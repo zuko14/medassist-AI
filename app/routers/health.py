@@ -4,6 +4,8 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+import datetime as dt
 
 from app.database import supabase
 
@@ -15,11 +17,14 @@ router = APIRouter(prefix="/health", tags=["health"])
 @router.get("")
 async def health_check():
     """Basic health check endpoint."""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": "mediassist-ai"
-    }
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "ok",
+            "service": "MediAssist AI",
+            "timestamp": dt.datetime.utcnow().isoformat()
+        }
+    )
 
 
 @router.get("/ready")
