@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediAssist AI — Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #060912;
+            --surface: #0d1120;
+            --surface2: #131830;
+            --border: #1e2540;
+            --border2: #2a3155;
+            --text: #e2e8f0;
+            --text2: #8892b0;
+            --text3: #5a6480;
+            --accent: #6c63ff;
+            --accent2: #8b7dff;
+            --accent-glow: rgba(108,99,255,0.15);
+            --green: #00d68f;
+            --green-bg: rgba(0,214,143,0.1);
+            --red: #ff6b6b;
+            --red-bg: rgba(255,107,107,0.1);
+            --blue: #4da6ff;
+            --blue-bg: rgba(77,166,255,0.1);
+            --amber: #ffc857;
+            --amber-bg: rgba(255,200,87,0.1);
+            --pink: #f472b6;
+            --cyan: #22d3ee;
+            --radius: 14px;
+            --shadow: 0 4px 30px rgba(0,0,0,0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ═══════ SCROLLBAR ═══════ */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+        /* ═══════ LOGIN ═══════ */
+        .login-screen {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(108,99,255,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(34,211,238,0.05) 0%, transparent 50%),
+                var(--bg);
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 420px;
+            padding: 44px 36px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: 0 20px 80px rgba(0,0,0,0.5), 0 0 60px rgba(108,99,255,0.06);
+            animation: fadeUp 0.5s ease;
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(24px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .login-logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .login-logo .icon {
+            width: 56px; height: 56px;
+            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            border-radius: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            margin-bottom: 14px;
+            box-shadow: 0 8px 30px rgba(108,99,255,0.3);
+        }
+
+        .login-logo h2 { font-size: 1.35rem; font-weight: 700; color: #fff; }
+        .login-logo p { color: var(--text3); font-size: 0.85rem; margin-top: 4px; }
+
+        .field { margin-bottom: 18px; }
+        .field label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--text2); margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.6px; }
+        .field input, .field select {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-size: 0.92rem;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .field input:focus, .field select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .field input::placeholder { color: var(--text3); }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.88rem;
+            font-family: inherit;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-accent {
+            background: linear-gradient(135deg, var(--accent), #8b5cf6);
+            color: #fff;
+            box-shadow: 0 4px 20px rgba(108,99,255,0.3);
+        }
+        .btn-accent:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(108,99,255,0.45); }
+        .btn-accent:active { transform: translateY(0); }
+
+        .btn-sm { padding: 7px 16px; font-size: 0.78rem; border-radius: 8px; }
+        .btn-ghost { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+        .btn-ghost:hover { border-color: var(--accent); color: var(--accent2); }
+        .btn-red { background: var(--red-bg); color: var(--red); border: 1px solid rgba(255,107,107,0.2); }
+        .btn-red:hover { background: rgba(255,107,107,0.18); }
+        .btn-green { background: var(--green-bg); color: var(--green); border: 1px solid rgba(0,214,143,0.2); }
+        .btn-green:hover { background: rgba(0,214,143,0.18); }
+
+        #loginError .alert { animation: shake 0.4s ease; }
+        @keyframes shake { 20%,60% { transform: translateX(-4px); } 40%,80% { transform: translateX(4px); } }
+
+        /* ═══════ APP SHELL ═══════ */
+        .app { display: none; min-height: 100vh; }
+        .app.open { display: flex; }
+
+        /* ─── Sidebar ─── */
+        .sidebar {
+            width: 260px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+            transition: transform 0.25s ease;
+        }
+
+        .sidebar-head {
+            padding: 24px 22px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-head h1 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-head h1 .dot {
+            width: 10px; height: 10px;
+            background: var(--green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--green);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%,100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .sidebar-head span { font-size: 0.72rem; color: var(--text3); margin-top: 2px; display: block; }
+
+        .nav-links { flex: 1; padding: 16px 12px; overflow-y: auto; }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 11px 14px;
+            border-radius: 10px;
+            color: var(--text2);
+            font-size: 0.88rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-bottom: 2px;
+        }
+
+        .nav-link:hover { background: var(--surface2); color: var(--text); }
+
+        .nav-link.on {
+            background: var(--accent-glow);
+            color: var(--accent2);
+            font-weight: 600;
+        }
+
+        .nav-link .ico { font-size: 1.15rem; width: 26px; text-align: center; }
+
+        .nav-bottom {
+            padding: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        /* ─── Main ─── */
+        .main {
+            margin-left: 260px;
+            flex: 1;
+            padding: 32px 36px;
+            background:
+                radial-gradient(ellipse at 80% 0%, rgba(108,99,255,0.03) 0%, transparent 50%),
+                var(--bg);
+            min-height: 100vh;
+        }
+
+        .page-head { margin-bottom: 28px; }
+        .page-head h2 { font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+        .page-head p { color: var(--text3); font-size: 0.85rem; }
+
+        /* ─── Sections ─── */
+        .sec { display: none; animation: fadeIn 0.3s ease; }
+        .sec.on { display: block; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* ═══════ STAT CARDS ═══════ */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .stat {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 22px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .stat:hover { transform: translateY(-3px); border-color: var(--border2); }
+
+        .stat .glow {
+            position: absolute;
+            top: -30px; right: -30px;
+            width: 80px; height: 80px;
+            border-radius: 50%;
+            filter: blur(30px);
+            pointer-events: none;
+        }
+
+        .stat:nth-child(1) .glow { background: var(--accent); opacity: 0.12; }
+        .stat:nth-child(2) .glow { background: var(--green); opacity: 0.12; }
+        .stat:nth-child(3) .glow { background: var(--red); opacity: 0.12; }
+        .stat:nth-child(4) .glow { background: var(--amber); opacity: 0.12; }
+        .stat:nth-child(5) .glow { background: var(--cyan); opacity: 0.12; }
+        .stat:nth-child(6) .glow { background: var(--pink); opacity: 0.12; }
+
+        .stat .label { font-size: 0.75rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+        .stat .num { font-size: 2.2rem; font-weight: 800; color: #fff; line-height: 1; }
+
+        .stat:nth-child(1) .num { color: var(--accent2); }
+        .stat:nth-child(2) .num { color: var(--green); }
+        .stat:nth-child(3) .num { color: var(--red); }
+        .stat:nth-child(4) .num { color: var(--amber); }
+        .stat:nth-child(5) .num { color: var(--cyan); }
+        .stat:nth-child(6) .num { color: var(--pink); }
+
+        /* ═══════ CARDS ═══════ */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 20px;
+            transition: border-color 0.2s;
+        }
+
+        .card:hover { border-color: var(--border2); }
+
+        .card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+        }
+
+        .card-head h3 { font-size: 1rem; font-weight: 600; color: #fff; }
+
+        /* ═══════ TABLES ═══════ */
+        .tbl-wrap { overflow-x: auto; border-radius: 10px; }
+
+        table { width: 100%; border-collapse: collapse; }
+
+        th {
+            padding: 11px 16px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: var(--text3);
+            text-transform: uppercase;
+            letter-spacing: 0.7px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            background: var(--surface2);
+        }
+
+        td {
+            padding: 12px 16px;
+            font-size: 0.87rem;
+            border-bottom: 1px solid rgba(30,37,64,0.5);
+            white-space: nowrap;
+        }
+
+        tr { transition: background 0.1s; }
+        tr:hover td { background: rgba(108,99,255,0.03); }
+
+        /* ═══════ BADGES ═══════ */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.73rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        .badge::before {
+            content: '';
+            width: 6px; height: 6px;
+            border-radius: 50%;
+        }
+
+        .badge-confirmed { background: var(--green-bg); color: var(--green); }
+        .badge-confirmed::before { background: var(--green); }
+        .badge-cancelled { background: var(--red-bg); color: var(--red); }
+        .badge-cancelled::before { background: var(--red); }
+        .badge-completed { background: var(--blue-bg); color: var(--blue); }
+        .badge-completed::before { background: var(--blue); }
+        .badge-no_show { background: var(--amber-bg); color: var(--amber); }
+        .badge-no_show::before { background: var(--amber); }
+        .badge-active { background: var(--green-bg); color: var(--green); }
+        .badge-active::before { background: var(--green); }
+        .badge-inactive { background: rgba(90,100,128,0.15); color: var(--text3); }
+        .badge-inactive::before { background: var(--text3); }
+
+        /* ═══════ DEPT BARS ═══════ */
+        .dept-bar { margin-bottom: 14px; }
+        .dept-bar .dept-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.84rem;
+            margin-bottom: 6px;
+        }
+        .dept-bar .dept-label span:first-child { color: var(--text); font-weight: 500; }
+        .dept-bar .dept-label span:last-child { color: var(--text2); font-weight: 600; }
+
+        .dept-track {
+            height: 8px;
+            background: var(--surface2);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .dept-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s ease;
+        }
+
+        .dept-bar:nth-child(1) .dept-fill { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+        .dept-bar:nth-child(2) .dept-fill { background: linear-gradient(90deg, var(--green), #6ee7b7); }
+        .dept-bar:nth-child(3) .dept-fill { background: linear-gradient(90deg, var(--blue), #93c5fd); }
+        .dept-bar:nth-child(4) .dept-fill { background: linear-gradient(90deg, var(--amber), #fde68a); }
+        .dept-bar:nth-child(5) .dept-fill { background: linear-gradient(90deg, var(--pink), #f9a8d4); }
+        .dept-bar:nth-child(6) .dept-fill { background: linear-gradient(90deg, var(--cyan), #67e8f9); }
+        .dept-bar:nth-child(n+7) .dept-fill { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+
+        /* ═══════ LOADING ═══════ */
+        .loader { text-align: center; padding: 40px; color: var(--text3); font-size: 0.85rem; }
+
+        .spin {
+            width: 30px; height: 30px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin: 0 auto 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .empty { text-align: center; padding: 40px; color: var(--text3); }
+        .empty .empty-icon { font-size: 2.4rem; margin-bottom: 10px; }
+        .empty p { font-size: 0.88rem; }
+
+        /* ═══════ ALERTS ═══════ */
+        .alert { padding: 12px 16px; border-radius: 10px; font-size: 0.85rem; margin-bottom: 16px; animation: fadeIn 0.3s; }
+        .alert-ok { background: var(--green-bg); color: var(--green); border: 1px solid rgba(0,214,143,0.2); }
+        .alert-err { background: var(--red-bg); color: var(--red); border: 1px solid rgba(255,107,107,0.2); }
+
+        /* ═══════ ADD FORM CARDS ═══════ */
+        .form-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 28px;
+            margin-bottom: 20px;
+        }
+
+        .form-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 22px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        /* ═══════ HAMBURGER ═══════ */
+        .hamburger {
+            display: none;
+            position: fixed;
+            top: 14px; left: 14px;
+            z-index: 200;
+            width: 42px; height: 42px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-size: 1.3rem;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 90;
+        }
+
+        /* ═══════ RESPONSIVE ═══════ */
+        @media (max-width: 768px) {
+            .hamburger { display: flex; }
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.mobile-open { transform: translateX(0); }
+            .overlay.show { display: block; }
+            .main { margin-left: 0; padding: 68px 16px 24px; }
+            .stats { grid-template-columns: repeat(2, 1fr); }
+            .form-row { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 480px) {
+            .stats { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="loginScreen" class="login-screen">
+    <div class="login-card">
+        <div class="login-logo">
+            <div class="icon">🏥</div>
+            <h2>MediAssist AI</h2>
+            <p>Admin Panel — Hospital Management</p>
+        </div>
+        <div id="loginError"></div>
+        <div class="field">
+            <label>Username</label>
+            <input type="text" id="loginUser" placeholder="Enter your username" autofocus>
+        </div>
+        <div class="field">
+            <label>Password</label>
+            <input type="password" id="loginPass" placeholder="Enter your password">
+        </div>
+        <button class="btn btn-accent" onclick="login()" style="width:100%; margin-top: 6px;">
+            Sign In →
+        </button>
+    </div>
+</div>
+
+<!-- ═══ APP ═══ -->
+<button class="hamburger" onclick="toggleSidebar()">☰</button>
+<div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+
+<div id="app" class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-head">
+            <h1>🏥 MediAssist <span class="dot"></span></h1>
+            <span>Hospital Admin Panel</span>
+        </div>
+        <div class="nav-links">
+            <div class="nav-link on" data-page="dashboard" onclick="go('dashboard',this)">
+                <span class="ico">📊</span> Dashboard
+            </div>
+            <div class="nav-link" data-page="appointments" onclick="go('appointments',this)">
+                <span class="ico">📅</span> Appointments
+            </div>
+            <div class="nav-link" data-page="doctors" onclick="go('doctors',this)">
+                <span class="ico">👨‍⚕️</span> Doctors
+            </div>
+            <div class="nav-link" data-page="leaves" onclick="go('leaves',this)">
+                <span class="ico">📋</span> Leaves
+            </div>
+            <div class="nav-link" data-page="holidays" onclick="go('holidays',this)">
+                <span class="ico">🗓️</span> Holidays
+            </div>
+        </div>
+        <div class="nav-bottom">
+            <div class="nav-link" onclick="logout()" style="color:var(--red)">
+                <span class="ico">🚪</span> Sign Out
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+
+        <!-- ─── DASHBOARD ─── -->
+        <div id="pg-dashboard" class="sec on">
+            <div class="page-head">
+                <h2>Dashboard</h2>
+                <p>Overview of your hospital's activity • Last 30 days</p>
+            </div>
+
+            <div class="stats">
+                <div class="stat"><div class="glow"></div><div class="label">Total Appointments</div><div class="num" id="s-total">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Confirmed</div><div class="num" id="s-confirmed">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Cancelled</div><div class="num" id="s-cancelled">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Completed</div><div class="num" id="s-completed">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-patients">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">New Patients</div><div class="num" id="s-new">—</div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>Department Breakdown</h3>
+                </div>
+                <div id="deptBars">
+                    <div class="loader"><div class="spin"></div>Loading departments...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>Recent Appointments</h3>
+                    <button class="btn btn-ghost btn-sm" onclick="go('appointments',null)">View All →</button>
+                </div>
+                <div class="tbl-wrap" id="dashAppts">
+                    <div class="loader"><div class="spin"></div>Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── APPOINTMENTS ─── -->
+        <div id="pg-appointments" class="sec">
+            <div class="page-head">
+                <h2>Appointments</h2>
+                <p>Upcoming appointments in the next 30 days</p>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="apptList">
+                    <div class="loader"><div class="spin"></div>Loading appointments...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── DOCTORS ─── -->
+        <div id="pg-doctors" class="sec">
+            <div class="page-head">
+                <h2>Doctors</h2>
+                <p>Manage your hospital's doctor roster</p>
+            </div>
+            <div class="card">
+                <div class="card-head">
+                    <h3>All Doctors</h3>
+                    <span id="docCount" style="color:var(--text3); font-size:0.8rem;"></span>
+                </div>
+                <div class="tbl-wrap" id="docList">
+                    <div class="loader"><div class="spin"></div>Loading doctors...</div>
+                </div>
+            </div>
+            <div class="form-card" id="docFormCard">
+                <h3 id="docFormTitle">➕ Add New Doctor</h3>
+                <input type="hidden" id="f-docId">
+                <div id="docMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Full Name</label><input type="text" id="f-docName" placeholder="Dr. Full Name"></div>
+                    <div class="field"><label>Specialization</label><input type="text" id="f-docSpec" placeholder="e.g. Cardiologist"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Department</label>
+                        <select id="f-docDept">
+                            <option value="General Medicine">General Medicine</option>
+                            <option value="Cardiology">Cardiology</option>
+                            <option value="Dental">Dental</option>
+                            <option value="Orthopedics">Orthopedics</option>
+                            <option value="Gynecology">Gynecology</option>
+                            <option value="Pediatrics">Pediatrics</option>
+                            <option value="Dermatology">Dermatology</option>
+                            <option value="Ophthalmology">Ophthalmology</option>
+                            <option value="ENT">ENT</option>
+                        </select>
+                    </div>
+                    <div class="field"><label>Consultation Fee (₹)</label><input type="number" id="f-docFee" value="500"></div>
+                </div>
+                <button class="btn btn-accent" id="btn-docSubmit" onclick="submitDoctor()" style="margin-top:6px">Add Doctor</button>
+                <button class="btn" id="btn-docCancel" onclick="resetDoctorForm()" style="margin-top:6px; display:none; background:var(--surface); border:1px solid var(--border)">Cancel</button>
+            </div>
+        </div>
+
+        <!-- ─── LEAVES ─── -->
+        <div id="pg-leaves" class="sec">
+            <div class="page-head">
+                <h2>Doctor Leaves</h2>
+                <p>Manage doctor leave schedules — bot auto-blocks affected slots</p>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Scheduled Leaves</h3></div>
+                <div class="tbl-wrap" id="leaveList">
+                    <div class="loader"><div class="spin"></div>Loading...</div>
+                </div>
+            </div>
+            <div class="form-card">
+                <h3>➕ Add Leave</h3>
+                <div id="leaveMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Doctor</label><select id="f-leaveDoc"></select></div>
+                    <div class="field"><label>Start Date</label><input type="date" id="f-leaveDate"></div>
+                    <div class="field"><label>End Date (Optional)</label><input type="date" id="f-leaveEndDate" title="Leave blank for a single day leave"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Leave Type</label>
+                        <select id="f-leaveType">
+                            <option value="full">Full Day</option>
+                            <option value="half_morning">Half Day — Morning Off</option>
+                            <option value="half_evening">Half Day — Evening Off</option>
+                        </select>
+                    </div>
+                    <div class="field"><label>Reason (optional)</label><input type="text" id="f-leaveReason" placeholder="e.g. Conference"></div>
+                </div>
+                <button class="btn btn-accent" onclick="addLeave()" style="margin-top:6px">Add Leave</button>
+            </div>
+        </div>
+
+        <!-- ─── HOLIDAYS ─── -->
+        <div id="pg-holidays" class="sec">
+            <div class="page-head">
+                <h2>Hospital Holidays</h2>
+                <p>Manage hospital-wide closures — bot blocks all slots on these days</p>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>All Holidays</h3></div>
+                <div class="tbl-wrap" id="holList">
+                    <div class="loader"><div class="spin"></div>Loading...</div>
+                </div>
+            </div>
+            <div class="form-card">
+                <h3>➕ Add Holiday</h3>
+                <div id="holMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Date</label><input type="date" id="f-holDate"></div>
+                    <div class="field"><label>Holiday Name</label><input type="text" id="f-holName" placeholder="e.g. Republic Day"></div>
+                </div>
+                <button class="btn btn-accent" onclick="addHoliday()" style="margin-top:6px">Add Holiday</button>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<script>
+// ═══════ CONFIG ═══════
+const API = window.location.origin;
+let auth = '';
+let doctorCache = [];
+
+// ═══════ AUTH ═══════
+function login() {
+    const u = document.getElementById('loginUser').value.trim();
+    const p = document.getElementById('loginPass').value;
+    if (!u || !p) return;
+    auth = 'Basic ' + btoa(u + ':' + p);
+
+    api('/admin/stats?days=30').then(data => {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('app').classList.add('open');
+        renderDashboard(data);
+        loadDoctorsSilent();
+    }).catch(() => {
+        auth = '';
+        document.getElementById('loginError').innerHTML =
+            '<div class="alert alert-err">Invalid username or password</div>';
+    });
+}
+
+function logout() {
+    auth = '';
+    doctorCache = [];
+    document.getElementById('app').classList.remove('open');
+    document.getElementById('loginScreen').style.display = '';
+    document.getElementById('loginUser').value = '';
+    document.getElementById('loginPass').value = '';
+}
+
+document.getElementById('loginPass').onkeypress = e => { if (e.key === 'Enter') login(); };
+document.getElementById('loginUser').onkeypress = e => { if (e.key === 'Enter') document.getElementById('loginPass').focus(); };
+
+// ═══════ NAV ═══════
+function go(page, el) {
+    document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
+    document.getElementById('pg-' + page).classList.add('on');
+
+    document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('on'));
+    if (el) el.classList.add('on');
+    else document.querySelector(`.nav-link[data-page="${page}"]`)?.classList.add('on');
+
+    // Close mobile
+    document.getElementById('sidebar').classList.remove('mobile-open');
+    document.getElementById('overlay').classList.remove('show');
+
+    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays };
+    if (loaders[page]) loaders[page]();
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('mobile-open');
+    document.getElementById('overlay').classList.toggle('show');
+}
+
+// ═══════ API HELPERS ═══════
+async function api(path) {
+    const r = await fetch(API + path, { headers: { Authorization: auth } });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+}
+
+async function apiPost(path, body) {
+    const r = await fetch(API + path, {
+        method: 'POST',
+        headers: { Authorization: auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    return r.json();
+}
+
+async function apiPut(path, body) {
+    const r = await fetch(API + path, {
+        method: 'PUT',
+        headers: { Authorization: auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+}
+
+async function apiDel(path) {
+    const r = await fetch(API + path, { method: 'DELETE', headers: { Authorization: auth } });
+    if (!r.ok) throw new Error(r.status);
+}
+
+function badge(status) {
+    return `<span class="badge badge-${status || 'confirmed'}">${(status || 'unknown').replace('_', ' ')}</span>`;
+}
+
+function msg(id, text, err) {
+    const el = document.getElementById(id);
+    el.innerHTML = `<div class="alert ${err ? 'alert-err' : 'alert-ok'}">${text}</div>`;
+    setTimeout(() => { el.innerHTML = ''; }, 4000);
+}
+
+function emptyState(icon, text) {
+    return `<div class="empty"><div class="empty-icon">${icon}</div><p>${text}</p></div>`;
+}
+
+function loading() {
+    return '<div class="loader"><div class="spin"></div>Loading...</div>';
+}
+
+// ═══════ DASHBOARD ═══════
+async function loadDashboard() {
+    try {
+        const [stats, appts] = await Promise.all([
+            api('/admin/stats?days=30'),
+            api('/admin/appointments/recent?limit=5').catch(() => [])
+        ]);
+        renderDashboard(stats);
+        renderDashAppts(appts);
+    } catch (e) { console.error('Dashboard:', e); }
+}
+
+function renderDashboard(d) {
+    document.getElementById('s-total').textContent = d.total_appointments ?? 0;
+    document.getElementById('s-confirmed').textContent = d.confirmed ?? 0;
+    document.getElementById('s-cancelled').textContent = d.cancelled ?? 0;
+    document.getElementById('s-completed').textContent = d.completed ?? 0;
+    document.getElementById('s-patients').textContent = d.total_patients ?? 0;
+    document.getElementById('s-new').textContent = d.new_patients ?? 0;
+
+    // Animate numbers
+    document.querySelectorAll('.stat .num').forEach(el => {
+        const val = parseInt(el.textContent) || 0;
+        animateNum(el, val);
+    });
+
+    // Department bars
+    const depts = d.by_department || [];
+    const el = document.getElementById('deptBars');
+    if (!depts.length) { el.innerHTML = emptyState('📁', 'No department data yet'); return; }
+    const max = Math.max(...depts.map(x => x.count));
+    el.innerHTML = depts.map(dept => `
+        <div class="dept-bar">
+            <div class="dept-label"><span>${dept.department}</span><span>${dept.count}</span></div>
+            <div class="dept-track"><div class="dept-fill" style="width:0%" data-w="${(dept.count / max * 100).toFixed(0)}%"></div></div>
+        </div>
+    `).join('');
+
+    // Animate bars
+    requestAnimationFrame(() => {
+        el.querySelectorAll('.dept-fill').forEach(bar => {
+            bar.style.width = bar.dataset.w;
+        });
+    });
+
+    // Dash recent appointments
+    api('/admin/appointments/recent?limit=5').then(renderDashAppts).catch(() => {});
+}
+
+function renderDashAppts(data) {
+    const el = document.getElementById('dashAppts');
+    if (!data || !data.length) { el.innerHTML = emptyState('📅', 'No recent appointments'); return; }
+    el.innerHTML = `<table>
+        <thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Date</th><th>Status</th></tr></thead>
+        <tbody>${data.map(a => `<tr>
+            <td style="color:var(--accent2); font-weight:600">${a.booking_ref || '—'}</td>
+            <td>${a.patient_name || a.patient_phone || '—'}</td>
+            <td>${a.doctor_name || '—'}</td>
+            <td>${a.appointment_date || '—'}</td>
+            <td>${badge(a.status)}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function animateNum(el, target) {
+    if (target === 0) { el.textContent = '0'; return; }
+    let current = 0;
+    const step = Math.max(1, Math.ceil(target / 20));
+    const timer = setInterval(() => {
+        current += step;
+        if (current >= target) { current = target; clearInterval(timer); }
+        el.textContent = current;
+    }, 30);
+}
+
+// ═══════ APPOINTMENTS ═══════
+async function loadAppointments() {
+    const el = document.getElementById('apptList');
+    el.innerHTML = loading();
+    try {
+        const data = await api('/admin/appointments/upcoming?days=30');
+        if (!data?.length) { el.innerHTML = emptyState('📅', 'No upcoming appointments'); return; }
+        el.innerHTML = `<table>
+            <thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Department</th><th>Date</th><th>Time</th><th>Status</th></tr></thead>
+            <tbody>${data.map(a => `<tr>
+                <td style="color:var(--accent2); font-weight:600">${a.booking_ref || '—'}</td>
+                <td>${a.patient_name || a.patient_phone || '—'}</td>
+                <td>${a.doctor_name || '—'}</td>
+                <td>${a.department || '—'}</td>
+                <td>${a.appointment_date || '—'}</td>
+                <td>${a.appointment_time || '—'}</td>
+                <td>${badge(a.status)}</td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load appointments'); }
+}
+
+// ═══════ DOCTORS ═══════
+async function loadDoctorsSilent() {
+    try { doctorCache = await api('/admin/doctors') || []; updateLeaveDropdown(); } catch (e) {}
+}
+
+async function loadDoctors() {
+    const el = document.getElementById('docList');
+    el.innerHTML = loading();
+    try {
+        doctorCache = await api('/admin/doctors') || [];
+        updateLeaveDropdown();
+        document.getElementById('docCount').textContent = `${doctorCache.length} doctor${doctorCache.length !== 1 ? 's' : ''}`;
+        if (!doctorCache.length) { el.innerHTML = emptyState('👨‍⚕️', 'No doctors added yet'); return; }
+        el.innerHTML = `<table>
+            <thead><tr><th>Name</th><th>Specialization</th><th>Department</th><th>Fee</th><th>Days</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>${doctorCache.map(d => `<tr>
+                <td style="font-weight:600; color:#fff">${d.name}</td>
+                <td>${d.specialization || '—'}</td>
+                <td>${d.department}</td>
+                <td>₹${d.consultation_fee}</td>
+                <td style="color:var(--text2); font-size:0.8rem">${d.available_days || 'Mon-Fri'}</td>
+                <td>${d.is_active ? badge('active') : badge('inactive')}</td>
+                <td>
+                    <button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--surface); min-width:auto" onclick="editDoctor('${d.id}')">✏️</button>
+                    <button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--red-bg); color:var(--red); min-width:auto" onclick="delDoctor('${d.id}')">🗑️</button>
+                </td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load doctors'); }
+}
+
+function updateLeaveDropdown() {
+    document.getElementById('f-leaveDoc').innerHTML =
+        doctorCache.filter(d => d.is_active).map(d => `<option value="${d.name}">${d.name}</option>`).join('') ||
+        '<option value="">No doctors available</option>';
+}
+
+async function submitDoctor() {
+    const id = document.getElementById('f-docId').value;
+    const name = document.getElementById('f-docName').value.trim();
+    const spec = document.getElementById('f-docSpec').value.trim();
+    if (!name || !spec) { msg('docMsg', 'Please fill in name and specialization', true); return; }
+    try {
+        const payload = {
+            name,
+            specialization: spec,
+            department: document.getElementById('f-docDept').value,
+            consultation_fee: parseInt(document.getElementById('f-docFee').value) || 500
+        };
+        
+        if (id) {
+            await apiPut(`/admin/doctors/${id}`, payload);
+            msg('docMsg', '✅ Doctor updated successfully!');
+        } else {
+            await apiPost('/admin/doctors', payload);
+            msg('docMsg', '✅ Doctor added successfully!');
+        }
+        
+        resetDoctorForm();
+        loadDoctors();
+    } catch (e) { msg('docMsg', id ? 'Failed to update doctor' : 'Failed to add doctor', true); }
+}
+
+function resetDoctorForm() {
+    document.getElementById('f-docId').value = '';
+    document.getElementById('f-docName').value = '';
+    document.getElementById('f-docSpec').value = '';
+    document.getElementById('f-docFee').value = '500';
+    document.getElementById('docFormTitle').innerHTML = '➕ Add New Doctor';
+    document.getElementById('btn-docSubmit').textContent = 'Add Doctor';
+    document.getElementById('btn-docCancel').style.display = 'none';
+}
+
+window.editDoctor = function(id) {
+    const d = doctorCache.find(x => x.id === id);
+    if (!d) return;
+    document.getElementById('f-docId').value = d.id;
+    document.getElementById('f-docName').value = d.name;
+    document.getElementById('f-docSpec').value = d.specialization || '';
+    document.getElementById('f-docDept').value = d.department;
+    document.getElementById('f-docFee').value = d.consultation_fee;
+    
+    document.getElementById('docFormTitle').innerHTML = '✏️ Edit Doctor Details';
+    document.getElementById('btn-docSubmit').textContent = 'Update Doctor';
+    document.getElementById('btn-docCancel').style.display = 'inline-block';
+    
+    document.getElementById('f-docName').focus();
+    // Scroll to form if needed
+    window.scrollTo({ top: document.getElementById('pg-doctors').offsetTop, behavior: 'smooth' });
+};
+
+window.delDoctor = async function(id) {
+    if (!confirm('Are you sure you want to delete this doctor? This action cannot be undone.')) return;
+    try {
+        await apiDel(`/admin/doctors/${id}`);
+        loadDoctors();
+    } catch (e) { alert('Failed to delete doctor. Ensure they have no upcoming appointments first.'); }
+};
+
+// ═══════ LEAVES ═══════
+async function loadLeaves() {
+    const el = document.getElementById('leaveList');
+    el.innerHTML = loading();
+    try {
+        const data = await api('/admin/leaves');
+        if (!data?.length) { el.innerHTML = emptyState('📋', 'No leaves scheduled'); return; }
+        el.innerHTML = `<table>
+            <thead><tr><th>Doctor</th><th>Date</th><th>Type</th><th>Reason</th><th></th></tr></thead>
+            <tbody>${data.map(l => `<tr>
+                <td style="font-weight:600">${l.doctor_name}</td>
+                <td>${l.leave_date}</td>
+                <td>${l.leave_type === 'full' ? 'Full Day' : l.leave_type === 'half_morning' ? '½ Morning' : '½ Evening'}</td>
+                <td style="color:var(--text2)">${l.reason || '—'}</td>
+                <td><button class="btn btn-red btn-sm" onclick="delLeave('${l.id}')">Remove</button></td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load leaves'); }
+}
+
+async function addLeave() {
+    const doc = document.getElementById('f-leaveDoc').value;
+    const date = document.getElementById('f-leaveDate').value;
+    const endDate = document.getElementById('f-leaveEndDate').value;
+    if (!doc || !date) { msg('leaveMsg', 'Please select a doctor and start date', true); return; }
+    
+    const payload = {
+        doctor_name: doc,
+        leave_date: date,
+        leave_type: document.getElementById('f-leaveType').value,
+        reason: document.getElementById('f-leaveReason').value || null
+    };
+    
+    if (endDate) {
+        payload.end_date = endDate;
+    }
+    
+    try {
+        await apiPost('/admin/leaves', payload);
+        msg('leaveMsg', '✅ Leave added successfully!');
+        document.getElementById('f-leaveReason').value = '';
+        document.getElementById('f-leaveEndDate').value = '';
+        loadLeaves();
+    } catch (e) { msg('leaveMsg', 'Failed to add leave', true); }
+}
+
+async function delLeave(id) {
+    if (!confirm('Remove this leave entry?')) return;
+    try { await apiDel(`/admin/leaves/${id}`); loadLeaves(); } catch (e) { alert('Failed'); }
+}
+
+// ═══════ HOLIDAYS ═══════
+async function loadHolidays() {
+    const el = document.getElementById('holList');
+    el.innerHTML = loading();
+    try {
+        const data = await api('/admin/holidays');
+        if (!data?.length) { el.innerHTML = emptyState('🗓️', 'No holidays added'); return; }
+        el.innerHTML = `<table>
+            <thead><tr><th>Date</th><th>Holiday</th><th></th></tr></thead>
+            <tbody>${data.map(h => `<tr>
+                <td style="font-weight:600">${h.holiday_date}</td>
+                <td>${h.name}</td>
+                <td><button class="btn btn-red btn-sm" onclick="delHoliday('${h.holiday_date}')">Remove</button></td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load holidays'); }
+}
+
+async function addHoliday() {
+    const date = document.getElementById('f-holDate').value;
+    const name = document.getElementById('f-holName').value.trim();
+    if (!date || !name) { msg('holMsg', 'Please enter date and holiday name', true); return; }
+    try {
+        const r = await fetch(`${API}/admin/holidays?holiday_date=${date}&name=${encodeURIComponent(name)}`, {
+            method: 'POST', headers: { Authorization: auth }
+        });
+        if (!r.ok) throw new Error();
+        msg('holMsg', '✅ Holiday added successfully!');
+        document.getElementById('f-holName').value = '';
+        loadHolidays();
+    } catch (e) { msg('holMsg', 'Failed to add holiday', true); }
+}
+
+async function delHoliday(date) {
+    if (!confirm('Remove this holiday?')) return;
+    try { await apiDel(`/admin/holidays/${date}`); loadHolidays(); } catch (e) { alert('Failed'); }
+}
+</script>
+</body>
+</html>

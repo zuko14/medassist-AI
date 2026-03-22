@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"=== File Checklist Verification ===\" && echo \"\" && echo \"Core Files:\" && ls -la app/main.py app/config.py app/database.py 2>/dev/null && echo \"\" && echo \"Routers:\" && ls -la app/routers/*.py 2>/dev/null && echo \"\" && echo \"Services:\" && ls -la app/services/*.py 2>/dev/null && echo \"\" && echo \"Models:\" && ls -la app/models/*.py 2>/dev/null && echo \"\" && echo \"Templates:\" && ls -la app/templates/*.py 2>/dev/null && echo \"\" && echo \"Utils:\" && ls -la app/utils/*.py 2>/dev/null && echo \"\" && echo \"Migrations:\" && ls -la migrations/*.sql 2>/dev/null && echo \"\" && echo \"Tests:\" && ls -la tests/*.py 2>/dev/null && echo \"\" && echo \"Admin:\" && ls -la admin/*.html 2>/dev/null && echo \"\" && echo \"Config Files:\" && ls -la requirements.txt Dockerfile railway.toml .env.example .gitignore README.md 2>/dev/null)"
+    ]
+  }
+}
