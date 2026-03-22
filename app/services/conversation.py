@@ -533,6 +533,8 @@ class ConversationManager:
             await self.update_state(phone, "selecting_language")
             return
 
+        from app.database import get_conversation
+        session = await get_conversation(phone) or {}
         context = session.get("context", {})
         if context.get("menu_shown"):
             pass
