@@ -346,8 +346,22 @@ Respond with ONLY the intent name, nothing else."""}
 
 async def map_symptom_to_department(symptom: str) -> dict:
     """Map symptoms to department using Groq with keyword fallback."""
-    # Step 1: Try keyword map first (instant, no API call)
+    # Step 1 - Check minimum length:
+    if len(symptom.strip()) < 3:
+        return {"suggested_department": None, "is_emergency": False, "confidence": "low", "reasoning": ""}
+
+    # Step 2 - Check if it's a real word using SKIP_KEYWORDS:
+    INVALID_SYMPTOM_WORDS = [
+        "hlo", "hi", "hello", "hey", "ok", "okay", "yes", "no",
+        "k", "hmm", "hm", "ya", "yep", "nope", "bye",
+        "హాయ్", "నమస్కారం", "హలో",
+        "हाय", "नमस्ते", "हलो"
+    ]
     msg_lower = symptom.lower().strip()
+    if msg_lower in INVALID_SYMPTOM_WORDS:
+        return {"suggested_department": None, "is_emergency": False, "confidence": "low", "reasoning": ""}
+
+    # Step 3: Try keyword map first (instant, no API call)
     for keyword, (dept, is_emg) in SYMPTOM_DEPARTMENT_MAP.items():
         if keyword == msg_lower or keyword in msg_lower or keyword in symptom:
             return {
@@ -357,7 +371,7 @@ async def map_symptom_to_department(symptom: str) -> dict:
                 "is_emergency": is_emg
             }
             
-    # Step 2: Only call Groq if keyword map fails
+    # Step 4: Only call Groq if keyword map fails
     try:
         # Primary: Groq AI
         response = groq_client.chat.completions.create(

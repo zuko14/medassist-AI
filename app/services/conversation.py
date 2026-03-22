@@ -62,6 +62,11 @@ class ConversationManager:
         if not session:
             return
         existing = session.get("context", {}) or {}
+        
+        # Reset menu_shown to False if transitioning BACK to main_menu from another state
+        if new_state == "main_menu" and session.get("state") != "main_menu":
+            new_context["menu_shown"] = False
+
         merged = {**existing, **new_context}
         supabase.table("conversations").update({
             "state": new_state,
@@ -161,6 +166,22 @@ class ConversationManager:
                 # IDs are formatted as doc_{index}_{name}, extract just the name
                 parts = button_id.split("_", 2)
                 message = parts[2] if len(parts) > 2 else button_id.replace("doc_", "")
+            elif button_id.startswith("view_doc_"):
+                intent = "view_doctor"
+                message = button_id.replace("view_doc_", "")
+            elif button_id.startswith("svc_"):
+                intent = "view_service"
+                svc_map = {
+                    "svc_general": "General Medicine",
+                    "svc_cardiology": "Cardiology",
+                    "svc_dental": "Dental",
+                    "svc_ortho": "Orthopedics",
+                    "svc_gynec": "Gynecology",
+                    "svc_pediatrics": "Pediatrics",
+                    "svc_ent": "ENT",
+                    "svc_derma": "Dermatology"
+                }
+                message = svc_map.get(button_id, "General Medicine")
             elif button_id.startswith("slot_"):
                 intent = "select_slot"
                 message = button_id.replace("slot_", "")
@@ -217,6 +238,36 @@ class ConversationManager:
                     {"id": "restart_booking", "title": "Start Over" if lang == "en" else ("फिर से शुरू" if lang == "hi" else "మళ్లీ ప్రారంభించు")}
                 ]
             )
+            return
+
+        # Handle global views (interactive buttons from _show_doctors and _show_services)
+        if intent == "view_doctor":
+            from app.database import supabase
+            res = supabase.table("doctors").select("*").eq("id", message).execute()
+            if res.data:
+                doc = res.data[0]
+                context = session.get("context", {})
+                context["doctor"] = doc
+                context["doctor_name"] = doc["name"]
+                context["department"] = doc["department"]
+                context["selected_doctor_id"] = message
+                lang = await get_lang(phone)
+                await self._show_date_picker(phone, context, lang)
+                await self.update_state(phone, "selecting_date", context)
+            return
+        elif intent == "view_service":
+            lang = await get_lang(phone)
+            context = session.get("context", {})
+            department = message
+            from app.database import supabase
+            response = supabase.table("doctors").select("*").eq("department", department).eq("is_active", True).order("rating", desc=True).execute()
+            doctors = response.data
+            
+            if doctors:
+                await self._show_doctor_list(phone, department, context, lang)
+            else:
+                await self.whatsapp.send_text(phone, f"No doctors available in {department} right now.")
+                await self._send_main_menu(phone, lang)
             return
 
         # Process based on state and intent
@@ -482,6 +533,17 @@ class ConversationManager:
             await self.update_state(phone, "selecting_language")
             return
 
+        context = session.get("context", {})
+        if context.get("menu_shown"):
+            pass
+        else:
+            await self._send_main_menu(phone, lang)
+            context["menu_shown"] = True
+            await self.update_state(phone, "main_menu", context)
+            if intent in ["greeting", "unknown"]:
+                # Menu shown via state entry, no need to process further
+                return
+
         if intent == "book_appointment" or message.lower() in ["book", "appointment", "बुक", "బుక్"]:
             await self._start_booking(phone, patient, lang)
         elif intent == "view_services":
@@ -498,10 +560,18 @@ class ConversationManager:
                 patient_name = patient.get("name") or "there"
                 first_name = patient_name.split()[0] if patient_name else "there"
                 await self.whatsapp.send_text(phone, get_message("welcome_back", lang, name=first_name))
-            await self._send_main_menu(phone, lang)
+            if not session.get("context", {}).get("menu_shown"):
+                await self._send_main_menu(phone, lang)
+                context = session.get("context", {})
+                context["menu_shown"] = True
+                await self.update_state(phone, "main_menu", context)
         else:
             # Unknown intent, show menu again
-            await self._send_main_menu(phone, lang)
+            if not session.get("context", {}).get("menu_shown"):
+                await self._send_main_menu(phone, lang)
+                context = session.get("context", {})
+                context["menu_shown"] = True
+                await self.update_state(phone, "main_menu", context)
 
     async def _start_booking(self, phone: str, patient: dict, lang: str) -> None:
         """Start the booking flow."""
@@ -672,6 +742,15 @@ class ConversationManager:
 
         # Map symptoms to department
         symptom_result = await map_symptom_to_department(message)
+
+        if symptom_result.get("suggested_department") is None:
+            await self.whatsapp.send_text(
+                phone, 
+                {"en": "I didn't understand that. Please describe your symptoms.\nExample: fever, chest pain, tooth pain",
+                 "hi": "मुझे समझ नहीं आया। अपने लक्षण बताएं।\nउदाहरण: बुखार, सीने में दर्द, दांत दर्द",
+                 "te": "అర్థం కాలేదు. మీ లక్షణాలు వివరించండి.\nఉదా: జ్వరం, గుండె నొప్పి, పళ్ళు నొప్పి"}.get(lang, "Please describe your symptoms.")
+            )
+            return
 
         # Store suggestion in context
         context["suggested_department"] = symptom_result["suggested_department"]
@@ -1383,38 +1462,70 @@ class ConversationManager:
 
     async def _show_services(self, phone: str, lang: str) -> None:
         """Show hospital services."""
-        services = """🏥 Our Services:
-
-👨‍⚕️ General Medicine - Fever, cold, general checkups
-❤️ Cardiology - Heart-related concerns
-🦷 Dental - Teeth and oral care
-🦴 Orthopedics - Bones, joints, fractures
-👩‍⚕️ Gynecology - Women's health
-👶 Pediatrics - Child healthcare
-
-For emergencies, call {emergency}""".format(emergency=settings.hospital_emergency_number)
-
-        await self.whatsapp.send_text(phone, services)
-        await self._send_main_menu(phone, lang)
+        await self.whatsapp.send_interactive_list(
+            phone=phone,
+            header={"en": "Our Services", "hi": "हमारी सेवाएँ", "te": "మా సేవలు"}.get(lang, "Our Services"),
+            body=get_message("our_services_body", lang),
+            button_text={"en": "Select", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(lang, "Select"),
+            sections=[{
+                "title": "Available Services"[:24],
+                "rows": [
+                    {"id": "svc_general",    "title": "General Medicine"[:24],
+                     "description": "Fever, cold, general checkups"[:72]},
+                    {"id": "svc_cardiology", "title": "Cardiology"[:24],
+                     "description": "Heart-related concerns"[:72]},
+                    {"id": "svc_dental",     "title": "Dental"[:24],
+                     "description": "Teeth and oral care"[:72]},
+                    {"id": "svc_ortho",      "title": "Orthopedics"[:24],
+                     "description": "Bones, joints, fractures"[:72]},
+                    {"id": "svc_gynec",      "title": "Gynecology"[:24],
+                     "description": "Women's health"[:72]},
+                    {"id": "svc_pediatrics", "title": "Pediatrics"[:24],
+                     "description": "Child healthcare"[:72]},
+                    {"id": "svc_ent",        "title": "ENT"[:24],
+                     "description": "Ear, nose, throat"[:72]},
+                    {"id": "svc_derma",      "title": "Dermatology"[:24],
+                     "description": "Skin concerns"[:72]},
+                ]
+            }]
+        )
 
     async def _show_doctors(self, phone: str, lang: str) -> None:
         """Show available doctors."""
-        doctors = await get_doctors()
+        from app.database import supabase
+        response = supabase.table("doctors").select("*").eq("is_active", True).order("department").execute()
+        doctors = response.data
 
-        # Deduplicate by doctor name
-        seen = set()
-        unique_doctors = []
+        sections = []
+        dept_groups = {}
         for doc in doctors:
-            if doc['name'] not in seen:
-                seen.add(doc['name'])
-                unique_doctors.append(doc)
+            dept = doc.get("department", "General Medicine")
+            if dept not in dept_groups:
+                dept_groups[dept] = []
+            dept_groups[dept].append(doc)
 
-        msg = "👨‍⚕️ Our Doctors:\n\n"
-        for doc in unique_doctors:
-            msg += f"• {doc['name']} - {doc['specialization']} ({doc['department']})\n"
+        import collections
+        # Sort dept_groups alphabetically or logically if desired. Here we just take up to 10 sections max.
+        for dept, docs in list(dept_groups.items())[:10]:
+            sections.append({
+                "title": dept[:24],
+                "rows": [
+                    {
+                        "id": f"view_doc_{doc['id']}",
+                        "title": doc["name"][:24],
+                        "description": f"{doc['specialization']} | Rs.{doc['consultation_fee']}"[:72]
+                    }
+                    for doc in docs[:10]  # whatsapp limit max 10 rows per section
+                ]
+            })
 
-        await self.whatsapp.send_text(phone, msg)
-        await self._send_main_menu(phone, lang)
+        await self.whatsapp.send_interactive_list(
+            phone=phone,
+            header={"en": "Our Doctors", "hi": "हमारे डॉक्टर", "te": "మా డాక్టర్లు"}.get(lang, "Our Doctors"),
+            body=get_message("our_doctors_body", lang),
+            button_text={"en": "Select", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(lang, "Select"),
+            sections=sections[:10]
+        )
 
     async def _handle_cancel_request(self, phone: str, patient: dict, lang: str) -> None:
         """Handle appointment cancellation request."""

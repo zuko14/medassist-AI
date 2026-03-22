@@ -54,7 +54,7 @@ def validate_name(name: str) -> tuple[bool, str]:
         return False, "invalid_chars"
     if name.lower().strip() in INVALID_NAMES:
         return False, "invalid_name"
-    if len(name.split()) < 2:
+    if len(name.strip().split()) < 2:
         return False, "need_full_name"
     
     return True, name.title()

@@ -194,7 +194,9 @@ MESSAGES = {
         "invalid_input": "I didn't understand that. Please try again or type 'help'.",
         "thank_you": "Thank you for choosing {hospital_name}. Take care!",
         "change_language": "🌐 Change Language",
-        "available_doctors_in": "Available doctors in {dept}:"
+        "available_doctors_in": "Available doctors in {dept}:",
+        "our_doctors_body": "Choose a doctor to book an appointment",
+        "our_services_body": "Choose a service to view availability:"
     },
     "hi": {
         "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं MediAssist हूं, आपका AI सहायक।",
@@ -223,7 +225,9 @@ MESSAGES = {
         "invalid_input": "मैं इसे समझ नहीं पाया। कृपया फिर से प्रयास करें या 'help' टाइप करें।",
         "thank_you": "{hospital_name} चुनने के लिए धन्यवाद। स्वस्थ रहें!",
         "change_language": "🌐 भाषा बदलें",
-        "available_doctors_in": "{dept} में उपलब्ध डॉक्टर:"
+        "available_doctors_in": "{dept} में उपलब्ध डॉक्टर:",
+        "our_doctors_body": "अपॉइंटमेंट बुक करने के लिए डॉक्टर चुनें",
+        "our_services_body": "उपलब्धता देखने के लिए सेवा चुनें:"
     },
     "te": {
         "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను MediAssist, మీ AI సహాయకుడిని.",
@@ -252,7 +256,9 @@ MESSAGES = {
         "invalid_input": "నేను దానిని అర్థం చేసుకోలేకపోయాను. దయచేసి మళ్లీ ప్రయత్నించండి లేదా 'help' టైప్ చేయండి.",
         "thank_you": "{hospital_name} ఎంచుకున్నందుకు ధన్యవాదాలు. జాగ్రత్త!",
         "change_language": "🌐 భాష మార్చు",
-        "available_doctors_in": "{dept}లో అందుబాటులో ఉన్న డాక్టర్లు:"
+        "available_doctors_in": "{dept}లో అందుబాటులో ఉన్న డాక్టర్లు:",
+        "our_doctors_body": "అపాయింట్మెంట్ బుక్ చేయడానికి డాక్టర్ని ఎంచుకోండి",
+        "our_services_body": "లభ్యత చూడటానికి సేవను ఎంచుకోండి:"
     }
 }
 
