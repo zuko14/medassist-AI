@@ -15,6 +15,7 @@ router = APIRouter(prefix="/health", tags=["health"])
 
 
 @router.get("")
+@router.head("")
 async def health_check():
     """Basic health check endpoint."""
     return JSONResponse(
@@ -31,9 +32,7 @@ async def health_check():
 async def readiness_check():
     """Readiness check with database connectivity."""
     try:
-        # Test database connection
         result = supabase.table("patients").select("count", count="exact").limit(1).execute()
-
         return {
             "status": "ready",
             "database": "connected",
