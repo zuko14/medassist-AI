@@ -896,15 +896,25 @@ async function loadAppointments() {
         const data = await api('/admin/appointments/upcoming?days=30');
         if (!data?.length) { el.innerHTML = emptyState('📅', 'No upcoming appointments'); return; }
         el.innerHTML = `<table>
-            <thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Department</th><th>Date</th><th>Time</th><th>Status</th></tr></thead>
+            <thead><tr>
+                <th>Ref</th><th>Patient</th><th>Doctor</th>
+                <th>Department</th><th>Date</th><th>Time</th>
+                <th>Status</th><th>Action</th>
+            </tr></thead>
             <tbody>${data.map(a => `<tr>
-                <td style="color:var(--accent2); font-weight:600">${a.booking_ref || '—'}</td>
+                <td style="color:var(--accent2);font-weight:600;font-family:monospace">${a.booking_ref || '—'}</td>
                 <td>${a.patient_name || a.patient_phone || '—'}</td>
                 <td>${a.doctor_name || '—'}</td>
                 <td>${a.department || '—'}</td>
                 <td>${a.appointment_date || '—'}</td>
                 <td>${a.appointment_time || '—'}</td>
                 <td>${badge(a.status)}</td>
+                <td>${a.status === 'confirmed' ? 
+                    `<button class="btn btn-red btn-sm" 
+                             onclick="cancelAppt('${a.id}')">
+                        Cancel
+                    </button>` : '—'}
+                </td>
             </tr>`).join('')}</tbody>
         </table>`;
     } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load appointments'); }
@@ -1096,6 +1106,26 @@ async function addHoliday() {
 async function delHoliday(date) {
     if (!confirm('Remove this holiday?')) return;
     try { await apiDel(`/admin/holidays/${date}`); loadHolidays(); } catch (e) { alert('Failed'); }
+}
+
+async function cancelAppt(id) {
+    if (!confirm('Cancel this appointment? This cannot be undone.')) return;
+    try {
+        const r = await fetch(`${API}/admin/appointments/${id}`, {
+            method: 'DELETE',
+            headers: { Authorization: auth }
+        });
+        if (!r.ok) throw new Error('Server error: ' + r.status);
+        const data = await r.json();
+        if (data.success) {
+            loadAppointments();  // refresh the list
+            loadDashboard();     // refresh dashboard stats
+        } else {
+            alert('Failed to cancel: ' + (data.message || 'Unknown error'));
+        }
+    } catch(e) {
+        alert('Error: ' + e.message);
+    }
 }
 </script>
 </body>
