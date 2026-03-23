@@ -205,6 +205,20 @@ class ConversationManager:
                 intent = "confirm_booking"
             elif button_id == "confirm_no":
                 intent = "edit_booking"
+            elif button_id == "go_main_menu":
+                lang = await get_lang(phone)
+                await self.update_state(phone, "main_menu", {
+                    "menu_shown": False
+                })
+                await self._send_main_menu(phone, lang)
+                return
+
+            elif button_id == "book_another":
+                lang = await get_lang(phone)
+                patient = await get_patient_by_phone(phone)
+                await self._start_booking(phone, patient, lang)
+                return
+
             elif button_id == "suggest_yes":
                 intent = "accept_suggestion"
             elif button_id == "suggest_no":

@@ -195,8 +195,8 @@ MESSAGES = {
         "thank_you": "Thank you for choosing {hospital_name}. Take care!",
         "change_language": "🌐 Change Language",
         "available_doctors_in": "Available doctors in {dept}:",
-        "our_doctors_body": "Choose a doctor to book an appointment",
-        "our_services_body": "Choose a service to view availability:"
+        "our_doctors_body": "Choose a doctor to book an appointment directly:",
+        "our_services_body": "Here are the services we offer at {hospital_name}:"
     },
     "hi": {
         "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं MediAssist हूं, आपका AI सहायक।",
@@ -226,8 +226,8 @@ MESSAGES = {
         "thank_you": "{hospital_name} चुनने के लिए धन्यवाद। स्वस्थ रहें!",
         "change_language": "🌐 भाषा बदलें",
         "available_doctors_in": "{dept} में उपलब्ध डॉक्टर:",
-        "our_doctors_body": "अपॉइंटमेंट बुक करने के लिए डॉक्टर चुनें",
-        "our_services_body": "उपलब्धता देखने के लिए सेवा चुनें:"
+        "our_doctors_body": "सीधे अपॉइंटमेंट बुक करने के लिए डॉक्टर चुनें:",
+        "our_services_body": "{hospital_name} में हमारी सेवाएं:"
     },
     "te": {
         "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను MediAssist, మీ AI సహాయకుడిని.",
@@ -257,8 +257,8 @@ MESSAGES = {
         "thank_you": "{hospital_name} ఎంచుకున్నందుకు ధన్యవాదాలు. జాగ్రత్త!",
         "change_language": "🌐 భాష మార్చు",
         "available_doctors_in": "{dept}లో అందుబాటులో ఉన్న డాక్టర్లు:",
-        "our_doctors_body": "అపాయింట్మెంట్ బుక్ చేయడానికి డాక్టర్ని ఎంచుకోండి",
-        "our_services_body": "లభ్యత చూడటానికి సేవను ఎంచుకోండి:"
+        "our_doctors_body": "నేరుగా అపాయింట్మెంట్ బుక్ చేయడానికి డాక్టర్ను ఎంచుకోండి:",
+        "our_services_body": "{hospital_name}లో మా సేవలు:"
     }
 }
 
