@@ -150,10 +150,33 @@ class ConversationManager:
             button_id = interactive_data.get("id", "")
             if button_id in ["en", "hi", "te", "lang_en", "lang_hi", "lang_te"]:
                 intent = "select_language"
-            elif button_id == "self":
-                intent = "booking_for_self"
-            elif button_id == "family":
-                intent = "booking_for_family"
+            elif button_id in ["self", "for_self"]:
+                # Handle For Me button directly — must ask symptoms next
+                lang = await get_lang(phone)
+                patient = await get_patient_by_phone(phone)
+                patient_name = patient.get("name", "") if patient else ""
+                context = session.get("context", {}) or {}
+                context["for_self"] = True
+                context["booking_name"] = patient_name
+                await update_conversation(phone, {
+                    "context": context,
+                    "state": "collecting_symptoms"
+                })
+                await whatsapp_service.send_text(
+                    phone, get_message("ask_symptoms", lang)
+                )
+                return
+
+            elif button_id in ["family", "for_family"]:
+                # Handle For Family button — ask for family member's name
+                lang = await get_lang(phone)
+                context = session.get("context", {}) or {}
+                context["for_self"] = False
+                await update_conversation(phone, {"context": context})
+                await whatsapp_service.send_text(
+                    phone, get_message("ask_name", lang)
+                )
+                return
             elif button_id == "continue_booking":
                 intent = "continue_booking"
             elif button_id == "restart_booking":
@@ -170,18 +193,8 @@ class ConversationManager:
                 intent = "view_doctor"
                 message = button_id.replace("view_doc_", "")
             elif button_id.startswith("svc_"):
-                intent = "view_service"
-                svc_map = {
-                    "svc_general": "General Medicine",
-                    "svc_cardiology": "Cardiology",
-                    "svc_dental": "Dental",
-                    "svc_ortho": "Orthopedics",
-                    "svc_gynec": "Gynecology",
-                    "svc_pediatrics": "Pediatrics",
-                    "svc_ent": "ENT",
-                    "svc_derma": "Dermatology"
-                }
-                message = svc_map.get(button_id, "General Medicine")
+                intent = "select_service"
+                message = button_id
             elif button_id.startswith("slot_"):
                 intent = "select_slot"
                 message = button_id.replace("slot_", "")
@@ -255,20 +268,7 @@ class ConversationManager:
                 await self._show_date_picker(phone, context, lang)
                 await self.update_state(phone, "selecting_date", context)
             return
-        elif intent == "view_service":
-            lang = await get_lang(phone)
-            context = session.get("context", {})
-            department = message
-            from app.database import supabase
-            response = supabase.table("doctors").select("*").eq("department", department).eq("is_active", True).order("rating", desc=True).execute()
-            doctors = response.data
-            
-            if doctors:
-                await self._show_doctor_list(phone, department, context, lang)
-            else:
-                await self.whatsapp.send_text(phone, f"No doctors available in {department} right now.")
-                await self._send_main_menu(phone, lang)
-            return
+
 
         # Process based on state and intent
         await self._process_state(phone, message, intent, session, patient, lang, interactive_data)
@@ -536,15 +536,16 @@ class ConversationManager:
         from app.database import get_conversation
         session = await get_conversation(phone) or {}
         context = session.get("context", {})
-        if context.get("menu_shown"):
-            pass
-        else:
+        
+        # Only show menu if not triggered by a specific button action
+        # and menu hasn't been shown yet
+        is_button_action = intent not in ["greeting", "unknown", None]
+        
+        if not context.get("menu_shown") and not is_button_action:
             await self._send_main_menu(phone, lang)
             context["menu_shown"] = True
             await self.update_state(phone, "main_menu", context)
-            if intent in ["greeting", "unknown"]:
-                # Menu shown via state entry, no need to process further
-                return
+            return
 
         if intent == "book_appointment" or message.lower() in ["book", "appointment", "बुक", "బుక్"]:
             await self._start_booking(phone, patient, lang)
@@ -626,6 +627,16 @@ class ConversationManager:
         lang: str
     ) -> None:
         """Handle name collection."""
+
+        # Skip validation for button responses
+        if message.lower() in [
+            "self", "for me", "family", "for family",
+            "for_self", "for_family",
+            "మెరే లిఏ", "నా కోసం", "కుటుంబం కోసం",
+            "मेरे लिए", "परिवार के लिए"
+        ]:
+            # These are handled by button handlers above, ignore here
+            return
 
         # Handle button responses
         if message.lower() in ["self", "for me", "मेरे लिए", "నా కోసం"]:
@@ -884,7 +895,7 @@ class ConversationManager:
         button_id = interactive_data.get("id", "") if interactive_data else ""
         
         # When patient selects from list
-        if button_id.startswith("dept_"):
+        if button_id.startswith("dept_") or button_id.startswith("svc_"):
             DEPT_MAP = {
                 "dept_general_medicine": "General Medicine",
                 "dept_cardiology": "Cardiology",
@@ -894,6 +905,14 @@ class ConversationManager:
                 "dept_pediatrics": "Pediatrics",
                 "dept_ent": "ENT",
                 "dept_dermatology": "Dermatology",
+                "svc_general": "General Medicine",
+                "svc_cardiology": "Cardiology",
+                "svc_dental": "Dental",
+                "svc_ortho": "Orthopedics",
+                "svc_gynec": "Gynecology",
+                "svc_pediatrics": "Pediatrics",
+                "svc_ent": "ENT",
+                "svc_derma": "Dermatology"
             }
             department = DEPT_MAP.get(button_id, "General Medicine")
             
