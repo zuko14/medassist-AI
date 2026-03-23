@@ -274,11 +274,15 @@ async def get_appointment_by_ref(booking_ref: str) -> Optional[dict]:
 async def cancel_appointment(appointment_id: str) -> bool:
     """Cancel an appointment."""
     try:
-        supabase.table("appointments").update({"status": "cancelled"}).eq("id", appointment_id).execute()
-        return True
+        result = supabase.table("appointments") \
+                         .update({"status": "cancelled"}) \
+                         .eq("id", appointment_id) \
+                         .execute()
+        return bool(result.data)
     except Exception as e:
-        logger.error(f"Error cancelling appointment: {e}")
+        logger.error(f"Cancel appointment error: {e}")
         return False
+
 
 
 async def get_patient_appointments(phone: str, status: Optional[str] = None) -> list:

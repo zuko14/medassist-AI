@@ -910,11 +910,16 @@ async function loadAppointments() {
                 <td>${a.appointment_time || '—'}</td>
                 <td>${badge(a.status)}</td>
                 <td>${a.status === 'confirmed' ? 
-                    `<button class="btn btn-red btn-sm" 
-                             onclick="cancelAppt('${a.id}')">
+                    `<button 
+                        style="background:#fee2e2;color:#dc2626;border:none;
+                               padding:5px 12px;border-radius:6px;cursor:pointer;
+                               font-size:12px;font-weight:600;"
+                        onclick="cancelAppt('${a.id}')">
                         Cancel
-                    </button>` : '—'}
+                    </button>` 
+                    : '—'}
                 </td>
+
             </tr>`).join('')}</tbody>
         </table>`;
     } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load appointments'); }
@@ -1109,24 +1114,24 @@ async function delHoliday(date) {
 }
 
 async function cancelAppt(id) {
-    if (!confirm('Cancel this appointment? This cannot be undone.')) return;
+    if (!confirm('Cancel this appointment?')) return;
     try {
-        const r = await fetch(`${API}/admin/appointments/${id}`, {
+        const r = await fetch(API + '/admin/appointments/' + id, {
             method: 'DELETE',
             headers: { Authorization: auth }
         });
-        if (!r.ok) throw new Error('Server error: ' + r.status);
         const data = await r.json();
         if (data.success) {
-            loadAppointments();  // refresh the list
-            loadDashboard();     // refresh dashboard stats
+            loadAppointments();
+            loadDashboard();
         } else {
-            alert('Failed to cancel: ' + (data.message || 'Unknown error'));
+            alert('Failed: ' + (data.detail || data.message || 'Error'));
         }
     } catch(e) {
         alert('Error: ' + e.message);
     }
 }
+
 </script>
 </body>
 </html>

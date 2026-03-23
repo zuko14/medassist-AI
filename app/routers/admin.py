@@ -260,7 +260,7 @@ async def delete_holiday(holiday_date: str, user: str = Depends(verify_credentia
         raise HTTPException(status_code=500, detail="Failed to delete holiday")
 
 @router.delete("/appointments/{appointment_id}")
-async def cancel_appointment_admin(
+async def cancel_appointment_by_admin(
     appointment_id: str,
     user: str = Depends(verify_credentials)
 ):
@@ -270,9 +270,9 @@ async def cancel_appointment_admin(
                          .eq("id", appointment_id) \
                          .execute()
         if result.data:
-            return {"success": True, "message": "Cancelled"}
-        else:
-            return {"success": False, "message": "Not found"}
+            return {"success": True}
+        return {"success": False, "message": "Not found"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 

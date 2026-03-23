@@ -151,32 +151,31 @@ class ConversationManager:
             if button_id in ["en", "hi", "te", "lang_en", "lang_hi", "lang_te"]:
                 intent = "select_language"
             elif button_id in ["self", "for_self"]:
-                # Handle For Me button directly — must ask symptoms next
                 lang = await get_lang(phone)
-                patient = await get_patient_by_phone(phone)
-                patient_name = patient.get("name", "") if patient else ""
-                context = session.get("context", {}) or {}
-                context["for_self"] = True
-                context["booking_name"] = patient_name
+                patient_local = await get_patient_by_phone(phone)
+                patient_name = (patient_local or {}).get("name", "")
+                ctx = session.get("context", {}) or {}
+                ctx["for_self"] = True
+                ctx["booking_name"] = patient_name
                 await update_conversation(phone, {
-                    "context": context,
+                    "context": ctx,
                     "state": "collecting_symptoms"
                 })
-                await whatsapp_service.send_text(
+                await self.whatsapp.send_text(
                     phone, get_message("ask_symptoms", lang)
                 )
                 return
 
             elif button_id in ["family", "for_family"]:
-                # Handle For Family button — ask for family member's name
                 lang = await get_lang(phone)
-                context = session.get("context", {}) or {}
-                context["for_self"] = False
-                await update_conversation(phone, {"context": context})
-                await whatsapp_service.send_text(
+                ctx = session.get("context", {}) or {}
+                ctx["for_self"] = False
+                await update_conversation(phone, {"context": ctx})
+                await self.whatsapp.send_text(
                     phone, get_message("ask_name", lang)
                 )
                 return
+
             elif button_id == "continue_booking":
                 intent = "continue_booking"
             elif button_id == "restart_booking":
@@ -237,6 +236,30 @@ class ConversationManager:
                     "back_upper": "upper back pain"
                 }
                 message = intent_map.get(button_id, message)
+            elif button_id.startswith("cancel_"):
+                appointment_id = button_id.replace("cancel_", "")
+                lang = await get_lang(phone)
+                
+                # Cancel in database
+                from app.database import cancel_appointment as db_cancel
+                success = await db_cancel(appointment_id)
+                
+                if success:
+                    cancel_msg = {
+                        "en": "Your appointment has been cancelled successfully.",
+                        "hi": "आपका अपॉइंटमेंट सफलतापूर्वक रद्द कर दिया गया है।",
+                        "te": "మీ అపాయింట్మెంట్ విజయవంతంగా రద్దు చేయబడింది."
+                    }.get(lang, "Appointment cancelled.")
+                    await self.whatsapp.send_text(phone, cancel_msg)
+                else:
+                    await self.whatsapp.send_text(
+                        phone, "Could not cancel. Please call us: " + settings.hospital_phone
+                    )
+                
+                await self.update_state(phone, "main_menu", {})
+                await self._send_main_menu(phone, lang)
+                return
+
             elif button_id in ["menu_book", "menu_services", "menu_doctors", "menu_emergency", "menu_human"]:
                 intent_map = {
                     "menu_book": "book_appointment",
