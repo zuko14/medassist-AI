@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS lab_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_lab_reports_phone ON lab_reports(patient_phone);
 CREATE INDEX IF NOT EXISTS idx_lab_reports_uploaded ON lab_reports(uploaded_at DESC);
+ALTER TABLE lab_reports ENABLE ROW LEVEL SECURITY;
 
 CREATE TABLE IF NOT EXISTS prescriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -32,3 +33,4 @@ CREATE TABLE IF NOT EXISTS prescriptions (
 );
 CREATE INDEX IF NOT EXISTS idx_prescriptions_phone ON prescriptions(patient_phone);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_active ON prescriptions(is_active, end_date);
+ALTER TABLE prescriptions ENABLE ROW LEVEL SECURITY;
