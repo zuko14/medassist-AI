@@ -105,13 +105,16 @@ class LabReportService:
 
         # Step C — Upload to Supabase Storage
         storage_path = f"{patient_phone}/{uuid4()}_{filename}"
+        storage_ok = False
         try:
-            supabase.storage.from_("lab-reports").upload(
+            upload_result = supabase.storage.from_("lab-reports").upload(
                 storage_path, file_bytes, {"content-type": content_type}
             )
-            logger.info(f"Uploaded report to storage: {storage_path}")
+            logger.info(f"Uploaded report to storage: {storage_path} -> {upload_result}")
+            storage_ok = True
         except Exception as e:
-            logger.error(f"Supabase Storage upload failed: {e}")
+            logger.error(f"Supabase Storage upload FAILED (file will not be retrievable for bot resend): {type(e).__name__}: {e}")
+            # Continue — still send via WhatsApp even if storage failed
 
         # Steps D, E, F — WhatsApp delivery
         sent_ok = False
@@ -160,7 +163,7 @@ class LabReportService:
             "ai_summary": ai_result.get("patient_message"),
             "has_abnormal_values": ai_result.get("has_abnormal", False),
             "status": "sent" if sent_ok else "failed",
-            "error_message": error_message,
+            "error_message": error_message if not sent_ok else (None if storage_ok else "Storage upload failed — bot resend unavailable"),
         }
         if sent_ok:
             row["sent_at"] = datetime.now(timezone.utc).isoformat()
