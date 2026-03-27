@@ -36,21 +36,29 @@ class LabReportService:
 
         # Step A — Upload to Supabase Storage
         storage_path = f"{patient_phone}/{uuid4()}_{filename}"
-        supabase.storage.from_("lab-reports").upload(
-            storage_path, file_bytes, {"content-type": content_type}
-        )
+        try:
+            supabase.storage.from_("lab-reports").upload(
+                storage_path, file_bytes, {"content-type": content_type}
+            )
+            logger.info(f"Uploaded report to storage: {storage_path}")
+        except Exception as e:
+            logger.error(f"Supabase Storage upload failed: {e}")
+            # Continue anyway — still send via WhatsApp and save the record
 
         # Step B — Send PDF via WhatsApp as a document
         sent_ok = False
         error_message = None
         try:
+            logger.info(f"Uploading media to WhatsApp for {patient_phone}...")
             media_id = await self._upload_media(file_bytes, filename, content_type)
+            logger.info(f"Media uploaded, media_id={media_id}. Sending document...")
             await self._send_document(
                 patient_phone, media_id, report_name,
                 f"Dear {patient_name}, your {report_type} report from TestHospital is ready. "
                 f"Please download and save it. For queries call 108."
             )
             sent_ok = True
+            logger.info(f"Report sent successfully to {patient_phone}")
         except Exception as e:
             logger.error(f"WhatsApp send failed for {patient_phone}: {e}")
             error_message = str(e)
@@ -69,8 +77,15 @@ class LabReportService:
         if sent_ok:
             row["sent_at"] = datetime.now(timezone.utc).isoformat()
 
-        result = supabase.table("lab_reports").insert(row).execute()
-        return result.data[0]
+        try:
+            result = supabase.table("lab_reports").insert(row).execute()
+            return result.data[0]
+        except Exception as e:
+            logger.error(f"Failed to save lab report record to database: {e}")
+            # Return the row data even if DB insert fails
+            row["id"] = str(uuid4())
+            row["_db_error"] = str(e)
+            return row
 
     async def get_all_reports(self, limit: int = 100) -> list:
         """Get all lab reports ordered by upload date."""
