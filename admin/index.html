@@ -1483,13 +1483,14 @@ function renderLabTable(list) {
     const el = document.getElementById('labList');
     if (!list.length) { el.innerHTML = emptyState('🧪', 'No lab reports yet'); return; }
     el.innerHTML = `<table>
-        <thead><tr><th>Patient Name</th><th>Phone</th><th>Report Name</th><th>Report Type</th><th>Uploaded At</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Patient Name</th><th>Phone</th><th>Report Name</th><th>Report Type</th><th>Uploaded At</th><th>AI Summary</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${list.map(r => `<tr>
             <td style="font-weight:600;color:#fff">${r.patient_name || '—'}</td>
             <td>${r.patient_phone}</td>
             <td>${r.report_name}</td>
             <td>${r.report_type || 'General'}</td>
             <td>${r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : '—'}</td>
+            <td>${r.ai_summary ? (r.has_abnormal_values ? `<span title="${r.ai_summary.replace(/"/g,'&quot;')}" style="cursor:help;font-size:1.2rem;color:var(--amber)">⚠️</span>` : `<span title="${r.ai_summary.replace(/"/g,'&quot;')}" style="cursor:help;font-size:1.2rem;color:var(--green)">✅</span>`) : '—'}</td>
             <td>${badge(r.status)}</td>
             <td><button class="btn btn-ghost btn-sm" onclick="resendReport('${r.id}')">🔁 Resend</button></td>
         </tr>`).join('')}</tbody>

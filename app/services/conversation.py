@@ -48,6 +48,8 @@ class ConversationState(str, Enum):
     EMERGENCY = "emergency"
     ESCALATED_TO_HUMAN = "escalated_to_human"
     AWAITING_DATA_DELETION = "awaiting_data_deletion"
+    VIEWING_REPORTS = "viewing_reports"
+    DOWNLOADING_REPORT = "downloading_report"
 
 
 class ConversationManager:
@@ -260,13 +262,14 @@ class ConversationManager:
                 await self._send_main_menu(phone, lang)
                 return
 
-            elif button_id in ["menu_book", "menu_services", "menu_doctors", "menu_emergency", "menu_human"]:
+            elif button_id in ["menu_book", "menu_services", "menu_doctors", "menu_emergency", "menu_human", "menu_reports"]:
                 intent_map = {
                     "menu_book": "book_appointment",
                     "menu_services": "view_services",
                     "menu_doctors": "doctor_availability",
                     "menu_emergency": "emergency",
-                    "menu_human": "human_escalation"
+                    "menu_human": "human_escalation",
+                    "menu_reports": "view_reports"
                 }
                 intent = intent_map.get(button_id, intent)
 
@@ -387,6 +390,8 @@ class ConversationManager:
             await self._handle_selecting_slot(phone, message, intent, context, lang)
         elif state == "confirming_booking":
             await self._handle_confirming_booking(phone, message, intent, context, patient, lang)
+        elif state == "viewing_reports":
+            await self._handle_viewing_reports(phone, message, session, lang)
         elif state == "emergency":
             # Patient was in emergency state — process their new message normally
             # Reset to main_menu and handle as a main_menu interaction
@@ -542,16 +547,23 @@ class ConversationManager:
 
         t = titles.get(lang, titles["en"])
 
-        await self.whatsapp.send_interactive_buttons(
+        sections = [{
+            "title": "Menu",
+            "rows": [
+                {"id": "menu_book", "title": t[0][:24], "description": ""},
+                {"id": "menu_services", "title": t[1][:24], "description": ""},
+                {"id": "menu_doctors", "title": t[2][:24], "description": ""},
+                {"id": "menu_reports", "title": "📋 My Reports"[:24], "description": ""},
+                {"id": "menu_emergency", "title": t[3][:24], "description": ""},
+                {"id": "menu_human", "title": t[4][:24], "description": ""},
+            ]
+        }]
+
+        await self.whatsapp.send_interactive_list(
             phone,
             body=get_message("main_menu", lang),
-            buttons=[
-                {"id": "menu_book", "title": t[0][:20]},
-                {"id": "menu_services", "title": t[1][:20]},
-                {"id": "menu_doctors", "title": t[2][:20]},
-                {"id": "menu_emergency", "title": t[3][:20]},
-                {"id": "menu_human", "title": t[4][:20]}
-            ]
+            button_text="Select" if lang == "en" else ("चुनें" if lang == "hi" else "ఎంచుకోండి"),
+            sections=sections
         )
 
     async def _handle_main_menu(
@@ -590,6 +602,8 @@ class ConversationManager:
             await self._show_services(phone, lang)
         elif intent == "doctor_availability":
             await self._show_doctors(phone, lang)
+        elif intent == "view_reports":
+            await self._handle_view_reports(phone, lang)
         elif intent == "cancel_appointment":
             await self._handle_cancel_request(phone, patient, lang)
         elif intent == "reschedule_appointment":
@@ -1623,6 +1637,87 @@ class ConversationManager:
             "To reschedule, please call us directly: " + settings.hospital_phone
         )
         await self._send_main_menu(phone, lang)
+
+
+    async def _handle_view_reports(self, phone: str, lang: str) -> None:
+        """Handle 'My Reports' menu selection."""
+        from app.services.lab_reports import LabReportService
+        reports = await LabReportService().get_reports_by_phone(phone)
+
+        if not reports:
+            await self.whatsapp.send_text(
+                phone,
+                "📋 No reports found for your number. Please visit the hospital or contact reception."
+            )
+            await self._send_main_menu(phone, lang)
+            await self.update_state(phone, "main_menu")
+            return
+
+        # Show up to 5 most recent reports
+        recent = reports[:5]
+        lines = ["📋 *Your Lab Reports*\n\nHere are your available reports:\n"]
+        for i, r in enumerate(recent, 1):
+            date_str = ""
+            if r.get("uploaded_at"):
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(r["uploaded_at"].replace("Z", "+00:00"))
+                    date_str = f" — {dt.strftime('%d %b %Y')}"
+                except Exception:
+                    pass
+            lines.append(f"{i}. {r['report_name']}{date_str}")
+
+        lines.append("\nReply with the report number to download it. Reply 0 to go back to main menu.")
+        await self.whatsapp.send_text(phone, "\n".join(lines))
+
+        # Save reports list in context
+        await self.update_state(phone, "viewing_reports", {"available_reports": recent})
+
+    async def _handle_viewing_reports(self, phone: str, message: str, session: dict, lang: str) -> None:
+        """Handle report selection in VIEWING_REPORTS state."""
+        context = session.get("context", {})
+        available = context.get("available_reports", [])
+        msg_stripped = message.strip()
+
+        if msg_stripped == "0":
+            await self.update_state(phone, "main_menu", {"menu_shown": False})
+            await self._send_main_menu(phone, lang)
+            return
+
+        # Check for "menu" keyword
+        if msg_stripped.lower() in ["menu", "main menu"]:
+            await self.update_state(phone, "main_menu", {"menu_shown": False})
+            await self._send_main_menu(phone, lang)
+            return
+
+        try:
+            choice = int(msg_stripped)
+            if 1 <= choice <= len(available):
+                selected = available[choice - 1]
+                await self.whatsapp.send_text(phone, "📤 Sending your report now...")
+
+                from app.services.lab_reports import LabReportService
+                try:
+                    await LabReportService().resend_report(selected["id"])
+                    await self.whatsapp.send_text(
+                        phone,
+                        "✅ Report sent! You can save it directly from WhatsApp. Need anything else? Reply with *Menu* to return."
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to resend report: {e}")
+                    await self.whatsapp.send_text(
+                        phone,
+                        "Sorry, we could not send the report right now. Please try again later or contact the hospital."
+                    )
+
+                await self.update_state(phone, "main_menu", {"menu_shown": False})
+                return
+            else:
+                await self.whatsapp.send_text(phone, "Please reply with a number from the list, or reply 0 to go back.")
+                return
+        except ValueError:
+            await self.whatsapp.send_text(phone, "Please reply with a number from the list, or reply 0 to go back.")
+            return
 
 
 # Global instance

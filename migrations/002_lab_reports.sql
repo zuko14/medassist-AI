@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS lab_reports (
     report_name TEXT NOT NULL,
     report_type TEXT DEFAULT 'General',
     file_path TEXT NOT NULL,
+    ai_summary TEXT,
+    has_abnormal_values BOOLEAN DEFAULT FALSE,
     status TEXT DEFAULT 'pending',
     uploaded_by TEXT DEFAULT 'admin',
     uploaded_at TIMESTAMPTZ DEFAULT NOW(),
@@ -12,6 +14,7 @@ CREATE TABLE IF NOT EXISTS lab_reports (
     error_message TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_lab_reports_phone ON lab_reports(patient_phone);
+CREATE INDEX IF NOT EXISTS idx_lab_reports_uploaded ON lab_reports(uploaded_at DESC);
 
 CREATE TABLE IF NOT EXISTS prescriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
