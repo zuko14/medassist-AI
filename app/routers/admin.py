@@ -4,13 +4,15 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from app.config import settings
 from app.database import supabase
 from app.services.analytics import analytics_service
+from app.services.lab_reports import LabReportService
+from app.services.prescriptions import PrescriptionService
 
 logger = logging.getLogger(__name__)
 
@@ -275,4 +277,122 @@ async def cancel_appointment_by_admin(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ═══════ LAB REPORTS ═══════
+
+@router.post("/lab-reports/upload")
+async def upload_lab_report(
+    file: UploadFile = File(...),
+    patient_phone: str = Form(...),
+    patient_name: str = Form(...),
+    report_name: str = Form(...),
+    report_type: str = Form("General"),
+    user: str = Depends(verify_credentials),
+):
+    """Upload and send a lab report to a patient via WhatsApp."""
+    try:
+        file_bytes = await file.read()
+        result = await LabReportService().upload_and_send(
+            file_bytes=file_bytes,
+            filename=file.filename,
+            content_type=file.content_type or "application/pdf",
+            patient_phone=patient_phone,
+            patient_name=patient_name,
+            report_name=report_name,
+            report_type=report_type,
+        )
+        return {"success": True, "message": "Report sent to patient via WhatsApp", "report": result}
+    except Exception as e:
+        logger.error(f"Lab report upload error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/lab-reports")
+async def get_lab_reports(user: str = Depends(verify_credentials)):
+    """Get all lab reports."""
+    result = await LabReportService().get_all_reports()
+    return {"reports": result}
+
+
+@router.post("/lab-reports/{report_id}/resend")
+async def resend_lab_report(
+    report_id: str,
+    user: str = Depends(verify_credentials),
+):
+    """Resend a lab report to the patient."""
+    try:
+        await LabReportService().resend_report(report_id)
+        return {"success": True, "message": "Report resent successfully"}
+    except Exception as e:
+        logger.error(f"Lab report resend error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/patients")
+async def get_patients(user: str = Depends(verify_credentials)):
+    """Get all patients with appointment counts."""
+    try:
+        result = supabase.rpc(
+            "get_patients_with_counts",
+            {},
+        ).execute()
+        if result.data:
+            return {"patients": result.data}
+        # Fallback: simple query
+        patients = supabase.table("patients").select("*").order("phone").execute()
+        return {"patients": patients.data or []}
+    except Exception:
+        # Fallback if RPC doesn't exist
+        patients = supabase.table("patients").select("*").order("phone").execute()
+        return {"patients": patients.data or []}
+
+
+# ═══════ PRESCRIPTIONS ═══════
+
+@router.post("/prescriptions")
+async def add_prescription(
+    body: dict,
+    user: str = Depends(verify_credentials),
+):
+    """Add a new prescription reminder."""
+    try:
+        result = await PrescriptionService().add_prescription(
+            patient_phone=body["patient_phone"],
+            patient_name=body["patient_name"],
+            medicine_name=body["medicine_name"],
+            dosage=body["dosage"],
+            frequency=body["frequency"],
+            reminder_times=body["reminder_times"],
+            start_date=body["start_date"],
+            end_date=body["end_date"],
+            notes=body.get("notes"),
+        )
+        return {"success": True, "prescription": result}
+    except Exception as e:
+        logger.error(f"Prescription add error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/prescriptions")
+async def get_prescriptions(
+    active_only: bool = False,
+    user: str = Depends(verify_credentials),
+):
+    """Get all prescriptions."""
+    result = await PrescriptionService().get_all_prescriptions(active_only)
+    return {"prescriptions": result}
+
+
+@router.post("/prescriptions/{prescription_id}/deactivate")
+async def deactivate_prescription(
+    prescription_id: str,
+    user: str = Depends(verify_credentials),
+):
+    """Deactivate a prescription reminder."""
+    try:
+        await PrescriptionService().deactivate_prescription(prescription_id)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Prescription deactivate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 

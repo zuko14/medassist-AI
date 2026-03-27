@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
+
+async def send_due_reminders_job():
+    """Async wrapper for prescription reminder scheduler job."""
+    from app.services.prescriptions import PrescriptionService
+    await PrescriptionService().send_due_reminders()
+
+
 class SchedulerService:
     """Service for scheduled tasks."""
 
@@ -53,6 +60,15 @@ class SchedulerService:
             self.check_doctor_leaves,
             CronTrigger(hour=8, minute=0),
             id="doctor_leaves",
+            replace_existing=True
+        )
+
+        # Prescription reminders (every 5 minutes)
+        self.scheduler.add_job(
+            send_due_reminders_job,
+            'interval',
+            minutes=5,
+            id='prescription_reminders',
             replace_existing=True
         )
 

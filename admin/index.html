@@ -367,6 +367,112 @@
         .badge-active::before { background: var(--green); }
         .badge-inactive { background: rgba(90,100,128,0.15); color: var(--text3); }
         .badge-inactive::before { background: var(--text3); }
+        .badge-sent { background: var(--green-bg); color: var(--green); }
+        .badge-sent::before { background: var(--green); }
+        .badge-failed { background: var(--red-bg); color: var(--red); }
+        .badge-failed::before { background: var(--red); }
+        .badge-pending { background: var(--amber-bg); color: var(--amber); }
+        .badge-pending::before { background: var(--amber); }
+
+        /* ═══════ MODAL ═══════ */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            z-index: 500;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 32px;
+            width: 100%;
+            max-width: 520px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 80px rgba(0,0,0,0.5);
+            animation: fadeUp 0.3s ease;
+        }
+        .modal h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 22px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .modal .field { margin-bottom: 14px; }
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        /* ═══════ SEARCH BAR ═══════ */
+        .search-bar {
+            width: 100%;
+            padding: 12px 18px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-size: 0.92rem;
+            font-family: inherit;
+            margin-bottom: 20px;
+            transition: border-color 0.2s;
+        }
+        .search-bar:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .search-bar::placeholder { color: var(--text3); }
+
+        .top-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .top-row .search-bar { flex: 1; margin-bottom: 0; }
+
+        .toggle-group {
+            display: inline-flex;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .toggle-btn {
+            padding: 8px 18px;
+            border: none;
+            background: transparent;
+            color: var(--text2);
+            font-size: 0.82rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .toggle-btn.on {
+            background: var(--accent-glow);
+            color: var(--accent2);
+        }
+        .toggle-btn:hover:not(.on) { color: var(--text); }
+
+        .time-inputs { display: flex; flex-direction: column; gap: 8px; }
+        .time-row { display: flex; gap: 8px; align-items: center; }
+        .time-row input { flex: 1; }
+        .time-row button { padding: 6px 10px; font-size: 0.85rem; border: none; background: var(--red-bg); color: var(--red); border-radius: 6px; cursor: pointer; }
+        .add-time-btn { padding: 6px 14px; font-size: 0.8rem; border: 1px dashed var(--border2); background: transparent; color: var(--text2); border-radius: 8px; cursor: pointer; margin-top: 4px; }
+        .add-time-btn:hover { border-color: var(--accent); color: var(--accent2); }
 
         /* ═══════ DEPT BARS ═══════ */
         .dept-bar { margin-bottom: 14px; }
@@ -539,6 +645,15 @@
             <div class="nav-link" data-page="holidays" onclick="go('holidays',this)">
                 <span class="ico">🗓️</span> Holidays
             </div>
+            <div class="nav-link" data-page="patients" onclick="go('patients',this)">
+                <span class="ico">👥</span> Patients
+            </div>
+            <div class="nav-link" data-page="labreports" onclick="go('labreports',this)">
+                <span class="ico">🧪</span> Lab Reports
+            </div>
+            <div class="nav-link" data-page="prescriptions" onclick="go('prescriptions',this)">
+                <span class="ico">💊</span> Prescriptions
+            </div>
         </div>
         <div class="nav-bottom">
             <div class="nav-link" onclick="logout()" style="color:var(--red)">
@@ -702,7 +817,178 @@
             </div>
         </div>
 
+        <!-- ─── PATIENTS ─── -->
+        <div id="pg-patients" class="sec">
+            <div class="page-head">
+                <h2>Patients</h2>
+                <p>Manage and view registered patients</p>
+            </div>
+            <input type="text" class="search-bar" id="patientSearch" placeholder="Search by name or phone number..." oninput="filterPatients()">
+            <div class="stats" id="patientStats">
+                <div class="stat"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-pat-total">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Opted In</div><div class="num" id="s-pat-opted">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Opted Out</div><div class="num" id="s-pat-out">—</div></div>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="patientList">
+                    <div class="loader"><div class="spin"></div>Loading patients...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── LAB REPORTS ─── -->
+        <div id="pg-labreports" class="sec">
+            <div class="page-head">
+                <h2>Lab Reports</h2>
+                <p>Send and manage patient lab reports via WhatsApp</p>
+            </div>
+            <div class="top-row">
+                <input type="text" class="search-bar" id="labSearch" placeholder="Search by patient name or phone..." oninput="filterLabReports()">
+                <button class="btn btn-accent" onclick="openLabReportModal()">📤 Upload Report</button>
+            </div>
+            <div class="stats" id="labStats">
+                <div class="stat"><div class="glow"></div><div class="label">Total Reports Sent</div><div class="num" id="s-lab-sent">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Failed Deliveries</div><div class="num" id="s-lab-failed">—</div></div>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="labList">
+                    <div class="loader"><div class="spin"></div>Loading lab reports...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── PRESCRIPTIONS ─── -->
+        <div id="pg-prescriptions" class="sec">
+            <div class="page-head">
+                <h2>Prescription Reminders</h2>
+                <p>Manage medication reminders sent via WhatsApp</p>
+            </div>
+            <div class="top-row">
+                <input type="text" class="search-bar" id="rxSearch" placeholder="Search by patient name or phone..." oninput="filterPrescriptions()">
+                <button class="btn btn-accent" onclick="openRxModal()">💊 Add Prescription</button>
+            </div>
+            <div class="toggle-group">
+                <button class="toggle-btn on" id="rxToggleAll" onclick="toggleRx(false)">All</button>
+                <button class="toggle-btn" id="rxToggleActive" onclick="toggleRx(true)">Active Only</button>
+            </div>
+            <div class="stats" id="rxStats">
+                <div class="stat"><div class="glow"></div><div class="label">Active Reminders</div><div class="num" id="s-rx-active">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Total Reminders</div><div class="num" id="s-rx-total">—</div></div>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="rxList">
+                    <div class="loader"><div class="spin"></div>Loading prescriptions...</div>
+                </div>
+            </div>
+        </div>
+
     </main>
+</div>
+
+<!-- ═══ UPLOAD REPORT MODAL ═══ -->
+<div class="modal-overlay" id="labReportModal">
+    <div class="modal">
+        <h3>📤 Upload Lab Report</h3>
+        <div id="labModalMsg"></div>
+        <div class="field">
+            <label>Patient Phone</label>
+            <input type="text" id="m-labPhone" placeholder="e.g. 919876543210">
+        </div>
+        <div class="field">
+            <label>Patient Name</label>
+            <input type="text" id="m-labName" placeholder="Patient full name">
+        </div>
+        <div class="field">
+            <label>Report Name</label>
+            <input type="text" id="m-labReportName" placeholder="e.g. Blood Test Report">
+        </div>
+        <div class="field">
+            <label>Report Type</label>
+            <select id="m-labReportType">
+                <option value="Blood Test">Blood Test</option>
+                <option value="X-Ray">X-Ray</option>
+                <option value="MRI">MRI</option>
+                <option value="CT Scan">CT Scan</option>
+                <option value="Ultrasound">Ultrasound</option>
+                <option value="ECG">ECG</option>
+                <option value="General">General</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>File (PDF only)</label>
+            <input type="file" id="m-labFile" accept=".pdf" style="padding:10px">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeLabReportModal()">Cancel</button>
+            <button class="btn btn-accent" id="btn-labSubmit" onclick="submitLabReport()">Send via WhatsApp</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ ADD PRESCRIPTION MODAL ═══ -->
+<div class="modal-overlay" id="rxModal">
+    <div class="modal">
+        <h3>💊 Add Prescription Reminder</h3>
+        <div id="rxModalMsg"></div>
+        <div class="form-row">
+            <div class="field">
+                <label>Patient Phone</label>
+                <input type="text" id="m-rxPhone" placeholder="e.g. 919876543210">
+            </div>
+            <div class="field">
+                <label>Patient Name</label>
+                <input type="text" id="m-rxName" placeholder="Patient full name">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="field">
+                <label>Medicine Name</label>
+                <input type="text" id="m-rxMedicine" placeholder="e.g. Paracetamol 500mg">
+            </div>
+            <div class="field">
+                <label>Dosage</label>
+                <input type="text" id="m-rxDosage" placeholder="e.g. 1 tablet, 5ml">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="field">
+                <label>Frequency</label>
+                <select id="m-rxFrequency">
+                    <option value="Once daily">Once daily</option>
+                    <option value="Twice daily">Twice daily</option>
+                    <option value="Three times daily">Three times daily</option>
+                    <option value="Every 8 hours">Every 8 hours</option>
+                    <option value="Every 6 hours">Every 6 hours</option>
+                    <option value="As needed">As needed</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>Reminder Times</label>
+                <div class="time-inputs" id="timeInputs">
+                    <div class="time-row"><input type="time" value="09:00"></div>
+                </div>
+                <button class="add-time-btn" onclick="addTimeInput()">+ Add Time</button>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="field">
+                <label>Start Date</label>
+                <input type="date" id="m-rxStart">
+            </div>
+            <div class="field">
+                <label>End Date</label>
+                <input type="date" id="m-rxEnd">
+            </div>
+        </div>
+        <div class="field">
+            <label>Notes (optional)</label>
+            <textarea id="m-rxNotes" rows="2" placeholder="Additional notes..." style="width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:inherit;font-size:0.9rem;resize:vertical"></textarea>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeRxModal()">Cancel</button>
+            <button class="btn btn-accent" id="btn-rxSubmit" onclick="submitPrescription()">Add Prescription</button>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -755,7 +1041,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays };
+    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions };
     if (loaders[page]) loaders[page]();
 }
 
@@ -1130,6 +1416,326 @@ async function cancelAppt(id) {
     } catch(e) {
         alert('Error: ' + e.message);
     }
+}
+
+// ═══════ PATIENTS ═══════
+let patientCache = [];
+
+async function loadPatients() {
+    const el = document.getElementById('patientList');
+    el.innerHTML = loading();
+    try {
+        const data = await api('/admin/patients');
+        patientCache = data.patients || [];
+        const total = patientCache.length;
+        const optedIn = patientCache.filter(p => p.opted_in).length;
+        const optedOut = total - optedIn;
+        document.getElementById('s-pat-total').textContent = total;
+        document.getElementById('s-pat-opted').textContent = optedIn;
+        document.getElementById('s-pat-out').textContent = optedOut;
+        renderPatientTable(patientCache);
+    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load patients'); }
+}
+
+function renderPatientTable(list) {
+    const el = document.getElementById('patientList');
+    if (!list.length) { el.innerHTML = emptyState('👥', 'No patients found'); return; }
+    el.innerHTML = `<table>
+        <thead><tr><th>Name</th><th>Phone</th><th>Language</th><th>Opted In</th><th>Visits</th><th>Actions</th></tr></thead>
+        <tbody>${list.map(p => `<tr>
+            <td style="font-weight:600;color:#fff">${p.name || '—'}</td>
+            <td>${p.phone}</td>
+            <td>${p.language || '—'}</td>
+            <td>${p.opted_in ? badge('active') : badge('inactive')}</td>
+            <td>${p.appointment_count ?? p.visit_count ?? 0}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="openLabReportModalFor('${p.phone}','${(p.name||'').replace(/'/g,"\\'")}')">📋 Upload Report</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function filterPatients() {
+    const q = document.getElementById('patientSearch').value.toLowerCase();
+    const filtered = patientCache.filter(p =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.phone || '').includes(q)
+    );
+    renderPatientTable(filtered);
+}
+
+// ═══════ LAB REPORTS ═══════
+let labCache = [];
+
+async function loadLabReports() {
+    const el = document.getElementById('labList');
+    el.innerHTML = loading();
+    try {
+        const data = await api('/admin/lab-reports');
+        labCache = data.reports || [];
+        const sent = labCache.filter(r => r.status === 'sent').length;
+        const failed = labCache.filter(r => r.status === 'failed').length;
+        document.getElementById('s-lab-sent').textContent = sent;
+        document.getElementById('s-lab-failed').textContent = failed;
+        renderLabTable(labCache);
+    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load lab reports'); }
+}
+
+function renderLabTable(list) {
+    const el = document.getElementById('labList');
+    if (!list.length) { el.innerHTML = emptyState('🧪', 'No lab reports yet'); return; }
+    el.innerHTML = `<table>
+        <thead><tr><th>Patient Name</th><th>Phone</th><th>Report Name</th><th>Report Type</th><th>Uploaded At</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${list.map(r => `<tr>
+            <td style="font-weight:600;color:#fff">${r.patient_name || '—'}</td>
+            <td>${r.patient_phone}</td>
+            <td>${r.report_name}</td>
+            <td>${r.report_type || 'General'}</td>
+            <td>${r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : '—'}</td>
+            <td>${badge(r.status)}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="resendReport('${r.id}')">🔁 Resend</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function filterLabReports() {
+    const q = document.getElementById('labSearch').value.toLowerCase();
+    const filtered = labCache.filter(r =>
+        (r.patient_name || '').toLowerCase().includes(q) ||
+        (r.patient_phone || '').includes(q)
+    );
+    renderLabTable(filtered);
+}
+
+function openLabReportModal() {
+    document.getElementById('m-labPhone').value = '';
+    document.getElementById('m-labPhone').readOnly = false;
+    document.getElementById('m-labName').value = '';
+    document.getElementById('m-labReportName').value = '';
+    document.getElementById('m-labReportType').value = 'General';
+    document.getElementById('m-labFile').value = '';
+    document.getElementById('labModalMsg').innerHTML = '';
+    document.getElementById('btn-labSubmit').disabled = false;
+    document.getElementById('btn-labSubmit').textContent = 'Send via WhatsApp';
+    document.getElementById('labReportModal').classList.add('open');
+}
+
+function openLabReportModalFor(phone, name) {
+    openLabReportModal();
+    document.getElementById('m-labPhone').value = phone;
+    document.getElementById('m-labPhone').readOnly = true;
+    document.getElementById('m-labName').value = name;
+}
+
+function closeLabReportModal() {
+    document.getElementById('labReportModal').classList.remove('open');
+}
+
+async function submitLabReport() {
+    const phone = document.getElementById('m-labPhone').value.trim();
+    const name = document.getElementById('m-labName').value.trim();
+    const reportName = document.getElementById('m-labReportName').value.trim();
+    const reportType = document.getElementById('m-labReportType').value;
+    const fileInput = document.getElementById('m-labFile');
+
+    if (!phone || !reportName || !fileInput.files.length) {
+        msg('labModalMsg', 'Please fill all required fields and select a PDF file', true);
+        return;
+    }
+
+    const btn = document.getElementById('btn-labSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    const fd = new FormData();
+    fd.append('file', fileInput.files[0]);
+    fd.append('patient_phone', phone);
+    fd.append('patient_name', name);
+    fd.append('report_name', reportName);
+    fd.append('report_type', reportType);
+
+    try {
+        const r = await fetch(API + '/admin/lab-reports/upload', {
+            method: 'POST',
+            headers: { Authorization: auth },
+            body: fd
+        });
+        const data = await r.json();
+        if (data.success) {
+            msg('labModalMsg', '✅ Report sent successfully!');
+            setTimeout(() => { closeLabReportModal(); loadLabReports(); }, 1200);
+        } else {
+            msg('labModalMsg', data.error || 'Upload failed', true);
+            btn.disabled = false;
+            btn.textContent = 'Send via WhatsApp';
+        }
+    } catch (e) {
+        msg('labModalMsg', 'Upload failed: ' + e.message, true);
+        btn.disabled = false;
+        btn.textContent = 'Send via WhatsApp';
+    }
+}
+
+async function resendReport(id) {
+    if (!confirm('Resend this report to the patient?')) return;
+    try {
+        const r = await fetch(API + '/admin/lab-reports/' + id + '/resend', {
+            method: 'POST',
+            headers: { Authorization: auth }
+        });
+        const data = await r.json();
+        if (data.success) {
+            alert('Report resent successfully!');
+            loadLabReports();
+        } else {
+            alert('Resend failed: ' + (data.detail || data.error || 'Error'));
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ═══════ PRESCRIPTIONS ═══════
+let rxCache = [];
+let rxActiveOnly = false;
+
+async function loadPrescriptions() {
+    const el = document.getElementById('rxList');
+    el.innerHTML = loading();
+    try {
+        const data = await api('/admin/prescriptions?active_only=' + rxActiveOnly);
+        rxCache = data.prescriptions || [];
+        const active = rxCache.filter(r => r.is_active).length;
+        document.getElementById('s-rx-active').textContent = active;
+        document.getElementById('s-rx-total').textContent = rxCache.length;
+        renderRxTable(rxCache);
+    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load prescriptions'); }
+}
+
+function renderRxTable(list) {
+    const el = document.getElementById('rxList');
+    if (!list.length) { el.innerHTML = emptyState('💊', 'No prescriptions yet'); return; }
+    el.innerHTML = `<table>
+        <thead><tr><th>Patient Name</th><th>Phone</th><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Reminder Times</th><th>End Date</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${list.map(r => `<tr>
+            <td style="font-weight:600;color:#fff">${r.patient_name || '—'}</td>
+            <td>${r.patient_phone}</td>
+            <td>${r.medicine_name}</td>
+            <td>${r.dosage}</td>
+            <td>${r.frequency}</td>
+            <td>${(r.reminder_times || []).join(', ')}</td>
+            <td>${r.end_date}</td>
+            <td>${r.is_active ? badge('active') : badge('inactive')}</td>
+            <td>${r.is_active ? `<button class="btn btn-red btn-sm" onclick="deactivateRx('${r.id}')">Deactivate</button>` : '—'}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function filterPrescriptions() {
+    const q = document.getElementById('rxSearch').value.toLowerCase();
+    const filtered = rxCache.filter(r =>
+        (r.patient_name || '').toLowerCase().includes(q) ||
+        (r.patient_phone || '').includes(q)
+    );
+    renderRxTable(filtered);
+}
+
+function toggleRx(activeOnly) {
+    rxActiveOnly = activeOnly;
+    document.getElementById('rxToggleAll').classList.toggle('on', !activeOnly);
+    document.getElementById('rxToggleActive').classList.toggle('on', activeOnly);
+    loadPrescriptions();
+}
+
+function openRxModal() {
+    document.getElementById('m-rxPhone').value = '';
+    document.getElementById('m-rxName').value = '';
+    document.getElementById('m-rxMedicine').value = '';
+    document.getElementById('m-rxDosage').value = '';
+    document.getElementById('m-rxFrequency').value = 'Once daily';
+    document.getElementById('m-rxStart').value = new Date().toISOString().split('T')[0];
+    document.getElementById('m-rxEnd').value = '';
+    document.getElementById('m-rxNotes').value = '';
+    document.getElementById('rxModalMsg').innerHTML = '';
+    document.getElementById('timeInputs').innerHTML = '<div class="time-row"><input type="time" value="09:00"></div>';
+    document.getElementById('btn-rxSubmit').disabled = false;
+    document.getElementById('btn-rxSubmit').textContent = 'Add Prescription';
+    document.getElementById('rxModal').classList.add('open');
+}
+
+function closeRxModal() {
+    document.getElementById('rxModal').classList.remove('open');
+}
+
+function addTimeInput() {
+    const container = document.getElementById('timeInputs');
+    const rows = container.querySelectorAll('.time-row');
+    if (rows.length >= 4) return;
+    const div = document.createElement('div');
+    div.className = 'time-row';
+    div.innerHTML = '<input type="time" value="12:00"><button onclick="this.parentElement.remove()">✕</button>';
+    container.appendChild(div);
+}
+
+async function submitPrescription() {
+    const phone = document.getElementById('m-rxPhone').value.trim();
+    const name = document.getElementById('m-rxName').value.trim();
+    const medicine = document.getElementById('m-rxMedicine').value.trim();
+    const dosage = document.getElementById('m-rxDosage').value.trim();
+    const frequency = document.getElementById('m-rxFrequency').value;
+    const startDate = document.getElementById('m-rxStart').value;
+    const endDate = document.getElementById('m-rxEnd').value;
+    const notes = document.getElementById('m-rxNotes').value.trim();
+
+    const timeInputs = document.getElementById('timeInputs').querySelectorAll('input[type=time]');
+    const reminderTimes = Array.from(timeInputs).map(i => i.value).filter(v => v);
+
+    if (!phone || !name || !medicine || !dosage || !endDate || !reminderTimes.length) {
+        msg('rxModalMsg', 'Please fill all required fields', true);
+        return;
+    }
+
+    const btn = document.getElementById('btn-rxSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        const data = await apiPost('/admin/prescriptions', {
+            patient_phone: phone,
+            patient_name: name,
+            medicine_name: medicine,
+            dosage: dosage,
+            frequency: frequency,
+            reminder_times: reminderTimes,
+            start_date: startDate,
+            end_date: endDate,
+            notes: notes || null
+        });
+        if (data.success) {
+            msg('rxModalMsg', '✅ Prescription added!');
+            setTimeout(() => { closeRxModal(); loadPrescriptions(); }, 1200);
+        } else {
+            msg('rxModalMsg', data.detail || 'Failed to add prescription', true);
+            btn.disabled = false;
+            btn.textContent = 'Add Prescription';
+        }
+    } catch (e) {
+        msg('rxModalMsg', 'Failed: ' + e.message, true);
+        btn.disabled = false;
+        btn.textContent = 'Add Prescription';
+    }
+}
+
+async function deactivateRx(id) {
+    if (!confirm('Deactivate this prescription reminder?')) return;
+    try {
+        const r = await fetch(API + '/admin/prescriptions/' + id + '/deactivate', {
+            method: 'POST',
+            headers: { Authorization: auth }
+        });
+        const data = await r.json();
+        if (data.success) {
+            loadPrescriptions();
+        } else {
+            alert('Failed: ' + (data.detail || 'Error'));
+        }
+    } catch (e) { alert('Error: ' + e.message); }
 }
 
 </script>
