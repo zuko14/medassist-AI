@@ -187,10 +187,12 @@ class LabReportService:
 
     async def get_reports_by_phone(self, phone: str) -> list:
         """Get sent lab reports for a specific patient phone."""
+        # Normalize: strip + prefix to match admin-uploaded records
+        clean_phone = phone.lstrip("+")
         result = (
             supabase.table("lab_reports")
             .select("id, report_name, report_type, uploaded_at, status")
-            .eq("patient_phone", phone)
+            .eq("patient_phone", clean_phone)
             .eq("status", "sent")
             .order("uploaded_at", desc=True)
             .execute()
