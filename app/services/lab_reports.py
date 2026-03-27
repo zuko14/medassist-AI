@@ -209,10 +209,17 @@ class LabReportService:
             raise ValueError("Report not found")
         report = report.data[0]
 
-        # Download file from Supabase Storage
-        file_bytes = supabase.storage.from_("lab-reports").download(report["file_path"])
-
         try:
+            # Download file from Supabase Storage
+            try:
+                file_bytes = supabase.storage.from_("lab-reports").download(report["file_path"])
+            except Exception as storage_err:
+                logger.error(f"Storage download failed for {report['file_path']}: {storage_err}")
+                raise ValueError(
+                    f"Report file not found in storage. It may have been deleted. "
+                    f"Please re-upload the report from the admin panel."
+                )
+
             filename = report["file_path"].split("/")[-1]
             media_id = await self._upload_media_to_whatsapp(file_bytes, filename, "application/pdf")
 
