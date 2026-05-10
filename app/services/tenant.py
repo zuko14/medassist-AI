@@ -61,8 +61,18 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"Clinics table lookup failed (may not exist yet): {e}")
 
-    # Fallback: single-tenant mode using env vars
-    # This preserves backward compatibility when clinics table doesn't exist
+    # Fallback: single-tenant mode
+    # Fetch the first clinic in the database as the fallback
+    try:
+        fallback = supabase.table("clinics").select("*").order("created_at").limit(1).execute()
+        if fallback.data:
+            clinic = fallback.data[0]
+            _tenant_cache[phone] = clinic
+            return clinic
+    except Exception as e:
+        logger.warning(f"Fallback clinic lookup failed: {e}")
+
+    # Absolute fallback using env vars (will fail if DB expects UUID, but safe if table doesn't exist)
     clinic = _build_fallback_clinic()
     _tenant_cache[phone] = clinic
     return clinic
@@ -89,6 +99,12 @@ def _build_fallback_clinic() -> dict:
 async def get_clinic_by_id(clinic_id: str) -> dict:
     """Get clinic by its UUID."""
     if clinic_id == "default":
+        try:
+            fallback = supabase.table("clinics").select("*").order("created_at").limit(1).execute()
+            if fallback.data:
+                return fallback.data[0]
+        except Exception:
+            pass
         return _build_fallback_clinic()
 
     result = supabase.table("clinics") \
