@@ -448,7 +448,7 @@ class ConversationManager:
     async def _send_language_selection(self, clinic: dict, phone: str) -> None:
         """Send language selection buttons."""
         from app.config import settings
-        body_text = f"Welcome to {clinic["name"]} 🏥\nनमस्ते | నమస్కారం\n\nPlease select your language:\nअपनी भाषा चुनें | మీ భాష ఎంచుకోండి"
+        body_text = f"Welcome to {clinic['name']} 🏥\nनमस्ते | నమస్కారం\n\nPlease select your language:\nअपनी भाषा चुनें | మీ భాష ఎంచుకోండి"
         await self.whatsapp.send_interactive_buttons(
             clinic, phone,
             body=body_text,
