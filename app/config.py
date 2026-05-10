@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "admin"
 
+    # Multi-tenant (optional — used when clinics table exists)
+    admin_secret: str = ""         # protects /admin/clinics routes
+    meta_verify_token: str = ""    # for Meta webhook handshake (global fallback)
+
     model_config = ConfigDict(env_file=".env")
 
 

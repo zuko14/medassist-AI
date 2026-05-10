@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.routers import webhook, health, admin
+from app.routers import webhook, health, admin, clinics
 from app.services.scheduler import scheduler_service
 from app.utils.logger import setup_logging
 
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MediAssist AI",
     description="Hospital WhatsApp Assistant for appointment scheduling",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -64,6 +64,7 @@ app.add_middleware(NgrokMiddleware)
 app.include_router(webhook.router)
 app.include_router(health.router)
 app.include_router(admin.router)
+app.include_router(clinics.router)
 
 
 @app.get("/")
@@ -71,7 +72,7 @@ async def root():
     """Root endpoint."""
     return {
         "service": "MediAssist AI",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "hospital": settings.hospital_name,
         "status": "running"
     }

@@ -23,6 +23,7 @@ class PrescriptionService:
 
     async def add_prescription(
         self,
+        clinic_id: str,
         patient_phone: str,
         patient_name: str,
         medicine_name: str,
@@ -35,6 +36,7 @@ class PrescriptionService:
     ) -> dict:
         """Add a new prescription and send confirmation to patient."""
         row = {
+            "clinic_id": clinic_id,
             "patient_phone": patient_phone,
             "patient_name": patient_name,
             "medicine_name": medicine_name,
@@ -63,7 +65,7 @@ class PrescriptionService:
 
         return result.data[0]
 
-    async def get_all_prescriptions(self, active_only: bool = False) -> list:
+    async def get_all_prescriptions(self, clinic_id: str = "default", active_only: bool = False) -> list:
         """Get all prescriptions, optionally filtered to active only."""
         if active_only:
             result = (

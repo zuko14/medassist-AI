@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import supabase
 from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import TEMPLATES
+from app.services.tenant import get_clinic_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +90,14 @@ class SchedulerService:
 
             for appt in appointments.data:
                 try:
+                    clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                     components = TEMPLATES["reminder_24h"]["components_builder"](
                         appt["doctor_name"],
                         appt["appointment_time"]
                     )
 
                     await whatsapp_service.send_template(
+                        clinic,
                         appt["patient_phone"],
                         "appointment_reminder_24h",
                         components=components
@@ -124,6 +127,7 @@ class SchedulerService:
                 # Check if appointment is in ~2 hours
                 if appt_time[:5] <= in_2h[:5]:
                     try:
+                        clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                         components = TEMPLATES["reminder_2h"]["components_builder"](
                             settings.hospital_name,
                             appt["doctor_name"]
@@ -154,12 +158,14 @@ class SchedulerService:
 
             for appt in appointments.data:
                 try:
+                    clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                     components = TEMPLATES["followup_message"]["components_builder"](
                         appt["patient_name"].split()[0],
                         settings.hospital_phone
                     )
 
                     await whatsapp_service.send_template(
+                        clinic,
                         appt["patient_phone"],
                         "post_appointment_followup",
                         components=components
@@ -189,6 +195,7 @@ class SchedulerService:
 
                 for appt in affected.data:
                     try:
+                        clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                         # Cancel appointment
                         supabase.table("appointments").update({"status": "cancelled"}).eq("id", appt["id"]).execute()
 

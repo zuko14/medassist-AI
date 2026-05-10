@@ -86,6 +86,7 @@ class LabReportService:
 
     async def upload_and_send(
         self,
+        clinic_id: str,
         file_bytes: bytes,
         filename: str,
         content_type: str,
@@ -155,6 +156,7 @@ class LabReportService:
 
         # Step G — Save to database
         row = {
+            "clinic_id": clinic_id,
             "patient_phone": patient_phone,
             "patient_name": patient_name,
             "report_name": report_name,

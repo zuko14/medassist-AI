@@ -1,4 +1,4 @@
-"""Database module for Supabase integration."""
+"""Database module for Supabase integration (Multi-Tenant Scoped)."""
 
 import logging
 from typing import Optional
@@ -15,10 +15,10 @@ supabase: Client = create_client(
 )
 
 
-async def get_patient_by_phone(phone: str) -> Optional[dict]:
-    """Get patient by phone number."""
+async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:
+    """Get patient by phone number and clinic_id."""
     try:
-        result = supabase.table("patients").select("*").eq("phone", phone).execute()
+        result = supabase.table("patients").select("*").eq("clinic_id", clinic_id).eq("phone", phone).execute()
         if result.data:
             return result.data[0]
         return None
@@ -27,10 +27,11 @@ async def get_patient_by_phone(phone: str) -> Optional[dict]:
         return None
 
 
-async def create_patient(phone: str, name: Optional[str] = None, language: Optional[str] = None) -> dict:
+async def create_patient(clinic_id: str, phone: str, name: Optional[str] = None, language: Optional[str] = None) -> dict:
     """Create a new patient."""
     try:
         data = {
+            "clinic_id": clinic_id,
             "phone": phone,
             "name": name,
             "language": language,
@@ -45,20 +46,20 @@ async def create_patient(phone: str, name: Optional[str] = None, language: Optio
         raise
 
 
-async def update_patient(phone: str, updates: dict) -> bool:
+async def update_patient(clinic_id: str, phone: str, updates: dict) -> bool:
     """Update patient data."""
     try:
-        supabase.table("patients").update(updates).eq("phone", phone).execute()
+        supabase.table("patients").update(updates).eq("clinic_id", clinic_id).eq("phone", phone).execute()
         return True
     except Exception as e:
         logger.error(f"Error updating patient: {e}")
         return False
 
 
-async def get_conversation(phone: str) -> Optional[dict]:
+async def get_conversation(clinic_id: str, phone: str) -> Optional[dict]:
     """Get conversation session for phone."""
     try:
-        result = supabase.table("conversations").select("*").eq("phone", phone).execute()
+        result = supabase.table("conversations").select("*").eq("clinic_id", clinic_id).eq("phone", phone).execute()
         if result.data:
             return result.data[0]
         return None
@@ -67,12 +68,13 @@ async def get_conversation(phone: str) -> Optional[dict]:
         return None
 
 
-async def create_conversation(phone: str) -> dict:
+async def create_conversation(clinic_id: str, phone: str) -> dict:
     """Create a new conversation session."""
     try:
         from datetime import datetime, timedelta, timezone
 
         data = {
+            "clinic_id": clinic_id,
             "phone": phone,
             "state": "idle",
             "context": {},
@@ -86,29 +88,29 @@ async def create_conversation(phone: str) -> dict:
         raise
 
 
-async def update_conversation(phone: str, updates: dict) -> bool:
+async def update_conversation(clinic_id: str, phone: str, updates: dict) -> bool:
     """Update conversation session."""
     try:
         updates["updated_at"] = "now()"
-        supabase.table("conversations").update(updates).eq("phone", phone).execute()
+        supabase.table("conversations").update(updates).eq("clinic_id", clinic_id).eq("phone", phone).execute()
         return True
     except Exception as e:
         logger.error(f"Error updating conversation: {e}")
         return False
 
 
-async def get_or_create_conversation(phone: str) -> dict:
+async def get_or_create_conversation(clinic_id: str, phone: str) -> dict:
     """Get existing conversation or create new one."""
-    conv = await get_conversation(phone)
+    conv = await get_conversation(clinic_id, phone)
     if conv:
         return conv
-    return await create_conversation(phone)
+    return await create_conversation(clinic_id, phone)
 
 
-async def get_doctors(department: Optional[str] = None, active_only: bool = True) -> list:
+async def get_doctors(clinic_id: str, department: Optional[str] = None, active_only: bool = True) -> list:
     """Get doctors, optionally filtered by department."""
     try:
-        query = supabase.table("doctors").select("*")
+        query = supabase.table("doctors").select("*").eq("clinic_id", clinic_id)
 
         if department:
             query = query.eq("department", department)
@@ -122,10 +124,10 @@ async def get_doctors(department: Optional[str] = None, active_only: bool = True
         return []
 
 
-async def get_doctor_by_name(name: str) -> Optional[dict]:
+async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
     """Get doctor by name."""
     try:
-        result = supabase.table("doctors").select("*").eq("name", name).execute()
+        result = supabase.table("doctors").select("*").eq("clinic_id", clinic_id).eq("name", name).execute()
         if result.data:
             return result.data[0]
         return None
@@ -134,7 +136,7 @@ async def get_doctor_by_name(name: str) -> Optional[dict]:
         return None
 
 
-async def get_available_slots(doctor_name: str, date_str: str) -> tuple[list, Optional[str]]:
+async def get_available_slots(clinic_id: str, doctor_name: str, date_str: str) -> tuple[list, Optional[str]]:
     """Get available slots for a doctor on a specific date. Returns (slots, reason)."""
     from datetime import datetime, date as dt_date, timedelta
 
@@ -143,12 +145,12 @@ async def get_available_slots(doctor_name: str, date_str: str) -> tuple[list, Op
         check_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
         # Check if it's a hospital holiday
-        holiday = supabase.table("hospital_holidays").select("name").eq("holiday_date", date_str).execute()
+        holiday = supabase.table("hospital_holidays").select("name").eq("clinic_id", clinic_id).eq("holiday_date", date_str).execute()
         if holiday.data:
             return [], "hospital_closed"  # Hospital closed
 
         # Check doctor leaves
-        leave = supabase.table("doctor_leaves").select("leave_type").eq("doctor_name", doctor_name).eq("leave_date", date_str).execute()
+        leave = supabase.table("doctor_leaves").select("leave_type").eq("clinic_id", clinic_id).eq("doctor_name", doctor_name).eq("leave_date", date_str).execute()
 
         blocked_sessions = []
         if leave.data:
@@ -161,7 +163,7 @@ async def get_available_slots(doctor_name: str, date_str: str) -> tuple[list, Op
                 blocked_sessions = ["evening"]
 
         # Get doctor's configured slots
-        doc = await get_doctor_by_name(doctor_name)
+        doc = await get_doctor_by_name(clinic_id, doctor_name)
         if not doc:
             return [], "doctor_not_found"
 
@@ -181,7 +183,7 @@ async def get_available_slots(doctor_name: str, date_str: str) -> tuple[list, Op
             all_slots.extend(evening_slots)
 
         # Get already booked slots
-        booked = supabase.table("appointments").select("appointment_time").eq("doctor_name", doctor_name).eq("appointment_date", date_str).eq("status", "confirmed").execute()
+        booked = supabase.table("appointments").select("appointment_time").eq("clinic_id", clinic_id).eq("doctor_name", doctor_name).eq("appointment_date", date_str).eq("status", "confirmed").execute()
         booked_times = {row["appointment_time"] for row in booked.data}
 
         # Filter out booked slots
@@ -198,7 +200,8 @@ async def get_available_slots(doctor_name: str, date_str: str) -> tuple[list, Op
         logger.error(f"Error getting available slots: {e}")
         return [], "error"
 
-async def find_next_available_date(doctor_name: str, from_date_str: str) -> tuple:
+
+async def find_next_available_date(clinic_id: str, doctor_name: str, from_date_str: str) -> tuple:
     """Find next available date with slots for a doctor."""
     from datetime import datetime, timedelta
 
@@ -210,11 +213,11 @@ async def find_next_available_date(doctor_name: str, from_date_str: str) -> tupl
             check_date_str = check_date.strftime("%Y-%m-%d")
 
             # Check holiday
-            holiday = supabase.table("hospital_holidays").select("name").eq("holiday_date", check_date_str).execute()
+            holiday = supabase.table("hospital_holidays").select("name").eq("clinic_id", clinic_id).eq("holiday_date", check_date_str).execute()
             if holiday.data:
                 continue
 
-            slots, _ = await get_available_slots(doctor_name, check_date_str)
+            slots, _ = await get_available_slots(clinic_id, doctor_name, check_date_str)
             if slots:
                 return check_date_str, slots, None
 
@@ -225,11 +228,13 @@ async def find_next_available_date(doctor_name: str, from_date_str: str) -> tupl
         return None, [], "error"
 
 
-async def book_appointment(data: dict) -> dict:
+async def book_appointment(clinic_id: str, data: dict) -> dict:
     """Book an appointment with race condition protection."""
     try:
+        data["clinic_id"] = clinic_id
+        
         # Check for existing booking at same slot
-        conflict = supabase.table("appointments").select("id").eq("doctor_name", data["doctor_name"]).eq("appointment_date", data["appointment_date"]).eq("appointment_time", data["appointment_time"]).eq("status", "confirmed").execute()
+        conflict = supabase.table("appointments").select("id").eq("clinic_id", clinic_id).eq("doctor_name", data["doctor_name"]).eq("appointment_date", data["appointment_date"]).eq("appointment_time", data["appointment_time"]).eq("status", "confirmed").execute()
 
         if conflict.data:
             return {"success": False, "reason": "slot_taken"}
@@ -244,10 +249,10 @@ async def book_appointment(data: dict) -> dict:
 
         # Update patient visit count
         if data.get("patient_phone"):
-            patient = await get_patient_by_phone(data["patient_phone"])
+            patient = await get_patient_by_phone(clinic_id, data["patient_phone"])
             if patient:
                 new_count = (patient.get("visit_count") or 0) + 1
-                await update_patient(data["patient_phone"], {"visit_count": new_count})
+                await update_patient(clinic_id, data["patient_phone"], {"visit_count": new_count})
 
         return {"success": True, "appointment": result.data[0]}
 
@@ -259,10 +264,10 @@ async def book_appointment(data: dict) -> dict:
         return {"success": False, "reason": "error"}
 
 
-async def get_appointment_by_ref(booking_ref: str) -> Optional[dict]:
+async def get_appointment_by_ref(clinic_id: str, booking_ref: str) -> Optional[dict]:
     """Get appointment by booking reference."""
     try:
-        result = supabase.table("appointments").select("*").eq("booking_ref", booking_ref).execute()
+        result = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).eq("booking_ref", booking_ref).execute()
         if result.data:
             return result.data[0]
         return None
@@ -271,11 +276,12 @@ async def get_appointment_by_ref(booking_ref: str) -> Optional[dict]:
         return None
 
 
-async def cancel_appointment(appointment_id: str) -> bool:
+async def cancel_appointment(clinic_id: str, appointment_id: str) -> bool:
     """Cancel an appointment."""
     try:
         result = supabase.table("appointments") \
                          .update({"status": "cancelled"}) \
+                         .eq("clinic_id", clinic_id) \
                          .eq("id", appointment_id) \
                          .execute()
         return bool(result.data)
@@ -284,11 +290,10 @@ async def cancel_appointment(appointment_id: str) -> bool:
         return False
 
 
-
-async def get_patient_appointments(phone: str, status: Optional[str] = None) -> list:
+async def get_patient_appointments(clinic_id: str, phone: str, status: Optional[str] = None) -> list:
     """Get appointments for a patient."""
     try:
-        query = supabase.table("appointments").select("*").eq("patient_phone", phone)
+        query = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).eq("patient_phone", phone)
         if status:
             query = query.eq("status", status)
         result = query.order("appointment_date", desc=False).execute()
@@ -298,10 +303,11 @@ async def get_patient_appointments(phone: str, status: Optional[str] = None) -> 
         return []
 
 
-async def log_analytics_event(phone: str, event_type: str, **kwargs) -> bool:
+async def log_analytics_event(clinic_id: str, phone: str, event_type: str, **kwargs) -> bool:
     """Log an analytics event."""
     try:
         data = {
+            "clinic_id": clinic_id,
             "phone": phone,
             "event_type": event_type,
             **{k: v for k, v in kwargs.items() if v is not None}
@@ -313,18 +319,18 @@ async def log_analytics_event(phone: str, event_type: str, **kwargs) -> bool:
         return False
 
 
-async def delete_patient_data(phone: str) -> bool:
+async def delete_patient_data(clinic_id: str, phone: str) -> bool:
     """Delete all patient data (DPDP compliance)."""
     try:
         # Get patient ID
-        patient = await get_patient_by_phone(phone)
+        patient = await get_patient_by_phone(clinic_id, phone)
         if patient:
             # Delete appointments
-            supabase.table("appointments").delete().eq("patient_id", patient["id"]).execute()
+            supabase.table("appointments").delete().eq("clinic_id", clinic_id).eq("patient_id", patient["id"]).execute()
             # Delete patient
-            supabase.table("patients").delete().eq("phone", phone).execute()
+            supabase.table("patients").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
             # Delete conversation
-            supabase.table("conversations").delete().eq("phone", phone).execute()
+            supabase.table("conversations").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
         return True
     except Exception as e:
         logger.error(f"Error deleting patient data: {e}")

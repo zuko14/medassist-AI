@@ -287,12 +287,14 @@ async def upload_lab_report(
     patient_name: str = Form(...),
     report_name: str = Form(...),
     report_type: str = Form("General"),
+    clinic_id: str = Form("default"),
     user: str = Depends(verify_credentials),
 ):
     """Upload and send a lab report to a patient via WhatsApp."""
     try:
         file_bytes = await file.read()
         result = await LabReportService().upload_and_send(
+            clinic_id=clinic_id,
             file_bytes=file_bytes,
             filename=file.filename,
             content_type=file.content_type or "application/pdf",
@@ -308,9 +310,9 @@ async def upload_lab_report(
 
 
 @router.get("/lab-reports")
-async def get_lab_reports(user: str = Depends(verify_credentials)):
+async def get_lab_reports(clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Get all lab reports."""
-    result = await LabReportService().get_all_reports()
+    result = await LabReportService().get_all_reports(clinic_id)
     return {"reports": result}
 
 
@@ -352,11 +354,14 @@ async def get_patients(user: str = Depends(verify_credentials)):
 @router.post("/prescriptions")
 async def add_prescription(
     body: dict,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials),
 ):
     """Add a new prescription reminder."""
     try:
+        clinic_id = body.get("clinic_id", clinic_id)
         result = await PrescriptionService().add_prescription(
+            clinic_id=clinic_id,
             patient_phone=body["patient_phone"],
             patient_name=body["patient_name"],
             medicine_name=body["medicine_name"],
@@ -376,21 +381,23 @@ async def add_prescription(
 @router.get("/prescriptions")
 async def get_prescriptions(
     active_only: bool = False,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials),
 ):
     """Get all prescriptions."""
-    result = await PrescriptionService().get_all_prescriptions(active_only)
+    result = await PrescriptionService().get_all_prescriptions(clinic_id, active_only)
     return {"prescriptions": result}
 
 
 @router.post("/prescriptions/{prescription_id}/deactivate")
 async def deactivate_prescription(
     prescription_id: str,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials),
 ):
     """Deactivate a prescription reminder."""
     try:
-        await PrescriptionService().deactivate_prescription(prescription_id)
+        await PrescriptionService().deactivate_prescription(clinic_id, prescription_id)
         return {"success": True}
     except Exception as e:
         logger.error(f"Prescription deactivate error: {e}")

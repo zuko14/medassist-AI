@@ -1,4 +1,4 @@
-"""Webhook router for WhatsApp Cloud API."""
+"""Webhook router for WhatsApp Cloud API (Multi-Tenant)."""
 
 import logging
 from fastapi import APIRouter, Request, HTTPException, Query, BackgroundTasks
@@ -8,6 +8,7 @@ from app.config import settings
 from app.models.message import WhatsAppWebhookPayload
 from app.services.conversation import conversation_manager
 from app.services.whatsapp import whatsapp_service
+from app.services.tenant import resolve_tenant
 from app.utils.validators import normalize_phone
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,8 @@ async def verify_webhook(
     hub_challenge: str = Query(..., alias="hub.challenge")
 ):
     """Verify webhook for Meta WhatsApp Cloud API."""
-    if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_verify_token:
+    # We use a global verify token for all clinics
+    if hub_mode == "subscribe" and hub_verify_token in (settings.whatsapp_verify_token, settings.meta_verify_token):
         logger.info("Webhook verified successfully")
         return PlainTextResponse(content=hub_challenge)
 
@@ -42,8 +44,15 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         for entry in payload.entry:
             for change in entry.changes:
                 if change.value.messages:
+                    metadata = change.value.metadata
+                    display_phone = metadata.get("display_phone_number")
+                    
+                    if not display_phone:
+                        logger.error("No display_phone_number found in webhook metadata")
+                        continue
+
                     for message in change.value.messages:
-                        background_tasks.add_task(process_message, message, background_tasks)
+                        background_tasks.add_task(process_message, message, display_phone, background_tasks)
 
         return {"status": "ok"}
 
@@ -53,14 +62,17 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "error"}
 
 
-async def process_message(message, background_tasks: BackgroundTasks):
+async def process_message(message, display_phone: str, background_tasks: BackgroundTasks):
     """Process incoming WhatsApp message."""
     try:
+        # Resolve tenant clinic
+        clinic = await resolve_tenant(display_phone)
+        
         phone = normalize_phone(message.from_)
         message_id = message.id
         message_type = message.type
         
-        background_tasks.add_task(whatsapp_service.mark_as_read, message_id)
+        background_tasks.add_task(whatsapp_service.mark_as_read, clinic, message_id)
 
         # Extract message content based on type
         content = ""
@@ -81,10 +93,11 @@ async def process_message(message, background_tasks: BackgroundTasks):
                 content = reply.get("title", "")
                 interactive_data = {"id": reply.get("id"), "type": "list_reply"}
 
-        logger.info(f"Processing message from {phone[:6]}...: {content[:50]}")
+        logger.info(f"[{clinic['name']}] Processing message from {phone[:6]}...: {content[:50]}")
 
         # Process through conversation manager
         await conversation_manager.handle_message(
+            clinic=clinic,
             phone=phone,
             message=content,
             message_type=message_type,
@@ -98,17 +111,25 @@ async def process_message(message, background_tasks: BackgroundTasks):
 
 
 @router.post("/test")
-async def test_webhook(phone: str, message: str):
+async def test_webhook(phone: str, message: str, display_phone: str = None):
     """Test endpoint for simulating incoming messages."""
     try:
+        if not display_phone:
+            # Fallback for testing backward compat
+            display_phone = settings.hospital_phone
+            
+        clinic = await resolve_tenant(display_phone)
         phone = normalize_phone(phone)
+        
         await conversation_manager.handle_message(
+            clinic=clinic,
             phone=phone,
             message=message,
             message_type="text",
             message_id="test_" + str(hash(message + phone))
         )
-        return {"status": "ok", "message": f"Processed test message from {phone}"}
+        return {"status": "ok", "message": f"Processed test message from {phone} to {clinic['name']}"}
     except Exception as e:
-        logger.error(f"Error in test webhook: {e}")
+        import traceback
+        logger.error(f"Error in test webhook: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Test failed")
