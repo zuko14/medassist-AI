@@ -1,29 +1,39 @@
-"""MediAssist AI - Hospital WhatsApp Assistant."""
+"""MediAssist AI - Hospital WhatsApp Assistant — Security Hardened."""
 
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.routers import webhook, health, admin, clinics
 from app.services.scheduler import scheduler_service
 from app.utils.logger import setup_logging
+from app.utils.security import SECURITY_HEADERS
 
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
-class NgrokMiddleware(BaseHTTPMiddleware):
-    """Middleware to skip ngrok browser warning page."""
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to every response.
+    
+    Protects against:
+    - XSS attacks (X-XSS-Protection, CSP)
+    - Clickjacking (X-Frame-Options)
+    - MIME sniffing (X-Content-Type-Options)
+    - Referrer leakage (Referrer-Policy)
+    """
 
-    async def dispatch(self, request, call_next):
-        """Add ngrok-skip-browser-warning header to every response."""
+    async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
+        for header, value in SECURITY_HEADERS.items():
+            response.headers[header] = value
+        # Also add ngrok skip header for development convenience
         response.headers["ngrok-skip-browser-warning"] = "1"
         return response
 
@@ -33,6 +43,22 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     logger.info("Starting MediAssist AI...")
+
+    # Security audit log on startup
+    if not settings.meta_app_secret:
+        logger.warning(
+            "⚠️  META_APP_SECRET is not set — webhook signature verification is DISABLED. "
+            "Set this in .env for production security."
+        )
+    if settings.admin_password in ("admin", "admin123", "password", ""):
+        logger.warning(
+            "⚠️  ADMIN_PASSWORD is using a default/weak value — change it immediately!"
+        )
+    if settings.app_env != "production":
+        logger.info("🔓 Running in DEVELOPMENT mode — /webhook/test endpoint is ENABLED")
+    else:
+        logger.info("🔒 Running in PRODUCTION mode — /webhook/test endpoint is DISABLED")
+
     scheduler_service.start()
     yield
     # Shutdown
@@ -41,24 +67,30 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app
+# In production, disable interactive API docs to reduce attack surface
+is_production = settings.app_env == "production"
 app = FastAPI(
     title="MediAssist AI",
     description="Hospital WhatsApp Assistant for appointment scheduling",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
+    openapi_url=None if is_production else "/openapi.json",
 )
 
-# CORS middleware
+# CORS middleware — restrict origins in production
+allowed_origins = ["*"]  # TODO: Restrict to your admin panel domain in production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Ngrok skip browser warning middleware
-app.add_middleware(NgrokMiddleware)
+# Security headers middleware (replaces old NgrokMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Include routers
 app.include_router(webhook.router)

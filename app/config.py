@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     admin_secret: str = ""         # protects /admin/clinics routes
     meta_verify_token: str = ""    # for Meta webhook handshake (global fallback)
 
+    # Security
+    meta_app_secret: str = ""      # Meta App Secret for X-Hub-Signature-256 verification
+    rate_limit_login: str = "5/minute"  # Rate limit for admin login attempts
+
     model_config = ConfigDict(env_file=".env")
 
 

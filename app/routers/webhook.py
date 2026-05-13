@@ -1,4 +1,4 @@
-"""Webhook router for WhatsApp Cloud API (Multi-Tenant)."""
+"""Webhook router for WhatsApp Cloud API (Multi-Tenant) — Security Hardened."""
 
 import logging
 from fastapi import APIRouter, Request, HTTPException, Query, BackgroundTasks
@@ -10,6 +10,7 @@ from app.services.conversation import conversation_manager
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import resolve_tenant
 from app.utils.validators import normalize_phone
+from app.utils.security import verify_webhook_signature
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,26 @@ async def verify_webhook(
 
 @router.post("")
 async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Receive webhook events from WhatsApp Cloud API."""
+    """Receive webhook events from WhatsApp Cloud API.
+    
+    Security: Validates X-Hub-Signature-256 header before processing.
+    Meta signs every payload with HMAC-SHA256 using your App Secret.
+    This prevents attackers from injecting fake payloads.
+    """
+    # ── Step 1: Read raw body BEFORE parsing JSON ──
+    raw_body = await request.body()
+
+    # ── Step 2: Verify Meta signature ──
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not verify_webhook_signature(raw_body, signature, settings.meta_app_secret):
+        logger.warning(
+            f"Webhook signature verification FAILED — "
+            f"IP={request.client.host if request.client else 'unknown'}"
+        )
+        # Return 200 to not reveal verification logic to attacker,
+        # but do NOT process the payload.
+        return {"status": "ok"}
+
     try:
         body = await request.json()
         logger.debug(f"Received webhook: {body}")
@@ -93,7 +113,10 @@ async def process_message(message, display_phone: str, background_tasks: Backgro
                 content = reply.get("title", "")
                 interactive_data = {"id": reply.get("id"), "type": "list_reply"}
 
-        logger.info(f"[{clinic['name']}] Processing message from {phone[:6]}...: {content[:50]}")
+        # Truncate content for safe logging (prevent log injection)
+        safe_phone = phone[:6] + "..." if len(phone) > 6 else phone
+        safe_content = content[:50].replace("\n", " ") if content else ""
+        logger.info(f"[{clinic['name']}] Processing message from {safe_phone}: {safe_content}")
 
         # Process through conversation manager
         await conversation_manager.handle_message(
@@ -112,7 +135,17 @@ async def process_message(message, display_phone: str, background_tasks: Backgro
 
 @router.post("/test")
 async def test_webhook(phone: str, message: str, display_phone: str = None):
-    """Test endpoint for simulating incoming messages."""
+    """Test endpoint for simulating incoming messages.
+    
+    SECURITY: Only available in development/local environments.
+    """
+    # Block in production — this endpoint bypasses signature verification
+    if settings.app_env == "production":
+        raise HTTPException(
+            status_code=403,
+            detail="Test endpoint is disabled in production. Set APP_ENV=development to use."
+        )
+
     try:
         if not display_phone:
             # Fallback for testing backward compat
@@ -130,6 +163,5 @@ async def test_webhook(phone: str, message: str, display_phone: str = None):
         )
         return {"status": "ok", "message": f"Processed test message from {phone} to {clinic['name']}"}
     except Exception as e:
-        import traceback
-        logger.error(f"Error in test webhook: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error in test webhook: {e}")
         raise HTTPException(status_code=500, detail="Test failed")

@@ -1,5 +1,10 @@
-# Environment variables
+# Environment variables (CRITICAL — never commit secrets)
 .env
+.env.local
+.env.production
+.env.staging
+.env.*.local
+*.secret
 
 # Python
 __pycache__/

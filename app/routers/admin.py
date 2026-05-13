@@ -1,10 +1,11 @@
-"""Admin router for analytics and management."""
+"""Admin router for analytics and management — Security Hardened."""
 
 import logging
+import secrets
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile, File, Form
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
@@ -13,6 +14,7 @@ from app.database import supabase
 from app.services.analytics import analytics_service
 from app.services.lab_reports import LabReportService
 from app.services.prescriptions import PrescriptionService
+from app.utils.security import login_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +22,59 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 security = HTTPBasic()
 
 
-def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
-    """Verify admin credentials."""
-    if (credentials.username != settings.admin_username or
-        credentials.password != settings.admin_password):
+async def verify_credentials(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(security),
+):
+    """Verify admin credentials with brute-force protection.
+    
+    Security measures:
+    - Rate limiting: 5 attempts per minute per IP address
+    - Constant-time comparison to prevent timing attacks
+    - Failed attempt logging for audit trail
+    """
+    # Get client IP for rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Check rate limit BEFORE validating credentials
+    if login_rate_limiter.is_rate_limited(client_ip):
+        remaining_wait = 60  # seconds
+        logger.warning(
+            f"Admin login rate limit exceeded — IP={client_ip}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many login attempts. Try again in {remaining_wait} seconds.",
+            headers={"Retry-After": str(remaining_wait)},
+        )
+
+    # Record this attempt
+    login_rate_limiter.record_attempt(client_ip)
+
+    # Constant-time comparison prevents timing side-channel attacks
+    username_ok = secrets.compare_digest(
+        credentials.username.encode("utf-8"),
+        settings.admin_username.encode("utf-8"),
+    )
+    password_ok = secrets.compare_digest(
+        credentials.password.encode("utf-8"),
+        settings.admin_password.encode("utf-8"),
+    )
+
+    if not (username_ok and password_ok):
+        remaining = login_rate_limiter.remaining_attempts(client_ip)
+        logger.warning(
+            f"Failed admin login attempt — IP={client_ip}, "
+            f"user='{credentials.username}', remaining={remaining}"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"}
+            headers={"WWW-Authenticate": "Basic"},
         )
+
+    # Successful login — reset rate limiter for this IP
+    login_rate_limiter.reset(client_ip)
     return credentials.username
 
 
