@@ -72,7 +72,9 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                         continue
 
                     for message in change.value.messages:
-                        background_tasks.add_task(process_message, message, display_phone, background_tasks)
+                        background_tasks.add_task(
+                            process_message_safe, message, display_phone, body
+                        )
 
         return {"status": "ok"}
 
@@ -82,7 +84,34 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "error"}
 
 
-async def process_message(message, display_phone: str, background_tasks: BackgroundTasks):
+async def process_message_safe(message, display_phone: str, raw_payload: dict):
+    """Wrapper that catches failures and logs them to a dead-letter queue.
+    
+    In a hospital bot, silently dropping a patient message is unacceptable.
+    If processing fails (e.g. mid-restart crash), the raw payload is saved
+    to Supabase `failed_messages` table for manual retry or investigation.
+    """
+    try:
+        await process_message(message, display_phone)
+    except Exception as e:
+        logger.error(f"Message processing failed, saving to dead-letter queue: {e}")
+        try:
+            import json
+            from app.database import supabase
+            supabase.table("failed_messages").insert({
+                "phone": getattr(message, "from_", "unknown"),
+                "display_phone": display_phone,
+                "payload": json.dumps(raw_payload) if raw_payload else "{}",
+                "error": str(e)[:500],
+                "status": "pending"
+            }).execute()
+            logger.info("Failed message saved to dead-letter queue for retry")
+        except Exception as dlq_err:
+            # If even the dead-letter queue fails, at least we logged the error above
+            logger.error(f"Dead-letter queue write also failed: {dlq_err}")
+
+
+async def process_message(message, display_phone: str):
     """Process incoming WhatsApp message."""
     try:
         # Resolve tenant clinic
@@ -92,7 +121,9 @@ async def process_message(message, display_phone: str, background_tasks: Backgro
         message_id = message.id
         message_type = message.type
         
-        background_tasks.add_task(whatsapp_service.mark_as_read, clinic, message_id)
+        # Mark as read (fire-and-forget)
+        import asyncio
+        asyncio.create_task(whatsapp_service.mark_as_read(clinic, message_id))
 
         # Extract message content based on type
         content = ""
@@ -130,7 +161,7 @@ async def process_message(message, display_phone: str, background_tasks: Backgro
 
     except Exception as e:
         logger.error(f"Error processing message: {e}")
-        # Don't raise - webhook should return 200
+        raise  # Re-raise so process_message_safe can catch and log to DLQ
 
 
 @router.post("/test")

@@ -79,14 +79,28 @@ app = FastAPI(
     openapi_url=None if is_production else "/openapi.json",
 )
 
-# CORS middleware — restrict origins in production
-allowed_origins = ["*"]  # TODO: Restrict to your admin panel domain in production
+# CORS middleware — restricted to same-origin for security
+# The admin panel is served from the same domain, so no cross-origin needed.
+# If you deploy the admin panel separately, add that domain here.
+allowed_origins = [
+    f"http://localhost:{settings.app_port}",   # Local development
+    "http://localhost:8000",                     # Default dev port
+    "http://127.0.0.1:8000",                    # Alt local
+]
+
+# In production, add your actual deployed domain
+# Example: "https://medassist-ai.onrender.com"
+if settings.app_env == "production":
+    # In production, only allow same-origin (no CORS needed since admin panel
+    # is served from the same FastAPI server)
+    allowed_origins = []
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "X-Admin-Secret"],
 )
 
 # Security headers middleware (replaces old NgrokMiddleware)

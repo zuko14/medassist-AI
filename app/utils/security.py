@@ -1,4 +1,9 @@
-"""Security utilities — webhook signature verification, input sanitization, rate limiting."""
+"""Security utilities — webhook signature verification, input sanitization, rate limiting.
+
+Security hardening module for MediAssist AI.
+Provides persistent (Supabase-backed) rate limiting, webhook signature
+verification, LLM prompt injection detection, and HTTP security headers.
+"""
 
 import hmac
 import hashlib
@@ -6,6 +11,7 @@ import logging
 import re
 import time
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -94,6 +100,10 @@ def sanitize_user_input(message: str) -> tuple[str, bool]:
     Returns:
         (sanitized_message, is_suspicious) — the cleaned message and whether
         prompt injection was detected.
+
+    NOTE: This regex layer is a trip-wire, NOT the primary defense.
+    The real protection is the strict whitelist on LLM output (Layer 4).
+    New injection patterns emerge constantly — don't over-rely on regex.
     """
     if not message:
         return message, False
@@ -126,51 +136,171 @@ def strip_injection_markers(message: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. IN-MEMORY RATE LIMITER (for admin login brute-force protection)
+# 3. PERSISTENT RATE LIMITER (Supabase-backed, survives restarts)
 # ═══════════════════════════════════════════════════════════════════════════
 
-class RateLimiter:
+class PersistentRateLimiter:
     """
-    Simple in-memory sliding-window rate limiter.
-    Good enough for single-instance deployments on Railway/Render.
+    Supabase-backed rate limiter that survives service restarts.
+
+    Uses the `rate_limits` table:
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            key TEXT NOT NULL,          -- e.g. IP address
+            attempts INT DEFAULT 1,
+            window_start TIMESTAMPTZ DEFAULT now(),
+            created_at TIMESTAMPTZ DEFAULT now()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_rate_limits_key ON rate_limits(key);
+
+    Falls back to in-memory if Supabase is unavailable (graceful degradation).
     """
 
     def __init__(self, max_attempts: int = 5, window_seconds: int = 60):
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
-        # {key: [timestamp, timestamp, ...]}
-        self._attempts: dict[str, list[float]] = defaultdict(list)
+        # In-memory fallback in case Supabase is down
+        self._fallback: dict[str, list[float]] = defaultdict(list)
+        self._use_fallback = False
+
+    def _get_supabase(self):
+        """Lazy import to avoid circular imports."""
+        try:
+            from app.database import supabase
+            return supabase
+        except Exception:
+            return None
 
     def is_rate_limited(self, key: str) -> bool:
         """Check if a key (e.g. IP address) has exceeded the rate limit."""
-        now = time.time()
-        cutoff = now - self.window_seconds
+        supabase = self._get_supabase()
 
-        # Prune old attempts
-        self._attempts[key] = [
-            ts for ts in self._attempts[key] if ts > cutoff
-        ]
+        if supabase and not self._use_fallback:
+            try:
+                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)).isoformat()
 
-        return len(self._attempts[key]) >= self.max_attempts
+                result = supabase.table("rate_limits") \
+                    .select("attempts, window_start") \
+                    .eq("key", key) \
+                    .gte("window_start", cutoff) \
+                    .execute()
+
+                if result.data:
+                    return result.data[0]["attempts"] >= self.max_attempts
+                return False
+
+            except Exception as e:
+                logger.warning(f"Supabase rate_limits query failed, using in-memory fallback: {e}")
+                self._use_fallback = True
+
+        # In-memory fallback
+        return self._fallback_is_limited(key)
 
     def record_attempt(self, key: str) -> None:
-        """Record an attempt for a key."""
-        self._attempts[key].append(time.time())
+        """Record a login attempt."""
+        supabase = self._get_supabase()
+
+        if supabase and not self._use_fallback:
+            try:
+                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)).isoformat()
+
+                # Check if a current window exists
+                existing = supabase.table("rate_limits") \
+                    .select("id, attempts, window_start") \
+                    .eq("key", key) \
+                    .execute()
+
+                if existing.data:
+                    row = existing.data[0]
+                    window_start = row["window_start"]
+
+                    # If the window is still active, increment
+                    if window_start and window_start >= cutoff:
+                        supabase.table("rate_limits") \
+                            .update({"attempts": row["attempts"] + 1}) \
+                            .eq("id", row["id"]) \
+                            .execute()
+                    else:
+                        # Window expired — reset it
+                        supabase.table("rate_limits") \
+                            .update({
+                                "attempts": 1,
+                                "window_start": datetime.now(timezone.utc).isoformat()
+                            }) \
+                            .eq("id", row["id"]) \
+                            .execute()
+                else:
+                    # First attempt from this key
+                    supabase.table("rate_limits").insert({
+                        "key": key,
+                        "attempts": 1,
+                        "window_start": datetime.now(timezone.utc).isoformat()
+                    }).execute()
+
+                return
+
+            except Exception as e:
+                logger.warning(f"Supabase rate_limits write failed, using in-memory fallback: {e}")
+                self._use_fallback = True
+
+        # In-memory fallback
+        self._fallback[key].append(time.time())
 
     def remaining_attempts(self, key: str) -> int:
         """How many attempts remain before rate limiting kicks in."""
+        supabase = self._get_supabase()
+
+        if supabase and not self._use_fallback:
+            try:
+                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)).isoformat()
+
+                result = supabase.table("rate_limits") \
+                    .select("attempts") \
+                    .eq("key", key) \
+                    .gte("window_start", cutoff) \
+                    .execute()
+
+                if result.data:
+                    return max(0, self.max_attempts - result.data[0]["attempts"])
+                return self.max_attempts
+
+            except Exception:
+                pass
+
+        # In-memory fallback
         now = time.time()
         cutoff = now - self.window_seconds
-        recent = [ts for ts in self._attempts[key] if ts > cutoff]
+        recent = [ts for ts in self._fallback[key] if ts > cutoff]
         return max(0, self.max_attempts - len(recent))
 
     def reset(self, key: str) -> None:
         """Reset attempts for a key (e.g. after successful login)."""
-        self._attempts.pop(key, None)
+        supabase = self._get_supabase()
+
+        if supabase and not self._use_fallback:
+            try:
+                supabase.table("rate_limits") \
+                    .delete() \
+                    .eq("key", key) \
+                    .execute()
+                return
+            except Exception as e:
+                logger.warning(f"Supabase rate_limits delete failed: {e}")
+
+        # In-memory fallback
+        self._fallback.pop(key, None)
+
+    def _fallback_is_limited(self, key: str) -> bool:
+        """In-memory fallback rate limiter."""
+        now = time.time()
+        cutoff = now - self.window_seconds
+        self._fallback[key] = [ts for ts in self._fallback[key] if ts > cutoff]
+        return len(self._fallback[key]) >= self.max_attempts
 
 
 # Global rate limiter for admin login
-login_rate_limiter = RateLimiter(max_attempts=5, window_seconds=60)
+# Persistent via Supabase — survives Render/Railway restarts
+login_rate_limiter = PersistentRateLimiter(max_attempts=5, window_seconds=60)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

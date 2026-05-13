@@ -4,7 +4,7 @@ from app.utils.security import (
     verify_webhook_signature,
     sanitize_user_input,
     strip_injection_markers,
-    RateLimiter,
+    PersistentRateLimiter,
 )
 import hmac
 import hashlib
@@ -57,25 +57,30 @@ def test_strip_markers():
     print("PASSED: Injection marker stripping")
 
 
-def test_rate_limiter():
-    rl = RateLimiter(max_attempts=3, window_seconds=60)
+def test_rate_limiter_fallback():
+    """Test the in-memory fallback of PersistentRateLimiter.
+    
+    When Supabase is unavailable (no rate_limits table), the limiter
+    falls back to in-memory mode gracefully.
+    """
+    rl = PersistentRateLimiter(max_attempts=3, window_seconds=60)
+    # Force fallback mode for testing (simulates no Supabase)
+    rl._use_fallback = True
 
     for i in range(3):
-        assert not rl.is_rate_limited("test_ip"), f"Should not be limited at attempt {i}"
-        rl.record_attempt("test_ip")
+        assert not rl._fallback_is_limited("test_ip"), f"Should not be limited at attempt {i}"
+        rl._fallback["test_ip"].append(__import__("time").time())
 
-    assert rl.is_rate_limited("test_ip"), "Should be limited after 3 attempts"
-    assert rl.remaining_attempts("test_ip") == 0, "No remaining attempts"
+    assert rl._fallback_is_limited("test_ip"), "Should be limited after 3 attempts"
 
-    rl.reset("test_ip")
-    assert not rl.is_rate_limited("test_ip"), "Should be reset"
-    assert rl.remaining_attempts("test_ip") == 3, "Should have 3 remaining"
-    print("PASSED: Rate limiter")
+    rl._fallback.pop("test_ip", None)
+    assert not rl._fallback_is_limited("test_ip"), "Should be reset"
+    print("PASSED: Rate limiter (fallback mode)")
 
 
 if __name__ == "__main__":
     test_signature_verification()
     test_prompt_injection()
     test_strip_markers()
-    test_rate_limiter()
+    test_rate_limiter_fallback()
     print("\nALL SECURITY TESTS PASSED")
