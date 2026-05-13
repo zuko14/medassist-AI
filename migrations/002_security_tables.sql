@@ -16,11 +16,19 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 -- Unique index so we upsert per key instead of creating duplicates
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rate_limits_key ON rate_limits(key);
 
--- Enable RLS (even though this table has no patient data, enforce good habits)
+-- Enable RLS
 ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
 
--- Auto-cleanup: delete rate limit entries older than 1 hour (optional cron)
--- You can set this up in Supabase Dashboard → Database → Extensions → pg_cron
+-- RLS Policy: ONLY the service_role can read/write this table.
+-- The anon key (used by frontend) gets zero access.
+-- Your FastAPI backend uses supabase_service_role_key, so it bypasses RLS.
+-- This policy exists as a safety net — if someone ever gets the anon key,
+-- they still can't read or write rate limit data.
+CREATE POLICY "Service role full access on rate_limits"
+    ON rate_limits
+    FOR ALL
+    USING (auth.role() = 'service_role')
+    WITH CHECK (auth.role() = 'service_role');
 
 
 -- 2. Failed Messages table (dead-letter queue for dropped webhooks)
@@ -40,12 +48,23 @@ CREATE TABLE IF NOT EXISTS failed_messages (
 -- Enable RLS
 ALTER TABLE failed_messages ENABLE ROW LEVEL SECURITY;
 
+-- RLS Policy: ONLY the service_role can access failed messages.
+-- These contain raw webhook payloads — patient data lives here.
+CREATE POLICY "Service role full access on failed_messages"
+    ON failed_messages
+    FOR ALL
+    USING (auth.role() = 'service_role')
+    WITH CHECK (auth.role() = 'service_role');
+
 -- Index for querying pending messages
 CREATE INDEX IF NOT EXISTS idx_failed_messages_status ON failed_messages(status);
 
 -- ═══════════════════════════════════════════════════════════════════
--- VERIFICATION: Run this to confirm tables were created
+-- VERIFICATION: Run this AFTER the migration to confirm everything
 -- ═══════════════════════════════════════════════════════════════════
--- SELECT table_name FROM information_schema.tables 
--- WHERE table_schema = 'public' 
--- AND table_name IN ('rate_limits', 'failed_messages');
+-- SELECT tablename, rowsecurity 
+-- FROM pg_tables 
+-- WHERE tablename IN ('rate_limits', 'failed_messages');
+--
+-- Expected: both rows show rowsecurity = true
+-- ═══════════════════════════════════════════════════════════════════

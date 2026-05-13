@@ -73,6 +73,22 @@ class SchedulerService:
             replace_existing=True
         )
 
+        # ── Security: Monitor dead-letter queue (Monday 9 AM) ──
+        self.scheduler.add_job(
+            self.alert_failed_messages,
+            CronTrigger(day_of_week='mon', hour=9, minute=0),
+            id='failed_messages_alert',
+            replace_existing=True
+        )
+
+        # ── Security: Cleanup stale rate limits (daily midnight) ──
+        self.scheduler.add_job(
+            self.cleanup_rate_limits,
+            CronTrigger(hour=0, minute=0),
+            id='rate_limits_cleanup',
+            replace_existing=True
+        )
+
         self.scheduler.start()
         logger.info("Scheduler started")
 
@@ -217,6 +233,64 @@ class SchedulerService:
 
         except Exception as e:
             logger.error(f"Error in doctor leaves job: {e}")
+
+    async def alert_failed_messages(self):
+        """Check for unprocessed failed messages and alert admin.
+        
+        Runs every Monday at 9 AM. If any messages are sitting in the
+        dead-letter queue with status='pending', sends a WhatsApp alert
+        to the admin so they know to investigate.
+        """
+        try:
+            result = supabase.table("failed_messages") \
+                .select("id", count="exact") \
+                .eq("status", "pending") \
+                .execute()
+
+            pending_count = len(result.data) if result.data else 0
+
+            if pending_count > 0:
+                admin_phone = settings.hospital_phone
+                alert_msg = (
+                    f"⚠️ MediAssist Security Alert\n\n"
+                    f"{pending_count} failed message(s) pending review.\n"
+                    f"These are patient messages that failed to process.\n\n"
+                    f"Check the failed_messages table in Supabase."
+                )
+
+                # Try to send via the default clinic, or log if we can't
+                try:
+                    from app.services.tenant import resolve_tenant
+                    clinic = await resolve_tenant(admin_phone)
+                    await whatsapp_service.send_text(clinic, admin_phone, alert_msg)
+                    logger.info(f"Sent failed messages alert: {pending_count} pending")
+                except Exception:
+                    # If we can't resolve a clinic for the admin phone, just log it
+                    logger.warning(
+                        f"ALERT: {pending_count} failed messages pending in dead-letter queue. "
+                        f"Could not send WhatsApp alert — check Supabase manually."
+                    )
+
+        except Exception as e:
+            # Table might not exist yet — don't crash the scheduler
+            logger.debug(f"Failed messages check skipped: {e}")
+
+    async def cleanup_rate_limits(self):
+        """Delete stale rate limit entries older than 1 hour.
+        
+        Runs daily at midnight. Prevents the rate_limits table from
+        growing indefinitely with old IP entries.
+        """
+        try:
+            cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
+            supabase.table("rate_limits") \
+                .delete() \
+                .lt("window_start", cutoff) \
+                .execute()
+            logger.info("Cleaned up stale rate limit entries")
+        except Exception as e:
+            # Table might not exist yet — don't crash the scheduler
+            logger.debug(f"Rate limits cleanup skipped: {e}")
 
 
 # Global instance
