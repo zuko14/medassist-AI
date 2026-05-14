@@ -1,5 +1,4 @@
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -45,7 +44,7 @@ class Settings(BaseSettings):
     meta_app_secret: str = ""      # Meta App Secret for X-Hub-Signature-256 verification
     rate_limit_login: str = "5/minute"  # Rate limit for admin login attempts
 
-    model_config = ConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env")
 
 
 settings = Settings()

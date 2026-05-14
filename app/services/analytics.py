@@ -29,13 +29,13 @@ class AnalyticsService:
             metadata=metadata or {}
         )
 
-    async def get_dashboard_stats(self, days: int = 30) -> dict:
+    async def get_dashboard_stats(self, clinic_id: str, days: int = 30) -> dict:
         """Get dashboard statistics."""
         try:
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
             # Fetch all appointments in period and count in Python
-            all_appts = supabase.table("appointments").select("status,department,created_at").gte("created_at", from_date).execute()
+            all_appts = supabase.table("appointments").select("status,department,created_at").eq("clinic_id", clinic_id).gte("created_at", from_date).execute()
             appts = all_appts.data or []
 
             total_appointments = len(appts)
@@ -55,7 +55,7 @@ class AnalyticsService:
             )
 
             # Patients
-            all_patients = supabase.table("patients").select("created_at").execute()
+            all_patients = supabase.table("patients").select("created_at").eq("clinic_id", clinic_id).execute()
             patients = all_patients.data or []
             total_patients = len(patients)
             new_patients = sum(1 for p in patients if p.get("created_at", "") >= from_date)
@@ -87,33 +87,33 @@ class AnalyticsService:
                 "error": str(e)
             }
 
-    async def get_recent_appointments(self, limit: int = 20) -> list:
+    async def get_recent_appointments(self, clinic_id: str, limit: int = 20) -> list:
         """Get recent appointments."""
         try:
-            result = supabase.table("appointments").select("*").order("created_at", desc=True).limit(limit).execute()
+            result = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).order("created_at", desc=True).limit(limit).execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting recent appointments: {e}")
             return []
 
-    async def get_upcoming_appointments(self, days: int = 7) -> list:
+    async def get_upcoming_appointments(self, clinic_id: str, days: int = 7) -> list:
         """Get upcoming appointments."""
         try:
             today = datetime.now().strftime("%Y-%m-%d")
             future = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
-            result = supabase.table("appointments").select("*").gte("appointment_date", today).lte("appointment_date", future).order("appointment_date").execute()
+            result = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).gte("appointment_date", today).lte("appointment_date", future).order("appointment_date").execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting upcoming appointments: {e}")
             return []
 
-    async def get_popular_departments(self, days: int = 30) -> list:
+    async def get_popular_departments(self, clinic_id: str, days: int = 30) -> list:
         """Get most popular departments."""
         try:
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-            result = supabase.table("appointments").select("department").gte("created_at", from_date).execute()
+            result = supabase.table("appointments").select("department").eq("clinic_id", clinic_id).gte("created_at", from_date).execute()
 
             dept_counts = {}
             for row in result.data:

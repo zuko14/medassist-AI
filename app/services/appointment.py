@@ -86,12 +86,12 @@ class AppointmentService:
 
         return alternatives
 
-    async def get_appointment_summary(self, appointment_id: str) -> Optional[dict]:
+    async def get_appointment_summary(self, clinic_id: str, appointment_id: str) -> Optional[dict]:
         """Get appointment summary."""
         from app.database import supabase
 
         try:
-            result = supabase.table("appointments").select("*").eq("id", appointment_id).execute()
+            result = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).eq("id", appointment_id).execute()
             if result.data:
                 return result.data[0]
             return None

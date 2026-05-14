@@ -14,6 +14,7 @@ class FeedbackService:
 
     async def collect_feedback(
         self,
+        clinic_id: str,
         phone: str,
         appointment_id: Optional[str] = None,
         rating: Optional[int] = None,
@@ -23,6 +24,7 @@ class FeedbackService:
         """Collect feedback from a patient."""
         try:
             data = {
+                "clinic_id": clinic_id,
                 "phone": phone,
                 "appointment_id": appointment_id,
                 "rating": rating,
@@ -42,13 +44,13 @@ class FeedbackService:
             logger.error(f"Error collecting feedback: {e}")
             return {"success": False, "error": str(e)}
 
-    async def get_feedback_stats(self, days: int = 30) -> dict:
+    async def get_feedback_stats(self, clinic_id: str, days: int = 30) -> dict:
         """Get feedback statistics."""
         try:
             from_date = (datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
 
             # Get all feedback in period
-            result = supabase.table("feedback").select("*").gte("created_at", from_date).execute()
+            result = supabase.table("feedback").select("*").eq("clinic_id", clinic_id).gte("created_at", from_date).execute()
 
             feedbacks = result.data or []
 
@@ -78,10 +80,10 @@ class FeedbackService:
             logger.error(f"Error getting feedback stats: {e}")
             return {"error": str(e)}
 
-    async def get_recent_feedback(self, limit: int = 20) -> list:
+    async def get_recent_feedback(self, clinic_id: str, limit: int = 20) -> list:
         """Get recent feedback entries."""
         try:
-            result = supabase.table("feedback").select("*").order("created_at", desc=True).limit(limit).execute()
+            result = supabase.table("feedback").select("*").eq("clinic_id", clinic_id).order("created_at", desc=True).limit(limit).execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting recent feedback: {e}")

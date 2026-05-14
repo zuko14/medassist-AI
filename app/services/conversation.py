@@ -147,7 +147,7 @@ class ConversationManager:
         await update_conversation(clinic["id"], phone, {"session_expires_at": session_expires})
 
         # Detect intent
-        intent = await detect_intent(message)
+        intent = await detect_intent(message, clinic)
 
         # Handle interactive button responses FIRST (before guards)
         if message_type == "interactive" and interactive_data:
@@ -298,7 +298,7 @@ class ConversationManager:
         # Handle global views (interactive buttons from _show_doctors and _show_services)
         if intent == "view_doctor":
             from app.database import supabase
-            res = supabase.table("doctors").select("*").eq("id", message).execute()
+            res = supabase.table("doctors").select("*").eq("clinic_id", clinic["id"]).eq("id", message).execute()
             if res.data:
                 doc = res.data[0]
                 context = session.get("context", {})
@@ -799,7 +799,7 @@ class ConversationManager:
             return
 
         # Map symptoms to department
-        symptom_result = await map_symptom_to_department(message)
+        symptom_result = await map_symptom_to_department(message, clinic)
 
         if symptom_result.get("suggested_department") is None:
             await self.whatsapp.send_text(
@@ -848,7 +848,7 @@ class ConversationManager:
             department = context.get("suggested_department")
             # Step 2: Query database directly
             from app.database import supabase
-            response = supabase.table("doctors").select("*").eq("department", department).eq("is_active", True).order("rating", desc=True).execute()
+            response = supabase.table("doctors").select("*").eq("clinic_id", clinic["id"]).eq("department", department).eq("is_active", True).order("rating", desc=True).execute()
             doctors = response.data
 
             if doctors:
@@ -894,18 +894,28 @@ class ConversationManager:
 
     async def _show_department_list(self, clinic: dict, phone: str, context: dict, lang: str) -> None:
         """Show list of departments."""
+        from app.services.tenant import has_feature
+        
+        if not has_feature(clinic, "multi_department"):
+            dept = clinic.get("config", {}).get("default_department", "General Medicine")
+            await self._show_doctor_list(clinic, phone, dept, context, lang)
+            return
+
+        from app.database import supabase
+        result = supabase.table("doctors").select("department").eq("clinic_id", clinic["id"]).eq("is_active", True).execute()
+        dept_names = list(set([r["department"] for r in (result.data or [])]))
+        
+        if not dept_names:
+            dept_names = ["General Medicine"]
+
+        rows = []
+        for d in dept_names[:10]:  # limit to 10 for interactive list
+            dept_id = f"dept_{d.lower().replace(' ', '_')}"
+            rows.append({"id": dept_id, "title": d[:24], "description": ""})
+
         sections = [{
             "title": "Departments",
-            "rows": [
-                {"id": "dept_general_medicine", "title": "General Medicine", "description": "Fever, cold, general health"},
-                {"id": "dept_cardiology", "title": "Cardiology", "description": "Heart, chest pain, BP"},
-                {"id": "dept_dental", "title": "Dental", "description": "Teeth, gums, oral health"},
-                {"id": "dept_orthopedics", "title": "Orthopedics", "description": "Bones, joints, fractures"},
-                {"id": "dept_gynecology", "title": "Gynecology", "description": "Women's health"},
-                {"id": "dept_pediatrics", "title": "Pediatrics", "description": "Child healthcare"},
-                {"id": "dept_ent", "title": "ENT", "description": "Ear, nose, throat"},
-                {"id": "dept_dermatology", "title": "Dermatology", "description": "Skin, hair, nails"},
-            ]
+            "rows": rows
         }]
 
         msg = {
@@ -959,7 +969,7 @@ class ConversationManager:
             
             # Fetch doctors for selected department
             from app.database import supabase
-            response = supabase.table("doctors").select("*").eq("department", department).eq("is_active", True).order("rating", desc=True).execute()
+            response = supabase.table("doctors").select("*").eq("clinic_id", clinic["id"]).eq("department", department).eq("is_active", True).order("rating", desc=True).execute()
             doctors = response.data
             
             if doctors:
@@ -1023,7 +1033,7 @@ class ConversationManager:
             
         if doctor_id:
             from app.database import supabase
-            res = supabase.table("doctors").select("*").eq("id", doctor_id).execute()
+            res = supabase.table("doctors").select("*").eq("clinic_id", clinic["id"]).eq("id", doctor_id).execute()
             doctor = res.data[0] if res.data else None
             doctor_name = doctor["name"] if doctor else message.strip()
         else:
@@ -1050,7 +1060,7 @@ class ConversationManager:
             if matched_dept:
                 # Patient is telling us which department they want
                 from app.database import supabase
-                response = supabase.table("doctors").select("*").eq("department", matched_dept).eq("is_active", True).order("rating", desc=True).execute()
+                response = supabase.table("doctors").select("*").eq("clinic_id", clinic["id"]).eq("department", matched_dept).eq("is_active", True).order("rating", desc=True).execute()
                 doctors = response.data
                 if doctors:
                     await self._show_doctor_list(clinic, phone, matched_dept, context, lang)
@@ -1061,7 +1071,7 @@ class ConversationManager:
             
             # If no department match, try to match doctor name
             from app.database import supabase
-            response = supabase.table("doctors").select("*").eq("is_active", True).execute()
+            response = supabase.table("doctors").select("*").eq("clinic_id", clinic["id"]).eq("is_active", True).execute()
             all_doctors = response.data
             matched_doc = None
             for doc in all_doctors:
@@ -1545,7 +1555,7 @@ class ConversationManager:
     async def _show_doctors(self, clinic: dict, phone: str, lang: str) -> None:
         """Show available doctors."""
         from app.database import supabase
-        response = supabase.table("doctors").select("*").eq("is_active", True).order("department").execute()
+        response = supabase.table("doctors").select("*").eq("clinic_id", clinic["id"]).eq("is_active", True).order("department").execute()
         doctors = response.data
 
         sections = []
@@ -1621,6 +1631,16 @@ class ConversationManager:
 
     async def _handle_view_reports(self, clinic: dict, phone: str, lang: str) -> None:
         """Handle 'My Reports' menu selection."""
+        from app.services.tenant import has_feature
+        if not has_feature(clinic, "lab_reports"):
+            await self.whatsapp.send_text(
+                clinic, phone,
+                "Lab report delivery is not available at this facility via WhatsApp. "
+                "Please visit the hospital reception to collect your reports."
+            )
+            await self._send_main_menu(clinic, phone, lang)
+            return
+
         from app.services.lab_reports import LabReportService
         reports = await LabReportService().get_reports_by_phone(phone)
 

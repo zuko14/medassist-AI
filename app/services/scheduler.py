@@ -100,6 +100,7 @@ class SchedulerService:
     async def send_24h_reminders(self):
         """Send 24-hour appointment reminders."""
         try:
+            from app.services.tenant import has_feature
             tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
             appointments = supabase.table("appointments").select("*").eq("appointment_date", tomorrow).eq("status", "confirmed").eq("reminder_24h_sent", False).execute()
@@ -107,6 +108,9 @@ class SchedulerService:
             for appt in appointments.data:
                 try:
                     clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                    if not has_feature(clinic, "reminders_basic"):
+                        continue
+                    
                     components = TEMPLATES["reminder_24h"]["components_builder"](
                         appt["doctor_name"],
                         appt["appointment_time"]
@@ -132,6 +136,7 @@ class SchedulerService:
     async def send_2h_reminders(self):
         """Send 2-hour appointment reminders."""
         try:
+            from app.services.tenant import has_feature
             now = datetime.now()
             in_2h = (now + timedelta(hours=2)).strftime("%H:%M")
             today = now.strftime("%Y-%m-%d")
@@ -144,6 +149,9 @@ class SchedulerService:
                 if appt_time[:5] <= in_2h[:5]:
                     try:
                         clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                        if not has_feature(clinic, "reminders_basic"):
+                            continue
+                            
                         components = TEMPLATES["reminder_2h"]["components_builder"](
                             settings.hospital_name,
                             appt["doctor_name"]
@@ -168,6 +176,7 @@ class SchedulerService:
     async def send_followups(self):
         """Send post-appointment follow-up messages."""
         try:
+            from app.services.tenant import has_feature
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
             appointments = supabase.table("appointments").select("*").eq("appointment_date", yesterday).eq("status", "completed").eq("followup_sent", False).execute()
@@ -175,6 +184,11 @@ class SchedulerService:
             for appt in appointments.data:
                 try:
                     clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                    if not has_feature(clinic, "reminders_post_visit") or not has_feature(clinic, "feedback"):
+                        # Mark as sent so we don't keep polling
+                        supabase.table("appointments").update({"followup_sent": True}).eq("id", appt["id"]).execute()
+                        continue
+                        
                     components = TEMPLATES["followup_message"]["components_builder"](
                         appt["patient_name"].split()[0],
                         settings.hospital_phone

@@ -109,43 +109,46 @@ class DoctorUpdate(BaseModel):
 
 
 @router.get("/stats")
-async def get_stats(days: int = 30, user: str = Depends(verify_credentials)):
+async def get_stats(clinic_id: str = "default", days: int = 30, user: str = Depends(verify_credentials)):
     """Get dashboard statistics."""
-    return await analytics_service.get_dashboard_stats(days)
+    return await analytics_service.get_dashboard_stats(clinic_id, days)
 
 
 @router.get("/appointments/recent")
 async def get_recent_appointments(
+    clinic_id: str = "default",
     limit: int = 20,
     user: str = Depends(verify_credentials)
 ):
     """Get recent appointments."""
-    return await analytics_service.get_recent_appointments(limit)
+    return await analytics_service.get_recent_appointments(clinic_id, limit)
 
 
 @router.get("/appointments/upcoming")
 async def get_upcoming_appointments(
+    clinic_id: str = "default",
     days: int = 7,
     user: str = Depends(verify_credentials)
 ):
     """Get upcoming appointments."""
-    return await analytics_service.get_upcoming_appointments(days)
+    return await analytics_service.get_upcoming_appointments(clinic_id, days)
 
 
 @router.get("/departments/popular")
 async def get_popular_departments(
+    clinic_id: str = "default",
     days: int = 30,
     user: str = Depends(verify_credentials)
 ):
     """Get popular departments."""
-    return await analytics_service.get_popular_departments(days)
+    return await analytics_service.get_popular_departments(clinic_id, days)
 
 
 @router.get("/doctors")
-async def get_doctors(user: str = Depends(verify_credentials)):
+async def get_doctors(clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Get all doctors."""
     try:
-        result = supabase.table("doctors").select("*").execute()
+        result = supabase.table("doctors").select("*").eq("clinic_id", clinic_id).execute()
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting doctors: {e}")
@@ -155,11 +158,14 @@ async def get_doctors(user: str = Depends(verify_credentials)):
 @router.post("/doctors")
 async def create_doctor(
     doctor: DoctorCreate,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials)
 ):
     """Create a new doctor."""
     try:
-        result = supabase.table("doctors").insert(doctor.dict()).execute()
+        doctor_data = doctor.dict()
+        doctor_data["clinic_id"] = clinic_id
+        result = supabase.table("doctors").insert(doctor_data).execute()
         return result.data[0]
     except Exception as e:
         logger.error(f"Error creating doctor: {e}")
@@ -170,6 +176,7 @@ async def create_doctor(
 async def update_doctor(
     doctor_id: str,
     doctor: DoctorUpdate,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials)
 ):
     """Update an existing doctor."""
@@ -177,7 +184,7 @@ async def update_doctor(
         update_data = doctor.dict(exclude_unset=True)
         if not update_data:
             return {"message": "No fields to update"}
-        result = supabase.table("doctors").update(update_data).eq("id", doctor_id).execute()
+        result = supabase.table("doctors").update(update_data).eq("clinic_id", clinic_id).eq("id", doctor_id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Doctor not found")
         return result.data[0]
@@ -191,11 +198,12 @@ async def update_doctor(
 @router.delete("/doctors/{doctor_id}")
 async def delete_doctor(
     doctor_id: str,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials)
 ):
     """Delete a doctor."""
     try:
-        result = supabase.table("doctors").delete().eq("id", doctor_id).execute()
+        result = supabase.table("doctors").delete().eq("clinic_id", clinic_id).eq("id", doctor_id).execute()
         # Note: if doctor has appointments, foreign key constraints might fail unless cascading is enabled
         return {"success": True}
     except Exception as e:
@@ -310,11 +318,13 @@ async def delete_holiday(holiday_date: str, user: str = Depends(verify_credentia
 @router.delete("/appointments/{appointment_id}")
 async def cancel_appointment_by_admin(
     appointment_id: str,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials)
 ):
     try:
         result = supabase.table("appointments") \
                          .update({"status": "cancelled"}) \
+                         .eq("clinic_id", clinic_id) \
                          .eq("id", appointment_id) \
                          .execute()
         if result.data:

@@ -125,51 +125,78 @@ def invalidate_tenant_cache(whatsapp_number: str = None):
         _tenant_cache.clear()
 
 
-# ─── PLAN-BASED FEATURE GATING ──────────────────────────────────────────
+# ─── Plan Feature Registry ───────────────────────────────────────────────────
 
-PLAN_FEATURES: dict[str, list[str]] = {
-    "basic": [
-        "appointments",
-        "reminders",
-    ],
-    "pro": [
-        "appointments",
-        "reminders",
+PLAN_FEATURES: dict[str, set[str]] = {
+    "basic": {
+        "booking",
+        "reminders_basic",   # 24hr + 2hr reminders
+        "multilingual",
+        "emergency_escalation",
+        "admin_dashboard",
+    },
+    "pro": {
+        "booking",
+        "reminders_basic",
+        "reminders_post_visit",  # post-visit feedback trigger
+        "multilingual",
+        "emergency_escalation",
+        "admin_dashboard",
         "lab_reports",
-        "prescriptions",
-    ],
-    "enterprise": [
-        "appointments",
-        "reminders",
-        "lab_reports",
-        "prescriptions",
-        "khata",
+        "feedback",
         "analytics",
-        "custom_prompt",
-        "bulk_blast",
-    ],
-}
-
-UPGRADE_MESSAGE: dict[str, str] = {
-    "lab_reports":   "Lab report delivery requires the Pro plan.",
-    "khata":         "KhataBot requires the Enterprise plan.",
-    "bulk_blast":    "SchemeBlast requires the Enterprise plan.",
-    "analytics":     "Analytics requires the Enterprise plan.",
-    "custom_prompt": "Custom AI personality requires the Enterprise plan.",
+        "multi_department",
+    },
+    "enterprise": {
+        # Sentinel — checked first, bypasses set lookup entirely
+        "*"
+    },
 }
 
 
-def can_use(clinic: dict, feature: str) -> bool:
-    """Check if clinic's plan includes the given feature."""
-    plan = clinic.get("plan", "basic")
-    return feature in PLAN_FEATURES.get(plan, [])
+def has_feature(clinic: dict, feature: str) -> bool:
+    """
+    Check whether a clinic's plan includes a given feature.
+
+    Resolution order:
+      1. Enterprise plan → always True (wildcard)
+      2. Per-clinic JSONB override in clinic["features"] → explicit True/False
+      3. Plan-level feature set → membership check
+    """
+    plan: str = clinic.get("plan", "basic")
+
+    # 1. Enterprise wildcard
+    if plan == "enterprise":
+        return True
+
+    # 2. Per-clinic JSONB overrides (allows upselling single features to basic clients)
+    overrides: dict = clinic.get("features") or {}
+    if feature in overrides:
+        override_val = overrides[feature]
+        if not isinstance(override_val, bool):
+            # Defensive — log and fall through to plan check
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Non-bool override for feature '{feature}' on clinic {clinic.get('id')} — ignoring"
+            )
+        else:
+            return override_val
+
+    # 3. Plan-level membership
+    allowed: set = PLAN_FEATURES.get(plan, set())
+    return feature in allowed
 
 
 def require_feature(clinic: dict, feature: str) -> None:
     """
-    Call before any feature handler. Raises FeatureNotAvailable
-    with a user-friendly message if the plan doesn't allow it.
+    Hard gate — raises HTTP 403 if clinic doesn't have the feature.
+    Use in admin API endpoints where a missing feature should surface as an error.
+    Use has_feature() in bot flows where you want silent graceful degradation instead.
     """
-    if not can_use(clinic, feature):
-        msg = UPGRADE_MESSAGE.get(feature, "This feature is not available on your plan.")
-        raise FeatureNotAvailable(msg)
+    from fastapi import HTTPException
+    if not has_feature(clinic, feature):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Feature '{feature}' is not available on your current plan. "
+                   f"Please upgrade to access this functionality."
+        )

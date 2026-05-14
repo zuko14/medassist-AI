@@ -11,6 +11,7 @@ from app.services.whatsapp import whatsapp_service
 from app.services.tenant import resolve_tenant
 from app.utils.validators import normalize_phone
 from app.utils.security import verify_webhook_signature
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                         background_tasks.add_task(
                             process_message_safe, message, display_phone, body
                         )
+                        logger.info(f"Queued message {message.id} to BackgroundTasks")
 
         return {"status": "ok"}
 
@@ -114,11 +116,25 @@ async def process_message_safe(message, display_phone: str, raw_payload: dict):
 async def process_message(message, display_phone: str):
     """Process incoming WhatsApp message."""
     try:
+        message_id = message.id
+        
+        # ── Security: Idempotency Check (Duplicate Delivery) ──
+        from app.database import supabase
+        try:
+            existing = supabase.table("processed_messages").select("id").eq("message_id", message_id).execute()
+            if existing.data:
+                logger.info(f"Message {message_id} already processed. Skipping duplicate.")
+                return
+            # Insert first, then process
+            supabase.table("processed_messages").insert({"message_id": message_id}).execute()
+        except Exception as e:
+            # If table doesn't exist yet, just continue (fail open)
+            logger.debug(f"Idempotency check failed/skipped: {e}")
+
         # Resolve tenant clinic
         clinic = await resolve_tenant(display_phone)
         
         phone = normalize_phone(message.from_)
-        message_id = message.id
         message_type = message.type
         
         # Mark as read (fire-and-forget)
