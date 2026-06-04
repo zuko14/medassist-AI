@@ -1650,7 +1650,7 @@ class ConversationManager:
             return
 
         from app.services.lab_reports import LabReportService
-        reports = await LabReportService().get_reports_by_phone(phone)
+        reports = await LabReportService().get_reports_by_phone(phone, clinic["id"])
 
         if not reports:
             await self.whatsapp.send_text(

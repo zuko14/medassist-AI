@@ -97,7 +97,7 @@ class LabReportService:
 
         # Step G — Save to database
         row = {
-            "clinic_id": clinic_id,
+            "clinic_id": clinic["id"],
             "patient_phone": patient_phone,
             "patient_name": patient_name,
             "report_name": report_name,
@@ -122,29 +122,22 @@ class LabReportService:
 
     async def get_all_reports(self, clinic_id: str = "default", limit: int = 100) -> list:
         """Get all lab reports ordered by upload date."""
-        result = (
-            supabase.table("lab_reports")
-            .select("*")
-            .eq("clinic_id", clinic_id)
-            .order("uploaded_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
+        query = supabase.table("lab_reports").select("*").order("uploaded_at", desc=True).limit(limit)
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        result = query.execute()
         return result.data or []
 
     async def get_reports_by_phone(self, phone: str, clinic_id: str = "default") -> list:
         """Get sent lab reports for a specific patient phone."""
         # Normalize: strip + prefix to match admin-uploaded records
         clean_phone = phone.lstrip("+")
-        result = (
-            supabase.table("lab_reports")
-            .select("id, report_name, report_type, uploaded_at, status")
-            .eq("clinic_id", clinic_id)
-            .eq("patient_phone", clean_phone)
-            .eq("status", "sent")
-            .order("uploaded_at", desc=True)
-            .execute()
-        )
+        
+        query = supabase.table("lab_reports").select("*").ilike("patient_phone", f"%{clean_phone}%").eq("status", "sent").order("uploaded_at", desc=True)
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+            
+        result = query.execute()
         return result.data or []
 
     async def resend_report(self, report_id: str) -> dict:
