@@ -618,9 +618,15 @@ class ConversationManager:
                 context["menu_shown"] = True
                 await self.update_state(clinic, phone, "main_menu", context)
         else:
-            # Unknown intent, show invalid input message
-            await self.whatsapp.send_text(clinic, phone, get_message("invalid_input", lang))
-            # Resend menu to help them
+            # Unknown intent: Let the LLM generate a conversational response
+            try:
+                from app.services.ai_engine import generate_response
+                ai_reply = await generate_response(message, clinic, context, lang)
+                await self.whatsapp.send_text(clinic, phone, ai_reply)
+            except Exception:
+                await self.whatsapp.send_text(clinic, phone, get_message("invalid_input", lang))
+                
+            # Resend menu to help them navigate back to structured flows
             await self._send_main_menu(clinic, phone, lang)
             context = session.get("context", {})
             context["menu_shown"] = True
