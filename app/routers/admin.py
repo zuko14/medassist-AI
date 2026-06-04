@@ -148,7 +148,10 @@ async def get_popular_departments(
 async def get_doctors(clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Get all doctors."""
     try:
-        result = supabase.table("doctors").select("*").eq("clinic_id", clinic_id).execute()
+        query = supabase.table("doctors").select("*")
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        result = query.execute()
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting doctors: {e}")
@@ -283,7 +286,10 @@ async def delete_leave(leave_id: str, clinic_id: str = "default", user: str = De
 async def get_holidays(clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Get hospital holidays."""
     try:
-        result = supabase.table("hospital_holidays").select("*").eq("clinic_id", clinic_id).order("holiday_date").execute()
+        query = supabase.table("hospital_holidays").select("*").order("holiday_date")
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        result = query.execute()
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting holidays: {e}")
@@ -401,12 +407,17 @@ async def get_patients(clinic_id: str = "default", user: str = Depends(verify_cr
         ).execute()
         if result.data:
             return {"patients": result.data}
-        # Fallback: simple query
-        patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
+        if clinic_id == "default":
+            patients = supabase.table("patients").select("*").order("phone").execute()
+        else:
+            patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
         return {"patients": patients.data or []}
     except Exception:
         # Fallback if RPC doesn't exist
-        patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
+        if clinic_id == "default":
+            patients = supabase.table("patients").select("*").order("phone").execute()
+        else:
+            patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
         return {"patients": patients.data or []}
 
 

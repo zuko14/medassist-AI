@@ -37,7 +37,10 @@ class AnalyticsService:
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
             # Fetch all appointments in period and count in Python
-            all_appts = supabase.table("appointments").select("status,department,created_at").eq("clinic_id", clinic_id).gte("created_at", from_date).execute()
+            query = supabase.table("appointments").select("status,department,created_at").gte("created_at", from_date)
+            if clinic_id != "default":
+                query = query.eq("clinic_id", clinic_id)
+            all_appts = query.execute()
             appts = all_appts.data or []
 
             total_appointments = len(appts)
@@ -57,7 +60,10 @@ class AnalyticsService:
             )
 
             # Patients
-            all_patients = supabase.table("patients").select("created_at").eq("clinic_id", clinic_id).execute()
+            pat_query = supabase.table("patients").select("created_at")
+            if clinic_id != "default":
+                pat_query = pat_query.eq("clinic_id", clinic_id)
+            all_patients = pat_query.execute()
             patients = all_patients.data or []
             total_patients = len(patients)
             new_patients = sum(1 for p in patients if p.get("created_at", "") >= from_date)
@@ -92,7 +98,10 @@ class AnalyticsService:
     async def get_recent_appointments(self, clinic_id: str, limit: int = 20) -> list:
         """Get recent appointments."""
         try:
-            result = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).order("created_at", desc=True).limit(limit).execute()
+            query = supabase.table("appointments").select("*").order("created_at", desc=True).limit(limit)
+            if clinic_id != "default":
+                query = query.eq("clinic_id", clinic_id)
+            result = query.execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting recent appointments: {e}")
@@ -102,9 +111,13 @@ class AnalyticsService:
         """Get upcoming appointments."""
         try:
             today = datetime.now().strftime("%Y-%m-%d")
-            future = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+            end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
-            result = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).gte("appointment_date", today).lte("appointment_date", future).order("appointment_date").execute()
+            query = supabase.table("appointments").select("*").gte("appointment_date", today).lte("appointment_date", end_date).order("appointment_date").order("appointment_time")
+            if clinic_id != "default":
+                query = query.eq("clinic_id", clinic_id)
+            result = query.execute()
+
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting upcoming appointments: {e}")
@@ -115,7 +128,10 @@ class AnalyticsService:
         try:
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-            result = supabase.table("appointments").select("department").eq("clinic_id", clinic_id).gte("created_at", from_date).execute()
+            query = supabase.table("appointments").select("department").gte("created_at", from_date)
+            if clinic_id != "default":
+                query = query.eq("clinic_id", clinic_id)
+            result = query.execute()
 
             dept_counts = {}
             for row in result.data:
