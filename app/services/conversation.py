@@ -618,12 +618,13 @@ class ConversationManager:
                 context["menu_shown"] = True
                 await self.update_state(clinic, phone, "main_menu", context)
         else:
-            # Unknown intent, show menu again
-            if not session.get("context", {}).get("menu_shown"):
-                await self._send_main_menu(clinic, phone, lang)
-                context = session.get("context", {})
-                context["menu_shown"] = True
-                await self.update_state(clinic, phone, "main_menu", context)
+            # Unknown intent, show invalid input message
+            await self.whatsapp.send_text(clinic, phone, get_message("invalid_input", lang))
+            # Resend menu to help them
+            await self._send_main_menu(clinic, phone, lang)
+            context = session.get("context", {})
+            context["menu_shown"] = True
+            await self.update_state(clinic, phone, "main_menu", context)
 
     async def _start_booking(self, clinic: dict, phone: str, patient: dict, lang: str) -> None:
         """Start the booking flow."""
