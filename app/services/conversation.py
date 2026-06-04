@@ -612,11 +612,12 @@ class ConversationManager:
                 patient_name = patient.get("name") or "there"
                 first_name = patient_name.split()[0] if patient_name else "there"
                 await self.whatsapp.send_text(clinic, phone, get_message("welcome_back", lang, name=first_name))
-            if not session.get("context", {}).get("menu_shown"):
-                await self._send_main_menu(clinic, phone, lang)
-                context = session.get("context", {})
-                context["menu_shown"] = True
-                await self.update_state(clinic, phone, "main_menu", context)
+            
+            # ALWAYS resend the menu if they say hi again
+            await self._send_main_menu(clinic, phone, lang)
+            context = session.get("context", {})
+            context["menu_shown"] = True
+            await self.update_state(clinic, phone, "main_menu", context)
         else:
             # Unknown intent: Let the LLM generate a conversational response
             try:
