@@ -153,11 +153,12 @@ class SchedulerService:
                             continue
                             
                         components = TEMPLATES["reminder_2h"]["components_builder"](
-                            settings.hospital_name,
+                            clinic["name"],
                             appt["doctor_name"]
                         )
 
                         await whatsapp_service.send_template(
+                            clinic,
                             appt["patient_phone"],
                             "appointment_reminder_2h",
                             components=components
@@ -221,7 +222,7 @@ class SchedulerService:
 
             for leave in leaves.data:
                 # Find affected appointments
-                affected = supabase.table("appointments").select("*").eq("doctor_name", leave["doctor_name"]).eq("appointment_date", leave["leave_date"]).eq("status", "confirmed").execute()
+                affected = supabase.table("appointments").select("*").eq("clinic_id", leave.get("clinic_id", "default")).eq("doctor_name", leave["doctor_name"]).eq("appointment_date", leave["leave_date"]).eq("status", "confirmed").execute()
 
                 for appt in affected.data:
                     try:
@@ -236,6 +237,7 @@ class SchedulerService:
                         )
 
                         await whatsapp_service.send_template(
+                            clinic,
                             appt["patient_phone"],
                             "appointment_cancelled_doctor_leave",
                             components=components

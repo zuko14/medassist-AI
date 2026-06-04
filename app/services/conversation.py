@@ -246,7 +246,7 @@ class ConversationManager:
                 
                 # Cancel in database
                 from app.database import cancel_appointment as db_cancel
-                success = await db_cancel(appointment_id)
+                success = await db_cancel(clinic_id, appointment_id)
                 
                 if success:
                     cancel_msg = {

@@ -10,79 +10,15 @@ from app.config import settings
 from app.database import supabase
 from app.utils.pdf_reader import extract_text_from_pdf
 from app.services.report_summarizer import ReportSummarizer
+from app.services.whatsapp import whatsapp_service
+from app.services.tenant import get_clinic_by_id
 
 logger = logging.getLogger(__name__)
-
-WHATSAPP_API_BASE = "https://graph.facebook.com/v18.0"
-
 
 class LabReportService:
     """Service for uploading and sending lab reports to patients via WhatsApp."""
 
-    def __init__(self):
-        self.phone_number_id = settings.whatsapp_phone_number_id
-        self.token = settings.whatsapp_token
-        self.base_url = f"{WHATSAPP_API_BASE}/{self.phone_number_id}"
-
-    async def _upload_media_to_whatsapp(self, file_bytes: bytes, filename: str, content_type: str) -> str:
-        """Upload file to Meta media endpoint and return media_id."""
-        url = f"{self.base_url}/media"
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {self.token}"},
-                files={"file": (filename, file_bytes, content_type)},
-                data={"messaging_product": "whatsapp"},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return response.json()["id"]
-
-    async def _send_whatsapp_text(self, to: str, message: str) -> None:
-        """Send a text message via WhatsApp."""
-        url = f"{self.base_url}/messages"
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": {"body": message, "preview_url": False},
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=10.0,
-            )
-            response.raise_for_status()
-
-    async def _send_whatsapp_document(self, to: str, media_id: str, filename: str, caption: str) -> None:
-        """Send a document message via WhatsApp."""
-        url = f"{self.base_url}/messages"
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "document",
-            "document": {
-                "id": media_id,
-                "filename": filename,
-                "caption": caption,
-            },
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=10.0,
-            )
-            response.raise_for_status()
+    # Removed hardcoded WhatsApp API methods in favor of whatsapp_service
 
     async def upload_and_send(
         self,
@@ -121,32 +57,37 @@ class LabReportService:
         sent_ok = False
         error_message = None
         try:
+            clinic = await get_clinic_by_id(clinic_id)
+            
             # Step D — Upload PDF to WhatsApp media
-            media_id = await self._upload_media_to_whatsapp(file_bytes, filename, content_type)
+            media_id = await whatsapp_service.upload_media(clinic, file_bytes, filename, content_type)
+
+            if not media_id:
+                raise ValueError("Failed to upload media to WhatsApp")
 
             # Step E — Send AI summary message to patient
             if not ai_result["fallback"]:
                 summary_message = (
-                    f"🏥 *{settings.hospital_name} — Lab Report Ready*\n\n"
+                    f"🏥 *{clinic['name']} — Lab Report Ready*\n\n"
                     f"Dear {patient_name},\n\n"
                     f"{ai_result['patient_message']}"
                 )
                 if ai_result["has_abnormal"]:
                     summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
                 summary_message += "\n\n📄 Your full report is attached below."
-                await self._send_whatsapp_text(patient_phone, summary_message)
+                await whatsapp_service.send_text(clinic, patient_phone, summary_message)
             else:
                 fallback_text = (
-                    f"🏥 *{settings.hospital_name}*\n\n"
+                    f"🏥 *{clinic['name']}*\n\n"
                     f"Dear {patient_name}, your *{report_type}* report is ready. "
                     f"Please find the full report attached below. "
                     f"Consult your doctor for interpretation."
                 )
-                await self._send_whatsapp_text(patient_phone, fallback_text)
+                await whatsapp_service.send_text(clinic, patient_phone, fallback_text)
 
             # Step F — Send the actual PDF document
-            caption = f"📋 {report_name} | {report_type} | {settings.hospital_name}"
-            await self._send_whatsapp_document(patient_phone, media_id, filename, caption)
+            caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
+            await whatsapp_service.send_document(clinic, patient_phone, media_id, filename, caption)
 
             sent_ok = True
             logger.info(f"Report sent successfully to {patient_phone}")
@@ -179,24 +120,26 @@ class LabReportService:
             row["_db_error"] = str(e)
             return row
 
-    async def get_all_reports(self, limit: int = 100) -> list:
+    async def get_all_reports(self, clinic_id: str = "default", limit: int = 100) -> list:
         """Get all lab reports ordered by upload date."""
         result = (
             supabase.table("lab_reports")
             .select("*")
+            .eq("clinic_id", clinic_id)
             .order("uploaded_at", desc=True)
             .limit(limit)
             .execute()
         )
         return result.data or []
 
-    async def get_reports_by_phone(self, phone: str) -> list:
+    async def get_reports_by_phone(self, phone: str, clinic_id: str = "default") -> list:
         """Get sent lab reports for a specific patient phone."""
         # Normalize: strip + prefix to match admin-uploaded records
         clean_phone = phone.lstrip("+")
         result = (
             supabase.table("lab_reports")
             .select("id, report_name, report_type, uploaded_at, status")
+            .eq("clinic_id", clinic_id)
             .eq("patient_phone", clean_phone)
             .eq("status", "sent")
             .order("uploaded_at", desc=True)
@@ -227,8 +170,12 @@ class LabReportService:
                     f"Please re-upload the report from the admin panel."
                 )
 
+            clinic = await get_clinic_by_id(report.get("clinic_id", "default"))
             filename = report["file_path"].split("/")[-1]
-            media_id = await self._upload_media_to_whatsapp(file_bytes, filename, "application/pdf")
+            media_id = await whatsapp_service.upload_media(clinic, file_bytes, filename, "application/pdf")
+            
+            if not media_id:
+                raise ValueError("Failed to upload media to WhatsApp")
 
             # Send summary or fallback text
             patient_name = report.get("patient_name", "Patient")
@@ -237,25 +184,25 @@ class LabReportService:
 
             if ai_summary:
                 summary_message = (
-                    f"🏥 *{settings.hospital_name} — Lab Report Ready*\n\n"
+                    f"🏥 *{clinic['name']} — Lab Report Ready*\n\n"
                     f"Dear {patient_name},\n\n"
                     f"{ai_summary}"
                 )
                 if report.get("has_abnormal_values"):
                     summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
                 summary_message += "\n\n📄 Your full report is attached below."
-                await self._send_whatsapp_text(report["patient_phone"], summary_message)
+                await whatsapp_service.send_text(clinic, report["patient_phone"], summary_message)
             else:
                 fallback_text = (
-                    f"🏥 *{settings.hospital_name}*\n\n"
+                    f"🏥 *{clinic['name']}*\n\n"
                     f"Dear {patient_name}, your *{report_type}* report is ready. "
                     f"Please find the full report attached below. "
                     f"Consult your doctor for interpretation."
                 )
-                await self._send_whatsapp_text(report["patient_phone"], fallback_text)
+                await whatsapp_service.send_text(clinic, report["patient_phone"], fallback_text)
 
-            caption = f"📋 {report['report_name']} | {report_type} | {settings.hospital_name}"
-            await self._send_whatsapp_document(report["patient_phone"], media_id, filename, caption)
+            caption = f"📋 {report['report_name']} | {report_type} | {clinic['name']}"
+            await whatsapp_service.send_document(clinic, report["patient_phone"], media_id, filename, caption)
 
             supabase.table("lab_reports").update({
                 "status": "sent",

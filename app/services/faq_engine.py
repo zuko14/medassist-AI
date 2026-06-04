@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 FAQ_DATABASE = {
     "en": {
         "visiting_hours": "Our visiting hours are from 4:00 PM to 7:00 PM daily. ICU visiting hours may vary.",
-        "parking": f"We have ample parking space available at {settings.hospital_name}. Parking is free for the first 2 hours.",
+        "parking": "We have ample parking space available at {hospital_name}. Parking is free for the first 2 hours.",
         "insurance": "We accept all major health insurance providers. Please bring your insurance card and ID proof.",
         "payment": "We accept cash, credit/debit cards, UPI, and insurance. Payment can be made at the billing counter.",
-        "emergency": f"For emergencies, please call {settings.hospital_emergency_number} immediately or visit our 24/7 emergency ward.",
-        "address": f"We are located at: {settings.hospital_address}. Landmark: {settings.hospital_landmark}",
-        "contact": f"You can reach us at: {settings.hospital_phone}. Emergency: {settings.hospital_emergency_number}",
-        "website": f"Visit our website: {settings.hospital_website}",
+        "emergency": "For emergencies, please call {hospital_emergency_number} immediately or visit our 24/7 emergency ward.",
+        "address": "We are located at: {hospital_address}. Landmark: {hospital_landmark}",
+        "contact": "You can reach us at: {hospital_phone}. Emergency: {hospital_emergency_number}",
+        "website": "Visit our website: {hospital_website}",
         "departments": "Our departments include: General Medicine, Cardiology, Dental, Orthopedics, Gynecology, Pediatrics, Dermatology, Ophthalmology, and ENT.",
         "lab_hours": "Our diagnostic lab is open from 7:00 AM to 8:00 PM, Monday to Saturday. Sunday: 8:00 AM to 2:00 PM.",
         "pharmacy": "Our 24-hour pharmacy is located on the ground floor. We stock all essential medicines.",
@@ -29,20 +29,20 @@ FAQ_DATABASE = {
     },
     "hi": {
         "visiting_hours": "हमारे मिलने का समय दोपहर 4:00 बजे से शाम 7:00 बजे तक है। ICU के लिए समय अलग हो सकता है।",
-        "parking": f"{settings.hospital_name} में पर्याप्त पार्किंग स्थल उपलब्ध है। पहले 2 घंटे पार्किंग निःशुल्क है।",
+        "parking": "{hospital_name} में पर्याप्त पार्किंग स्थल उपलब्ध है। पहले 2 घंटे पार्किंग निःशुल्क है।",
         "insurance": "हम सभी प्रमुख स्वास्थ्य बीमा प्रदाताओं को स्वीकार करते हैं। कृपया अपना बीमा कार्ड और पहचान पत्र लाएं।",
         "payment": "हम नकद, क्रेडिट/डेबिट कार्ड, UPI और बीमा स्वीकार करते हैं। भुगतान बिलिंग काउंटर पर किया जा सकता है।",
-        "emergency": f"आपातकाल के लिए, कृपया तुरंत {settings.hospital_emergency_number} पर कॉल करें या हमारे 24/7 आपातकाल वार्ड में जाएं।",
-        "address": f"हम यहां स्थित हैं: {settings.hospital_address}. लैंडमार्क: {settings.hospital_landmark}",
-        "contact": f"आप हमसे संपर्क कर सकते हैं: {settings.hospital_phone}. आपातकाल: {settings.hospital_emergency_number}",
+        "emergency": "आपातकाल के लिए, कृपया तुरंत {hospital_emergency_number} पर कॉल करें या हमारे 24/7 आपातकाल वार्ड में जाएं।",
+        "address": "हम यहां स्थित हैं: {hospital_address}. लैंडमार्क: {hospital_landmark}",
+        "contact": "आप हमसे संपर्क कर सकते हैं: {hospital_phone}. आपातकाल: {hospital_emergency_number}",
         "departments": "हमारे विभाग: सामान्य चिकित्सा, हृदय रोग, दंत चिकित्सा, हड्डी रोग, स्त्री रोग, बाल रोग, त्वचा रोग, नेत्र रोग, और कान-नाक-गला।",
     },
     "te": {
         "visiting_hours": "మా సందర్శకుల సమయం రోజువారీ మధ్యాహ్నం 4:00 నుండి సాయంత్రం 7:00 వరకు. ICU సమయాలు మారవచ్చు.",
-        "parking": f"{settings.hospital_name}లో పుష్కలంగా పార్కింగ్ స్థలం ఉంది. మొదటి 2 గంటలు ఉచితం.",
+        "parking": "{hospital_name}లో పుష్కలంగా పార్కింగ్ స్థలం ఉంది. మొదటి 2 గంటలు ఉచితం.",
         "insurance": "మేజర్ ఆరోగ్య బీమా ప్రొవైడర్లను అన్నింటినీ అంగీకరిస్తాం. దయచేసి మీ బీమా కార్డ్ మరియు ID ప్రూఫ్ తీసుకురండి.",
-        "emergency": f"అత్యవసర పరిస్థితుల కోసం, వెంటనే {settings.hospital_emergency_number} కు కాల్ చేయండి లేదా మా 24/7 అత్యవసర వార్డ్‌కు వెళ్లండి.",
-        "address": f"మనం ఇక్కడ ఉన్నాం: {settings.hospital_address}. ల్యాండ్‌మార్క్: {settings.hospital_landmark}",
+        "emergency": "అత్యవసర పరిస్థితుల కోసం, వెంటనే {hospital_emergency_number} కు కాల్ చేయండి లేదా మా 24/7 అత్యవసర వార్డ్‌కు వెళ్లండి.",
+        "address": "మనం ఇక్కడ ఉన్నాం: {hospital_address}. ల్యాండ్‌మార్క్: {hospital_landmark}",
         "departments": "మా విభాగాలు: జనరల్ మెడిసిన్, కార్డియాలజీ, దంతచికిత్స, ఆర్థోపెడిక్స్, గైనకాలజీ, పీడియాట్రిక్స్, డెర్మటాలజీ, ఆఫ్తాల్మాలజీ, మరియు ENT.",
     }
 }
@@ -93,25 +93,39 @@ class FAQEngine:
         self.faq_db = FAQ_DATABASE
         self.keywords = FAQ_KEYWORDS
 
-    def find_answer(self, message: str, lang: str = "en") -> Optional[str]:
+    def find_answer(self, message: str, clinic: dict, lang: str = "en") -> Optional[str]:
         """Find FAQ answer for a message."""
         message_lower = message.lower()
 
         # Get keywords for the language
         lang_keywords = self.keywords.get(lang, self.keywords["en"])
 
+        # Default info if not in clinic
+        config = clinic.get("config", {})
+        info = {
+            "hospital_name": clinic.get("name", settings.hospital_name),
+            "hospital_address": config.get("address", settings.hospital_address),
+            "hospital_phone": clinic.get("phone", settings.hospital_phone),
+            "hospital_emergency_number": config.get("emergency_number", settings.hospital_emergency_number),
+            "hospital_website": config.get("website", settings.hospital_website),
+            "hospital_landmark": config.get("landmark", settings.hospital_landmark)
+        }
+
         # Check each FAQ category
         for category, keywords in lang_keywords.items():
             for keyword in keywords:
                 if keyword in message_lower:
                     # Return answer in requested language
-                    return self.faq_db.get(lang, self.faq_db["en"]).get(category)
+                    answer = self.faq_db.get(lang, self.faq_db["en"]).get(category)
+                    if answer:
+                        return answer.format(**info)
+                    return None
 
         return None
 
-    def is_faq_query(self, message: str, lang: str = "en") -> bool:
+    def is_faq_query(self, message: str, clinic: dict, lang: str = "en") -> bool:
         """Check if message is a FAQ query."""
-        return self.find_answer(message, lang) is not None
+        return self.find_answer(message, clinic, lang) is not None
 
     def get_all_faqs(self, lang: str = "en") -> dict:
         """Get all FAQs for a language."""

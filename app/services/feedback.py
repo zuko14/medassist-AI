@@ -36,7 +36,7 @@ class FeedbackService:
             result = supabase.table("feedback").insert(data).execute()
 
             # Log analytics event
-            await log_analytics_event(phone, "feedback_submitted", metadata={"rating": rating})
+            await log_analytics_event(clinic_id, phone, "feedback_submitted", metadata={"rating": rating})
 
             return {"success": True, "feedback_id": result.data[0]["id"]}
 

@@ -214,11 +214,12 @@ async def delete_doctor(
 @router.get("/leaves")
 async def get_leaves(
     doctor: Optional[str] = None,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials)
 ):
     """Get doctor leaves."""
     try:
-        query = supabase.table("doctor_leaves").select("*")
+        query = supabase.table("doctor_leaves").select("*").eq("clinic_id", clinic_id)
         if doctor:
             query = query.eq("doctor_name", doctor)
         result = query.order("leave_date").execute()
@@ -231,6 +232,7 @@ async def get_leaves(
 @router.post("/leaves")
 async def create_leave(
     leave: LeaveCreate,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials)
 ):
     """Create a doctor leave (single day or date range)."""
@@ -248,6 +250,7 @@ async def create_leave(
         while current_date <= end_date:
             leave_data = leave.dict(exclude={"end_date"})
             leave_data["leave_date"] = str(current_date)
+            leave_data["clinic_id"] = clinic_id
             leaves_to_insert.append(leave_data)
             current_date += timedelta(days=1)
             
@@ -266,10 +269,10 @@ async def create_leave(
 
 
 @router.delete("/leaves/{leave_id}")
-async def delete_leave(leave_id: str, user: str = Depends(verify_credentials)):
+async def delete_leave(leave_id: str, clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Delete a doctor leave."""
     try:
-        supabase.table("doctor_leaves").delete().eq("id", leave_id).execute()
+        supabase.table("doctor_leaves").delete().eq("clinic_id", clinic_id).eq("id", leave_id).execute()
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting leave: {e}")
@@ -277,10 +280,10 @@ async def delete_leave(leave_id: str, user: str = Depends(verify_credentials)):
 
 
 @router.get("/holidays")
-async def get_holidays(user: str = Depends(verify_credentials)):
+async def get_holidays(clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Get hospital holidays."""
     try:
-        result = supabase.table("hospital_holidays").select("*").order("holiday_date").execute()
+        result = supabase.table("hospital_holidays").select("*").eq("clinic_id", clinic_id).order("holiday_date").execute()
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting holidays: {e}")
@@ -291,11 +294,13 @@ async def get_holidays(user: str = Depends(verify_credentials)):
 async def create_holiday(
     holiday_date: date,
     name: str,
+    clinic_id: str = "default",
     user: str = Depends(verify_credentials)
 ):
     """Create a hospital holiday."""
     try:
         result = supabase.table("hospital_holidays").insert({
+            "clinic_id": clinic_id,
             "holiday_date": str(holiday_date),
             "name": name
         }).execute()
@@ -306,10 +311,10 @@ async def create_holiday(
 
 
 @router.delete("/holidays/{holiday_date}")
-async def delete_holiday(holiday_date: str, user: str = Depends(verify_credentials)):
+async def delete_holiday(holiday_date: str, clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Delete a hospital holiday."""
     try:
-        supabase.table("hospital_holidays").delete().eq("holiday_date", holiday_date).execute()
+        supabase.table("hospital_holidays").delete().eq("clinic_id", clinic_id).eq("holiday_date", holiday_date).execute()
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting holiday: {e}")
@@ -387,21 +392,21 @@ async def resend_lab_report(
 
 
 @router.get("/patients")
-async def get_patients(user: str = Depends(verify_credentials)):
+async def get_patients(clinic_id: str = "default", user: str = Depends(verify_credentials)):
     """Get all patients with appointment counts."""
     try:
         result = supabase.rpc(
             "get_patients_with_counts",
-            {},
+            {"p_clinic_id": clinic_id},
         ).execute()
         if result.data:
             return {"patients": result.data}
         # Fallback: simple query
-        patients = supabase.table("patients").select("*").order("phone").execute()
+        patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
         return {"patients": patients.data or []}
     except Exception:
         # Fallback if RPC doesn't exist
-        patients = supabase.table("patients").select("*").order("phone").execute()
+        patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
         return {"patients": patients.data or []}
 
 

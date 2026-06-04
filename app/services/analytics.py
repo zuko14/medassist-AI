@@ -16,12 +16,14 @@ class AnalyticsService:
         self,
         phone: str,
         event_type: str,
+        clinic_id: str = "default",
         department: Optional[str] = None,
         intent: Optional[str] = None,
         metadata: Optional[dict] = None
     ) -> bool:
         """Track an analytics event."""
         return await log_analytics_event(
+            clinic_id,
             phone,
             event_type,
             department=department,

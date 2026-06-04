@@ -7,19 +7,13 @@ import httpx
 
 from app.config import settings
 from app.database import supabase
+from app.services.whatsapp import whatsapp_service
+from app.services.tenant import get_clinic_by_id
 
 logger = logging.getLogger(__name__)
 
-WHATSAPP_API_BASE = "https://graph.facebook.com/v18.0"
-
-
 class PrescriptionService:
     """Service for managing prescription reminders."""
-
-    def __init__(self):
-        self.phone_number_id = settings.whatsapp_phone_number_id
-        self.token = settings.whatsapp_token
-        self.base_url = f"{WHATSAPP_API_BASE}/{self.phone_number_id}"
 
     async def add_prescription(
         self,
@@ -59,7 +53,8 @@ class PrescriptionService:
                 f"You will receive reminders at: {times_str} daily until {end_date}.\n"
                 f"Reply STOP anytime to opt out."
             )
-            await self._send_text(patient_phone, message)
+            clinic = await get_clinic_by_id(clinic_id)
+            await whatsapp_service.send_text(clinic, patient_phone, message)
         except Exception as e:
             logger.error(f"Failed to send prescription confirmation: {e}")
 
@@ -71,6 +66,7 @@ class PrescriptionService:
             result = (
                 supabase.table("prescriptions")
                 .select("*")
+                .eq("clinic_id", clinic_id)
                 .eq("is_active", True)
                 .gte("end_date", str(date.today()))
                 .order("created_at", desc=True)
@@ -80,20 +76,22 @@ class PrescriptionService:
             result = (
                 supabase.table("prescriptions")
                 .select("*")
+                .eq("clinic_id", clinic_id)
                 .order("created_at", desc=True)
                 .execute()
             )
         return result.data or []
 
-    async def deactivate_prescription(self, prescription_id: str) -> dict:
+    async def deactivate_prescription(self, clinic_id: str, prescription_id: str) -> dict:
         """Deactivate a prescription reminder."""
         supabase.table("prescriptions").update(
             {"is_active": False}
-        ).eq("id", prescription_id).execute()
+        ).eq("clinic_id", clinic_id).eq("id", prescription_id).execute()
 
         updated = (
             supabase.table("prescriptions")
             .select("*")
+            .eq("clinic_id", clinic_id)
             .eq("id", prescription_id)
             .execute()
         )
@@ -123,13 +121,14 @@ class PrescriptionService:
             for rt in rx.get("reminder_times", []):
                 if self._time_within_window(current_time, rt, 5):
                     try:
+                        clinic = await get_clinic_by_id(rx.get("clinic_id", "default"))
                         message = (
                             f"⏰ Medication Reminder\n"
                             f"Hi {rx['patient_name']}, time to take your medicine!\n"
                             f"💊 {rx['medicine_name']} — {rx['dosage']}\n"
-                            f"Stay healthy! 🏥 TestHospital"
+                            f"Stay healthy! 🏥 {clinic['name']}"
                         )
-                        await self._send_text(rx["patient_phone"], message)
+                        await whatsapp_service.send_text(clinic, rx["patient_phone"], message)
                         count_sent += 1
                     except Exception as e:
                         logger.error(f"Reminder send error for {rx['id']}: {e}")
@@ -151,24 +150,3 @@ class PrescriptionService:
             return abs(current_mins - target_mins) <= window_min
         except (ValueError, AttributeError):
             return False
-
-    async def _send_text(self, phone: str, message: str):
-        """Send a text message via WhatsApp."""
-        url = f"{self.base_url}/messages"
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": phone,
-            "type": "text",
-            "text": {"body": message},
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=10.0,
-            )
-            response.raise_for_status()

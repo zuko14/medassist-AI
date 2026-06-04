@@ -258,6 +258,69 @@ class WhatsAppService:
             logger.error(f"Failed to send location: {e}")
             return False
 
+    async def upload_media(self, clinic: dict, file_bytes: bytes, filename: str, content_type: str) -> str:
+        """Upload file to Meta media endpoint and return media_id."""
+        try:
+            token, phone_id = self._get_credentials(clinic)
+        except ValueError:
+            return ""
+
+        url = f"{WHATSAPP_API_BASE}/{phone_id}/media"
+        async with httpx.AsyncClient() as client:
+            for attempt in range(2):
+                try:
+                    response = await client.post(
+                        url,
+                        headers={"Authorization": f"Bearer {token}"},
+                        files={"file": (filename, file_bytes, content_type)},
+                        data={"messaging_product": "whatsapp"},
+                        timeout=30.0,
+                    )
+                    response.raise_for_status()
+                    return response.json()["id"]
+                except httpx.HTTPStatusError as e:
+                    logger.error(f"WhatsApp Media API error (attempt {attempt + 1}): {e.response.text}")
+                    if attempt == 1:
+                        raise
+                except Exception as e:
+                    logger.error(f"WhatsApp Media request error (attempt {attempt + 1}): {e}")
+                    if attempt == 1:
+                        raise
+        return ""
+
+    async def send_document(
+        self,
+        clinic: dict,
+        phone: str,
+        media_id: str,
+        filename: str,
+        caption: str
+    ) -> bool:
+        """Send a document message."""
+        if not await self._can_send_freeform(clinic, phone):
+            logger.warning(f"Cannot send document to {self._mask_phone(phone)}: session expired")
+            return False
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": phone,
+            "type": "document",
+            "document": {
+                "id": media_id,
+                "filename": filename,
+                "caption": caption
+            }
+        }
+
+        try:
+            await self._make_request(clinic, "messages", payload)
+            logger.info(f"Sent document to {self._mask_phone(phone)}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send document: {e}")
+            return False
+
     async def mark_as_read(self, clinic: dict, message_id: str) -> bool:
         """Mark a message as read."""
         payload = {
