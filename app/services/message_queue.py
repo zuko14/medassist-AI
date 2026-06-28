@@ -12,30 +12,36 @@ Strategy:
     only one INSERT will succeed. The other will silently fail — this is the
     atomic gate.
 
-  Layer 2 — asyncio.Lock per phone number:
+  Layer 2 — asyncio.Lock per phone number (with timeout):
     Prevents concurrent state mutations for the same patient within a single
-    process instance. Uses a WeakValue dict to auto-GC locks for inactive phones.
+    process instance. Uses a dict with explicit cleanup to avoid WeakValueDict
+    GC issues. Locks have a configurable timeout (default 15s) to prevent
+    cascading delays from Groq latency spikes.
 
-Usage in webhook.py:
-    queue = MessageQueueManager()
-    if not await queue.acquire(message_id):
-        return  # duplicate — already processing
-    try:
-        await process_message(...)
-    finally:
-        await queue.release(message_id)
+Meta Webhook Timeout Protection:
+  Meta requires a 200 OK within 20 seconds. Our webhook.py returns 200
+  immediately via FastAPI BackgroundTasks, then processes asynchronously.
+  The per-phone lock timeout (15s) ensures that even if processing stalls,
+  subsequent messages for the same phone are never blocked indefinitely.
 """
 
 import asyncio
 import logging
-import weakref
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# In-memory per-phone asyncio locks (WeakValueDictionary auto-GC's unused locks)
-_phone_locks: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+# ── Per-phone asyncio locks with reference counting ─────────────────────────
+# We use a regular dict + refcount instead of WeakValueDictionary to avoid
+# garbage collection races where a lock is collected while a task still holds it.
+_phone_locks: dict[str, asyncio.Lock] = {}
+_phone_refcounts: dict[str, int] = {}
 _phone_locks_mutex = asyncio.Lock()
+
+# Maximum time (seconds) a message will wait to acquire the per-phone lock.
+# Set below Meta's 20s webhook timeout to prevent cascading stalls.
+PHONE_LOCK_TIMEOUT_SECONDS = 15
 
 
 class MessageQueueManager:
@@ -123,11 +129,8 @@ class MessageQueueManager:
 async def get_phone_lock(phone: str) -> asyncio.Lock:
     """Get (or create) a per-phone asyncio lock for concurrent state protection.
 
-    Prevents two concurrent messages from the same patient phone number
-    from simultaneously modifying the conversation state in Supabase.
-
-    The WeakValueDictionary ensures that locks for inactive phones are
-    automatically garbage-collected, preventing memory leaks.
+    Uses reference counting instead of WeakValueDictionary to prevent GC
+    from collecting a lock while a coroutine still references it.
 
     Args:
         phone: Patient phone number.
@@ -136,11 +139,66 @@ async def get_phone_lock(phone: str) -> asyncio.Lock:
         asyncio.Lock for the given phone.
     """
     async with _phone_locks_mutex:
-        lock = _phone_locks.get(phone)
-        if lock is None:
-            lock = asyncio.Lock()
-            _phone_locks[phone] = lock
-        return lock
+        if phone not in _phone_locks:
+            _phone_locks[phone] = asyncio.Lock()
+            _phone_refcounts[phone] = 0
+        _phone_refcounts[phone] += 1
+        return _phone_locks[phone]
+
+
+async def release_phone_lock(phone: str) -> None:
+    """Release a reference to a per-phone lock.
+
+    When the reference count drops to zero, the lock is removed from the dict
+    to prevent memory leaks from accumulating locks for inactive phones.
+
+    Args:
+        phone: Patient phone number.
+    """
+    async with _phone_locks_mutex:
+        if phone in _phone_refcounts:
+            _phone_refcounts[phone] -= 1
+            if _phone_refcounts[phone] <= 0:
+                _phone_locks.pop(phone, None)
+                _phone_refcounts.pop(phone, None)
+
+
+async def acquire_phone_lock_with_timeout(
+    phone: str,
+    timeout: float = PHONE_LOCK_TIMEOUT_SECONDS,
+) -> bool:
+    """Acquire the per-phone asyncio lock with a timeout.
+
+    If the lock cannot be acquired within `timeout` seconds (e.g., because
+    a previous message for the same phone is still being processed by Groq),
+    this returns False instead of blocking indefinitely.
+
+    This prevents cascading delays when:
+      - A patient sends rapid consecutive messages
+      - Groq API has a latency spike
+      - Meta retries cause lock contention
+
+    Args:
+        phone: Patient phone number.
+        timeout: Max seconds to wait for the lock. Defaults to 15s
+                 (safely under Meta's 20s webhook timeout).
+
+    Returns:
+        True  → Lock acquired. Caller MUST release it via the lock's context.
+        False → Timed out. Caller should defer or queue the message.
+    """
+    lock = await get_phone_lock(phone)
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"Phone lock timeout ({timeout}s) for {phone[:6]}*** — "
+            f"previous message still processing. Deferring."
+        )
+        # Release our refcount since we won't be using the lock
+        await release_phone_lock(phone)
+        return False
 
 
 # Global instance

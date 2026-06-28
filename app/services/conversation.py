@@ -17,8 +17,12 @@ from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import MESSAGES, get_message
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
-# Per-phone asyncio lock for concurrent state protection
-from app.services.message_queue import get_phone_lock
+# Per-phone asyncio lock with Meta timeout protection
+from app.services.message_queue import (
+    acquire_phone_lock_with_timeout,
+    get_phone_lock,
+    release_phone_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,15 +103,56 @@ class ConversationManager:
         message_id: Optional[str] = None,
         interactive_data: Optional[dict] = None
     ) -> None:
-        """Handle incoming message with all guards."""
+        """Handle incoming message with all guards.
+
+        Meta Webhook Timeout Protection:
+          Meta requires 200 OK within 20 seconds. Our webhook already returns
+          200 immediately via BackgroundTasks, but the per-phone asyncio.Lock
+          can cause cascading delays if Groq has a latency spike.
+
+          Solution: acquire_phone_lock_with_timeout() waits at most 15 seconds
+          for the lock. If it times out, the message is deferred to the
+          Supabase dead-letter queue for retry rather than blocking indefinitely.
+        """
 
         clinic_id = clinic["id"]
 
-        # ── Per-phone asyncio lock: prevents concurrent state mutation ──────────
-        # If two messages from the same patient arrive simultaneously (e.g., rapid
-        # re-send), the second waits until the first finishes processing.
+        # ── Per-phone asyncio lock with timeout ────────────────────────────────
+        # If two messages from the same patient arrive simultaneously, the second
+        # waits up to 15s for the first to finish. If it can't acquire in time
+        # (e.g., Groq latency spike), it defers gracefully instead of blocking.
+        acquired = await acquire_phone_lock_with_timeout(phone, timeout=15)
+        if not acquired:
+            # Lock timed out — the previous message is still processing.
+            # Save to dead-letter queue for automatic retry rather than dropping.
+            logger.warning(
+                f"Phone lock timeout for {phone[:6]}*** — deferring message "
+                f"{message_id} to dead-letter queue"
+            )
+            try:
+                from app.database import supabase
+                import json
+                supabase.table("failed_messages").insert({
+                    "phone": phone,
+                    "display_phone": clinic.get("phone", ""),
+                    "payload": json.dumps({
+                        "message": message[:500],
+                        "message_type": message_type,
+                        "message_id": message_id,
+                        "clinic_id": clinic_id,
+                    }),
+                    "error": "Phone lock timeout (15s) — previous message still processing",
+                    "status": "pending_retry"
+                }).execute()
+            except Exception as dlq_err:
+                logger.error(f"Failed to save timed-out message to DLQ: {dlq_err}")
+            return
+
+        # Lock acquired — process the message with guaranteed cleanup
         phone_lock = await get_phone_lock(phone)
-        async with phone_lock:
+        try:
+            # We already hold the lock from acquire_phone_lock_with_timeout(),
+            # so _handle_message_locked runs exclusively for this phone.
             await self._handle_message_locked(
                 clinic=clinic,
                 phone=phone,
@@ -116,6 +161,10 @@ class ConversationManager:
                 message_id=message_id,
                 interactive_data=interactive_data,
             )
+        finally:
+            # Always release the lock and decrement refcount
+            phone_lock.release()
+            await release_phone_lock(phone)
 
     async def _handle_message_locked(
         self,

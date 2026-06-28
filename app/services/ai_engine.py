@@ -288,8 +288,14 @@ SECURITY RULES (NEVER VIOLATE):
     return base_prompt.strip()
 
 async def call_groq_with_backoff(messages, timeout=5, max_tokens=20, clinic_id=None):
-    """Call Groq with exponential backoff and tenant-level logging."""
-    for attempt in range(3):
+    """Call Groq with exponential backoff and tenant-level logging.
+
+    Total time budget: ~12 seconds max (safely under the 15s phone lock timeout).
+      - 2 attempts × 5s timeout = 10s API time
+      - 1 backoff wait of 2s = 2s
+      - Total worst case: 12s
+    """
+    for attempt in range(2):  # Max 2 attempts (down from 3) to cap total time
         try:
             return groq_client.chat.completions.create(
                 model=settings.groq_model,
@@ -298,14 +304,18 @@ async def call_groq_with_backoff(messages, timeout=5, max_tokens=20, clinic_id=N
                 max_tokens=max_tokens
             )
         except RateLimitError as e:
-            wait_time = 2 ** attempt
-            logger.warning(f"Groq rate limit hit. Retrying in {wait_time}s... (Attempt {attempt+1}/3)")
-            await asyncio.sleep(wait_time)
+            if attempt < 1:  # Only retry once
+                wait_time = 2  # Fixed 2s wait (not exponential)
+                logger.warning(f"Groq rate limit hit. Retrying in {wait_time}s... (Attempt {attempt+1}/2)")
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error("Groq rate limit exceeded after 2 attempts.")
+                raise
         except Exception as e:
             logger.error(f"Groq API error: {e}")
             raise
     
-    logger.error("Groq rate limit exceeded after 3 attempts.")
+    logger.error("Groq rate limit exceeded after 2 attempts.")
     raise RateLimitError("Rate limit exceeded")
 
 
