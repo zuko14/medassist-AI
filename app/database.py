@@ -320,18 +320,39 @@ async def log_analytics_event(clinic_id: str, phone: str, event_type: str, **kwa
 
 
 async def delete_patient_data(clinic_id: str, phone: str) -> bool:
-    """Delete all patient data (DPDP compliance)."""
+    """Delete / anonymize patient data (DPDP + NMC compliance).
+    
+    Tiered strategy:
+      Tier 1 (Clinical records — appointments, lab_reports, prescriptions):
+        Anonymized (PII replaced with [REDACTED]), NOT deleted.
+        Retained per NMC 7-year mandate for medical audit purposes.
+
+      Tier 2 (Session / chat data — conversations, analytics):
+        Fully deleted. These are transient operational records.
+
+    This satisfies both the DPDP Act right to erasure (personal data is gone)
+    and the NMC clinical record retention requirement (clinical record exists
+    but contains no personally identifiable information).
+    """
     try:
-        # Get patient ID
-        patient = await get_patient_by_phone(clinic_id, phone)
-        if patient:
-            # Delete appointments
-            supabase.table("appointments").delete().eq("clinic_id", clinic_id).eq("patient_id", patient["id"]).execute()
-            # Delete patient
-            supabase.table("patients").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
-            # Delete conversation
-            supabase.table("conversations").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
+        # ── Tier 1: Anonymize clinical records (preserve structure, erase PII) ──
+        from app.services.data_retention import data_retention_service
+        await data_retention_service.anonymize_clinical_records(clinic_id, phone)
+
+        # ── Tier 2: Delete conversation / session data ──
+        supabase.table("conversations").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
+
+        # Delete analytics events (operational, not clinical)
+        try:
+            supabase.table("analytics_events").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
+        except Exception:
+            pass  # Analytics table may not have phone column in all versions
+
+        logger.info(
+            f"Data deletion: conversations purged, clinical records anonymized "
+            f"for phone={phone[:6]}*** in clinic={clinic_id}"
+        )
         return True
     except Exception as e:
-        logger.error(f"Error deleting patient data: {e}")
+        logger.error(f"Error in tiered data deletion: {e}")
         return False

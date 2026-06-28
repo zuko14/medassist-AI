@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     meta_app_secret: str = ""      # Meta App Secret for X-Hub-Signature-256 verification
     rate_limit_login: str = "5/minute"  # Rate limit for admin login attempts
 
+    # ABDM / ABHA Integration (optional — leave empty to skip live verification)
+    abdm_client_id: str = ""
+    abdm_client_secret: str = ""
+    abdm_base_url: str = "https://abhasbx.abdm.gov.in/abha/api"  # sandbox default
+
+    # Data Retention (NMC + DPDP compliance)
+    clinical_retention_years: int = 7    # NMC mandate: 7 years minimum
+    conversation_purge_days: int = 30    # DPDP minimization: 30-day chat log purge
+
     model_config = SettingsConfigDict(env_file=".env")
 
 

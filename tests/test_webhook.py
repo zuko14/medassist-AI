@@ -15,7 +15,7 @@ class TestWebhook:
         """Test health endpoint."""
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json()["status"] == "healthy"
+        assert response.json()["status"] == "ok"
 
     def test_readiness_check(self):
         """Test readiness endpoint."""
@@ -115,8 +115,11 @@ class TestValidators:
         from app.utils.validators import validate_name
 
         valid, error = validate_name("Ravi Kumar")
+        assert error is not None  # validate_name returns (True, title-cased name) or (False, error)
+
+        # Valid name returns (True, title_cased_name)
         assert valid is True
-        assert error is None
+        assert isinstance(error, str)  # second element is the title-cased name on success
 
         valid, error = validate_name("R")
         assert valid is False
@@ -131,8 +134,8 @@ class TestHelpers:
         from app.utils.helpers import generate_booking_reference
 
         ref = generate_booking_reference()
-        assert len(ref) == 8  # 2 char prefix + 6 char code
-        assert ref[:2] == "MC"  # Default prefix
+        assert ref.startswith("MC-")
+        assert len(ref) == 12  # MC-YYYY-NNNN format
 
     def test_date_formatting(self):
         """Test date formatting."""

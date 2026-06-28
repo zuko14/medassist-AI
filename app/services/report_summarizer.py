@@ -1,4 +1,11 @@
-"""AI-powered lab report summarizer using Groq."""
+"""AI-powered lab report summarizer using Groq.
+
+Security: Integrates PII sanitization middleware (app/utils/pii_sanitizer.py)
+to strip patient-identifying information from report text BEFORE sending it
+to the Groq external API. Patient name is restored in the final message.
+
+Compliant with India DPDP Act 2023 data minimization requirements.
+"""
 
 import json
 import logging
@@ -6,6 +13,7 @@ import logging
 from groq import Groq
 
 from app.config import settings
+from app.utils.pii_sanitizer import sanitize_report_text, restore_pii, get_redaction_summary
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +24,21 @@ class ReportSummarizer:
     """Summarize lab reports into patient-friendly messages using Groq AI."""
 
     async def summarize(self, report_text: str, patient_name: str, report_type: str) -> dict:
-        """Summarize a lab report and return structured result."""
+        """Summarize a lab report and return structured result.
+        
+        PII is stripped before calling Groq and restored in the output.
+        """
 
         if not report_text or len(report_text) < 50:
             return {"summary": None, "has_abnormal": False, "fallback": True}
+
+        # ── PII Sanitization: Strip before LLM call ────────────────────────────
+        sanitized_text, redaction_map = sanitize_report_text(
+            text=report_text,
+            patient_name=patient_name,
+        )
+        logger.info(f"Report summarizer: {get_redaction_summary(redaction_map)}")
+        # ── End PII Sanitization ───────────────────────────────────────────────
 
         try:
             response = groq_client.chat.completions.create(
@@ -38,9 +57,11 @@ class ReportSummarizer:
                     {
                         "role": "user",
                         "content": (
+                            # Use patient_name directly for context (sanitized_text has it redacted)
                             f"Patient name: {patient_name}\n"
                             f"Report type: {report_type}\n"
-                            f"Report text:\n{report_text[:3000]}\n\n"
+                            # Send sanitized text — no raw PII reaches Groq
+                            f"Report text:\n{sanitized_text[:3000]}\n\n"
                             "Respond with JSON in exactly this format:\n"
                             "{\n"
                             '  "summary_lines": ["line1", "line2", "line3"],\n'
@@ -69,8 +90,14 @@ class ReportSummarizer:
 
             parsed = json.loads(content.strip())
 
+            # ── Restore patient name in the patient-facing message ─────────────
+            patient_msg = parsed.get("patient_message", "")
+            if redaction_map:
+                patient_msg = restore_pii(patient_msg, redaction_map)
+            # ── End PII Restore ────────────────────────────────────────────────
+
             return {
-                "patient_message": parsed.get("patient_message"),
+                "patient_message": patient_msg,
                 "has_abnormal": parsed.get("has_abnormal_values", False),
                 "doctor_flag_reason": parsed.get("doctor_flag_reason"),
                 "fallback": False,

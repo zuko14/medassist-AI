@@ -89,6 +89,22 @@ class SchedulerService:
             replace_existing=True
         )
 
+        # ── DPDP/NMC Compliance: Purge expired conversation sessions (daily 2 AM) ──
+        self.scheduler.add_job(
+            self.purge_expired_conversations,
+            CronTrigger(hour=2, minute=0),
+            id='conversation_purge',
+            replace_existing=True
+        )
+
+        # ── DPDP/NMC Compliance: Purge expired analytics events (daily 3 AM) ──
+        self.scheduler.add_job(
+            self.purge_expired_session_data,
+            CronTrigger(hour=3, minute=0),
+            id='analytics_purge',
+            replace_existing=True
+        )
+
         self.scheduler.start()
         logger.info("Scheduler started")
 
@@ -307,6 +323,33 @@ class SchedulerService:
         except Exception as e:
             # Table might not exist yet — don't crash the scheduler
             logger.debug(f"Rate limits cleanup skipped: {e}")
+
+    async def purge_expired_conversations(self):
+        """Purge conversation sessions older than the configured purge window.
+        
+        Runs daily at 2 AM. Deletes Tier 2 session data only.
+        Clinical records are NOT touched by this job.
+        """
+        try:
+            from app.services.data_retention import data_retention_service
+            count = await data_retention_service.purge_expired_conversations()
+            if count > 0:
+                logger.info(f"Scheduler: purged {count} expired conversation sessions")
+        except Exception as e:
+            logger.error(f"Conversation purge job failed: {e}")
+
+    async def purge_expired_session_data(self):
+        """Purge analytics events older than 12 months.
+        
+        Runs daily at 3 AM. Removes operational analytics data only.
+        """
+        try:
+            from app.services.data_retention import data_retention_service
+            count = await data_retention_service.purge_expired_session_data()
+            if count > 0:
+                logger.info(f"Scheduler: purged {count} expired analytics events")
+        except Exception as e:
+            logger.error(f"Analytics purge job failed: {e}")
 
 
 # Global instance

@@ -11,6 +11,8 @@ from app.services.whatsapp import whatsapp_service
 from app.services.tenant import resolve_tenant
 from app.utils.validators import normalize_phone
 from app.utils.security import verify_webhook_signature
+# Supabase-native atomic idempotency + per-phone asyncio lock
+from app.services.message_queue import message_queue
 import json
 
 logger = logging.getLogger(__name__)
@@ -117,19 +119,17 @@ async def process_message(message, display_phone: str):
     """Process incoming WhatsApp message."""
     try:
         message_id = message.id
-        
-        # ── Security: Idempotency Check (Duplicate Delivery) ──
-        from app.database import supabase
-        try:
-            existing = supabase.table("processed_messages").select("id").eq("message_id", message_id).execute()
-            if existing.data:
-                logger.info(f"Message {message_id} already processed. Skipping duplicate.")
-                return
-            # Insert first, then process
-            supabase.table("processed_messages").insert({"message_id": message_id}).execute()
-        except Exception as e:
-            # If table doesn't exist yet, just continue (fail open)
-            logger.debug(f"Idempotency check failed/skipped: {e}")
+
+        # ── Primary Idempotency: Atomic Supabase INSERT (closes the race window) ──
+        # Uses PostgreSQL UNIQUE constraint on message_id.
+        # Two simultaneous webhooks for the same message_id: only one INSERT
+        # succeeds — PostgreSQL guarantees this at the database engine level.
+        # The other gets a unique violation and returns False, dropping silently.
+        acquired = await message_queue.acquire(message_id)
+        if not acquired:
+            logger.info(f"Webhook: duplicate message {message_id} dropped by atomic queue")
+            return
+        # ── End Idempotency Gate ────────────────────────────────────────────────
 
         # Resolve tenant clinic
         clinic = await resolve_tenant(display_phone)

@@ -15,6 +15,10 @@ from app.database import (
 from app.services.ai_engine import detect_intent, map_symptom_to_department, EMERGENCY_KEYWORDS
 from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import MESSAGES, get_message
+# Clinical safety firewall — screens messages before LLM is called
+from app.services.clinical_firewall import screen_message
+# Per-phone asyncio lock for concurrent state protection
+from app.services.message_queue import get_phone_lock
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +102,37 @@ class ConversationManager:
         """Handle incoming message with all guards."""
 
         clinic_id = clinic["id"]
-        # Guard 1: Duplicate webhook delivery
+
+        # ── Per-phone asyncio lock: prevents concurrent state mutation ──────────
+        # If two messages from the same patient arrive simultaneously (e.g., rapid
+        # re-send), the second waits until the first finishes processing.
+        phone_lock = await get_phone_lock(phone)
+        async with phone_lock:
+            await self._handle_message_locked(
+                clinic=clinic,
+                phone=phone,
+                message=message,
+                message_type=message_type,
+                message_id=message_id,
+                interactive_data=interactive_data,
+            )
+
+    async def _handle_message_locked(
+        self,
+        clinic: dict,
+        phone: str,
+        message: str,
+        message_type: str = "text",
+        message_id: Optional[str] = None,
+        interactive_data: Optional[dict] = None
+    ) -> None:
+        """Inner handler called while holding the per-phone asyncio lock."""
+        clinic_id = clinic["id"]
+
+        # Guard 1: Duplicate webhook delivery (secondary check at conversation layer)
         session = await get_or_create_conversation(clinic_id, phone)
         if message_id and session.get("last_processed_message_id") == message_id:
-            logger.info(f"Duplicate dropped: {message_id}")
+            logger.info(f"Duplicate dropped at conversation layer: {message_id}")
             return
 
         if message_id:
@@ -145,6 +176,23 @@ class ConversationManager:
         # Update session expiry (24 hours from now)
         session_expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         await update_conversation(clinic["id"], phone, {"session_expires_at": session_expires})
+
+        # ── Clinical Firewall: Screen for medical advice requests ──────────────
+        # This runs BEFORE the LLM is called. If a patient asks for medication
+        # names, dosages, or diagnoses, we return a safe static response and
+        # never reach the Groq API — protecting against NMC liability.
+        # Skip firewall for interactive button responses (they are controlled inputs)
+        if message_type == "text" and message.strip():
+            lang_for_firewall = patient.get("language") or "en"
+            firewall_blocked, firewall_response = screen_message(message, lang_for_firewall)
+            if firewall_blocked and firewall_response:
+                await self.whatsapp.send_text(clinic, phone, firewall_response)
+                logger.info(
+                    f"Clinical firewall blocked message from {phone[:6]}*** "
+                    f"(type: medication/diagnosis request)"
+                )
+                return
+        # ── End Clinical Firewall ──────────────────────────────────────────────
 
         # Detect intent
         intent = await detect_intent(message, clinic)

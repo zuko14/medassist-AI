@@ -87,21 +87,72 @@ FAQ_KEYWORDS = {
 
 
 class FAQEngine:
-    """FAQ Engine for answering common questions."""
+    """FAQ Engine for answering common questions.
+    
+    Tenant Isolation:
+      FAQ lookup is scoped per-clinic. Each clinic can define custom FAQ
+      overrides in its config JSONB field under "custom_faqs".
+
+      When pgvector semantic search is adopted, the pattern MUST be:
+        WHERE clinic_id = $1 ORDER BY embedding <-> query_vec LIMIT 5
+      NEVER query embeddings without a clinic_id pre-filter.
+    """
 
     def __init__(self):
         self.faq_db = FAQ_DATABASE
         self.keywords = FAQ_KEYWORDS
 
+    def _get_clinic_overrides(self, clinic: dict, lang: str) -> dict:
+        """Extract per-clinic FAQ overrides from clinic config JSONB.
+        
+        Clinics can add custom FAQs in their config:
+          {
+            "custom_faqs": {
+              "en": {
+                "canteen": "Our canteen is open 8 AM to 9 PM on all floors.",
+                "wifi": "Free Wi-Fi: Network 'Hospital-Guest', no password needed."
+              }
+            }
+          }
+        """
+        config = clinic.get("config", {}) or {}
+        custom_faqs = config.get("custom_faqs", {})
+        return custom_faqs.get(lang, custom_faqs.get("en", {}))
+
+    def _get_clinic_keyword_overrides(self, clinic: dict, lang: str) -> dict:
+        """Extract per-clinic keyword overrides from clinic config JSONB.
+        
+        Clinics can add custom keyword triggers in their config:
+          {
+            "custom_faq_keywords": {
+              "en": {
+                "canteen": ["canteen", "food", "cafeteria", "lunch"],
+                "wifi": ["wifi", "wi-fi", "internet", "network"]
+              }
+            }
+          }
+        """
+        config = clinic.get("config", {}) or {}
+        custom_kw = config.get("custom_faq_keywords", {})
+        return custom_kw.get(lang, custom_kw.get("en", {}))
+
     def find_answer(self, message: str, clinic: dict, lang: str = "en") -> Optional[str]:
-        """Find FAQ answer for a message."""
+        """Find FAQ answer for a message, merging global + clinic-specific FAQs.
+        
+        Tenant isolation: FAQs are scoped to the clinic.
+        Clinic-specific custom FAQs override global defaults when defined.
+        """
         message_lower = message.lower()
 
         # Get keywords for the language
         lang_keywords = self.keywords.get(lang, self.keywords["en"])
 
+        # Merge with clinic-specific keyword overrides (clinic takes priority)
+        clinic_keyword_overrides = self._get_clinic_keyword_overrides(clinic, lang)
+        merged_keywords = {**lang_keywords, **clinic_keyword_overrides}
+
         # Default info if not in clinic
-        config = clinic.get("config", {})
+        config = clinic.get("config", {}) or {}
         info = {
             "hospital_name": clinic.get("name", settings.hospital_name),
             "hospital_address": config.get("address", settings.hospital_address),
@@ -111,14 +162,21 @@ class FAQEngine:
             "hospital_landmark": config.get("landmark", settings.hospital_landmark)
         }
 
+        # Get global FAQs merged with clinic overrides (clinic answers take priority)
+        global_faqs = self.faq_db.get(lang, self.faq_db["en"])
+        clinic_faq_overrides = self._get_clinic_overrides(clinic, lang)
+        merged_faqs = {**global_faqs, **clinic_faq_overrides}
+
         # Check each FAQ category
-        for category, keywords in lang_keywords.items():
+        for category, keywords in merged_keywords.items():
             for keyword in keywords:
                 if keyword in message_lower:
-                    # Return answer in requested language
-                    answer = self.faq_db.get(lang, self.faq_db["en"]).get(category)
+                    answer = merged_faqs.get(category)
                     if answer:
-                        return answer.format(**info)
+                        try:
+                            return answer.format(**info)
+                        except KeyError:
+                            return answer  # Return as-is if format vars missing
                     return None
 
         return None

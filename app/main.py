@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.routers import webhook, health, admin, clinics
+from app.routers.fhir import router as fhir_router
 from app.services.scheduler import scheduler_service
 from app.utils.logger import setup_logging
 from app.utils.security import SECURITY_HEADERS
@@ -111,6 +112,8 @@ app.include_router(webhook.router)
 app.include_router(health.router)
 app.include_router(admin.router)
 app.include_router(clinics.router)
+# FHIR R4 interoperability API (HMIS / ABDM integration)
+app.include_router(fhir_router)
 
 
 @app.get("/")
@@ -164,8 +167,14 @@ time by replying STOP.</p>
 hospital communication. We never sell or share your 
 personal data with third parties.</p>
 <h2>4. Data Retention</h2>
-<p>Your data is retained for 12 months after your last 
-interaction. You may request deletion at any time.</p>
+<p><strong>Clinical Records</strong> (appointments, lab reports, prescriptions):
+Retained for <strong>7 years</strong> per National Medical Commission (NMC)
+regulations. Upon deletion request, personal identifiers are anonymized
+(replaced with [REDACTED]) while the clinical record is preserved for
+regulatory audit purposes.</p>
+<p><strong>Conversation History</strong> (WhatsApp chat sessions):
+Automatically purged after <strong>30 days</strong> of inactivity to minimize
+data retention per DPDP data minimization principles.</p>
 <h2>5. Data Deletion</h2>
 <p>Type DELETE MY DATA in WhatsApp to permanently delete 
 all your data within 24 hours.</p>

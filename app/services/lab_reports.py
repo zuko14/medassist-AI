@@ -7,7 +7,7 @@ from uuid import uuid4
 import httpx
 
 from app.config import settings
-from app.database import supabase
+from app.database import supabase, log_analytics_event
 from app.utils.pdf_reader import extract_text_from_pdf
 from app.services.report_summarizer import ReportSummarizer
 from app.services.whatsapp import whatsapp_service
@@ -113,12 +113,27 @@ class LabReportService:
 
         try:
             result = supabase.table("lab_reports").insert(row).execute()
-            return result.data[0]
+            saved_record = result.data[0] if result.data else row
         except Exception as e:
             logger.error(f"Failed to save lab report record to database: {e}")
             row["id"] = str(uuid4())
             row["_db_error"] = str(e)
-            return row
+            saved_record = row
+
+        # Audit logging for PII-safe AI summarization and delivery
+        if sent_ok:
+            await log_analytics_event(
+                clinic_id=clinic["id"],
+                phone=patient_phone,
+                event_type="report_delivered",
+                metadata={
+                    "report_type": report_type,
+                    "has_abnormal": ai_result.get("has_abnormal", False),
+                    "ai_fallback": ai_result.get("fallback", True)
+                }
+            )
+
+        return saved_record
 
     async def get_all_reports(self, clinic_id: str = "default", limit: int = 100) -> list:
         """Get all lab reports ordered by upload date."""
