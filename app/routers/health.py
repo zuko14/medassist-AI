@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, HTMLResponse
-import datetime as dt
 
 from app.database import supabase
 
@@ -23,7 +22,7 @@ async def health_check():
         content={
             "status": "ok",
             "service": "MediAssist AI",
-            "timestamp": dt.datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
 
