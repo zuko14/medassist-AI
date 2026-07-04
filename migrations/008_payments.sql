@@ -75,14 +75,21 @@ CREATE INDEX IF NOT EXISTS idx_payment_events_type
 CREATE INDEX IF NOT EXISTS idx_payment_events_created
     ON payment_events (created_at);
 
--- ── Step 5: RLS policies for multi-tenant isolation ──
--- (Only if RLS is enabled on these tables — Supabase service role bypasses RLS)
--- ALTER TABLE payment_events ENABLE ROW LEVEL SECURITY;
--- CREATE POLICY payment_events_clinic_isolation ON payment_events
---     USING (booking_id IN (SELECT id FROM appointments WHERE clinic_id = current_setting('app.clinic_id')::uuid));
+-- ── Step 5: RLS on payment_events ──
+ALTER TABLE payment_events ENABLE ROW LEVEL SECURITY;
+
+-- Allow service_role full access (our backend uses service_role key).
+-- anon and authenticated have NO access to this audit table.
+CREATE POLICY payment_events_service_role_all ON payment_events
+    FOR ALL
+    TO service_role
+    USING (true)
+    WITH CHECK (true);
 
 -- ── Step 6: Protect payment_events from UPDATE/DELETE ──
 -- This trigger prevents any UPDATE or DELETE on the audit table.
+-- Uses SECURITY INVOKER (not DEFINER) because triggers run with
+-- the privileges of the table owner, not the calling user.
 CREATE OR REPLACE FUNCTION prevent_payment_event_mutation()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -90,8 +97,12 @@ BEGIN
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = pg_catalog, public;
+
+-- Revoke EXECUTE from public-facing roles so it cannot be called
+-- via /rest/v1/rpc/prevent_payment_event_mutation
+REVOKE EXECUTE ON FUNCTION prevent_payment_event_mutation() FROM anon, authenticated, public;
 
 DROP TRIGGER IF EXISTS trg_payment_events_no_update ON payment_events;
 CREATE TRIGGER trg_payment_events_no_update
