@@ -89,7 +89,9 @@ BEGIN
     RAISE EXCEPTION 'payment_events table is append-only. UPDATE and DELETE are not permitted.';
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public;
 
 DROP TRIGGER IF EXISTS trg_payment_events_no_update ON payment_events;
 CREATE TRIGGER trg_payment_events_no_update
