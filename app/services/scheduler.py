@@ -105,6 +105,25 @@ class SchedulerService:
             replace_existing=True
         )
 
+        # ── Payment: Expire stale pending_payment bookings (every minute) ──
+        # Also recovers bookings where Razorpay shows paid but webhook was missed
+        self.scheduler.add_job(
+            self.expire_stale_bookings,
+            'interval',
+            minutes=1,
+            id='expire_stale_bookings',
+            replace_existing=True
+        )
+
+        # ── Payment: Daily reconciliation (11 PM) ──
+        # Compares confirmed bookings against Razorpay — discrepancies → alert
+        self.scheduler.add_job(
+            self.daily_payment_reconciliation,
+            CronTrigger(hour=23, minute=0),
+            id='payment_reconciliation',
+            replace_existing=True
+        )
+
         self.scheduler.start()
         logger.info("Scheduler started")
 
@@ -350,6 +369,47 @@ class SchedulerService:
                 logger.info(f"Scheduler: purged {count} expired analytics events")
         except Exception as e:
             logger.error(f"Analytics purge job failed: {e}")
+
+    async def expire_stale_bookings(self):
+        """Expire pending_payment bookings past their hold window.
+
+        Runs every minute. Before expiring, checks Razorpay order status.
+        If Razorpay shows paid but the webhook never arrived, confirms
+        the booking instead (recovery path).
+        """
+        try:
+            from app.services.payment import payment_service
+            count = await payment_service.expire_stale_bookings()
+            if count > 0:
+                logger.info(f"Scheduler: processed {count} stale bookings")
+        except Exception as e:
+            logger.error(f"Stale bookings job failed: {e}")
+
+    async def daily_payment_reconciliation(self):
+        """Compare confirmed bookings against Razorpay settlements.
+
+        Runs daily at 11 PM. Logs a reconciliation summary.
+        Any discrepancy → alert admin, never auto-correct.
+        """
+        try:
+            from app.services.payment import payment_service
+            summary = await payment_service.get_daily_reconciliation()
+            logger.info(
+                f"Payment reconciliation: {summary['confirmed_count']} confirmed, "
+                f"₹{summary['confirmed_total_rupees']:.2f} total, "
+                f"{summary['pending_review_count']} pending review"
+            )
+            if summary['pending_review_count'] > 0:
+                await payment_service._alert_admin(
+                    f"⚠️ Daily Reconciliation Alert\n\n"
+                    f"Date: {summary['date']}\n"
+                    f"Confirmed bookings: {summary['confirmed_count']}\n"
+                    f"Total: ₹{summary['confirmed_total_rupees']:.2f}\n"
+                    f"⚠️ Pending review: {summary['pending_review_count']}\n\n"
+                    f"Please check the admin panel and compare against Razorpay dashboard."
+                )
+        except Exception as e:
+            logger.error(f"Payment reconciliation job failed: {e}")
 
 
 # Global instance

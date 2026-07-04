@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import settings
 from app.routers import webhook, health, admin, clinics
 from app.routers.fhir import router as fhir_router
+from app.routers.razorpay_webhook import router as razorpay_router
 from app.services.scheduler import scheduler_service
 from app.utils.logger import setup_logging
 from app.utils.security import SECURITY_HEADERS
@@ -114,6 +115,8 @@ app.include_router(admin.router)
 app.include_router(clinics.router)
 # FHIR R4 interoperability API (HMIS / ABDM integration)
 app.include_router(fhir_router)
+# Razorpay payment webhook (/webhooks/razorpay)
+app.include_router(razorpay_router)
 
 
 @app.get("/")

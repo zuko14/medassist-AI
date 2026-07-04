@@ -654,6 +654,9 @@
             <div class="nav-link" data-page="prescriptions" onclick="go('prescriptions',this)">
                 <span class="ico">💊</span> Prescriptions
             </div>
+            <div class="nav-link" data-page="payments" onclick="go('payments',this)">
+                <span class="ico">💳</span> Payments
+            </div>
         </div>
         <div class="nav-bottom">
             <div class="nav-link" onclick="logout()" style="color:var(--red)">
@@ -882,6 +885,58 @@
             </div>
         </div>
 
+        <!-- ─── PAYMENTS ─── -->
+        <div id="pg-payments" class="sec">
+            <div class="page-head">
+                <h2>Payments & Bookings</h2>
+                <p>Manage payment-gated bookings, refunds, and audit trail</p>
+            </div>
+
+            <div class="stats" id="paymentStats">
+                <div class="stat"><div class="glow"></div><div class="label">Confirmed (Paid)</div><div class="num" id="s-pay-confirmed">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Revenue</div><div class="num" id="s-pay-revenue">—</div></div>
+                <div class="stat" style="border-color: var(--amber)"><div class="glow" style="background: var(--amber)"></div><div class="label">⚠️ Pending Review</div><div class="num" id="s-pay-review" style="color: var(--amber)">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Refunded</div><div class="num" id="s-pay-refunded">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Expired</div><div class="num" id="s-pay-expired">—</div></div>
+            </div>
+
+            <!-- Pending Review Queue -->
+            <div class="card" id="pendingReviewCard" style="border-left: 3px solid var(--amber); margin-bottom: 20px; display:none;">
+                <h3 style="color: var(--amber); margin-bottom: 12px;">⚠️ Pending Review — Needs Human Action</h3>
+                <p style="color: var(--text2); font-size: 0.82rem; margin-bottom: 16px;">These bookings have amount mismatches or unexpected states. Review and confirm/reject manually.</p>
+                <div class="tbl-wrap" id="pendingReviewList"></div>
+            </div>
+
+            <!-- Bookings Table -->
+            <div class="top-row">
+                <select class="search-bar" id="payStatusFilter" onchange="loadPayments()" style="max-width:220px">
+                    <option value="">All Statuses</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="pending_payment">Pending Payment</option>
+                    <option value="pending_review">Pending Review</option>
+                    <option value="expired">Expired</option>
+                    <option value="refunded">Refunded</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="paymentsList">
+                    <div class="loader"><div class="spin"></div>Loading payments...</div>
+                </div>
+            </div>
+
+            <!-- Payment Events Modal -->
+            <div class="modal-overlay" id="paymentEventsModal">
+                <div class="modal" style="max-width:650px">
+                    <h3>📋 Payment Audit Trail</h3>
+                    <div id="paymentEventsContent" style="max-height:400px; overflow-y:auto; margin-top:16px;"></div>
+                    <div class="modal-actions">
+                        <button class="btn" onclick="document.getElementById('paymentEventsModal').style.display='none'">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </main>
 </div>
 
@@ -1041,7 +1096,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions };
+    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments };
     if (loaders[page]) loaders[page]();
 }
 
@@ -1736,6 +1791,156 @@ async function deactivateRx(id) {
         } else {
             alert('Failed: ' + (data.detail || 'Error'));
         }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ═══════ PAYMENTS ═══════
+
+const PAY_STATUS_BADGE = {
+    confirmed: '<span style="color:var(--green);background:var(--green-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">✅ Confirmed</span>',
+    pending_payment: '<span style="color:var(--blue);background:var(--blue-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">⏳ Pending Payment</span>',
+    pending_review: '<span style="color:var(--amber);background:var(--amber-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">⚠️ Pending Review</span>',
+    expired: '<span style="color:var(--text3);background:var(--surface2);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">⏰ Expired</span>',
+    refunded: '<span style="color:var(--pink);background:rgba(244,114,182,0.1);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">💸 Refunded</span>',
+    cancelled: '<span style="color:var(--red);background:var(--red-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">❌ Cancelled</span>',
+};
+
+async function loadPayments() {
+    try {
+        // Load stats
+        const stats = await api('/admin/payments/stats');
+        document.getElementById('s-pay-confirmed').textContent = stats.confirmed_count || 0;
+        document.getElementById('s-pay-revenue').textContent = '₹' + (stats.confirmed_amount_rupees || 0).toLocaleString('en-IN');
+        document.getElementById('s-pay-review').textContent = stats.pending_review_count || 0;
+        document.getElementById('s-pay-refunded').textContent = stats.refunded_count || 0;
+        document.getElementById('s-pay-expired').textContent = stats.expired_count || 0;
+
+        // Load pending review
+        const prData = await api('/admin/bookings/pending-review');
+        const prCard = document.getElementById('pendingReviewCard');
+        if (prData.bookings && prData.bookings.length > 0) {
+            prCard.style.display = 'block';
+            let prHtml = '<table><thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Slot</th><th>Amount</th><th>Actions</th></tr></thead><tbody>';
+            prData.bookings.forEach(b => {
+                const amt = b.amount_paise ? '₹' + (b.amount_paise / 100).toFixed(0) : '—';
+                prHtml += `<tr>
+                    <td>${b.booking_ref || '—'}</td>
+                    <td>${b.patient_name || '—'}<br><small style="color:var(--text3)">${b.patient_phone || ''}</small></td>
+                    <td>${b.doctor_name || '—'}</td>
+                    <td>${b.appointment_date || ''} ${b.appointment_time || ''}</td>
+                    <td>${amt}</td>
+                    <td>
+                        <button class="btn btn-accent" style="padding:4px 12px;font-size:0.75rem" onclick="adminConfirmBooking('${b.id}')">✅ Confirm</button>
+                        <button class="btn" style="padding:4px 12px;font-size:0.75rem;color:var(--red);border-color:var(--red)" onclick="adminRejectBooking('${b.id}')">❌ Reject</button>
+                        <button class="btn" style="padding:4px 10px;font-size:0.75rem" onclick="showPaymentEvents('${b.id}')">📋</button>
+                    </td>
+                </tr>`;
+            });
+            prHtml += '</tbody></table>';
+            document.getElementById('pendingReviewList').innerHTML = prHtml;
+        } else {
+            prCard.style.display = 'none';
+        }
+
+        // Load bookings
+        const statusFilter = document.getElementById('payStatusFilter').value;
+        const url = '/admin/bookings' + (statusFilter ? '?status=' + statusFilter : '');
+        const data = await api(url);
+
+        if (!data.bookings || data.bookings.length === 0) {
+            document.getElementById('paymentsList').innerHTML = '<p style="color:var(--text3);text-align:center;padding:32px">No bookings found</p>';
+            return;
+        }
+
+        let html = '<table><thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Slot</th><th>Status</th><th>Amount</th><th>Payment ID</th><th>Actions</th></tr></thead><tbody>';
+        data.bookings.forEach(b => {
+            const badge = PAY_STATUS_BADGE[b.status] || b.status;
+            const amt = b.amount_paise ? '₹' + (b.amount_paise / 100).toFixed(0) : '—';
+            const payId = b.payment_id ? `<small>${b.payment_id.substring(0, 16)}...</small>` : '—';
+            let actions = `<button class="btn" style="padding:4px 10px;font-size:0.75rem" onclick="showPaymentEvents('${b.id}')">📋 Trail</button>`;
+            if (b.status === 'confirmed' && b.payment_id) {
+                actions += ` <button class="btn" style="padding:4px 10px;font-size:0.75rem;color:var(--pink)" onclick="refundBooking('${b.id}')">💸 Refund</button>`;
+            }
+            html += `<tr>
+                <td>${b.booking_ref || '—'}</td>
+                <td>${b.patient_name || '—'}<br><small style="color:var(--text3)">${b.patient_phone || ''}</small></td>
+                <td>${b.doctor_name || '—'}</td>
+                <td>${b.appointment_date || ''} ${b.appointment_time || ''}</td>
+                <td>${badge}</td>
+                <td>${amt}</td>
+                <td>${payId}</td>
+                <td>${actions}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('paymentsList').innerHTML = html;
+    } catch (e) {
+        document.getElementById('paymentsList').innerHTML = '<p style="color:var(--red);text-align:center;padding:32px">Error loading payments: ' + e.message + '</p>';
+    }
+}
+
+async function showPaymentEvents(bookingId) {
+    try {
+        const data = await api('/admin/payment-events/' + bookingId);
+        const events = data.events || [];
+        if (events.length === 0) {
+            document.getElementById('paymentEventsContent').innerHTML = '<p style="color:var(--text3)">No events recorded yet.</p>';
+        } else {
+            let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+            events.forEach(e => {
+                const time = new Date(e.created_at).toLocaleString();
+                const typeColors = {
+                    confirmed: 'var(--green)', signature_failed: 'var(--red)',
+                    mismatch_flagged: 'var(--amber)', expired: 'var(--text3)',
+                    refund_initiated: 'var(--pink)', refund_completed: 'var(--pink)',
+                    recovery_confirmed: 'var(--cyan)', manual_confirm: 'var(--blue)',
+                };
+                const color = typeColors[e.event_type] || 'var(--text2)';
+                let payloadStr = '';
+                try { payloadStr = typeof e.raw_payload === 'string' ? e.raw_payload : JSON.stringify(e.raw_payload, null, 2); } catch { payloadStr = String(e.raw_payload); }
+                html += `<div style="background:var(--surface2);padding:12px 16px;border-radius:10px;border-left:3px solid ${color}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                        <span style="font-weight:600;color:${color};font-size:0.85rem">${e.event_type}</span>
+                        <span style="color:var(--text3);font-size:0.75rem">${time}</span>
+                    </div>
+                    <pre style="color:var(--text2);font-size:0.72rem;white-space:pre-wrap;word-break:break-all;margin:0;max-height:80px;overflow:auto">${payloadStr}</pre>
+                </div>`;
+            });
+            html += '</div>';
+            document.getElementById('paymentEventsContent').innerHTML = html;
+        }
+        document.getElementById('paymentEventsModal').style.display = 'flex';
+    } catch (e) {
+        alert('Error loading events: ' + e.message);
+    }
+}
+
+async function adminConfirmBooking(bookingId) {
+    if (!confirm('Manually CONFIRM this booking? Only do this after verifying payment in Razorpay dashboard.')) return;
+    try {
+        const r = await apiPost('/admin/bookings/' + bookingId + '/confirm', { admin_notes: 'Manual confirmation from admin panel' });
+        if (r.success) { alert('Booking confirmed!'); loadPayments(); }
+        else alert('Failed: ' + (r.detail || r.reason || 'Unknown error'));
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function adminRejectBooking(bookingId) {
+    const reason = prompt('Reason for rejection (will initiate refund if payment was captured):');
+    if (reason === null) return;
+    try {
+        const r = await apiPost('/admin/bookings/' + bookingId + '/reject', { admin_notes: reason });
+        if (r.success) { alert('Booking rejected and refund initiated.'); loadPayments(); }
+        else alert('Failed: ' + (r.detail || r.reason || 'Unknown error'));
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function refundBooking(bookingId) {
+    const reason = prompt('Reason for refund:');
+    if (reason === null) return;
+    try {
+        const r = await apiPost('/admin/bookings/' + bookingId + '/refund', { reason: reason });
+        if (r.success) { alert('Refund initiated! Refund ID: ' + (r.refund_id || 'processing')); loadPayments(); }
+        else alert('Refund failed: ' + (r.detail || r.reason || 'Unknown error'));
     } catch (e) { alert('Error: ' + e.message); }
 }
 

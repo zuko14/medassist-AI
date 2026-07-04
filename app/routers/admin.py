@@ -475,3 +475,207 @@ async def deactivate_prescription(
         logger.error(f"Prescription deactivate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ═══════ PAYMENTS & BOOKINGS ═══════
+
+@router.get("/bookings")
+async def get_bookings(
+    clinic_id: str = "default",
+    status: Optional[str] = None,
+    limit: int = 50,
+    user: str = Depends(verify_credentials),
+):
+    """Get all bookings with payment information."""
+    try:
+        query = supabase.table("appointments").select(
+            "id, clinic_id, patient_phone, patient_name, department, doctor_name, "
+            "appointment_date, appointment_time, status, razorpay_order_id, "
+            "payment_id, amount_paise, hold_expires_at, booking_ref, created_at, updated_at"
+        )
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        if status:
+            query = query.eq("status", status)
+        result = query.order("created_at", desc=True).limit(limit).execute()
+        return {"bookings": result.data or []}
+    except Exception as e:
+        logger.error(f"Error getting bookings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get bookings")
+
+
+@router.get("/bookings/pending-review")
+async def get_pending_review_bookings(
+    clinic_id: str = "default",
+    user: str = Depends(verify_credentials),
+):
+    """Get bookings in pending_review status — needs human eyes."""
+    try:
+        query = supabase.table("appointments").select("*").eq("status", "pending_review")
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        result = query.order("created_at", desc=True).execute()
+        return {"bookings": result.data or []}
+    except Exception as e:
+        logger.error(f"Error getting pending review bookings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get pending review bookings")
+
+
+@router.post("/bookings/{booking_id}/confirm")
+async def admin_confirm_booking(
+    booking_id: str,
+    body: dict = None,
+    user: str = Depends(verify_credentials),
+):
+    """Manually confirm a pending_review booking (admin override)."""
+    try:
+        from app.services.payment import payment_service
+        admin_notes = (body or {}).get("admin_notes", f"Confirmed by admin: {user}")
+        result = await payment_service.admin_confirm_booking(booking_id, admin_notes)
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result.get("reason", "Failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin confirm booking error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bookings/{booking_id}/reject")
+async def admin_reject_booking(
+    booking_id: str,
+    body: dict = None,
+    user: str = Depends(verify_credentials),
+):
+    """Manually reject a pending_review booking + initiate refund."""
+    try:
+        from app.services.payment import payment_service
+        admin_notes = (body or {}).get("admin_notes", f"Rejected by admin: {user}")
+        result = await payment_service.admin_reject_booking(booking_id, admin_notes)
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result.get("reason", "Failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin reject booking error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bookings/{booking_id}/refund")
+async def admin_refund_booking(
+    booking_id: str,
+    body: dict = None,
+    user: str = Depends(verify_credentials),
+):
+    """Initiate a refund for a confirmed booking."""
+    try:
+        from app.services.payment import payment_service
+        reason = (body or {}).get("reason", f"Admin refund by {user}")
+        result = await payment_service.initiate_refund(booking_id, reason)
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result.get("reason", "Refund failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin refund error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/payment-events/{booking_id}")
+async def get_payment_events(
+    booking_id: str,
+    user: str = Depends(verify_credentials),
+):
+    """Get the payment audit trail for a booking."""
+    try:
+        result = supabase.table("payment_events") \
+            .select("*") \
+            .eq("booking_id", booking_id) \
+            .order("created_at", desc=False) \
+            .execute()
+        return {"events": result.data or []}
+    except Exception as e:
+        logger.error(f"Error getting payment events: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get payment events")
+
+
+@router.get("/payments/reconciliation")
+async def get_payment_reconciliation(
+    date_str: Optional[str] = None,
+    user: str = Depends(verify_credentials),
+):
+    """Get daily payment reconciliation summary."""
+    try:
+        from app.services.payment import payment_service
+        summary = await payment_service.get_daily_reconciliation(date_str)
+        return summary
+    except Exception as e:
+        logger.error(f"Reconciliation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get reconciliation data")
+
+
+@router.get("/payments/stats")
+async def get_payment_stats(
+    clinic_id: str = "default",
+    days: int = 30,
+    user: str = Depends(verify_credentials),
+):
+    """Get payment statistics for the dashboard."""
+    try:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        # Total confirmed with payments
+        confirmed = supabase.table("appointments") \
+            .select("id, amount_paise", count="exact") \
+            .eq("status", "confirmed") \
+            .not_.is_("payment_id", "null") \
+            .gte("created_at", cutoff) \
+            .execute()
+
+        # Total pending review
+        pending = supabase.table("appointments") \
+            .select("id", count="exact") \
+            .eq("status", "pending_review") \
+            .execute()
+
+        # Total refunded
+        refunded = supabase.table("appointments") \
+            .select("id, amount_paise", count="exact") \
+            .eq("status", "refunded") \
+            .gte("created_at", cutoff) \
+            .execute()
+
+        # Total expired
+        expired = supabase.table("appointments") \
+            .select("id", count="exact") \
+            .eq("status", "expired") \
+            .gte("created_at", cutoff) \
+            .execute()
+
+        confirmed_amount = sum(b.get("amount_paise", 0) for b in (confirmed.data or []))
+        refunded_amount = sum(b.get("amount_paise", 0) for b in (refunded.data or []))
+
+        # Signature failures
+        sig_failures = supabase.table("payment_events") \
+            .select("id", count="exact") \
+            .eq("event_type", "signature_failed") \
+            .gte("created_at", cutoff) \
+            .execute()
+
+        return {
+            "confirmed_count": len(confirmed.data or []),
+            "confirmed_amount_rupees": confirmed_amount / 100,
+            "pending_review_count": len(pending.data or []),
+            "refunded_count": len(refunded.data or []),
+            "refunded_amount_rupees": refunded_amount / 100,
+            "expired_count": len(expired.data or []),
+            "signature_failures": len(sig_failures.data or []),
+            "period_days": days,
+        }
+    except Exception as e:
+        logger.error(f"Payment stats error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get payment stats")
+

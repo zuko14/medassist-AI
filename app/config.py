@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     clinical_retention_years: int = 7    # NMC mandate: 7 years minimum
     conversation_purge_days: int = 30    # DPDP minimization: 30-day chat log purge
 
+    # Razorpay Payment Gateway
+    razorpay_key_id: str = ""            # From Razorpay Dashboard → Settings → API Keys
+    razorpay_key_secret: str = ""        # Keep this secret — never expose in frontend
+    razorpay_webhook_secret: str = ""    # From Razorpay Dashboard → Webhooks → Secret
+    booking_fee_paise: int = 50000       # Fallback fee (₹500) if doctor has no consultation_fee
+    booking_hold_minutes: int = 10       # How long a pending_payment slot is held
+    refund_window_hours: int = 4         # Minimum hours before slot for refund eligibility
+
     model_config = SettingsConfigDict(env_file=".env")
 
 

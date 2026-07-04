@@ -51,6 +51,7 @@ class ConversationState(str, Enum):
     SELECTING_DATE = "selecting_date"
     SELECTING_SLOT = "selecting_slot"
     CONFIRMING_BOOKING = "confirming_booking"
+    AWAITING_PAYMENT = "awaiting_payment"
     MANAGING_APPOINTMENT = "managing_appointment"
     RESCHEDULING = "rescheduling"
     EMERGENCY = "emergency"
@@ -487,6 +488,8 @@ class ConversationManager:
             await self._handle_selecting_slot(clinic, phone, message, intent, context, lang)
         elif state == "confirming_booking":
             await self._handle_confirming_booking(clinic, phone, message, intent, context, patient, lang)
+        elif state == "awaiting_payment":
+            await self._handle_awaiting_payment(clinic, phone, message, context, patient, lang)
         elif state == "viewing_reports":
             await self._handle_viewing_reports(clinic, phone, message, session, lang)
         elif state == "emergency":
@@ -1439,95 +1442,198 @@ class ConversationManager:
         patient: dict,
         lang: str
     ) -> None:
-        """Handle booking confirmation."""
+        """Handle booking confirmation — creates a payment-gated booking.
+
+        Instead of directly confirming, this:
+          1. Creates a pending_payment booking + Razorpay order
+          2. Sends the payment link to the patient via WhatsApp
+          3. Transitions to awaiting_payment state
+          4. Actual confirmation happens only via verified Razorpay webhook
+        """
 
         if intent in ["confirm_booking", "yes"]:
-            # Attempt to book
             from datetime import datetime
+            from app.services.payment import payment_service
 
-            appointment_data = {
-                "patient_id": patient.get("id"),
-                "patient_phone": phone,
-                "patient_name": context.get("booking_name", "Patient"),
-                "department": context.get("department", "General Medicine"),
-                "doctor_name": context["doctor_name"],
-                "appointment_date": context["appointment_date"],
-                "appointment_time": context["appointment_time"],
-                "symptoms": context.get("symptoms", ""),
-                "status": "confirmed"
-            }
-
-            result = await book_appointment(clinic["id"], appointment_data)
+            result = await payment_service.create_booking_with_payment(
+                clinic_id=clinic["id"],
+                patient_phone=phone,
+                patient_name=context.get("booking_name", "Patient"),
+                department=context.get("department", "General Medicine"),
+                doctor_name=context["doctor_name"],
+                appointment_date=context["appointment_date"],
+                appointment_time=context["appointment_time"],
+                symptoms=context.get("symptoms", ""),
+                patient_id=patient.get("id"),
+            )
 
             if result["success"]:
-                appointment = result["appointment"]
+                amount_rupees = result["amount_paise"] / 100
                 date_display = datetime.strptime(context["appointment_date"], "%Y-%m-%d").strftime("%d %b %Y")
 
+                payment_msg = {
+                    "en": (
+                        f"💳 *Payment Required to Confirm Booking*\n\n"
+                        f"👨‍⚕️ Doctor: {context['doctor_name']}\n"
+                        f"📅 Date: {date_display}\n"
+                        f"🕐 Time: {context['appointment_time']}\n"
+                        f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
+                        f"⏱️ *This slot is held for 10 minutes.* Pay before it expires.\n\n"
+                        f"👉 Click below to pay securely via Razorpay:\n"
+                        f"{result['payment_link']}\n\n"
+                        f"_Amount is refundable if cancelled {settings.refund_window_hours}+ hours before appointment. "
+                        f"No-show bookings are non-refundable._"
+                    ),
+                    "hi": (
+                        f"💳 *बुकिंग की पुष्टि के लिए भुगतान करें*\n\n"
+                        f"👨‍⚕️ डॉक्टर: {context['doctor_name']}\n"
+                        f"📅 तारीख: {date_display}\n"
+                        f"🕐 समय: {context['appointment_time']}\n"
+                        f"💰 राशि: ₹{amount_rupees:.0f}\n\n"
+                        f"⏱️ *यह स्लॉट 10 मिनट के लिए होल्ड है।* समय से पहले भुगतान करें।\n\n"
+                        f"👉 Razorpay से सुरक्षित भुगतान करें:\n"
+                        f"{result['payment_link']}\n\n"
+                        f"_अपॉइंटमेंट से {settings.refund_window_hours}+ घंटे पहले रद्द करने पर राशि वापस की जाएगी। "
+                        f"नो-शो बुकिंग पर रिफंड नहीं होगा।_"
+                    ),
+                    "te": (
+                        f"💳 *బుకింగ్ నిర్ధారించడానికి చెల్లింపు అవసరం*\n\n"
+                        f"👨‍⚕️ డాక్టర్: {context['doctor_name']}\n"
+                        f"📅 తేదీ: {date_display}\n"
+                        f"🕐 సమయం: {context['appointment_time']}\n"
+                        f"💰 మొత్తం: ₹{amount_rupees:.0f}\n\n"
+                        f"⏱️ *ఈ స్లాట్ 10 నిమిషాలు హోల్డ్ చేయబడింది.* గడువులోపు చెల్లించండి.\n\n"
+                        f"👉 Razorpay ద్వారా సురక్షితంగా చెల్లించండి:\n"
+                        f"{result['payment_link']}\n\n"
+                        f"_అపాయింట్‌మెంట్‌కు {settings.refund_window_hours}+ గంటల ముందు రద్దు చేస్తే మొత్తం రీఫండ్ అవుతుంది. "
+                        f"నో-షో బుకింగ్‌లు రీఫండ్ కావు._"
+                    ),
+                }.get(lang, None)
+
+                if not payment_msg:
+                    payment_msg = (
+                        f"💳 *Payment Required to Confirm Booking*\n\n"
+                        f"👨‍⚕️ Doctor: {context['doctor_name']}\n"
+                        f"📅 Date: {date_display}\n"
+                        f"🕐 Time: {context['appointment_time']}\n"
+                        f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
+                        f"⏱️ *This slot is held for 10 minutes.* Pay before it expires.\n\n"
+                        f"👉 Click below to pay securely via Razorpay:\n"
+                        f"{result['payment_link']}\n\n"
+                        f"_Refundable if cancelled {settings.refund_window_hours}+ hours before appointment. "
+                        f"No-show bookings are non-refundable._"
+                    )
+
+                await self.whatsapp.send_text(clinic, phone, payment_msg)
+
+                await log_analytics_event(clinic["id"], phone, "payment_link_sent", department=context.get("department"))
+
+                # Save booking context and transition to awaiting_payment
+                context["booking_id"] = result["booking_id"]
+                context["razorpay_order_id"] = result["razorpay_order_id"]
+                context["booking_ref"] = result["booking_ref"]
+                await self.update_state(clinic, phone, "awaiting_payment", context)
+
+            elif result.get("reason") == "slot_taken":
                 await self.whatsapp.send_text(
                     clinic, phone,
-                    get_message(
-                        "booking_confirmed",
-                        lang,
-                        ref=appointment["booking_ref"],
-                        doctor=context["doctor_name"],
-                        date=date_display,
-                        time=context["appointment_time"]
-                    )
+                    get_message("slot_taken", lang, doctor=context["doctor_name"])
                 )
-
-                await log_analytics_event(clinic["id"], phone, "appointment_booked", department=context.get("department"))
-
-                import asyncio
-                await asyncio.sleep(2)
-                
-                # Pre-appointment instructions for dept
-                dept_instruction = {
-                    "en": f"Instructions for {context.get('department')}: Please arrive 15 minutes early and bring relevant medical records.",
-                    "hi": f"{context.get('department')} के लिए निर्देश: कृपया 15 मिनट पहले पहुंचें और प्रासंगिक चिकित्सा रिकॉर्ड लाएं।",
-                    "te": f"{context.get('department')} కోసం సూచనలు: దయచేసి సంబంధిత మెడికల్ రికార్డులను తీసుకుని 15 నిమిషాల ముందుగా రండి."
-                }.get(lang, "Please arrive 15 mins early.")
-                await self.whatsapp.send_text(clinic, phone, dept_instruction)
-
-                # Follow-up
-                follow_up_msg = {
-                    "en": "What would you like to do?",
-                    "hi": "आप आगे क्या करना चाहेंगे?",
-                    "te": "మీరు ఇంకా ఏమి చేయాలనుకుంటున్నారు?"
-                }.get(lang, "What would you like to do?")
-                await self.whatsapp.send_interactive_buttons(
-                    clinic, phone,
-                    body=follow_up_msg,
-                    buttons=[
-                        {"id": "book_another", "title": "Book Appointment"},
-                        {"id": "main_menu", "title": "Main Menu"}
-                    ]
-                )
-
-                # Reset to main menu
-                await self.update_state(clinic, phone, "main_menu")
-            else:
-                if result.get("reason") == "slot_taken":
-                    # Slot was taken, show alternatives
-                    await self.whatsapp.send_text(
-                        clinic, phone,
-                        get_message("slot_taken", lang, doctor=context["doctor_name"])
-                    )
-                    # Get next available slots
-                    slots, _ = await get_available_slots(clinic["id"], context["doctor_name"], context["appointment_date"])
-                    if slots:
-                        await self._show_slot_list(clinic, phone, slots[:3], context, lang)
-                    else:
-                        await self._suggest_other_doctors(clinic, phone, context, lang)
+                slots, _ = await get_available_slots(clinic["id"], context["doctor_name"], context["appointment_date"])
+                if slots:
+                    await self._show_slot_list(clinic, phone, slots[:3], context, lang)
                 else:
-                    await self.whatsapp.send_text(
-                        clinic, phone,
-                        get_message("booking_failed", lang, phone=clinic["whatsapp_number"])
-                    )
-                    await self.update_state(clinic, phone, "main_menu")
-                    await self._send_main_menu(clinic, phone, lang)
+                    await self._suggest_other_doctors(clinic, phone, context, lang)
+            else:
+                error_msg = {
+                    "en": "Sorry, we couldn't process your booking right now. Please try again.",
+                    "hi": "क्षमा करें, अभी बुकिंग प्रक्रिया नहीं हो सकी। कृपया पुनः प्रयास करें।",
+                    "te": "క్షమించండి, మీ బుకింగ్ ప్రాసెస్ కాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.",
+                }.get(lang, "Sorry, we couldn't process your booking right now. Please try again.")
+                await self.whatsapp.send_text(clinic, phone, error_msg)
+                await self.update_state(clinic, phone, "main_menu")
+                await self._send_main_menu(clinic, phone, lang)
         else:
             # Edit booking - go back to doctor selection
             await self._show_doctor_list(clinic, phone, context.get("department", "General Medicine"), context, lang)
+
+    async def _handle_awaiting_payment(self, clinic: dict, phone: str,
+        message: str,
+        context: dict,
+        patient: dict,
+        lang: str
+    ) -> None:
+        """Handle messages while patient is in the awaiting_payment state.
+
+        The patient may ask about payment status or want to cancel.
+        Actual confirmation only happens via Razorpay webhook, never here.
+        """
+        msg_lower = message.lower().strip()
+
+        if msg_lower in ["cancel", "रद्द", "రద్దు", "cancel booking"]:
+            # Cancel the pending booking
+            booking_id = context.get("booking_id")
+            if booking_id:
+                from app.database import supabase
+                supabase.table("appointments").update({
+                    "status": "cancelled"
+                }).eq("id", booking_id).eq("status", "pending_payment").execute()
+
+            cancel_msg = {
+                "en": "Booking cancelled. The slot has been released.",
+                "hi": "बुकिंग रद्द कर दी गई। स्लॉट खाली हो गया है।",
+                "te": "బుకింగ్ రద్దు చేయబడింది. స్లాట్ విడుదల చేయబడింది.",
+            }.get(lang, "Booking cancelled. The slot has been released.")
+            await self.whatsapp.send_text(clinic, phone, cancel_msg)
+            await self.update_state(clinic, phone, "main_menu")
+            await self._send_main_menu(clinic, phone, lang)
+            return
+
+        if msg_lower in ["status", "payment status", "स्थिति", "స్థితి"]:
+            # Check if booking was confirmed by webhook in the meantime
+            booking_id = context.get("booking_id")
+            if booking_id:
+                from app.database import supabase
+                result = supabase.table("appointments").select("status, booking_ref").eq("id", booking_id).execute()
+                if result.data:
+                    status = result.data[0]["status"]
+                    if status == "confirmed":
+                        confirmed_msg = {
+                            "en": f"✅ Your payment has been received and booking *{result.data[0].get('booking_ref', '')}* is confirmed!",
+                            "hi": f"✅ आपका भुगतान प्राप्त हो गया है और बुकिंग *{result.data[0].get('booking_ref', '')}* पुष्ट है!",
+                            "te": f"✅ మీ చెల్లింపు అందింది మరియు బుకింగ్ *{result.data[0].get('booking_ref', '')}* నిర్ధారించబడింది!",
+                        }.get(lang, f"✅ Payment received — booking {result.data[0].get('booking_ref', '')} confirmed!")
+                        await self.whatsapp.send_text(clinic, phone, confirmed_msg)
+                        await self.update_state(clinic, phone, "main_menu")
+                        await self._send_main_menu(clinic, phone, lang)
+                        return
+                    elif status == "expired":
+                        expired_msg = {
+                            "en": "⏰ Your payment window has expired. The slot has been released. Would you like to book again?",
+                            "hi": "⏰ भुगतान का समय समाप्त हो गया। स्लॉट खाली हो गया है। क्या आप फिर से बुक करना चाहेंगे?",
+                            "te": "⏰ చెల్లింపు సమయం ముగిసింది. స్లాట్ విడుదల చేయబడింది. మళ్ళీ బుక్ చేయాలనుకుంటున్నారా?",
+                        }.get(lang, "⏰ Payment window expired. Slot released. Book again?")
+                        await self.whatsapp.send_text(clinic, phone, expired_msg)
+                        await self.update_state(clinic, phone, "main_menu")
+                        await self._send_main_menu(clinic, phone, lang)
+                        return
+
+            # Still pending
+            pending_msg = {
+                "en": "⏳ Waiting for your payment. Please complete the payment using the link above, or type *cancel* to cancel.",
+                "hi": "⏳ आपके भुगतान की प्रतीक्षा है। ऊपर दिए गए लिंक से भुगतान करें, या *cancel* टाइप करें।",
+                "te": "⏳ మీ చెల్లింపు కోసం ఎదురుచూస్తున్నాము. పైన ఉన్న లింక్ ద్వారా చెల్లించండి, లేదా *cancel* టైప్ చేయండి.",
+            }.get(lang, "⏳ Waiting for payment. Use the link or type *cancel*.")
+            await self.whatsapp.send_text(clinic, phone, pending_msg)
+            return
+
+        # Default: remind them to pay
+        reminder_msg = {
+            "en": "💳 Your slot is being held. Please complete the payment using the link sent above, or type *cancel* to release the slot.",
+            "hi": "💳 आपका स्लॉट होल्ड है। ऊपर दिए लिंक से भुगतान करें, या *cancel* टाइप करें।",
+            "te": "💳 మీ స్లాట్ హోల్డ్ చేయబడింది. పైన పంపిన లింక్ ద్వారా చెల్లించండి, లేదా *cancel* టైప్ చేయండి.",
+        }.get(lang, "💳 Slot held. Pay via the link or type *cancel*.")
+        await self.whatsapp.send_text(clinic, phone, reminder_msg)
 
     async def _suggest_other_doctors(self, clinic: dict, phone: str, context: dict, lang: str) -> None:
         """Suggest other doctors when selected doctor is fully booked."""
