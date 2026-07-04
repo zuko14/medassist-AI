@@ -39,6 +39,10 @@ class CreateClinicRequest(BaseModel):
     timezone: str = "Asia/Kolkata"
     system_prompt: Optional[str] = None
     logo_url: Optional[str] = None
+    # Per-clinic Razorpay credentials (optional — falls back to global settings if omitted)
+    razorpay_key_id: Optional[str] = None       # e.g. "rzp_live_xxxxxx"
+    razorpay_key_secret: Optional[str] = None   # Keep this secret
+    razorpay_webhook_secret: Optional[str] = None  # From Razorpay Dashboard → Webhooks
 
 
 @router.post("", dependencies=[Depends(verify_admin_secret)])
@@ -56,6 +60,13 @@ async def create_clinic(req: CreateClinicRequest):
         config["system_prompt"] = req.system_prompt
     if req.logo_url:
         config["logo_url"] = req.logo_url
+    # Only store Razorpay keys if explicitly provided — never store empty strings
+    if req.razorpay_key_id:
+        config["razorpay_key_id"] = req.razorpay_key_id
+    if req.razorpay_key_secret:
+        config["razorpay_key_secret"] = req.razorpay_key_secret
+    if req.razorpay_webhook_secret:
+        config["razorpay_webhook_secret"] = req.razorpay_webhook_secret
 
     try:
         result = supabase.table("clinics").insert({

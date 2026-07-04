@@ -1452,8 +1452,10 @@ class ConversationManager:
         if intent in ["confirm_booking", "yes"]:
             from datetime import datetime
 
-            # ── Check if Razorpay is configured ──
-            razorpay_configured = bool(settings.razorpay_key_id and settings.razorpay_key_secret)
+            # ── Check if Razorpay is configured (per-clinic first, global fallback) ──
+            from app.services.payment import get_razorpay_creds
+            _rz_key_id, _rz_key_secret, _ = get_razorpay_creds(clinic)
+            razorpay_configured = bool(_rz_key_id and _rz_key_secret)
 
             if razorpay_configured:
                 # ═══ PATH A: Payment-gated booking ═══
@@ -1469,7 +1471,9 @@ class ConversationManager:
                     appointment_time=context["appointment_time"],
                     symptoms=context.get("symptoms", ""),
                     patient_id=patient.get("id"),
+                    clinic=clinic,
                 )
+
 
                 if result["success"]:
                     amount_rupees = result["amount_paise"] / 100

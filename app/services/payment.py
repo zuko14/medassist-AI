@@ -8,6 +8,16 @@ SECURITY INVARIANTS — if any of these are violated, treat it as a P0 bug:
   5. Amounts are ALWAYS in integer paise — never floats.
   6. Every state transition is logged to the append-only payment_events table.
   7. Fail closed: ambiguous states → pending_review, never auto-confirmed.
+
+MULTI-TENANT RAZORPAY:
+  Each clinic can store its own Razorpay credentials inside the clinics.config JSONB:
+    {
+      "razorpay_key_id":       "rzp_live_xxxxxx",
+      "razorpay_key_secret":   "<secret>",
+      "razorpay_webhook_secret": "<webhook_secret>"
+    }
+  If a clinic has no per-clinic keys, the global settings (env vars) are used as a
+  transparent fallback — so single-clinic deployments need zero changes.
 """
 
 import hashlib
@@ -24,6 +34,23 @@ from app.config import settings
 from app.database import supabase
 
 logger = logging.getLogger(__name__)
+
+
+def get_razorpay_creds(clinic: dict) -> tuple[str, str, str]:
+    """Extract Razorpay credentials from a clinic config with global settings fallback.
+
+    Resolution order (per credential):
+      1. clinic["config"]["razorpay_key_id"]       — per-clinic override
+      2. settings.razorpay_key_id                   — global env-var fallback
+
+    Returns:
+        (key_id, key_secret, webhook_secret)
+    """
+    cfg: dict = clinic.get("config") or {}
+    key_id = cfg.get("razorpay_key_id") or settings.razorpay_key_id
+    key_secret = cfg.get("razorpay_key_secret") or settings.razorpay_key_secret
+    webhook_secret = cfg.get("razorpay_webhook_secret") or settings.razorpay_webhook_secret
+    return key_id, key_secret, webhook_secret
 
 
 class PaymentService:
@@ -47,13 +74,21 @@ class PaymentService:
         appointment_time: str,
         symptoms: str = "",
         patient_id: Optional[str] = None,
+        clinic: Optional[dict] = None,
     ) -> dict:
         """Create a pending_payment booking and a Razorpay order.
+
+        Args:
+            clinic: Optional full clinic dict. If provided, per-clinic Razorpay
+                    credentials are used. Falls back to global settings if None.
 
         Returns:
             dict with keys: success, booking_id, razorpay_order_id,
             payment_link, amount_paise, hold_expires_at, reason
         """
+        # ── Resolve per-clinic Razorpay credentials ──
+        key_id, key_secret, _ = get_razorpay_creds(clinic or {})
+
         # ── Determine fee from doctor's consultation_fee ──
         amount_paise = await self._get_doctor_fee_paise(clinic_id, doctor_name)
 
@@ -106,6 +141,8 @@ class PaymentService:
                 booking_id=booking_id,
                 booking_ref=booking_ref,
                 patient_phone=patient_phone,
+                key_id=key_id,
+                key_secret=key_secret,
             )
 
             razorpay_order_id = order["id"]
@@ -123,7 +160,7 @@ class PaymentService:
             })
 
             # Build the payment link
-            payment_link = self._build_payment_link(razorpay_order_id)
+            payment_link = self._build_payment_link(razorpay_order_id, key_id=key_id)
 
             return {
                 "success": True,
@@ -153,16 +190,26 @@ class PaymentService:
     # 2. WEBHOOK SIGNATURE VERIFICATION
     # ─────────────────────────────────────────────────────────────────────
 
-    def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
+    def verify_webhook_signature(
+        self,
+        raw_body: bytes,
+        signature: str,
+        webhook_secret: Optional[str] = None,
+    ) -> bool:
         """Verify Razorpay webhook HMAC-SHA256 signature.
 
         MUST be called BEFORE parsing or trusting any field in the payload.
+
+        Args:
+            webhook_secret: Per-clinic webhook secret. Falls back to
+                            settings.razorpay_webhook_secret if None/empty.
         """
-        if not signature or not settings.razorpay_webhook_secret:
+        secret = webhook_secret or settings.razorpay_webhook_secret
+        if not signature or not secret:
             return False
 
         expected = hmac.new(
-            settings.razorpay_webhook_secret.encode("utf-8"),
+            secret.encode("utf-8"),
             raw_body,
             hashlib.sha256,
         ).hexdigest()
@@ -173,13 +220,22 @@ class PaymentService:
     # 3. PROCESS PAYMENT WEBHOOK
     # ─────────────────────────────────────────────────────────────────────
 
-    async def process_payment_webhook(self, raw_body: bytes, signature: str) -> dict:
+    async def process_payment_webhook(
+        self,
+        raw_body: bytes,
+        signature: str,
+        webhook_secret: Optional[str] = None,
+    ) -> dict:
         """Process a Razorpay webhook event.
+
+        Args:
+            webhook_secret: Per-clinic webhook secret resolved by the router.
+                            Falls back to settings if None.
 
         Returns: {"status": "ok"|"error"|"ignored", "code": 200|400}
         """
         # ── Step 1: Verify signature FIRST ──
-        if not self.verify_webhook_signature(raw_body, signature):
+        if not self.verify_webhook_signature(raw_body, signature, webhook_secret=webhook_secret):
             # Log the failure — possible spoofing attempt
             self._log_payment_event_raw(None, "signature_failed", {
                 "signature_provided": signature[:20] + "..." if signature else "none",
@@ -349,6 +405,9 @@ class PaymentService:
         If Razorpay shows 'paid' but we missed the webhook, CONFIRM instead.
         Never silently drop a paid booking.
 
+        Each stale booking's clinic is fetched individually so the correct
+        per-clinic Razorpay credentials are used for the order status check.
+
         Returns: number of bookings processed
         """
         now = datetime.now(timezone.utc).isoformat()
@@ -368,16 +427,32 @@ class PaymentService:
             order_id = booking.get("razorpay_order_id")
 
             try:
+                # ── Resolve per-clinic Razorpay creds for this booking ──
+                clinic_for_booking: dict = {}
+                clinic_id_for_booking = booking.get("clinic_id")
+                if clinic_id_for_booking:
+                    try:
+                        from app.services.tenant import get_clinic_by_id
+                        clinic_for_booking = await get_clinic_by_id(clinic_id_for_booking)
+                    except Exception as ce:
+                        logger.warning(f"Could not fetch clinic {clinic_id_for_booking} for expiry: {ce}")
+
+                key_id, key_secret, _ = get_razorpay_creds(clinic_for_booking)
+
                 # ── Recovery path: check Razorpay before expiring ──
                 if order_id:
-                    rz_status = await self._check_razorpay_order_status(order_id)
+                    rz_status = await self._check_razorpay_order_status(
+                        order_id, key_id=key_id, key_secret=key_secret
+                    )
 
                     if rz_status == "paid":
                         # Webhook was missed — recover by confirming
                         logger.info(f"Recovery: booking {booking_id} was paid on Razorpay but webhook missed. Confirming.")
 
                         # Fetch payment details from Razorpay
-                        payment_info = await self._get_razorpay_order_payments(order_id)
+                        payment_info = await self._get_razorpay_order_payments(
+                            order_id, key_id=key_id, key_secret=key_secret
+                        )
                         payment_id = payment_info.get("payment_id", f"recovery_{order_id}")
 
                         supabase.table("appointments").update({
@@ -417,14 +492,19 @@ class PaymentService:
     # 5. REFUNDS
     # ─────────────────────────────────────────────────────────────────────
 
-    async def initiate_refund(self, booking_id: str, reason: str = "") -> dict:
+    async def initiate_refund(self, booking_id: str, reason: str = "", clinic: Optional[dict] = None) -> dict:
         """Initiate a refund for a confirmed booking.
 
         Checks refund eligibility (4+ hours before slot), calls Razorpay
         Refund API with an idempotency key, and logs all transitions.
 
+        Args:
+            clinic: Optional clinic dict. Used to resolve per-clinic Razorpay
+                    credentials. Falls back to global settings if None.
+
         Returns: {"success": bool, "refund_id": str, "reason": str}
         """
+        key_id, key_secret, _ = get_razorpay_creds(clinic or {})
         # ── Look up booking ──
         booking_result = supabase.table("appointments") \
             .select("*") \
@@ -473,6 +553,8 @@ class PaymentService:
                 amount_paise=booking["amount_paise"],
                 reason=reason,
                 idempotency_key=idempotency_key,
+                key_id=key_id,
+                key_secret=key_secret,
             )
 
             refund_id = refund_result.get("id", "")
@@ -629,9 +711,19 @@ class PaymentService:
         booking_id: str,
         booking_ref: str,
         patient_phone: str,
+        key_id: str = "",
+        key_secret: str = "",
     ) -> dict:
-        """Create a Razorpay Order via their API."""
-        if not settings.razorpay_key_id or not settings.razorpay_key_secret:
+        """Create a Razorpay Order via their API.
+
+        Args:
+            key_id:     Per-clinic key ID (or global fallback).
+            key_secret: Per-clinic key secret (or global fallback).
+        """
+        effective_key_id = key_id or settings.razorpay_key_id
+        effective_key_secret = key_secret or settings.razorpay_key_secret
+
+        if not effective_key_id or not effective_key_secret:
             raise ValueError("Razorpay API credentials not configured")
 
         order_data = {
@@ -650,32 +742,41 @@ class PaymentService:
             response = await client.post(
                 f"{self._razorpay_base}/orders",
                 json=order_data,
-                auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+                auth=(effective_key_id, effective_key_secret),
                 timeout=15.0,
             )
             response.raise_for_status()
             return response.json()
 
-    def _build_payment_link(self, order_id: str) -> str:
+    def _build_payment_link(self, order_id: str, key_id: str = "") -> str:
         """Build the Razorpay checkout payment link.
 
         For WhatsApp, we use a hosted checkout page URL that includes
         the order ID. The patient opens this in their mobile browser.
+
+        Args:
+            key_id: Per-clinic key ID. Falls back to settings if empty.
         """
-        # Razorpay standard checkout URL format
-        key_id = settings.razorpay_key_id
+        effective_key_id = key_id or settings.razorpay_key_id
         return (
             f"https://api.razorpay.com/v1/checkout/embedded?"
-            f"key_id={key_id}&order_id={order_id}"
+            f"key_id={effective_key_id}&order_id={order_id}"
         )
 
-    async def _check_razorpay_order_status(self, order_id: str) -> str:
+    async def _check_razorpay_order_status(
+        self,
+        order_id: str,
+        key_id: str = "",
+        key_secret: str = "",
+    ) -> str:
         """Check order status from Razorpay (for recovery/expiry path)."""
+        effective_key_id = key_id or settings.razorpay_key_id
+        effective_key_secret = key_secret or settings.razorpay_key_secret
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{self._razorpay_base}/orders/{order_id}",
-                    auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+                    auth=(effective_key_id, effective_key_secret),
                     timeout=10.0,
                 )
                 response.raise_for_status()
@@ -684,13 +785,20 @@ class PaymentService:
             logger.error(f"Error checking Razorpay order status for {order_id}: {e}")
             return "unknown"
 
-    async def _get_razorpay_order_payments(self, order_id: str) -> dict:
+    async def _get_razorpay_order_payments(
+        self,
+        order_id: str,
+        key_id: str = "",
+        key_secret: str = "",
+    ) -> dict:
         """Get payment details for a Razorpay order."""
+        effective_key_id = key_id or settings.razorpay_key_id
+        effective_key_secret = key_secret or settings.razorpay_key_secret
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{self._razorpay_base}/orders/{order_id}/payments",
-                    auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+                    auth=(effective_key_id, effective_key_secret),
                     timeout=10.0,
                 )
                 response.raise_for_status()
@@ -708,8 +816,12 @@ class PaymentService:
         amount_paise: int,
         reason: str,
         idempotency_key: str,
+        key_id: str = "",
+        key_secret: str = "",
     ) -> dict:
         """Call Razorpay Refund API."""
+        effective_key_id = key_id or settings.razorpay_key_id
+        effective_key_secret = key_secret or settings.razorpay_key_secret
         refund_data = {
             "amount": amount_paise,
             "speed": "normal",
@@ -722,7 +834,7 @@ class PaymentService:
             response = await client.post(
                 f"{self._razorpay_base}/payments/{payment_id}/refund",
                 json=refund_data,
-                auth=(settings.razorpay_key_id, settings.razorpay_key_secret),
+                auth=(effective_key_id, effective_key_secret),
                 headers={"X-Razorpay-Idempotency-Key": idempotency_key},
                 timeout=15.0,
             )
