@@ -56,7 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_appointments_pending_review
 -- for all payment-related state changes.
 CREATE TABLE IF NOT EXISTS payment_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    booking_id UUID NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+    booking_id UUID NOT NULL REFERENCES appointments(id) ON DELETE RESTRICT,
     event_type TEXT NOT NULL,
     -- e.g.: order_created, webhook_received, signature_verified,
     --        signature_failed, confirmed, refund_initiated,
