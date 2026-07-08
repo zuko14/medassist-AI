@@ -64,7 +64,7 @@ class ConversationState(str, Enum):
 class ConversationManager:
     """Manages conversation state and flow."""
 
-    async def update_state(self, clinic: dict, phone: str, new_state: str, new_context: dict = None) -> None:
+    async def update_state(self, clinic: dict, phone: str, new_state: str, new_context: Optional[dict] = None) -> None:
         if new_context is None:
             new_context = {}
         from app.database import get_conversation
@@ -512,8 +512,8 @@ class ConversationManager:
             # Returning patient — skip language picker
             if not patient.get("data_consent"):
                 from app.database import get_conversation
-                session = await get_session(phone)
-                if session.get("state") == "awaiting_consent":
+                session = await get_conversation(clinic["id"], phone)
+                if session and session.get("state") == "awaiting_consent":
                     return  # already sent, don't send again
 
                 await self.whatsapp.send_interactive_buttons(
@@ -588,7 +588,7 @@ class ConversationManager:
         if consent is None or consent is False:
             from app.database import get_conversation
             session = await get_conversation(clinic["id"], phone)
-            state = session.get("state")
+            state = session.get("state") if session else None
             if state == "awaiting_consent":
                 return  # already sent consent, don't send again
                 
@@ -733,8 +733,9 @@ class ConversationManager:
             context["menu_shown"] = True
             await self.update_state(clinic, phone, "main_menu", context)
 
-    async def _start_booking(self, clinic: dict, phone: str, patient: dict, lang: str) -> None:
+    async def _start_booking(self, clinic: dict, phone: str, patient: Optional[dict], lang: str) -> None:
         """Start the booking flow."""
+        patient = patient or {}
 
         # Guard: Language must be set before proceeding
         if not patient.get("language"):
@@ -1192,6 +1193,7 @@ class ConversationManager:
                 doctor_name = doctor["name"]
             else:
                 doctor = None
+                doctor_name = ""
 
         if not doctor:
             # Implement Fallback: resend the list instead of just an error text
