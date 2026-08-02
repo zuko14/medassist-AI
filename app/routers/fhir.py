@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import JSONResponse
 
 from app.database import supabase
-from app.routers.admin import verify_credentials
+from app.routers.admin import verify_credentials, enforce_clinic_access, AdminUser
 from app.services.fhir_schemas import (
     patient_to_fhir,
     appointment_to_fhir,
@@ -44,7 +44,7 @@ def _fhir_response(data: dict) -> JSONResponse:
 async def get_patient_fhir(
     phone: str = Path(..., description="Patient phone number (E.164 or local format)"),
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Return a patient as a FHIR R4 Patient resource.
 
@@ -52,6 +52,7 @@ async def get_patient_fhir(
         phone: Patient's registered phone number.
         clinic_id: Tenant clinic ID (defaults to 'default').
     """
+    clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         # Fetch patient
         query = supabase.table("patients").select("*").eq("phone", phone)
@@ -103,7 +104,7 @@ async def get_appointment_fhir(
         ..., description="Appointment booking reference (e.g. MC-ABC123)"
     ),
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Return an appointment as a FHIR R4 Appointment resource.
 
@@ -111,6 +112,7 @@ async def get_appointment_fhir(
         booking_ref: Booking reference code (e.g., MC-ABC123).
         clinic_id: Tenant clinic ID.
     """
+    clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = (
             supabase.table("appointments").select("*").eq("booking_ref", booking_ref)
@@ -161,9 +163,10 @@ async def get_appointment_fhir(
 async def get_diagnostic_report_fhir(
     report_id: str = Path(..., description="Lab report UUID"),
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Return a lab report as a FHIR R4 DiagnosticReport resource."""
+    clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("lab_reports").select("*").eq("id", report_id)
         if clinic_id != "default":
@@ -199,13 +202,14 @@ async def get_diagnostic_report_fhir(
 async def get_patient_everything(
     phone: str = Path(..., description="Patient phone number"),
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Return a FHIR Bundle with all data for a patient.
 
     Implements the FHIR $everything operation — returns Patient + Appointments
     + DiagnosticReports as a single Bundle resource.
     """
+    clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         resources = []
 

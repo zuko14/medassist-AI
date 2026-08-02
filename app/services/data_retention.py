@@ -170,15 +170,43 @@ class DataRetentionService:
             logger.error(f"Appointment anonymization error: {e}")
             results["errors"].append(f"appointments: {e}")
 
-        # 2. Anonymize lab reports — preserve report_type, created_at
+        # 2. Anonymize lab reports — delete PDF from Storage & redact DB row
         try:
+            # Fetch lab report file_path(s) before redacting DB row
+            reports_res = (
+                supabase.table("lab_reports")
+                .select("id, file_path")
+                .eq("clinic_id", clinic_id)
+                .eq("patient_phone", phone)
+                .execute()
+            )
+            file_paths_to_delete = [
+                r["file_path"]
+                for r in (reports_res.data or [])
+                if r.get("file_path") and r["file_path"] != "[REDACTED]"
+            ]
+
+            # Remove objects from Supabase Storage
+            if file_paths_to_delete:
+                try:
+                    supabase.storage.from_("lab-reports").remove(file_paths_to_delete)
+                    logger.info(
+                        f"Data retention: deleted {len(file_paths_to_delete)} lab report storage object(s) for patient"
+                    )
+                except Exception as storage_err:
+                    logger.error(
+                        f"Data retention: failed to remove lab report PDF(s) from storage: {storage_err}"
+                    )
+                    results["errors"].append(f"lab_reports_storage: {storage_err}")
+
+            # Update database row (use correct column name: file_path)
             lr_res = (
                 supabase.table("lab_reports")
                 .update(
                     {
                         "patient_name": "[REDACTED]",
                         "patient_phone": "[REDACTED]",
-                        "file_url": "[REDACTED]",
+                        "file_path": "[REDACTED]",
                     }
                 )
                 .eq("clinic_id", clinic_id)
@@ -187,8 +215,8 @@ class DataRetentionService:
             )
             results["lab_reports_anonymized"] = len(lr_res.data or [])
         except Exception as e:
-            # Lab reports table might not exist in all deployments
-            logger.debug(f"Lab reports anonymization skipped: {e}")
+            logger.error(f"Lab reports anonymization error: {e}")
+            results["errors"].append(f"lab_reports: {e}")
 
         # 3. Anonymize prescriptions — preserve medicine class, frequency (not name)
         try:
@@ -207,7 +235,8 @@ class DataRetentionService:
             )
             results["prescriptions_anonymized"] = len(rx_res.data or [])
         except Exception as e:
-            logger.debug(f"Prescriptions anonymization skipped: {e}")
+            logger.error(f"Prescriptions anonymization error: {e}")
+            results["errors"].append(f"prescriptions: {e}")
 
         # 4. Mark the patient row itself as anonymized (but keep the shell for FK integrity)
         try:

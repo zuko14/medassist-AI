@@ -1,12 +1,20 @@
 """Database module for Supabase integration (Multi-Tenant Scoped)."""
 
+import asyncio
 import logging
+import time
 from typing import Optional
 from supabase import create_client, Client
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# TTL Caches for static metadata (5 minutes)
+_doctor_cache: dict[str, dict] = {}
+_holiday_cache: dict[str, dict] = {}
+DOCTOR_CACHE_TTL_SECONDS = 300
+HOLIDAY_CACHE_TTL_SECONDS = 300
 
 # Initialize Supabase client
 supabase: Client = create_client(
@@ -217,7 +225,12 @@ async def get_doctors_at_branch(
 
 
 async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
-    """Get doctor by name."""
+    """Get doctor by name with TTL cache."""
+    cache_key = f"{clinic_id}:{name}"
+    cached = _doctor_cache.get(cache_key)
+    if cached and (time.time() - cached.get("cached_at", 0) < DOCTOR_CACHE_TTL_SECONDS):
+        return cached.get("data")
+
     try:
         result = (
             supabase.table("doctors")
@@ -227,7 +240,9 @@ async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
             .execute()
         )
         if result.data:
-            return result.data[0]
+            doc = result.data[0]
+            _doctor_cache[cache_key] = {"data": doc, "cached_at": time.time()}
+            return doc
         return None
     except Exception as e:
         logger.error(f"Error getting doctor: {e}")
@@ -236,106 +251,122 @@ async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
 
 async def get_available_slots(
     clinic_id: str,
-    doctor_name: str,
-    date_str: str,
+    doctor_name: Optional[str] = None,
+    date_str: Optional[str] = None,
     branch_id: Optional[str] = None,
     branch_session: Optional[str] = None,
 ) -> tuple[list, Optional[str]]:
-    """Get available slots for a doctor on a specific date.
+    """Get available slots for a doctor on a specific date using parallel queries & metadata caching.
 
-    Args:
-        branch_id: Optional branch for context (used for holiday checks)
-        branch_session: Optional session filter from doctor_branches.
-            'morning' = only morning slots, 'evening' = only evening slots, 'both'/None = all.
-
-    Returns (slots, reason).
+    Supports 2-arg (doctor_name, date_str) and 3-arg (clinic_id, doctor_name, date_str) calls.
     """
     from datetime import datetime, date as dt_date, timedelta
 
+    if date_str is None:
+        date_str = doctor_name
+        doctor_name = clinic_id
+        clinic_id = "default"
+
     try:
-        # Parse date
         check_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
-        # Check if it's a hospital holiday (clinic-level, not branch-level)
-        holiday = (
-            supabase.table("hospital_holidays")
-            .select("name")
-            .eq("clinic_id", clinic_id)
-            .eq("holiday_date", date_str)
-            .execute()
-        )
-        if holiday.data:
-            return [], "hospital_closed"  # Hospital closed
+        async def _fetch_holiday():
+            cache_key = f"{clinic_id}:{date_str}"
+            cached = _holiday_cache.get(cache_key)
+            if cached and (time.time() - cached.get("cached_at", 0) < HOLIDAY_CACHE_TTL_SECONDS):
+                return cached.get("data")
 
-        # Check doctor leaves
-        leave = (
-            supabase.table("doctor_leaves")
-            .select("leave_type")
-            .eq("clinic_id", clinic_id)
-            .eq("doctor_name", doctor_name)
-            .eq("leave_date", date_str)
-            .execute()
+            res = (
+                supabase.table("hospital_holidays")
+                .select("name")
+                .eq("clinic_id", clinic_id)
+                .eq("holiday_date", date_str)
+                .execute()
+            )
+            data = res.data or []
+            _holiday_cache[cache_key] = {"data": data, "cached_at": time.time()}
+            return data
+
+        async def _fetch_leave():
+            res = (
+                supabase.table("doctor_leaves")
+                .select("leave_type")
+                .eq("clinic_id", clinic_id)
+                .eq("doctor_name", doctor_name)
+                .eq("leave_date", date_str)
+                .execute()
+            )
+            return res.data or []
+
+        async def _fetch_booked():
+            res = (
+                supabase.table("appointments")
+                .select("appointment_time")
+                .eq("clinic_id", clinic_id)
+                .eq("doctor_name", doctor_name)
+                .eq("appointment_date", date_str)
+                .eq("status", "confirmed")
+                .execute()
+            )
+            return res.data or []
+
+        async def _fetch_doc():
+            res = get_doctor_by_name(clinic_id, doctor_name)
+            if hasattr(res, "__await__"):
+                return await res
+            return res
+
+        # Execute non-interdependent queries in parallel via asyncio.gather
+        holiday_data, leave_data, doc, booked_data = await asyncio.gather(
+            _fetch_holiday(),
+            _fetch_leave(),
+            _fetch_doc(),
+            _fetch_booked(),
         )
+
+        if holiday_data:
+            return [], "hospital_closed"
 
         blocked_sessions = []
-        if leave.data:
-            leave_type = leave.data[0]["leave_type"]
+        if leave_data:
+            leave_type = leave_data[0]["leave_type"]
             if leave_type == "full":
-                return [], "doctor_on_leave"  # Full day leave
+                return [], "doctor_on_leave"
             elif leave_type == "half_morning":
                 blocked_sessions = ["morning"]
             elif leave_type == "half_evening":
                 blocked_sessions = ["evening"]
 
-        # Get doctor's configured slots
-        doc = await get_doctor_by_name(clinic_id, doctor_name)
         if not doc:
             return [], "doctor_not_found"
 
         day_name = check_date.strftime("%a")
         available_days = doc.get("available_days", "Mon,Tue,Wed,Thu,Fri").split(",")
         if day_name not in available_days:
-            return [], "doctor_off_day"  # Doctor doesn't work this day
+            return [], "doctor_off_day"
 
-        # Build slot list — apply branch_session filter
         all_slots = []
         morning_slots = doc.get(
             "morning_slots", ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
         )
         evening_slots = doc.get("evening_slots", ["17:00", "17:30", "18:00", "18:30"])
 
-        # Determine which sessions to include based on branch assignment + leave blocks
         include_morning = "morning" not in blocked_sessions
         include_evening = "evening" not in blocked_sessions
 
-        # If branch_session is specified, further restrict
         if branch_session == "morning":
             include_evening = False
         elif branch_session == "evening":
             include_morning = False
-        # 'both' or None = no additional restriction
 
         if include_morning:
             all_slots.extend(morning_slots)
         if include_evening:
             all_slots.extend(evening_slots)
 
-        # Get already booked slots
-        booked = (
-            supabase.table("appointments")
-            .select("appointment_time")
-            .eq("clinic_id", clinic_id)
-            .eq("doctor_name", doctor_name)
-            .eq("appointment_date", date_str)
-            .eq("status", "confirmed")
-            .execute()
-        )
-        booked_times = {row["appointment_time"] for row in booked.data}
-
-        # Filter out booked slots
+        booked_times = {row["appointment_time"] for row in booked_data if "appointment_time" in row}
         available = [s for s in all_slots if s not in booked_times]
 
-        # If today, filter out past slots (+30 min buffer)
         if check_date == dt_date.today():
             cutoff = (datetime.now() + timedelta(minutes=30)).strftime("%H:%M")
             available = [s for s in available if s > cutoff]

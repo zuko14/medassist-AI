@@ -1,6 +1,8 @@
 """Admin router for analytics and management — Security Hardened."""
 
+import asyncio
 import logging
+import re
 import secrets
 from datetime import date, datetime
 from typing import Optional
@@ -16,7 +18,7 @@ from fastapi import (
     Form,
 )
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import settings
 from app.database import supabase
@@ -31,23 +33,101 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 security = HTTPBasic()
 
 
+class AdminUser(str):
+    """Authenticated admin user with RBAC role, clinic scope, and staff user ID."""
+
+    username: str
+    role: str
+    clinic_id: Optional[str]
+    user_id: Optional[str]
+
+    def __new__(
+        cls,
+        username: str,
+        role: str = "clinic_admin",
+        clinic_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ):
+        obj = super().__new__(cls, username)
+        obj.username = username
+        obj.role = role
+        obj.clinic_id = clinic_id
+        obj.user_id = user_id
+        return obj
+
+    def can_access_clinic(self, target_clinic_id: str) -> bool:
+        """Check if user has permission to access the specified clinic."""
+        if self.role == "super_admin":
+            return True
+        if target_clinic_id == "default":
+            return True
+        if not self.clinic_id:
+            return True
+        return str(self.clinic_id) == str(target_clinic_id)
+
+
+async def log_admin_action(
+    user: AdminUser,
+    action: str,
+    resource_type: str,
+    resource_id: Optional[str] = None,
+    details: Optional[dict] = None,
+    ip_address: Optional[str] = None,
+) -> None:
+    """Log administrative actions for NABH/DPDP staff identity audit compliance."""
+    try:
+        def _insert():
+            return (
+                supabase.table("admin_audit_logs")
+                .insert(
+                    {
+                        "clinic_id": user.clinic_id if user.clinic_id and user.clinic_id != "default" else None,
+                        "user_id": user.user_id if user.user_id != "super_admin_env" else None,
+                        "username": user.username,
+                        "role": user.role,
+                        "action": action,
+                        "resource_type": resource_type,
+                        "resource_id": str(resource_id) if resource_id else None,
+                        "details": details or {},
+                        "ip_address": ip_address or "unknown",
+                    }
+                )
+                .execute()
+            )
+
+        await asyncio.to_thread(_insert)
+    except Exception as e:
+        logger.error(f"Failed to record admin audit log for action '{action}' by '{user.username}': {e}")
+
+
+def check_password_hash(plain_password: str, stored_hash: str) -> bool:
+    """Check plain password against stored hash (bcrypt or constant-time comparison)."""
+    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
+        try:
+            import bcrypt
+
+            return bcrypt.checkpw(
+                plain_password.encode("utf-8"), stored_hash.encode("utf-8")
+            )
+        except Exception:
+            pass
+    return secrets.compare_digest(
+        plain_password.encode("utf-8"), stored_hash.encode("utf-8")
+    )
+
+
 async def verify_credentials(
     request: Request,
     credentials: HTTPBasicCredentials = Depends(security),
-):
-    """Verify admin credentials with brute-force protection.
+) -> AdminUser:
+    """Verify admin credentials with brute-force protection and tenant isolation.
 
-    Security measures:
-    - Rate limiting: 5 attempts per minute per IP address
-    - Constant-time comparison to prevent timing attacks
-    - Failed attempt logging for audit trail
+    Checks the `clinic_admins` table first, then falls back to global environment settings.
     """
-    # Get client IP for rate limiting
     client_ip = request.client.host if request.client else "unknown"
 
-    # Check rate limit BEFORE validating credentials
     if login_rate_limiter.is_rate_limited(client_ip):
-        remaining_wait = 60  # seconds
+        remaining_wait = 60
         logger.warning(f"Admin login rate limit exceeded — IP={client_ip}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -55,10 +135,33 @@ async def verify_credentials(
             headers={"Retry-After": str(remaining_wait)},
         )
 
-    # Record this attempt
     login_rate_limiter.record_attempt(client_ip)
 
-    # Constant-time comparison prevents timing side-channel attacks
+    # 1. Check database clinic_admins table
+    try:
+        res = (
+            supabase.table("clinic_admins")
+            .select("*")
+            .eq("username", credentials.username)
+            .eq("is_active", True)
+            .execute()
+        )
+        if res.data and len(res.data) > 0:
+            user_row = res.data[0]
+            if check_password_hash(
+                credentials.password, user_row.get("password_hash", "")
+            ):
+                login_rate_limiter.reset(client_ip)
+                return AdminUser(
+                    username=user_row["username"],
+                    role=user_row.get("role", "clinic_admin"),
+                    clinic_id=user_row.get("clinic_id"),
+                    user_id=user_row.get("id"),
+                )
+    except Exception as e:
+        logger.warning(f"Database error during admin auth lookup: {e}")
+
+    # 2. Fallback to global env credentials (Super Admin)
     username_ok = secrets.compare_digest(
         credentials.username.encode("utf-8"),
         settings.admin_username.encode("utf-8"),
@@ -68,21 +171,49 @@ async def verify_credentials(
         settings.admin_password.encode("utf-8"),
     )
 
-    if not (username_ok and password_ok):
-        remaining = login_rate_limiter.remaining_attempts(client_ip)
-        logger.warning(
-            f"Failed admin login attempt — IP={client_ip}, "
-            f"user='{credentials.username}', remaining={remaining}"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
+    if username_ok and password_ok:
+        login_rate_limiter.reset(client_ip)
+        return AdminUser(
+            username=credentials.username,
+            role="super_admin",
+            clinic_id=None,
+            user_id="super_admin_env",
         )
 
-    # Successful login — reset rate limiter for this IP
-    login_rate_limiter.reset(client_ip)
-    return credentials.username
+    remaining = login_rate_limiter.remaining_attempts(client_ip)
+    logger.warning(
+        f"Failed admin login attempt — IP={client_ip}, "
+        f"user='{credentials.username}', remaining={remaining}"
+    )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid credentials",
+        headers={"WWW-Authenticate": "Basic"},
+    )
+
+
+def enforce_clinic_access(
+    user: AdminUser, requested_clinic_id: str = "default"
+) -> str:
+    """Enforce tenant isolation boundaries.
+
+    Returns effective clinic_id or raises 403 Forbidden if user tries to access a clinic
+    outside their authorized scope.
+    """
+    if isinstance(user, AdminUser):
+        if not user.can_access_clinic(requested_clinic_id):
+            logger.warning(
+                f"Tenant boundary violation attempt: user '{user.username}' (role={user.role}, clinic_id={user.clinic_id}) "
+                f"attempted to access clinic_id='{requested_clinic_id}'"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Access to clinic '{requested_clinic_id}' is restricted",
+            )
+        if requested_clinic_id == "default" and user.clinic_id:
+            return user.clinic_id
+
+    return requested_clinic_id
 
 
 class LeaveCreate(BaseModel):
@@ -141,6 +272,40 @@ class BranchUpdate(BaseModel):
 class DoctorBranchAssign(BaseModel):
     doctor_id: str
     session: str = "both"  # morning | evening | both
+
+
+class PrescriptionCreate(BaseModel):
+    patient_phone: str = Field(..., description="Patient phone number")
+    patient_name: str = Field(..., min_length=1, description="Patient full name")
+    medicine_name: str = Field(..., min_length=1, description="Medicine / drug name")
+    dosage: str = Field(..., min_length=1, description="Dosage (e.g. 500mg, 1 tablet)")
+    frequency: str = Field(..., min_length=1, description="Frequency (e.g. twice daily)")
+    reminder_times: list[str] = Field(
+        ...,
+        min_length=1,
+        description="List of reminder times in HH:MM format (e.g. ['08:00', '20:00'])",
+    )
+    start_date: date = Field(..., description="Start date of prescription")
+    end_date: date = Field(..., description="End date of prescription")
+    notes: Optional[str] = Field(None, description="Optional notes/instructions")
+    clinic_id: Optional[str] = Field(None, description="Optional clinic ID override")
+
+    @field_validator("reminder_times")
+    @classmethod
+    def validate_reminder_times(cls, times: list[str]) -> list[str]:
+        time_regex = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+        for t in times:
+            if not isinstance(t, str) or not time_regex.match(t.strip()):
+                raise ValueError(
+                    f"Invalid reminder time format: '{t}'. Must be HH:MM format (00:00 to 23:59)."
+                )
+        return [t.strip() for t in times]
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date cannot be earlier than start_date")
+        return self
 
 
 @router.get("/stats")
@@ -510,24 +675,25 @@ async def get_patients(
 
 @router.post("/prescriptions")
 async def add_prescription(
-    body: dict,
+    body: PrescriptionCreate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
-    """Add a new prescription reminder."""
+    """Add a new prescription reminder with strict Pydantic input validation."""
+    effective_clinic_id = body.clinic_id or clinic_id
+    effective_clinic_id = enforce_clinic_access(user, effective_clinic_id)
     try:
-        clinic_id = body.get("clinic_id", clinic_id)
         result = await PrescriptionService().add_prescription(
-            clinic_id=clinic_id,
-            patient_phone=body["patient_phone"],
-            patient_name=body["patient_name"],
-            medicine_name=body["medicine_name"],
-            dosage=body["dosage"],
-            frequency=body["frequency"],
-            reminder_times=body["reminder_times"],
-            start_date=body["start_date"],
-            end_date=body["end_date"],
-            notes=body.get("notes"),
+            clinic_id=effective_clinic_id,
+            patient_phone=body.patient_phone,
+            patient_name=body.patient_name,
+            medicine_name=body.medicine_name,
+            dosage=body.dosage,
+            frequency=body.frequency,
+            reminder_times=body.reminder_times,
+            start_date=str(body.start_date),
+            end_date=str(body.end_date),
+            notes=body.notes,
         )
         return {"success": True, "prescription": result}
     except Exception as e:
@@ -877,6 +1043,46 @@ async def get_connector_audit_log(connector_id: str, limit: int = 20):
     except Exception as e:
         logger.error(f"Failed to get audit log: {e}")
         raise HTTPException(status_code=500, detail="Failed to get audit log")
+
+
+@router.get("/connectors/failed-reports")
+async def get_connector_failed_reports(
+    clinic_id: str = "default",
+    unresolved_only: bool = True,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Get per-report failure tracking records for staff visibility."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        query = supabase.table("connector_failed_reports").select("*")
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        if unresolved_only:
+            query = query.is_("resolved_at", "null")
+        result = query.order("last_attempt_at", desc=True).execute()
+        return {"failed_reports": result.data or []}
+    except Exception as e:
+        logger.error(f"Failed to get connector failed reports: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get failed reports")
+
+
+@router.get("/audit-logs")
+async def get_admin_audit_logs(
+    clinic_id: str = "default",
+    limit: int = 50,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Get administrative staff action audit logs for compliance auditing (NABH / DPDP)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        query = supabase.table("admin_audit_logs").select("*")
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        result = query.order("created_at", desc=True).limit(limit).execute()
+        return {"audit_logs": result.data or []}
+    except Exception as e:
+        logger.error(f"Failed to get admin audit logs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get admin audit logs")
 
 
 # ═══════ BRANCHES ═══════

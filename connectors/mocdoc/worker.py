@@ -21,6 +21,8 @@ from typing import Optional
 
 from connectors.base import HospitalConnector, ReportMetadata
 from connectors.mocdoc import selectors as S
+from app.config import settings
+from app.utils.pii_sanitizer import sanitize_report_text
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +170,25 @@ class MocDocConnector(HospitalConnector):
             "saved_at": time.time(),
         }
         os.makedirs(self.session_dir, exist_ok=True)
+        raw_json = json.dumps(session_data)
+
+        encryption_key = getattr(settings, "connector_encryption_key", "")
+        if encryption_key:
+            try:
+                from cryptography.fernet import Fernet
+                f = Fernet(encryption_key.encode() if isinstance(encryption_key, str) else encryption_key)
+                encrypted = f.encrypt(raw_json.encode()).decode()
+                payload = json.dumps({"encrypted": True, "data": encrypted})
+                with open(self.session_file, "w") as file:
+                    file.write(payload)
+                logger.debug(f"Session saved (encrypted): {len(cookies)} cookies")
+                return
+            except Exception as e:
+                logger.warning(f"Session encryption failed: {e}")
+
         with open(self.session_file, "w") as f:
-            json.dump(session_data, f)
-        logger.debug(f"Session saved: {len(cookies)} cookies")
+            f.write(raw_json)
+        logger.debug(f"Session saved (plain): {len(cookies)} cookies")
 
     async def _restore_session(self) -> bool:
         """Try to restore a previous session from cookies.
@@ -183,7 +201,24 @@ class MocDocConnector(HospitalConnector):
 
         try:
             with open(self.session_file, "r") as f:
-                session_data = json.load(f)
+                content = f.read()
+
+            try:
+                parsed = json.loads(content)
+            except Exception:
+                return False
+
+            if isinstance(parsed, dict) and parsed.get("encrypted") and "data" in parsed:
+                encryption_key = getattr(settings, "connector_encryption_key", "")
+                if not encryption_key:
+                    logger.error("Session file is encrypted but no CONNECTOR_ENCRYPTION_KEY configured")
+                    return False
+                from cryptography.fernet import Fernet
+                f = Fernet(encryption_key.encode() if isinstance(encryption_key, str) else encryption_key)
+                decrypted_bytes = f.decrypt(parsed["data"].encode())
+                session_data = json.loads(decrypted_bytes.decode())
+            else:
+                session_data = parsed
 
             # Check if session file is older than 12 hours
             saved_at = session_data.get("saved_at", 0)
@@ -823,27 +858,36 @@ class MocDocConnector(HospitalConnector):
         except Exception as err:
             logger.error(f"DOWNLOAD_MODAL_MISSING for {report_id}: {err}")
 
-            # Debug: save HTML and screenshot to see the modal
+            # Debug: save sanitized/encrypted HTML and conditional screenshot
             try:
                 debug_dir = Path(".connector_sessions")
                 debug_dir.mkdir(exist_ok=True)
+                encryption_key = getattr(settings, "connector_encryption_key", "")
 
-                # Dump main page HTML
-                html_path = debug_dir / f"modal_missing_{report_id}.html"
-                html_path.write_text(await self._page.content(), encoding="utf-8")
-                logger.error(f"Saved page HTML to {html_path}")
+                # Dump main page HTML (sanitized / encrypted)
+                raw_html = await self._page.content()
+                sanitized_html = sanitize_report_text(raw_html)
 
-                # Dump iframe HTMLs if any
-                for i, frame in enumerate(self._page.frames):
-                    try:
-                        frame_path = debug_dir / f"modal_missing_{report_id}_frame_{i}.html"
-                        frame_path.write_text(await frame.content(), encoding="utf-8")
-                    except Exception:
-                        pass
+                if encryption_key:
+                    from cryptography.fernet import Fernet
+                    f = Fernet(encryption_key.encode() if isinstance(encryption_key, str) else encryption_key)
+                    enc_bytes = f.encrypt(sanitized_html.encode())
+                    enc_path = debug_dir / f"modal_missing_{report_id}.html.enc"
+                    enc_path.write_bytes(enc_bytes)
+                    logger.error(f"Saved encrypted debug HTML to {enc_path}")
+                else:
+                    html_path = debug_dir / f"modal_missing_{report_id}.html"
+                    html_path.write_text(sanitized_html, encoding="utf-8")
+                    logger.error(f"Saved sanitized page HTML to {html_path}")
 
-                shot_path = debug_dir / f"modal_missing_{report_id}.png"
-                await self._page.screenshot(path=str(shot_path), full_page=True)
-                logger.error(f"Saved screenshot to {shot_path}")
+                # Save screenshots ONLY in development environment to avoid writing raw PHI
+                app_env = getattr(settings, "app_env", "development")
+                if app_env == "development":
+                    shot_path = debug_dir / f"modal_missing_{report_id}.png"
+                    await self._page.screenshot(path=str(shot_path), full_page=True)
+                    logger.error(f"Saved debug screenshot to {shot_path}")
+                else:
+                    logger.info("Skipped full-page PNG screenshot in production to protect PHI.")
             except Exception as e:
                 logger.error(f"Could not save debug files: {e}")
 

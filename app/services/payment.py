@@ -446,13 +446,26 @@ class PaymentService:
             ).eq("id", booking_id).execute()
             return {"status": "ok", "code": 200, "reason": "unexpected_state"}
 
-        # ── Step 8: CONFIRM the booking ──
-        supabase.table("appointments").update(
-            {
-                "status": "confirmed",
-                "payment_id": payment_id,
-            }
-        ).eq("id", booking_id).execute()
+        # ── Step 8: CONFIRM the booking (Atomic Update) ──
+        update_result = (
+            supabase.table("appointments")
+            .update(
+                {
+                    "status": "confirmed",
+                    "payment_id": payment_id,
+                }
+            )
+            .eq("id", booking_id)
+            .in_("status", ["pending_payment", "expired"])
+            .execute()
+        )
+
+        if not update_result.data:
+            # Atomic update modified 0 rows because a concurrent process already confirmed it!
+            logger.info(
+                f"Razorpay webhook atomic check: booking {booking_id} already confirmed by concurrent process (idempotent)"
+            )
+            return {"status": "ok", "code": 200, "reason": "already_confirmed"}
 
         self._log_payment_event(
             booking_id,
@@ -543,12 +556,24 @@ class PaymentService:
                             "payment_id", f"recovery_{order_id}"
                         )
 
-                        supabase.table("appointments").update(
-                            {
-                                "status": "confirmed",
-                                "payment_id": payment_id,
-                            }
-                        ).eq("id", booking_id).execute()
+                        recovery_update = (
+                            supabase.table("appointments")
+                            .update(
+                                {
+                                    "status": "confirmed",
+                                    "payment_id": payment_id,
+                                }
+                            )
+                            .eq("id", booking_id)
+                            .eq("status", "pending_payment")
+                            .execute()
+                        )
+
+                        if not recovery_update.data:
+                            logger.info(
+                                f"Recovery skipped for booking {booking_id}: already updated concurrently"
+                            )
+                            continue
 
                         self._log_payment_event(
                             booking_id,

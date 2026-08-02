@@ -6,12 +6,38 @@ from typing import Optional
 from app.database import supabase
 from app.config import settings
 
+import time
+
 logger = logging.getLogger(__name__)
 
-# In-memory cache: {whatsapp_number: clinic_dict}
-# Avoids a DB hit on every single message.
-# Cache is cleared on clinic update via /admin.
+CACHE_TTL_SECONDS = 300  # 5 minutes TTL for horizontally scaled workers
+
+# In-memory caches with TTL support
 _tenant_cache: dict[str, dict] = {}
+_branch_cache: dict[str, list[dict]] = {}
+
+
+def _get_cached_item(cache: dict, key: str) -> Optional[any]:
+    """Retrieve item from cache if present and not expired."""
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    if isinstance(entry, dict) and "cached_at" in entry and "data" in entry:
+        if time.time() - entry["cached_at"] < CACHE_TTL_SECONDS:
+            return entry["data"]
+        else:
+            cache.pop(key, None)
+            return None
+    # Backward compatibility for direct un-wrapped values
+    return entry
+
+
+def _set_cached_item(cache: dict, key: str, data: any) -> None:
+    """Store item in cache with current timestamp."""
+    cache[key] = {
+        "data": data,
+        "cached_at": time.time(),
+    }
 
 
 class TenantNotFound(Exception):
@@ -38,15 +64,17 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
         else f"+{display_phone_number}"
     )
 
-    # Check cache first
-    if phone in _tenant_cache:
-        clinic = _tenant_cache[phone]
-        if clinic.get("is_active", True):
-            return clinic
+    # Check cache first (TTL-enabled)
+    cached_clinic = _get_cached_item(_tenant_cache, phone)
+    if cached_clinic is not None:
+        if cached_clinic.get("is_active", True):
+            return cached_clinic
         else:
             raise TenantNotFound(f"Clinic for {phone} is inactive.")
 
     # Try DB lookup
+    db_failed = False
+    db_error = None
     try:
         result = (
             supabase.table("clinics")
@@ -58,11 +86,17 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
 
         if result.data:
             clinic = result.data[0]
-            _tenant_cache[phone] = clinic
+            _set_cached_item(_tenant_cache, phone, clinic)
             return clinic
 
     except Exception as e:
-        logger.warning(f"Clinics table lookup failed (may not exist yet): {e}")
+        db_failed = True
+        db_error = e
+        logger.error(f"Clinics table lookup encountered database error for {phone}: {e}")
+
+    # If DB query failed with an exception, DO NOT silently fall back to default tenant!
+    if db_failed:
+        raise RuntimeError(f"Database error during tenant resolution for {phone}: {db_error}") from db_error
 
     # Fallback: single-tenant mode
     # Fetch the first clinic in the database as the fallback
@@ -72,14 +106,14 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
         )
         if fallback.data:
             clinic = fallback.data[0]
-            _tenant_cache[phone] = clinic
+            _set_cached_item(_tenant_cache, phone, clinic)
             return clinic
     except Exception as e:
         logger.warning(f"Fallback clinic lookup failed: {e}")
 
     # Absolute fallback using env vars (will fail if DB expects UUID, but safe if table doesn't exist)
     clinic = _build_fallback_clinic()
-    _tenant_cache[phone] = clinic
+    _set_cached_item(_tenant_cache, phone, clinic)
     return clinic
 
 
@@ -271,10 +305,11 @@ async def get_clinic_branches(clinic_id: str) -> list[dict]:
     """
     Get active branches for a clinic, ordered by display_order.
     Returns [] for single-branch / legacy clinics.
-    Results are cached in-memory; call invalidate_branch_cache() on admin update.
+    Results are cached in-memory with TTL; call invalidate_branch_cache() on admin update.
     """
-    if clinic_id in _branch_cache:
-        return _branch_cache[clinic_id]
+    cached_branches = _get_cached_item(_branch_cache, clinic_id)
+    if cached_branches is not None:
+        return cached_branches
 
     try:
         result = (
@@ -287,12 +322,12 @@ async def get_clinic_branches(clinic_id: str) -> list[dict]:
         )
 
         branches = result.data or []
-        _branch_cache[clinic_id] = branches
+        _set_cached_item(_branch_cache, clinic_id, branches)
         return branches
 
     except Exception as e:
         logger.warning(f"Branch lookup failed for clinic {clinic_id}: {e}")
-        _branch_cache[clinic_id] = []
+        _set_cached_item(_branch_cache, clinic_id, [])
         return []
 
 
@@ -315,10 +350,12 @@ def invalidate_branch_cache(clinic_id: str = None):
 async def get_branch_by_id(branch_id: str) -> Optional[dict]:
     """Get a single branch by its UUID."""
     # Check cache first
-    for branches in _branch_cache.values():
-        for branch in branches:
-            if branch.get("id") == branch_id:
-                return branch
+    for key in list(_branch_cache.keys()):
+        branches = _get_cached_item(_branch_cache, key)
+        if isinstance(branches, list):
+            for branch in branches:
+                if branch.get("id") == branch_id:
+                    return branch
 
     try:
         result = supabase.table("branches").select("*").eq("id", branch_id).execute()

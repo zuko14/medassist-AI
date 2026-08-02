@@ -94,6 +94,85 @@ async def send_admin_alert(clinic_id: str, message: str) -> None:
         logger.error(f"Failed to send admin alert: {e}")
 
 
+async def record_report_failure(
+    clinic_id: str,
+    connector_type: str,
+    external_report_id: str,
+    error_message: str,
+    vam_id: str = None,
+    patient_name: str = None,
+    alert_threshold: int = 3,
+) -> None:
+    """Record a report failure and send an admin alert if failure threshold is reached."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+
+        existing = (
+            supabase.table("connector_failed_reports")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("connector_type", connector_type)
+            .eq("external_report_id", external_report_id)
+            .execute()
+        )
+
+        if existing.data and len(existing.data) > 0:
+            row = existing.data[0]
+            new_count = row.get("failure_count", 0) + 1
+            supabase.table("connector_failed_reports").update(
+                {
+                    "failure_count": new_count,
+                    "last_error": error_message,
+                    "last_attempt_at": now,
+                    "resolved_at": None,
+                }
+            ).eq("id", row["id"]).execute()
+
+            if new_count >= alert_threshold and row.get("failure_count", 0) < alert_threshold:
+                alert_msg = (
+                    f"⚠️ MocDoc Report Failure Alert!\n"
+                    f"Report ID: {external_report_id} (VAM: {vam_id or 'N/A'})\n"
+                    f"Patient: {patient_name or 'Unknown'}\n"
+                    f"Consecutive Failures: {new_count}\n"
+                    f"Last Error: {error_message}"
+                )
+                await send_admin_alert(clinic_id, alert_msg)
+        else:
+            supabase.table("connector_failed_reports").insert(
+                {
+                    "clinic_id": clinic_id,
+                    "connector_type": connector_type,
+                    "external_report_id": external_report_id,
+                    "vam_id": vam_id,
+                    "patient_name": patient_name,
+                    "failure_count": 1,
+                    "last_error": error_message,
+                    "first_failed_at": now,
+                    "last_attempt_at": now,
+                    "resolved_at": None,
+                }
+            ).execute()
+    except Exception as e:
+        logger.error(f"Failed to record report failure: {e}")
+
+
+async def record_report_success(
+    clinic_id: str,
+    connector_type: str,
+    external_report_id: str,
+) -> None:
+    """Clear/resolve per-report failure tracking upon successful report processing."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        supabase.table("connector_failed_reports").update(
+            {"resolved_at": now}
+        ).eq("clinic_id", clinic_id).eq("connector_type", connector_type).eq(
+            "external_report_id", external_report_id
+        ).is_("resolved_at", "null").execute()
+    except Exception as e:
+        logger.error(f"Failed to resolve report failure tracking: {e}")
+
+
 async def run_connector(
     clinic_id: str,
     connector_type: str = "mocdoc",
@@ -257,14 +336,35 @@ async def run_connector(
                     pdf_bytes = await connector.download_report(meta)
                     if not pdf_bytes:
                         summary["reports_failed"] += 1
+                        await record_report_failure(
+                            clinic_id=clinic_id,
+                            connector_type=connector_type,
+                            external_report_id=meta.external_report_id,
+                            error_message="PDF download failed or bill due pending",
+                            vam_id=meta.vam_id,
+                            patient_name=meta.patient_name,
+                        )
                         continue
                     result = await connector.submit_to_medassist(pdf_bytes, meta)
                     if not result.get("already_processed"):
                         summary["reports_uploaded"] += 1
                         logger.info(f"Uploaded: {meta}")
+                    await record_report_success(
+                        clinic_id=clinic_id,
+                        connector_type=connector_type,
+                        external_report_id=meta.external_report_id,
+                    )
                 except Exception as e:
                     summary["reports_failed"] += 1
                     logger.error(f"Failed: {meta.external_report_id}: {e}")
+                    await record_report_failure(
+                        clinic_id=clinic_id,
+                        connector_type=connector_type,
+                        external_report_id=meta.external_report_id,
+                        error_message=str(e),
+                        vam_id=meta.vam_id,
+                        patient_name=meta.patient_name,
+                    )
 
             await connector.cleanup()
 
@@ -439,16 +539,16 @@ async def cleanup_expired_storage() -> None:
     except Exception as e:
         logger.warning(f"Audit log cleanup failed: {e}")
 
-    # Clean stale session files (7 days)
+    # Clean stale session files and debug artifacts (24 hours)
     session_dir = os.path.join(PROJECT_ROOT, ".connector_sessions")
     if os.path.exists(session_dir):
-        cutoff_ts = time.time() - (7 * 24 * 3600)
+        cutoff_ts = time.time() - (24 * 3600)
         for f in os.listdir(session_dir):
             fpath = os.path.join(session_dir, f)
             try:
                 if os.path.getmtime(fpath) < cutoff_ts:
                     os.remove(fpath)
-                    logger.debug(f"Deleted stale session file: {f}")
+                    logger.debug(f"Deleted stale session/debug file: {f}")
             except Exception:
                 pass
 

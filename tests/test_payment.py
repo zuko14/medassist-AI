@@ -501,13 +501,64 @@ class TestHoldExpiry:
             mock_table.select.return_value.eq.return_value.lt.return_value.execute.return_value = MagicMock(
                 data=[mock_stale]
             )
-            mock_table.update.return_value.eq.return_value.execute.return_value = (
-                MagicMock(data=[])
+            mock_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[mock_stale])
             )
 
             count = await service.expire_stale_bookings()
 
         assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_atomic_update_race_condition_returns_already_confirmed(self):
+        """If atomic update returns 0 affected rows (concurrent webhook win), handle as already_confirmed without duplicate notification."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+
+        payload_dict = _make_payment_webhook_payload()
+        payload = json.dumps(payload_dict).encode()
+        signature = _sign_payload(payload)
+
+        mock_booking = {
+            "id": "test-booking-uuid",
+            "amount_paise": 50000,
+            "status": "pending_payment",
+            "booking_ref": "MC-2026-1234",
+            "patient_phone": "+919876543210",
+        }
+
+        with patch("app.services.payment.supabase") as mock_sb, patch(
+            "app.services.payment.settings"
+        ) as mock_settings, patch.object(
+            service, "_notify_payment_confirmed", new_callable=AsyncMock
+        ) as mock_notify:
+
+            mock_settings.razorpay_webhook_secret = WEBHOOK_SECRET
+
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+
+            mock_select = MagicMock()
+            mock_table.select.return_value = mock_select
+            mock_select.eq.return_value.execute.return_value = MagicMock(
+                data=[mock_booking]
+            )
+            mock_select.eq.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
+
+            # Update returns empty data (0 rows affected due to concurrent update)
+            mock_table.update.return_value.eq.return_value.in_.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
+
+            res = await service.process_payment_webhook(payload, signature)
+
+            assert res["status"] == "ok"
+            assert res["reason"] == "already_confirmed"
+            # Notification must NOT be sent if update affected 0 rows
+            mock_notify.assert_not_called()
 
 
 class TestAmountIntegrity:
