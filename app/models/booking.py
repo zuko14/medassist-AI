@@ -1,15 +1,14 @@
 """Pydantic models for the payment-gated booking flow."""
 
-from datetime import datetime
 from enum import Enum
 from typing import Optional
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
 class BookingStatus(str, Enum):
     """Valid booking statuses — matches the DB CHECK constraint."""
+
     PENDING_PAYMENT = "pending_payment"
     CONFIRMED = "confirmed"
     EXPIRED = "expired"
@@ -23,6 +22,7 @@ class BookingStatus(str, Enum):
 
 class PaymentEventType(str, Enum):
     """Audit event types for payment_events table."""
+
     ORDER_CREATED = "order_created"
     WEBHOOK_RECEIVED = "webhook_received"
     SIGNATURE_VERIFIED = "signature_verified"
@@ -41,6 +41,7 @@ class PaymentEventType(str, Enum):
 
 class BookingCreateRequest(BaseModel):
     """Input from conversation flow to create a payment-gated booking."""
+
     clinic_id: str
     patient_phone: str
     patient_name: str
@@ -53,6 +54,7 @@ class BookingCreateRequest(BaseModel):
 
 class BookingCreateResponse(BaseModel):
     """Response after creating a booking + Razorpay order."""
+
     success: bool
     booking_id: Optional[str] = None
     razorpay_order_id: Optional[str] = None
@@ -64,12 +66,14 @@ class BookingCreateResponse(BaseModel):
 
 class RefundRequest(BaseModel):
     """Admin request to initiate a refund."""
+
     booking_id: str = Field(..., description="UUID of the booking to refund")
     reason: Optional[str] = Field(None, description="Reason for the refund")
 
 
 class RefundResponse(BaseModel):
     """Response after initiating a refund."""
+
     success: bool
     refund_id: Optional[str] = None
     status: Optional[str] = None
@@ -78,12 +82,14 @@ class RefundResponse(BaseModel):
 
 class ManualConfirmRequest(BaseModel):
     """Admin request to manually confirm a pending_review booking."""
+
     booking_id: str
     admin_notes: Optional[str] = None
 
 
 class BookingDetail(BaseModel):
     """Full booking detail for admin panel."""
+
     id: str
     clinic_id: str
     patient_phone: str

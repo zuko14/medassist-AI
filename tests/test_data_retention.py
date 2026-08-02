@@ -6,7 +6,11 @@ Verifies:
 """
 
 import pytest
-from app.services.data_retention import DataRetentionService, CLINICAL_RETENTION_YEARS, CONVERSATION_PURGE_DAYS
+from app.services.data_retention import (
+    DataRetentionService,
+    CLINICAL_RETENTION_YEARS,
+    CONVERSATION_PURGE_DAYS,
+)
 
 
 class TestDataRetention:

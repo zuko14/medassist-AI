@@ -26,25 +26,17 @@ logger = logging.getLogger(__name__)
 # ── PII Regex Patterns ────────────────────────────────────────────────────────
 
 # Indian mobile numbers: +91-XXXXXXXXXX, 91XXXXXXXXXX, 0XXXXXXXXXX, XXXXXXXXXX (10-digit starting with 6-9)
-_PHONE_PATTERN = re.compile(
-    r"(\+91[-\s]?|91[-\s]?|0)?[6-9]\d{9}",
-    re.IGNORECASE
-)
+_PHONE_PATTERN = re.compile(r"(\+91[-\s]?|91[-\s]?|0)?[6-9]\d{9}", re.IGNORECASE)
 
 # Aadhaar: 12 digits, optionally space- or dash-separated in groups of 4
-_AADHAAR_PATTERN = re.compile(
-    r"\b(\d{4}[\s\-]?\d{4}[\s\-]?\d{4})\b"
-)
+_AADHAAR_PATTERN = re.compile(r"\b(\d{4}[\s\-]?\d{4}[\s\-]?\d{4})\b")
 
 # ABHA Health ID: exactly 14 digits (standalone)
-_ABHA_PATTERN = re.compile(
-    r"\b(\d{14})\b"
-)
+_ABHA_PATTERN = re.compile(r"\b(\d{14})\b")
 
 # Email addresses
 _EMAIL_PATTERN = re.compile(
-    r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b",
-    re.IGNORECASE
+    r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b", re.IGNORECASE
 )
 
 # Date of Birth patterns: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, DD.MM.YYYY
@@ -55,19 +47,18 @@ _DOB_PATTERN = re.compile(
 # Age patterns: "Age: 35", "Age/Sex: 35/M", "35 years", "35Y"
 _AGE_PATTERN = re.compile(
     r"\b(?:age|age/sex)\s*:?\s*\d{1,3}(?:/[MFmf])?\b|\b\d{1,3}\s*(?:years?|yrs?|Y)\b",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # Patient ID / MRN / UHID labels followed by value
 _PATIENT_ID_PATTERN = re.compile(
     r"\b(?:patient\s*id|mrn|uhid|reg(?:istration)?\s*(?:no|number)|pid)\s*[:\-#]?\s*[\w\-/]+",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # Indian PIN code (6 digits, often preceded by keywords)
 _PINCODE_PATTERN = re.compile(
-    r"\b(?:pin(?:\s*code)?|zip)\s*[:\-]?\s*\d{6}\b",
-    re.IGNORECASE
+    r"\b(?:pin(?:\s*code)?|zip)\s*[:\-]?\s*\d{6}\b", re.IGNORECASE
 )
 
 
@@ -82,7 +73,9 @@ def _build_name_pattern(patient_name: Optional[str]) -> Optional[re.Pattern]:
     # Match full name OR individual name parts (first name, last name)
     # Full name first for specificity, then parts
     full_escaped = re.escape(patient_name.strip())
-    pattern_str = full_escaped + "|" + "|".join(parts) if len(parts) > 1 else full_escaped
+    pattern_str = (
+        full_escaped + "|" + "|".join(parts) if len(parts) > 1 else full_escaped
+    )
     try:
         return re.compile(r"\b(?:" + pattern_str + r")\b", re.IGNORECASE)
     except re.error:
@@ -124,48 +117,58 @@ def sanitize_report_text(
     # 1. Redact patient name first (highest priority — appears throughout report)
     name_pattern = _build_name_pattern(patient_name)
     if name_pattern:
+
         def _replace_name(m: re.Match) -> str:
             return make_placeholder("PATIENT", m.group(0))
+
         redacted = name_pattern.sub(_replace_name, redacted)
 
     # 2. Redact ABHA IDs (14-digit) — before generic phone/Aadhaar to avoid overlap
     def _replace_abha(m: re.Match) -> str:
         return make_placeholder("ABHA_ID", m.group(0))
+
     redacted = _ABHA_PATTERN.sub(_replace_abha, redacted)
 
     # 3. Redact Aadhaar numbers
     def _replace_aadhaar(m: re.Match) -> str:
         return make_placeholder("AADHAAR", m.group(0))
+
     redacted = _AADHAAR_PATTERN.sub(_replace_aadhaar, redacted)
 
     # 4. Redact phone numbers
     def _replace_phone(m: re.Match) -> str:
         return make_placeholder("PHONE", m.group(0))
+
     redacted = _PHONE_PATTERN.sub(_replace_phone, redacted)
 
     # 5. Redact email addresses
     def _replace_email(m: re.Match) -> str:
         return make_placeholder("EMAIL", m.group(0))
+
     redacted = _EMAIL_PATTERN.sub(_replace_email, redacted)
 
     # 6. Redact patient IDs / MRNs
     def _replace_pid(m: re.Match) -> str:
         return make_placeholder("PID", m.group(0))
+
     redacted = _PATIENT_ID_PATTERN.sub(_replace_pid, redacted)
 
     # 7. Redact DOB (keep date context but strip the value)
     def _replace_dob(m: re.Match) -> str:
         return make_placeholder("DOB", m.group(0))
+
     redacted = _DOB_PATTERN.sub(_replace_dob, redacted)
 
     # 8. Redact age patterns (but preserve in medical context — only if labeled)
     def _replace_age(m: re.Match) -> str:
         return make_placeholder("AGE", m.group(0))
+
     redacted = _AGE_PATTERN.sub(_replace_age, redacted)
 
     # 9. Redact PIN codes
     def _replace_pin(m: re.Match) -> str:
         return make_placeholder("PINCODE", m.group(0))
+
     redacted = _PINCODE_PATTERN.sub(_replace_pin, redacted)
 
     redaction_count = len(redaction_map)

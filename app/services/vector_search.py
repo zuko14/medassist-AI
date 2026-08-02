@@ -32,15 +32,14 @@ logger = logging.getLogger(__name__)
 
 class TenantIsolationError(Exception):
     """Raised when a vector search is attempted without a clinic_id.
-    
+
     This is a security guard — preventing cross-tenant data leakage.
     """
-    pass
 
 
 class VectorSearchService:
     """Tenant-isolated vector search wrapper.
-    
+
     All search methods enforce clinic_id pre-filtering before
     similarity computation.
     """
@@ -98,7 +97,9 @@ class VectorSearchService:
         except Exception as e:
             if "does not exist" in str(e).lower():
                 # pgvector/function not set up yet — return empty gracefully
-                logger.debug(f"Vector search not available yet (pgvector not configured): {e}")
+                logger.debug(
+                    f"Vector search not available yet (pgvector not configured): {e}"
+                )
                 return []
             logger.error(f"Vector search error: {e}")
             return []
@@ -137,9 +138,9 @@ class VectorSearchService:
 
     def validate_tenant_scope(self, clinic_id: Optional[str]) -> None:
         """Raise TenantIsolationError if clinic_id is not provided.
-        
+
         Use this as a guard at the start of any data access function.
-        
+
         Example:
             vector_search.validate_tenant_scope(clinic_id)
             # safe to proceed

@@ -21,7 +21,6 @@ Usage:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from app.database import supabase
 from app.config import settings
@@ -147,19 +146,21 @@ class DataRetentionService:
         if not patient:
             return results
 
-        patient_id = patient.get("id")
-        now_iso = datetime.now(timezone.utc).isoformat()
+        patient.get("id")
+        datetime.now(timezone.utc).isoformat()
 
         # 1. Anonymize appointments — preserve department, doctor, date, status
         try:
             appt_res = (
                 supabase.table("appointments")
-                .update({
-                    "patient_name": "[REDACTED]",
-                    "patient_phone": "[REDACTED]",
-                    "symptoms": "[REDACTED]",
-                    "notes": "[REDACTED]",
-                })
+                .update(
+                    {
+                        "patient_name": "[REDACTED]",
+                        "patient_phone": "[REDACTED]",
+                        "symptoms": "[REDACTED]",
+                        "notes": "[REDACTED]",
+                    }
+                )
                 .eq("clinic_id", clinic_id)
                 .eq("patient_phone", phone)
                 .execute()
@@ -173,11 +174,13 @@ class DataRetentionService:
         try:
             lr_res = (
                 supabase.table("lab_reports")
-                .update({
-                    "patient_name": "[REDACTED]",
-                    "patient_phone": "[REDACTED]",
-                    "file_url": "[REDACTED]",
-                })
+                .update(
+                    {
+                        "patient_name": "[REDACTED]",
+                        "patient_phone": "[REDACTED]",
+                        "file_url": "[REDACTED]",
+                    }
+                )
                 .eq("clinic_id", clinic_id)
                 .eq("patient_phone", phone)
                 .execute()
@@ -191,11 +194,13 @@ class DataRetentionService:
         try:
             rx_res = (
                 supabase.table("prescriptions")
-                .update({
-                    "patient_name": "[REDACTED]",
-                    "patient_phone": "[REDACTED]",
-                    "notes": "[REDACTED]",
-                })
+                .update(
+                    {
+                        "patient_name": "[REDACTED]",
+                        "patient_phone": "[REDACTED]",
+                        "notes": "[REDACTED]",
+                    }
+                )
                 .eq("clinic_id", clinic_id)
                 .eq("patient_phone", phone)
                 .execute()
@@ -206,11 +211,13 @@ class DataRetentionService:
 
         # 4. Mark the patient row itself as anonymized (but keep the shell for FK integrity)
         try:
-            supabase.table("patients").update({
-                "name": "[REDACTED]",
-                "opted_in": False,
-                "data_consent": False,
-            }).eq("clinic_id", clinic_id).eq("phone", phone).execute()
+            supabase.table("patients").update(
+                {
+                    "name": "[REDACTED]",
+                    "opted_in": False,
+                    "data_consent": False,
+                }
+            ).eq("clinic_id", clinic_id).eq("phone", phone).execute()
         except Exception as e:
             logger.error(f"Patient anonymization error: {e}")
             results["errors"].append(f"patient_row: {e}")
@@ -246,12 +253,12 @@ class DataRetentionService:
             retention_expires = None
             if oldest_date:
                 from datetime import date
+
                 try:
                     oldest = date.fromisoformat(str(oldest_date))
-                    retention_expires = (
-                        datetime(oldest.year + CLINICAL_RETENTION_YEARS, oldest.month, oldest.day)
-                        .isoformat()
-                    )
+                    retention_expires = datetime(
+                        oldest.year + CLINICAL_RETENTION_YEARS, oldest.month, oldest.day
+                    ).isoformat()
                 except Exception:
                     pass
 

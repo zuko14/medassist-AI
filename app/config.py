@@ -37,11 +37,11 @@ class Settings(BaseSettings):
     admin_password: str = "admin"
 
     # Multi-tenant (optional — used when clinics table exists)
-    admin_secret: str = ""         # protects /admin/clinics routes
-    meta_verify_token: str = ""    # for Meta webhook handshake (global fallback)
+    admin_secret: str = ""  # protects /admin/clinics routes
+    meta_verify_token: str = ""  # for Meta webhook handshake (global fallback)
 
     # Security
-    meta_app_secret: str = ""      # Meta App Secret for X-Hub-Signature-256 verification
+    meta_app_secret: str = ""  # Meta App Secret for X-Hub-Signature-256 verification
     rate_limit_login: str = "5/minute"  # Rate limit for admin login attempts
 
     # ABDM / ABHA Integration (optional — leave empty to skip live verification)
@@ -50,16 +50,25 @@ class Settings(BaseSettings):
     abdm_base_url: str = "https://abhasbx.abdm.gov.in/abha/api"  # sandbox default
 
     # Data Retention (NMC + DPDP compliance)
-    clinical_retention_years: int = 7    # NMC mandate: 7 years minimum
-    conversation_purge_days: int = 30    # DPDP minimization: 30-day chat log purge
+    clinical_retention_years: int = 7  # NMC mandate: 7 years minimum
+    conversation_purge_days: int = 30  # DPDP minimization: 30-day chat log purge
 
     # Razorpay Payment Gateway
-    razorpay_key_id: str = ""            # From Razorpay Dashboard → Settings → API Keys
-    razorpay_key_secret: str = ""        # Keep this secret — never expose in frontend
-    razorpay_webhook_secret: str = ""    # From Razorpay Dashboard → Webhooks → Secret
-    booking_fee_paise: int = 50000       # Fallback fee (₹500) if doctor has no consultation_fee
-    booking_hold_minutes: int = 10       # How long a pending_payment slot is held
-    refund_window_hours: int = 4         # Minimum hours before slot for refund eligibility
+    razorpay_key_id: str = ""  # From Razorpay Dashboard → Settings → API Keys
+    razorpay_key_secret: str = ""  # Keep this secret — never expose in frontend
+    razorpay_webhook_secret: str = ""  # From Razorpay Dashboard → Webhooks → Secret
+    booking_fee_paise: int = (
+        50000  # Fallback fee (₹500) if doctor has no consultation_fee
+    )
+    booking_hold_minutes: int = 10  # How long a pending_payment slot is held
+    refund_window_hours: int = 4  # Minimum hours before slot for refund eligibility
+
+    # Integration Connectors (MocDoc, Practo, etc.)
+    integration_secret: str = ""  # Shared secret for /internal/integrations/* endpoints
+    connector_encryption_key: str = (
+        ""  # Fernet key for encrypting HMIS credentials at rest
+    )
+    medassist_url: str = "http://localhost:8000"  # Base URL where FastAPI is running
 
     model_config = SettingsConfigDict(env_file=".env")
 

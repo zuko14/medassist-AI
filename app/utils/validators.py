@@ -35,28 +35,39 @@ def normalize_phone(phone: str) -> str:
 
 def validate_name(name: str) -> tuple[bool, str]:
     name = name.strip()
-    
+
     INVALID_NAMES = [
-        "no", "yes", "hi", "hello", "ok", "okay",
-        "skip", "none", "test", "admin", "user",
-        "లేదు", "అవును", "నహీ", "హాయ్",
-        "नहीं", "हाँ", "ठीक है"
+        "no",
+        "yes",
+        "hi",
+        "hello",
+        "ok",
+        "okay",
+        "skip",
+        "none",
+        "test",
+        "admin",
+        "user",
+        "లేదు",
+        "అవును",
+        "నహీ",
+        "హాయ్",
+        "नहीं",
+        "हाँ",
+        "ठीक है",
     ]
-    
+
     if len(name) < 3:
         return False, "too_short"
     if len(name) > 60:
         return False, "too_long"
-    if not re.match(
-        r"^[a-zA-Z\u0900-\u097F\u0C00-\u0C7F\s]+$", 
-        name
-    ):
+    if not re.match(r"^[a-zA-Z\u0900-\u097F\u0C00-\u0C7F\s]+$", name):
         return False, "invalid_chars"
     if name.lower().strip() in INVALID_NAMES:
         return False, "invalid_name"
     if len(name.strip().split()) < 2:
         return False, "need_full_name"
-    
+
     return True, name.title()
 
 

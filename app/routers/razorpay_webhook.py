@@ -44,6 +44,7 @@ async def razorpay_webhook(clinic_id: str, request: Request):
     # ── Step 1: Resolve clinic ──
     try:
         from app.services.tenant import get_clinic_by_id
+
         clinic = await get_clinic_by_id(clinic_id)
     except Exception as e:
         logger.warning(f"Razorpay webhook: unknown clinic_id={clinic_id} — {e}")

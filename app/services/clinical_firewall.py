@@ -29,35 +29,99 @@ logger = logging.getLogger(__name__)
 
 MEDICATION_NAMES = {
     # Antibiotics
-    "antibiotic", "antibiotics", "azithromycin", "amoxicillin", "amoxyclav",
-    "augmentin", "doxycycline", "ciprofloxacin", "metronidazole", "flagyl",
-    "cefixime", "ceftriaxone", "levofloxacin",
+    "antibiotic",
+    "antibiotics",
+    "azithromycin",
+    "amoxicillin",
+    "amoxyclav",
+    "augmentin",
+    "doxycycline",
+    "ciprofloxacin",
+    "metronidazole",
+    "flagyl",
+    "cefixime",
+    "ceftriaxone",
+    "levofloxacin",
     # Pain / Fever
-    "paracetamol", "dolo", "crocin", "calpol", "ibuprofen", "combiflam",
-    "brufen", "meftal", "nimesulide", "diclofenac", "voveran",
+    "paracetamol",
+    "dolo",
+    "crocin",
+    "calpol",
+    "ibuprofen",
+    "combiflam",
+    "brufen",
+    "meftal",
+    "nimesulide",
+    "diclofenac",
+    "voveran",
     # Antacids / GI
-    "pantoprazole", "omeprazole", "pan", "rantac", "ranitidine",
-    "gelusil", "eno", "digene", "cremaffin",
+    "pantoprazole",
+    "omeprazole",
+    "pan",
+    "rantac",
+    "ranitidine",
+    "gelusil",
+    "eno",
+    "digene",
+    "cremaffin",
     # Steroids
-    "steroid", "steroids", "prednisolone", "dexamethasone", "betamethasone",
-    "cortisone", "hydrocortisone",
+    "steroid",
+    "steroids",
+    "prednisolone",
+    "dexamethasone",
+    "betamethasone",
+    "cortisone",
+    "hydrocortisone",
     # Diabetes
-    "metformin", "glycomet", "glipizide", "insulin", "glargine",
-    "januvia", "sitagliptin", "jardiance",
+    "metformin",
+    "glycomet",
+    "glipizide",
+    "insulin",
+    "glargine",
+    "januvia",
+    "sitagliptin",
+    "jardiance",
     # Cardiac / BP
-    "aspirin", "ecosprin", "clopidogrel", "atorvastatin", "rosuvastatin",
-    "amlodipine", "atenolol", "losartan", "telma",
+    "aspirin",
+    "ecosprin",
+    "clopidogrel",
+    "atorvastatin",
+    "rosuvastatin",
+    "amlodipine",
+    "atenolol",
+    "losartan",
+    "telma",
     # Allergy / Cold
-    "cetirizine", "levocetrizine", "loratadine", "chlorpheniramine",
-    "allegra", "montair", "montelukast",
+    "cetirizine",
+    "levocetrizine",
+    "loratadine",
+    "chlorpheniramine",
+    "allegra",
+    "montair",
+    "montelukast",
     # Vitamins (when asked in treatment context)
-    "vitamin d3", "vitamin b12", "zinc", "calcium", "iron tablet",
+    "vitamin d3",
+    "vitamin b12",
+    "zinc",
+    "calcium",
+    "iron tablet",
     # Hindi medication terms
-    "एंटीबायोटिक", "दवाई", "दवा", "गोली", "टैबलेट", "कैप्सूल",
-    "इंजेक्शन", "सिरप",
+    "एंटीबायोटिक",
+    "दवाई",
+    "दवा",
+    "गोली",
+    "टैबलेट",
+    "कैप्सूल",
+    "इंजेक्शन",
+    "सिरप",
     # Telugu medication terms
-    "యాంటీబయోటిక్", "మందు", "మాత్ర", "గుళిక", "క్యాప్సూల్",
-    "ఇంజెక్షన్", "సిరప్",
+    "యాంటీబయోటిక్",
+    "మందు",
+    "మాత్ర",
+    "గుళిక",
+    "క్యాప్సూల్",
+    "ఇంజెక్షన్",
+    "సిరప్",
 }
 
 # ── Diagnostic Request Patterns ────────────────────────────────────────────────
@@ -176,7 +240,9 @@ _DOSAGE_OUTPUT_PATTERN = re.compile(
 )
 
 _MEDICATION_OUTPUT_SNIPPET = re.compile(
-    r"\b(?:" + "|".join(re.escape(m) for m in sorted(MEDICATION_NAMES, key=len, reverse=True)) + r")\b",
+    r"\b(?:"
+    + "|".join(re.escape(m) for m in sorted(MEDICATION_NAMES, key=len, reverse=True))
+    + r")\b",
     re.IGNORECASE,
 )
 
@@ -242,7 +308,9 @@ def screen_message(message: str, lang: str = "en") -> tuple[bool, Optional[str]]
     # 3. Check regex treatment-seeking patterns
     for pattern in _TREATMENT_SEEKING_PATTERNS:
         if pattern.search(message):
-            logger.info("Clinical firewall triggered: treatment-seeking pattern matched")
+            logger.info(
+                "Clinical firewall triggered: treatment-seeking pattern matched"
+            )
             return True, _build_response(lang)
 
     return False, None
@@ -269,12 +337,16 @@ def validate_llm_output(response: str, lang: str = "en") -> tuple[bool, str]:
 
     # Check for dosage patterns (e.g., "500mg", "twice daily")
     if _DOSAGE_OUTPUT_PATTERN.search(response):
-        logger.warning("Clinical firewall: LLM output contained dosage pattern — replaced")
+        logger.warning(
+            "Clinical firewall: LLM output contained dosage pattern — replaced"
+        )
         return False, _SAFE_OUTPUT_FALLBACK.get(lang, _SAFE_OUTPUT_FALLBACK["en"])
 
     # Check for medication names in output
     if _MEDICATION_OUTPUT_SNIPPET.search(response):
-        logger.warning("Clinical firewall: LLM output contained medication name — replaced")
+        logger.warning(
+            "Clinical firewall: LLM output contained medication name — replaced"
+        )
         return False, _SAFE_OUTPUT_FALLBACK.get(lang, _SAFE_OUTPUT_FALLBACK["en"])
 
     return True, response

@@ -19,7 +19,7 @@ class FeedbackService:
         appointment_id: Optional[str] = None,
         rating: Optional[int] = None,
         feedback_text: Optional[str] = None,
-        category: Optional[str] = None
+        category: Optional[str] = None,
     ) -> dict:
         """Collect feedback from a patient."""
         try:
@@ -30,13 +30,15 @@ class FeedbackService:
                 "rating": rating,
                 "feedback_text": feedback_text,
                 "category": category,
-                "created_at": "now()"
+                "created_at": "now()",
             }
 
             result = supabase.table("feedback").insert(data).execute()
 
             # Log analytics event
-            await log_analytics_event(clinic_id, phone, "feedback_submitted", metadata={"rating": rating})
+            await log_analytics_event(
+                clinic_id, phone, "feedback_submitted", metadata={"rating": rating}
+            )
 
             return {"success": True, "feedback_id": result.data[0]["id"]}
 
@@ -47,10 +49,18 @@ class FeedbackService:
     async def get_feedback_stats(self, clinic_id: str, days: int = 30) -> dict:
         """Get feedback statistics."""
         try:
-            from_date = (datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            from_date = (datetime.now() - datetime.timedelta(days=days)).strftime(
+                "%Y-%m-%d"
+            )
 
             # Get all feedback in period
-            result = supabase.table("feedback").select("*").eq("clinic_id", clinic_id).gte("created_at", from_date).execute()
+            result = (
+                supabase.table("feedback")
+                .select("*")
+                .eq("clinic_id", clinic_id)
+                .gte("created_at", from_date)
+                .execute()
+            )
 
             feedbacks = result.data or []
 
@@ -58,7 +68,7 @@ class FeedbackService:
                 return {
                     "total_feedback": 0,
                     "average_rating": 0,
-                    "rating_distribution": {}
+                    "rating_distribution": {},
                 }
 
             # Calculate stats
@@ -73,7 +83,7 @@ class FeedbackService:
             return {
                 "total_feedback": len(feedbacks),
                 "average_rating": round(avg_rating, 2),
-                "rating_distribution": distribution
+                "rating_distribution": distribution,
             }
 
         except Exception as e:
@@ -83,7 +93,14 @@ class FeedbackService:
     async def get_recent_feedback(self, clinic_id: str, limit: int = 20) -> list:
         """Get recent feedback entries."""
         try:
-            result = supabase.table("feedback").select("*").eq("clinic_id", clinic_id).order("created_at", desc=True).limit(limit).execute()
+            result = (
+                supabase.table("feedback")
+                .select("*")
+                .eq("clinic_id", clinic_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting recent feedback: {e}")

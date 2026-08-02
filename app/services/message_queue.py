@@ -27,8 +27,6 @@ Meta Webhook Timeout Protection:
 
 import asyncio
 import logging
-import time
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +64,14 @@ class MessageQueueManager:
         try:
             # Atomic INSERT ON CONFLICT DO NOTHING
             # If message_id already exists, Supabase returns empty data (no error)
-            result = supabase.table("processed_messages").insert(
-                {"message_id": message_id},
-                # upsert=False ensures we DON'T update on conflict
-            ).execute()
+            result = (
+                supabase.table("processed_messages")
+                .insert(
+                    {"message_id": message_id},
+                    # upsert=False ensures we DON'T update on conflict
+                )
+                .execute()
+            )
 
             # If insert succeeded, result.data will have the new row
             if result.data:
@@ -83,8 +85,14 @@ class MessageQueueManager:
         except Exception as e:
             error_str = str(e).lower()
             # PostgreSQL unique violation codes
-            if "unique" in error_str or "duplicate" in error_str or "23505" in error_str:
-                logger.info(f"Message queue: duplicate (unique violation) for {message_id}")
+            if (
+                "unique" in error_str
+                or "duplicate" in error_str
+                or "23505" in error_str
+            ):
+                logger.info(
+                    f"Message queue: duplicate (unique violation) for {message_id}"
+                )
                 return False
             # On any other error, fail open (allow processing) to avoid dropping real messages
             logger.warning(f"Message queue: acquire error (failing open): {e}")
@@ -99,7 +107,6 @@ class MessageQueueManager:
         This method exists for API symmetry in try/finally blocks.
         """
         # The Supabase row was already inserted on acquire() — nothing to do.
-        pass
 
     async def is_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed.
@@ -113,6 +120,7 @@ class MessageQueueManager:
             True if already processed, False if new.
         """
         from app.database import supabase
+
         try:
             result = (
                 supabase.table("processed_messages")

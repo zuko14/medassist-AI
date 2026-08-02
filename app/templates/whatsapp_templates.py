@@ -9,7 +9,6 @@ Language: en (English) - can add hi, te variants later.
 
 from app.config import settings
 
-
 # META_TEMPLATE_APPROVAL_NOTE: Submit these templates to Meta Business Manager
 # Template names must match exactly as registered in Meta.
 TEMPLATES = {
@@ -27,11 +26,10 @@ TEMPLATES = {
                     {"type": "text", "text": date},
                     {"type": "text", "text": time},
                     {"type": "text", "text": hospital},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "reminder_24h": {
         "name": "appointment_reminder_24h",
         "language": "en",
@@ -43,11 +41,10 @@ TEMPLATES = {
                 "parameters": [
                     {"type": "text", "text": doctor},
                     {"type": "text", "text": time},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "reminder_2h": {
         "name": "appointment_reminder_2h",
         "language": "en",
@@ -59,11 +56,10 @@ TEMPLATES = {
                 "parameters": [
                     {"type": "text", "text": hospital},
                     {"type": "text", "text": doctor},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "followup_message": {
         "name": "post_appointment_followup",
         "language": "en",
@@ -75,11 +71,10 @@ TEMPLATES = {
                 "parameters": [
                     {"type": "text", "text": name},
                     {"type": "text", "text": phone},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "opt_out_confirmation": {
         "name": "opt_out_confirmation",
         "language": "en",
@@ -91,11 +86,10 @@ TEMPLATES = {
                 "parameters": [
                     {"type": "text", "text": hospital},
                     {"type": "text", "text": emergency_phone},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "data_deletion_confirmation": {
         "name": "data_deletion_confirmation",
         "language": "en",
@@ -108,11 +102,10 @@ TEMPLATES = {
                     {"type": "text", "text": hospital},
                     {"type": "text", "text": ref},
                     {"type": "text", "text": contact},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "emergency_response": {
         "name": "emergency_response_v2",
         "language": "en",
@@ -124,11 +117,10 @@ TEMPLATES = {
                 "parameters": [
                     {"type": "text", "text": emergency_num},
                     {"type": "text", "text": address},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "reengagement": {
         "name": "patient_reengagement",
         "language": "en",
@@ -139,11 +131,10 @@ TEMPLATES = {
                 "type": "body",
                 "parameters": [
                     {"type": "text", "text": name},
-                ]
+                ],
             }
-        ]
+        ],
     },
-
     "appointment_cancelled_doctor_leave": {
         "name": "appointment_cancelled_doctor_leave",
         "language": "en",
@@ -155,9 +146,9 @@ TEMPLATES = {
                 "parameters": [
                     {"type": "text", "text": doctor},
                     {"type": "text", "text": date},
-                ]
+                ],
             }
-        ]
+        ],
     },
 }
 
@@ -196,7 +187,7 @@ MESSAGES = {
         "change_language": "🌐 Change Language",
         "available_doctors_in": "Available doctors in {dept}:",
         "our_doctors_body": "Choose a doctor to book an appointment directly:",
-        "our_services_body": "Here are the services we offer at {hospital_name}:"
+        "our_services_body": "Here are the services we offer at {hospital_name}:",
     },
     "hi": {
         "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं MediAssist हूं, आपका AI सहायक।",
@@ -227,7 +218,7 @@ MESSAGES = {
         "change_language": "🌐 भाषा बदलें",
         "available_doctors_in": "{dept} में उपलब्ध डॉक्टर:",
         "our_doctors_body": "सीधे अपॉइंटमेंट बुक करने के लिए डॉक्टर चुनें:",
-        "our_services_body": "{hospital_name} में हमारी सेवाएं:"
+        "our_services_body": "{hospital_name} में हमारी सेवाएं:",
     },
     "te": {
         "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను MediAssist, మీ AI సహాయకుడిని.",
@@ -258,8 +249,8 @@ MESSAGES = {
         "change_language": "🌐 భాష మార్చు",
         "available_doctors_in": "{dept}లో అందుబాటులో ఉన్న డాక్టర్లు:",
         "our_doctors_body": "నేరుగా అపాయింట్మెంట్ బుక్ చేయడానికి డాక్టర్ను ఎంచుకోండి:",
-        "our_services_body": "{hospital_name}లో మా సేవలు:"
-    }
+        "our_services_body": "{hospital_name}లో మా సేవలు:",
+    },
 }
 
 
@@ -277,7 +268,7 @@ def get_message(key: str, lang: str = "en", **kwargs) -> str:
         "hospital_name": settings.hospital_name,
         "emergency": settings.hospital_emergency_number,
         "phone": settings.hospital_phone,
-        **kwargs
+        **kwargs,
     }
 
     return template.format(**format_kwargs)

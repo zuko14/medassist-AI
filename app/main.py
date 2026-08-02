@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.routers import webhook, health, admin, clinics
+from app.routers.integrations import router as integrations_router
 from app.routers.fhir import router as fhir_router
 from app.routers.razorpay_webhook import router as razorpay_router
 from app.services.scheduler import scheduler_service
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to every response.
-    
+
     Protects against:
     - XSS attacks (X-XSS-Protection, CSP)
     - Clickjacking (X-Frame-Options)
@@ -57,9 +58,13 @@ async def lifespan(app: FastAPI):
             "⚠️  ADMIN_PASSWORD is using a default/weak value — change it immediately!"
         )
     if settings.app_env != "production":
-        logger.info("🔓 Running in DEVELOPMENT mode — /webhook/test endpoint is ENABLED")
+        logger.info(
+            "🔓 Running in DEVELOPMENT mode — /webhook/test endpoint is ENABLED"
+        )
     else:
-        logger.info("🔒 Running in PRODUCTION mode — /webhook/test endpoint is DISABLED")
+        logger.info(
+            "🔒 Running in PRODUCTION mode — /webhook/test endpoint is DISABLED"
+        )
 
     scheduler_service.start()
     yield
@@ -85,9 +90,9 @@ app = FastAPI(
 # The admin panel is served from the same domain, so no cross-origin needed.
 # If you deploy the admin panel separately, add that domain here.
 allowed_origins = [
-    f"http://localhost:{settings.app_port}",   # Local development
-    "http://localhost:8000",                     # Default dev port
-    "http://127.0.0.1:8000",                    # Alt local
+    f"http://localhost:{settings.app_port}",  # Local development
+    "http://localhost:8000",  # Default dev port
+    "http://127.0.0.1:8000",  # Alt local
 ]
 
 # In production, add your actual deployed domain
@@ -102,7 +107,12 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", "X-Admin-Secret"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Admin-Secret",
+        "X-Integration-Secret",
+    ],
 )
 
 # Security headers middleware (replaces old NgrokMiddleware)
@@ -117,6 +127,8 @@ app.include_router(clinics.router)
 app.include_router(fhir_router)
 # Razorpay payment webhook (/webhooks/razorpay)
 app.include_router(razorpay_router)
+# Internal integration API (connector → MedAssist)
+app.include_router(integrations_router)
 
 
 @app.get("/")
@@ -126,7 +138,7 @@ async def root():
         "service": "MediAssist AI",
         "version": "2.0.0",
         "hospital": settings.hospital_name,
-        "status": "running"
+        "status": "running",
     }
 
 
@@ -137,6 +149,7 @@ async def admin_panel():
 
 
 from fastapi.responses import HTMLResponse as HTMLResp
+
 
 @app.get("/privacy", response_class=HTMLResp, include_in_schema=False)
 async def privacy_page():
@@ -199,9 +212,10 @@ MediAssist AI - Hospital WhatsApp Assistant - 2026</p>
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
         port=settings.app_port,
-        reload=settings.app_env == "development"
+        reload=settings.app_env == "development",
     )

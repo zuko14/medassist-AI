@@ -16,7 +16,7 @@ import json
 import os
 import sys
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Ensure test env vars are set before any app import
 os.environ.setdefault("WHATSAPP_TOKEN", "test_token")
@@ -32,7 +32,9 @@ os.environ.setdefault("HOSPITAL_EMERGENCY_NUMBER", "108")
 os.environ.setdefault("HOSPITAL_PHONE", "+919876543210")
 os.environ.setdefault("HOSPITAL_MAPS_LINK", "https://maps.google.com")
 os.environ.setdefault("HOSPITAL_WEBSITE", "https://test.hospital.com")
-os.environ.setdefault("HOSPITAL_PRIVACY_POLICY_URL", "https://test.hospital.com/privacy")
+os.environ.setdefault(
+    "HOSPITAL_PRIVACY_POLICY_URL", "https://test.hospital.com/privacy"
+)
 os.environ.setdefault("HOSPITAL_ADDRESS", "Test Address")
 os.environ.setdefault("HOSPITAL_LANDMARK", "Test Landmark")
 os.environ.setdefault("BOOKING_REF_PREFIX", "MC")
@@ -99,6 +101,7 @@ class TestWebhookSignatureVerification:
     def test_valid_signature_accepted(self):
         """Valid HMAC-SHA256 signature should pass verification."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         payload = b'{"event":"payment.captured"}'
@@ -111,6 +114,7 @@ class TestWebhookSignatureVerification:
     def test_invalid_signature_rejected(self):
         """Tampered signature should be rejected."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         payload = b'{"event":"payment.captured"}'
@@ -121,6 +125,7 @@ class TestWebhookSignatureVerification:
     def test_empty_signature_rejected(self):
         """Empty signature header should be rejected."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         payload = b'{"event":"payment.captured"}'
@@ -129,6 +134,7 @@ class TestWebhookSignatureVerification:
     def test_no_secret_configured_rejects(self):
         """If webhook secret is not configured, all signatures should be rejected."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         payload = b'{"event":"payment.captured"}'
@@ -141,6 +147,7 @@ class TestWebhookSignatureVerification:
     def test_tampered_body_detected(self):
         """Signature for original body should not match tampered body."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         original = b'{"event":"payment.captured","amount":50000}'
@@ -159,13 +166,15 @@ class TestPaymentWebhookProcessing:
     async def test_signature_failed_returns_400(self):
         """Invalid signature should return 400 and log signature_failed."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         payload = json.dumps(_make_payment_webhook_payload()).encode()
         bad_signature = "invalid_signature"
 
-        with patch.object(service, '_log_payment_event_raw') as mock_log, \
-             patch.object(service, '_alert_admin', new_callable=AsyncMock):
+        with patch.object(service, "_log_payment_event_raw"), patch.object(
+            service, "_alert_admin", new_callable=AsyncMock
+        ):
             result = await service.process_payment_webhook(payload, bad_signature)
 
         assert result["code"] == 400
@@ -175,6 +184,7 @@ class TestPaymentWebhookProcessing:
     async def test_non_payment_captured_event_ignored(self):
         """Events other than payment.captured should be ignored with 200."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         payload_dict = _make_payment_webhook_payload(event="payment.failed")
@@ -192,6 +202,7 @@ class TestPaymentWebhookProcessing:
     async def test_amount_mismatch_routes_to_pending_review(self):
         """Webhook with wrong amount should route booking to pending_review."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         # Booking expects 50000, webhook sends 99999
@@ -208,10 +219,13 @@ class TestPaymentWebhookProcessing:
         }
 
         # Setup chain mock for supabase
-        with patch("app.services.payment.supabase") as mock_sb, \
-             patch("app.services.payment.settings") as mock_settings, \
-             patch.object(service, '_alert_admin', new_callable=AsyncMock), \
-             patch.object(service, '_log_payment_event'):
+        with patch("app.services.payment.supabase") as mock_sb, patch(
+            "app.services.payment.settings"
+        ) as mock_settings, patch.object(
+            service, "_alert_admin", new_callable=AsyncMock
+        ), patch.object(
+            service, "_log_payment_event"
+        ):
 
             mock_settings.razorpay_webhook_secret = WEBHOOK_SECRET
 
@@ -229,7 +243,9 @@ class TestPaymentWebhookProcessing:
             mock_eq2.execute.return_value = MagicMock(data=[])
 
             # For booking lookup (single .eq)
-            mock_select.eq.return_value.execute.return_value = MagicMock(data=[mock_booking])
+            mock_select.eq.return_value.execute.return_value = MagicMock(
+                data=[mock_booking]
+            )
 
             # For update
             mock_update = MagicMock()
@@ -248,10 +264,12 @@ class TestBookingCreation:
     async def test_slot_taken_returns_failure(self):
         """If the unique constraint rejects the insert, return slot_taken."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
-        with patch("app.services.payment.supabase") as mock_sb, \
-             patch.object(service, '_get_doctor_fee_paise', new_callable=AsyncMock, return_value=50000):
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
+        ):
             # Simulate unique constraint violation
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
@@ -276,19 +294,30 @@ class TestBookingCreation:
     async def test_successful_booking_creates_order(self):
         """Successful booking should return payment link and booking details."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         mock_booking = {"id": "new-booking-uuid", "booking_ref": "MC-2026-5678"}
         mock_order = {"id": "order_new_test"}
 
-        with patch("app.services.payment.supabase") as mock_sb, \
-             patch.object(service, '_get_doctor_fee_paise', new_callable=AsyncMock, return_value=50000), \
-             patch.object(service, '_create_razorpay_order', new_callable=AsyncMock, return_value=mock_order), \
-             patch.object(service, '_log_payment_event'):
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
+        ), patch.object(
+            service,
+            "_create_razorpay_order",
+            new_callable=AsyncMock,
+            return_value=mock_order,
+        ), patch.object(
+            service, "_log_payment_event"
+        ):
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
-            mock_table.insert.return_value.execute.return_value = MagicMock(data=[mock_booking])
-            mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_table.insert.return_value.execute.return_value = MagicMock(
+                data=[mock_booking]
+            )
+            mock_table.update.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
 
             result = await service.create_booking_with_payment(
                 clinic_id="test-clinic",
@@ -314,6 +343,7 @@ class TestRefundFlow:
         """Refund should be denied if less than 4 hours before slot."""
         from app.services.payment import PaymentService
         from datetime import datetime, timedelta, timezone
+
         service = PaymentService()
 
         # Slot is 1 hour from now (inside refund window)
@@ -331,7 +361,9 @@ class TestRefundFlow:
         with patch("app.services.payment.supabase") as mock_sb:
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
-            mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[mock_booking])
+            mock_table.select.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[mock_booking])
+            )
 
             result = await service.initiate_refund("booking-refund-test")
 
@@ -342,6 +374,7 @@ class TestRefundFlow:
     async def test_refund_for_non_confirmed_booking_fails(self):
         """Cannot refund a booking that isn't confirmed or pending_review."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         mock_booking = {
@@ -354,7 +387,9 @@ class TestRefundFlow:
         with patch("app.services.payment.supabase") as mock_sb:
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
-            mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[mock_booking])
+            mock_table.select.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[mock_booking])
+            )
 
             result = await service.initiate_refund("booking-expired")
 
@@ -364,6 +399,7 @@ class TestRefundFlow:
     async def test_refund_without_payment_id_fails(self):
         """Cannot refund a booking that has no payment_id."""
         from app.services.payment import PaymentService
+
         service = PaymentService()
 
         mock_booking = {
@@ -376,7 +412,9 @@ class TestRefundFlow:
         with patch("app.services.payment.supabase") as mock_sb:
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
-            mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[mock_booking])
+            mock_table.select.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[mock_booking])
+            )
 
             result = await service.initiate_refund("booking-no-pay")
 
@@ -392,6 +430,7 @@ class TestHoldExpiry:
         """Pending bookings past hold_expires_at should be expired."""
         from app.services.payment import PaymentService
         from datetime import datetime, timedelta, timezone
+
         service = PaymentService()
 
         past_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
@@ -402,13 +441,20 @@ class TestHoldExpiry:
             "status": "pending_payment",
         }
 
-        with patch("app.services.payment.supabase") as mock_sb, \
-             patch.object(service, '_check_razorpay_order_status', new_callable=AsyncMock, return_value="created"), \
-             patch.object(service, '_log_payment_event'):
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service,
+            "_check_razorpay_order_status",
+            new_callable=AsyncMock,
+            return_value="created",
+        ), patch.object(service, "_log_payment_event"):
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
-            mock_table.select.return_value.eq.return_value.lt.return_value.execute.return_value = MagicMock(data=[mock_stale])
-            mock_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_table.select.return_value.eq.return_value.lt.return_value.execute.return_value = MagicMock(
+                data=[mock_stale]
+            )
+            mock_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
 
             count = await service.expire_stale_bookings()
 
@@ -419,6 +465,7 @@ class TestHoldExpiry:
         """If Razorpay shows paid but webhook missed, confirm instead of expiring."""
         from app.services.payment import PaymentService
         from datetime import datetime, timedelta, timezone
+
         service = PaymentService()
 
         past_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
@@ -434,15 +481,29 @@ class TestHoldExpiry:
             "appointment_time": "10:00",
         }
 
-        with patch("app.services.payment.supabase") as mock_sb, \
-             patch.object(service, '_check_razorpay_order_status', new_callable=AsyncMock, return_value="paid"), \
-             patch.object(service, '_get_razorpay_order_payments', new_callable=AsyncMock, return_value={"payment_id": "pay_recovered"}), \
-             patch.object(service, '_log_payment_event'), \
-             patch.object(service, '_notify_payment_confirmed', new_callable=AsyncMock):
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service,
+            "_check_razorpay_order_status",
+            new_callable=AsyncMock,
+            return_value="paid",
+        ), patch.object(
+            service,
+            "_get_razorpay_order_payments",
+            new_callable=AsyncMock,
+            return_value={"payment_id": "pay_recovered"},
+        ), patch.object(
+            service, "_log_payment_event"
+        ), patch.object(
+            service, "_notify_payment_confirmed", new_callable=AsyncMock
+        ):
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
-            mock_table.select.return_value.eq.return_value.lt.return_value.execute.return_value = MagicMock(data=[mock_stale])
-            mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_table.select.return_value.eq.return_value.lt.return_value.execute.return_value = MagicMock(
+                data=[mock_stale]
+            )
+            mock_table.update.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
 
             count = await service.expire_stale_bookings()
 
@@ -461,8 +522,8 @@ class TestAmountIntegrity:
                 if "amount" in name.lower() or "paise" in name.lower():
                     annotation = field.annotation
                     # Allow Optional[int] as well
-                    assert annotation in (int, ) or (
-                        hasattr(annotation, '__args__') and int in annotation.__args__
+                    assert annotation in (int,) or (
+                        hasattr(annotation, "__args__") and int in annotation.__args__
                     ), f"{model.__name__}.{name} should be int, not {annotation}"
 
 

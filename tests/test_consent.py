@@ -10,7 +10,7 @@ Verifies:
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from app.services.consent import ConsentService
 
@@ -29,7 +29,9 @@ class TestConsentHasConsent:
 
     @pytest.mark.asyncio
     async def test_returns_true_when_consented(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = {"phone": PHONE, "data_consent": True}
             result = await consent_svc.has_consent(CLINIC_ID, PHONE)
             assert result is True
@@ -37,14 +39,18 @@ class TestConsentHasConsent:
 
     @pytest.mark.asyncio
     async def test_returns_false_when_not_consented(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = {"phone": PHONE, "data_consent": False}
             result = await consent_svc.has_consent(CLINIC_ID, PHONE)
             assert result is False
 
     @pytest.mark.asyncio
     async def test_returns_false_when_patient_not_found(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = None
             result = await consent_svc.has_consent(CLINIC_ID, PHONE)
             assert result is False
@@ -52,7 +58,9 @@ class TestConsentHasConsent:
     @pytest.mark.asyncio
     async def test_returns_false_when_field_missing(self, consent_svc):
         """If data_consent key is absent, default to False."""
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = {"phone": PHONE}  # no data_consent key
             result = await consent_svc.has_consent(CLINIC_ID, PHONE)
             assert result is False
@@ -63,25 +71,27 @@ class TestConsentGrantRevoke:
 
     @pytest.mark.asyncio
     async def test_grant_consent_calls_update(self, consent_svc):
-        with patch("app.services.consent.update_patient", new_callable=AsyncMock) as mock_update:
+        with patch(
+            "app.services.consent.update_patient", new_callable=AsyncMock
+        ) as mock_update:
             mock_update.return_value = True
             result = await consent_svc.grant_consent(CLINIC_ID, PHONE)
             assert result is True
-            mock_update.assert_called_once_with(CLINIC_ID, PHONE, {
-                "data_consent": True,
-                "data_consent_at": "now()"
-            })
+            mock_update.assert_called_once_with(
+                CLINIC_ID, PHONE, {"data_consent": True, "data_consent_at": "now()"}
+            )
 
     @pytest.mark.asyncio
     async def test_revoke_consent_calls_update(self, consent_svc):
-        with patch("app.services.consent.update_patient", new_callable=AsyncMock) as mock_update:
+        with patch(
+            "app.services.consent.update_patient", new_callable=AsyncMock
+        ) as mock_update:
             mock_update.return_value = True
             result = await consent_svc.revoke_consent(CLINIC_ID, PHONE)
             assert result is True
-            mock_update.assert_called_once_with(CLINIC_ID, PHONE, {
-                "data_consent": False,
-                "data_consent_at": None
-            })
+            mock_update.assert_called_once_with(
+                CLINIC_ID, PHONE, {"data_consent": False, "data_consent_at": None}
+            )
 
     @pytest.mark.asyncio
     async def test_request_consent_always_returns_true(self, consent_svc):
@@ -94,8 +104,11 @@ class TestConsentDeleteData:
 
     @pytest.mark.asyncio
     async def test_successful_deletion(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get, \
-             patch("app.services.consent.delete_patient_data", new_callable=AsyncMock) as mock_delete:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get, patch(
+            "app.services.consent.delete_patient_data", new_callable=AsyncMock
+        ) as mock_delete:
             mock_get.return_value = {"phone": PHONE, "name": "Test Patient"}
             mock_delete.return_value = True
 
@@ -108,7 +121,9 @@ class TestConsentDeleteData:
 
     @pytest.mark.asyncio
     async def test_deletion_patient_not_found(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = None
             result = await consent_svc.delete_data(CLINIC_ID, PHONE)
             assert result["success"] is False
@@ -116,8 +131,11 @@ class TestConsentDeleteData:
 
     @pytest.mark.asyncio
     async def test_deletion_failure(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get, \
-             patch("app.services.consent.delete_patient_data", new_callable=AsyncMock) as mock_delete:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get, patch(
+            "app.services.consent.delete_patient_data", new_callable=AsyncMock
+        ) as mock_delete:
             mock_get.return_value = {"phone": PHONE, "name": "Test"}
             mock_delete.return_value = False
             result = await consent_svc.delete_data(CLINIC_ID, PHONE)
@@ -125,7 +143,9 @@ class TestConsentDeleteData:
 
     @pytest.mark.asyncio
     async def test_deletion_exception_handled(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.side_effect = Exception("DB down")
             result = await consent_svc.delete_data(CLINIC_ID, PHONE)
             assert result["success"] is False
@@ -137,7 +157,9 @@ class TestConsentStatus:
 
     @pytest.mark.asyncio
     async def test_status_existing_patient(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = {
                 "phone": PHONE,
                 "opted_in": True,
@@ -153,10 +175,14 @@ class TestConsentStatus:
 
     @pytest.mark.asyncio
     async def test_status_missing_patient(self, consent_svc):
-        with patch("app.services.consent.get_patient_by_phone", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "app.services.consent.get_patient_by_phone", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = None
             status = await consent_svc.get_consent_status(CLINIC_ID, PHONE)
             assert status["exists"] is False
             assert status["opted_in"] is False
             assert status["data_consent"] is False
+
+
 """Tests for Consent Management Service (app/services/consent.py)."""

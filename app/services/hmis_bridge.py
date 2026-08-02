@@ -18,7 +18,6 @@ Configuration (per clinic in clinics.config JSONB):
 """
 
 import logging
-from typing import Optional
 
 import httpx
 
@@ -34,13 +33,9 @@ class HMISBridge:
     def is_enabled(self, clinic: dict) -> bool:
         """Check if HMIS sync is configured and enabled for a clinic."""
         config = clinic.get("config", {}) or {}
-        return bool(
-            config.get("hmis_sync_enabled") and config.get("hmis_webhook_url")
-        )
+        return bool(config.get("hmis_sync_enabled") and config.get("hmis_webhook_url"))
 
-    async def push_appointment_to_hmis(
-        self, clinic: dict, appointment: dict
-    ) -> bool:
+    async def push_appointment_to_hmis(self, clinic: dict, appointment: dict) -> bool:
         """Push a new or updated appointment to the clinic's external HMIS.
 
         Fires-and-forgets after MediAssist books the appointment. The
@@ -163,9 +158,7 @@ class HMISBridge:
             logger.error(f"HMIS roster pull error for {clinic.get('name')}: {e}")
             return []
 
-    async def sync_patient_registration(
-        self, clinic: dict, patient: dict
-    ) -> dict:
+    async def sync_patient_registration(self, clinic: dict, patient: dict) -> dict:
         """Sync patient registration data with external HMIS.
 
         Pushes MediAssist patient data to HMIS when a new patient registers

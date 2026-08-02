@@ -19,7 +19,7 @@ class AnalyticsService:
         clinic_id: str = "default",
         department: Optional[str] = None,
         intent: Optional[str] = None,
-        metadata: Optional[dict] = None
+        metadata: Optional[dict] = None,
     ) -> bool:
         """Track an analytics event."""
         return await log_analytics_event(
@@ -28,7 +28,7 @@ class AnalyticsService:
             event_type,
             department=department,
             intent=intent,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
     async def get_dashboard_stats(self, clinic_id: str, days: int = 30) -> dict:
@@ -37,7 +37,11 @@ class AnalyticsService:
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
             # Fetch all appointments in period and count in Python
-            query = supabase.table("appointments").select("status,department,created_at").gte("created_at", from_date)
+            query = (
+                supabase.table("appointments")
+                .select("status,department,created_at")
+                .gte("created_at", from_date)
+            )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
             all_appts = query.execute()
@@ -56,7 +60,8 @@ class AnalyticsService:
                 dept_counts[d] = dept_counts.get(d, 0) + 1
             by_department = sorted(
                 [{"department": k, "count": v} for k, v in dept_counts.items()],
-                key=lambda x: x["count"], reverse=True
+                key=lambda x: x["count"],
+                reverse=True,
             )
 
             # Patients
@@ -66,7 +71,9 @@ class AnalyticsService:
             all_patients = pat_query.execute()
             patients = all_patients.data or []
             total_patients = len(patients)
-            new_patients = sum(1 for p in patients if p.get("created_at", "") >= from_date)
+            new_patients = sum(
+                1 for p in patients if p.get("created_at", "") >= from_date
+            )
 
             return {
                 "period_days": days,
@@ -77,7 +84,7 @@ class AnalyticsService:
                 "no_show": no_show,
                 "new_patients": new_patients,
                 "total_patients": total_patients,
-                "by_department": by_department
+                "by_department": by_department,
             }
 
         except Exception as e:
@@ -92,13 +99,18 @@ class AnalyticsService:
                 "new_patients": 0,
                 "total_patients": 0,
                 "by_department": [],
-                "error": str(e)
+                "error": str(e),
             }
 
     async def get_recent_appointments(self, clinic_id: str, limit: int = 20) -> list:
         """Get recent appointments."""
         try:
-            query = supabase.table("appointments").select("*").order("created_at", desc=True).limit(limit)
+            query = (
+                supabase.table("appointments")
+                .select("*")
+                .order("created_at", desc=True)
+                .limit(limit)
+            )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
             result = query.execute()
@@ -113,7 +125,14 @@ class AnalyticsService:
             today = datetime.now().strftime("%Y-%m-%d")
             end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
-            query = supabase.table("appointments").select("*").gte("appointment_date", today).lte("appointment_date", end_date).order("appointment_date").order("appointment_time")
+            query = (
+                supabase.table("appointments")
+                .select("*")
+                .gte("appointment_date", today)
+                .lte("appointment_date", end_date)
+                .order("appointment_date")
+                .order("appointment_time")
+            )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
             result = query.execute()
@@ -128,7 +147,11 @@ class AnalyticsService:
         try:
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-            query = supabase.table("appointments").select("department").gte("created_at", from_date)
+            query = (
+                supabase.table("appointments")
+                .select("department")
+                .gte("created_at", from_date)
+            )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
             result = query.execute()

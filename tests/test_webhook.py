@@ -39,8 +39,8 @@ class TestWebhook:
             params={
                 "hub.mode": "subscribe",
                 "hub.verify_token": settings.whatsapp_verify_token,
-                "hub.challenge": "test_challenge"
-            }
+                "hub.challenge": "test_challenge",
+            },
         )
         assert response.status_code == 200
         assert response.text == "test_challenge"
@@ -52,8 +52,8 @@ class TestWebhook:
             params={
                 "hub.mode": "subscribe",
                 "hub.verify_token": "invalid_token",
-                "hub.challenge": "test_challenge"
-            }
+                "hub.challenge": "test_challenge",
+            },
         )
         assert response.status_code == 403
 
@@ -61,30 +61,38 @@ class TestWebhook:
         """Test webhook receive."""
         payload = {
             "object": "whatsapp_business_account",
-            "entry": [{
-                "id": "test_entry_id",
-                "changes": [{
-                    "value": {
-                        "messaging_product": "whatsapp",
-                        "metadata": {
-                            "display_phone_number": "1234567890",
-                            "phone_number_id": "test_phone_id"
-                        },
-                        "contacts": [{
-                            "wa_id": "+919876543210",
-                            "profile": {"name": "Test User"}
-                        }],
-                        "messages": [{
-                            "from": "+919876543210",
-                            "id": "test_msg_id",
-                            "timestamp": "1234567890",
-                            "type": "text",
-                            "text": {"body": "Hello"}
-                        }]
-                    },
-                    "field": "messages"
-                }]
-            }]
+            "entry": [
+                {
+                    "id": "test_entry_id",
+                    "changes": [
+                        {
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "1234567890",
+                                    "phone_number_id": "test_phone_id",
+                                },
+                                "contacts": [
+                                    {
+                                        "wa_id": "+919876543210",
+                                        "profile": {"name": "Test User"},
+                                    }
+                                ],
+                                "messages": [
+                                    {
+                                        "from": "+919876543210",
+                                        "id": "test_msg_id",
+                                        "timestamp": "1234567890",
+                                        "type": "text",
+                                        "text": {"body": "Hello"},
+                                    }
+                                ],
+                            },
+                            "field": "messages",
+                        }
+                    ],
+                }
+            ],
         }
 
         response = client.post("/webhook", json=payload)
@@ -115,11 +123,15 @@ class TestValidators:
         from app.utils.validators import validate_name
 
         valid, error = validate_name("Ravi Kumar")
-        assert error is not None  # validate_name returns (True, title-cased name) or (False, error)
+        assert (
+            error is not None
+        )  # validate_name returns (True, title-cased name) or (False, error)
 
         # Valid name returns (True, title_cased_name)
         assert valid is True
-        assert isinstance(error, str)  # second element is the title-cased name on success
+        assert isinstance(
+            error, str
+        )  # second element is the title-cased name on success
 
         valid, error = validate_name("R")
         assert valid is False

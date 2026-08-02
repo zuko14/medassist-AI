@@ -22,7 +22,9 @@ class AppointmentCreate(AppointmentBase):
 
 
 class AppointmentUpdate(BaseModel):
-    status: Optional[str] = Field(None, pattern=r"^(confirmed|cancelled|rescheduled|completed|no_show)$")
+    status: Optional[str] = Field(
+        None, pattern=r"^(confirmed|cancelled|rescheduled|completed|no_show)$"
+    )
     appointment_date: Optional[date] = None
     appointment_time: Optional[time] = None
     doctor_name: Optional[str] = None

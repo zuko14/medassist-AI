@@ -10,15 +10,20 @@ logger = logging.getLogger(__name__)
 
 # Initialize Supabase client
 supabase: Client = create_client(
-    settings.supabase_url,
-    settings.supabase_service_role_key
+    settings.supabase_url, settings.supabase_service_role_key
 )
 
 
 async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:
     """Get patient by phone number and clinic_id."""
     try:
-        result = supabase.table("patients").select("*").eq("clinic_id", clinic_id).eq("phone", phone).execute()
+        result = (
+            supabase.table("patients")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("phone", phone)
+            .execute()
+        )
         if result.data:
             return result.data[0]
         return None
@@ -27,7 +32,12 @@ async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:
         return None
 
 
-async def create_patient(clinic_id: str, phone: str, name: Optional[str] = None, language: Optional[str] = None) -> dict:
+async def create_patient(
+    clinic_id: str,
+    phone: str,
+    name: Optional[str] = None,
+    language: Optional[str] = None,
+) -> dict:
     """Create a new patient."""
     try:
         data = {
@@ -37,7 +47,7 @@ async def create_patient(clinic_id: str, phone: str, name: Optional[str] = None,
             "language": language,
             "opted_in": True,
             "opted_in_at": "now()",
-            "last_seen_at": "now()"
+            "last_seen_at": "now()",
         }
         result = supabase.table("patients").insert(data).execute()
         return result.data[0]
@@ -49,7 +59,9 @@ async def create_patient(clinic_id: str, phone: str, name: Optional[str] = None,
 async def update_patient(clinic_id: str, phone: str, updates: dict) -> bool:
     """Update patient data."""
     try:
-        supabase.table("patients").update(updates).eq("clinic_id", clinic_id).eq("phone", phone).execute()
+        supabase.table("patients").update(updates).eq("clinic_id", clinic_id).eq(
+            "phone", phone
+        ).execute()
         return True
     except Exception as e:
         logger.error(f"Error updating patient: {e}")
@@ -59,7 +71,13 @@ async def update_patient(clinic_id: str, phone: str, updates: dict) -> bool:
 async def get_conversation(clinic_id: str, phone: str) -> Optional[dict]:
     """Get conversation session for phone."""
     try:
-        result = supabase.table("conversations").select("*").eq("clinic_id", clinic_id).eq("phone", phone).execute()
+        result = (
+            supabase.table("conversations")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("phone", phone)
+            .execute()
+        )
         if result.data:
             return result.data[0]
         return None
@@ -78,8 +96,10 @@ async def create_conversation(clinic_id: str, phone: str) -> dict:
             "phone": phone,
             "state": "idle",
             "context": {},
-            "session_expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
-            "last_message_at": "now()"
+            "session_expires_at": (
+                datetime.now(timezone.utc) + timedelta(hours=24)
+            ).isoformat(),
+            "last_message_at": "now()",
         }
         result = supabase.table("conversations").insert(data).execute()
         return result.data[0]
@@ -92,7 +112,9 @@ async def update_conversation(clinic_id: str, phone: str, updates: dict) -> bool
     """Update conversation session."""
     try:
         updates["updated_at"] = "now()"
-        supabase.table("conversations").update(updates).eq("clinic_id", clinic_id).eq("phone", phone).execute()
+        supabase.table("conversations").update(updates).eq("clinic_id", clinic_id).eq(
+            "phone", phone
+        ).execute()
         return True
     except Exception as e:
         logger.error(f"Error updating conversation: {e}")
@@ -107,9 +129,24 @@ async def get_or_create_conversation(clinic_id: str, phone: str) -> dict:
     return await create_conversation(clinic_id, phone)
 
 
-async def get_doctors(clinic_id: str, department: Optional[str] = None, active_only: bool = True) -> list:
-    """Get doctors, optionally filtered by department."""
+async def get_doctors(
+    clinic_id: str,
+    department: Optional[str] = None,
+    active_only: bool = True,
+    branch_id: Optional[str] = None,
+) -> list:
+    """Get doctors, optionally filtered by department and/or branch.
+
+    When branch_id is provided, only returns doctors assigned to that branch
+    via the doctor_branches junction table.
+    """
     try:
+        if branch_id:
+            # Branch-scoped: join through doctor_branches
+            return await get_doctors_at_branch(
+                clinic_id, branch_id, department, active_only
+            )
+
         query = supabase.table("doctors").select("*").eq("clinic_id", clinic_id)
 
         if department:
@@ -124,10 +161,71 @@ async def get_doctors(clinic_id: str, department: Optional[str] = None, active_o
         return []
 
 
+async def get_doctors_at_branch(
+    clinic_id: str,
+    branch_id: str,
+    department: Optional[str] = None,
+    active_only: bool = True,
+) -> list:
+    """Get doctors assigned to a specific branch via doctor_branches junction.
+
+    Returns doctor dicts enriched with 'branch_session' field indicating
+    which session ('morning', 'evening', 'both') applies at this branch.
+    """
+    try:
+        # Get doctor_ids assigned to this branch
+        db_result = (
+            supabase.table("doctor_branches")
+            .select("doctor_id, session")
+            .eq("branch_id", branch_id)
+            .execute()
+        )
+
+        if not db_result.data:
+            return []
+
+        # Build lookup: {doctor_id: session}
+        doctor_session_map = {
+            row["doctor_id"]: row["session"] for row in db_result.data
+        }
+        doctor_ids = list(doctor_session_map.keys())
+
+        # Fetch doctor details
+        query = (
+            supabase.table("doctors")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .in_("id", doctor_ids)
+        )
+
+        if department:
+            query = query.eq("department", department)
+        if active_only:
+            query = query.eq("is_active", True)
+
+        result = query.execute()
+        doctors = result.data or []
+
+        # Enrich with branch_session
+        for doc in doctors:
+            doc["branch_session"] = doctor_session_map.get(doc["id"], "both")
+
+        return doctors
+    except Exception as e:
+        logger.error(f"Error getting doctors at branch {branch_id}: {e}")
+        return []
+
+
 async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
     """Get doctor by name."""
     try:
-        result = supabase.table("doctors").select("*").eq("clinic_id", clinic_id).eq("name", name).execute()
+        result = (
+            supabase.table("doctors")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("name", name)
+            .execute()
+        )
         if result.data:
             return result.data[0]
         return None
@@ -136,21 +234,48 @@ async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
         return None
 
 
-async def get_available_slots(clinic_id: str, doctor_name: str, date_str: str) -> tuple[list, Optional[str]]:
-    """Get available slots for a doctor on a specific date. Returns (slots, reason)."""
+async def get_available_slots(
+    clinic_id: str,
+    doctor_name: str,
+    date_str: str,
+    branch_id: Optional[str] = None,
+    branch_session: Optional[str] = None,
+) -> tuple[list, Optional[str]]:
+    """Get available slots for a doctor on a specific date.
+
+    Args:
+        branch_id: Optional branch for context (used for holiday checks)
+        branch_session: Optional session filter from doctor_branches.
+            'morning' = only morning slots, 'evening' = only evening slots, 'both'/None = all.
+
+    Returns (slots, reason).
+    """
     from datetime import datetime, date as dt_date, timedelta
 
     try:
         # Parse date
         check_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
-        # Check if it's a hospital holiday
-        holiday = supabase.table("hospital_holidays").select("name").eq("clinic_id", clinic_id).eq("holiday_date", date_str).execute()
+        # Check if it's a hospital holiday (clinic-level, not branch-level)
+        holiday = (
+            supabase.table("hospital_holidays")
+            .select("name")
+            .eq("clinic_id", clinic_id)
+            .eq("holiday_date", date_str)
+            .execute()
+        )
         if holiday.data:
             return [], "hospital_closed"  # Hospital closed
 
         # Check doctor leaves
-        leave = supabase.table("doctor_leaves").select("leave_type").eq("clinic_id", clinic_id).eq("doctor_name", doctor_name).eq("leave_date", date_str).execute()
+        leave = (
+            supabase.table("doctor_leaves")
+            .select("leave_type")
+            .eq("clinic_id", clinic_id)
+            .eq("doctor_name", doctor_name)
+            .eq("leave_date", date_str)
+            .execute()
+        )
 
         blocked_sessions = []
         if leave.data:
@@ -172,18 +297,39 @@ async def get_available_slots(clinic_id: str, doctor_name: str, date_str: str) -
         if day_name not in available_days:
             return [], "doctor_off_day"  # Doctor doesn't work this day
 
-        # Build slot list
+        # Build slot list — apply branch_session filter
         all_slots = []
-        morning_slots = doc.get("morning_slots", ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"])
+        morning_slots = doc.get(
+            "morning_slots", ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
+        )
         evening_slots = doc.get("evening_slots", ["17:00", "17:30", "18:00", "18:30"])
 
-        if "morning" not in blocked_sessions:
+        # Determine which sessions to include based on branch assignment + leave blocks
+        include_morning = "morning" not in blocked_sessions
+        include_evening = "evening" not in blocked_sessions
+
+        # If branch_session is specified, further restrict
+        if branch_session == "morning":
+            include_evening = False
+        elif branch_session == "evening":
+            include_morning = False
+        # 'both' or None = no additional restriction
+
+        if include_morning:
             all_slots.extend(morning_slots)
-        if "evening" not in blocked_sessions:
+        if include_evening:
             all_slots.extend(evening_slots)
 
         # Get already booked slots
-        booked = supabase.table("appointments").select("appointment_time").eq("clinic_id", clinic_id).eq("doctor_name", doctor_name).eq("appointment_date", date_str).eq("status", "confirmed").execute()
+        booked = (
+            supabase.table("appointments")
+            .select("appointment_time")
+            .eq("clinic_id", clinic_id)
+            .eq("doctor_name", doctor_name)
+            .eq("appointment_date", date_str)
+            .eq("status", "confirmed")
+            .execute()
+        )
         booked_times = {row["appointment_time"] for row in booked.data}
 
         # Filter out booked slots
@@ -201,7 +347,9 @@ async def get_available_slots(clinic_id: str, doctor_name: str, date_str: str) -
         return [], "error"
 
 
-async def find_next_available_date(clinic_id: str, doctor_name: str, from_date_str: str) -> tuple:
+async def find_next_available_date(
+    clinic_id: str, doctor_name: str, from_date_str: str
+) -> tuple:
     """Find next available date with slots for a doctor."""
     from datetime import datetime, timedelta
 
@@ -213,7 +361,13 @@ async def find_next_available_date(clinic_id: str, doctor_name: str, from_date_s
             check_date_str = check_date.strftime("%Y-%m-%d")
 
             # Check holiday
-            holiday = supabase.table("hospital_holidays").select("name").eq("clinic_id", clinic_id).eq("holiday_date", check_date_str).execute()
+            holiday = (
+                supabase.table("hospital_holidays")
+                .select("name")
+                .eq("clinic_id", clinic_id)
+                .eq("holiday_date", check_date_str)
+                .execute()
+            )
             if holiday.data:
                 continue
 
@@ -232,17 +386,30 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
     """Book an appointment with race condition protection."""
     try:
         data["clinic_id"] = clinic_id
-        
+
         # Check for existing booking at same slot
-        conflict = supabase.table("appointments").select("id").eq("clinic_id", clinic_id).eq("doctor_name", data["doctor_name"]).eq("appointment_date", data["appointment_date"]).eq("appointment_time", data["appointment_time"]).eq("status", "confirmed").execute()
+        conflict = (
+            supabase.table("appointments")
+            .select("id")
+            .eq("clinic_id", clinic_id)
+            .eq("doctor_name", data["doctor_name"])
+            .eq("appointment_date", data["appointment_date"])
+            .eq("appointment_time", data["appointment_time"])
+            .eq("status", "confirmed")
+            .execute()
+        )
 
         if conflict.data:
             return {"success": False, "reason": "slot_taken"}
 
         # Generate booking reference
         from app.utils.helpers import generate_booking_reference
+
         ref = generate_booking_reference()
         data["booking_ref"] = ref
+
+        # Include branch_id and branch_name if present in data
+        # (These are set by the conversation flow when a branch is selected)
 
         # Insert appointment
         result = supabase.table("appointments").insert(data).execute()
@@ -252,7 +419,9 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
             patient = await get_patient_by_phone(clinic_id, data["patient_phone"])
             if patient:
                 new_count = (patient.get("visit_count") or 0) + 1
-                await update_patient(clinic_id, data["patient_phone"], {"visit_count": new_count})
+                await update_patient(
+                    clinic_id, data["patient_phone"], {"visit_count": new_count}
+                )
 
         return {"success": True, "appointment": result.data[0]}
 
@@ -267,7 +436,13 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
 async def get_appointment_by_ref(clinic_id: str, booking_ref: str) -> Optional[dict]:
     """Get appointment by booking reference."""
     try:
-        result = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).eq("booking_ref", booking_ref).execute()
+        result = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("booking_ref", booking_ref)
+            .execute()
+        )
         if result.data:
             return result.data[0]
         return None
@@ -279,21 +454,30 @@ async def get_appointment_by_ref(clinic_id: str, booking_ref: str) -> Optional[d
 async def cancel_appointment(clinic_id: str, appointment_id: str) -> bool:
     """Cancel an appointment."""
     try:
-        result = supabase.table("appointments") \
-                         .update({"status": "cancelled"}) \
-                         .eq("clinic_id", clinic_id) \
-                         .eq("id", appointment_id) \
-                         .execute()
+        result = (
+            supabase.table("appointments")
+            .update({"status": "cancelled"})
+            .eq("clinic_id", clinic_id)
+            .eq("id", appointment_id)
+            .execute()
+        )
         return bool(result.data)
     except Exception as e:
         logger.error(f"Cancel appointment error: {e}")
         return False
 
 
-async def get_patient_appointments(clinic_id: str, phone: str, status: Optional[str] = None) -> list:
+async def get_patient_appointments(
+    clinic_id: str, phone: str, status: Optional[str] = None
+) -> list:
     """Get appointments for a patient."""
     try:
-        query = supabase.table("appointments").select("*").eq("clinic_id", clinic_id).eq("patient_phone", phone)
+        query = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("patient_phone", phone)
+        )
         if status:
             query = query.eq("status", status)
         result = query.order("appointment_date", desc=False).execute()
@@ -303,14 +487,16 @@ async def get_patient_appointments(clinic_id: str, phone: str, status: Optional[
         return []
 
 
-async def log_analytics_event(clinic_id: str, phone: str, event_type: str, **kwargs) -> bool:
+async def log_analytics_event(
+    clinic_id: str, phone: str, event_type: str, **kwargs
+) -> bool:
     """Log an analytics event."""
     try:
         data = {
             "clinic_id": clinic_id,
             "phone": phone,
             "event_type": event_type,
-            **{k: v for k, v in kwargs.items() if v is not None}
+            **{k: v for k, v in kwargs.items() if v is not None},
         }
         supabase.table("analytics_events").insert(data).execute()
         return True
@@ -321,7 +507,7 @@ async def log_analytics_event(clinic_id: str, phone: str, event_type: str, **kwa
 
 async def delete_patient_data(clinic_id: str, phone: str) -> bool:
     """Delete / anonymize patient data (DPDP + NMC compliance).
-    
+
     Tiered strategy:
       Tier 1 (Clinical records — appointments, lab_reports, prescriptions):
         Anonymized (PII replaced with [REDACTED]), NOT deleted.
@@ -337,14 +523,19 @@ async def delete_patient_data(clinic_id: str, phone: str) -> bool:
     try:
         # ── Tier 1: Anonymize clinical records (preserve structure, erase PII) ──
         from app.services.data_retention import data_retention_service
+
         await data_retention_service.anonymize_clinical_records(clinic_id, phone)
 
         # ── Tier 2: Delete conversation / session data ──
-        supabase.table("conversations").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
+        supabase.table("conversations").delete().eq("clinic_id", clinic_id).eq(
+            "phone", phone
+        ).execute()
 
         # Delete analytics events (operational, not clinical)
         try:
-            supabase.table("analytics_events").delete().eq("clinic_id", clinic_id).eq("phone", phone).execute()
+            supabase.table("analytics_events").delete().eq("clinic_id", clinic_id).eq(
+                "phone", phone
+            ).execute()
         except Exception:
             pass  # Analytics table may not have phone column in all versions
 

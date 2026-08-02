@@ -5,7 +5,6 @@ before being passed to the LLM.
 """
 
 import logging
-from typing import Optional
 import asyncio
 from groq import Groq, RateLimitError
 
@@ -19,17 +18,112 @@ groq_client = Groq(api_key=settings.groq_api_key)
 
 # Intent detection keywords for fallback
 INTENT_KEYWORDS = {
-    "book_appointment": ["book", "appointment", "doctor", "slot", "visit", "consult", "fever", "pain", "cough", "ache", "बुक", "अपॉइंटमेंट", "అపాయింట్", "డాక్టర్"],
+    "book_appointment": [
+        "book",
+        "appointment",
+        "doctor",
+        "slot",
+        "visit",
+        "consult",
+        "fever",
+        "pain",
+        "cough",
+        "ache",
+        "बुक",
+        "अपॉइंटमेंट",
+        "అపాయింట్",
+        "డాక్టర్",
+    ],
     "cancel_appointment": ["cancel", "रद्द", "రద్దు", "abort", "stop booking"],
-    "reschedule_appointment": ["reschedule", "change", "move", "postpone", "shift", "बदलें", "మార్చు"],
-    "view_services": ["service", "department", "speciality", "treatment", "facility", "सेवा", "సేవ"],
-    "doctor_availability": ["available", "timing", "when", "schedule", "free", "उपलब्ध", "అందుబాటు"],
-    "emergency": ["emergency", "dying", "bleeding", "unconscious", "accident", "heart attack", "stroke", "can't breathe", "cannot breathe", "not breathing", "overdose", "poisoning", "seizure", "fits", "paralysis", "severe chest pain", "खून बह", "बेहोश", "దెబ్బతింది", "అపస్మారం"],
-    "opt_out": ["stop", "unsubscribe", "opt out", "don't message", "रुको", "ఆపు", "వద్దు"],
-    "data_deletion_request": ["delete my data", "remove my information", "forget me", "erase data", "data delete"],
-    "human_escalation": ["human", "staff", "agent", "person", "speak to someone", "talk to someone", "representative", "मानव", "మనిషి", "సిబ్బంది"],
+    "reschedule_appointment": [
+        "reschedule",
+        "change",
+        "move",
+        "postpone",
+        "shift",
+        "बदलें",
+        "మార్చు",
+    ],
+    "view_services": [
+        "service",
+        "department",
+        "speciality",
+        "treatment",
+        "facility",
+        "सेवा",
+        "సేవ",
+    ],
+    "doctor_availability": [
+        "available",
+        "timing",
+        "when",
+        "schedule",
+        "free",
+        "उपलब्ध",
+        "అందుబాటు",
+    ],
+    "emergency": [
+        "emergency",
+        "dying",
+        "bleeding",
+        "unconscious",
+        "accident",
+        "heart attack",
+        "stroke",
+        "can't breathe",
+        "cannot breathe",
+        "not breathing",
+        "overdose",
+        "poisoning",
+        "seizure",
+        "fits",
+        "paralysis",
+        "severe chest pain",
+        "खून बह",
+        "बेहोश",
+        "దెబ్బతింది",
+        "అపస్మారం",
+    ],
+    "opt_out": [
+        "stop",
+        "unsubscribe",
+        "opt out",
+        "don't message",
+        "रुको",
+        "ఆపు",
+        "వద్దు",
+    ],
+    "data_deletion_request": [
+        "delete my data",
+        "remove my information",
+        "forget me",
+        "erase data",
+        "data delete",
+    ],
+    "human_escalation": [
+        "human",
+        "staff",
+        "agent",
+        "person",
+        "speak to someone",
+        "talk to someone",
+        "representative",
+        "मानव",
+        "మనిషి",
+        "సిబ్బంది",
+    ],
     "followup_booking": ["follow up", "followup", "review", "checkup", "follow-up"],
-    "greeting": ["hello", "hi", "hey", "namaste", "नमस्ते", "నమస్కారం", "good morning", "good afternoon", "good evening"],
+    "greeting": [
+        "hello",
+        "hi",
+        "hey",
+        "namaste",
+        "नमस्ते",
+        "నమస్కారం",
+        "good morning",
+        "good afternoon",
+        "good evening",
+    ],
 }
 
 # Symptom to department mapping (fallback)
@@ -70,7 +164,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     "बदन दर्द": ("General Medicine", False),
     "थकान": ("General Medicine", False),
     "पेट दर्द": ("General Medicine", False),
-
     # CARDIOLOGY — English
     "chest pain": ("Cardiology", True),
     "heart": ("Cardiology", True),
@@ -87,7 +180,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     "दिल": ("Cardiology", True),
     "सांस": ("Cardiology", True),
     "धड़कन": ("Cardiology", False),
-
     # DENTAL — English
     "tooth": ("Dental", False),
     "teeth": ("Dental", False),
@@ -111,7 +203,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     "दांत": ("Dental", False),
     "मसूड़े": ("Dental", False),
     "दंत": ("Dental", False),
-
     # ORTHOPEDICS — English
     "bone": ("Orthopedics", False),
     "joint": ("Orthopedics", False),
@@ -131,7 +222,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     "जोड़": ("Orthopedics", False),
     "कमर दर्द": ("Orthopedics", False),
     "घुटना": ("Orthopedics", False),
-
     # GYNECOLOGY — English
     "pregnancy": ("Gynecology", False),
     "periods": ("Gynecology", False),
@@ -146,7 +236,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     "गर्भ": ("Gynecology", False),
     "मासिक": ("Gynecology", False),
     "महिला": ("Gynecology", False),
-
     # PEDIATRICS — English
     "child": ("Pediatrics", False),
     "baby": ("Pediatrics", False),
@@ -159,7 +248,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     # PEDIATRICS — Hindi
     "बच्चा": ("Pediatrics", False),
     "शिशु": ("Pediatrics", False),
-
     # ENT — English
     "ear": ("ENT", False),
     "nose": ("ENT", False),
@@ -176,7 +264,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     "नाक": ("ENT", False),
     "गला": ("ENT", False),
     "टॉन्सिल": ("ENT", False),
-
     # DERMATOLOGY — English
     "skin": ("Dermatology", False),
     "rash": ("Dermatology", False),
@@ -192,7 +279,6 @@ SYMPTOM_DEPARTMENT_MAP = {
     "त्वचा": ("Dermatology", False),
     "खुजली": ("Dermatology", False),
     "एलर्जी": ("Dermatology", False),
-
     # OPHTHALMOLOGY — English
     "eyes": ("Ophthalmology", False),
     "vision": ("Ophthalmology", False),
@@ -208,15 +294,27 @@ SYMPTOM_DEPARTMENT_MAP = {
 
 EMERGENCY_KEYWORDS = [
     # English
-    "bleeding", "unconscious", "accident",
-    "heart attack", "stroke",
-    "can't breathe", "cannot breathe", "not breathing",
-    "dying", "overdose", "poisoning",
-    "seizure", "fits", "paralysis",
+    "bleeding",
+    "unconscious",
+    "accident",
+    "heart attack",
+    "stroke",
+    "can't breathe",
+    "cannot breathe",
+    "not breathing",
+    "dying",
+    "overdose",
+    "poisoning",
+    "seizure",
+    "fits",
+    "paralysis",
     "severe chest pain",
     # Hindi
-    "खून बह", "बेहोश", "दुर्घटना",
-    "हार्ट अटैक", "लकवा",
+    "खून बह",
+    "बेहोश",
+    "दुर्घटना",
+    "हार्ट अटैक",
+    "लकवा",
     # Telugu
     "రక్తం కారుతోంది",
     "అపస్మారం",
@@ -228,9 +326,17 @@ EMERGENCY_KEYWORDS = [
 
 # Whitelisted departments — LLM output MUST be one of these
 VALID_DEPARTMENTS = {
-    "General Medicine", "Cardiology", "Dental", "Orthopedics",
-    "Gynecology", "Pediatrics", "Dermatology", "Ophthalmology", "ENT",
+    "General Medicine",
+    "Cardiology",
+    "Dental",
+    "Orthopedics",
+    "Gynecology",
+    "Pediatrics",
+    "Dermatology",
+    "Ophthalmology",
+    "ENT",
 }
+
 
 def build_system_prompt(clinic: dict) -> str:
     """
@@ -238,7 +344,7 @@ def build_system_prompt(clinic: dict) -> str:
     Prevents the bot from offering features the clinic hasn't paid for.
     """
     from app.services.tenant import has_feature
-    
+
     base_prompt = f"""You are MediAssist, a hospital appointment scheduling assistant for {clinic.get('name', 'our hospital')}.
 
 You understand medical symptoms in THREE languages:
@@ -279,13 +385,20 @@ SECURITY RULES (NEVER VIOLATE):
     if has_feature(clinic, "multi_department"):
         base_prompt += "\nYou can route patients to specific departments. Ask which department they need before booking."
     else:
-        default_dept = clinic.get("config", {}).get("default_department", "General Medicine")
-        base_prompt += f"\nFor appointments, direct all patients to the {default_dept} department."
+        default_dept = clinic.get("config", {}).get(
+            "default_department", "General Medicine"
+        )
+        base_prompt += (
+            f"\nFor appointments, direct all patients to the {default_dept} department."
+        )
 
     if has_feature(clinic, "analytics"):
-        base_prompt += "\nLog intent classification for every message to support analytics."
+        base_prompt += (
+            "\nLog intent classification for every message to support analytics."
+        )
 
     return base_prompt.strip()
+
 
 async def call_groq_with_backoff(messages, timeout=5, max_tokens=20, clinic_id=None):
     """Call Groq with exponential backoff and tenant-level logging.
@@ -301,12 +414,14 @@ async def call_groq_with_backoff(messages, timeout=5, max_tokens=20, clinic_id=N
                 model=settings.groq_model,
                 messages=messages,
                 timeout=timeout,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
             )
         except RateLimitError as e:
             if attempt < 1:  # Only retry once
                 wait_time = 2  # Fixed 2s wait (not exponential)
-                logger.warning(f"Groq rate limit hit. Retrying in {wait_time}s... (Attempt {attempt+1}/2)")
+                logger.warning(
+                    f"Groq rate limit hit. Retrying in {wait_time}s... (Attempt {attempt+1}/2)"
+                )
                 await asyncio.sleep(wait_time)
             else:
                 logger.error("Groq rate limit exceeded after 2 attempts.")
@@ -314,7 +429,7 @@ async def call_groq_with_backoff(messages, timeout=5, max_tokens=20, clinic_id=N
         except Exception as e:
             logger.error(f"Groq API error: {e}")
             raise
-    
+
     logger.error("Groq rate limit exceeded after 2 attempts.")
     raise RateLimitError("Rate limit exceeded")
 
@@ -344,7 +459,9 @@ def keyword_symptom_fallback(symptom: str) -> dict:
     symptom_lower = symptom.lower().strip()
 
     # Check for emergency keywords first
-    is_emergency = any(kw in symptom_lower or kw in symptom for kw in EMERGENCY_KEYWORDS)
+    is_emergency = any(
+        kw in symptom_lower or kw in symptom for kw in EMERGENCY_KEYWORDS
+    )
 
     # Find matching department
     for keyword, (dept, could_be_emergency) in SYMPTOM_DEPARTMENT_MAP.items():
@@ -353,7 +470,7 @@ def keyword_symptom_fallback(symptom: str) -> dict:
                 "suggested_department": dept,
                 "confidence": "high" if keyword == symptom_lower else "medium",
                 "reasoning": f"Based on your mention of '{keyword}', our {dept} team may be able to help.",
-                "is_emergency": is_emergency or could_be_emergency
+                "is_emergency": is_emergency or could_be_emergency,
             }
 
     # No match found or low confidence
@@ -361,7 +478,7 @@ def keyword_symptom_fallback(symptom: str) -> dict:
         "suggested_department": "General Medicine",
         "confidence": "low",
         "reasoning": "Based on your concern, our General Medicine team is the best starting point.",
-        "is_emergency": is_emergency
+        "is_emergency": is_emergency,
     }
 
 
@@ -383,14 +500,16 @@ def detect_language(message: str) -> str:
 
 async def detect_intent(message: str, clinic: dict) -> str:
     """Detect intent using Groq with keyword fallback.
-    
+
     Security: Input is sanitized for prompt injection before LLM processing.
     Output is strictly validated against a whitelist of known intents.
     """
     # ── Security: Sanitize input ──
     sanitized_message, is_suspicious = sanitize_user_input(message)
     if is_suspicious:
-        logger.warning(f"Prompt injection detected in intent detection — using keyword fallback only")
+        logger.warning(
+            f"Prompt injection detected in intent detection — using keyword fallback only"
+        )
         return keyword_intent_fallback(message)
 
     # Strip LLM control tokens from the message
@@ -402,7 +521,9 @@ async def detect_intent(message: str, clinic: dict) -> str:
         response = await call_groq_with_backoff(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"""Classify this patient message into exactly one intent:
+                {
+                    "role": "user",
+                    "content": f"""Classify this patient message into exactly one intent:
 book_appointment, cancel_appointment, reschedule_appointment, view_services,
 doctor_availability, emergency, opt_out, data_deletion_request, human_escalation,
 followup_booking, greeting, or unknown.
@@ -411,10 +532,11 @@ followup_booking, greeting, or unknown.
 
 Message: "{clean_message}"
 
-Respond with ONLY the intent name, nothing else."""}
+Respond with ONLY the intent name, nothing else.""",
+                },
             ],
             timeout=5,
-            max_tokens=20
+            max_tokens=20,
         )
 
         intent = response.choices[0].message.content.strip().lower()
@@ -422,17 +544,27 @@ Respond with ONLY the intent name, nothing else."""}
         # ── Security: STRICT whitelist validation ──
         # Never execute arbitrary intent strings from LLM output
         allowed_intents = {
-            "book_appointment", "cancel_appointment", "reschedule_appointment",
-            "view_services", "doctor_availability", "emergency", "opt_out",
-            "data_deletion_request", "human_escalation", "followup_booking",
-            "greeting", "unknown"
+            "book_appointment",
+            "cancel_appointment",
+            "reschedule_appointment",
+            "view_services",
+            "doctor_availability",
+            "emergency",
+            "opt_out",
+            "data_deletion_request",
+            "human_escalation",
+            "followup_booking",
+            "greeting",
+            "unknown",
         }
 
         if intent in allowed_intents:
             return intent
 
         # If Groq returns something unexpected, use fallback
-        logger.warning(f"LLM returned unexpected intent '{intent}' — falling back to keyword")
+        logger.warning(
+            f"LLM returned unexpected intent '{intent}' — falling back to keyword"
+        )
         return keyword_intent_fallback(message)
 
     except Exception as e:
@@ -442,28 +574,57 @@ Respond with ONLY the intent name, nothing else."""}
 
 async def map_symptom_to_department(symptom: str, clinic: dict) -> dict:
     """Map symptoms to department using Groq with keyword fallback.
-    
+
     Security: Input is sanitized, output department is validated against whitelist.
     """
     # Step 1 - Check minimum length:
     if len(symptom.strip()) < 3:
-        return {"suggested_department": None, "is_emergency": False, "confidence": "low", "reasoning": ""}
+        return {
+            "suggested_department": None,
+            "is_emergency": False,
+            "confidence": "low",
+            "reasoning": "",
+        }
 
     # Step 2 - Check if it's a real word using SKIP_KEYWORDS:
     INVALID_SYMPTOM_WORDS = [
-        "hlo", "hi", "hello", "hey", "ok", "okay", "yes", "no",
-        "k", "hmm", "hm", "ya", "yep", "nope", "bye",
-        "హాయ్", "నమస్కారం", "హలో",
-        "हाय", "नमस्ते", "हलो"
+        "hlo",
+        "hi",
+        "hello",
+        "hey",
+        "ok",
+        "okay",
+        "yes",
+        "no",
+        "k",
+        "hmm",
+        "hm",
+        "ya",
+        "yep",
+        "nope",
+        "bye",
+        "హాయ్",
+        "నమస్కారం",
+        "హలో",
+        "हाय",
+        "नमस्ते",
+        "हलो",
     ]
     msg_lower = symptom.lower().strip()
     if msg_lower in INVALID_SYMPTOM_WORDS:
-        return {"suggested_department": None, "is_emergency": False, "confidence": "low", "reasoning": ""}
+        return {
+            "suggested_department": None,
+            "is_emergency": False,
+            "confidence": "low",
+            "reasoning": "",
+        }
 
     # ── Security: Sanitize input ──
     sanitized_symptom, is_suspicious = sanitize_user_input(symptom)
     if is_suspicious:
-        logger.warning(f"Prompt injection detected in symptom mapping — using keyword fallback")
+        logger.warning(
+            f"Prompt injection detected in symptom mapping — using keyword fallback"
+        )
         return keyword_symptom_fallback(symptom)
 
     # Step 3: Try keyword map first (instant, no API call)
@@ -473,9 +634,9 @@ async def map_symptom_to_department(symptom: str, clinic: dict) -> dict:
                 "suggested_department": dept,
                 "confidence": "high",
                 "reasoning": f"Based on your mention of '{keyword}', our {dept} team may be able to help.",
-                "is_emergency": is_emg
+                "is_emergency": is_emg,
             }
-            
+
     # Step 4: Only call Groq if keyword map fails
     clean_symptom = strip_injection_markers(sanitized_symptom)
 
@@ -485,7 +646,9 @@ async def map_symptom_to_department(symptom: str, clinic: dict) -> dict:
         response = await call_groq_with_backoff(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"""Given this patient symptom or concern, suggest the appropriate hospital department.
+                {
+                    "role": "user",
+                    "content": f"""Given this patient symptom or concern, suggest the appropriate hospital department.
 
 Symptom: "{clean_symptom}"
 
@@ -499,20 +662,26 @@ Respond in this exact JSON format:
 
 Departments available: General Medicine, Cardiology, Dental, Orthopedics, Gynecology, Pediatrics, Dermatology, Ophthalmology, ENT.
 
-IMPORTANT: Do NOT diagnose. Only suggest which department may be appropriate."""}
+IMPORTANT: Do NOT diagnose. Only suggest which department may be appropriate.""",
+                },
             ],
             timeout=5,
-            max_tokens=150
+            max_tokens=150,
         )
 
         # Parse JSON response
         import json
+
         content = response.choices[0].message.content.strip()
 
         # Extract JSON if wrapped in code blocks
         content = content or ""
         if "```json" in content:
-            content = content.split("```json")[1].split("```")[0] if "```" in content.split("```json")[1] else content.split("```json")[1]
+            content = (
+                content.split("```json")[1].split("```")[0]
+                if "```" in content.split("```json")[1]
+                else content.split("```json")[1]
+            )
         elif "```" in content:
             parts = content.split("```")
             content = parts[1] if len(parts) > 1 else content
@@ -543,9 +712,11 @@ IMPORTANT: Do NOT diagnose. Only suggest which department may be appropriate."""
         return keyword_symptom_fallback(symptom)
 
 
-async def generate_response(message: str, clinic: dict, context: dict, language: str = "en") -> str:
+async def generate_response(
+    message: str, clinic: dict, context: dict, language: str = "en"
+) -> str:
     """Generate a contextual response using Groq.
-    
+
     Security:
       - Input is sanitized for prompt injection.
       - Output is scanned for medication names/dosages (clinical firewall).
@@ -557,11 +728,13 @@ async def generate_response(message: str, clinic: dict, context: dict, language:
     clean_message = strip_injection_markers(sanitized_message)
 
     if is_suspicious:
-        logger.warning(f"Prompt injection detected in generate_response — returning safe fallback")
+        logger.warning(
+            f"Prompt injection detected in generate_response — returning safe fallback"
+        )
         fallbacks = {
             "en": "I'm here to help you book an appointment. What would you like to do?",
             "hi": "मैं आपकी अपॉइंटमेंट बुक करने में मदद करने के लिए यहां हूं। आप क्या करना चाहेंगे?",
-            "te": "నేను మీ అపాయింట్‌మెంట్ బుక్ చేయడంలో సహాయం చేయడానికి ఇక్కడ ఉన్నాను. మీరు ఏమి చేయాలనుకుంటున్నారు?"
+            "te": "నేను మీ అపాయింట్‌మెంట్ బుక్ చేయడంలో సహాయం చేయడానికి ఇక్కడ ఉన్నాను. మీరు ఏమి చేయాలనుకుంటున్నారు?",
         }
         return fallbacks.get(language or "en", fallbacks["en"])
 
@@ -569,16 +742,19 @@ async def generate_response(message: str, clinic: dict, context: dict, language:
         lang_instruction = {
             "en": "Respond in English.",
             "hi": "Respond in Hindi (Devanagari script).",
-            "te": "Respond in Telugu."
+            "te": "Respond in Telugu.",
         }.get(language, "Respond in English.")
 
         response = await call_groq_with_backoff(
             messages=[
-                {"role": "system", "content": build_system_prompt(clinic) + f"\n\n{lang_instruction}"},
-                {"role": "user", "content": clean_message}
+                {
+                    "role": "system",
+                    "content": build_system_prompt(clinic) + f"\n\n{lang_instruction}",
+                },
+                {"role": "user", "content": clean_message},
             ],
             timeout=5,
-            max_tokens=200
+            max_tokens=200,
         )
 
         raw_output = response.choices[0].message.content.strip()
@@ -588,7 +764,9 @@ async def generate_response(message: str, clinic: dict, context: dict, language:
         # dosage despite the system prompt prohibition, replace with safe fallback.
         is_safe, final_output = validate_llm_output(raw_output, language or "en")
         if not is_safe:
-            logger.warning("generate_response: LLM output contained clinical content — replaced")
+            logger.warning(
+                "generate_response: LLM output contained clinical content — replaced"
+            )
         return final_output
         # ── End Output Validation ────────────────────────────────────────────
 
@@ -597,7 +775,7 @@ async def generate_response(message: str, clinic: dict, context: dict, language:
         fallbacks = {
             "en": "I'm here to help you book an appointment. What would you like to do?",
             "hi": "मैं आपकी अपॉइंटमेंट बुक करने में मदद करने के लिए यहां हूं। आप क्या करना चाहेंगे?",
-            "te": "నేను మీ అపాయింట్‌మెంట్ బుక్ చేయడంలో సహాయం చేయడానికి ఇక్కడ ఉన్నాను. మీరు ఏమి చేయాలనుకుంటున్నారు?"
+            "te": "నేను మీ అపాయింట్‌మెంట్ బుక్ చేయడంలో సహాయం చేయడానికి ఇక్కడ ఉన్నాను. మీరు ఏమి చేయాలనుకుంటున్నారు?",
         }
         lang = language or "en"
         return fallbacks.get(lang, fallbacks["en"])

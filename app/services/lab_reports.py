@@ -4,9 +4,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-import httpx
 
-from app.config import settings
 from app.database import supabase, log_analytics_event
 from app.utils.pdf_reader import extract_text_from_pdf
 from app.services.report_summarizer import ReportSummarizer
@@ -14,6 +12,7 @@ from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
 
 logger = logging.getLogger(__name__)
+
 
 class LabReportService:
     """Service for uploading and sending lab reports to patients via WhatsApp."""
@@ -47,10 +46,14 @@ class LabReportService:
             upload_result = supabase.storage.from_("lab-reports").upload(
                 storage_path, file_bytes, {"content-type": content_type}
             )
-            logger.info(f"Uploaded report to storage: {storage_path} -> {upload_result}")
+            logger.info(
+                f"Uploaded report to storage: {storage_path} -> {upload_result}"
+            )
             storage_ok = True
         except Exception as e:
-            logger.error(f"Supabase Storage upload FAILED (file will not be retrievable for bot resend): {type(e).__name__}: {e}")
+            logger.error(
+                f"Supabase Storage upload FAILED (file will not be retrievable for bot resend): {type(e).__name__}: {e}"
+            )
             # Continue — still send via WhatsApp even if storage failed
 
         # Steps D, E, F — WhatsApp delivery
@@ -58,9 +61,11 @@ class LabReportService:
         error_message = None
         try:
             clinic = await get_clinic_by_id(clinic_id)
-            
+
             # Step D — Upload PDF to WhatsApp media
-            media_id = await whatsapp_service.upload_media(clinic, file_bytes, filename, content_type)
+            media_id = await whatsapp_service.upload_media(
+                clinic, file_bytes, filename, content_type
+            )
 
             if not media_id:
                 raise ValueError("Failed to upload media to WhatsApp")
@@ -75,7 +80,9 @@ class LabReportService:
                 if ai_result["has_abnormal"]:
                     summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
                 summary_message += "\n\n📄 Your full report is attached below."
-                await whatsapp_service.send_text(clinic, patient_phone, summary_message)
+                text_sent = await whatsapp_service.send_text(
+                    clinic, patient_phone, summary_message
+                )
             else:
                 fallback_text = (
                     f"🏥 *{clinic['name']}*\n\n"
@@ -83,11 +90,25 @@ class LabReportService:
                     f"Please find the full report attached below. "
                     f"Consult your doctor for interpretation."
                 )
-                await whatsapp_service.send_text(clinic, patient_phone, fallback_text)
+                text_sent = await whatsapp_service.send_text(
+                    clinic, patient_phone, fallback_text
+                )
+
+            if not text_sent:
+                raise ValueError(
+                    "WhatsApp API rejected the summary message — check recipient allowlist and 24h session window"
+                )
 
             # Step F — Send the actual PDF document
             caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
-            await whatsapp_service.send_document(clinic, patient_phone, media_id, filename, caption)
+            doc_sent = await whatsapp_service.send_document(
+                clinic, patient_phone, media_id, filename, caption
+            )
+
+            if not doc_sent:
+                raise ValueError(
+                    "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
+                )
 
             sent_ok = True
             logger.info(f"Report sent successfully to {patient_phone}")
@@ -106,7 +127,15 @@ class LabReportService:
             "ai_summary": ai_result.get("patient_message"),
             "has_abnormal_values": ai_result.get("has_abnormal", False),
             "status": "sent" if sent_ok else "failed",
-            "error_message": error_message if not sent_ok else (None if storage_ok else "Storage upload failed — bot resend unavailable"),
+            "error_message": (
+                error_message
+                if not sent_ok
+                else (
+                    None
+                    if storage_ok
+                    else "Storage upload failed — bot resend unavailable"
+                )
+            ),
         }
         if sent_ok:
             row["sent_at"] = datetime.now(timezone.utc).isoformat()
@@ -129,50 +158,72 @@ class LabReportService:
                 metadata={
                     "report_type": report_type,
                     "has_abnormal": ai_result.get("has_abnormal", False),
-                    "ai_fallback": ai_result.get("fallback", True)
-                }
+                    "ai_fallback": ai_result.get("fallback", True),
+                },
             )
 
         return saved_record
 
-    async def get_all_reports(self, clinic_id: str = "default", limit: int = 100) -> list:
+    async def get_all_reports(
+        self, clinic_id: str = "default", limit: int = 100
+    ) -> list:
         """Get all lab reports ordered by upload date."""
-        query = supabase.table("lab_reports").select("*").order("uploaded_at", desc=True).limit(limit)
+        query = (
+            supabase.table("lab_reports")
+            .select("*")
+            .order("uploaded_at", desc=True)
+            .limit(limit)
+        )
         if clinic_id != "default":
             query = query.eq("clinic_id", clinic_id)
         result = query.execute()
         return result.data or []
 
-    async def get_reports_by_phone(self, phone: str, clinic_id: str = "default") -> list:
+    async def get_reports_by_phone(
+        self, phone: str, clinic_id: str = "default"
+    ) -> list:
         """Get sent lab reports for a specific patient phone."""
         # Normalize: strip + prefix to match admin-uploaded records
         clean_phone = phone.lstrip("+")
-        
-        query = supabase.table("lab_reports").select("*").ilike("patient_phone", f"%{clean_phone}%").eq("status", "sent").order("uploaded_at", desc=True)
+
+        query = (
+            supabase.table("lab_reports")
+            .select("*")
+            .ilike("patient_phone", f"%{clean_phone}%")
+            .eq("status", "sent")
+            .order("uploaded_at", desc=True)
+        )
         if clinic_id != "default":
             query = query.eq("clinic_id", clinic_id)
-            
+
         result = query.execute()
         return result.data or []
 
     async def resend_report(self, report_id: str) -> dict:
         """Resend a previously uploaded lab report."""
-        report = (
-            supabase.table("lab_reports")
-            .select("*")
-            .eq("id", report_id)
-            .execute()
-        )
+        report = supabase.table("lab_reports").select("*").eq("id", report_id).execute()
         if not report.data:
             raise ValueError("Report not found")
         report = report.data[0]
 
         try:
+            # Check if PDF has been cleaned up by storage retention policy
+            if not report.get("file_path"):
+                raise ValueError(
+                    "PDF has been removed after the 90-day retention period. "
+                    "Metadata and AI summary are still available. "
+                    "Please re-upload the report from MocDoc or the admin panel."
+                )
+
             # Download file from Supabase Storage
             try:
-                file_bytes = supabase.storage.from_("lab-reports").download(report["file_path"])
+                file_bytes = supabase.storage.from_("lab-reports").download(
+                    report["file_path"]
+                )
             except Exception as storage_err:
-                logger.error(f"Storage download failed for {report['file_path']}: {storage_err}")
+                logger.error(
+                    f"Storage download failed for {report['file_path']}: {storage_err}"
+                )
                 raise ValueError(
                     f"Report file not found in storage. It may have been deleted. "
                     f"Please re-upload the report from the admin panel."
@@ -180,8 +231,10 @@ class LabReportService:
 
             clinic = await get_clinic_by_id(report.get("clinic_id", "default"))
             filename = report["file_path"].split("/")[-1]
-            media_id = await whatsapp_service.upload_media(clinic, file_bytes, filename, "application/pdf")
-            
+            media_id = await whatsapp_service.upload_media(
+                clinic, file_bytes, filename, "application/pdf"
+            )
+
             if not media_id:
                 raise ValueError("Failed to upload media to WhatsApp")
 
@@ -199,7 +252,9 @@ class LabReportService:
                 if report.get("has_abnormal_values"):
                     summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
                 summary_message += "\n\n📄 Your full report is attached below."
-                await whatsapp_service.send_text(clinic, report["patient_phone"], summary_message)
+                text_sent = await whatsapp_service.send_text(
+                    clinic, report["patient_phone"], summary_message
+                )
             else:
                 fallback_text = (
                     f"🏥 *{clinic['name']}*\n\n"
@@ -207,22 +262,42 @@ class LabReportService:
                     f"Please find the full report attached below. "
                     f"Consult your doctor for interpretation."
                 )
-                await whatsapp_service.send_text(clinic, report["patient_phone"], fallback_text)
+                text_sent = await whatsapp_service.send_text(
+                    clinic, report["patient_phone"], fallback_text
+                )
+
+            if not text_sent:
+                raise ValueError(
+                    "WhatsApp API rejected the summary message — check recipient allowlist and 24h session window"
+                )
 
             caption = f"📋 {report['report_name']} | {report_type} | {clinic['name']}"
-            await whatsapp_service.send_document(clinic, report["patient_phone"], media_id, filename, caption)
+            doc_sent = await whatsapp_service.send_document(
+                clinic, report["patient_phone"], media_id, filename, caption
+            )
 
-            supabase.table("lab_reports").update({
-                "status": "sent",
-                "sent_at": datetime.now(timezone.utc).isoformat(),
-                "error_message": None,
-            }).eq("id", report_id).execute()
+            if not doc_sent:
+                raise ValueError(
+                    "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
+                )
+
+            supabase.table("lab_reports").update(
+                {
+                    "status": "sent",
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                    "error_message": None,
+                }
+            ).eq("id", report_id).execute()
         except Exception as e:
-            supabase.table("lab_reports").update({
-                "status": "failed",
-                "error_message": str(e),
-            }).eq("id", report_id).execute()
+            supabase.table("lab_reports").update(
+                {
+                    "status": "failed",
+                    "error_message": str(e),
+                }
+            ).eq("id", report_id).execute()
             raise
 
-        updated = supabase.table("lab_reports").select("*").eq("id", report_id).execute()
+        updated = (
+            supabase.table("lab_reports").select("*").eq("id", report_id).execute()
+        )
         return updated.data[0]

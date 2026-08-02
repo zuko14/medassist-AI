@@ -15,10 +15,18 @@ def test_signature_verification():
     payload = b'{"test": true}'
     sig = "sha256=" + hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
 
-    assert verify_webhook_signature(payload, sig, secret) is True, "Valid sig should pass"
-    assert verify_webhook_signature(payload, "sha256=wrong", secret) is False, "Wrong sig should fail"
-    assert verify_webhook_signature(payload, None, secret) is False, "Missing sig should fail"
-    assert verify_webhook_signature(payload, sig, "") is True, "No secret configured = skip"
+    assert (
+        verify_webhook_signature(payload, sig, secret) is True
+    ), "Valid sig should pass"
+    assert (
+        verify_webhook_signature(payload, "sha256=wrong", secret) is False
+    ), "Wrong sig should fail"
+    assert (
+        verify_webhook_signature(payload, None, secret) is False
+    ), "Missing sig should fail"
+    assert (
+        verify_webhook_signature(payload, sig, "") is True
+    ), "No secret configured = skip"
     print("PASSED: Signature verification")
 
 
@@ -59,7 +67,7 @@ def test_strip_markers():
 
 def test_rate_limiter_fallback():
     """Test the in-memory fallback of PersistentRateLimiter.
-    
+
     When Supabase is unavailable (no rate_limits table), the limiter
     falls back to in-memory mode gracefully.
     """
@@ -68,7 +76,9 @@ def test_rate_limiter_fallback():
     rl._use_fallback = True
 
     for i in range(3):
-        assert not rl._fallback_is_limited("test_ip"), f"Should not be limited at attempt {i}"
+        assert not rl._fallback_is_limited(
+            "test_ip"
+        ), f"Should not be limited at attempt {i}"
         rl._fallback["test_ip"].append(__import__("time").time())
 
     assert rl._fallback_is_limited("test_ip"), "Should be limited after 3 attempts"

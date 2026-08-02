@@ -2,10 +2,19 @@
 
 import logging
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile, File, Form
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    status,
+    UploadFile,
+    File,
+    Form,
+)
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
@@ -27,7 +36,7 @@ async def verify_credentials(
     credentials: HTTPBasicCredentials = Depends(security),
 ):
     """Verify admin credentials with brute-force protection.
-    
+
     Security measures:
     - Rate limiting: 5 attempts per minute per IP address
     - Constant-time comparison to prevent timing attacks
@@ -39,9 +48,7 @@ async def verify_credentials(
     # Check rate limit BEFORE validating credentials
     if login_rate_limiter.is_rate_limited(client_ip):
         remaining_wait = 60  # seconds
-        logger.warning(
-            f"Admin login rate limit exceeded — IP={client_ip}"
-        )
+        logger.warning(f"Admin login rate limit exceeded — IP={client_ip}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Too many login attempts. Try again in {remaining_wait} seconds.",
@@ -108,17 +115,45 @@ class DoctorUpdate(BaseModel):
     consultation_fee: Optional[int] = None
 
 
+class BranchCreate(BaseModel):
+    name: str
+    short_name: Optional[str] = None
+    address: Optional[str] = None
+    landmark: Optional[str] = None
+    maps_link: Optional[str] = None
+    phone: Optional[str] = None
+    is_diagnostic: bool = False
+    display_order: int = 0
+
+
+class BranchUpdate(BaseModel):
+    name: Optional[str] = None
+    short_name: Optional[str] = None
+    address: Optional[str] = None
+    landmark: Optional[str] = None
+    maps_link: Optional[str] = None
+    phone: Optional[str] = None
+    is_diagnostic: Optional[bool] = None
+    is_active: Optional[bool] = None
+    display_order: Optional[int] = None
+
+
+class DoctorBranchAssign(BaseModel):
+    doctor_id: str
+    session: str = "both"  # morning | evening | both
+
+
 @router.get("/stats")
-async def get_stats(clinic_id: str = "default", days: int = 30, user: str = Depends(verify_credentials)):
+async def get_stats(
+    clinic_id: str = "default", days: int = 30, user: str = Depends(verify_credentials)
+):
     """Get dashboard statistics."""
     return await analytics_service.get_dashboard_stats(clinic_id, days)
 
 
 @router.get("/appointments/recent")
 async def get_recent_appointments(
-    clinic_id: str = "default",
-    limit: int = 20,
-    user: str = Depends(verify_credentials)
+    clinic_id: str = "default", limit: int = 20, user: str = Depends(verify_credentials)
 ):
     """Get recent appointments."""
     return await analytics_service.get_recent_appointments(clinic_id, limit)
@@ -126,9 +161,7 @@ async def get_recent_appointments(
 
 @router.get("/appointments/upcoming")
 async def get_upcoming_appointments(
-    clinic_id: str = "default",
-    days: int = 7,
-    user: str = Depends(verify_credentials)
+    clinic_id: str = "default", days: int = 7, user: str = Depends(verify_credentials)
 ):
     """Get upcoming appointments."""
     return await analytics_service.get_upcoming_appointments(clinic_id, days)
@@ -136,16 +169,16 @@ async def get_upcoming_appointments(
 
 @router.get("/departments/popular")
 async def get_popular_departments(
-    clinic_id: str = "default",
-    days: int = 30,
-    user: str = Depends(verify_credentials)
+    clinic_id: str = "default", days: int = 30, user: str = Depends(verify_credentials)
 ):
     """Get popular departments."""
     return await analytics_service.get_popular_departments(clinic_id, days)
 
 
 @router.get("/doctors")
-async def get_doctors(clinic_id: str = "default", user: str = Depends(verify_credentials)):
+async def get_doctors(
+    clinic_id: str = "default", user: str = Depends(verify_credentials)
+):
     """Get all doctors."""
     try:
         query = supabase.table("doctors").select("*")
@@ -162,7 +195,7 @@ async def get_doctors(clinic_id: str = "default", user: str = Depends(verify_cre
 async def create_doctor(
     doctor: DoctorCreate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials)
+    user: str = Depends(verify_credentials),
 ):
     """Create a new doctor."""
     try:
@@ -180,14 +213,20 @@ async def update_doctor(
     doctor_id: str,
     doctor: DoctorUpdate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials)
+    user: str = Depends(verify_credentials),
 ):
     """Update an existing doctor."""
     try:
         update_data = doctor.dict(exclude_unset=True)
         if not update_data:
             return {"message": "No fields to update"}
-        result = supabase.table("doctors").update(update_data).eq("clinic_id", clinic_id).eq("id", doctor_id).execute()
+        result = (
+            supabase.table("doctors")
+            .update(update_data)
+            .eq("clinic_id", clinic_id)
+            .eq("id", doctor_id)
+            .execute()
+        )
         if not result.data:
             raise HTTPException(status_code=404, detail="Doctor not found")
         return result.data[0]
@@ -200,13 +239,13 @@ async def update_doctor(
 
 @router.delete("/doctors/{doctor_id}")
 async def delete_doctor(
-    doctor_id: str,
-    clinic_id: str = "default",
-    user: str = Depends(verify_credentials)
+    doctor_id: str, clinic_id: str = "default", user: str = Depends(verify_credentials)
 ):
     """Delete a doctor."""
     try:
-        result = supabase.table("doctors").delete().eq("clinic_id", clinic_id).eq("id", doctor_id).execute()
+        supabase.table("doctors").delete().eq("clinic_id", clinic_id).eq(
+            "id", doctor_id
+        ).execute()
         # Note: if doctor has appointments, foreign key constraints might fail unless cascading is enabled
         return {"success": True}
     except Exception as e:
@@ -218,7 +257,7 @@ async def delete_doctor(
 async def get_leaves(
     doctor: Optional[str] = None,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials)
+    user: str = Depends(verify_credentials),
 ):
     """Get doctor leaves."""
     try:
@@ -236,29 +275,32 @@ async def get_leaves(
 async def create_leave(
     leave: LeaveCreate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials)
+    user: str = Depends(verify_credentials),
 ):
     """Create a doctor leave (single day or date range)."""
     from datetime import timedelta
+
     try:
         start_date = leave.leave_date
         end_date = leave.end_date or start_date
-        
+
         if end_date < start_date:
-            raise HTTPException(status_code=400, detail="End date cannot be before start date")
-            
+            raise HTTPException(
+                status_code=400, detail="End date cannot be before start date"
+            )
+
         leaves_to_insert = []
         current_date = start_date
-        
+
         while current_date <= end_date:
             leave_data = leave.dict(exclude={"end_date"})
             leave_data["leave_date"] = str(current_date)
             leave_data["clinic_id"] = clinic_id
             leaves_to_insert.append(leave_data)
             current_date += timedelta(days=1)
-            
+
         result = supabase.table("doctor_leaves").insert(leaves_to_insert).execute()
-        
+
         # Return the first inserted leave just to satisfy the previous API signature somewhat
         # in case the frontend depends on it
         if result.data:
@@ -272,10 +314,14 @@ async def create_leave(
 
 
 @router.delete("/leaves/{leave_id}")
-async def delete_leave(leave_id: str, clinic_id: str = "default", user: str = Depends(verify_credentials)):
+async def delete_leave(
+    leave_id: str, clinic_id: str = "default", user: str = Depends(verify_credentials)
+):
     """Delete a doctor leave."""
     try:
-        supabase.table("doctor_leaves").delete().eq("clinic_id", clinic_id).eq("id", leave_id).execute()
+        supabase.table("doctor_leaves").delete().eq("clinic_id", clinic_id).eq(
+            "id", leave_id
+        ).execute()
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting leave: {e}")
@@ -283,7 +329,9 @@ async def delete_leave(leave_id: str, clinic_id: str = "default", user: str = De
 
 
 @router.get("/holidays")
-async def get_holidays(clinic_id: str = "default", user: str = Depends(verify_credentials)):
+async def get_holidays(
+    clinic_id: str = "default", user: str = Depends(verify_credentials)
+):
     """Get hospital holidays."""
     try:
         query = supabase.table("hospital_holidays").select("*").order("holiday_date")
@@ -301,15 +349,21 @@ async def create_holiday(
     holiday_date: date,
     name: str,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials)
+    user: str = Depends(verify_credentials),
 ):
     """Create a hospital holiday."""
     try:
-        result = supabase.table("hospital_holidays").insert({
-            "clinic_id": clinic_id,
-            "holiday_date": str(holiday_date),
-            "name": name
-        }).execute()
+        result = (
+            supabase.table("hospital_holidays")
+            .insert(
+                {
+                    "clinic_id": clinic_id,
+                    "holiday_date": str(holiday_date),
+                    "name": name,
+                }
+            )
+            .execute()
+        )
         return result.data[0]
     except Exception as e:
         logger.error(f"Error creating holiday: {e}")
@@ -317,27 +371,36 @@ async def create_holiday(
 
 
 @router.delete("/holidays/{holiday_date}")
-async def delete_holiday(holiday_date: str, clinic_id: str = "default", user: str = Depends(verify_credentials)):
+async def delete_holiday(
+    holiday_date: str,
+    clinic_id: str = "default",
+    user: str = Depends(verify_credentials),
+):
     """Delete a hospital holiday."""
     try:
-        supabase.table("hospital_holidays").delete().eq("clinic_id", clinic_id).eq("holiday_date", holiday_date).execute()
+        supabase.table("hospital_holidays").delete().eq("clinic_id", clinic_id).eq(
+            "holiday_date", holiday_date
+        ).execute()
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting holiday: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete holiday")
 
+
 @router.delete("/appointments/{appointment_id}")
 async def cancel_appointment_by_admin(
     appointment_id: str,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials)
+    user: str = Depends(verify_credentials),
 ):
     try:
-        result = supabase.table("appointments") \
-                         .update({"status": "cancelled"}) \
-                         .eq("clinic_id", clinic_id) \
-                         .eq("id", appointment_id) \
-                         .execute()
+        result = (
+            supabase.table("appointments")
+            .update({"status": "cancelled"})
+            .eq("clinic_id", clinic_id)
+            .eq("id", appointment_id)
+            .execute()
+        )
         if result.data:
             return {"success": True}
         return {"success": False, "message": "Not found"}
@@ -346,6 +409,7 @@ async def cancel_appointment_by_admin(
 
 
 # ═══════ LAB REPORTS ═══════
+
 
 @router.post("/lab-reports/upload")
 async def upload_lab_report(
@@ -370,14 +434,20 @@ async def upload_lab_report(
             report_name=report_name,
             report_type=report_type,
         )
-        return {"success": True, "message": "Report sent to patient via WhatsApp", "report": result}
+        return {
+            "success": True,
+            "message": "Report sent to patient via WhatsApp",
+            "report": result,
+        }
     except Exception as e:
         logger.error(f"Lab report upload error: {e}")
         return {"success": False, "error": str(e)}
 
 
 @router.get("/lab-reports")
-async def get_lab_reports(clinic_id: str = "default", user: str = Depends(verify_credentials)):
+async def get_lab_reports(
+    clinic_id: str = "default", user: str = Depends(verify_credentials)
+):
     """Get all lab reports."""
     result = await LabReportService().get_all_reports(clinic_id)
     return {"reports": result}
@@ -398,7 +468,9 @@ async def resend_lab_report(
 
 
 @router.get("/patients")
-async def get_patients(clinic_id: str = "default", user: str = Depends(verify_credentials)):
+async def get_patients(
+    clinic_id: str = "default", user: str = Depends(verify_credentials)
+):
     """Get all patients with appointment counts."""
     try:
         result = supabase.rpc(
@@ -410,18 +482,31 @@ async def get_patients(clinic_id: str = "default", user: str = Depends(verify_cr
         if clinic_id == "default":
             patients = supabase.table("patients").select("*").order("phone").execute()
         else:
-            patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
+            patients = (
+                supabase.table("patients")
+                .select("*")
+                .eq("clinic_id", clinic_id)
+                .order("phone")
+                .execute()
+            )
         return {"patients": patients.data or []}
     except Exception:
         # Fallback if RPC doesn't exist
         if clinic_id == "default":
             patients = supabase.table("patients").select("*").order("phone").execute()
         else:
-            patients = supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").execute()
+            patients = (
+                supabase.table("patients")
+                .select("*")
+                .eq("clinic_id", clinic_id)
+                .order("phone")
+                .execute()
+            )
         return {"patients": patients.data or []}
 
 
 # ═══════ PRESCRIPTIONS ═══════
+
 
 @router.post("/prescriptions")
 async def add_prescription(
@@ -478,6 +563,7 @@ async def deactivate_prescription(
 
 # ═══════ PAYMENTS & BOOKINGS ═══════
 
+
 @router.get("/bookings")
 async def get_bookings(
     clinic_id: str = "default",
@@ -510,14 +596,18 @@ async def get_pending_review_bookings(
 ):
     """Get bookings in pending_review status — needs human eyes."""
     try:
-        query = supabase.table("appointments").select("*").eq("status", "pending_review")
+        query = (
+            supabase.table("appointments").select("*").eq("status", "pending_review")
+        )
         if clinic_id != "default":
             query = query.eq("clinic_id", clinic_id)
         result = query.order("created_at", desc=True).execute()
         return {"bookings": result.data or []}
     except Exception as e:
         logger.error(f"Error getting pending review bookings: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get pending review bookings")
+        raise HTTPException(
+            status_code=500, detail="Failed to get pending review bookings"
+        )
 
 
 @router.post("/bookings/{booking_id}/confirm")
@@ -529,6 +619,7 @@ async def admin_confirm_booking(
     """Manually confirm a pending_review booking (admin override)."""
     try:
         from app.services.payment import payment_service
+
         admin_notes = (body or {}).get("admin_notes", f"Confirmed by admin: {user}")
         result = await payment_service.admin_confirm_booking(booking_id, admin_notes)
         if not result["success"]:
@@ -550,6 +641,7 @@ async def admin_reject_booking(
     """Manually reject a pending_review booking + initiate refund."""
     try:
         from app.services.payment import payment_service
+
         admin_notes = (body or {}).get("admin_notes", f"Rejected by admin: {user}")
         result = await payment_service.admin_reject_booking(booking_id, admin_notes)
         if not result["success"]:
@@ -571,10 +663,13 @@ async def admin_refund_booking(
     """Initiate a refund for a confirmed booking."""
     try:
         from app.services.payment import payment_service
+
         reason = (body or {}).get("reason", f"Admin refund by {user}")
         result = await payment_service.initiate_refund(booking_id, reason)
         if not result["success"]:
-            raise HTTPException(status_code=400, detail=result.get("reason", "Refund failed"))
+            raise HTTPException(
+                status_code=400, detail=result.get("reason", "Refund failed")
+            )
         return result
     except HTTPException:
         raise
@@ -590,11 +685,13 @@ async def get_payment_events(
 ):
     """Get the payment audit trail for a booking."""
     try:
-        result = supabase.table("payment_events") \
-            .select("*") \
-            .eq("booking_id", booking_id) \
-            .order("created_at", desc=False) \
+        result = (
+            supabase.table("payment_events")
+            .select("*")
+            .eq("booking_id", booking_id)
+            .order("created_at", desc=False)
             .execute()
+        )
         return {"events": result.data or []}
     except Exception as e:
         logger.error(f"Error getting payment events: {e}")
@@ -609,6 +706,7 @@ async def get_payment_reconciliation(
     """Get daily payment reconciliation summary."""
     try:
         from app.services.payment import payment_service
+
         summary = await payment_service.get_daily_reconciliation(date_str)
         return summary
     except Exception as e:
@@ -625,45 +723,56 @@ async def get_payment_stats(
     """Get payment statistics for the dashboard."""
     try:
         from datetime import datetime, timedelta
+
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
         # Total confirmed with payments
-        confirmed = supabase.table("appointments") \
-            .select("id, amount_paise", count="exact") \
-            .eq("status", "confirmed") \
-            .not_.is_("payment_id", "null") \
-            .gte("created_at", cutoff) \
+        confirmed = (
+            supabase.table("appointments")
+            .select("id, amount_paise", count="exact")
+            .eq("status", "confirmed")
+            .not_.is_("payment_id", "null")
+            .gte("created_at", cutoff)
             .execute()
+        )
 
         # Total pending review
-        pending = supabase.table("appointments") \
-            .select("id", count="exact") \
-            .eq("status", "pending_review") \
+        pending = (
+            supabase.table("appointments")
+            .select("id", count="exact")
+            .eq("status", "pending_review")
             .execute()
+        )
 
         # Total refunded
-        refunded = supabase.table("appointments") \
-            .select("id, amount_paise", count="exact") \
-            .eq("status", "refunded") \
-            .gte("created_at", cutoff) \
+        refunded = (
+            supabase.table("appointments")
+            .select("id, amount_paise", count="exact")
+            .eq("status", "refunded")
+            .gte("created_at", cutoff)
             .execute()
+        )
 
         # Total expired
-        expired = supabase.table("appointments") \
-            .select("id", count="exact") \
-            .eq("status", "expired") \
-            .gte("created_at", cutoff) \
+        expired = (
+            supabase.table("appointments")
+            .select("id", count="exact")
+            .eq("status", "expired")
+            .gte("created_at", cutoff)
             .execute()
+        )
 
         confirmed_amount = sum(b.get("amount_paise", 0) for b in (confirmed.data or []))
         refunded_amount = sum(b.get("amount_paise", 0) for b in (refunded.data or []))
 
         # Signature failures
-        sig_failures = supabase.table("payment_events") \
-            .select("id", count="exact") \
-            .eq("event_type", "signature_failed") \
-            .gte("created_at", cutoff) \
+        sig_failures = (
+            supabase.table("payment_events")
+            .select("id", count="exact")
+            .eq("event_type", "signature_failed")
+            .gte("created_at", cutoff)
             .execute()
+        )
 
         return {
             "confirmed_count": len(confirmed.data or []),
@@ -679,3 +788,294 @@ async def get_payment_stats(
         logger.error(f"Payment stats error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get payment stats")
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONNECTOR MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/connectors", dependencies=[Depends(verify_credentials)])
+async def get_connectors(clinic_id: Optional[str] = None):
+    """Get all integration connectors with status info."""
+    try:
+        query = supabase.table("integration_connectors").select("*")
+        if clinic_id:
+            query = query.eq("clinic_id", clinic_id)
+        result = query.order("created_at", desc=True).execute()
+        return {"connectors": result.data or []}
+    except Exception as e:
+        logger.error(f"Failed to get connectors: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get connectors")
+
+
+class ConnectorToggle(BaseModel):
+    is_enabled: bool
+
+
+@router.post(
+    "/connectors/{connector_id}/toggle", dependencies=[Depends(verify_credentials)]
+)
+async def toggle_connector(connector_id: str, body: ConnectorToggle):
+    """Toggle a connector ON or OFF. This is the primary kill switch."""
+    try:
+        result = (
+            supabase.table("integration_connectors")
+            .update(
+                {
+                    "is_enabled": body.is_enabled,
+                    "updated_at": datetime.now().isoformat(),
+                }
+            )
+            .eq("id", connector_id)
+            .execute()
+        )
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Connector not found")
+
+        status = "enabled" if body.is_enabled else "disabled"
+        logger.info(f"Connector {connector_id} {status}")
+        return {"message": f"Connector {status}", "connector": result.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to toggle connector: {e}")
+        raise HTTPException(status_code=500, detail="Failed to toggle connector")
+
+
+@router.get(
+    "/connectors/{connector_id}/audit-log", dependencies=[Depends(verify_credentials)]
+)
+async def get_connector_audit_log(connector_id: str, limit: int = 20):
+    """Get recent audit log entries for a connector."""
+    try:
+        # First get the connector to find its clinic_id and type
+        connector = (
+            supabase.table("integration_connectors")
+            .select("clinic_id, connector_type")
+            .eq("id", connector_id)
+            .single()
+            .execute()
+        )
+
+        if not connector.data:
+            raise HTTPException(status_code=404, detail="Connector not found")
+
+        logs = (
+            supabase.table("connector_audit_log")
+            .select("*")
+            .eq("clinic_id", connector.data["clinic_id"])
+            .eq("connector_type", connector.data["connector_type"])
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        return {"audit_log": logs.data or []}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get audit log: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get audit log")
+
+
+# ═══════ BRANCHES ═══════
+
+
+@router.get("/branches")
+async def get_branches(
+    clinic_id: str = "default",
+    user: str = Depends(verify_credentials),
+):
+    """Get all branches for a clinic."""
+    try:
+        query = supabase.table("branches").select("*")
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        query = query.order("display_order")
+        result = query.execute()
+        return {"branches": result.data or []}
+    except Exception as e:
+        logger.error(f"Error getting branches: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get branches")
+
+
+@router.post("/branches")
+async def create_branch(
+    branch: BranchCreate,
+    clinic_id: str = "default",
+    user: str = Depends(verify_credentials),
+):
+    """Create a new branch."""
+    try:
+        branch_data = branch.dict()
+        # Auto-resolve clinic_id for single-tenant setups
+        if clinic_id == "default":
+            clinics = supabase.table("clinics").select("id").limit(1).execute()
+            if clinics.data:
+                clinic_id = clinics.data[0]["id"]
+            else:
+                raise HTTPException(status_code=400, detail="No clinic found")
+        branch_data["clinic_id"] = clinic_id
+        result = supabase.table("branches").insert(branch_data).execute()
+
+        # Invalidate branch cache
+        from app.services.tenant import invalidate_branch_cache
+
+        invalidate_branch_cache(clinic_id)
+
+        return {"success": True, "branch": result.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating branch: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create branch")
+
+
+@router.put("/branches/{branch_id}")
+async def update_branch(
+    branch_id: str,
+    branch: BranchUpdate,
+    clinic_id: str = "default",
+    user: str = Depends(verify_credentials),
+):
+    """Update a branch."""
+    try:
+        update_data = branch.dict(exclude_unset=True)
+        if not update_data:
+            return {"message": "No fields to update"}
+        query = supabase.table("branches").update(update_data)
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        result = query.eq("id", branch_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Branch not found")
+
+        # Invalidate branch cache
+        from app.services.tenant import invalidate_branch_cache
+
+        invalidate_branch_cache(clinic_id)
+
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating branch: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update branch")
+
+
+@router.delete("/branches/{branch_id}")
+async def delete_branch(
+    branch_id: str,
+    clinic_id: str = "default",
+    user: str = Depends(verify_credentials),
+):
+    """Soft-delete a branch (deactivate it)."""
+    try:
+        query = supabase.table("branches").update({"is_active": False})
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        result = query.eq("id", branch_id).execute()
+
+        # Invalidate branch cache
+        from app.services.tenant import invalidate_branch_cache
+
+        invalidate_branch_cache(clinic_id)
+
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error deleting branch: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete branch")
+
+
+@router.get("/branches/{branch_id}/doctors")
+async def get_branch_doctors(
+    branch_id: str,
+    user: str = Depends(verify_credentials),
+):
+    """Get doctors assigned to a specific branch."""
+    try:
+        result = (
+            supabase.table("doctor_branches")
+            .select("*, doctors(*)")
+            .eq("branch_id", branch_id)
+            .execute()
+        )
+        return {"doctor_branches": result.data or []}
+    except Exception as e:
+        logger.error(f"Error getting branch doctors: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get branch doctors")
+
+
+@router.post("/branches/{branch_id}/doctors")
+async def assign_doctor_to_branch(
+    branch_id: str,
+    body: DoctorBranchAssign,
+    user: str = Depends(verify_credentials),
+):
+    """Assign a doctor to a branch with session control."""
+    try:
+        data = {
+            "doctor_id": body.doctor_id,
+            "branch_id": branch_id,
+            "session": body.session,
+        }
+        result = supabase.table("doctor_branches").insert(data).execute()
+        return result.data[0]
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "duplicate" in error_msg or "unique" in error_msg:
+            raise HTTPException(
+                status_code=409, detail="Doctor already assigned to this branch"
+            )
+        logger.error(f"Error assigning doctor to branch: {e}")
+        raise HTTPException(status_code=500, detail="Failed to assign doctor to branch")
+
+
+@router.delete("/branches/{branch_id}/doctors/{doctor_id}")
+async def remove_doctor_from_branch(
+    branch_id: str,
+    doctor_id: str,
+    user: str = Depends(verify_credentials),
+):
+    """Remove a doctor from a branch."""
+    try:
+        supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
+            "doctor_id", doctor_id
+        ).execute()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error removing doctor from branch: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to remove doctor from branch"
+        )
+
+
+@router.put("/branches/{branch_id}/doctors/{doctor_id}")
+async def update_doctor_branch_session(
+    branch_id: str,
+    doctor_id: str,
+    body: DoctorBranchAssign,
+    user: str = Depends(verify_credentials),
+):
+    """Update a doctor's session assignment at a branch."""
+    try:
+        result = (
+            supabase.table("doctor_branches")
+            .update({"session": body.session})
+            .eq("branch_id", branch_id)
+            .eq("doctor_id", doctor_id)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(
+                status_code=404, detail="Doctor-branch assignment not found"
+            )
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating doctor branch session: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to update doctor branch session"
+        )

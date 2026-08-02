@@ -3,14 +3,13 @@
 import logging
 from datetime import datetime, date, timezone
 
-import httpx
 
-from app.config import settings
 from app.database import supabase
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
 
 logger = logging.getLogger(__name__)
+
 
 class PrescriptionService:
     """Service for managing prescription reminders."""
@@ -60,7 +59,9 @@ class PrescriptionService:
 
         return result.data[0]
 
-    async def get_all_prescriptions(self, clinic_id: str = "default", active_only: bool = False) -> list:
+    async def get_all_prescriptions(
+        self, clinic_id: str = "default", active_only: bool = False
+    ) -> list:
         """Get all prescriptions, optionally filtered to active only."""
         if active_only:
             result = (
@@ -82,11 +83,13 @@ class PrescriptionService:
             )
         return result.data or []
 
-    async def deactivate_prescription(self, clinic_id: str, prescription_id: str) -> dict:
+    async def deactivate_prescription(
+        self, clinic_id: str, prescription_id: str
+    ) -> dict:
         """Deactivate a prescription reminder."""
-        supabase.table("prescriptions").update(
-            {"is_active": False}
-        ).eq("clinic_id", clinic_id).eq("id", prescription_id).execute()
+        supabase.table("prescriptions").update({"is_active": False}).eq(
+            "clinic_id", clinic_id
+        ).eq("id", prescription_id).execute()
 
         updated = (
             supabase.table("prescriptions")
@@ -128,7 +131,9 @@ class PrescriptionService:
                             f"💊 {rx['medicine_name']} — {rx['dosage']}\n"
                             f"Stay healthy! 🏥 {clinic['name']}"
                         )
-                        await whatsapp_service.send_text(clinic, rx["patient_phone"], message)
+                        await whatsapp_service.send_text(
+                            clinic, rx["patient_phone"], message
+                        )
                         count_sent += 1
                     except Exception as e:
                         logger.error(f"Reminder send error for {rx['id']}: {e}")

@@ -9,8 +9,11 @@ Verifies that:
   - restore_pii restores only patient name while keeping other PII hidden
 """
 
-import pytest
-from app.utils.pii_sanitizer import sanitize_report_text, restore_pii, get_redaction_summary
+from app.utils.pii_sanitizer import (
+    sanitize_report_text,
+    restore_pii,
+    get_redaction_summary,
+)
 
 
 class TestPIISanitizer:
@@ -50,16 +53,16 @@ class TestPIISanitizer:
     def test_restores_only_patient_name(self):
         text = "Report for Rahul Sharma. Phone: 9876543210."
         sanitized, rmap = sanitize_report_text(text, patient_name="Rahul Sharma")
-        
+
         # Simulate LLM summary output containing placeholders
-        llm_output = f"Hello {rmap.get('[PATIENT_1]', '[PATIENT_1]')}, we checked your phone [PHONE_2]."
+        f"Hello {rmap.get('[PATIENT_1]', '[PATIENT_1]')}, we checked your phone [PHONE_2]."
         # Actually let's use the exact placeholder
         pat_key = [k for k in rmap.keys() if "PATIENT" in k][0]
         phone_key = [k for k in rmap.keys() if "PHONE" in k][0]
-        
+
         llm_mock = f"Hello {pat_key}, we contacted {phone_key}."
         restored = restore_pii(llm_mock, rmap)
-        
+
         assert "Rahul Sharma" in restored
         assert phone_key in restored  # Phone is NOT restored in outbound message
 

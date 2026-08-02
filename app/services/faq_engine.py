@@ -4,7 +4,6 @@ import logging
 from typing import Optional
 
 from app.config import settings
-from app.templates.whatsapp_templates import get_message
 
 logger = logging.getLogger(__name__)
 
@@ -44,18 +43,29 @@ FAQ_DATABASE = {
         "emergency": "అత్యవసర పరిస్థితుల కోసం, వెంటనే {hospital_emergency_number} కు కాల్ చేయండి లేదా మా 24/7 అత్యవసర వార్డ్‌కు వెళ్లండి.",
         "address": "మనం ఇక్కడ ఉన్నాం: {hospital_address}. ల్యాండ్‌మార్క్: {hospital_landmark}",
         "departments": "మా విభాగాలు: జనరల్ మెడిసిన్, కార్డియాలజీ, దంతచికిత్స, ఆర్థోపెడిక్స్, గైనకాలజీ, పీడియాట్రిక్స్, డెర్మటాలజీ, ఆఫ్తాల్మాలజీ, మరియు ENT.",
-    }
+    },
 }
 
 # FAQ Keywords for matching
 FAQ_KEYWORDS = {
     "en": {
-        "visiting_hours": ["visiting hours", "visit time", "when can I visit", "meeting hours"],
+        "visiting_hours": [
+            "visiting hours",
+            "visit time",
+            "when can I visit",
+            "meeting hours",
+        ],
         "parking": ["parking", "where to park", "car parking", "vehicle"],
         "insurance": ["insurance", "cashless", "health insurance", "TPA", "claim"],
         "payment": ["payment", "pay", "billing", "bill", "charges", "fees", "cost"],
         "emergency": ["emergency", "urgent", "critical", "ambulance"],
-        "address": ["address", "location", "where are you", "how to reach", "directions"],
+        "address": [
+            "address",
+            "location",
+            "where are you",
+            "how to reach",
+            "directions",
+        ],
         "contact": ["contact", "phone", "number", "call", "reach you"],
         "website": ["website", "online", "portal", "web"],
         "departments": ["departments", "specialities", "services", "what do you have"],
@@ -82,13 +92,13 @@ FAQ_KEYWORDS = {
         "emergency": ["అత్యవసరం", "ఎమర్జెన్సీ", "ఆంబులెన్స్"],
         "address": ["చిరునామా", "లొకేషన్", "ఎక్కడ ఉన్నారు", "ఎలా వెళ్ళాలి"],
         "contact": ["సంప్రదింపు", "ఫోన్", "నంబర్", "కాల్"],
-    }
+    },
 }
 
 
 class FAQEngine:
     """FAQ Engine for answering common questions.
-    
+
     Tenant Isolation:
       FAQ lookup is scoped per-clinic. Each clinic can define custom FAQ
       overrides in its config JSONB field under "custom_faqs".
@@ -104,7 +114,7 @@ class FAQEngine:
 
     def _get_clinic_overrides(self, clinic: dict, lang: str) -> dict:
         """Extract per-clinic FAQ overrides from clinic config JSONB.
-        
+
         Clinics can add custom FAQs in their config:
           {
             "custom_faqs": {
@@ -121,7 +131,7 @@ class FAQEngine:
 
     def _get_clinic_keyword_overrides(self, clinic: dict, lang: str) -> dict:
         """Extract per-clinic keyword overrides from clinic config JSONB.
-        
+
         Clinics can add custom keyword triggers in their config:
           {
             "custom_faq_keywords": {
@@ -136,9 +146,11 @@ class FAQEngine:
         custom_kw = config.get("custom_faq_keywords", {})
         return custom_kw.get(lang, custom_kw.get("en", {}))
 
-    def find_answer(self, message: str, clinic: dict, lang: str = "en") -> Optional[str]:
+    def find_answer(
+        self, message: str, clinic: dict, lang: str = "en"
+    ) -> Optional[str]:
         """Find FAQ answer for a message, merging global + clinic-specific FAQs.
-        
+
         Tenant isolation: FAQs are scoped to the clinic.
         Clinic-specific custom FAQs override global defaults when defined.
         """
@@ -157,9 +169,11 @@ class FAQEngine:
             "hospital_name": clinic.get("name", settings.hospital_name),
             "hospital_address": config.get("address", settings.hospital_address),
             "hospital_phone": clinic.get("phone", settings.hospital_phone),
-            "hospital_emergency_number": config.get("emergency_number", settings.hospital_emergency_number),
+            "hospital_emergency_number": config.get(
+                "emergency_number", settings.hospital_emergency_number
+            ),
             "hospital_website": config.get("website", settings.hospital_website),
-            "hospital_landmark": config.get("landmark", settings.hospital_landmark)
+            "hospital_landmark": config.get("landmark", settings.hospital_landmark),
         }
 
         # Get global FAQs merged with clinic overrides (clinic answers take priority)

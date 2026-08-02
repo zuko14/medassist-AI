@@ -1,17 +1,14 @@
 """Helper utilities."""
 
-import random
-import string
 from datetime import date, datetime, timedelta
 from typing import Optional
-
-from app.config import settings
 
 
 def generate_booking_reference() -> str:
     """Generate a unique booking reference."""
     import random
     from datetime import datetime
+
     year = datetime.now().year
     number = str(random.randint(1000, 9999)).zfill(4)
     return f"MC-{year}-{number}"
@@ -62,7 +59,7 @@ def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
     """Truncate text to max length."""
     if len(text) <= max_length:
         return text
-    return text[:max_length - len(suffix)] + suffix
+    return text[: max_length - len(suffix)] + suffix
 
 
 def sanitize_input(text: str) -> str:
@@ -95,7 +92,15 @@ def parse_natural_date(text: str) -> Optional[date]:
         return today + timedelta(days=2)
 
     # Try to parse day names
-    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    days = [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ]
     if text_lower in days:
         target_day = days.index(text_lower)
         current_day = today.weekday()

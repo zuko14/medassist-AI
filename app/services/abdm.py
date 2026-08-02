@@ -39,7 +39,9 @@ class ABDMService:
     """Service for ABDM / ABHA integration."""
 
     def __init__(self):
-        self.base_url = getattr(settings, "abdm_base_url", "https://abhasbx.abdm.gov.in/abha/api")
+        self.base_url = getattr(
+            settings, "abdm_base_url", "https://abhasbx.abdm.gov.in/abha/api"
+        )
         self.client_id = getattr(settings, "abdm_client_id", "")
         self.client_secret = getattr(settings, "abdm_client_secret", "")
         self._configured = bool(self.client_id and self.client_secret)
@@ -81,7 +83,9 @@ class ABDMService:
 
         # If not configured, return graceful fallback
         if not self._configured:
-            logger.warning("ABDM credentials not configured. Skipping live verification.")
+            logger.warning(
+                "ABDM credentials not configured. Skipping live verification."
+            )
             return {
                 "valid": True,  # Optimistic — format is correct
                 "name": None,
@@ -118,12 +122,23 @@ class ABDMService:
             elif response.status_code == 404:
                 return {"valid": False, "name": None, "error": "ABHA ID not found."}
             else:
-                logger.error(f"ABDM verify error: {response.status_code} {response.text[:200]}")
-                return {"valid": False, "name": None, "error": "ABDM verification unavailable."}
+                logger.error(
+                    f"ABDM verify error: {response.status_code} {response.text[:200]}"
+                )
+                return {
+                    "valid": False,
+                    "name": None,
+                    "error": "ABDM verification unavailable.",
+                }
 
         except httpx.TimeoutException:
             logger.warning("ABDM verify timeout — failing open")
-            return {"valid": True, "name": None, "error": None, "note": "ABDM timeout — format valid only."}
+            return {
+                "valid": True,
+                "name": None,
+                "error": None,
+                "note": "ABDM timeout — format valid only.",
+            }
         except Exception as e:
             logger.error(f"ABDM verify exception: {e}")
             return {"valid": False, "name": None, "error": "ABDM service error."}

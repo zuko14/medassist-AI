@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # 1. META WEBHOOK SIGNATURE VERIFICATION (X-Hub-Signature-256)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def verify_webhook_signature(
     payload_body: bytes,
     signature_header: Optional[str],
@@ -57,16 +58,21 @@ def verify_webhook_signature(
         logger.warning("Webhook signature has invalid format — REJECTED")
         return False
 
-    expected_signature = "sha256=" + hmac.new(
-        app_secret.encode("utf-8"),
-        payload_body,
-        hashlib.sha256,
-    ).hexdigest()
+    expected_signature = (
+        "sha256="
+        + hmac.new(
+            app_secret.encode("utf-8"),
+            payload_body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
 
     is_valid = hmac.compare_digest(expected_signature, signature_header)
 
     if not is_valid:
-        logger.warning("Webhook signature mismatch — REJECTED (possible spoofed request)")
+        logger.warning(
+            "Webhook signature mismatch — REJECTED (possible spoofed request)"
+        )
 
     return is_valid
 
@@ -79,15 +85,15 @@ def verify_webhook_signature(
 INJECTION_PATTERNS = [
     r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|context)",
     r"you\s+are\s+now\s+(an?\s+)?(admin|administrator|root|superuser|developer|hacker)",
-    r"system\s*:\s*",                          # Trying to inject system-role messages
+    r"system\s*:\s*",  # Trying to inject system-role messages
     r"act\s+as\s+(if\s+)?(an?\s+)?(admin|root|developer|hacker|unrestricted)",
     r"(show|display|list|reveal|dump|print)\s+(all|every|my)?\s*(patient|appointment|record|data|database|secret|key|token|password)",
     r"forget\s+(all\s+)?(your\s+)?(rules?|instructions?|training|constraints?)",
     r"(bypass|override|disable|skip|break)\s+(security|restrictions?|rules?|filters?|safety)",
     r"pretend\s+(you\s+)?(are|to\s+be)\s+(not\s+)?(a|an)?\s*(ai|bot|assistant|chatbot)",
     r"execute\s+(this\s+)?(sql|query|command|code|script)",
-    r"(drop|delete|truncate|alter)\s+table",   # SQL injection in chat
-    r"\{[^}]*role\s*:\s*['\"]?system",         # JSON role injection
+    r"(drop|delete|truncate|alter)\s+table",  # SQL injection in chat
+    r"\{[^}]*role\s*:\s*['\"]?system",  # JSON role injection
 ]
 
 _compiled_patterns = [re.compile(p, re.IGNORECASE) for p in INJECTION_PATTERNS]
@@ -128,7 +134,12 @@ def strip_injection_markers(message: str) -> str:
     # Remove triple-backtick blocks (code injection)
     message = re.sub(r"```[\s\S]*?```", "[code removed]", message)
     # Remove <system>, <|im_start|>, etc. — common LLM control tokens
-    message = re.sub(r"<\|?/?(?:system|user|assistant|im_start|im_end|endoftext)\|?>", "", message, flags=re.IGNORECASE)
+    message = re.sub(
+        r"<\|?/?(?:system|user|assistant|im_start|im_end|endoftext)\|?>",
+        "",
+        message,
+        flags=re.IGNORECASE,
+    )
     # Remove excessive newlines (used to push instructions off-screen)
     message = re.sub(r"\n{5,}", "\n\n", message)
 
@@ -138,6 +149,7 @@ def strip_injection_markers(message: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. PERSISTENT RATE LIMITER (Supabase-backed, survives restarts)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class PersistentRateLimiter:
     """
@@ -167,6 +179,7 @@ class PersistentRateLimiter:
         """Lazy import to avoid circular imports."""
         try:
             from app.database import supabase
+
             return supabase
         except Exception:
             return None
@@ -177,20 +190,26 @@ class PersistentRateLimiter:
 
         if supabase and not self._use_fallback:
             try:
-                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)).isoformat()
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)
+                ).isoformat()
 
-                result = supabase.table("rate_limits") \
-                    .select("attempts, window_start") \
-                    .eq("key", key) \
-                    .gte("window_start", cutoff) \
+                result = (
+                    supabase.table("rate_limits")
+                    .select("attempts, window_start")
+                    .eq("key", key)
+                    .gte("window_start", cutoff)
                     .execute()
+                )
 
                 if result.data:
                     return result.data[0]["attempts"] >= self.max_attempts
                 return False
 
             except Exception as e:
-                logger.warning(f"Supabase rate_limits query failed, using in-memory fallback: {e}")
+                logger.warning(
+                    f"Supabase rate_limits query failed, using in-memory fallback: {e}"
+                )
                 self._use_fallback = True
 
         # In-memory fallback
@@ -202,13 +221,17 @@ class PersistentRateLimiter:
 
         if supabase and not self._use_fallback:
             try:
-                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)).isoformat()
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)
+                ).isoformat()
 
                 # Check if a current window exists
-                existing = supabase.table("rate_limits") \
-                    .select("id, attempts, window_start") \
-                    .eq("key", key) \
+                existing = (
+                    supabase.table("rate_limits")
+                    .select("id, attempts, window_start")
+                    .eq("key", key)
                     .execute()
+                )
 
                 if existing.data:
                     row = existing.data[0]
@@ -216,31 +239,33 @@ class PersistentRateLimiter:
 
                     # If the window is still active, increment
                     if window_start and window_start >= cutoff:
-                        supabase.table("rate_limits") \
-                            .update({"attempts": row["attempts"] + 1}) \
-                            .eq("id", row["id"]) \
-                            .execute()
+                        supabase.table("rate_limits").update(
+                            {"attempts": row["attempts"] + 1}
+                        ).eq("id", row["id"]).execute()
                     else:
                         # Window expired — reset it
-                        supabase.table("rate_limits") \
-                            .update({
+                        supabase.table("rate_limits").update(
+                            {
                                 "attempts": 1,
-                                "window_start": datetime.now(timezone.utc).isoformat()
-                            }) \
-                            .eq("id", row["id"]) \
-                            .execute()
+                                "window_start": datetime.now(timezone.utc).isoformat(),
+                            }
+                        ).eq("id", row["id"]).execute()
                 else:
                     # First attempt from this key
-                    supabase.table("rate_limits").insert({
-                        "key": key,
-                        "attempts": 1,
-                        "window_start": datetime.now(timezone.utc).isoformat()
-                    }).execute()
+                    supabase.table("rate_limits").insert(
+                        {
+                            "key": key,
+                            "attempts": 1,
+                            "window_start": datetime.now(timezone.utc).isoformat(),
+                        }
+                    ).execute()
 
                 return
 
             except Exception as e:
-                logger.warning(f"Supabase rate_limits write failed, using in-memory fallback: {e}")
+                logger.warning(
+                    f"Supabase rate_limits write failed, using in-memory fallback: {e}"
+                )
                 self._use_fallback = True
 
         # In-memory fallback
@@ -252,13 +277,17 @@ class PersistentRateLimiter:
 
         if supabase and not self._use_fallback:
             try:
-                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)).isoformat()
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)
+                ).isoformat()
 
-                result = supabase.table("rate_limits") \
-                    .select("attempts") \
-                    .eq("key", key) \
-                    .gte("window_start", cutoff) \
+                result = (
+                    supabase.table("rate_limits")
+                    .select("attempts")
+                    .eq("key", key)
+                    .gte("window_start", cutoff)
                     .execute()
+                )
 
                 if result.data:
                     return max(0, self.max_attempts - result.data[0]["attempts"])
@@ -279,10 +308,7 @@ class PersistentRateLimiter:
 
         if supabase and not self._use_fallback:
             try:
-                supabase.table("rate_limits") \
-                    .delete() \
-                    .eq("key", key) \
-                    .execute()
+                supabase.table("rate_limits").delete().eq("key", key).execute()
                 return
             except Exception as e:
                 logger.warning(f"Supabase rate_limits delete failed: {e}")

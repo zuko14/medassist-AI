@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
-
 async def send_due_reminders_job():
     """Async wrapper for prescription reminder scheduler job."""
     from app.services.prescriptions import PrescriptionService
+
     await PrescriptionService().send_due_reminders()
 
 
@@ -37,7 +37,7 @@ class SchedulerService:
             self.send_24h_reminders,
             CronTrigger(hour=9, minute=0),
             id="24h_reminders",
-            replace_existing=True
+            replace_existing=True,
         )
 
         # 2-hour reminder (runs every hour)
@@ -45,7 +45,7 @@ class SchedulerService:
             self.send_2h_reminders,
             CronTrigger(hour="*"),
             id="2h_reminders",
-            replace_existing=True
+            replace_existing=True,
         )
 
         # Follow-up messages (runs daily at 10 AM)
@@ -53,7 +53,7 @@ class SchedulerService:
             self.send_followups,
             CronTrigger(hour=10, minute=0),
             id="followups",
-            replace_existing=True
+            replace_existing=True,
         )
 
         # Check doctor leaves (runs daily at 8 AM)
@@ -61,58 +61,58 @@ class SchedulerService:
             self.check_doctor_leaves,
             CronTrigger(hour=8, minute=0),
             id="doctor_leaves",
-            replace_existing=True
+            replace_existing=True,
         )
 
         # Prescription reminders (every 5 minutes)
         self.scheduler.add_job(
             send_due_reminders_job,
-            'interval',
+            "interval",
             minutes=5,
-            id='prescription_reminders',
-            replace_existing=True
+            id="prescription_reminders",
+            replace_existing=True,
         )
 
         # ── Security: Monitor dead-letter queue (Monday 9 AM) ──
         self.scheduler.add_job(
             self.alert_failed_messages,
-            CronTrigger(day_of_week='mon', hour=9, minute=0),
-            id='failed_messages_alert',
-            replace_existing=True
+            CronTrigger(day_of_week="mon", hour=9, minute=0),
+            id="failed_messages_alert",
+            replace_existing=True,
         )
 
         # ── Security: Cleanup stale rate limits (daily midnight) ──
         self.scheduler.add_job(
             self.cleanup_rate_limits,
             CronTrigger(hour=0, minute=0),
-            id='rate_limits_cleanup',
-            replace_existing=True
+            id="rate_limits_cleanup",
+            replace_existing=True,
         )
 
         # ── DPDP/NMC Compliance: Purge expired conversation sessions (daily 2 AM) ──
         self.scheduler.add_job(
             self.purge_expired_conversations,
             CronTrigger(hour=2, minute=0),
-            id='conversation_purge',
-            replace_existing=True
+            id="conversation_purge",
+            replace_existing=True,
         )
 
         # ── DPDP/NMC Compliance: Purge expired analytics events (daily 3 AM) ──
         self.scheduler.add_job(
             self.purge_expired_session_data,
             CronTrigger(hour=3, minute=0),
-            id='analytics_purge',
-            replace_existing=True
+            id="analytics_purge",
+            replace_existing=True,
         )
 
         # ── Payment: Expire stale pending_payment bookings (every minute) ──
         # Also recovers bookings where Razorpay shows paid but webhook was missed
         self.scheduler.add_job(
             self.expire_stale_bookings,
-            'interval',
+            "interval",
             minutes=1,
-            id='expire_stale_bookings',
-            replace_existing=True
+            id="expire_stale_bookings",
+            replace_existing=True,
         )
 
         # ── Payment: Daily reconciliation (11 PM) ──
@@ -120,8 +120,8 @@ class SchedulerService:
         self.scheduler.add_job(
             self.daily_payment_reconciliation,
             CronTrigger(hour=23, minute=0),
-            id='payment_reconciliation',
-            replace_existing=True
+            id="payment_reconciliation",
+            replace_existing=True,
         )
 
         self.scheduler.start()
@@ -136,30 +136,39 @@ class SchedulerService:
         """Send 24-hour appointment reminders."""
         try:
             from app.services.tenant import has_feature
+
             tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-            appointments = supabase.table("appointments").select("*").eq("appointment_date", tomorrow).eq("status", "confirmed").eq("reminder_24h_sent", False).execute()
+            appointments = (
+                supabase.table("appointments")
+                .select("*")
+                .eq("appointment_date", tomorrow)
+                .eq("status", "confirmed")
+                .eq("reminder_24h_sent", False)
+                .execute()
+            )
 
             for appt in appointments.data:
                 try:
                     clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                     if not has_feature(clinic, "reminders_basic"):
                         continue
-                    
+
                     components = TEMPLATES["reminder_24h"]["components_builder"](
-                        appt["doctor_name"],
-                        appt["appointment_time"]
+                        appt["doctor_name"], appt["appointment_time"]
                     )
 
                     await whatsapp_service.send_template(
                         clinic,
                         appt["patient_phone"],
                         "appointment_reminder_24h",
-                        components=components
+                        components=components,
                     )
 
                     # Mark as sent
-                    supabase.table("appointments").update({"reminder_24h_sent": True}).eq("id", appt["id"]).execute()
+                    supabase.table("appointments").update(
+                        {"reminder_24h_sent": True}
+                    ).eq("id", appt["id"]).execute()
 
                     logger.info(f"Sent 24h reminder for appointment {appt['id']}")
                 except Exception as e:
@@ -172,35 +181,49 @@ class SchedulerService:
         """Send 2-hour appointment reminders."""
         try:
             from app.services.tenant import has_feature
+
             now = datetime.now()
             in_2h = (now + timedelta(hours=2)).strftime("%H:%M")
             today = now.strftime("%Y-%m-%d")
 
-            appointments = supabase.table("appointments").select("*").eq("appointment_date", today).eq("status", "confirmed").eq("reminder_2h_sent", False).execute()
+            appointments = (
+                supabase.table("appointments")
+                .select("*")
+                .eq("appointment_date", today)
+                .eq("status", "confirmed")
+                .eq("reminder_2h_sent", False)
+                .execute()
+            )
 
             for appt in appointments.data:
                 appt_time = appt["appointment_time"]
                 # Check if appointment is in ~2 hours
                 if appt_time[:5] <= in_2h[:5]:
                     try:
-                        clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                        clinic = await get_clinic_by_id(
+                            appt.get("clinic_id", "default")
+                        )
                         if not has_feature(clinic, "reminders_basic"):
                             continue
-                            
+
+                        # Use branch name if available (multi-branch), else clinic name
+                        location_name = appt.get("branch_name") or clinic["name"]
+
                         components = TEMPLATES["reminder_2h"]["components_builder"](
-                            clinic["name"],
-                            appt["doctor_name"]
+                            location_name, appt["doctor_name"]
                         )
 
                         await whatsapp_service.send_template(
                             clinic,
                             appt["patient_phone"],
                             "appointment_reminder_2h",
-                            components=components
+                            components=components,
                         )
 
                         # Mark as sent
-                        supabase.table("appointments").update({"reminder_2h_sent": True}).eq("id", appt["id"]).execute()
+                        supabase.table("appointments").update(
+                            {"reminder_2h_sent": True}
+                        ).eq("id", appt["id"]).execute()
 
                         logger.info(f"Sent 2h reminder for appointment {appt['id']}")
                     except Exception as e:
@@ -213,32 +236,45 @@ class SchedulerService:
         """Send post-appointment follow-up messages."""
         try:
             from app.services.tenant import has_feature
+
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-            appointments = supabase.table("appointments").select("*").eq("appointment_date", yesterday).eq("status", "completed").eq("followup_sent", False).execute()
+            appointments = (
+                supabase.table("appointments")
+                .select("*")
+                .eq("appointment_date", yesterday)
+                .eq("status", "completed")
+                .eq("followup_sent", False)
+                .execute()
+            )
 
             for appt in appointments.data:
                 try:
                     clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
-                    if not has_feature(clinic, "reminders_post_visit") or not has_feature(clinic, "feedback"):
+                    if not has_feature(
+                        clinic, "reminders_post_visit"
+                    ) or not has_feature(clinic, "feedback"):
                         # Mark as sent so we don't keep polling
-                        supabase.table("appointments").update({"followup_sent": True}).eq("id", appt["id"]).execute()
+                        supabase.table("appointments").update(
+                            {"followup_sent": True}
+                        ).eq("id", appt["id"]).execute()
                         continue
-                        
+
                     components = TEMPLATES["followup_message"]["components_builder"](
-                        appt["patient_name"].split()[0],
-                        settings.hospital_phone
+                        appt["patient_name"].split()[0], settings.hospital_phone
                     )
 
                     await whatsapp_service.send_template(
                         clinic,
                         appt["patient_phone"],
                         "post_appointment_followup",
-                        components=components
+                        components=components,
                     )
 
                     # Mark as sent
-                    supabase.table("appointments").update({"followup_sent": True}).eq("id", appt["id"]).execute()
+                    supabase.table("appointments").update({"followup_sent": True}).eq(
+                        "id", appt["id"]
+                    ).execute()
 
                     logger.info(f"Sent followup for appointment {appt['id']}")
                 except Exception as e:
@@ -253,32 +289,52 @@ class SchedulerService:
             tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
             next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
 
-            leaves = supabase.table("doctor_leaves").select("*").gte("leave_date", tomorrow).lte("leave_date", next_week).eq("leave_type", "full").execute()
+            leaves = (
+                supabase.table("doctor_leaves")
+                .select("*")
+                .gte("leave_date", tomorrow)
+                .lte("leave_date", next_week)
+                .eq("leave_type", "full")
+                .execute()
+            )
 
             for leave in leaves.data:
                 # Find affected appointments
-                affected = supabase.table("appointments").select("*").eq("clinic_id", leave.get("clinic_id", "default")).eq("doctor_name", leave["doctor_name"]).eq("appointment_date", leave["leave_date"]).eq("status", "confirmed").execute()
+                affected = (
+                    supabase.table("appointments")
+                    .select("*")
+                    .eq("clinic_id", leave.get("clinic_id", "default"))
+                    .eq("doctor_name", leave["doctor_name"])
+                    .eq("appointment_date", leave["leave_date"])
+                    .eq("status", "confirmed")
+                    .execute()
+                )
 
                 for appt in affected.data:
                     try:
-                        clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                        clinic = await get_clinic_by_id(
+                            appt.get("clinic_id", "default")
+                        )
                         # Cancel appointment
-                        supabase.table("appointments").update({"status": "cancelled"}).eq("id", appt["id"]).execute()
+                        supabase.table("appointments").update(
+                            {"status": "cancelled"}
+                        ).eq("id", appt["id"]).execute()
 
                         # Send notification
-                        components = TEMPLATES["appointment_cancelled_doctor_leave"]["components_builder"](
-                            appt["doctor_name"],
-                            appt["appointment_date"]
-                        )
+                        components = TEMPLATES["appointment_cancelled_doctor_leave"][
+                            "components_builder"
+                        ](appt["doctor_name"], appt["appointment_date"])
 
                         await whatsapp_service.send_template(
                             clinic,
                             appt["patient_phone"],
                             "appointment_cancelled_doctor_leave",
-                            components=components
+                            components=components,
                         )
 
-                        logger.info(f"Cancelled appointment {appt['id']} due to doctor leave")
+                        logger.info(
+                            f"Cancelled appointment {appt['id']} due to doctor leave"
+                        )
                     except Exception as e:
                         logger.error(f"Error handling doctor leave: {e}")
 
@@ -287,16 +343,18 @@ class SchedulerService:
 
     async def alert_failed_messages(self):
         """Check for unprocessed failed messages and alert admin.
-        
+
         Runs every Monday at 9 AM. If any messages are sitting in the
         dead-letter queue with status='pending', sends a WhatsApp alert
         to the admin so they know to investigate.
         """
         try:
-            result = supabase.table("failed_messages") \
-                .select("id", count="exact") \
-                .eq("status", "pending") \
+            result = (
+                supabase.table("failed_messages")
+                .select("id", count="exact")
+                .eq("status", "pending")
                 .execute()
+            )
 
             pending_count = len(result.data) if result.data else 0
 
@@ -312,6 +370,7 @@ class SchedulerService:
                 # Try to send via the default clinic, or log if we can't
                 try:
                     from app.services.tenant import resolve_tenant
+
                     clinic = await resolve_tenant(admin_phone)
                     await whatsapp_service.send_text(clinic, admin_phone, alert_msg)
                     logger.info(f"Sent failed messages alert: {pending_count} pending")
@@ -328,16 +387,13 @@ class SchedulerService:
 
     async def cleanup_rate_limits(self):
         """Delete stale rate limit entries older than 1 hour.
-        
+
         Runs daily at midnight. Prevents the rate_limits table from
         growing indefinitely with old IP entries.
         """
         try:
             cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
-            supabase.table("rate_limits") \
-                .delete() \
-                .lt("window_start", cutoff) \
-                .execute()
+            supabase.table("rate_limits").delete().lt("window_start", cutoff).execute()
             logger.info("Cleaned up stale rate limit entries")
         except Exception as e:
             # Table might not exist yet — don't crash the scheduler
@@ -345,12 +401,13 @@ class SchedulerService:
 
     async def purge_expired_conversations(self):
         """Purge conversation sessions older than the configured purge window.
-        
+
         Runs daily at 2 AM. Deletes Tier 2 session data only.
         Clinical records are NOT touched by this job.
         """
         try:
             from app.services.data_retention import data_retention_service
+
             count = await data_retention_service.purge_expired_conversations()
             if count > 0:
                 logger.info(f"Scheduler: purged {count} expired conversation sessions")
@@ -359,11 +416,12 @@ class SchedulerService:
 
     async def purge_expired_session_data(self):
         """Purge analytics events older than 12 months.
-        
+
         Runs daily at 3 AM. Removes operational analytics data only.
         """
         try:
             from app.services.data_retention import data_retention_service
+
             count = await data_retention_service.purge_expired_session_data()
             if count > 0:
                 logger.info(f"Scheduler: purged {count} expired analytics events")
@@ -379,6 +437,7 @@ class SchedulerService:
         """
         try:
             from app.services.payment import payment_service
+
             count = await payment_service.expire_stale_bookings()
             if count > 0:
                 logger.info(f"Scheduler: processed {count} stale bookings")
@@ -393,13 +452,14 @@ class SchedulerService:
         """
         try:
             from app.services.payment import payment_service
+
             summary = await payment_service.get_daily_reconciliation()
             logger.info(
                 f"Payment reconciliation: {summary['confirmed_count']} confirmed, "
                 f"₹{summary['confirmed_total_rupees']:.2f} total, "
                 f"{summary['pending_review_count']} pending review"
             )
-            if summary['pending_review_count'] > 0:
+            if summary["pending_review_count"] > 0:
                 await payment_service._alert_admin(
                     f"⚠️ Daily Reconciliation Alert\n\n"
                     f"Date: {summary['date']}\n"

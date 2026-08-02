@@ -19,7 +19,7 @@ import pytest
 import hmac
 import hashlib
 import json
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -38,7 +38,7 @@ MOCK_CLINIC = {
         "meta_access_token": "test_token",
         "clinic_name": "Integration Test Hospital",
         "language": "en",
-    }
+    },
 }
 
 
@@ -52,30 +52,35 @@ def _build_webhook_payload(
     """Build a valid WhatsApp webhook payload."""
     payload = {
         "object": "whatsapp_business_account",
-        "entry": [{
-            "id": "entry-1",
-            "changes": [{
-                "value": {
-                    "messaging_product": "whatsapp",
-                    "metadata": {
-                        "display_phone_number": display_phone,
-                        "phone_number_id": "test_phone_id"
-                    },
-                    "contacts": [{
-                        "wa_id": phone,
-                        "profile": {"name": "Test Patient"}
-                    }],
-                    "messages": [{
-                        "from": phone,
-                        "id": message_id,
-                        "timestamp": "1719756000",
-                        "type": msg_type,
-                        "text": {"body": message_text}
-                    }]
-                },
-                "field": "messages"
-            }]
-        }]
+        "entry": [
+            {
+                "id": "entry-1",
+                "changes": [
+                    {
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": display_phone,
+                                "phone_number_id": "test_phone_id",
+                            },
+                            "contacts": [
+                                {"wa_id": phone, "profile": {"name": "Test Patient"}}
+                            ],
+                            "messages": [
+                                {
+                                    "from": phone,
+                                    "id": message_id,
+                                    "timestamp": "1719756000",
+                                    "type": msg_type,
+                                    "text": {"body": message_text},
+                                }
+                            ],
+                        },
+                        "field": "messages",
+                    }
+                ],
+            }
+        ],
     }
     return payload
 
@@ -101,19 +106,23 @@ class TestWebhookIntegrationFlow:
         """Webhook with no messages should still return 200."""
         payload = {
             "object": "whatsapp_business_account",
-            "entry": [{
-                "id": "entry-1",
-                "changes": [{
-                    "value": {
-                        "messaging_product": "whatsapp",
-                        "metadata": {
-                            "display_phone_number": "1234567890",
-                            "phone_number_id": "test_phone_id"
-                        },
-                    },
-                    "field": "messages"
-                }]
-            }]
+            "entry": [
+                {
+                    "id": "entry-1",
+                    "changes": [
+                        {
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "1234567890",
+                                    "phone_number_id": "test_phone_id",
+                                },
+                            },
+                            "field": "messages",
+                        }
+                    ],
+                }
+            ],
         }
         response = client.post("/webhook", json=payload)
         assert response.status_code == 200
@@ -128,21 +137,28 @@ class TestWebhookIntegrationFlow:
     def test_webhook_verify_subscribe(self):
         """Meta webhook verification handshake."""
         from app.config import settings
-        response = client.get("/webhook", params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": settings.whatsapp_verify_token,
-            "hub.challenge": "challenge_token_12345"
-        })
+
+        response = client.get(
+            "/webhook",
+            params={
+                "hub.mode": "subscribe",
+                "hub.verify_token": settings.whatsapp_verify_token,
+                "hub.challenge": "challenge_token_12345",
+            },
+        )
         assert response.status_code == 200
         assert response.text == "challenge_token_12345"
 
     def test_webhook_verify_wrong_token(self):
         """Invalid verify token should return 403."""
-        response = client.get("/webhook", params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": "wrong_token",
-            "hub.challenge": "challenge"
-        })
+        response = client.get(
+            "/webhook",
+            params={
+                "hub.mode": "subscribe",
+                "hub.verify_token": "wrong_token",
+                "hub.challenge": "challenge",
+            },
+        )
         assert response.status_code == 403
 
 
@@ -175,7 +191,9 @@ class TestClinicalFirewallIntegration:
         """A booking request should pass through the firewall cleanly."""
         from app.services.clinical_firewall import screen_message
 
-        blocked, _ = screen_message("I want to book an appointment with a cardiologist", "en")
+        blocked, _ = screen_message(
+            "I want to book an appointment with a cardiologist", "en"
+        )
         assert blocked is False
 
     def test_emergency_keyword_detected(self):
@@ -207,8 +225,7 @@ class TestIdempotencyIntegration:
     def test_duplicate_webhook_payloads(self):
         """Sending the same message_id twice should not crash."""
         payload = _build_webhook_payload(
-            message_id="wamid.duplicate_test_001",
-            message_text="Booking please"
+            message_id="wamid.duplicate_test_001", message_text="Booking please"
         )
         # First call
         response1 = client.post("/webhook", json=payload)
@@ -225,6 +242,7 @@ class TestEndpointSecurity:
     def test_test_endpoint_blocked_in_production(self):
         """Test endpoint should be 403 when APP_ENV=production."""
         import os
+
         original = os.environ.get("APP_ENV", "testing")
         try:
             os.environ["APP_ENV"] = "production"
@@ -234,7 +252,7 @@ class TestEndpointSecurity:
                 mock_settings.hospital_phone = "+919876543210"
                 response = client.post(
                     "/webhook/test",
-                    params={"phone": "+919876543210", "message": "test"}
+                    params={"phone": "+919876543210", "message": "test"},
                 )
                 assert response.status_code == 403
         finally:
@@ -272,24 +290,29 @@ class TestMultilingualIntegration:
 
     def test_language_detection_english(self):
         from app.services.ai_engine import detect_language
+
         assert detect_language("I need an appointment") == "en"
 
     def test_language_detection_hindi(self):
         from app.services.ai_engine import detect_language
+
         assert detect_language("मुझे डॉक्टर से मिलना है") == "hi"
 
     def test_language_detection_telugu(self):
         from app.services.ai_engine import detect_language
+
         assert detect_language("నాకు డాక్టర్ కావాలి") == "te"
 
     def test_firewall_hindi_medication_blocked(self):
         from app.services.clinical_firewall import screen_message
+
         blocked, response = screen_message("कौन सी दवा लूं", "hi")
         assert blocked is True
         assert "🏥" in response
 
     def test_firewall_telugu_medication_blocked(self):
         from app.services.clinical_firewall import screen_message
+
         blocked, response = screen_message("ఏ మందు తీసుకోవాలి", "te")
         assert blocked is True
         assert "🏥" in response
@@ -336,17 +359,19 @@ class TestPIIIntegration:
 class TestTenantFeatureGating:
     """Integration test for plan-level feature gating."""
 
-    def test_basic_plan_features(self):
+    def test_soloclinic_plan_features(self):
         from app.services.tenant import has_feature
-        clinic = {"plan": "basic"}
+
+        clinic = {"plan": "soloclinic"}
         assert has_feature(clinic, "booking") is True
         assert has_feature(clinic, "emergency_escalation") is True
         assert has_feature(clinic, "lab_reports") is False
         assert has_feature(clinic, "analytics") is False
 
-    def test_pro_plan_features(self):
+    def test_essential_plan_features(self):
         from app.services.tenant import has_feature
-        clinic = {"plan": "pro"}
+
+        clinic = {"plan": "essential"}
         assert has_feature(clinic, "booking") is True
         assert has_feature(clinic, "lab_reports") is True
         assert has_feature(clinic, "analytics") is True
@@ -354,6 +379,7 @@ class TestTenantFeatureGating:
 
     def test_enterprise_wildcard(self):
         from app.services.tenant import has_feature
+
         clinic = {"plan": "enterprise"}
         assert has_feature(clinic, "booking") is True
         assert has_feature(clinic, "lab_reports") is True
@@ -361,6 +387,7 @@ class TestTenantFeatureGating:
 
     def test_per_clinic_override(self):
         from app.services.tenant import has_feature
+
         clinic = {"plan": "basic", "features": {"lab_reports": True}}
         assert has_feature(clinic, "lab_reports") is True  # overridden
 

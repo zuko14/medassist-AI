@@ -5,7 +5,6 @@ from unittest.mock import patch, MagicMock
 
 from app.services import ai_engine
 
-
 # Mock clinic object for tests requiring tenant context
 MOCK_CLINIC = {
     "id": "test-clinic",
@@ -22,12 +21,16 @@ class TestAIEngine:
     async def test_detect_intent_booking(self):
         """Test intent detection for booking."""
         # Mock Groq client
-        with patch.object(ai_engine, 'groq_client') as mock_client:
+        with patch.object(ai_engine, "groq_client") as mock_client:
             mock_response = MagicMock()
-            mock_response.choices = [MagicMock(message=MagicMock(content="book_appointment"))]
+            mock_response.choices = [
+                MagicMock(message=MagicMock(content="book_appointment"))
+            ]
             mock_client.chat.completions.create.return_value = mock_response
 
-            result = await ai_engine.detect_intent("I want to book an appointment", MOCK_CLINIC)
+            result = await ai_engine.detect_intent(
+                "I want to book an appointment", MOCK_CLINIC
+            )
             assert result == "book_appointment"
 
     @pytest.mark.asyncio
@@ -40,10 +43,12 @@ class TestAIEngine:
     async def test_detect_intent_fallback(self):
         """Test intent detection fallback."""
         # Make Groq fail
-        with patch.object(ai_engine, 'groq_client') as mock_client:
+        with patch.object(ai_engine, "groq_client") as mock_client:
             mock_client.chat.completions.create.side_effect = Exception("API error")
 
-            result = await ai_engine.detect_intent("book appointment please", MOCK_CLINIC)
+            result = await ai_engine.detect_intent(
+                "book appointment please", MOCK_CLINIC
+            )
             assert result == "book_appointment"
 
     @pytest.mark.asyncio
@@ -51,7 +56,9 @@ class TestAIEngine:
         """Test keyword fallback for intent detection."""
         # Emergency keywords
         assert await ai_engine.detect_intent("heart attack", MOCK_CLINIC) == "emergency"
-        assert await ai_engine.detect_intent("severe bleeding", MOCK_CLINIC) == "emergency"
+        assert (
+            await ai_engine.detect_intent("severe bleeding", MOCK_CLINIC) == "emergency"
+        )
 
         # Booking keywords
         assert ai_engine.keyword_intent_fallback("I want to book") == "book_appointment"
@@ -73,7 +80,9 @@ class TestAIEngine:
         result = await ai_engine.map_symptom_to_department("toothache", MOCK_CLINIC)
         assert result["suggested_department"] == "Dental"
 
-        result = await ai_engine.map_symptom_to_department("fever and cold", MOCK_CLINIC)
+        result = await ai_engine.map_symptom_to_department(
+            "fever and cold", MOCK_CLINIC
+        )
         assert result["suggested_department"] == "General Medicine"
 
     def test_language_detection(self):
@@ -85,9 +94,11 @@ class TestAIEngine:
     @pytest.mark.asyncio
     async def test_generate_response(self):
         """Test response generation."""
-        with patch.object(ai_engine, 'groq_client') as mock_client:
+        with patch.object(ai_engine, "groq_client") as mock_client:
             mock_response = MagicMock()
-            mock_response.choices = [MagicMock(message=MagicMock(content="Hello, how can I help?"))]
+            mock_response.choices = [
+                MagicMock(message=MagicMock(content="Hello, how can I help?"))
+            ]
             mock_client.chat.completions.create.return_value = mock_response
 
             result = await ai_engine.generate_response("Hi", MOCK_CLINIC, {}, "en")

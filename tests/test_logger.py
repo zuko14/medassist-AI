@@ -11,7 +11,6 @@ Verifies:
 
 import json
 import logging
-import pytest
 
 from app.utils.logger import JSONFormatter, ReadableFormatter, setup_logging, get_logger
 
@@ -19,7 +18,9 @@ from app.utils.logger import JSONFormatter, ReadableFormatter, setup_logging, ge
 class TestJSONFormatter:
     """Tests for production JSON log formatter."""
 
-    def _make_record(self, message="Test message", level=logging.INFO, name="test.module"):
+    def _make_record(
+        self, message="Test message", level=logging.INFO, name="test.module"
+    ):
         """Create a LogRecord for testing."""
         record = logging.LogRecord(
             name=name,
@@ -85,6 +86,7 @@ class TestJSONFormatter:
             raise ValueError("test error for logging")
         except ValueError:
             import sys
+
             record = self._make_record(level=logging.ERROR, message="Caught error")
             record.exc_info = sys.exc_info()
 
@@ -99,7 +101,9 @@ class TestJSONFormatter:
     def test_unicode_handling(self):
         """Hindi/Telugu characters should be preserved in JSON (ensure_ascii=False)."""
         formatter = JSONFormatter()
-        record = self._make_record(message="Clinical firewall triggered: दवा keyword detected")
+        record = self._make_record(
+            message="Clinical firewall triggered: दवा keyword detected"
+        )
         output = formatter.format(record)
         parsed = json.loads(output)
 

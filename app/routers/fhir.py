@@ -64,7 +64,13 @@ async def get_patient_fhir(
                 status_code=404,
                 detail={
                     "resourceType": "OperationOutcome",
-                    "issue": [{"severity": "error", "code": "not-found", "details": {"text": "Patient not found"}}],
+                    "issue": [
+                        {
+                            "severity": "error",
+                            "code": "not-found",
+                            "details": {"text": "Patient not found"},
+                        }
+                    ],
                 },
             )
 
@@ -73,7 +79,12 @@ async def get_patient_fhir(
         # Fetch clinic for Organization reference
         clinic = None
         if patient.get("clinic_id"):
-            clinic_res = supabase.table("clinics").select("*").eq("id", patient["clinic_id"]).execute()
+            clinic_res = (
+                supabase.table("clinics")
+                .select("*")
+                .eq("id", patient["clinic_id"])
+                .execute()
+            )
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_patient = patient_to_fhir(patient, clinic)
@@ -88,7 +99,9 @@ async def get_patient_fhir(
 
 @router.get("/Appointment/{booking_ref}")
 async def get_appointment_fhir(
-    booking_ref: str = Path(..., description="Appointment booking reference (e.g. MC-ABC123)"),
+    booking_ref: str = Path(
+        ..., description="Appointment booking reference (e.g. MC-ABC123)"
+    ),
     clinic_id: str = "default",
     user: str = Depends(verify_credentials),
 ):
@@ -99,7 +112,9 @@ async def get_appointment_fhir(
         clinic_id: Tenant clinic ID.
     """
     try:
-        query = supabase.table("appointments").select("*").eq("booking_ref", booking_ref)
+        query = (
+            supabase.table("appointments").select("*").eq("booking_ref", booking_ref)
+        )
         if clinic_id != "default":
             query = query.eq("clinic_id", clinic_id)
         result = query.execute()
@@ -109,7 +124,13 @@ async def get_appointment_fhir(
                 status_code=404,
                 detail={
                     "resourceType": "OperationOutcome",
-                    "issue": [{"severity": "error", "code": "not-found", "details": {"text": "Appointment not found"}}],
+                    "issue": [
+                        {
+                            "severity": "error",
+                            "code": "not-found",
+                            "details": {"text": "Appointment not found"},
+                        }
+                    ],
                 },
             )
 
@@ -118,7 +139,12 @@ async def get_appointment_fhir(
         # Fetch clinic
         clinic = None
         if appointment.get("clinic_id"):
-            clinic_res = supabase.table("clinics").select("*").eq("id", appointment["clinic_id"]).execute()
+            clinic_res = (
+                supabase.table("clinics")
+                .select("*")
+                .eq("id", appointment["clinic_id"])
+                .execute()
+            )
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_appt = appointment_to_fhir(appointment, clinic)
@@ -151,7 +177,12 @@ async def get_diagnostic_report_fhir(
 
         clinic = None
         if report.get("clinic_id"):
-            clinic_res = supabase.table("clinics").select("*").eq("id", report["clinic_id"]).execute()
+            clinic_res = (
+                supabase.table("clinics")
+                .select("*")
+                .eq("id", report["clinic_id"])
+                .execute()
+            )
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_report = lab_report_to_fhir(report, clinic)
@@ -189,7 +220,12 @@ async def get_patient_everything(
 
         clinic = None
         if patient.get("clinic_id"):
-            c_res = supabase.table("clinics").select("*").eq("id", patient["clinic_id"]).execute()
+            c_res = (
+                supabase.table("clinics")
+                .select("*")
+                .eq("id", patient["clinic_id"])
+                .execute()
+            )
             clinic = c_res.data[0] if c_res.data else None
 
         resources.append(patient_to_fhir(patient, clinic))
@@ -199,7 +235,7 @@ async def get_patient_everything(
         if clinic_id != "default":
             a_q = a_q.eq("clinic_id", clinic_id)
         a_res = a_q.execute()
-        for appt in (a_res.data or []):
+        for appt in a_res.data or []:
             resources.append(appointment_to_fhir(appt, clinic))
 
         # Lab Reports
@@ -207,7 +243,7 @@ async def get_patient_everything(
         if clinic_id != "default":
             lr_q = lr_q.eq("clinic_id", clinic_id)
         lr_res = lr_q.execute()
-        for report in (lr_res.data or []):
+        for report in lr_res.data or []:
             resources.append(lab_report_to_fhir(report, clinic))
 
         bundle = create_fhir_bundle(resources, bundle_type="searchset", clinic=clinic)

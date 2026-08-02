@@ -38,7 +38,9 @@ def patient_to_fhir(patient: dict, clinic: Optional[dict] = None) -> dict:
         "id": str(patient.get("id", "")),
         "meta": {
             "versionId": "1",
-            "lastUpdated": _to_fhir_dt(patient.get("updated_at") or patient.get("created_at")),
+            "lastUpdated": _to_fhir_dt(
+                patient.get("updated_at") or patient.get("created_at")
+            ),
             "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Patient"],
         },
         "identifier": [
@@ -134,7 +136,8 @@ def appointment_to_fhir(appointment: dict, clinic: Optional[dict] = None) -> dic
         "identifier": [
             {
                 "system": f"{_FHIR_SERVER_BASE}/identifier/appointment",
-                "value": appointment.get("booking_ref") or str(appointment.get("id", "")),
+                "value": appointment.get("booking_ref")
+                or str(appointment.get("id", "")),
             }
         ],
         "status": fhir_status,
@@ -156,9 +159,7 @@ def appointment_to_fhir(appointment: dict, clinic: Optional[dict] = None) -> dic
 
     # Symptoms → reason
     if appointment.get("symptoms"):
-        resource["reasonCode"] = [
-            {"text": appointment["symptoms"][:200]}
-        ]
+        resource["reasonCode"] = [{"text": appointment["symptoms"][:200]}]
 
     # Start time
     if start_iso:
@@ -239,7 +240,8 @@ def lab_report_to_fhir(report: dict, clinic: Optional[dict] = None) -> dict:
             }
         ],
         "code": {
-            "text": report.get("report_name") or report.get("report_type", "Lab Report"),
+            "text": report.get("report_name")
+            or report.get("report_type", "Lab Report"),
             "coding": [
                 {
                     "system": "http://loinc.org",

@@ -9,7 +9,6 @@ Verifies that:
   - All three languages (en, hi, te) are handled
 """
 
-import pytest
 from app.services.clinical_firewall import screen_message, validate_llm_output
 
 
@@ -25,7 +24,9 @@ class TestClinicalFirewallScreenMessage:
         assert "appointment" in response.lower()
 
     def test_blocks_antibiotic_english(self):
-        blocked, response = screen_message("which antibiotic should I take for infection", "en")
+        blocked, response = screen_message(
+            "which antibiotic should I take for infection", "en"
+        )
         assert blocked is True
 
     def test_blocks_dolo_english(self):
@@ -72,7 +73,9 @@ class TestClinicalFirewallScreenMessage:
     # ── Treatment Seeking Patterns ────────────────────────────────────────────
 
     def test_blocks_what_medicine_for_fever(self):
-        blocked, response = screen_message("what medicine should I take for fever", "en")
+        blocked, response = screen_message(
+            "what medicine should I take for fever", "en"
+        )
         assert blocked is True
 
     def test_blocks_which_tablet_for_pain(self):

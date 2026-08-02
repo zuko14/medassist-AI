@@ -192,7 +192,7 @@
 
         .sidebar-head span { font-size: 0.72rem; color: var(--text3); margin-top: 2px; display: block; }
 
-        .nav-links { flex: 1; padding: 16px 12px; overflow-y: auto; }
+        .nav-links { flex: 1; min-height: 0; padding: 16px 12px; overflow-y: auto; }
 
         .nav-link {
             display: flex;
@@ -413,6 +413,37 @@
             justify-content: flex-end;
             margin-top: 20px;
         }
+        .modal p.confirm-msg { color: var(--text2); font-size: 0.9rem; line-height: 1.6; margin-bottom: 20px; }
+
+        /* ═══════ TOASTS ═══════ */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 700;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 380px;
+        }
+        .toast {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 14px 16px;
+            border-radius: 12px;
+            font-size: 0.86rem;
+            font-weight: 500;
+            background: var(--surface);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+            animation: toastIn 0.25s ease;
+        }
+        .toast.out { animation: toastOut 0.2s ease forwards; }
+        .toast-ok { border: 1px solid rgba(0,214,143,0.3); color: var(--text); }
+        .toast-err { border: 1px solid rgba(255,107,107,0.3); color: var(--text); }
+        .toast-icon { font-size: 1rem; line-height: 1.3; flex-shrink: 0; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(30px); } }
 
         /* ═══════ SEARCH BAR ═══════ */
         .search-bar {
@@ -656,6 +687,9 @@
             </div>
             <div class="nav-link" data-page="payments" onclick="go('payments',this)">
                 <span class="ico">💳</span> Payments
+            </div>
+            <div class="nav-link" data-page="branches" onclick="go('branches',this)">
+                <span class="ico">🏢</span> Branches
             </div>
         </div>
         <div class="nav-bottom">
@@ -937,6 +971,82 @@
             </div>
         </div>
 
+        <!-- ─── BRANCHES ─── -->
+        <div id="pg-branches" class="sec">
+            <div class="page-head">
+                <h2>Branches</h2>
+                <p>Manage your hospital branches and doctor assignments</p>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>All Branches</h3>
+                    <span id="branchCount" style="color:var(--text3); font-size:0.8rem;"></span>
+                </div>
+                <div class="tbl-wrap" id="branchList">
+                    <div class="loader"><div class="spin"></div>Loading branches...</div>
+                </div>
+            </div>
+
+            <!-- Branch Form -->
+            <div class="form-card" id="branchFormCard">
+                <h3 id="branchFormTitle">➕ Add New Branch</h3>
+                <input type="hidden" id="f-branchId">
+                <div id="branchMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Branch Name</label><input type="text" id="f-branchName" placeholder="e.g. Kukatpally Branch"></div>
+                    <div class="field"><label>Short Name</label><input type="text" id="f-branchShort" placeholder="e.g. KPL" maxlength="4"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label>Address</label><input type="text" id="f-branchAddr" placeholder="Full address"></div>
+                    <div class="field"><label>Landmark</label><input type="text" id="f-branchLandmark" placeholder="e.g. Near Metro Station"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label>Google Maps Link</label><input type="text" id="f-branchMaps" placeholder="https://maps.google.com/..."></div>
+                    <div class="field"><label>Phone</label><input type="text" id="f-branchPhone" placeholder="Branch contact number"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Type</label>
+                        <select id="f-branchDiag">
+                            <option value="false">Clinic / Hospital</option>
+                            <option value="true">Diagnostics Center (No Booking)</option>
+                        </select>
+                    </div>
+                    <div class="field"><label>Display Order</label><input type="number" id="f-branchOrder" value="0" min="0"></div>
+                </div>
+                <div style="display:flex; gap:10px; margin-top:14px;">
+                    <button class="btn btn-accent" onclick="saveBranch()">Save Branch</button>
+                    <button class="btn btn-ghost" onclick="resetBranchForm()">Reset</button>
+                </div>
+            </div>
+
+            <!-- Doctor Assignment Section -->
+            <div class="card" id="branchDoctorsCard" style="display:none;">
+                <div class="card-head">
+                    <h3 id="branchDoctorsTitle">Doctors at Branch</h3>
+                </div>
+                <div class="tbl-wrap" id="branchDoctorsList"></div>
+                <div style="margin-top:16px; display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+                    <div class="field" style="margin:0; flex:1; min-width:200px;">
+                        <label>Add Doctor</label>
+                        <select id="f-assignDoctor" style="width:100%;">
+                            <option value="">Select doctor...</option>
+                        </select>
+                    </div>
+                    <div class="field" style="margin:0;">
+                        <label>Session</label>
+                        <select id="f-assignSession">
+                            <option value="both">Both (All Slots)</option>
+                            <option value="morning">Morning Only</option>
+                            <option value="evening">Evening Only</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-accent" onclick="assignDoctorToBranch()" style="height:42px;">Assign</button>
+                </div>
+            </div>
+        </div>
+
     </main>
 </div>
 
@@ -1046,6 +1156,24 @@
     </div>
 </div>
 
+<!-- ═══ CONFIRM / PROMPT DIALOG (replaces native confirm()/prompt()) ═══ -->
+<div class="modal-overlay" id="confirmOverlay" style="z-index:600">
+    <div class="modal" style="max-width:440px">
+        <h3 id="confirmTitle">Are you sure?</h3>
+        <p class="confirm-msg" id="confirmMessage"></p>
+        <div class="field" id="confirmPromptField" style="display:none">
+            <input type="text" id="confirmPromptInput">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" id="confirmCancelBtn">Cancel</button>
+            <button class="btn btn-accent" id="confirmOkBtn">Confirm</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ TOAST CONTAINER (replaces native alert()) ═══ -->
+<div class="toast-container" id="toastContainer"></div>
+
 <script>
 // ═══════ CONFIG ═══════
 const API = window.location.origin;
@@ -1096,7 +1224,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments };
+    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, branches: loadBranches };
     if (loaders[page]) loaders[page]();
 }
 
@@ -1152,6 +1280,72 @@ function emptyState(icon, text) {
 
 function loading() {
     return '<div class="loader"><div class="spin"></div>Loading...</div>';
+}
+
+// ═══════ TOAST (replaces alert()) ═══════
+function toast(text, err = false) {
+    const container = document.getElementById('toastContainer');
+    const el = document.createElement('div');
+    el.className = 'toast ' + (err ? 'toast-err' : 'toast-ok');
+    const icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    icon.textContent = err ? '⚠️' : '✅';
+    const label = document.createElement('span');
+    label.textContent = text;
+    el.appendChild(icon);
+    el.appendChild(label);
+    container.appendChild(el);
+    setTimeout(() => {
+        el.classList.add('out');
+        setTimeout(() => el.remove(), 200);
+    }, 4000);
+}
+
+// ═══════ CONFIRM / PROMPT DIALOG (replaces confirm()/prompt()) ═══════
+let _dialogResolve = null;
+
+function _openDialog({ title = 'Are you sure?', message = '', okText = 'Confirm', cancelText = 'Cancel', danger = false, isPrompt = false, placeholder = '' } = {}) {
+    return new Promise((resolve) => {
+        _dialogResolve = resolve;
+        document.getElementById('confirmTitle').textContent = title;
+        document.getElementById('confirmMessage').textContent = message;
+
+        const okBtn = document.getElementById('confirmOkBtn');
+        okBtn.textContent = okText;
+        okBtn.className = 'btn ' + (danger ? 'btn-red' : 'btn-accent');
+        document.getElementById('confirmCancelBtn').textContent = cancelText;
+
+        const field = document.getElementById('confirmPromptField');
+        const input = document.getElementById('confirmPromptInput');
+        field.style.display = isPrompt ? 'block' : 'none';
+        input.value = '';
+        input.placeholder = placeholder;
+
+        document.getElementById('confirmOverlay').classList.add('open');
+        if (isPrompt) setTimeout(() => input.focus(), 50);
+    });
+}
+
+function _closeDialog(value) {
+    document.getElementById('confirmOverlay').classList.remove('open');
+    if (_dialogResolve) { _dialogResolve(value); _dialogResolve = null; }
+}
+
+document.getElementById('confirmCancelBtn').onclick = () => _closeDialog(null);
+document.getElementById('confirmOkBtn').onclick = () => {
+    const isPrompt = document.getElementById('confirmPromptField').style.display !== 'none';
+    _closeDialog(isPrompt ? document.getElementById('confirmPromptInput').value.trim() : true);
+};
+document.getElementById('confirmPromptInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('confirmOkBtn').click();
+});
+
+async function confirmDialog(message, opts = {}) {
+    return (await _openDialog({ message, ...opts, isPrompt: false })) === true;
+}
+
+async function promptDialog(message, opts = {}) {
+    return await _openDialog({ message, ...opts, isPrompt: true });
 }
 
 // ═══════ DASHBOARD ═══════
@@ -1358,11 +1552,12 @@ window.editDoctor = function(id) {
 };
 
 window.delDoctor = async function(id) {
-    if (!confirm('Are you sure you want to delete this doctor? This action cannot be undone.')) return;
+    const ok = await confirmDialog('Are you sure you want to delete this doctor? This action cannot be undone.', { okText: 'Delete', danger: true });
+    if (!ok) return;
     try {
         await apiDel(`/admin/doctors/${id}`);
         loadDoctors();
-    } catch (e) { alert('Failed to delete doctor. Ensure they have no upcoming appointments first.'); }
+    } catch (e) { toast('Failed to delete doctor. Ensure they have no upcoming appointments first.', true); }
 };
 
 // ═══════ LEAVES ═══════
@@ -1412,8 +1607,9 @@ async function addLeave() {
 }
 
 async function delLeave(id) {
-    if (!confirm('Remove this leave entry?')) return;
-    try { await apiDel(`/admin/leaves/${id}`); loadLeaves(); } catch (e) { alert('Failed'); }
+    const ok = await confirmDialog('Remove this leave entry?', { okText: 'Remove', danger: true });
+    if (!ok) return;
+    try { await apiDel(`/admin/leaves/${id}`); loadLeaves(); } catch (e) { toast('Failed to remove leave entry', true); }
 }
 
 // ═══════ HOLIDAYS ═══════
@@ -1450,12 +1646,14 @@ async function addHoliday() {
 }
 
 async function delHoliday(date) {
-    if (!confirm('Remove this holiday?')) return;
-    try { await apiDel(`/admin/holidays/${date}`); loadHolidays(); } catch (e) { alert('Failed'); }
+    const ok = await confirmDialog('Remove this holiday?', { okText: 'Remove', danger: true });
+    if (!ok) return;
+    try { await apiDel(`/admin/holidays/${date}`); loadHolidays(); } catch (e) { toast('Failed to remove holiday', true); }
 }
 
 async function cancelAppt(id) {
-    if (!confirm('Cancel this appointment?')) return;
+    const ok = await confirmDialog('Cancel this appointment?', { okText: 'Cancel Appointment', danger: true });
+    if (!ok) return;
     try {
         const r = await fetch(API + '/admin/appointments/' + id, {
             method: 'DELETE',
@@ -1466,10 +1664,10 @@ async function cancelAppt(id) {
             loadAppointments();
             loadDashboard();
         } else {
-            alert('Failed: ' + (data.detail || data.message || 'Error'));
+            toast('Failed: ' + (data.detail || data.message || 'Error'), true);
         }
     } catch(e) {
-        alert('Error: ' + e.message);
+        toast('Error: ' + e.message, true);
     }
 }
 
@@ -1631,7 +1829,8 @@ async function submitLabReport() {
 }
 
 async function resendReport(id) {
-    if (!confirm('Resend this report to the patient?')) return;
+    const ok = await confirmDialog('Resend this report to the patient?', { okText: 'Resend' });
+    if (!ok) return;
     try {
         const r = await fetch(API + '/admin/lab-reports/' + id + '/resend', {
             method: 'POST',
@@ -1639,12 +1838,12 @@ async function resendReport(id) {
         });
         const data = await r.json();
         if (data.success) {
-            alert('Report resent successfully!');
+            toast('Report resent successfully!');
             loadLabReports();
         } else {
-            alert('Resend failed: ' + (data.detail || data.error || 'Error'));
+            toast('Resend failed: ' + (data.detail || data.error || 'Error'), true);
         }
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, true); }
 }
 
 // ═══════ PRESCRIPTIONS ═══════
@@ -1779,7 +1978,8 @@ async function submitPrescription() {
 }
 
 async function deactivateRx(id) {
-    if (!confirm('Deactivate this prescription reminder?')) return;
+    const ok = await confirmDialog('Deactivate this prescription reminder?', { okText: 'Deactivate', danger: true });
+    if (!ok) return;
     try {
         const r = await fetch(API + '/admin/prescriptions/' + id + '/deactivate', {
             method: 'POST',
@@ -1789,9 +1989,9 @@ async function deactivateRx(id) {
         if (data.success) {
             loadPrescriptions();
         } else {
-            alert('Failed: ' + (data.detail || 'Error'));
+            toast('Failed: ' + (data.detail || 'Error'), true);
         }
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { toast('Error: ' + e.message, true); }
 }
 
 // ═══════ PAYMENTS ═══════
@@ -1852,7 +2052,7 @@ async function loadPayments() {
             return;
         }
 
-        let html = '<table><thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Slot</th><th>Status</th><th>Amount</th><th>Payment ID</th><th>Actions</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Branch</th><th>Slot</th><th>Status</th><th>Amount</th><th>Payment ID</th><th>Actions</th></tr></thead><tbody>';
         data.bookings.forEach(b => {
             const badge = PAY_STATUS_BADGE[b.status] || b.status;
             const amt = b.amount_paise ? '₹' + (b.amount_paise / 100).toFixed(0) : '—';
@@ -1865,6 +2065,7 @@ async function loadPayments() {
                 <td>${b.booking_ref || '—'}</td>
                 <td>${b.patient_name || '—'}<br><small style="color:var(--text3)">${b.patient_phone || ''}</small></td>
                 <td>${b.doctor_name || '—'}</td>
+                <td>${b.branch_name || '—'}</td>
                 <td>${b.appointment_date || ''} ${b.appointment_time || ''}</td>
                 <td>${badge}</td>
                 <td>${amt}</td>
@@ -1875,7 +2076,7 @@ async function loadPayments() {
         html += '</tbody></table>';
         document.getElementById('paymentsList').innerHTML = html;
     } catch (e) {
-        document.getElementById('paymentsList').innerHTML = '<p style="color:var(--red);text-align:center;padding:32px">Error loading payments: ' + e.message + '</p>';
+        document.getElementById('paymentsList').innerHTML = emptyState('⚠️', 'Failed to load payments');
     }
 }
 
@@ -1911,37 +2112,237 @@ async function showPaymentEvents(bookingId) {
         }
         document.getElementById('paymentEventsModal').style.display = 'flex';
     } catch (e) {
-        alert('Error loading events: ' + e.message);
+        toast('Error loading events: ' + e.message, true);
     }
 }
 
 async function adminConfirmBooking(bookingId) {
-    if (!confirm('Manually CONFIRM this booking? Only do this after verifying payment in Razorpay dashboard.')) return;
+    const ok = await confirmDialog('Manually CONFIRM this booking? Only do this after verifying payment in Razorpay dashboard.', { title: 'Confirm booking', okText: 'Confirm Booking' });
+    if (!ok) return;
     try {
         const r = await apiPost('/admin/bookings/' + bookingId + '/confirm', { admin_notes: 'Manual confirmation from admin panel' });
-        if (r.success) { alert('Booking confirmed!'); loadPayments(); }
-        else alert('Failed: ' + (r.detail || r.reason || 'Unknown error'));
-    } catch (e) { alert('Error: ' + e.message); }
+        if (r.success) { toast('Booking confirmed!'); loadPayments(); }
+        else toast('Failed: ' + (r.detail || r.reason || 'Unknown error'), true);
+    } catch (e) { toast('Error: ' + e.message, true); }
 }
 
 async function adminRejectBooking(bookingId) {
-    const reason = prompt('Reason for rejection (will initiate refund if payment was captured):');
+    const reason = await promptDialog('Reason for rejection (will initiate refund if payment was captured):', { title: 'Reject booking', okText: 'Reject Booking', danger: true, placeholder: 'e.g. Duplicate booking' });
     if (reason === null) return;
     try {
         const r = await apiPost('/admin/bookings/' + bookingId + '/reject', { admin_notes: reason });
-        if (r.success) { alert('Booking rejected and refund initiated.'); loadPayments(); }
-        else alert('Failed: ' + (r.detail || r.reason || 'Unknown error'));
-    } catch (e) { alert('Error: ' + e.message); }
+        if (r.success) { toast('Booking rejected and refund initiated.'); loadPayments(); }
+        else toast('Failed: ' + (r.detail || r.reason || 'Unknown error'), true);
+    } catch (e) { toast('Error: ' + e.message, true); }
 }
 
 async function refundBooking(bookingId) {
-    const reason = prompt('Reason for refund:');
+    const reason = await promptDialog('Reason for refund:', { title: 'Refund booking', okText: 'Refund', danger: true, placeholder: 'e.g. Patient requested cancellation' });
     if (reason === null) return;
     try {
         const r = await apiPost('/admin/bookings/' + bookingId + '/refund', { reason: reason });
-        if (r.success) { alert('Refund initiated! Refund ID: ' + (r.refund_id || 'processing')); loadPayments(); }
-        else alert('Refund failed: ' + (r.detail || r.reason || 'Unknown error'));
-    } catch (e) { alert('Error: ' + e.message); }
+        if (r.success) { toast('Refund initiated! Refund ID: ' + (r.refund_id || 'processing')); loadPayments(); }
+        else toast('Refund failed: ' + (r.detail || r.reason || 'Unknown error'), true);
+    } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+// ═══════ BRANCHES ═══════
+let _selectedBranchId = null;
+
+async function loadBranches() {
+    try {
+        const data = await api('/admin/branches');
+        const branches = data.branches || [];
+        document.getElementById('branchCount').textContent = branches.length + ' branches';
+
+        if (branches.length === 0) {
+            document.getElementById('branchList').innerHTML = emptyState('🏢', 'No branches created yet. Add your first branch below.');
+            return;
+        }
+
+        let html = '<table><thead><tr><th>Name</th><th>Short</th><th>Address</th><th>Type</th><th>Status</th><th>Order</th><th>Actions</th></tr></thead><tbody>';
+        branches.forEach(b => {
+            const type = b.is_diagnostic
+                ? '<span style="color:var(--cyan);font-size:0.8rem">🔬 Diagnostics</span>'
+                : '<span style="color:var(--green);font-size:0.8rem">🏥 Clinic</span>';
+            const status = b.is_active
+                ? '<span class="badge badge-confirmed">Active</span>'
+                : '<span class="badge badge-cancelled">Inactive</span>';
+            html += `<tr>
+                <td><strong>${b.name}</strong></td>
+                <td>${b.short_name || '—'}</td>
+                <td>${b.address || '—'}<br><small style="color:var(--text3)">${b.landmark || ''}</small></td>
+                <td>${type}</td>
+                <td>${status}</td>
+                <td>${b.display_order}</td>
+                <td>
+                    <button class="btn btn-ghost btn-sm" onclick="editBranch('${b.id}')">✏️</button>
+                    <button class="btn btn-ghost btn-sm" onclick="manageBranchDoctors('${b.id}', '${b.name.replace(/'/g, "\\'")}')">👨‍⚕️</button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBranch('${b.id}')">🗑️</button>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('branchList').innerHTML = html;
+    } catch (e) {
+        document.getElementById('branchList').innerHTML = emptyState('⚠️', 'Failed to load branches');
+    }
+}
+
+async function saveBranch() {
+    const id = document.getElementById('f-branchId').value;
+    const body = {
+        name: document.getElementById('f-branchName').value.trim(),
+        short_name: document.getElementById('f-branchShort').value.trim() || null,
+        address: document.getElementById('f-branchAddr').value.trim() || null,
+        landmark: document.getElementById('f-branchLandmark').value.trim() || null,
+        maps_link: document.getElementById('f-branchMaps').value.trim() || null,
+        phone: document.getElementById('f-branchPhone').value.trim() || null,
+        is_diagnostic: document.getElementById('f-branchDiag').value === 'true',
+        display_order: parseInt(document.getElementById('f-branchOrder').value) || 0,
+    };
+
+    if (!body.name) { msg('branchMsg', 'Branch name is required', true); return; }
+
+    try {
+        if (id) {
+            await apiPut('/admin/branches/' + id, body);
+            msg('branchMsg', '✅ Branch updated!');
+        } else {
+            await apiPost('/admin/branches', body);
+            msg('branchMsg', '✅ Branch created!');
+        }
+        resetBranchForm();
+        loadBranches();
+    } catch (e) {
+        msg('branchMsg', 'Error: ' + e.message, true);
+    }
+}
+
+async function editBranch(branchId) {
+    try {
+        const data = await api('/admin/branches');
+        const branch = (data.branches || []).find(b => b.id === branchId);
+        if (!branch) return;
+
+        document.getElementById('f-branchId').value = branch.id;
+        document.getElementById('f-branchName').value = branch.name || '';
+        document.getElementById('f-branchShort').value = branch.short_name || '';
+        document.getElementById('f-branchAddr').value = branch.address || '';
+        document.getElementById('f-branchLandmark').value = branch.landmark || '';
+        document.getElementById('f-branchMaps').value = branch.maps_link || '';
+        document.getElementById('f-branchPhone').value = branch.phone || '';
+        document.getElementById('f-branchDiag').value = branch.is_diagnostic ? 'true' : 'false';
+        document.getElementById('f-branchOrder').value = branch.display_order || 0;
+        document.getElementById('branchFormTitle').textContent = '✏️ Edit Branch: ' + branch.name;
+
+        document.getElementById('branchFormCard').scrollIntoView({ behavior: 'smooth' });
+    } catch (e) {
+        toast('Error loading branch: ' + e.message, true);
+    }
+}
+
+async function deleteBranch(branchId) {
+    const ok = await confirmDialog('Deactivate this branch? Existing appointments will not be affected.', { okText: 'Deactivate', danger: true });
+    if (!ok) return;
+    try {
+        await apiDel('/admin/branches/' + branchId);
+        loadBranches();
+    } catch (e) {
+        toast('Error: ' + e.message, true);
+    }
+}
+
+function resetBranchForm() {
+    document.getElementById('f-branchId').value = '';
+    document.getElementById('f-branchName').value = '';
+    document.getElementById('f-branchShort').value = '';
+    document.getElementById('f-branchAddr').value = '';
+    document.getElementById('f-branchLandmark').value = '';
+    document.getElementById('f-branchMaps').value = '';
+    document.getElementById('f-branchPhone').value = '';
+    document.getElementById('f-branchDiag').value = 'false';
+    document.getElementById('f-branchOrder').value = '0';
+    document.getElementById('branchFormTitle').textContent = '➕ Add New Branch';
+}
+
+async function manageBranchDoctors(branchId, branchName) {
+    _selectedBranchId = branchId;
+    document.getElementById('branchDoctorsCard').style.display = 'block';
+    document.getElementById('branchDoctorsTitle').textContent = '👨‍⚕️ Doctors at: ' + branchName;
+
+    // Load assigned doctors
+    try {
+        const data = await api('/admin/branches/' + branchId + '/doctors');
+        const assignments = data.doctor_branches || [];
+
+        if (assignments.length === 0) {
+            document.getElementById('branchDoctorsList').innerHTML = '<p style="color:var(--text3);padding:12px">No doctors assigned yet.</p>';
+        } else {
+            let html = '<table><thead><tr><th>Doctor</th><th>Department</th><th>Session</th><th>Actions</th></tr></thead><tbody>';
+            assignments.forEach(a => {
+                const doc = a.doctors || {};
+                const sessionBadge = {
+                    both: '<span style="color:var(--green)">Both</span>',
+                    morning: '<span style="color:var(--amber)">Morning</span>',
+                    evening: '<span style="color:var(--blue)">Evening</span>',
+                }[a.session] || a.session;
+
+                html += `<tr>
+                    <td><strong>${doc.name || 'Unknown'}</strong><br><small style="color:var(--text3)">${doc.specialization || ''}</small></td>
+                    <td>${doc.department || '—'}</td>
+                    <td>${sessionBadge}</td>
+                    <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="removeDoctorFromBranch('${branchId}', '${a.doctor_id}')">Remove</button></td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            document.getElementById('branchDoctorsList').innerHTML = html;
+        }
+    } catch (e) {
+        document.getElementById('branchDoctorsList').innerHTML = emptyState('⚠️', 'Failed to load assigned doctors');
+    }
+
+    // Load all doctors for the assignment dropdown
+    try {
+        const docs = await api('/admin/doctors');
+        const select = document.getElementById('f-assignDoctor');
+        select.innerHTML = '<option value="">Select doctor...</option>';
+        (Array.isArray(docs) ? docs : []).forEach(d => {
+            select.innerHTML += `<option value="${d.id}">${d.name} (${d.department})</option>`;
+        });
+    } catch (e) {}
+
+    document.getElementById('branchDoctorsCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function assignDoctorToBranch() {
+    const doctorId = document.getElementById('f-assignDoctor').value;
+    const session = document.getElementById('f-assignSession').value;
+    if (!doctorId || !_selectedBranchId) { toast('Please select a doctor', true); return; }
+
+    try {
+        await apiPost('/admin/branches/' + _selectedBranchId + '/doctors', {
+            doctor_id: doctorId,
+            session: session,
+        });
+        // Reload the doctor list for this branch
+        const branchName = document.getElementById('branchDoctorsTitle').textContent.replace('👨‍⚕️ Doctors at: ', '');
+        manageBranchDoctors(_selectedBranchId, branchName);
+    } catch (e) {
+        toast('Error assigning doctor: ' + (e.message || 'Unknown error'), true);
+    }
+}
+
+async function removeDoctorFromBranch(branchId, doctorId) {
+    const ok = await confirmDialog('Remove this doctor from the branch?', { okText: 'Remove', danger: true });
+    if (!ok) return;
+    try {
+        await apiDel('/admin/branches/' + branchId + '/doctors/' + doctorId);
+        const branchName = document.getElementById('branchDoctorsTitle').textContent.replace('👨‍⚕️ Doctors at: ', '');
+        manageBranchDoctors(branchId, branchName);
+    } catch (e) {
+        toast('Error: ' + e.message, true);
+    }
 }
 
 </script>
