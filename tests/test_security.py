@@ -8,6 +8,7 @@ from app.utils.security import (
 )
 import hmac
 import hashlib
+import pytest
 
 
 def test_signature_verification():
@@ -86,6 +87,24 @@ def test_rate_limiter_fallback():
     rl._fallback.pop("test_ip", None)
     assert not rl._fallback_is_limited("test_ip"), "Should be reset"
     print("PASSED: Rate limiter (fallback mode)")
+
+
+@pytest.mark.asyncio
+async def test_production_boot_refusal_on_placeholder_secrets(monkeypatch):
+    """Verify application startup raises RuntimeError if app_env='production' and secrets are placeholders."""
+    from app.config import settings
+    from app.main import lifespan, app
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "meta_app_secret", "change_me_in_production")
+    monkeypatch.setattr(settings, "admin_password", "admin123")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        async with lifespan(app):
+            pass
+
+    assert "Refusing to boot in production mode" in str(exc_info.value)
+    assert "META_APP_SECRET" in str(exc_info.value)
 
 
 if __name__ == "__main__":

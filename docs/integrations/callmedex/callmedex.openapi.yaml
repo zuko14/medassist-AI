@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: CallMedex Integration API
+  description: OpenAPI 3.0.3 contract specification for CallMedex connector API endpoints and callbacks.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000/internal/integrations/callmedex
+    description: Local development environment
+
+paths:
+  /process-report:
+    post:
+      summary: Enqueue or process a laboratory report
+      operationId: processReport
+      security:
+        - BearerAuth: []
+        - IntegrationSecret: []
+      parameters:
+        - in: header
+          name: X-Correlation-ID
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Unique correlation ID for end-to-end tracing.
+        - in: header
+          name: X-Idempotency-Key
+          required: false
+          schema:
+            type: string
+          description: Unique idempotency key to prevent duplicate processing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessReportRequest'
+      responses:
+        '200':
+          description: Report accepted or processed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessReportResponse'
+        '400':
+          description: Invalid request payload or missing required parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authentication token / secret.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal connector error during task execution.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      summary: Diagnostic health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service health status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    IntegrationSecret:
+      type: apiKey
+      in: header
+      name: X-Integration-Secret
+
+  schemas:
+    ProcessReportRequest:
+      type: object
+      required:
+        - clinic_id
+        - external_report_id
+        - patient
+        - report_name
+      properties:
+        clinic_id:
+          type: string
+          example: clinic_123
+        connector_type:
+          type: string
+          enum: [mocdoc, crelio, cloudlims, custom]
+          default: mocdoc
+        external_report_id:
+          type: string
+          example: MOC-998822
+        patient:
+          $ref: '#/components/schemas/PatientIdentity'
+        report_name:
+          type: string
+          example: Complete Blood Count (CBC)
+        report_type:
+          type: string
+          enum: [Laboratory, Radiology, Pathology, General]
+          default: Laboratory
+
+    PatientIdentity:
+      type: object
+      required:
+        - patient_phone
+        - patient_name
+      properties:
+        patient_phone:
+          type: string
+          example: "+919876543210"
+        patient_name:
+          type: string
+          example: Jane Doe
+        patient_mrn:
+          type: string
+          nullable: true
+          example: MRN-55441
+
+    ProcessReportResponse:
+      type: object
+      required:
+        - success
+        - task_id
+        - timestamp
+      properties:
+        success:
+          type: boolean
+        task_id:
+          type: string
+          format: uuid
+        already_processed:
+          type: boolean
+          default: false
+        lab_report_id:
+          type: string
+          nullable: true
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthCheckResponse:
+      type: object
+      required:
+        - status
+        - integration_api
+      properties:
+        status:
+          type: string
+          example: ok
+        integration_api:
+          type: boolean
+          example: true
+        queue_status:
+          type: string
+          example: healthy
+        version:
+          type: string
+          example: 1.0.0
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error_code
+        - message
+      properties:
+        success:
+          type: boolean
+          default: false
+        error_code:
+          type: string
+          example: AUTH_ERROR
+        message:
+          type: string
+          example: Invalid authentication credentials

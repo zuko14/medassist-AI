@@ -1,4 +1,4 @@
-"""Structured logging configuration for MediAssist AI.
+"""Structured logging configuration for MediAssist AI (Security Hardened).
 
 Supports two output modes:
   - Production (APP_ENV=production): JSON-formatted structured logs
@@ -15,6 +15,7 @@ JSON log format includes:
 """
 
 import json
+import re
 import logging
 import sys
 from datetime import datetime, timezone
@@ -23,6 +24,24 @@ from app.config import settings
 
 _APP_VERSION = "2.0.0"
 _SERVICE_NAME = "mediassist-ai"
+
+SENSITIVE_PATTERNS = [
+    (re.compile(r"(Authorization:\s*Bearer\s+)[^\s,'\"]+", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(X-Signature-256:\s*)[^\s,'\"]+", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(X-Integration-Secret:\s*)[^\s,'\"]+", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(password[\"':\s=]+)[^\s,'\"]+", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(Cookie:\s*)[^\r\n]+", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(Set-Cookie:\s*)[^\r\n]+", re.IGNORECASE), r"\1[REDACTED]"),
+]
+
+
+def sanitize_log_message(msg: str) -> str:
+    """Scrub sensitive credentials, headers, and secrets from log message strings."""
+    if not isinstance(msg, str):
+        return msg
+    for pattern, repl in SENSITIVE_PATTERNS:
+        msg = pattern.sub(repl, msg)
+    return msg
 
 
 class JSONFormatter(logging.Formatter):
@@ -36,16 +55,16 @@ class JSONFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
+        clean_msg = sanitize_log_message(record.getMessage())
         log_entry = {
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": clean_msg,
             "service": _SERVICE_NAME,
             "version": _APP_VERSION,
         }
 
-        # Add source location for errors
         if record.levelno >= logging.WARNING:
             log_entry["source"] = {
                 "file": record.pathname,
@@ -53,11 +72,10 @@ class JSONFormatter(logging.Formatter):
                 "function": record.funcName,
             }
 
-        # Add exception info if present
         if record.exc_info and record.exc_info[0] is not None:
             log_entry["exception"] = {
                 "type": record.exc_info[0].__name__,
-                "message": str(record.exc_info[1]),
+                "message": sanitize_log_message(str(record.exc_info[1])),
                 "traceback": self.formatException(record.exc_info),
             }
 
@@ -80,7 +98,8 @@ class ReadableFormatter(logging.Formatter):
         color = self.COLORS.get(record.levelname, "")
         reset = self.RESET if color else ""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        base = f"{color}{timestamp} [{record.levelname:>7}]{reset} {record.name}: {record.getMessage()}"
+        clean_msg = sanitize_log_message(record.getMessage())
+        base = f"{color}{timestamp} [{record.levelname:>7}]{reset} {record.name}: {clean_msg}"
         if record.exc_info and record.exc_info[0] is not None:
             base += "\n" + self.formatException(record.exc_info)
         return base
@@ -94,21 +113,18 @@ def setup_logging():
     """
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
-    # Select formatter based on environment
     is_production = settings.app_env == "production"
     formatter = JSONFormatter() if is_production else ReadableFormatter()
 
-    # Configure root logger
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
 
     logging.basicConfig(
         level=log_level,
         handlers=[handler],
-        force=True,  # Override any existing config
+        force=True,
     )
 
-    # Set specific loggers to reduce noise
     logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)

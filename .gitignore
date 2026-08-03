@@ -62,3 +62,11 @@ render.yaml
 
 # Integration Connector Sessions (contains encrypted cookies)
 .connector_sessions/
+
+# Browser runtime artifacts
+app/integrations/callmedex/browser/artifacts/
+app/integrations/callmedex/browser/downloads/
+app/integrations/callmedex/browser/videos/
+app/integrations/callmedex/browser/traces/
+screenshots_browser_automation_callmedex/
+

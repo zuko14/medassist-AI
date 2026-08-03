@@ -1,0 +1,113 @@
+openapi: 3.0.3
+info:
+  title: MediAssist Integration Interface API
+  description: OpenAPI 3.0.3 specification for MediAssist internal webhook and callback contracts.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000/internal/integrations/callmedex
+    description: MediAssist internal backend
+
+paths:
+  /callback/status:
+    post:
+      summary: Receive signed status updates from CallMedex background workers
+      operationId: receiveCallbackStatus
+      security:
+        - HMACSignature: []
+      parameters:
+        - in: header
+          name: X-Signature-256
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 signature calculated over request body.
+        - in: header
+          name: X-Correlation-ID
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Correlation ID tracking request flow across systems.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallbackStatusPayload'
+      responses:
+        '200':
+          description: Callback acknowledged successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                    example: true
+                  correlation_id:
+                    type: string
+                    format: uuid
+        '401':
+          description: Invalid HMAC signature.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    HMACSignature:
+      type: apiKey
+      in: header
+      name: X-Signature-256
+
+  schemas:
+    CallbackStatusPayload:
+      type: object
+      required:
+        - task_id
+        - clinic_id
+        - connector_type
+        - external_report_id
+        - status
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        clinic_id:
+          type: string
+        connector_type:
+          type: string
+          enum: [mocdoc, crelio, cloudlims, custom]
+        external_report_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, retrying]
+        error_message:
+          type: string
+          nullable: true
+        processed_at:
+          type: string
+          format: date-time
+        correlation_id:
+          type: string
+          format: uuid
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error_code
+        - message
+      properties:
+        success:
+          type: boolean
+          default: false
+        error_code:
+          type: string
+          example: SIGNATURE_INVALID
+        message:
+          type: string
+          example: HMAC signature verification failed

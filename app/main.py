@@ -11,6 +11,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import settings
 from app.routers import webhook, health, admin, clinics
 from app.routers.integrations import router as integrations_router
+from app.integrations.callmedex.api.router import (
+    router as callmedex_router,
+    global_container as callmedex_container,
+)
 from app.routers.fhir import router as fhir_router
 from app.routers.razorpay_webhook import router as razorpay_router
 from app.services.scheduler import scheduler_service
@@ -65,11 +69,42 @@ async def lifespan(app: FastAPI):
         logger.info(
             "🔒 Running in PRODUCTION mode — /webhook/test endpoint is DISABLED"
         )
+        placeholder_secrets = []
+        if not settings.meta_app_secret or settings.meta_app_secret in ("change_me_in_production", "dev_secret"):
+            placeholder_secrets.append("META_APP_SECRET")
+        if settings.admin_password in ("admin", "admin123", "password", ""):
+            placeholder_secrets.append("ADMIN_PASSWORD")
+        if not settings.integration_secret or "change_in_prod" in settings.integration_secret.lower():
+            placeholder_secrets.append("INTEGRATION_SECRET")
+        if callmedex_container.settings.bearer_token.get_secret_value() in ("dev_bearer_token", "change_in_prod"):
+            placeholder_secrets.append("CALLMEDEX_BEARER_TOKEN")
 
+        if placeholder_secrets:
+            error_msg = f"Refusing to boot in production mode with default/placeholder secrets: {', '.join(placeholder_secrets)}"
+            logger.critical(f"FATAL: {error_msg}")
+            raise RuntimeError(error_msg)
+
+    # Storage orphan cleanup and pre-flight directory check
+    import os
+    if hasattr(callmedex_container.storage_provider, "cleanup_stale_temp_files"):
+        purged = callmedex_container.storage_provider.cleanup_stale_temp_files(max_age_seconds=3600.0)
+        if purged > 0:
+            logger.info(f"Startup pre-flight: Purged {purged} stale temporary report files")
+
+    download_dir = getattr(callmedex_container.storage_provider, "download_dir", None)
+    if download_dir and not os.access(download_dir, os.W_OK):
+        logger.warning(f"Storage download directory '{download_dir}' is not writable")
+
+    from app.integrations.callmedex.api.router import global_runner
+    await callmedex_container.queue_engine.register_handler(
+        "process_report", global_runner.execute_report_job
+    )
     scheduler_service.start()
+    await callmedex_container.queue_engine.start()
     yield
     # Shutdown
     logger.info("Shutting down MediAssist AI...")
+    await callmedex_container.queue_engine.shutdown()
     scheduler_service.shutdown()
 
 
@@ -129,6 +164,8 @@ app.include_router(fhir_router)
 app.include_router(razorpay_router)
 # Internal integration API (connector → MedAssist)
 app.include_router(integrations_router)
+# CallMedex internal integration API (/internal/integrations/callmedex)
+app.include_router(callmedex_router)
 
 
 @app.get("/")
