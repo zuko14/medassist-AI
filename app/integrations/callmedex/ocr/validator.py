@@ -4,7 +4,6 @@ import re
 import logging
 from typing import List, Tuple
 from app.integrations.callmedex.ocr.schemas import ExtractedLabTest, LabFlag
-from app.integrations.callmedex.api.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,5 @@
 """CallMedex Background Worker Runner & DI Container (Phase 3 & Phase R2 Implementation)."""
 
-import os
 import logging
 from typing import Dict, Any, Optional
 from uuid import uuid4

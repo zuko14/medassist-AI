@@ -27,6 +27,59 @@ from app.integrations.callmedex.api.exceptions import (
 logger = logging.getLogger(__name__)
 
 
+def _build_mock_lab_report_pdf(barcode_id: str) -> bytes:
+    """Build a minimal but structurally valid, OCR-parseable PDF for non-live (test/dev) runs.
+
+    Used only outside production (live browser navigation disabled). Contains real embedded
+    text so the downstream Canonical OCR pipeline exercises genuine extraction instead of
+    silently falling through to a failure path.
+    """
+    stream_text = (
+        "BT\n/F1 12 Tf\n14 TL\n50 750 Td\n"
+        "(LABORATORY TEST REPORT) Tj T*\n"
+        f"(Barcode {barcode_id}) Tj T*\n"
+        "(Hemoglobin 13.6 g/dL 13.0-17.0) Tj T*\n"
+        "(White Blood Cell Count 7500 /uL 4000-11000) Tj T*\n"
+        "(Platelet Count 250000 /uL 150000-450000) Tj T*\n"
+        "(Serum Creatinine 0.9 mg/dL 0.6-1.2) Tj T*\n"
+        "ET"
+    )
+    stream_len = len(stream_text)
+    pdf_text = f"""%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length {stream_len} >>
+stream
+{stream_text}
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000242 00000 n
+0000000300 00000 n
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+380
+%%EOF"""
+    return pdf_text.encode("latin-1")
+
+
 class MocDocConnector(BaseLaboratoryConnector):
     """Concrete laboratory connector for MocDoc EMR web portal.
 
@@ -272,7 +325,7 @@ class MocDocConnector(BaseLaboratoryConnector):
                 raise ReportDownloadError(
                     f"Production execution cannot download report for barcode '{barcode_id}' because live browser navigation is not active"
                 )
-            pdf_bytes = b"%PDF-1.4 Mock Lab Report Content for " + barcode_id.encode("utf-8")
+            pdf_bytes = _build_mock_lab_report_pdf(barcode_id)
 
         if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
             raise ReportDownloadError(f"Downloaded file for barcode '{barcode_id}' is not a valid PDF document")

@@ -1,7 +1,7 @@
 """Layer 2: Multi-Audience Summary & Language Generator (Phase 6 Implementation)."""
 
 import logging
-from typing import List, Dict
+from typing import List
 from app.integrations.callmedex.ocr.schemas import CanonicalLabReport
 from app.integrations.callmedex.ai.schemas import (
     ClinicalReasoningResult,

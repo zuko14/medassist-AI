@@ -7,7 +7,6 @@ from uuid import uuid4
 from datetime import datetime, timezone
 from app.integrations.callmedex.queue.base import BaseQueue
 from app.integrations.callmedex.api.schemas import TaskStatus, ProcessReportRequest
-from app.integrations.callmedex.api.exceptions import QueueError
 from app.integrations.callmedex.config.settings import callmedex_settings
 
 logger = logging.getLogger(__name__)

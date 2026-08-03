@@ -4,7 +4,7 @@ import io
 import re
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Tuple
+from typing import List, Tuple
 import pdfplumber
 
 try:
@@ -26,7 +26,6 @@ from app.integrations.callmedex.ocr.schemas import (
     CanonicalReportMetadata,
     ExtractedLabTest,
     ExtractionSource,
-    LabFlag,
 )
 from app.integrations.callmedex.ocr.normalizer import normalize_lab_test_name
 from app.integrations.callmedex.ocr.validator import validate_and_deduplicate_tests, parse_flag_from_reference_range
@@ -170,16 +169,12 @@ class CanonicalOCRPipeline:
         except Exception:
             pass
 
-        # 4. Fallback line structure
-        fallback_lines = [
-            "LABORATORY TEST REPORT",
-            "Hemoglobin 13.6 g/dL 13.0-17.0 Normal",
-            "White Blood Cell Count 7500 /uL 4000-11000 Normal",
-            "Platelet Count 250000 /uL 150000-450000 Normal",
-            "Serum Creatinine 0.9 mg/dL 0.6-1.2 Normal",
-            "Mantoux Test 10 mm 0-5 High",
-        ]
-        return fallback_lines, ExtractionSource.FALLBACK
+        # 4. All extraction strategies exhausted: no text could be recovered from this PDF.
+        # Return no lines rather than fabricating placeholder data — downstream confidence
+        # routing (Layer 2) correctly escalates a report with zero extracted tests for
+        # manual clinical review instead of silently reporting fake normal results.
+        logger.warning("All OCR extraction strategies failed to recover any text from PDF")
+        return [], ExtractionSource.FALLBACK
 
     def _parse_tests_from_lines(
         self, lines: List[str], source: ExtractionSource
@@ -232,19 +227,9 @@ class CanonicalOCRPipeline:
                     )
 
         if not extracted_tests:
-            extracted_tests.append(
-                ExtractedLabTest(
-                    code="HB",
-                    display_name="Hemoglobin",
-                    raw_test_name="Hemoglobin",
-                    value=13.6,
-                    unit="g/dL",
-                    reference_range="13.0-17.0",
-                    flag=LabFlag.NORMAL,
-                    confidence=0.95,
-                    source=source,
-                    page_number=1,
-                )
+            logger.warning(
+                f"No recognizable lab test patterns found in {len(lines)} extracted line(s) "
+                f"(source={source.value}); returning zero tests rather than fabricated data"
             )
 
         return extracted_tests

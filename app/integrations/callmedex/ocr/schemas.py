@@ -1,7 +1,7 @@
 """Canonical OCR Pipeline Pydantic Schemas & Domain Models (Phase 5 Implementation)."""
 
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 

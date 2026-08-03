@@ -1,7 +1,6 @@
 """Callback Contracts & Interface (Phase 2 Contract)."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
 from app.integrations.callmedex.api.schemas import CallbackStatusPayload
 
 

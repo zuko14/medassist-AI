@@ -3,7 +3,7 @@
 import uuid
 import logging
 import httpx
-from typing import Dict, Any, Optional
+from typing import Optional
 from datetime import datetime, timezone
 from app.integrations.callmedex.ai.schemas import MultiAudienceSummaryReport
 from app.integrations.callmedex.callbacks.handler import CallMedexCallbackHandler

@@ -1,7 +1,7 @@
 """Phase 6 AI Medical Summary Schemas & Domain Models."""
 
 from enum import Enum
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
 
 

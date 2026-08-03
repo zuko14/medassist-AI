@@ -1,7 +1,7 @@
 """Browser Abstraction Interface (Phase 2 Contract)."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 
 class BaseBrowserSession(ABC):

@@ -2,8 +2,8 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict, Any, List
-from uuid import UUID, uuid4
+from typing import Optional
+from uuid import uuid4
 from pydantic import BaseModel, Field, ConfigDict
 
 

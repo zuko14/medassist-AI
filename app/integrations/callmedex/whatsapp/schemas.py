@@ -1,7 +1,6 @@
 """Phase 7 WhatsApp Delivery Schemas & Domain Models."""
 
 from enum import Enum
-from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 

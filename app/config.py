@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     )
     medassist_url: str = "http://localhost:8000"  # Base URL where FastAPI is running
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
