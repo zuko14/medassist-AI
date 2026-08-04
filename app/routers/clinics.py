@@ -58,6 +58,11 @@ class CreateClinicRequest(BaseModel):
     timezone: str = "Asia/Kolkata"
     system_prompt: Optional[str] = None
     logo_url: Optional[str] = None
+    # Per-clinic front-desk contact & location (optional — falls back to global settings if omitted)
+    hospital_phone: Optional[str] = None  # Front-desk number, distinct from whatsapp_number
+    hospital_address: Optional[str] = None
+    hospital_maps_link: Optional[str] = None
+    hospital_emergency_number: Optional[str] = None  # Clinic's own emergency desk line
     # Per-clinic Razorpay credentials (optional — falls back to global settings if omitted)
     razorpay_key_id: Optional[str] = None  # e.g. "rzp_live_xxxxxx"
     razorpay_key_secret: Optional[str] = None  # Keep this secret
@@ -81,6 +86,15 @@ async def create_clinic(req: CreateClinicRequest):
         config["system_prompt"] = req.system_prompt
     if req.logo_url:
         config["logo_url"] = req.logo_url
+    # Front-desk contact & location — stored under the same config keys faq_engine.py reads
+    if req.hospital_phone:
+        config["phone"] = req.hospital_phone
+    if req.hospital_address:
+        config["address"] = req.hospital_address
+    if req.hospital_maps_link:
+        config["maps_link"] = req.hospital_maps_link
+    if req.hospital_emergency_number:
+        config["emergency_number"] = req.hospital_emergency_number
     # Only store Razorpay keys if explicitly provided — never store empty strings
     if req.razorpay_key_id:
         config["razorpay_key_id"] = req.razorpay_key_id

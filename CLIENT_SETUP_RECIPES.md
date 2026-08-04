@@ -21,7 +21,7 @@ Before setting up any clinic type, you **must** get their WhatsApp number regist
 
 # 🏥 RECIPE 1: SOLO CLINIC (`soloclinic`)
 > **Use case:** Single doctor operating at 1 location (e.g. Dr. Sharma's Clinic).  
-> **Features:** 24/7 WhatsApp AI Bot, Appointment Scheduling, Reminders, Patient FAQ.
+> **Features:** 24/7 WhatsApp AI Bot, Appointment Scheduling, Reminders, Patient FAQ, Google Maps location, Emergency hotline.
 
 ### Step 1: Register the Clinic
 Open terminal and run (replace values in `< >`):
@@ -38,7 +38,11 @@ curl -X POST https://medassist-ai.onrender.com/admin/clinics \
     "meta_access_token": "<META_PERMANENT_TOKEN>",
     "doctor_name": "Dr. Rahul Sharma",
     "language": "en",
-    "timezone": "Asia/Kolkata"
+    "timezone": "Asia/Kolkata",
+    "hospital_phone": "+919876543210",
+    "hospital_address": "Plot 12, KPHB Colony, Hyderabad",
+    "hospital_maps_link": "https://maps.app.goo.gl/sample",
+    "hospital_emergency_number": "+919876500000"
   }'
 ```
 > 📌 **COPY THE RETURNED `id` (CLINIC_UUID)** e.g., `a1b2c3d4-1111-2222-3333-444455556666`.
@@ -60,7 +64,13 @@ curl -X POST "https://medassist-ai.onrender.com/admin/doctors?clinic_id=<CLINIC_
   }'
 ```
 
-### Step 3: Test on WhatsApp
+### Step 3: (Optional) Add Clinic Fixed Holidays
+```bash
+curl -X POST "https://medassist-ai.onrender.com/admin/holidays?clinic_id=<CLINIC_UUID>&holiday_date=2026-10-20&name=Diwali" \
+  -u "admin:Secure@9999"
+```
+
+### Step 4: Test on WhatsApp
 1. Save `+919876543210` on your phone.
 2. Send `Hi`.
 3. Bot greets as *Sharma Clinic* and lets you book appointments with *Dr. Rahul Sharma*. Done! ✅
@@ -85,7 +95,9 @@ curl -X POST https://medassist-ai.onrender.com/admin/clinics \
     "meta_access_token": "<META_PERMANENT_TOKEN>",
     "doctor_name": "Laboratory Services",
     "language": "en",
-    "timezone": "Asia/Kolkata"
+    "timezone": "Asia/Kolkata",
+    "hospital_address": "Road 1, Ameerpet, Hyderabad",
+    "hospital_maps_link": "https://maps.app.goo.gl/sample"
   }'
 ```
 > 📌 **COPY THE RETURNED `id` (CLINIC_UUID)**.

@@ -168,7 +168,7 @@ class FAQEngine:
         info = {
             "hospital_name": clinic.get("name", settings.hospital_name),
             "hospital_address": config.get("address", settings.hospital_address),
-            "hospital_phone": clinic.get("phone", settings.hospital_phone),
+            "hospital_phone": config.get("phone", settings.hospital_phone),
             "hospital_emergency_number": config.get(
                 "emergency_number", settings.hospital_emergency_number
             ),

@@ -1169,6 +1169,25 @@ class PaymentService:
                 f"No-show bookings are non-refundable._"
             )
 
+            # Append clinic location — skip for branch bookings, which already
+            # have their own branch-specific address shown during booking
+            if not booking.get("branch_id"):
+                from app.services.tenant import get_clinic_contact
+
+                clinic_address = get_clinic_contact(
+                    clinic, "address", settings.hospital_address
+                )
+                clinic_maps_link = get_clinic_contact(
+                    clinic, "maps_link", settings.hospital_maps_link
+                )
+                if clinic_address or clinic_maps_link:
+                    location_line = f"\n\n📍 Location: {clinic.get('name', settings.hospital_name)}"
+                    if clinic_address:
+                        location_line += f", {clinic_address}"
+                    if clinic_maps_link:
+                        location_line += f"\nGoogle Maps: {clinic_maps_link}"
+                    msg += location_line
+
             await whatsapp_service.send_text(clinic, booking["patient_phone"], msg)
             logger.info(
                 f"Sent payment confirmation to {booking['patient_phone'][:6]}***"

@@ -159,6 +159,13 @@ async def get_clinic_by_id(clinic_id: str) -> dict:
     return result.data[0]
 
 
+def get_clinic_contact(clinic: dict, key: str, fallback: str) -> str:
+    """Read a per-clinic contact/location value (phone, address, maps_link,
+    emergency_number) from the clinic's config JSONB, falling back to the
+    platform-wide default when the clinic hasn't configured its own."""
+    return (clinic.get("config") or {}).get(key) or fallback
+
+
 def invalidate_tenant_cache(whatsapp_number: str = None):
     """Call after /admin clinic update to clear stale cache."""
     if whatsapp_number:

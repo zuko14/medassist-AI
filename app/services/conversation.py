@@ -798,9 +798,16 @@ class ConversationManager:
             return
 
         # Get welcome message in selected language
+        from app.services.tenant import get_clinic_contact
+
+        emergency_number = get_clinic_contact(
+            clinic, "emergency_number", settings.hospital_emergency_number
+        )
         await self.whatsapp.send_text(clinic, phone, get_message("welcome", selected))
         await self.whatsapp.send_text(
-            clinic, phone, get_message("disclaimer", selected)
+            clinic,
+            phone,
+            get_message("disclaimer", selected, emergency=emergency_number),
         )
         await self._send_main_menu(clinic, phone, selected)
         await self.update_state(clinic, phone, "main_menu")
@@ -815,8 +822,13 @@ class ConversationManager:
         interactive_data: Optional[dict] = None,
     ) -> None:
         """Handle data consent response."""
+        from app.services.tenant import get_clinic_contact
+
         button_id = interactive_data.get("id") if interactive_data else None
         msg_lower = message.lower().strip()
+        emergency_number = get_clinic_contact(
+            clinic, "emergency_number", settings.hospital_emergency_number
+        )
 
         if button_id == "consent_yes" or msg_lower in [
             "yes",
@@ -830,7 +842,9 @@ class ConversationManager:
             )
             await self.whatsapp.send_text(clinic, phone, get_message("welcome", lang))
             await self.whatsapp.send_text(
-                clinic, phone, get_message("disclaimer", lang)
+                clinic,
+                phone,
+                get_message("disclaimer", lang, emergency=emergency_number),
             )
             await self._send_main_menu(clinic, phone, lang)
             await self.update_state(clinic, phone, "main_menu")
@@ -844,7 +858,9 @@ class ConversationManager:
             await update_patient(clinic["id"], phone, {"data_consent": False})
             await self.whatsapp.send_text(clinic, phone, get_message("welcome", lang))
             await self.whatsapp.send_text(
-                clinic, phone, get_message("disclaimer", lang)
+                clinic,
+                phone,
+                get_message("disclaimer", lang, emergency=emergency_number),
             )
             await self._send_main_menu(clinic, phone, lang)
             await self.update_state(clinic, phone, "main_menu")
@@ -2324,6 +2340,31 @@ class ConversationManager:
                         ),
                     )
 
+                    # Send clinic location — skip for branch bookings, which already
+                    # showed their branch-specific address in the confirmation step
+                    if not context.get("branch_id"):
+                        from app.services.tenant import get_clinic_contact
+
+                        clinic_address = get_clinic_contact(
+                            clinic, "address", settings.hospital_address
+                        )
+                        clinic_maps_link = get_clinic_contact(
+                            clinic, "maps_link", settings.hospital_maps_link
+                        )
+                        if clinic_address or clinic_maps_link:
+                            location_lines = [
+                                f"📍 Location: {clinic.get('name', settings.hospital_name)}"
+                            ]
+                            if clinic_address:
+                                location_lines[0] += f", {clinic_address}"
+                            if clinic_maps_link:
+                                location_lines.append(
+                                    f"Google Maps: {clinic_maps_link}"
+                                )
+                            await self.whatsapp.send_text(
+                                clinic, phone, "\n".join(location_lines)
+                            )
+
                     await log_analytics_event(
                         clinic["id"],
                         phone,
@@ -2587,14 +2628,26 @@ class ConversationManager:
 
     async def _handle_emergency(self, clinic: dict, phone: str, lang: str) -> None:
         """Handle emergency situation."""
-        await self.whatsapp.send_text(clinic, phone, get_message("emergency", lang))
+        from app.services.tenant import get_clinic_contact
 
-        # Send location if available
-        if settings.hospital_maps_link:
+        emergency_number = get_clinic_contact(
+            clinic, "emergency_number", settings.hospital_emergency_number
+        )
+        await self.whatsapp.send_text(
+            clinic, phone, get_message("emergency", lang, emergency=emergency_number)
+        )
+
+        # Send location if the clinic (or the platform default) has one configured
+        maps_link = get_clinic_contact(clinic, "maps_link", settings.hospital_maps_link)
+        address = get_clinic_contact(clinic, "address", settings.hospital_address)
+        if maps_link or address:
+            location_lines = []
+            if address:
+                location_lines.append(f"Address: {address}")
+            if maps_link:
+                location_lines.append(f"Google Maps: {maps_link}")
             await self.whatsapp.send_text(
-                clinic,
-                phone,
-                f"Emergency location: {settings.hospital_maps_link}\nAddress: {settings.hospital_address}",
+                clinic, phone, "📍 Emergency location\n" + "\n".join(location_lines)
             )
 
         await self.update_state(clinic, phone, "main_menu")
