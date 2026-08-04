@@ -216,6 +216,37 @@ def enforce_clinic_access(
     return requested_clinic_id
 
 
+async def resolve_clinic_id_for_write(
+    user: AdminUser, requested_clinic_id: str = "default"
+) -> str:
+    """Resolve a clinic_id for a row that is about to be INSERTed (or otherwise
+    written with an equality filter that has no "show everything" fallback).
+
+    "default" is a sentinel meaning "no clinic specified" — the admin frontend
+    never sends a real clinic_id, so every write defaulted to the literal
+    string "default". That is never an actual clinics.id value. Writing it
+    into a row's clinic_id column desyncs that row from every downstream
+    query that filters by the real UUID — most importantly the WhatsApp
+    bot's get_doctors()/get_available_slots(), which use the clinic resolved
+    from the incoming WhatsApp number. A doctor, leave, or holiday written
+    with clinic_id='default' becomes permanently invisible to patients even
+    though it shows up fine in the admin panel that just created it (the
+    admin panel's own list endpoints skip the clinic_id filter entirely when
+    it's still "default").
+    """
+    effective = enforce_clinic_access(user, requested_clinic_id)
+    if effective != "default":
+        return effective
+    clinics = (
+        supabase.table("clinics").select("id").order("created_at").limit(1).execute()
+    )
+    if not clinics.data:
+        raise HTTPException(
+            status_code=400, detail="No clinic configured. Create a clinic first."
+        )
+    return clinics.data[0]["id"]
+
+
 class LeaveCreate(BaseModel):
     doctor_name: str
     leave_date: date
@@ -310,45 +341,50 @@ class PrescriptionCreate(BaseModel):
 
 @router.get("/stats")
 async def get_stats(
-    clinic_id: str = "default", days: int = 30, user: str = Depends(verify_credentials)
+    clinic_id: str = "default", days: int = 30, user: AdminUser = Depends(verify_credentials)
 ):
     """Get dashboard statistics."""
-    return await analytics_service.get_dashboard_stats(clinic_id, days)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    return await analytics_service.get_dashboard_stats(effective_clinic_id, days)
 
 
 @router.get("/appointments/recent")
 async def get_recent_appointments(
-    clinic_id: str = "default", limit: int = 20, user: str = Depends(verify_credentials)
+    clinic_id: str = "default", limit: int = 20, user: AdminUser = Depends(verify_credentials)
 ):
     """Get recent appointments."""
-    return await analytics_service.get_recent_appointments(clinic_id, limit)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    return await analytics_service.get_recent_appointments(effective_clinic_id, limit)
 
 
 @router.get("/appointments/upcoming")
 async def get_upcoming_appointments(
-    clinic_id: str = "default", days: int = 7, user: str = Depends(verify_credentials)
+    clinic_id: str = "default", days: int = 7, user: AdminUser = Depends(verify_credentials)
 ):
     """Get upcoming appointments."""
-    return await analytics_service.get_upcoming_appointments(clinic_id, days)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    return await analytics_service.get_upcoming_appointments(effective_clinic_id, days)
 
 
 @router.get("/departments/popular")
 async def get_popular_departments(
-    clinic_id: str = "default", days: int = 30, user: str = Depends(verify_credentials)
+    clinic_id: str = "default", days: int = 30, user: AdminUser = Depends(verify_credentials)
 ):
     """Get popular departments."""
-    return await analytics_service.get_popular_departments(clinic_id, days)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    return await analytics_service.get_popular_departments(effective_clinic_id, days)
 
 
 @router.get("/doctors")
 async def get_doctors(
-    clinic_id: str = "default", user: str = Depends(verify_credentials)
+    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
     """Get all doctors."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("doctors").select("*")
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
         result = query.execute()
         return result.data or []
     except Exception as e:
@@ -360,14 +396,17 @@ async def get_doctors(
 async def create_doctor(
     doctor: DoctorCreate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Create a new doctor."""
     try:
+        effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         doctor_data = doctor.dict()
-        doctor_data["clinic_id"] = clinic_id
+        doctor_data["clinic_id"] = effective_clinic_id
         result = supabase.table("doctors").insert(doctor_data).execute()
         return result.data[0]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating doctor: {e}")
         raise HTTPException(status_code=500, detail="Failed to create doctor")
@@ -378,20 +417,18 @@ async def update_doctor(
     doctor_id: str,
     doctor: DoctorUpdate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Update an existing doctor."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         update_data = doctor.dict(exclude_unset=True)
         if not update_data:
             return {"message": "No fields to update"}
-        result = (
-            supabase.table("doctors")
-            .update(update_data)
-            .eq("clinic_id", clinic_id)
-            .eq("id", doctor_id)
-            .execute()
-        )
+        query = supabase.table("doctors").update(update_data)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        result = query.eq("id", doctor_id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Doctor not found")
         return result.data[0]
@@ -404,13 +441,15 @@ async def update_doctor(
 
 @router.delete("/doctors/{doctor_id}")
 async def delete_doctor(
-    doctor_id: str, clinic_id: str = "default", user: str = Depends(verify_credentials)
+    doctor_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
     """Delete a doctor."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        supabase.table("doctors").delete().eq("clinic_id", clinic_id).eq(
-            "id", doctor_id
-        ).execute()
+        query = supabase.table("doctors").delete()
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        query.eq("id", doctor_id).execute()
         # Note: if doctor has appointments, foreign key constraints might fail unless cascading is enabled
         return {"success": True}
     except Exception as e:
@@ -422,11 +461,14 @@ async def delete_doctor(
 async def get_leaves(
     doctor: Optional[str] = None,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Get doctor leaves."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        query = supabase.table("doctor_leaves").select("*").eq("clinic_id", clinic_id)
+        query = supabase.table("doctor_leaves").select("*")
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
         if doctor:
             query = query.eq("doctor_name", doctor)
         result = query.order("leave_date").execute()
@@ -440,12 +482,13 @@ async def get_leaves(
 async def create_leave(
     leave: LeaveCreate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Create a doctor leave (single day or date range)."""
     from datetime import timedelta
 
     try:
+        effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         start_date = leave.leave_date
         end_date = leave.end_date or start_date
 
@@ -460,7 +503,7 @@ async def create_leave(
         while current_date <= end_date:
             leave_data = leave.dict(exclude={"end_date"})
             leave_data["leave_date"] = str(current_date)
-            leave_data["clinic_id"] = clinic_id
+            leave_data["clinic_id"] = effective_clinic_id
             leaves_to_insert.append(leave_data)
             current_date += timedelta(days=1)
 
@@ -480,13 +523,15 @@ async def create_leave(
 
 @router.delete("/leaves/{leave_id}")
 async def delete_leave(
-    leave_id: str, clinic_id: str = "default", user: str = Depends(verify_credentials)
+    leave_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
     """Delete a doctor leave."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        supabase.table("doctor_leaves").delete().eq("clinic_id", clinic_id).eq(
-            "id", leave_id
-        ).execute()
+        query = supabase.table("doctor_leaves").delete()
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        query.eq("id", leave_id).execute()
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting leave: {e}")
@@ -495,13 +540,14 @@ async def delete_leave(
 
 @router.get("/holidays")
 async def get_holidays(
-    clinic_id: str = "default", user: str = Depends(verify_credentials)
+    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
     """Get hospital holidays."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("hospital_holidays").select("*").order("holiday_date")
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
         result = query.execute()
         return result.data or []
     except Exception as e:
@@ -514,15 +560,16 @@ async def create_holiday(
     holiday_date: date,
     name: str,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Create a hospital holiday."""
     try:
+        effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         result = (
             supabase.table("hospital_holidays")
             .insert(
                 {
-                    "clinic_id": clinic_id,
+                    "clinic_id": effective_clinic_id,
                     "holiday_date": str(holiday_date),
                     "name": name,
                 }
@@ -530,6 +577,8 @@ async def create_holiday(
             .execute()
         )
         return result.data[0]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating holiday: {e}")
         raise HTTPException(status_code=500, detail="Failed to create holiday")
@@ -539,13 +588,15 @@ async def create_holiday(
 async def delete_holiday(
     holiday_date: str,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Delete a hospital holiday."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        supabase.table("hospital_holidays").delete().eq("clinic_id", clinic_id).eq(
-            "holiday_date", holiday_date
-        ).execute()
+        query = supabase.table("hospital_holidays").delete()
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        query.eq("holiday_date", holiday_date).execute()
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting holiday: {e}")
@@ -556,20 +607,31 @@ async def delete_holiday(
 async def cancel_appointment_by_admin(
     appointment_id: str,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
+    """Cancel a confirmed appointment.
+
+    Routes through PaymentService.admin_cancel_confirmed_booking() so a
+    Razorpay-paid booking gets refunded and the patient is notified over
+    WhatsApp, instead of silently flipping status with no refund and no
+    notification (see payment.py for why this matters).
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        result = (
-            supabase.table("appointments")
-            .update({"status": "cancelled"})
-            .eq("clinic_id", clinic_id)
-            .eq("id", appointment_id)
-            .execute()
+        from app.services.payment import payment_service
+
+        result = await payment_service.admin_cancel_confirmed_booking(
+            appointment_id,
+            clinic_id=effective_clinic_id,
+            admin_notes=f"Cancelled by admin: {user}",
         )
-        if result.data:
+        if result["success"]:
             return {"success": True}
-        return {"success": False, "message": "Not found"}
+        return {"success": False, "message": result.get("reason", "Failed")}
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error cancelling appointment {appointment_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -584,13 +646,14 @@ async def upload_lab_report(
     report_name: str = Form(...),
     report_type: str = Form("General"),
     clinic_id: str = Form("default"),
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Upload and send a lab report to a patient via WhatsApp."""
     try:
+        effective_clinic_id = enforce_clinic_access(user, clinic_id)
         file_bytes = await file.read()
         result = await LabReportService().upload_and_send(
-            clinic_id=clinic_id,
+            clinic_id=effective_clinic_id,
             file_bytes=file_bytes,
             filename=file.filename,
             content_type=file.content_type or "application/pdf",
@@ -611,10 +674,11 @@ async def upload_lab_report(
 
 @router.get("/lab-reports")
 async def get_lab_reports(
-    clinic_id: str = "default", user: str = Depends(verify_credentials)
+    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
     """Get all lab reports."""
-    result = await LabReportService().get_all_reports(clinic_id)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    result = await LabReportService().get_all_reports(effective_clinic_id)
     return {"reports": result}
 
 
@@ -634,36 +698,37 @@ async def resend_lab_report(
 
 @router.get("/patients")
 async def get_patients(
-    clinic_id: str = "default", user: str = Depends(verify_credentials)
+    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
     """Get all patients with appointment counts."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         result = supabase.rpc(
             "get_patients_with_counts",
-            {"p_clinic_id": clinic_id},
+            {"p_clinic_id": effective_clinic_id},
         ).execute()
         if result.data:
             return {"patients": result.data}
-        if clinic_id == "default":
+        if effective_clinic_id == "default":
             patients = supabase.table("patients").select("*").order("phone").execute()
         else:
             patients = (
                 supabase.table("patients")
                 .select("*")
-                .eq("clinic_id", clinic_id)
+                .eq("clinic_id", effective_clinic_id)
                 .order("phone")
                 .execute()
             )
         return {"patients": patients.data or []}
     except Exception:
         # Fallback if RPC doesn't exist
-        if clinic_id == "default":
+        if effective_clinic_id == "default":
             patients = supabase.table("patients").select("*").order("phone").execute()
         else:
             patients = (
                 supabase.table("patients")
                 .select("*")
-                .eq("clinic_id", clinic_id)
+                .eq("clinic_id", effective_clinic_id)
                 .order("phone")
                 .execute()
             )
@@ -705,10 +770,13 @@ async def add_prescription(
 async def get_prescriptions(
     active_only: bool = False,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Get all prescriptions."""
-    result = await PrescriptionService().get_all_prescriptions(clinic_id, active_only)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    result = await PrescriptionService().get_all_prescriptions(
+        effective_clinic_id, active_only
+    )
     return {"prescriptions": result}
 
 
@@ -716,11 +784,14 @@ async def get_prescriptions(
 async def deactivate_prescription(
     prescription_id: str,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Deactivate a prescription reminder."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        await PrescriptionService().deactivate_prescription(clinic_id, prescription_id)
+        await PrescriptionService().deactivate_prescription(
+            effective_clinic_id, prescription_id
+        )
         return {"success": True}
     except Exception as e:
         logger.error(f"Prescription deactivate error: {e}")
@@ -735,17 +806,18 @@ async def get_bookings(
     clinic_id: str = "default",
     status: Optional[str] = None,
     limit: int = 50,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Get all bookings with payment information."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("appointments").select(
             "id, clinic_id, patient_phone, patient_name, department, doctor_name, "
             "appointment_date, appointment_time, status, razorpay_order_id, "
             "payment_id, amount_paise, hold_expires_at, booking_ref, created_at, updated_at"
         )
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
         if status:
             query = query.eq("status", status)
         result = query.order("created_at", desc=True).limit(limit).execute()
@@ -758,15 +830,16 @@ async def get_bookings(
 @router.get("/bookings/pending-review")
 async def get_pending_review_bookings(
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Get bookings in pending_review status — needs human eyes."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = (
             supabase.table("appointments").select("*").eq("status", "pending_review")
         )
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
         result = query.order("created_at", desc=True).execute()
         return {"bookings": result.data or []}
     except Exception as e:
@@ -884,54 +957,56 @@ async def get_payment_reconciliation(
 async def get_payment_stats(
     clinic_id: str = "default",
     days: int = 30,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Get payment statistics for the dashboard."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         from datetime import datetime, timedelta
 
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
+        def _scope(query):
+            if effective_clinic_id != "default":
+                return query.eq("clinic_id", effective_clinic_id)
+            return query
+
         # Total confirmed with payments
-        confirmed = (
+        confirmed = _scope(
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
             .eq("status", "confirmed")
             .not_.is_("payment_id", "null")
             .gte("created_at", cutoff)
-            .execute()
-        )
+        ).execute()
 
         # Total pending review
-        pending = (
+        pending = _scope(
             supabase.table("appointments")
             .select("id", count="exact")
             .eq("status", "pending_review")
-            .execute()
-        )
+        ).execute()
 
         # Total refunded
-        refunded = (
+        refunded = _scope(
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
             .eq("status", "refunded")
             .gte("created_at", cutoff)
-            .execute()
-        )
+        ).execute()
 
         # Total expired
-        expired = (
+        expired = _scope(
             supabase.table("appointments")
             .select("id", count="exact")
             .eq("status", "expired")
             .gte("created_at", cutoff)
-            .execute()
-        )
+        ).execute()
 
         confirmed_amount = sum(b.get("amount_paise", 0) for b in (confirmed.data or []))
         refunded_amount = sum(b.get("amount_paise", 0) for b in (refunded.data or []))
 
-        # Signature failures
+        # Signature failures (payment_events isn't clinic-scoped directly; left global)
         sig_failures = (
             supabase.table("payment_events")
             .select("id", count="exact")
@@ -1091,13 +1166,14 @@ async def get_admin_audit_logs(
 @router.get("/branches")
 async def get_branches(
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Get all branches for a clinic."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("branches").select("*")
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
         query = query.order("display_order")
         result = query.execute()
         return {"branches": result.data or []}
@@ -1110,25 +1186,19 @@ async def get_branches(
 async def create_branch(
     branch: BranchCreate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Create a new branch."""
     try:
+        effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         branch_data = branch.dict()
-        # Auto-resolve clinic_id for single-tenant setups
-        if clinic_id == "default":
-            clinics = supabase.table("clinics").select("id").limit(1).execute()
-            if clinics.data:
-                clinic_id = clinics.data[0]["id"]
-            else:
-                raise HTTPException(status_code=400, detail="No clinic found")
-        branch_data["clinic_id"] = clinic_id
+        branch_data["clinic_id"] = effective_clinic_id
         result = supabase.table("branches").insert(branch_data).execute()
 
         # Invalidate branch cache
         from app.services.tenant import invalidate_branch_cache
 
-        invalidate_branch_cache(clinic_id)
+        invalidate_branch_cache(effective_clinic_id)
 
         return {"success": True, "branch": result.data[0]}
     except HTTPException:
@@ -1143,16 +1213,17 @@ async def update_branch(
     branch_id: str,
     branch: BranchUpdate,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Update a branch."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         update_data = branch.dict(exclude_unset=True)
         if not update_data:
             return {"message": "No fields to update"}
         query = supabase.table("branches").update(update_data)
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
         result = query.eq("id", branch_id).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="Branch not found")
@@ -1160,7 +1231,7 @@ async def update_branch(
         # Invalidate branch cache
         from app.services.tenant import invalidate_branch_cache
 
-        invalidate_branch_cache(clinic_id)
+        invalidate_branch_cache(effective_clinic_id)
 
         return result.data[0]
     except HTTPException:
@@ -1174,19 +1245,20 @@ async def update_branch(
 async def delete_branch(
     branch_id: str,
     clinic_id: str = "default",
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Soft-delete a branch (deactivate it)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("branches").update({"is_active": False})
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
-        result = query.eq("id", branch_id).execute()
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        query.eq("id", branch_id).execute()
 
         # Invalidate branch cache
         from app.services.tenant import invalidate_branch_cache
 
-        invalidate_branch_cache(clinic_id)
+        invalidate_branch_cache(effective_clinic_id)
 
         return {"success": True}
     except Exception as e:

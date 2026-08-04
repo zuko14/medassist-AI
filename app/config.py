@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # Admin
     admin_username: str = "admin"
     admin_password: str = "admin"
+    owner_username: str = ""  # platform-owner dashboard login — blank = disabled
+    owner_password: str = ""  # must be set explicitly; never ship a real default
 
     # Multi-tenant (optional — used when clinics table exists)
     admin_secret: str = ""  # protects /admin/clinics routes

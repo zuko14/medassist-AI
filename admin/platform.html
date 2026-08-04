@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediAssist AI — Platform Super-Admin Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #060912;
+            --surface: #0d1120;
+            --surface2: #131830;
+            --surface-hover: #192040;
+            --border: #1e2540;
+            --border2: #2a3155;
+            --text: #f1f5f9;
+            --text2: #94a3b8;
+            --text3: #64748b;
+            --accent: #6c63ff;
+            --accent-light: #8b7dff;
+            --accent-glow: rgba(108,99,255,0.2);
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6,182,212,0.2);
+            --green: #10b981;
+            --green-bg: rgba(16,185,129,0.12);
+            --red: #ef4444;
+            --red-bg: rgba(239,68,68,0.12);
+            --amber: #f59e0b;
+            --amber-bg: rgba(245,158,11,0.12);
+            --purple: #a855f7;
+            --purple-bg: rgba(168,85,247,0.12);
+            --radius: 16px;
+            --radius-sm: 10px;
+            --shadow: 0 10px 40px rgba(0,0,0,0.5);
+            --glass: rgba(13, 17, 32, 0.75);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+        /* Login Overlay */
+        .login-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 999;
+            background: radial-gradient(circle at 50% 30%, rgba(108,99,255,0.12) 0%, rgba(6,9,18,0.95) 70%);
+            backdrop-filter: blur(16px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            transition: opacity 0.4s ease, visibility 0.4s;
+        }
+
+        .login-overlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 440px;
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: 24px;
+            padding: 40px 36px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.6), 0 0 40px var(--accent-glow);
+            animation: slideUp 0.4s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .login-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: rgba(108,99,255,0.12);
+            border: 1px solid rgba(108,99,255,0.3);
+            border-radius: 30px;
+            color: var(--accent-light);
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 16px;
+        }
+
+        .login-header h2 {
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 30%, var(--text2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .login-header p {
+            color: var(--text3);
+            font-size: 0.88rem;
+            margin-top: 6px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text2);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 13px 16px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: #fff;
+            font-size: 0.95rem;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            border: none;
+            border-radius: var(--radius-sm);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 8px 25px rgba(108,99,255,0.35);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(108,99,255,0.5);
+        }
+
+        .error-msg {
+            background: var(--red-bg);
+            border: 1px solid var(--red);
+            color: #fca5a5;
+            font-size: 0.85rem;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        /* App Layout */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Header / Navbar */
+        .navbar {
+            background: var(--glass);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-logo {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: #fff;
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        .brand-title {
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.4px;
+        }
+
+        .brand-subtitle {
+            font-size: 0.75rem;
+            color: var(--cyan);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-tag {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 30px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--green);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        .btn-secondary {
+            padding: 9px 18px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text2);
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-hover);
+            color: #fff;
+            border-color: var(--border2);
+        }
+
+        /* Main Content */
+        .main-content {
+            padding: 32px;
+            max-width: 1540px;
+            width: 100%;
+            margin: 0 auto;
+            flex: 1;
+        }
+
+        /* Stat Tiles Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.25s ease, border-color 0.25s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--border2);
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; right: 0; width: 120px; height: 120px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .stat-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text3);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 2.2rem;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+
+        .stat-meta {
+            font-size: 0.8rem;
+            color: var(--text2);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-icon {
+            position: absolute;
+            bottom: 20px; right: 20px;
+            font-size: 2rem;
+            opacity: 0.15;
+        }
+
+        /* Analytics Grid */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        @media (max-width: 1100px) {
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+
+        .chart-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .chart-subtitle {
+            font-size: 0.82rem;
+            color: var(--text3);
+            margin-top: 2px;
+        }
+
+        .chart-container {
+            position: relative;
+            flex: 1;
+            min-height: 280px;
+            width: 100%;
+        }
+
+        /* Leaderboard Section */
+        .section-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+
+        .table-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex: 1;
+            min-width: 280px;
+        }
+
+        .search-box {
+            position: relative;
+            flex: 1;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 10px 16px 10px 38px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 30px;
+            color: var(--text);
+            font-size: 0.88rem;
+            font-family: inherit;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 14px; top: 50%;
+            transform: translateY(-50%);
+            color: var(--text3);
+            font-size: 0.9rem;
+        }
+
+        .filter-select {
+            padding: 10px 16px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 30px;
+            color: var(--text);
+            font-size: 0.85rem;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        /* Table */
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        .custom-table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+
+        .custom-table th {
+            padding: 14px 18px;
+            background: var(--surface2);
+            color: var(--text3);
+            font-weight: 600;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .custom-table td {
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+            vertical-align: middle;
+        }
+
+        .custom-table tbody tr {
+            transition: background 0.15s;
+            cursor: pointer;
+        }
+
+        .custom-table tbody tr:hover {
+            background: var(--surface-hover);
+        }
+
+        .clinic-name-cell {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .clinic-title {
+            font-weight: 700;
+            color: #fff;
+            font-size: 0.95rem;
+        }
+
+        .clinic-phone {
+            font-size: 0.78rem;
+            color: var(--text3);
+            margin-top: 2px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-soloclinic { background: rgba(148,163,184,0.12); color: #cbd5e1; }
+        .badge-essential { background: var(--cyan-glow); color: var(--cyan); }
+        .badge-polyclinic { background: var(--purple-bg); color: var(--purple); }
+        .badge-enterprise { background: var(--accent-glow); color: var(--accent-light); }
+        .badge-diagstream { background: var(--amber-bg); color: var(--amber); }
+
+        .status-active { background: var(--green-bg); color: var(--green); }
+        .status-dormant { background: var(--red-bg); color: var(--red); }
+
+        .action-btn {
+            padding: 6px 12px;
+            background: rgba(108,99,255,0.15);
+            border: 1px solid rgba(108,99,255,0.3);
+            border-radius: 6px;
+            color: var(--accent-light);
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        /* Modal Side Panel */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 900;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            display: flex;
+            justify-content: flex-end;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-panel {
+            width: 100%;
+            max-width: 640px;
+            background: var(--surface);
+            border-left: 1px solid var(--border2);
+            height: 100%;
+            overflow-y: auto;
+            padding: 32px;
+            box-shadow: -10px 0 40px rgba(0,0,0,0.5);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.active .modal-panel {
+            transform: translateX(0);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text3);
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .close-btn:hover { color: #fff; }
+
+        .modal-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .mini-stat {
+            background: var(--surface2);
+            padding: 16px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+        }
+
+        .mini-stat-val {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #fff;
+            margin-top: 4px;
+        }
+
+        /* Loading Skeleton & Spinner */
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255,255,255,0.2);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Footer */
+        .footer {
+            padding: 20px 32px;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text3);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Authentication Modal Overlay -->
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-badge">🔐 Platform Super-Admin</div>
+                <h2>Owner Authentication</h2>
+                <p>Enter your owner credentials to access executive cross-hospital intelligence.</p>
+            </div>
+            <div class="error-msg" id="loginError">Invalid credentials or rate limit exceeded.</div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Owner Username</label>
+                    <input type="text" id="ownerUser" class="form-control" placeholder="Owner username" required>
+                </div>
+                <div class="form-group">
+                    <label>Owner Password</label>
+                    <input type="password" id="ownerPass" class="form-control" placeholder="••••••••••••" required>
+                </div>
+                <button type="submit" class="btn-primary" id="loginBtn">Authenticate Owner</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Application Wrapper -->
+    <div class="app-container">
+        <!-- Top Navbar -->
+        <nav class="navbar">
+            <div class="brand">
+                <div class="brand-logo">⚡</div>
+                <div>
+                    <div class="brand-title">MediAssist AI</div>
+                    <div class="brand-subtitle">Platform Owner Dashboard</div>
+                </div>
+            </div>
+            <div class="nav-controls">
+                <div class="user-tag">
+                    <div class="pulse-dot"></div>
+                    <span id="authenticatedUser">Super-Admin</span>
+                </div>
+                <button class="btn-secondary" onclick="fetchPlatformData()">🔄 Refresh</button>
+                <button class="btn-secondary" onclick="logoutOwner()">Lock Dashboard</button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Headline Stat Tiles -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Hospitals</div>
+                    <div class="stat-value" id="statTotalClinics">-</div>
+                    <div class="stat-meta">🏥 Across all onboarded tiers</div>
+                    <div class="stat-icon">🏥</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active / Inactive</div>
+                    <div class="stat-value" id="statActiveClinics">-</div>
+                    <div class="stat-meta" id="statInactiveClinics">0 inactive hospitals</div>
+                    <div class="stat-icon">🟢</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">New This Month</div>
+                    <div class="stat-value" id="statNewThisMonth">-</div>
+                    <div class="stat-meta">✨ Month-to-date onboarding</div>
+                    <div class="stat-icon">🚀</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Platform Revenue (30d)</div>
+                    <div class="stat-value" id="statPlatformRevenue">₹0</div>
+                    <div class="stat-meta" id="statRefundRate">0% refund rate</div>
+                    <div class="stat-icon">💰</div>
+                </div>
+            </div>
+
+            <!-- Charts Row 1 -->
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Daily Financial Revenue & Activity Trends</div>
+                            <div class="chart-subtitle">Confirmed Razorpay payments & total system events over 30 days</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="revenueChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Plan Tier Distribution</div>
+                            <div class="chart-subtitle">Hospitals grouped by active subscription tier</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="planChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Leaderboard Table Card -->
+            <div class="section-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="search-box">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="searchInput" placeholder="Search hospital name or WhatsApp..." onkeyup="filterLeaderboard()">
+                        </div>
+                        <select class="filter-select" id="planFilter" onchange="filterLeaderboard()">
+                            <option value="ALL">All Subscription Tiers</option>
+                            <option value="soloclinic">SoloClinic</option>
+                            <option value="essential">Essential</option>
+                            <option value="polyclinic">Polyclinic</option>
+                            <option value="enterprise">Enterprise</option>
+                            <option value="diagstream">DiagStream</option>
+                        </select>
+                        <select class="filter-select" id="statusFilter" onchange="filterLeaderboard()">
+                            <option value="ALL">All Statuses</option>
+                            <option value="active">Active Only</option>
+                            <option value="dormant">Dormant Only (14d+)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr>
+                                <th>Hospital / Clinic</th>
+                                <th>Plan Tier</th>
+                                <th>30d Appts</th>
+                                <th>Total Patients</th>
+                                <th>30d Revenue</th>
+                                <th>Last Activity</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboardBody">
+                            <tr>
+                                <td colspan="8" style="text-align:center; padding:40px; color:var(--text3)">
+                                    <div class="spinner"></div><br><br>Loading platform leaderboard...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            MediAssist AI Platform Super-Admin Governance Engine &bull; Protected by HTTPBasic Owner Session & Security Headers
+        </footer>
+    </div>
+
+    <!-- Clinic Drill-down Modal -->
+    <div class="modal-overlay" id="detailModal">
+        <div class="modal-panel">
+            <div class="modal-header">
+                <div>
+                    <h3 id="modalClinicName" style="font-size:1.3rem; font-weight:800; color:#fff;">Hospital Name</h3>
+                    <p id="modalClinicPhone" style="color:var(--cyan); font-size:0.85rem; margin-top:2px;">+91 98765 43210</p>
+                </div>
+                <button class="close-btn" onclick="closeModal()">✕</button>
+            </div>
+
+            <div class="modal-grid">
+                <div class="mini-stat">
+                    <div class="stat-label">Total Appointments</div>
+                    <div class="mini-stat-val" id="modalTotalAppts">0</div>
+                </div>
+                <div class="mini-stat">
+                    <div class="stat-label">Confirmed Slots</div>
+                    <div class="mini-stat-val" id="modalConfirmedAppts" style="color:var(--green)">0</div>
+                </div>
+                <div class="mini-stat">
+                    <div class="stat-label">Total Registered Patients</div>
+                    <div class="mini-stat-val" id="modalTotalPatients">0</div>
+                </div>
+                <div class="mini-stat">
+                    <div class="stat-label">New Patients (30d)</div>
+                    <div class="mini-stat-val" id="modalNewPatients" style="color:var(--cyan)">0</div>
+                </div>
+            </div>
+
+            <div style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:24px;">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:12px;">Department Usage Breakdown</h4>
+                <div id="modalDeptList" style="display:flex; flex-direction:column; gap:8px;">
+                    <!-- Department rows injected dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ownerAuthHeader = '';
+        let globalClinicsData = [];
+        let revenueChartInstance = null;
+        let planChartInstance = null;
+
+        // On Load
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedAuth = sessionStorage.getItem('owner_auth');
+            if (savedAuth) {
+                ownerAuthHeader = savedAuth;
+                document.getElementById('loginOverlay').classList.add('hidden');
+                fetchPlatformData();
+            }
+        });
+
+        // Login Handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const user = document.getElementById('ownerUser').value.trim();
+            const pass = document.getElementById('ownerPass').value.trim();
+            const authHeader = 'Basic ' + btoa(user + ':' + pass);
+
+            const errEl = document.getElementById('loginError');
+            errEl.style.display = 'none';
+
+            try {
+                const res = await fetch('/platform/overview', {
+                    headers: { 'Authorization': authHeader }
+                });
+
+                if (res.ok) {
+                    ownerAuthHeader = authHeader;
+                    sessionStorage.setItem('owner_auth', authHeader);
+                    document.getElementById('loginOverlay').classList.add('hidden');
+                    document.getElementById('authenticatedUser').innerText = user;
+                    fetchPlatformData();
+                } else {
+                    errEl.innerText = res.status === 429 ? 'Too many login attempts. Try again in 60s.' : 'Invalid owner credentials.';
+                    errEl.style.display = 'block';
+                }
+            } catch (err) {
+                errEl.innerText = 'Network error while reaching server.';
+                errEl.style.display = 'block';
+            }
+        });
+
+        function logoutOwner() {
+            sessionStorage.removeItem('owner_auth');
+            ownerAuthHeader = '';
+            document.getElementById('loginOverlay').classList.remove('hidden');
+        }
+
+        async function fetchPlatformData() {
+            if (!ownerAuthHeader) return;
+
+            try {
+                // Fetch Overview, Leaderboard, Revenue, Activity in parallel
+                const [overviewRes, clinicsRes, revenueRes, activityRes] = await Promise.all([
+                    fetch('/platform/overview', { headers: { 'Authorization': ownerAuthHeader } }),
+                    fetch('/platform/clinics', { headers: { 'Authorization': ownerAuthHeader } }),
+                    fetch('/platform/revenue', { headers: { 'Authorization': ownerAuthHeader } }),
+                    fetch('/platform/activity', { headers: { 'Authorization': ownerAuthHeader } })
+                ]);
+
+                if (overviewRes.status === 401 || clinicsRes.status === 401) {
+                    logoutOwner();
+                    return;
+                }
+
+                const overview = await overviewRes.json();
+                const clinicsData = await clinicsRes.json();
+                const revenueData = await revenueRes.json();
+                const activityData = await activityRes.json();
+
+                renderOverview(overview);
+                renderRevenueMetrics(revenueData);
+                renderLeaderboard(clinicsData.clinics || []);
+                renderCharts(overview, revenueData, activityData);
+
+            } catch (e) {
+                console.error('Error fetching platform data:', e);
+            }
+        }
+
+        function renderOverview(data) {
+            document.getElementById('statTotalClinics').innerText = data.total_clinics || 0;
+            document.getElementById('statActiveClinics').innerText = data.active_clinics || 0;
+            document.getElementById('statInactiveClinics').innerText = `${data.inactive_clinics || 0} inactive hospitals`;
+            document.getElementById('statNewThisMonth').innerText = `+${data.new_clinics_this_month || 0}`;
+        }
+
+        function renderRevenueMetrics(data) {
+            const revINR = data.total_revenue_inr || 0;
+            document.getElementById('statPlatformRevenue').innerText = `₹${revINR.toLocaleString('en-IN')}`;
+            document.getElementById('statRefundRate').innerText = `${data.refund_rate_percentage || 0}% refund rate (${data.total_refunded_payments || 0} refunds)`;
+        }
+
+        function renderLeaderboard(clinics) {
+            globalClinicsData = clinics;
+            filterLeaderboard();
+        }
+
+        function filterLeaderboard() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const planFilter = document.getElementById('planFilter').value;
+            const statusFilter = document.getElementById('statusFilter').value;
+            const nowMs = Date.now();
+            const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+
+            const filtered = globalClinicsData.filter(c => {
+                const nameMatch = (c.name || '').toLowerCase().includes(query) || (c.whatsapp_number || '').includes(query);
+                const planMatch = planFilter === 'ALL' || (c.plan || '').toLowerCase() === planFilter.toLowerCase();
+                
+                let isDormant = false;
+                if (c.last_activity) {
+                    const lastActMs = new Date(c.last_activity).getTime();
+                    if (nowMs - lastActMs > fourteenDaysMs) isDormant = true;
+                } else {
+                    isDormant = true;
+                }
+
+                let statusMatch = true;
+                if (statusFilter === 'active') statusMatch = !isDormant && c.is_active;
+                if (statusFilter === 'dormant') statusMatch = isDormant || !c.is_active;
+
+                return nameMatch && planMatch && statusMatch;
+            });
+
+            const tbody = document.getElementById('leaderboardBody');
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--text3)">No hospitals matched your filters.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(c => {
+                const rev = (c.revenue_inr_30d || 0).toLocaleString('en-IN');
+                const plan = (c.plan || 'soloclinic').toLowerCase();
+                
+                let isDormant = false;
+                let lastActStr = 'Never';
+                if (c.last_activity) {
+                    const d = new Date(c.last_activity);
+                    lastActStr = d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    if (nowMs - d.getTime() > fourteenDaysMs) isDormant = true;
+                } else {
+                    isDormant = true;
+                }
+
+                const statusBadge = isDormant
+                    ? `<span class="badge status-dormant">⚠️ Dormant</span>`
+                    : `<span class="badge status-active">🟢 Active</span>`;
+
+                return `
+                    <tr onclick="openModal('${c.id}')">
+                        <td>
+                            <div class="clinic-name-cell">
+                                <span class="clinic-title">${escapeHtml(c.name || 'Unnamed Hospital')}</span>
+                                <span class="clinic-phone">${escapeHtml(c.whatsapp_number || '')}</span>
+                            </div>
+                        </td>
+                        <td><span class="badge badge-${plan}">${plan}</span></td>
+                        <td style="font-weight:700">${c.appointments_count_30d || 0}</td>
+                        <td>${c.patients_count || 0}</td>
+                        <td style="font-weight:700; color:var(--green)">₹${rev}</td>
+                        <td style="font-size:0.82rem; color:var(--text2)">${lastActStr}</td>
+                        <td>${statusBadge}</td>
+                        <td><button class="action-btn" onclick="event.stopPropagation(); openModal('${c.id}')">Analytics</button></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderCharts(overview, revenue, activity) {
+            // 1. Revenue & Activity Chart
+            const ctxRev = document.getElementById('revenueChart').getContext('2d');
+            const revTimeseries = revenue.timeseries || [];
+            const labels = revTimeseries.map(t => t.date);
+            const revData = revTimeseries.map(t => t.total_inr);
+
+            if (revenueChartInstance) revenueChartInstance.destroy();
+
+            revenueChartInstance = new Chart(ctxRev, {
+                type: 'line',
+                data: {
+                    labels: labels.length ? labels : ['No Data'],
+                    datasets: [{
+                        label: 'Daily Revenue (₹)',
+                        data: revData.length ? revData : [0],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                        fill: true,
+                        tension: 0.3,
+                        borderWidth: 3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#10b981'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#94a3b8', font: { family: 'Inter' } } }
+                    },
+                    scales: {
+                        x: { grid: { color: '#1e2540' }, ticks: { color: '#64748b' } },
+                        y: { grid: { color: '#1e2540' }, ticks: { color: '#64748b' } }
+                    }
+                }
+            });
+
+            // 2. Plan Distribution Chart
+            const ctxPlan = document.getElementById('planChart').getContext('2d');
+            const plans = overview.clinics_by_plan || {};
+            const planLabels = Object.keys(plans);
+            const planCounts = Object.values(plans);
+
+            if (planChartInstance) planChartInstance.destroy();
+
+            planChartInstance = new Chart(ctxPlan, {
+                type: 'doughnut',
+                data: {
+                    labels: planLabels,
+                    datasets: [{
+                        data: planCounts,
+                        backgroundColor: ['#6c63ff', '#06b6d4', '#10b981', '#a855f7', '#f59e0b'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#94a3b8', font: { family: 'Inter' } } }
+                    }
+                }
+            });
+        }
+
+        async function openModal(clinicId) {
+            const modal = document.getElementById('detailModal');
+            modal.classList.add('active');
+
+            document.getElementById('modalClinicName').innerText = 'Loading...';
+            document.getElementById('modalClinicPhone').innerText = '';
+
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}`, {
+                    headers: { 'Authorization': ownerAuthHeader }
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    const c = data.clinic;
+                    const a = data.analytics;
+
+                    document.getElementById('modalClinicName').innerText = c.name || 'Unnamed Hospital';
+                    document.getElementById('modalClinicPhone').innerText = c.whatsapp_number || '';
+                    document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
+                    document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
+                    document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;
+                    document.getElementById('modalNewPatients').innerText = a.new_patients || 0;
+
+                    const deptList = document.getElementById('modalDeptList');
+                    if (a.by_department && a.by_department.length > 0) {
+                        deptList.innerHTML = a.by_department.map(d => `
+                            <div style="display:flex; justify-content:space-between; font-size:0.85rem; color:var(--text2);">
+                                <span>${escapeHtml(d.department || 'General')}</span>
+                                <span style="font-weight:700; color:#fff">${d.count} slots</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        deptList.innerHTML = `<div style="font-size:0.85rem; color:var(--text3)">No department bookings logged yet.</div>`;
+                    }
+                }
+            } catch (e) {
+                console.error('Error fetching clinic detail:', e);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('detailModal').classList.remove('active');
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/[&<>"']/g, function(m) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+            });
+        }
+    </script>
+</body>
+</html>

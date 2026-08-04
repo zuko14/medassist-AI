@@ -480,6 +480,9 @@ class PaymentService:
         logger.info(f"✅ Booking {booking_id} CONFIRMED via payment {payment_id}")
 
         # ── Step 9: Notify patient + admin ──
+        await self._increment_patient_visit_count(
+            booking.get("clinic_id"), booking.get("patient_phone")
+        )
         await self._notify_payment_confirmed(booking)
 
         return {"status": "ok", "code": 200}
@@ -585,6 +588,9 @@ class PaymentService:
                             },
                         )
 
+                        await self._increment_patient_visit_count(
+                            booking.get("clinic_id"), booking.get("patient_phone")
+                        )
                         await self._notify_payment_confirmed(booking)
                         count += 1
                         continue
@@ -759,6 +765,9 @@ class PaymentService:
         )
 
         logger.info(f"Admin manually confirmed booking {booking_id}")
+        await self._increment_patient_visit_count(
+            booking.get("clinic_id"), booking.get("patient_phone")
+        )
         await self._notify_payment_confirmed(booking)
         return {"success": True}
 
@@ -800,6 +809,59 @@ class PaymentService:
                 booking_id, reason=f"Admin rejected: {admin_notes}"
             )
 
+        return {"success": True}
+
+    async def admin_cancel_confirmed_booking(
+        self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
+    ) -> dict:
+        """Cancel a CONFIRMED appointment from the admin panel.
+
+        The admin panel's Appointments page "Cancel" button (DELETE
+        /admin/appointments/{id}) used to set status='cancelled' directly via
+        raw Supabase update — for a Razorpay-paid booking that left the
+        patient's payment captured with no refund and no notification, even
+        though it's shown right next to bookings that DID go through the
+        proper reject/refund path (admin_reject_booking). This routes
+        paid bookings through initiate_refund() instead, and always notifies
+        the patient over WhatsApp so the bot conversation stays in sync with
+        what the admin just did.
+        """
+        query = supabase.table("appointments").select("*").eq("id", booking_id)
+        if clinic_id and clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        booking_result = query.execute()
+
+        if not booking_result.data:
+            return {"success": False, "reason": "booking_not_found"}
+
+        booking = booking_result.data[0]
+
+        if booking["status"] != "confirmed":
+            return {
+                "success": False,
+                "reason": f"can_only_cancel_confirmed_not_{booking['status']}",
+            }
+
+        if booking.get("payment_id"):
+            from app.services.tenant import get_clinic_by_id
+
+            clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+            refund_result = await self.initiate_refund(
+                booking_id, reason=admin_notes or "Cancelled by admin", clinic=clinic
+            )
+            if not refund_result["success"]:
+                return refund_result
+        else:
+            supabase.table("appointments").update({"status": "cancelled"}).eq(
+                "id", booking_id
+            ).execute()
+            self._log_payment_event(
+                booking_id, "admin_cancel", {"admin_notes": admin_notes}
+            )
+
+        await self._notify_booking_cancelled(
+            booking, refunded=bool(booking.get("payment_id"))
+        )
         return {"success": True}
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1023,6 +1085,33 @@ class PaymentService:
             # If audit logging fails, that is itself a bug — log loudly
             logger.error(f"CRITICAL: Failed to write payment_event ({event_type}): {e}")
 
+    async def _increment_patient_visit_count(
+        self, clinic_id: Optional[str], patient_phone: Optional[str]
+    ) -> None:
+        """Increment patients.visit_count when a Razorpay-gated booking is confirmed.
+
+        The direct (non-Razorpay) booking path increments this in
+        app.database.book_appointment(). This path inserts appointments
+        directly via Supabase, bypassing that helper, so visit_count must be
+        kept in sync here too — otherwise the admin Patients page "Visits"
+        column and the bot's own returning-patient detection
+        (conversation.py checks patient.get("visit_count", 0) > 0) go stale
+        for every clinic that has Razorpay configured.
+        """
+        if not clinic_id or not patient_phone:
+            return
+        try:
+            from app.database import get_patient_by_phone, update_patient
+
+            patient = await get_patient_by_phone(clinic_id, patient_phone)
+            if patient:
+                new_count = (patient.get("visit_count") or 0) + 1
+                await update_patient(
+                    clinic_id, patient_phone, {"visit_count": new_count}
+                )
+        except Exception as e:
+            logger.error(f"Failed to increment patient visit_count: {e}")
+
     def _log_payment_event_raw(
         self, booking_id: Optional[str], event_type: str, payload: dict
     ) -> None:
@@ -1087,6 +1176,51 @@ class PaymentService:
 
         except Exception as e:
             logger.error(f"Failed to send payment confirmation notification: {e}")
+
+    async def _notify_booking_cancelled(self, booking: dict, refunded: bool) -> None:
+        """Send WhatsApp notice to the patient after an admin cancels their booking."""
+        try:
+            from app.services.whatsapp import whatsapp_service
+            from app.services.tenant import get_clinic_by_id
+
+            clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+
+            date_display = booking.get("appointment_date", "")
+            try:
+                from datetime import datetime as dt
+
+                date_display = dt.strptime(date_display, "%Y-%m-%d").strftime(
+                    "%d %b %Y"
+                )
+            except Exception:
+                pass
+
+            refund_line = ""
+            if refunded:
+                amount_rupees = booking.get("amount_paise", 0) / 100
+                refund_line = (
+                    f"💰 A full refund of ₹{amount_rupees:.0f} has been initiated and "
+                    f"will reflect in your account within 5-7 business days.\n\n"
+                )
+
+            msg = (
+                f"❌ *Appointment Cancelled*\n\n"
+                f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
+                f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
+                f"📅 *Date:* {date_display}\n"
+                f"🕐 *Time:* {booking.get('appointment_time', 'N/A')}\n\n"
+                f"{refund_line}"
+                f"Please contact us at {clinic.get('whatsapp_number', '')} if you have "
+                f"any questions or would like to book a new appointment."
+            )
+
+            await whatsapp_service.send_text(clinic, booking["patient_phone"], msg)
+            logger.info(
+                f"Sent cancellation notice to {booking['patient_phone'][:6]}***"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to send cancellation notification: {e}")
 
     async def _alert_admin(self, message: str) -> None:
         """Send alert to admin phone."""

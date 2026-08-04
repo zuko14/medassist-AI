@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.routers import webhook, health, admin, clinics
+from app.routers import webhook, health, admin, clinics, platform
 from app.routers.integrations import router as integrations_router
 from app.integrations.callmedex.api.router import (
     router as callmedex_router,
@@ -61,6 +61,16 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "⚠️  ADMIN_PASSWORD is using a default/weak value — change it immediately!"
         )
+    if not settings.owner_username or not settings.owner_password:
+        logger.info(
+            "ℹ️  OWNER_USERNAME/OWNER_PASSWORD not set — platform owner dashboard "
+            "(/platform-panel) is disabled (returns 503)."
+        )
+    elif settings.owner_password in ("owner", "owner_secret_change_me", "admin", "password", "123456"):
+        logger.warning(
+            "⚠️  OWNER_PASSWORD is using a default/weak value — change it immediately! "
+            "This dashboard exposes cross-hospital revenue and patient data."
+        )
     if settings.app_env != "production":
         logger.info(
             "🔓 Running in DEVELOPMENT mode — /webhook/test endpoint is ENABLED"
@@ -74,6 +84,8 @@ async def lifespan(app: FastAPI):
             placeholder_secrets.append("META_APP_SECRET")
         if settings.admin_password in ("admin", "admin123", "password", ""):
             placeholder_secrets.append("ADMIN_PASSWORD")
+        if settings.owner_password in ("owner", "owner_secret_change_me", "admin", "password", "123456"):
+            placeholder_secrets.append("OWNER_PASSWORD")
         if not settings.integration_secret or "change_in_prod" in settings.integration_secret.lower():
             placeholder_secrets.append("INTEGRATION_SECRET")
         if callmedex_container.settings.bearer_token.get_secret_value() in ("dev_bearer_token", "change_in_prod"):
@@ -158,6 +170,7 @@ app.include_router(webhook.router)
 app.include_router(health.router)
 app.include_router(admin.router)
 app.include_router(clinics.router)
+app.include_router(platform.router)
 # FHIR R4 interoperability API (HMIS / ABDM integration)
 app.include_router(fhir_router)
 # Razorpay payment webhook (/webhooks/razorpay)
@@ -183,6 +196,12 @@ async def root():
 async def admin_panel():
     """Serve admin panel HTML."""
     return FileResponse("admin/index.html", media_type="text/html")
+
+
+@app.get("/platform-panel")
+async def platform_panel():
+    """Serve platform super-admin owner panel HTML."""
+    return FileResponse("admin/platform.html", media_type="text/html")
 
 
 from fastapi.responses import HTMLResponse as HTMLResp

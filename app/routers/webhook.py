@@ -128,21 +128,18 @@ async def process_message(message, display_phone: str):
     try:
         message_id = message.id
 
+        # Resolve tenant clinic first to capture clinic attribution
+        clinic = await resolve_tenant(display_phone)
+        clinic_id = clinic.get("id") if clinic else None
+
         # ── Primary Idempotency: Atomic Supabase INSERT (closes the race window) ──
-        # Uses PostgreSQL UNIQUE constraint on message_id.
-        # Two simultaneous webhooks for the same message_id: only one INSERT
-        # succeeds — PostgreSQL guarantees this at the database engine level.
-        # The other gets a unique violation and returns False, dropping silently.
-        acquired = await message_queue.acquire(message_id)
+        acquired = await message_queue.acquire(message_id, clinic_id=clinic_id)
         if not acquired:
             logger.info(
                 f"Webhook: duplicate message {message_id} dropped by atomic queue"
             )
             return
         # ── End Idempotency Gate ────────────────────────────────────────────────
-
-        # Resolve tenant clinic
-        clinic = await resolve_tenant(display_phone)
 
         phone = normalize_phone(message.from_)
         message_type = message.type

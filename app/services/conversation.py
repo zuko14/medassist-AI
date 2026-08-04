@@ -25,6 +25,7 @@ from app.services.ai_engine import (
 )
 from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import get_message
+from app.utils.validators import mask_phone
 
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
@@ -237,7 +238,7 @@ class ConversationManager:
         patient = await get_patient_by_phone(clinic["id"], phone)
         if not patient:
             patient = await create_patient(clinic["id"], phone)
-            logger.info(f"Created new patient for {phone}")
+            logger.info(f"Created new patient for {mask_phone(phone)}")
 
         # Determine language - use None if not set (don't default here)
         lang = patient.get("language") or "en"
@@ -707,7 +708,7 @@ class ConversationManager:
 
         logger = logging.getLogger(__name__)
         logger.info(
-            f"IDLE: phone={phone}, existing_lang={patient.get('language')}, visits={patient.get('visit_count')}"
+            f"IDLE: phone={mask_phone(phone)}, existing_lang={patient.get('language')}, visits={patient.get('visit_count')}"
         )
 
         await self._send_language_selection(clinic, phone)

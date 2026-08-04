@@ -27,8 +27,10 @@ Meta Webhook Timeout Protection:
 
 import asyncio
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
 
 # ── Per-phone asyncio locks with reference counting ─────────────────────────
 # We use a regular dict + refcount instead of WeakValueDictionary to avoid
@@ -45,7 +47,9 @@ PHONE_LOCK_TIMEOUT_SECONDS = 15
 class MessageQueueManager:
     """Supabase-native atomic message deduplication + per-phone asyncio locks."""
 
-    async def acquire(self, message_id: str) -> bool:
+    async def acquire(
+        self, message_id: str, clinic_id: Optional[str] = None
+    ) -> bool:
         """Attempt to atomically claim processing rights for a message.
 
         Uses PostgreSQL UNIQUE constraint on message_id. If two identical
@@ -54,6 +58,7 @@ class MessageQueueManager:
 
         Args:
             message_id: WhatsApp message ID (unique per message globally).
+            clinic_id: Optional clinic ID to associate message volume.
 
         Returns:
             True  → This process owns this message. Proceed with processing.
@@ -61,17 +66,21 @@ class MessageQueueManager:
         """
         from app.database import supabase
 
+        def _is_duplicate(exc: Exception) -> bool:
+            error_str = str(exc).lower()
+            return (
+                "unique" in error_str
+                or "duplicate" in error_str
+                or "23505" in error_str
+            )
+
+        payload = {"message_id": message_id}
+        if clinic_id:
+            payload["clinic_id"] = clinic_id
+
         try:
             # Atomic INSERT ON CONFLICT DO NOTHING
-            # If message_id already exists, Supabase returns empty data (no error)
-            result = (
-                supabase.table("processed_messages")
-                .insert(
-                    {"message_id": message_id},
-                    # upsert=False ensures we DON'T update on conflict
-                )
-                .execute()
-            )
+            result = supabase.table("processed_messages").insert(payload).execute()
 
             # If insert succeeded, result.data will have the new row
             if result.data:
@@ -83,17 +92,43 @@ class MessageQueueManager:
                 return False
 
         except Exception as e:
-            error_str = str(e).lower()
-            # PostgreSQL unique violation codes
-            if (
-                "unique" in error_str
-                or "duplicate" in error_str
-                or "23505" in error_str
-            ):
+            if _is_duplicate(e):
                 logger.info(
                     f"Message queue: duplicate (unique violation) for {message_id}"
                 )
                 return False
+
+            # If we tried to attribute a clinic_id and the insert failed for a
+            # different reason (e.g. the clinic_id column/migration isn't
+            # present yet), retry the bare insert. Without this, a missing
+            # migration silently disables the PRIMARY atomic dedup gate for
+            # every single message platform-wide (falling straight to the
+            # fail-open branch below) instead of just losing the per-clinic
+            # message-volume attribution used by the platform dashboard.
+            if clinic_id:
+                try:
+                    result = (
+                        supabase.table("processed_messages")
+                        .insert({"message_id": message_id})
+                        .execute()
+                    )
+                    if result.data:
+                        logger.warning(
+                            f"Message queue: acquired lock for {message_id} without "
+                            f"clinic_id attribution (insert with clinic_id failed: {e})"
+                        )
+                        return True
+                    logger.info(f"Message queue: duplicate dropped for {message_id}")
+                    return False
+                except Exception as e2:
+                    if _is_duplicate(e2):
+                        logger.info(
+                            f"Message queue: duplicate (unique violation) for {message_id}"
+                        )
+                        return False
+                    logger.warning(f"Message queue: acquire error (failing open): {e2}")
+                    return True
+
             # On any other error, fail open (allow processing) to avoid dropping real messages
             logger.warning(f"Message queue: acquire error (failing open): {e}")
             return True

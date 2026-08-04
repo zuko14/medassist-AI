@@ -30,6 +30,8 @@ def set_dummy_env_vars():
         "LOG_LEVEL": "DEBUG",
         "ADMIN_USERNAME": "admin",
         "ADMIN_PASSWORD": "admin",
+        "OWNER_USERNAME": "test_owner",
+        "OWNER_PASSWORD": "test_owner_password_12345",
     }
 
     for key, value in env_defaults.items():
