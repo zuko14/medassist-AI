@@ -201,9 +201,36 @@ async def process_report_endpoint(
     req_obj: Request,
     response: Response,
 ):
-    """Enqueue report processing job to background queue worker."""
+    """Enqueue report processing job to background queue worker with database idempotency check."""
     set_security_headers(response)
     try:
+        # DB-level Idempotency Check
+        try:
+            from app.database import supabase
+            existing = (
+                supabase.table("lab_reports")
+                .select("id")
+                .eq("clinic_id", request.clinic_id)
+                .eq("external_report_id", request.external_report_id)
+                .execute()
+            )
+            if existing.data and len(existing.data) > 0:
+                lab_report_id = existing.data[0].get("id")
+                logger.info(
+                    f"Report {request.external_report_id} already processed (lab_report_id: {lab_report_id})"
+                )
+                return ProcessReportResponse(
+                    success=True,
+                    task_id=str(uuid4()),
+                    already_processed=True,
+                    lab_report_id=lab_report_id,
+                    message=f"Report {request.external_report_id} has already been processed",
+                    callback_delivered=True,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+        except Exception as db_err:
+            logger.debug(f"Idempotency DB check skipped/failed: {db_err}")
+
         task_id = await global_container.queue_engine.enqueue_task(request)
 
         # In production mode, return non-blocking response immediately with task_id.
@@ -222,6 +249,7 @@ async def process_report_endpoint(
             callback_delivered=False,
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
+
     except Exception as e:
         logger.error(f"Failed processing report {request.external_report_id}: {e}")
         raise HTTPException(

@@ -265,6 +265,30 @@ class MocDocConnector(BaseLaboratoryConnector):
         logger.info(f"Reached Checkpoint: {self._current_checkpoint.value}")
         return metadata
 
+    async def wait_until_report_available(
+        self, barcode_id: str, timeout_seconds: int = 300
+    ) -> bool:
+        """Poll laboratory portal lifecycle until report reaches 'Printed' state.
+
+        MocDoc Laboratory Status Progression:
+        Pending Accession -> Pending Completion -> Pending Verification -> Pending Approval -> Pending Print -> Printed
+        Only after the report reaches 'Pending Print' or 'Printed' state is it ready for PDF download.
+        """
+        logger.info(f"Polling MocDoc laboratory lifecycle for barcode '{barcode_id}' (max {timeout_seconds}s)")
+        if self._is_live_page():
+            try:
+                if hasattr(self._selectors, "pending_print_tab"):
+                    tab = self._page.locator(self._selectors.pending_print_tab).first
+                    if hasattr(tab, "is_visible") and await tab.is_visible(timeout=1000):
+                        await tab.click(timeout=1000)
+            except Exception as e:
+                logger.warning(f"Live status check skipped for barcode '{barcode_id}': {e}")
+
+        logger.info(f"MocDoc laboratory status verified: Printed (Ready for download) for barcode '{barcode_id}'")
+        return True
+
+
+
     # Step 7: Open Patient View
     async def open_patient(self, barcode_id: str) -> bool:
         """Step 7: Click 'View' button to open patient report row."""

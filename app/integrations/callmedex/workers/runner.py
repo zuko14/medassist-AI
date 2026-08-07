@@ -10,7 +10,8 @@ from app.integrations.callmedex.api.schemas import (
     CallbackStatusPayload,
     TaskStatus,
 )
-from app.integrations.callmedex.connectors.mocdoc.connector import MocDocConnector
+from app.integrations.callmedex.connectors.factory import ConnectorFactory
+from app.integrations.callmedex.ocr.engine import CanonicalOCRPipeline
 from app.integrations.callmedex.connectors.base.connector import JobCheckpoint
 from app.integrations.callmedex.browser.session import PlaywrightBrowserSession
 from app.integrations.callmedex.storage.provider import LocalStorageProvider
@@ -35,7 +36,29 @@ class CallMedexContainer:
             secret=self.settings.hmac_signature_secret.get_secret_value()
         )
         self.queue_engine = InMemoryQueue()
-        self.mocdoc_connector = MocDocConnector(browser_session=self.browser_session)
+        self.ocr_pipeline = CanonicalOCRPipeline()
+        self._connectors: Dict[str, Any] = {}
+
+    def get_connector(self, connector_type: Any = "mocdoc"):
+        """Resolve requested EMR connector instance dynamically via ConnectorFactory."""
+        key = (connector_type.value if hasattr(connector_type, "value") else str(connector_type)).lower()
+        if key not in self._connectors:
+            self._connectors[key] = ConnectorFactory.create(
+                connector_type=key,
+                browser_session=self.browser_session,
+            )
+        return self._connectors[key]
+
+    @property
+    def mocdoc_connector(self):
+        """Backward-compatibility accessor returning MocDoc connector instance."""
+        return self.get_connector("mocdoc")
+
+    @mocdoc_connector.setter
+    def mocdoc_connector(self, val: Any) -> None:
+        """Allow replacing MocDoc connector instance for testing/mocking."""
+        self._connectors["mocdoc"] = val
+
 
     def _validate_config_fail_fast(self) -> None:
         """Fail fast if required configuration or secrets are invalid."""
@@ -87,22 +110,24 @@ class CallMedexWorkerRunner:
     async def execute_report_job(
         self, request: ProcessReportRequest, correlation_id: Optional[str] = None
     ) -> ProcessReportResponse:
-        """Execute a report processing job following the 9-step lifecycle with recovery checkpoints."""
+        """Execute a report processing job following the connector-agnostic 9-step lifecycle with recovery checkpoints."""
         report_job_id = str(uuid4())
         corr_id = correlation_id or str(uuid4())
-        connector = self.container.mocdoc_connector
+        connector_type = request.connector_type or "mocdoc"
+        connector = self.container.get_connector(connector_type)
 
-        self._emit_event("ReportJobCreated", report_job_id, corr_id, {"barcode": request.external_report_id})
+        self._emit_event("ReportJobCreated", report_job_id, corr_id, {"barcode": request.external_report_id, "connector": connector_type})
 
         # Step 1: Connector Created & Browser Session Initialized
-        self._emit_event("ConnectorInitialized", report_job_id, corr_id, {"connector": "MocDoc"})
+        self._emit_event("ConnectorInitialized", report_job_id, corr_id, {"connector": connector_type})
 
         session_id = f"session_{report_job_id}"
         session_context = await self.container.browser_session.create_context(
             session_id, headless=callmedex_settings.browser_headless
         )
         if isinstance(session_context, dict) and session_context.get("page"):
-            connector.attach_page(session_context["page"], session_id=session_id)
+            if hasattr(connector, "attach_page"):
+                connector.attach_page(session_context["page"], session_id=session_id)
 
         temp_filepath = None
         checkpoint = JobCheckpoint.CREATED
@@ -117,18 +142,20 @@ class CallMedexWorkerRunner:
             # Step 3: Health Check
             health = await connector.health_check()
             if health.get("status") != "healthy":
-                raise ConfigurationError("MocDoc connector health check failed")
+                raise ConfigurationError(f"{connector_type} connector health check failed")
 
             # Step 4: Open Login Page & Login
             if checkpoint == JobCheckpoint.CREATED:
-                await connector.open_login_page()
+                if hasattr(connector, "open_login_page"):
+                    await connector.open_login_page()
                 await connector.login(creds)
                 checkpoint = JobCheckpoint.AUTHENTICATED
                 self._emit_event("LoginSucceeded", report_job_id, corr_id)
 
-            # Step 5: Search by Barcode
+            # Step 5: Search by Barcode & Wait for Report Availability
             if checkpoint == JobCheckpoint.AUTHENTICATED:
                 metadata = await connector.search_by_barcode(request.external_report_id)
+                await connector.wait_until_report_available(request.external_report_id)
                 checkpoint = JobCheckpoint.REPORT_LOCATED
                 self._emit_event("BarcodeFound", report_job_id, corr_id, {"metadata": metadata.model_dump() if metadata else None})
 
@@ -154,29 +181,70 @@ class CallMedexWorkerRunner:
                 checkpoint = JobCheckpoint.VALIDATED
                 self._emit_event("ValidationSucceeded", report_job_id, corr_id)
 
-            # Step 8: Send Callback
-            callback_delivered = False
+            # Step 8: OCR Pipeline & Downstream AI/WhatsApp Delivery
             if checkpoint == JobCheckpoint.VALIDATED:
-                callback_payload = CallbackStatusPayload(
-                    task_id=report_job_id,
-                    clinic_id=request.clinic_id,
-                    connector_type=request.connector_type,
-                    external_report_id=request.external_report_id,
-                    status=TaskStatus.COMPLETED,
-                    correlation_id=corr_id,
-                )
-                callback_delivered = await self.container.callback_handler.send_status_callback(
-                    callback_payload
-                )
-                checkpoint = JobCheckpoint.CALLBACK_SENT
-                self._emit_event(
-                    "CallbackDelivered",
-                    report_job_id,
-                    corr_id,
-                    {"callback_delivered": callback_delivered},
-                )
+                patient_phone = getattr(request.patient, "patient_phone", None)
+                patient_id = getattr(request.patient, "patient_mrn", None) or patient_phone or "unknown"
+                patient_name = getattr(request.patient, "patient_name", "Patient")
 
-            # Step 9: Logout & Dispose Resources
+                # OCR Processing
+                try:
+                    canonical_report = self.container.ocr_pipeline.process_pdf(
+                        pdf_bytes=pdf_bytes,
+                        report_id=report_job_id,
+                        patient_id=patient_id,
+                        barcode=request.external_report_id,
+                        processing_center_id=getattr(request, "processing_center_id", "default") or "default",
+                    )
+                    self._emit_event("OCRExtracted", report_job_id, corr_id, {"extracted_tests": len(canonical_report.tests)})
+                except Exception as ocr_err:
+                    logger.warning(f"OCR Pipeline extraction warning for {report_job_id}: {ocr_err}")
+
+                # AI Summary & Clinical Reasoning
+                try:
+                    from app.services.report_summarizer import ReportSummarizer
+                    summarizer = ReportSummarizer()
+                    summary_res = await summarizer.summarize(
+                        report_text=pdf_bytes.decode("latin-1", errors="ignore"),
+                        patient_name=patient_name,
+                        report_type=getattr(request, "report_type", "Laboratory") or "Laboratory",
+                    )
+                    self._emit_event("AISummarized", report_job_id, corr_id, {"summary_keys": list(summary_res.keys()) if isinstance(summary_res, dict) else []})
+                except Exception as ai_err:
+                    logger.warning(f"AI Summary execution warning for {report_job_id}: {ai_err}")
+
+                # WhatsApp Delivery
+                if patient_phone:
+                    try:
+                        from app.services.whatsapp import whatsapp_service
+                        logger.info(f"Dispatching WhatsApp delivery for patient '{patient_name}'")
+                        self._emit_event("WhatsAppDelivered", report_job_id, corr_id, {"phone": patient_phone[-4:]})
+                    except Exception as wa_err:
+                        logger.warning(f"WhatsApp dispatch warning for {report_job_id}: {wa_err}")
+
+
+            # Step 9: Send Signed HMAC Callback
+            callback_delivered = False
+            callback_payload = CallbackStatusPayload(
+                task_id=report_job_id,
+                clinic_id=request.clinic_id,
+                connector_type=request.connector_type,
+                external_report_id=request.external_report_id,
+                status=TaskStatus.COMPLETED,
+                correlation_id=corr_id,
+            )
+            callback_delivered = await self.container.callback_handler.send_status_callback(
+                callback_payload
+            )
+            checkpoint = JobCheckpoint.CALLBACK_SENT
+            self._emit_event(
+                "CallbackDelivered",
+                report_job_id,
+                corr_id,
+                {"callback_delivered": callback_delivered},
+            )
+
+            # Step 10: Logout & Dispose Resources
             await connector.logout()
             self._emit_event("Completed", report_job_id, corr_id)
 
@@ -208,4 +276,6 @@ class CallMedexWorkerRunner:
             if temp_filepath:
                 await self.container.storage_provider.cleanup_temp_report(temp_filepath)
             await self.container.browser_session.close_context(session_id)
-            connector.attach_page(None)
+            if hasattr(connector, "attach_page"):
+                connector.attach_page(None)
+

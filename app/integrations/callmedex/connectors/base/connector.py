@@ -109,3 +109,11 @@ class BaseLaboratoryConnector(ABC):
     async def checkpoint_resume(self, report_job_id: str, target_checkpoint: JobCheckpoint) -> bool:
         """Resume execution from target recovery checkpoint."""
         pass
+
+    @abstractmethod
+    async def wait_until_report_available(
+        self, barcode_id: str, timeout_seconds: int = 300
+    ) -> bool:
+        """Poll laboratory portal lifecycle until report is verified, approved, and ready for download."""
+        pass
+
