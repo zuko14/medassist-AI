@@ -55,6 +55,33 @@ def get_razorpay_creds(clinic: dict) -> tuple[str, str, str]:
     return key_id, key_secret, webhook_secret
 
 
+def resolve_payment_mode(clinic: dict) -> tuple[str, int]:
+    """Resolve a clinic's payment mode with a fail-safe default.
+
+    Returns:
+        (mode, percent) where mode is "full" | "partial" | "none" and percent
+        is 100 unless mode == "partial" (then it's the configured deposit %).
+
+    Back-compat default: if config.payment_mode is unset, every existing
+    clinic behaves exactly as it did before this feature existed — "full"
+    if Razorpay keys are configured, "none" if they aren't.
+
+    Fail-safe: "full"/"partial" is never returned without working keys, so a
+    clinic that saves a payment-gated mode and later loses its Razorpay keys
+    falls back to free direct booking instead of silently blocking bookings.
+    """
+    cfg = clinic.get("config") or {}
+    key_id, key_secret, _ = get_razorpay_creds(clinic)
+    configured = bool(key_id and key_secret)
+
+    mode = cfg.get("payment_mode") or ("full" if configured else "none")
+    if mode in ("full", "partial") and not configured:
+        mode = "none"
+
+    percent = cfg.get("payment_deposit_percent", 100) if mode == "partial" else 100
+    return mode, percent
+
+
 class PaymentService:
     """Razorpay payment integration for appointment booking."""
 
@@ -79,6 +106,7 @@ class PaymentService:
         clinic: Optional[dict] = None,
         branch_id: Optional[str] = None,
         branch_name: Optional[str] = None,
+        deposit_percent: int = 100,
     ) -> dict:
         """Create a pending_payment booking and a Razorpay order.
 
@@ -87,6 +115,9 @@ class PaymentService:
                     credentials are used. Falls back to global settings if None.
             branch_id: Optional branch UUID for multi-branch clinics.
             branch_name: Optional branch display name for multi-branch clinics.
+            deposit_percent: 1-100. When < 100, only this fraction of the
+                    doctor's full consultation_fee is charged now (the rest is
+                    collected at the clinic). Defaults to 100 (full fee).
 
         Returns:
             dict with keys: success, booking_id, razorpay_order_id,
@@ -95,8 +126,10 @@ class PaymentService:
         # ── Resolve per-clinic Razorpay credentials ──
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
 
-        # ── Determine fee from doctor's consultation_fee ──
+        # ── Determine fee from doctor's consultation_fee, scaled for deposits ──
         amount_paise = await self._get_doctor_fee_paise(clinic_id, doctor_name)
+        if deposit_percent < 100:
+            amount_paise = round(amount_paise * deposit_percent / 100)
 
         hold_expires_at = (
             datetime.now(timezone.utc)

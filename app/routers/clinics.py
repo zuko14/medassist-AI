@@ -168,6 +168,18 @@ async def list_clinics():
 @router.patch("/{clinic_id}", dependencies=[Depends(verify_admin_secret)])
 async def update_clinic(clinic_id: str, updates: dict):
     """Update plan, config, or status. Clears tenant cache."""
+    # Guard the same payment_mode/payment_deposit_percent invariant that
+    # PUT /admin/settings/payment enforces, so this raw owner-only endpoint
+    # can't leave a clinic in a "partial" mode with no deposit percentage set.
+    incoming_config = updates.get("config")
+    if isinstance(incoming_config, dict) and incoming_config.get("payment_mode") == "partial":
+        percent = incoming_config.get("payment_deposit_percent")
+        if not (isinstance(percent, int) and 1 <= percent <= 99):
+            raise HTTPException(
+                422,
+                "config.payment_deposit_percent (1-99) is required when config.payment_mode is 'partial'",
+            )
+
     result = supabase.table("clinics").update(updates).eq("id", clinic_id).execute()
 
     if not result.data:

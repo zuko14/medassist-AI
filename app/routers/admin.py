@@ -5,7 +5,7 @@ import logging
 import re
 import secrets
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import (
     APIRouter,
@@ -22,6 +22,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import settings
 from app.database import supabase
+from app.services.tenant import (
+    ALL_FEATURES,
+    get_clinic_by_id,
+    has_feature,
+    invalidate_tenant_cache,
+    require_feature,
+)
 from app.services.analytics import analytics_service
 from app.services.lab_reports import LabReportService
 from app.services.prescriptions import PrescriptionService
@@ -247,6 +254,36 @@ async def resolve_clinic_id_for_write(
     return clinics.data[0]["id"]
 
 
+@router.get("/me")
+async def get_current_admin(user: AdminUser = Depends(verify_credentials)):
+    """Return the caller's identity plus their clinic's plan and resolved
+    feature set, so the admin panel frontend can show/hide tabs without
+    duplicating the PLAN_FEATURES registry in JS."""
+    if user.role == "super_admin" or not user.clinic_id:
+        return {
+            "username": user.username,
+            "role": user.role,
+            "clinic_id": user.clinic_id,
+            "plan": None,
+            "features": None,
+        }
+
+    clinic = await get_clinic_by_id(user.clinic_id)
+    plan = clinic.get("plan", "soloclinic")
+    features = (
+        list(ALL_FEATURES)
+        if plan == "enterprise"
+        else [f for f in ALL_FEATURES if has_feature(clinic, f)]
+    )
+    return {
+        "username": user.username,
+        "role": user.role,
+        "clinic_id": user.clinic_id,
+        "plan": plan,
+        "features": features,
+    }
+
+
 class LeaveCreate(BaseModel):
     doctor_name: str
     leave_date: date
@@ -275,6 +312,24 @@ class DoctorUpdate(BaseModel):
     evening_slots: Optional[list[str]] = None
     is_active: Optional[bool] = None
     consultation_fee: Optional[int] = None
+
+
+class PaymentSettingsUpdate(BaseModel):
+    """Self-service payment settings a clinic_admin can set for their own
+    clinic. Partial update — only fields explicitly sent are changed."""
+
+    razorpay_key_id: Optional[str] = None
+    razorpay_key_secret: Optional[str] = None
+    razorpay_webhook_secret: Optional[str] = None
+    payment_mode: Optional[Literal["full", "partial", "none"]] = None
+    payment_deposit_percent: Optional[int] = None
+
+    @field_validator("payment_deposit_percent")
+    @classmethod
+    def validate_percent_range(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 99):
+            raise ValueError("payment_deposit_percent must be between 1 and 99")
+        return v
 
 
 class BranchCreate(BaseModel):
@@ -1028,6 +1083,101 @@ async def get_payment_stats(
     except Exception as e:
         logger.error(f"Payment stats error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get payment stats")
+
+
+@router.get("/settings/payment")
+async def get_payment_settings(
+    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
+):
+    """Return this clinic's payment settings, with secrets masked."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    cfg = clinic.get("config") or {}
+
+    def _mask(secret: Optional[str]) -> Optional[str]:
+        if not secret:
+            return None
+        return "•" * max(0, len(secret) - 4) + secret[-4:]
+
+    key_id = cfg.get("razorpay_key_id")
+    key_secret = cfg.get("razorpay_key_secret")
+    default_mode = "full" if (key_id and key_secret) else "none"
+
+    return {
+        "razorpay_key_id": key_id,
+        "razorpay_key_secret_masked": _mask(key_secret),
+        "razorpay_webhook_secret_masked": _mask(cfg.get("razorpay_webhook_secret")),
+        "payment_mode": cfg.get("payment_mode", default_mode),
+        "payment_deposit_percent": cfg.get("payment_deposit_percent"),
+    }
+
+
+@router.put("/settings/payment")
+async def update_payment_settings(
+    body: PaymentSettingsUpdate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Self-service update of a clinic's own Razorpay keys and payment mode.
+    A clinic_admin may only update their own clinic (enforced via
+    enforce_clinic_access); diagstream clinics are rejected — they don't
+    take bookings, so payments_razorpay isn't in their feature set."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    require_feature(clinic, "payments_razorpay")
+
+    cfg = dict(clinic.get("config") or {})
+    updates = body.dict(exclude_unset=True)
+
+    for key in ("razorpay_key_id", "razorpay_key_secret", "razorpay_webhook_secret"):
+        if key in updates and updates[key] and updates[key].strip():
+            cfg[key] = updates[key].strip()
+
+    if "payment_mode" in updates and updates["payment_mode"] is not None:
+        cfg["payment_mode"] = updates["payment_mode"]
+    if (
+        "payment_deposit_percent" in updates
+        and updates["payment_deposit_percent"] is not None
+    ):
+        cfg["payment_deposit_percent"] = updates["payment_deposit_percent"]
+
+    final_mode = cfg.get("payment_mode", "full")
+    final_percent = cfg.get("payment_deposit_percent")
+    if final_mode == "partial" and not (
+        isinstance(final_percent, int) and 1 <= final_percent <= 99
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="payment_deposit_percent (1-99) is required when payment_mode is 'partial'",
+        )
+
+    result = (
+        supabase.table("clinics")
+        .update({"config": cfg})
+        .eq("id", effective_clinic_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    updated_clinic = result.data[0]
+    invalidate_tenant_cache(updated_clinic["whatsapp_number"])
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="update_payment_settings",
+        resource_type="clinic_config",
+        resource_id=effective_clinic_id,
+        details={
+            "payment_mode": cfg.get("payment_mode"),
+            "razorpay_configured": bool(cfg.get("razorpay_key_id")),
+        },
+        ip_address=client_ip,
+    )
+
+    return {"success": True}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

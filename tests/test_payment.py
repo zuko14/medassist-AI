@@ -95,6 +95,82 @@ def _make_payment_webhook_payload(
     }
 
 
+class TestResolvePaymentMode:
+    """Test the full/partial/none payment mode resolution."""
+
+    def test_defaults_to_full_when_keys_configured_no_mode_set(self):
+        from app.services.payment import resolve_payment_mode
+
+        clinic = {"config": {"razorpay_key_id": "rzp_1", "razorpay_key_secret": "secret1"}}
+        mode, percent = resolve_payment_mode(clinic)
+        assert mode == "full"
+        assert percent == 100
+
+    def test_defaults_to_none_when_no_keys_and_no_mode_set(self):
+        from app.services.payment import resolve_payment_mode
+
+        with patch("app.services.payment.settings.razorpay_key_id", ""), patch(
+            "app.services.payment.settings.razorpay_key_secret", ""
+        ):
+            clinic = {"config": {}}
+            mode, percent = resolve_payment_mode(clinic)
+            assert mode == "none"
+            assert percent == 100
+
+    def test_explicit_none_with_keys_configured_stays_none(self):
+        from app.services.payment import resolve_payment_mode
+
+        clinic = {
+            "config": {
+                "razorpay_key_id": "rzp_1",
+                "razorpay_key_secret": "secret1",
+                "payment_mode": "none",
+            }
+        }
+        mode, percent = resolve_payment_mode(clinic)
+        assert mode == "none"
+        assert percent == 100
+
+    def test_partial_with_keys_configured_returns_percent(self):
+        from app.services.payment import resolve_payment_mode
+
+        clinic = {
+            "config": {
+                "razorpay_key_id": "rzp_1",
+                "razorpay_key_secret": "secret1",
+                "payment_mode": "partial",
+                "payment_deposit_percent": 20,
+            }
+        }
+        mode, percent = resolve_payment_mode(clinic)
+        assert mode == "partial"
+        assert percent == 20
+
+    def test_full_mode_without_keys_fails_safe_to_none(self):
+        from app.services.payment import resolve_payment_mode
+
+        with patch("app.services.payment.settings.razorpay_key_id", ""), patch(
+            "app.services.payment.settings.razorpay_key_secret", ""
+        ):
+            clinic = {"config": {"payment_mode": "full"}}
+            mode, percent = resolve_payment_mode(clinic)
+            assert mode == "none"
+            assert percent == 100
+
+    def test_partial_mode_without_keys_fails_safe_to_none(self):
+        from app.services.payment import resolve_payment_mode
+
+        with patch("app.services.payment.settings.razorpay_key_id", ""), patch(
+            "app.services.payment.settings.razorpay_key_secret", ""
+        ):
+            clinic = {
+                "config": {"payment_mode": "partial", "payment_deposit_percent": 20}
+            }
+            mode, percent = resolve_payment_mode(clinic)
+            assert mode == "none"
+            assert percent == 100
+
+
 class TestWebhookSignatureVerification:
     """Test that webhook signature verification is correct and mandatory."""
 
@@ -333,6 +409,91 @@ class TestBookingCreation:
         assert result["razorpay_order_id"] == "order_new_test"
         assert result["amount_paise"] == 50000
         assert "payment_link" in result
+
+    @pytest.mark.asyncio
+    async def test_partial_deposit_scales_amount(self):
+        """deposit_percent < 100 should charge that fraction of the full fee."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+
+        mock_booking = {"id": "new-booking-uuid", "booking_ref": "MC-2026-5679"}
+        mock_order = {"id": "order_partial_test"}
+
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
+        ), patch.object(
+            service,
+            "_create_razorpay_order",
+            new_callable=AsyncMock,
+            return_value=mock_order,
+        ), patch.object(
+            service, "_log_payment_event"
+        ):
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_table.insert.return_value.execute.return_value = MagicMock(
+                data=[mock_booking]
+            )
+            mock_table.update.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
+
+            result = await service.create_booking_with_payment(
+                clinic_id="test-clinic",
+                patient_phone="+919876543210",
+                patient_name="Test Patient",
+                department="General Medicine",
+                doctor_name="Dr. Test",
+                appointment_date="2026-07-05",
+                appointment_time="10:00",
+                deposit_percent=20,
+            )
+
+        assert result["success"] is True
+        # 50000 paise full fee * 20% = 10000 paise deposit
+        assert result["amount_paise"] == 10000
+
+    @pytest.mark.asyncio
+    async def test_full_deposit_percent_default_charges_full_fee(self):
+        """Omitting deposit_percent must charge the full fee (back-compat)."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+
+        mock_booking = {"id": "new-booking-uuid", "booking_ref": "MC-2026-5680"}
+        mock_order = {"id": "order_full_test"}
+
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
+        ), patch.object(
+            service,
+            "_create_razorpay_order",
+            new_callable=AsyncMock,
+            return_value=mock_order,
+        ), patch.object(
+            service, "_log_payment_event"
+        ):
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_table.insert.return_value.execute.return_value = MagicMock(
+                data=[mock_booking]
+            )
+            mock_table.update.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
+
+            result = await service.create_booking_with_payment(
+                clinic_id="test-clinic",
+                patient_phone="+919876543210",
+                patient_name="Test Patient",
+                department="General Medicine",
+                doctor_name="Dr. Test",
+                appointment_date="2026-07-05",
+                appointment_time="10:00",
+            )
+
+        assert result["amount_paise"] == 50000
 
 
 class TestRefundFlow:

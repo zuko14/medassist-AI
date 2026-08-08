@@ -15,6 +15,7 @@
             --text: #e2e8f0;
             --text2: #8892b0;
             --text3: #5a6480;
+            --text-strong: #ffffff;
             --accent: #6c63ff;
             --accent2: #8b7dff;
             --accent-glow: rgba(108,99,255,0.15);
@@ -30,9 +31,47 @@
             --cyan: #22d3ee;
             --radius: 14px;
             --shadow: 0 4px 30px rgba(0,0,0,0.3);
+            --motion-fast: 150ms;
+            --motion-base: 250ms;
+            --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        :root[data-theme="light"] {
+            --bg: #f7f8fc;
+            --surface: #ffffff;
+            --surface2: #f1f3f9;
+            --border: #e2e5f0;
+            --border2: #d0d4e6;
+            --text: #1a2035;
+            --text2: #5a6480;
+            --text3: #78829c;
+            --text-strong: #0f1425;
+            --accent: #6c63ff;
+            --accent2: #5b4fe0;
+            --accent-glow: rgba(108,99,255,0.08);
+            --green: #059669;
+            --green-bg: rgba(5,150,105,0.08);
+            --red: #dc2626;
+            --red-bg: rgba(220,38,38,0.08);
+            --blue: #2563eb;
+            --blue-bg: rgba(37,99,235,0.08);
+            --amber: #b45309;
+            --amber-bg: rgba(180,83,9,0.08);
+            --pink: #db2777;
+            --cyan: #0891b2;
+            --shadow: 0 4px 30px rgba(15,20,37,0.08);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+        button:focus-visible, .nav-link:focus-visible, .btn:focus-visible {
+            outline-offset: 3px;
+        }
 
         body {
             font-family: 'Inter', sans-serif;
@@ -92,7 +131,7 @@
             box-shadow: 0 8px 30px rgba(108,99,255,0.3);
         }
 
-        .login-logo h2 { font-size: 1.35rem; font-weight: 700; color: #fff; }
+        .login-logo h2 { font-size: 1.35rem; font-weight: 700; color: var(--text-strong); }
         .login-logo p { color: var(--text3); font-size: 0.85rem; margin-top: 4px; }
 
         .field { margin-bottom: 18px; }
@@ -123,10 +162,11 @@
             font-weight: 600;
             font-size: 0.88rem;
             font-family: inherit;
-            transition: all 0.2s;
+            transition: all var(--motion-fast) var(--ease-out);
             position: relative;
             overflow: hidden;
         }
+        .btn:active { transform: scale(0.97); }
 
         .btn-accent {
             background: linear-gradient(135deg, var(--accent), #8b5cf6);
@@ -217,6 +257,7 @@
         }
 
         .nav-link .ico { font-size: 1.15rem; width: 26px; text-align: center; }
+        .nav-link .ico svg { vertical-align: middle; }
 
         .nav-bottom {
             padding: 16px;
@@ -235,7 +276,7 @@
         }
 
         .page-head { margin-bottom: 28px; }
-        .page-head h2 { font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+        .page-head h2 { font-size: 1.5rem; font-weight: 700; color: var(--text-strong); margin-bottom: 4px; }
         .page-head p { color: var(--text3); font-size: 0.85rem; }
 
         /* ─── Sections ─── */
@@ -258,7 +299,7 @@
             padding: 22px;
             position: relative;
             overflow: hidden;
-            transition: transform 0.2s, border-color 0.2s;
+            transition: transform var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
         }
 
         .stat:hover { transform: translateY(-3px); border-color: var(--border2); }
@@ -280,7 +321,7 @@
         .stat:nth-child(6) .glow { background: var(--pink); opacity: 0.12; }
 
         .stat .label { font-size: 0.75rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
-        .stat .num { font-size: 2.2rem; font-weight: 800; color: #fff; line-height: 1; }
+        .stat .num { font-size: 2.2rem; font-weight: 800; color: var(--text-strong); line-height: 1; }
 
         .stat:nth-child(1) .num { color: var(--accent2); }
         .stat:nth-child(2) .num { color: var(--green); }
@@ -308,7 +349,7 @@
             margin-bottom: 18px;
         }
 
-        .card-head h3 { font-size: 1rem; font-weight: 600; color: #fff; }
+        .card-head h3 { font-size: 1rem; font-weight: 600; color: var(--text-strong); }
 
         /* ═══════ TABLES ═══════ */
         .tbl-wrap { overflow-x: auto; border-radius: 10px; }
@@ -401,7 +442,7 @@
         .modal h3 {
             font-size: 1.1rem;
             font-weight: 700;
-            color: #fff;
+            color: var(--text-strong);
             margin-bottom: 22px;
             padding-bottom: 14px;
             border-bottom: 1px solid var(--border);
@@ -551,7 +592,7 @@
         @keyframes spin { to { transform: rotate(360deg); } }
 
         .empty { text-align: center; padding: 40px; color: var(--text3); }
-        .empty .empty-icon { font-size: 2.4rem; margin-bottom: 10px; }
+        .empty .empty-icon { display: flex; justify-content: center; margin-bottom: 10px; opacity: 0.5; }
         .empty p { font-size: 0.88rem; }
 
         /* ═══════ ALERTS ═══════ */
@@ -571,7 +612,7 @@
         .form-card h3 {
             font-size: 1rem;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-strong);
             margin-bottom: 22px;
             padding-bottom: 14px;
             border-bottom: 1px solid var(--border);
@@ -589,7 +630,7 @@
             position: fixed;
             top: 14px; left: 14px;
             z-index: 200;
-            width: 42px; height: 42px;
+            width: 44px; height: 44px;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 10px;
@@ -608,7 +649,36 @@
             z-index: 90;
         }
 
+        /* ═══════ MOTION ═══════ */
+        @media (prefers-reduced-motion: no-preference) {
+            @keyframes staggerFadeUp {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .stagger-in > * {
+                animation: staggerFadeUp var(--motion-base) var(--ease-out) both;
+            }
+            .stagger-in > *:nth-child(1) { animation-delay: 0ms; }
+            .stagger-in > *:nth-child(2) { animation-delay: 40ms; }
+            .stagger-in > *:nth-child(3) { animation-delay: 80ms; }
+            .stagger-in > *:nth-child(4) { animation-delay: 120ms; }
+            .stagger-in > *:nth-child(5) { animation-delay: 160ms; }
+            .stagger-in > *:nth-child(6) { animation-delay: 200ms; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
+            }
+        }
+
         /* ═══════ RESPONSIVE ═══════ */
+        @media (max-width: 1024px) {
+            .main { padding: 28px 24px; }
+            .stats { grid-template-columns: repeat(3, 1fr); }
+        }
+
         @media (max-width: 768px) {
             .hamburger { display: flex; }
             .sidebar { transform: translateX(-100%); }
@@ -622,6 +692,10 @@
         @media (max-width: 480px) {
             .stats { grid-template-columns: 1fr; }
         }
+
+        @media (min-width: 1441px) {
+            .main { max-width: 1400px; }
+        }
     </style>
 </head>
 <body>
@@ -630,7 +704,7 @@
 <div id="loginScreen" class="login-screen">
     <div class="login-card">
         <div class="login-logo">
-            <div class="icon">🏥</div>
+            <div class="icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></div>
             <h2>MediAssist AI</h2>
             <p>Admin Panel — Hospital Management</p>
         </div>
@@ -650,51 +724,57 @@
 </div>
 
 <!-- ═══ APP ═══ -->
-<button class="hamburger" onclick="toggleSidebar()">☰</button>
+<button class="hamburger" onclick="toggleSidebar()" aria-label="Toggle navigation menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></button>
 <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
 
 <div id="app" class="app">
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-head">
-            <h1>🏥 MediAssist <span class="dot"></span></h1>
+            <h1><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px; margin-right:4px"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>MediAssist <span class="dot"></span></h1>
             <span>Hospital Admin Panel</span>
         </div>
         <div class="nav-links">
-            <div class="nav-link on" data-page="dashboard" onclick="go('dashboard',this)">
-                <span class="ico">📊</span> Dashboard
+            <div class="nav-link on" tabindex="0" data-page="dashboard" onclick="go('dashboard',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span> Dashboard
             </div>
-            <div class="nav-link" data-page="appointments" onclick="go('appointments',this)">
-                <span class="ico">📅</span> Appointments
+            <div class="nav-link" tabindex="0" data-page="appointments" data-feature="booking" onclick="go('appointments',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span> Appointments
             </div>
-            <div class="nav-link" data-page="doctors" onclick="go('doctors',this)">
-                <span class="ico">👨‍⚕️</span> Doctors
+            <div class="nav-link" tabindex="0" data-page="doctors" data-feature="booking" onclick="go('doctors',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span> Doctors
             </div>
-            <div class="nav-link" data-page="leaves" onclick="go('leaves',this)">
-                <span class="ico">📋</span> Leaves
+            <div class="nav-link" tabindex="0" data-page="leaves" data-feature="roster_management" onclick="go('leaves',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1"></rect></svg></span> Leaves
             </div>
-            <div class="nav-link" data-page="holidays" onclick="go('holidays',this)">
-                <span class="ico">🗓️</span> Holidays
+            <div class="nav-link" tabindex="0" data-page="holidays" data-feature="roster_management" onclick="go('holidays',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></span> Holidays
             </div>
-            <div class="nav-link" data-page="patients" onclick="go('patients',this)">
-                <span class="ico">👥</span> Patients
+            <div class="nav-link" tabindex="0" data-page="patients" onclick="go('patients',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> Patients
             </div>
-            <div class="nav-link" data-page="labreports" onclick="go('labreports',this)">
-                <span class="ico">🧪</span> Lab Reports
+            <div class="nav-link" tabindex="0" data-page="labreports" data-feature="lab_reports" onclick="go('labreports',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L15 8V2"></path><line x1="9" y1="2" x2="15" y2="2"></line><line x1="7" y1="14" x2="17" y2="14"></line></svg></span> Lab Reports
             </div>
-            <div class="nav-link" data-page="prescriptions" onclick="go('prescriptions',this)">
-                <span class="ico">💊</span> Prescriptions
+            <div class="nav-link" tabindex="0" data-page="prescriptions" onclick="go('prescriptions',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9.5" width="18" height="5" rx="2.5" transform="rotate(-45 12 12)"></rect><line x1="8.5" y1="15.5" x2="15.5" y2="8.5"></line></svg></span> Prescriptions
             </div>
-            <div class="nav-link" data-page="payments" onclick="go('payments',this)">
-                <span class="ico">💳</span> Payments
+            <div class="nav-link" tabindex="0" data-page="payments" data-feature="booking" onclick="go('payments',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg></span> Payments
             </div>
-            <div class="nav-link" data-page="branches" onclick="go('branches',this)">
-                <span class="ico">🏢</span> Branches
+            <div class="nav-link" tabindex="0" data-page="paysettings" data-feature="payments_razorpay" onclick="go('paysettings',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg></span> Payment Settings
+            </div>
+            <div class="nav-link" tabindex="0" data-page="branches" data-feature="multi_branch" onclick="go('branches',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="1"></rect><rect x="9" y="6" width="2" height="2"></rect><rect x="13" y="6" width="2" height="2"></rect><rect x="9" y="11" width="2" height="2"></rect><rect x="13" y="11" width="2" height="2"></rect><rect x="10" y="16" width="4" height="6"></rect></svg></span> Branches
             </div>
         </div>
         <div class="nav-bottom">
-            <div class="nav-link" onclick="logout()" style="color:var(--red)">
-                <span class="ico">🚪</span> Sign Out
+            <div class="nav-link" onclick="toggleTheme()" id="themeToggleBtn" role="button" aria-label="Switch to light theme" tabindex="0">
+                <span class="ico" id="themeToggleIcon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></span> <span id="themeToggleLabel">Dark Mode</span>
+            </div>
+            <div class="nav-link" onclick="logout()" style="color:var(--red)" role="button" aria-label="Sign out" tabindex="0">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span> Sign Out
             </div>
         </div>
     </aside>
@@ -709,7 +789,7 @@
                 <p>Overview of your hospital's activity • Last 30 days</p>
             </div>
 
-            <div class="stats">
+            <div class="stats stagger-in">
                 <div class="stat"><div class="glow"></div><div class="label">Total Appointments</div><div class="num" id="s-total">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Confirmed</div><div class="num" id="s-confirmed">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Cancelled</div><div class="num" id="s-cancelled">—</div></div>
@@ -971,6 +1051,40 @@
             </div>
         </div>
 
+        <!-- ─── PAYMENT SETTINGS ─── -->
+        <div id="pg-paysettings" class="sec">
+            <div class="page-head">
+                <h2>Payment Settings</h2>
+                <p>Manage your own Razorpay keys and how patients pay for bookings</p>
+            </div>
+
+            <div class="form-card">
+                <h3>💳 Razorpay Credentials</h3>
+                <div id="paySettingsMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Key ID</label><input type="text" id="f-payKeyId" placeholder="rzp_live_xxxxxx"></div>
+                    <div class="field"><label>Key Secret</label><input type="password" id="f-payKeySecret" placeholder="Leave blank to keep existing"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label>Webhook Secret</label><input type="password" id="f-payWebhookSecret" placeholder="Leave blank to keep existing"></div>
+                </div>
+
+                <h3 style="margin-top:24px">How should patients pay?</h3>
+                <div class="form-row">
+                    <div class="field">
+                        <label><input type="radio" name="payMode" value="full" id="f-payModeFull"> Full payment before booking is confirmed</label><br>
+                        <label><input type="radio" name="payMode" value="partial" id="f-payModePartial"> Partial deposit now, rest at the clinic</label><br>
+                        <label><input type="radio" name="payMode" value="none" id="f-payModeNone"> No payment required — book directly</label>
+                    </div>
+                </div>
+                <div class="form-row" id="f-payPercentRow" style="display:none">
+                    <div class="field"><label>Deposit Percentage</label><input type="number" id="f-payPercent" min="1" max="99" placeholder="e.g. 20"></div>
+                </div>
+
+                <button class="btn btn-accent" onclick="savePaymentSettings()">Save Payment Settings</button>
+            </div>
+        </div>
+
         <!-- ─── BRANCHES ─── -->
         <div id="pg-branches" class="sec">
             <div class="page-head">
@@ -1180,7 +1294,72 @@ const API = window.location.origin;
 let auth = '';
 let doctorCache = [];
 
+// ═══════ THEME ═══════
+function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    const label = document.getElementById('themeToggleLabel');
+    if (label) label.textContent = theme === 'light' ? 'Light Mode' : 'Dark Mode';
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) btn.setAttribute('aria-label', theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme');
+    const iconEl = document.getElementById('themeToggleIcon');
+    if (iconEl) iconEl.innerHTML = icon(theme === 'light' ? 'sun' : 'moon');
+}
+
+function toggleTheme() {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    localStorage.setItem('mediassist_theme', next);
+    applyTheme(next);
+}
+
+// Restore saved theme on load. Defaults to dark (no data-theme attribute) if
+// nothing is stored — never auto-applies prefers-color-scheme, so existing
+// users see zero visual change unless they explicitly opt into light mode.
+(function initTheme() {
+    const saved = localStorage.getItem('mediassist_theme');
+    if (saved === 'light') applyTheme('light');
+})();
+
+// ═══════ ICONS (inline SVG, stroke-based, theme-able via currentColor) ═══════
+const ICONS = {
+    dashboard: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>',
+    doctor: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
+    clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1"></rect>',
+    sun: '<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>',
+    moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
+    users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>',
+    flask: '<path d="M9 2v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L15 8V2"></path><line x1="9" y1="2" x2="15" y2="2"></line><line x1="7" y1="14" x2="17" y2="14"></line>',
+    pill: '<rect x="3" y="9.5" width="18" height="5" rx="2.5" transform="rotate(-45 12 12)"></rect><line x1="8.5" y1="15.5" x2="15.5" y2="8.5"></line>',
+    card: '<rect x="1" y="4" width="22" height="16" rx="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>',
+    sliders: '<line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>',
+    building: '<rect x="4" y="2" width="16" height="20" rx="1"></rect><rect x="9" y="6" width="2" height="2"></rect><rect x="13" y="6" width="2" height="2"></rect><rect x="9" y="11" width="2" height="2"></rect><rect x="13" y="11" width="2" height="2"></rect><rect x="10" y="16" width="4" height="6"></rect>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>',
+    folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>',
+    warning: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>',
+    success: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
+    brand: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line>',
+    menu: '<line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line>',
+};
+
+function icon(name, size = 20) {
+    const path = ICONS[name];
+    if (!path) return '';
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+}
+
+const icon_ = icon; // alias so the toast() function's local `icon` element var doesn't shadow the helper
+
 // ═══════ AUTH ═══════
+let myFeatures = null; // null = super_admin, sees everything
+
+function applyFeatureVisibility() {
+    document.querySelectorAll('[data-feature]').forEach(el => {
+        const feature = el.dataset.feature;
+        const visible = myFeatures === null || myFeatures.includes(feature);
+        el.style.display = visible ? '' : 'none';
+    });
+}
+
 function login() {
     const u = document.getElementById('loginUser').value.trim();
     const p = document.getElementById('loginPass').value;
@@ -1192,6 +1371,10 @@ function login() {
         document.getElementById('app').classList.add('open');
         renderDashboard(data);
         loadDoctorsSilent();
+        api('/admin/me').then(me => {
+            myFeatures = me.features; // null for super_admin
+            applyFeatureVisibility();
+        }).catch(() => {});
     }).catch(() => {
         auth = '';
         document.getElementById('loginError').innerHTML =
@@ -1224,7 +1407,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, branches: loadBranches };
+    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches };
     if (loaders[page]) loaders[page]();
 }
 
@@ -1232,6 +1415,15 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('mobile-open');
     document.getElementById('overlay').classList.toggle('show');
 }
+
+document.querySelectorAll('.nav-link[tabindex]').forEach(link => {
+    link.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            link.click();
+        }
+    });
+});
 
 // ═══════ API HELPERS ═══════
 async function api(path) {
@@ -1274,8 +1466,8 @@ function msg(id, text, err) {
     setTimeout(() => { el.innerHTML = ''; }, 4000);
 }
 
-function emptyState(icon, text) {
-    return `<div class="empty"><div class="empty-icon">${icon}</div><p>${text}</p></div>`;
+function emptyState(iconKey, text) {
+    return `<div class="empty"><div class="empty-icon">${icon(iconKey, 32)}</div><p>${text}</p></div>`;
 }
 
 function loading() {
@@ -1289,7 +1481,7 @@ function toast(text, err = false) {
     el.className = 'toast ' + (err ? 'toast-err' : 'toast-ok');
     const icon = document.createElement('span');
     icon.className = 'toast-icon';
-    icon.textContent = err ? '⚠️' : '✅';
+    icon.innerHTML = icon_(err ? 'warning' : 'success');
     const label = document.createElement('span');
     label.textContent = text;
     el.appendChild(icon);
@@ -1340,6 +1532,13 @@ document.getElementById('confirmPromptInput').addEventListener('keydown', (e) =>
     if (e.key === 'Enter') document.getElementById('confirmOkBtn').click();
 });
 
+document.querySelectorAll('input[name="payMode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        document.getElementById('f-payPercentRow').style.display =
+            document.getElementById('f-payModePartial').checked ? 'block' : 'none';
+    });
+});
+
 async function confirmDialog(message, opts = {}) {
     return (await _openDialog({ message, ...opts, isPrompt: false })) === true;
 }
@@ -1377,7 +1576,7 @@ function renderDashboard(d) {
     // Department bars
     const depts = d.by_department || [];
     const el = document.getElementById('deptBars');
-    if (!depts.length) { el.innerHTML = emptyState('📁', 'No department data yet'); return; }
+    if (!depts.length) { el.innerHTML = emptyState('folder', 'No department data yet'); return; }
     const max = Math.max(...depts.map(x => x.count));
     el.innerHTML = depts.map(dept => `
         <div class="dept-bar">
@@ -1399,7 +1598,7 @@ function renderDashboard(d) {
 
 function renderDashAppts(data) {
     const el = document.getElementById('dashAppts');
-    if (!data || !data.length) { el.innerHTML = emptyState('📅', 'No recent appointments'); return; }
+    if (!data || !data.length) { el.innerHTML = emptyState('calendar', 'No recent appointments'); return; }
     el.innerHTML = `<table>
         <thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Date</th><th>Status</th></tr></thead>
         <tbody>${data.map(a => `<tr>
@@ -1429,7 +1628,7 @@ async function loadAppointments() {
     el.innerHTML = loading();
     try {
         const data = await api('/admin/appointments/upcoming?days=30');
-        if (!data?.length) { el.innerHTML = emptyState('📅', 'No upcoming appointments'); return; }
+        if (!data?.length) { el.innerHTML = emptyState('calendar', 'No upcoming appointments'); return; }
         el.innerHTML = `<table>
             <thead><tr>
                 <th>Ref</th><th>Patient</th><th>Doctor</th>
@@ -1457,7 +1656,7 @@ async function loadAppointments() {
 
             </tr>`).join('')}</tbody>
         </table>`;
-    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load appointments'); }
+    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load appointments'); }
 }
 
 // ═══════ DOCTORS ═══════
@@ -1472,11 +1671,11 @@ async function loadDoctors() {
         doctorCache = await api('/admin/doctors') || [];
         updateLeaveDropdown();
         document.getElementById('docCount').textContent = `${doctorCache.length} doctor${doctorCache.length !== 1 ? 's' : ''}`;
-        if (!doctorCache.length) { el.innerHTML = emptyState('👨‍⚕️', 'No doctors added yet'); return; }
+        if (!doctorCache.length) { el.innerHTML = emptyState('doctor', 'No doctors added yet'); return; }
         el.innerHTML = `<table>
             <thead><tr><th>Name</th><th>Specialization</th><th>Department</th><th>Fee</th><th>Days</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${doctorCache.map(d => `<tr>
-                <td style="font-weight:600; color:#fff">${d.name}</td>
+                <td style="font-weight:600; color:var(--text-strong)">${d.name}</td>
                 <td>${d.specialization || '—'}</td>
                 <td>${d.department}</td>
                 <td>₹${d.consultation_fee}</td>
@@ -1488,7 +1687,7 @@ async function loadDoctors() {
                 </td>
             </tr>`).join('')}</tbody>
         </table>`;
-    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load doctors'); }
+    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load doctors'); }
 }
 
 function updateLeaveDropdown() {
@@ -1566,7 +1765,7 @@ async function loadLeaves() {
     el.innerHTML = loading();
     try {
         const data = await api('/admin/leaves');
-        if (!data?.length) { el.innerHTML = emptyState('📋', 'No leaves scheduled'); return; }
+        if (!data?.length) { el.innerHTML = emptyState('clipboard', 'No leaves scheduled'); return; }
         el.innerHTML = `<table>
             <thead><tr><th>Doctor</th><th>Date</th><th>Type</th><th>Reason</th><th></th></tr></thead>
             <tbody>${data.map(l => `<tr>
@@ -1577,7 +1776,7 @@ async function loadLeaves() {
                 <td><button class="btn btn-red btn-sm" onclick="delLeave('${l.id}')">Remove</button></td>
             </tr>`).join('')}</tbody>
         </table>`;
-    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load leaves'); }
+    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load leaves'); }
 }
 
 async function addLeave() {
@@ -1618,7 +1817,7 @@ async function loadHolidays() {
     el.innerHTML = loading();
     try {
         const data = await api('/admin/holidays');
-        if (!data?.length) { el.innerHTML = emptyState('🗓️', 'No holidays added'); return; }
+        if (!data?.length) { el.innerHTML = emptyState('sun', 'No holidays added'); return; }
         el.innerHTML = `<table>
             <thead><tr><th>Date</th><th>Holiday</th><th></th></tr></thead>
             <tbody>${data.map(h => `<tr>
@@ -1627,7 +1826,7 @@ async function loadHolidays() {
                 <td><button class="btn btn-red btn-sm" onclick="delHoliday('${h.holiday_date}')">Remove</button></td>
             </tr>`).join('')}</tbody>
         </table>`;
-    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load holidays'); }
+    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load holidays'); }
 }
 
 async function addHoliday() {
@@ -1687,16 +1886,16 @@ async function loadPatients() {
         document.getElementById('s-pat-opted').textContent = optedIn;
         document.getElementById('s-pat-out').textContent = optedOut;
         renderPatientTable(patientCache);
-    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load patients'); }
+    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load patients'); }
 }
 
 function renderPatientTable(list) {
     const el = document.getElementById('patientList');
-    if (!list.length) { el.innerHTML = emptyState('👥', 'No patients found'); return; }
+    if (!list.length) { el.innerHTML = emptyState('users', 'No patients found'); return; }
     el.innerHTML = `<table>
         <thead><tr><th>Name</th><th>Phone</th><th>Language</th><th>Opted In</th><th>Visits</th><th>Actions</th></tr></thead>
         <tbody>${list.map(p => `<tr>
-            <td style="font-weight:600;color:#fff">${p.name || '—'}</td>
+            <td style="font-weight:600;color:var(--text-strong)">${p.name || '—'}</td>
             <td>${p.phone}</td>
             <td>${p.language || '—'}</td>
             <td>${p.opted_in ? badge('active') : badge('inactive')}</td>
@@ -1729,16 +1928,16 @@ async function loadLabReports() {
         document.getElementById('s-lab-sent').textContent = sent;
         document.getElementById('s-lab-failed').textContent = failed;
         renderLabTable(labCache);
-    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load lab reports'); }
+    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load lab reports'); }
 }
 
 function renderLabTable(list) {
     const el = document.getElementById('labList');
-    if (!list.length) { el.innerHTML = emptyState('🧪', 'No lab reports yet'); return; }
+    if (!list.length) { el.innerHTML = emptyState('flask', 'No lab reports yet'); return; }
     el.innerHTML = `<table>
         <thead><tr><th>Patient Name</th><th>Phone</th><th>Report Name</th><th>Report Type</th><th>Uploaded At</th><th>AI Summary</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${list.map(r => `<tr>
-            <td style="font-weight:600;color:#fff">${r.patient_name || '—'}</td>
+            <td style="font-weight:600;color:var(--text-strong)">${r.patient_name || '—'}</td>
             <td>${r.patient_phone}</td>
             <td>${r.report_name}</td>
             <td>${r.report_type || 'General'}</td>
@@ -1860,16 +2059,16 @@ async function loadPrescriptions() {
         document.getElementById('s-rx-active').textContent = active;
         document.getElementById('s-rx-total').textContent = rxCache.length;
         renderRxTable(rxCache);
-    } catch (e) { el.innerHTML = emptyState('⚠️', 'Failed to load prescriptions'); }
+    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load prescriptions'); }
 }
 
 function renderRxTable(list) {
     const el = document.getElementById('rxList');
-    if (!list.length) { el.innerHTML = emptyState('💊', 'No prescriptions yet'); return; }
+    if (!list.length) { el.innerHTML = emptyState('pill', 'No prescriptions yet'); return; }
     el.innerHTML = `<table>
         <thead><tr><th>Patient Name</th><th>Phone</th><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Reminder Times</th><th>End Date</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${list.map(r => `<tr>
-            <td style="font-weight:600;color:#fff">${r.patient_name || '—'}</td>
+            <td style="font-weight:600;color:var(--text-strong)">${r.patient_name || '—'}</td>
             <td>${r.patient_phone}</td>
             <td>${r.medicine_name}</td>
             <td>${r.dosage}</td>
@@ -2076,7 +2275,7 @@ async function loadPayments() {
         html += '</tbody></table>';
         document.getElementById('paymentsList').innerHTML = html;
     } catch (e) {
-        document.getElementById('paymentsList').innerHTML = emptyState('⚠️', 'Failed to load payments');
+        document.getElementById('paymentsList').innerHTML = emptyState('warning', 'Failed to load payments');
     }
 }
 
@@ -2156,7 +2355,7 @@ async function loadBranches() {
         document.getElementById('branchCount').textContent = branches.length + ' branches';
 
         if (branches.length === 0) {
-            document.getElementById('branchList').innerHTML = emptyState('🏢', 'No branches created yet. Add your first branch below.');
+            document.getElementById('branchList').innerHTML = emptyState('building', 'No branches created yet. Add your first branch below.');
             return;
         }
 
@@ -2185,7 +2384,7 @@ async function loadBranches() {
         html += '</tbody></table>';
         document.getElementById('branchList').innerHTML = html;
     } catch (e) {
-        document.getElementById('branchList').innerHTML = emptyState('⚠️', 'Failed to load branches');
+        document.getElementById('branchList').innerHTML = emptyState('warning', 'Failed to load branches');
     }
 }
 
@@ -2299,7 +2498,7 @@ async function manageBranchDoctors(branchId, branchName) {
             document.getElementById('branchDoctorsList').innerHTML = html;
         }
     } catch (e) {
-        document.getElementById('branchDoctorsList').innerHTML = emptyState('⚠️', 'Failed to load assigned doctors');
+        document.getElementById('branchDoctorsList').innerHTML = emptyState('warning', 'Failed to load assigned doctors');
     }
 
     // Load all doctors for the assignment dropdown
@@ -2342,6 +2541,56 @@ async function removeDoctorFromBranch(branchId, doctorId) {
         manageBranchDoctors(branchId, branchName);
     } catch (e) {
         toast('Error: ' + e.message, true);
+    }
+}
+
+// ═══════ PAYMENT SETTINGS ═══════
+async function loadPaymentSettings() {
+    try {
+        const data = await api('/admin/settings/payment');
+        document.getElementById('f-payKeyId').value = data.razorpay_key_id || '';
+        document.getElementById('f-payKeySecret').placeholder =
+            data.razorpay_key_secret_masked ? 'Saved: ' + data.razorpay_key_secret_masked : 'Leave blank to keep existing';
+        document.getElementById('f-payWebhookSecret').placeholder =
+            data.razorpay_webhook_secret_masked ? 'Saved: ' + data.razorpay_webhook_secret_masked : 'Leave blank to keep existing';
+
+        const mode = data.payment_mode || 'none';
+        document.getElementById('f-payMode' + mode.charAt(0).toUpperCase() + mode.slice(1)).checked = true;
+        document.getElementById('f-payPercent').value = data.payment_deposit_percent || '';
+        document.getElementById('f-payPercentRow').style.display = mode === 'partial' ? 'block' : 'none';
+    } catch (e) {
+        msg('paySettingsMsg', 'Error loading payment settings: ' + e.message, true);
+    }
+}
+
+async function savePaymentSettings() {
+    const mode = document.querySelector('input[name="payMode"]:checked')?.value || 'none';
+    const body = { payment_mode: mode };
+
+    const keyId = document.getElementById('f-payKeyId').value.trim();
+    const keySecret = document.getElementById('f-payKeySecret').value.trim();
+    const webhookSecret = document.getElementById('f-payWebhookSecret').value.trim();
+    if (keyId) body.razorpay_key_id = keyId;
+    if (keySecret) body.razorpay_key_secret = keySecret;
+    if (webhookSecret) body.razorpay_webhook_secret = webhookSecret;
+
+    if (mode === 'partial') {
+        const percent = parseInt(document.getElementById('f-payPercent').value, 10);
+        if (!percent || percent < 1 || percent > 99) {
+            msg('paySettingsMsg', 'Enter a deposit percentage between 1 and 99', true);
+            return;
+        }
+        body.payment_deposit_percent = percent;
+    }
+
+    try {
+        await apiPut('/admin/settings/payment', body);
+        msg('paySettingsMsg', '✅ Payment settings saved!');
+        document.getElementById('f-payKeySecret').value = '';
+        document.getElementById('f-payWebhookSecret').value = '';
+        loadPaymentSettings();
+    } catch (e) {
+        msg('paySettingsMsg', 'Error: ' + e.message, true);
     }
 }
 

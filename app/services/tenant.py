@@ -251,6 +251,14 @@ PLAN_FEATURES: dict[str, set[str]] = {
     },
 }
 
+# Flat, sorted list of every named feature across all plans — excludes the
+# "*" enterprise wildcard sentinel. Used by GET /admin/me (app/routers/admin.py)
+# to tell the admin panel frontend which tabs to show, without duplicating
+# this registry in JS.
+ALL_FEATURES: list[str] = sorted(
+    {feature for features in PLAN_FEATURES.values() for feature in features if feature != "*"}
+)
+
 
 def has_feature(clinic: dict, feature: str) -> bool:
     """

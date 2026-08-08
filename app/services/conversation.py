@@ -2172,13 +2172,12 @@ class ConversationManager:
         if intent in ["confirm_booking", "yes"]:
             from datetime import datetime
 
-            # ── Check if Razorpay is configured (per-clinic first, global fallback) ──
-            from app.services.payment import get_razorpay_creds
+            # ── Resolve this clinic's payment mode: full / partial / none ──
+            from app.services.payment import resolve_payment_mode
 
-            _rz_key_id, _rz_key_secret, _ = get_razorpay_creds(clinic)
-            razorpay_configured = bool(_rz_key_id and _rz_key_secret)
+            payment_mode, deposit_percent = resolve_payment_mode(clinic)
 
-            if razorpay_configured:
+            if payment_mode in ("full", "partial"):
                 # ═══ PATH A: Payment-gated booking ═══
                 from app.services.payment import payment_service
 
@@ -2195,6 +2194,7 @@ class ConversationManager:
                     clinic=clinic,
                     branch_id=context.get("branch_id"),
                     branch_name=context.get("branch_name"),
+                    deposit_percent=deposit_percent,
                 )
 
                 if result["success"]:
@@ -2203,6 +2203,25 @@ class ConversationManager:
                         context["appointment_date"], "%Y-%m-%d"
                     ).strftime("%d %b %Y")
 
+                    deposit_note_en = (
+                        f"_This is a {deposit_percent}% deposit — the remaining "
+                        f"{100 - deposit_percent}% is payable at the clinic._\n\n"
+                        if payment_mode == "partial"
+                        else ""
+                    )
+                    deposit_note_hi = (
+                        f"_यह {deposit_percent}% जमा राशि है — शेष {100 - deposit_percent}% "
+                        f"क्लिनिक में देय है।_\n\n"
+                        if payment_mode == "partial"
+                        else ""
+                    )
+                    deposit_note_te = (
+                        f"_ఇది {deposit_percent}% డిపాజిట్ — మిగిలిన {100 - deposit_percent}% "
+                        f"క్లినిక్‌లో చెల్లించాలి._\n\n"
+                        if payment_mode == "partial"
+                        else ""
+                    )
+
                     payment_msg = {
                         "en": (
                             f"💳 *Payment Required to Confirm Booking*\n\n"
@@ -2210,6 +2229,7 @@ class ConversationManager:
                             f"📅 Date: {date_display}\n"
                             f"🕐 Time: {context['appointment_time']}\n"
                             f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
+                            f"{deposit_note_en}"
                             f"⏱️ *This slot is held for 10 minutes.* Pay before it expires.\n\n"
                             f"👉 Click below to pay securely via Razorpay:\n"
                             f"{result['payment_link']}\n\n"
@@ -2222,6 +2242,7 @@ class ConversationManager:
                             f"📅 तारीख: {date_display}\n"
                             f"🕐 समय: {context['appointment_time']}\n"
                             f"💰 राशि: ₹{amount_rupees:.0f}\n\n"
+                            f"{deposit_note_hi}"
                             f"⏱️ *यह स्लॉट 10 मिनट के लिए होल्ड है।* समय से पहले भुगतान करें।\n\n"
                             f"👉 Razorpay से सुरक्षित भुगतान करें:\n"
                             f"{result['payment_link']}\n\n"
@@ -2234,6 +2255,7 @@ class ConversationManager:
                             f"📅 తేదీ: {date_display}\n"
                             f"🕐 సమయం: {context['appointment_time']}\n"
                             f"💰 మొత్తం: ₹{amount_rupees:.0f}\n\n"
+                            f"{deposit_note_te}"
                             f"⏱️ *ఈ స్లాట్ 10 నిమిషాలు హోల్డ్ చేయబడింది.* గడువులోపు చెల్లించండి.\n\n"
                             f"👉 Razorpay ద్వారా సురక్షితంగా చెల్లించండి:\n"
                             f"{result['payment_link']}\n\n"
@@ -2249,6 +2271,7 @@ class ConversationManager:
                             f"📅 Date: {date_display}\n"
                             f"🕐 Time: {context['appointment_time']}\n"
                             f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
+                            f"{deposit_note_en}"
                             f"⏱️ *This slot is held for 10 minutes.* Pay before it expires.\n\n"
                             f"👉 Click below to pay securely via Razorpay:\n"
                             f"{result['payment_link']}\n\n"
@@ -2301,7 +2324,7 @@ class ConversationManager:
                     await self.update_state(clinic, phone, "main_menu")
                     await self._send_main_menu(clinic, phone, lang)
             else:
-                # ═══ PATH B: Direct booking (Razorpay NOT configured) ═══
+                # ═══ PATH B: Direct booking (payment_mode == "none") ═══
                 appointment_data = {
                     "patient_id": patient.get("id"),
                     "patient_phone": phone,

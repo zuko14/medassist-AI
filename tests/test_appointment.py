@@ -13,7 +13,7 @@ class TestAppointmentService:
     @pytest.mark.asyncio
     async def test_get_available_doctors(self):
         """Test getting available doctors."""
-        with patch("app.services.appointment.get_doctors") as mock_get_doctors:
+        with patch("app.services.appointment.get_doctors", new_callable=AsyncMock) as mock_get_doctors:
             mock_get_doctors.return_value = [
                 {"name": "Dr. Test", "specialization": "General"}
             ]
@@ -25,7 +25,7 @@ class TestAppointmentService:
     @pytest.mark.asyncio
     async def test_find_alternative_doctors(self):
         """Test finding alternative doctors."""
-        with patch("app.services.appointment.get_doctors") as mock_get_doctors, patch(
+        with patch("app.services.appointment.get_doctors", new_callable=AsyncMock) as mock_get_doctors, patch(
             "app.services.appointment.get_available_slots", new_callable=AsyncMock
         ) as mock_get_slots:
 
@@ -48,7 +48,7 @@ class TestAppointmentService:
     @pytest.mark.asyncio
     async def test_get_appointment_history(self):
         """Test getting appointment history."""
-        with patch("app.services.appointment.get_patient_appointments") as mock_get:
+        with patch("app.services.appointment.get_patient_appointments", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = [
                 {"id": "1", "status": "completed"},
                 {"id": "2", "status": "cancelled"},
@@ -60,7 +60,7 @@ class TestAppointmentService:
     @pytest.mark.asyncio
     async def test_get_upcoming_appointments(self):
         """Test getting upcoming appointments."""
-        with patch("app.services.appointment.get_patient_appointments") as mock_get:
+        with patch("app.services.appointment.get_patient_appointments", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = [
                 {
                     "id": "1",
