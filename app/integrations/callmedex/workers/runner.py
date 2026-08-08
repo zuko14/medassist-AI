@@ -18,6 +18,7 @@ from app.integrations.callmedex.storage.provider import LocalStorageProvider
 from app.integrations.callmedex.callbacks.handler import CallMedexCallbackHandler
 from app.integrations.callmedex.queue.drivers import InMemoryQueue
 from app.integrations.callmedex.api.exceptions import ConfigurationError, CallMedexException
+from app.integrations.callmedex.config.processing_centers import resolve_processing_center
 
 logger = logging.getLogger(__name__)
 
@@ -133,10 +134,47 @@ class CallMedexWorkerRunner:
         checkpoint = JobCheckpoint.CREATED
 
         try:
-            # Step 2: Configuration Validated
+            # Step 2: Resolve processing center config & credentials (base_url, clinic_slug, username, password)
+            # Uses processing_center_id from request, falling back to clinic_id
+            center_lookup_id = (
+                getattr(request, "processing_center_id", None) or request.clinic_id
+            )
+            center_config = None
+            try:
+                center_config = await resolve_processing_center(
+                    clinic_id=center_lookup_id,
+                    connector_type=str(connector_type.value if hasattr(connector_type, 'value') else connector_type),
+                )
+                if hasattr(connector, "configure_center"):
+                    connector.configure_center(
+                        base_url=center_config.base_url,
+                        clinic_slug=center_config.clinic_slug,
+                    )
+                self._emit_event(
+                    "CenterConfigResolved", report_job_id, corr_id,
+                    {"center_id": center_lookup_id, "base_url": center_config.base_url},
+                )
+            except ValueError as cfg_err:
+                logger.warning(
+                    f"Processing center config resolution failed for '{center_lookup_id}': {cfg_err}. "
+                    f"Falling back to environment settings."
+                )
+                self._emit_event(
+                    "CenterConfigMissing", report_job_id, corr_id,
+                    {"center_id": center_lookup_id, "error": str(cfg_err)},
+                )
+
+            # Step 2b: Credentials Validated
+            # Priority: Per-center credentials in Supabase -> fallback to Render .env settings
             creds = {
-                "username": self.container.settings.mocdoc_username.get_secret_value(),
-                "password": self.container.settings.mocdoc_password.get_secret_value(),
+                "username": (
+                    (center_config.username if center_config and center_config.username else None)
+                    or self.container.settings.mocdoc_username.get_secret_value()
+                ),
+                "password": (
+                    (center_config.password if center_config and center_config.password else None)
+                    or self.container.settings.mocdoc_password.get_secret_value()
+                ),
             }
 
             # Step 3: Health Check

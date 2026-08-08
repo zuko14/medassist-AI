@@ -75,6 +75,11 @@ class ProcessReportRequest(BaseModel):
     report_type: ReportType = Field(
         default=ReportType.LABORATORY, description="Type of lab report"
     )
+    processing_center_id: Optional[str] = Field(
+        None,
+        description="Processing center identifier for MocDoc portal config resolution. "
+        "If not provided, clinic_id is used as the lookup key.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -89,6 +94,7 @@ class ProcessReportRequest(BaseModel):
                 },
                 "report_name": "Complete Blood Count (CBC)",
                 "report_type": "Laboratory",
+                "processing_center_id": "visakha-multispeciality-clinics",
             }
         }
     )
