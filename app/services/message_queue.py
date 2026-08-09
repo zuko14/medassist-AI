@@ -43,6 +43,21 @@ _phone_locks_mutex = asyncio.Lock()
 # Set below Meta's 20s webhook timeout to prevent cascading stalls.
 PHONE_LOCK_TIMEOUT_SECONDS = 15
 
+# Counter of acquire() calls that failed open due to a non-duplicate error
+# (e.g. Supabase outage). A sustained non-zero rate here means messages may
+# be double-processed — scheduler.py polls this to page an admin.
+_fail_open_count = 0
+
+
+def get_fail_open_count() -> int:
+    """Current count of acquire() fail-open events since process start."""
+    return _fail_open_count
+
+
+def _record_fail_open() -> None:
+    global _fail_open_count
+    _fail_open_count += 1
+
 
 class MessageQueueManager:
     """Supabase-native atomic message deduplication + per-phone asyncio locks."""
@@ -127,10 +142,12 @@ class MessageQueueManager:
                         )
                         return False
                     logger.warning(f"Message queue: acquire error (failing open): {e2}")
+                    _record_fail_open()
                     return True
 
             # On any other error, fail open (allow processing) to avoid dropping real messages
             logger.warning(f"Message queue: acquire error (failing open): {e}")
+            _record_fail_open()
             return True
 
     async def release(self, message_id: str) -> None:

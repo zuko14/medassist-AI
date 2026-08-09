@@ -15,6 +15,7 @@ from app.services.tenant import get_clinic_by_id
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+_last_fail_open_count = 0
 
 
 async def send_due_reminders_job():
@@ -86,6 +87,15 @@ class SchedulerService:
             self.alert_failed_messages,
             CronTrigger(day_of_week="mon", hour=9, minute=0),
             id="failed_messages_alert",
+            replace_existing=True,
+        )
+
+        # ── Reliability: Monitor message queue fail-open rate (every 10 minutes) ──
+        self.scheduler.add_job(
+            self.alert_message_queue_fail_open,
+            "interval",
+            minutes=10,
+            id="message_queue_fail_open_alert",
             replace_existing=True,
         )
 
@@ -452,6 +462,43 @@ class SchedulerService:
         except Exception as e:
             # Table might not exist yet — don't crash the scheduler
             logger.debug(f"Failed messages check skipped: {e}")
+
+    async def alert_message_queue_fail_open(self):
+        """Alert admin if the message queue fail-open rate is elevated.
+
+        A sustained fail-open rate means messages are being processed without
+        the atomic uniqueness guarantee (e.g. Supabase connection issues),
+        which risks double-processing patient messages.
+        """
+        global _last_fail_open_count
+        try:
+            from app.services.message_queue import get_fail_open_count
+
+            current = get_fail_open_count()
+            delta = current - _last_fail_open_count
+            _last_fail_open_count = current
+
+            if delta > 5:
+                admin_phone = settings.hospital_phone
+                alert_msg = (
+                    f"⚠️ Message queue fail-open rate elevated: "
+                    f"{delta} messages processed without idempotency guarantee since last check."
+                )
+                try:
+                    from app.services.tenant import resolve_tenant
+
+                    clinic = await resolve_tenant(admin_phone)
+                    await whatsapp_service.send_text(clinic, admin_phone, alert_msg)
+                    logger.warning(
+                        f"Sent message queue fail-open alert: {delta} fail-open events"
+                    )
+                except Exception:
+                    logger.warning(
+                        f"ALERT: {delta} message queue fail-open events occurred. "
+                        f"Could not send WhatsApp alert."
+                    )
+        except Exception as e:
+            logger.debug(f"Message queue fail-open check skipped: {e}")
 
     async def cleanup_rate_limits(self):
         """Delete stale rate limit entries older than 1 hour.
