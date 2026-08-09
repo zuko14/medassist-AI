@@ -17,6 +17,8 @@ from app.database import (
     find_next_available_date,
     book_appointment,
     get_patient_queue_status,
+    get_family_members,
+    add_family_member,
     log_analytics_event,
 )
 from app.services.ai_engine import (
@@ -66,7 +68,9 @@ class ConversationState(str, Enum):
     AWAITING_CONSENT = "awaiting_consent"
     MAIN_MENU = "main_menu"
     SELECTING_BRANCH = "selecting_branch"
+    SELECTING_FAMILY_MEMBER = "selecting_family_member"
     COLLECTING_NAME = "collecting_name"
+    CONFIRMING_SAVE_FAMILY_MEMBER = "confirming_save_family_member"
     COLLECTING_SYMPTOMS = "collecting_symptoms"
     SUGGESTING_DEPARTMENT = "suggesting_department"
     SELECTING_DEPARTMENT = "selecting_department"
@@ -398,6 +402,8 @@ class ConversationManager:
                 intent = "health_checkin_concern"
             elif button_id == "checkin_ok":
                 intent = "health_checkin_ok"
+            elif button_id.startswith("fam_") or button_id.startswith("save_family_"):
+                message = button_id
             elif button_id == "edit_doctor":
                 intent = "edit_doctor"
             elif button_id == "edit_date":
@@ -619,9 +625,17 @@ class ConversationManager:
             await self._handle_selecting_branch(
                 clinic, phone, message, intent, context, patient, lang, interactive_data
             )
+        elif state == "selecting_family_member":
+            await self._handle_selecting_family_member(
+                clinic, phone, message, context, lang, patient
+            )
         elif state == "collecting_name":
             await self._handle_collecting_name(
                 clinic, phone, message, context, patient, lang
+            )
+        elif state == "confirming_save_family_member":
+            await self._handle_confirming_save_family_member(
+                clinic, phone, message, context, lang
             )
         elif state == "collecting_symptoms":
             await self._handle_collecting_symptoms(
@@ -1103,21 +1117,47 @@ class ConversationManager:
         """Continue booking flow after branch is selected (or skipped for single-branch clinics)."""
         patient = patient or {}
 
+        patient_name = patient.get("name") or "there"
+        first_name = patient_name.split()[0] if patient_name != "there" else "there"
+
+        msg_str = {
+            "en": f"Who is this appointment for, {first_name}?",
+            "hi": f"यह अपॉइंटमेंट किसके लिए है, {first_name}?",
+            "te": f"ఈ అపాయింట్‌మెంట్ ఎవరి కోసం, {first_name}?",
+        }.get(lang, f"Who is this appointment for, {first_name}?")
+
+        saved_family = await get_family_members(clinic["id"], phone)
+        if saved_family:
+            buttons = [
+                {
+                    "id": "fam_self",
+                    "title": ("For Me" if lang == "en" else ("मेरे लिए" if lang == "hi" else "నా కోసం"))[:20],
+                }
+            ]
+            for i, m in enumerate(saved_family[:1]):
+                buttons.append({"id": f"fam_{i}", "title": m["full_name"][:20]})
+            buttons.append(
+                {
+                    "id": "fam_new",
+                    "title": ("+ Someone Else" if lang == "en" else ("+ अन्य व्यक्ति" if lang == "hi" else "+ వేరొకరు"))[:20],
+                }
+            )
+            await self.whatsapp.send_interactive_buttons(
+                clinic,
+                phone,
+                body=msg_str,
+                buttons=buttons,
+            )
+            await self.update_state(
+                clinic,
+                phone,
+                "selecting_family_member",
+                {**context, "family_members": saved_family},
+            )
+            return
+
         # Check if returning patient with name and language is set
-        if (
-            patient.get("name")
-            and patient.get("visit_count", 0) > 0
-            and patient.get("language")
-        ):
-            patient_name = patient.get("name") or "there"
-            first_name = patient_name.split()[0] if patient_name else "there"
-
-            msg_str = {
-                "en": f"Who is this appointment for, {first_name}?",
-                "hi": f"यह अपॉइंटमेंट किसके लिए है, {first_name}?",
-                "te": f"ఈ అపాయింట్‌మెంట్ ఎవరి కోసం, {first_name}?",
-            }.get(lang, f"Who is this appointment for, {first_name}?")
-
+        if patient.get("name") and patient.get("language"):
             await self.whatsapp.send_interactive_buttons(
                 clinic,
                 phone,
@@ -1141,25 +1181,20 @@ class ConversationManager:
                     },
                 ],
             )
-            from app.database import update_conversation
-
-            await update_conversation(
-                clinic["id"],
+            await self.update_state(
+                clinic,
                 phone,
-                {
-                    "state": "collecting_name",
-                    "context": {**context, "asked_for_whom": True},
-                },
+                "collecting_name",
+                {**context, "asked_for_whom": True},
             )
         else:
             # New patient, ask for name
             await self.whatsapp.send_text(clinic, phone, get_message("ask_name", lang))
-            from app.database import update_conversation
-
-            await update_conversation(
-                clinic["id"],
+            await self.update_state(
+                clinic,
                 phone,
-                {"state": "collecting_name", "context": {**context, "for_self": True}},
+                "collecting_name",
+                {**context, "for_self": True},
             )
 
     async def _send_branch_selection(
@@ -1270,6 +1305,107 @@ class ConversationManager:
         branches = await get_clinic_branches(clinic["id"])
         bookable_branches = [b for b in branches if not b.get("is_diagnostic", False)]
         await self._send_branch_selection(clinic, phone, bookable_branches, lang)
+
+    async def _handle_selecting_family_member(
+        self,
+        clinic: dict,
+        phone: str,
+        message: str,
+        context: dict,
+        lang: str,
+        patient: Optional[dict] = None,
+    ) -> None:
+        """Handle patient selection of which family member / self to book for."""
+        msg_clean = message.strip().lower()
+        family_members = context.get("family_members", [])
+
+        # 1. Selected "For Self"
+        if msg_clean in ["fam_self", "self", "for me", "me", "for myself", "myself"]:
+            p_name = (patient or {}).get("name") or "there"
+            new_ctx = {**context, "patient_name": p_name, "for_self": True}
+            await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+            await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
+            return
+
+        # 2. Selected "+ Someone Else / New"
+        if msg_clean in ["fam_new", "new", "+ someone else", "+ new person", "someone else", "new person"]:
+            await self.update_state(
+                clinic, phone, "collecting_name", {**context, "is_family": True}
+            )
+            await self.whatsapp.send_text(clinic, phone, get_message("ask_name", lang))
+            return
+
+        # 3. Selected a numbered choice or fam_X button
+        selected_idx = None
+        if msg_clean.startswith("fam_") and msg_clean[4:].isdigit():
+            selected_idx = int(msg_clean[4:])
+        elif msg_clean.isdigit():
+            # 1-indexed choice
+            idx = int(msg_clean) - 1
+            if 0 <= idx < len(family_members):
+                selected_idx = idx
+
+        if selected_idx is not None and 0 <= selected_idx < len(family_members):
+            member = family_members[selected_idx]
+            new_ctx = {
+                **context,
+                "patient_name": member["full_name"],
+                "relationship": member.get("relationship"),
+                "is_family": True,
+            }
+            await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+            await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
+            return
+
+        # 4. Check if exact name was typed
+        for m in family_members:
+            if msg_clean == m["full_name"].lower():
+                new_ctx = {
+                    **context,
+                    "patient_name": m["full_name"],
+                    "relationship": m.get("relationship"),
+                    "is_family": True,
+                }
+                await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+                await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
+                return
+
+        # Fallback: Treat typed input as new name if 2+ words, or prompt again
+        if len(msg_clean.split()) >= 2:
+            new_ctx = {**context, "patient_name": message.strip(), "is_family": True}
+            await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+            await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
+        else:
+            await self.whatsapp.send_text(
+                clinic, phone, "Please select who this appointment is for or type their full name."
+            )
+
+    async def _handle_confirming_save_family_member(
+        self,
+        clinic: dict,
+        phone: str,
+        message: str,
+        context: dict,
+        lang: str,
+    ) -> None:
+        """Save a new family member to the database if the patient confirmed YES."""
+        msg = message.strip().lower()
+        if msg in ["save_family_yes", "yes", "y", "हाँ", "అవును"]:
+            name = context.get("patient_name")
+            if name:
+                await add_family_member(
+                    clinic["id"],
+                    phone,
+                    full_name=name,
+                    relationship=context.get("relationship"),
+                )
+                save_ack = {
+                    "en": f"Saved {name} to your family profiles for quick booking next time! 👍",
+                    "hi": f"{name} को अगली बार त्वरित बुकिंग के लिए आपकी प्रोफ़ाइल में सहेज लिया गया है! 👍",
+                    "te": f"{name} ను తదుపరి శీఘ్ర బుకింగ్ కోసం మీ ప్రొఫైల్‌లో సేవ్ చేసాము! 👍",
+                }.get(lang, f"Saved {name} to your family profiles!")
+                await self.whatsapp.send_text(clinic, phone, save_ack)
+        await self.update_state(clinic, phone, "main_menu")
 
     async def _handle_collecting_name(
         self,
