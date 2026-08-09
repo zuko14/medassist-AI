@@ -581,7 +581,12 @@ async def delete_patient_data(clinic_id: str, phone: str) -> bool:
 
 
 async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[dict]:
-    """Assign the next sequential token number for this appointment's doctor+date."""
+    """Assign the next sequential token number for this appointment's doctor+date.
+
+    Race-safe: relies on the UNIQUE partial index idx_unique_queue_token
+    (migration 021) to reject collisions, and retries with the next number
+    on conflict instead of allowing duplicate tokens under concurrent check-ins.
+    """
     try:
         appt_result = (
             supabase.table("appointments")
@@ -595,27 +600,46 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
         doctor_name = appt_result.data[0]["doctor_name"]
         appointment_date = appt_result.data[0]["appointment_date"]
 
-        max_result = (
-            supabase.table("appointments")
-            .select("token_number")
-            .eq("clinic_id", clinic_id)
-            .eq("doctor_name", doctor_name)
-            .eq("appointment_date", appointment_date)
-            .order("token_number", desc=True)
-            .limit(1)
-            .execute()
-        )
-        current_max = max_result.data[0]["token_number"] if max_result.data and max_result.data[0]["token_number"] else 0
-        next_token = current_max + 1
+        max_retries = 5
+        for attempt in range(max_retries):
+            max_result = (
+                supabase.table("appointments")
+                .select("token_number")
+                .eq("clinic_id", clinic_id)
+                .eq("doctor_name", doctor_name)
+                .eq("appointment_date", appointment_date)
+                .order("token_number", desc=True)
+                .limit(1)
+                .execute()
+            )
+            current_max = (
+                max_result.data[0]["token_number"]
+                if max_result.data and max_result.data[0]["token_number"]
+                else 0
+            )
+            next_token = current_max + 1 + attempt
 
-        result = (
-            supabase.table("appointments")
-            .update({"token_number": next_token, "queue_status": "waiting"})
-            .eq("clinic_id", clinic_id)
-            .eq("id", appointment_id)
-            .execute()
-        )
-        return result.data[0] if result.data else None
+            try:
+                result = (
+                    supabase.table("appointments")
+                    .update({"token_number": next_token, "queue_status": "waiting"})
+                    .eq("clinic_id", clinic_id)
+                    .eq("id", appointment_id)
+                    .execute()
+                )
+                return result.data[0] if result.data else None
+            except Exception as e:
+                if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                    logger.info(
+                        f"check_in_appointment: token {next_token} collision for "
+                        f"{doctor_name}/{appointment_date}, retrying (attempt {attempt + 1})"
+                    )
+                    continue
+                raise
+
+        logger.error(f"check_in_appointment: exhausted retries for {appointment_id}")
+        return None
+
     except Exception as e:
         logger.error(f"Error checking in appointment: {e}")
         return None
