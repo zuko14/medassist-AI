@@ -43,6 +43,13 @@ def _clinic(config: dict) -> dict:
     return {"id": "clinic-1", "name": "Test Clinic", "config": config}
 
 
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_mock_db():
+    yield
+    if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+        del sys.modules["app.database"]
+
+
 def _context() -> dict:
     return {
         "doctor_name": "Dr. Test",

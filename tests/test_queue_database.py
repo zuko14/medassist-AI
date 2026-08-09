@@ -1,13 +1,28 @@
 """Tests for queue/token database helpers."""
 
+import importlib
+import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.database import check_in_appointment, call_next_patient, get_patient_queue_status
+if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+    del sys.modules["app.database"]
+
+import app.database as app_db
+if not hasattr(app_db, "check_in_appointment"):
+    importlib.reload(app_db)
+
+
+@pytest.fixture(autouse=True)
+def restore_real_database_module():
+    if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+        del sys.modules["app.database"]
+        importlib.import_module("app.database")
 
 
 @pytest.mark.asyncio
 async def test_check_in_appointment_assigns_next_token():
+    import app.database as db
     mock_sb = MagicMock()
     # First select: appt lookup
     mock_appt = [{"doctor_name": "Dr. Rao", "appointment_date": "2026-08-09"}]
@@ -30,8 +45,8 @@ async def test_check_in_appointment_assigns_next_token():
     mock_update.eq.return_value = mock_update
     mock_update.execute.return_value = MagicMock(data=mock_updated)
 
-    with patch("app.database.supabase", mock_sb):
-        result = await check_in_appointment("clinic-1", "appt-1")
+    with patch.object(db, "supabase", mock_sb):
+        result = await db.check_in_appointment("clinic-1", "appt-1")
 
     assert result["token_number"] == 4
     assert result["queue_status"] == "waiting"
@@ -39,6 +54,7 @@ async def test_check_in_appointment_assigns_next_token():
 
 @pytest.mark.asyncio
 async def test_check_in_appointment_first_token_of_day_is_1():
+    import app.database as db
     mock_sb = MagicMock()
     mock_appt = [{"doctor_name": "Dr. Rao", "appointment_date": "2026-08-09"}]
     mock_max = []
@@ -57,14 +73,15 @@ async def test_check_in_appointment_first_token_of_day_is_1():
     mock_update.eq.return_value = mock_update
     mock_update.execute.return_value = MagicMock(data=mock_updated)
 
-    with patch("app.database.supabase", mock_sb):
-        result = await check_in_appointment("clinic-1", "appt-1")
+    with patch.object(db, "supabase", mock_sb):
+        result = await db.check_in_appointment("clinic-1", "appt-1")
 
     assert result["token_number"] == 1
 
 
 @pytest.mark.asyncio
 async def test_get_patient_queue_status_not_checked_in():
+    import app.database as db
     mock_sb = MagicMock()
     mock_select = mock_sb.table.return_value.select.return_value
     mock_select.eq.return_value = mock_select
@@ -72,14 +89,15 @@ async def test_get_patient_queue_status_not_checked_in():
         data=[{"id": "appt-1", "token_number": None, "doctor_name": "Dr. Rao"}]
     )
 
-    with patch("app.database.supabase", mock_sb):
-        result = await get_patient_queue_status("clinic-1", "+919876543210", "2026-08-09")
+    with patch.object(db, "supabase", mock_sb):
+        result = await db.get_patient_queue_status("clinic-1", "+919876543210", "2026-08-09")
 
     assert result["checked_in"] is False
 
 
 @pytest.mark.asyncio
 async def test_call_next_patient_advances_queue():
+    import app.database as db
     mock_sb = MagicMock()
     mock_update = mock_sb.table.return_value.update.return_value
     mock_update.eq.return_value = mock_update
@@ -92,7 +110,7 @@ async def test_call_next_patient_advances_queue():
     mock_select.limit.return_value = mock_select
     mock_select.execute.return_value = MagicMock(data=mock_waiting)
 
-    with patch("app.database.supabase", mock_sb):
-        result = await call_next_patient("clinic-1", "Dr. Rao", "2026-08-09")
+    with patch.object(db, "supabase", mock_sb):
+        result = await db.call_next_patient("clinic-1", "Dr. Rao", "2026-08-09")
 
     assert result["id"] == "appt-2"

@@ -58,6 +58,13 @@ mock_db_module.supabase = mock_supabase
 sys.modules["app.database"] = mock_db_module
 
 
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_mock_db():
+    yield
+    if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+        del sys.modules["app.database"]
+
+
 WEBHOOK_SECRET = "test_webhook_secret_789"
 
 
