@@ -21,7 +21,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import settings
-from app.database import supabase
+from app.database import supabase, check_in_appointment, call_next_patient
 from app.services.tenant import (
     ALL_FEATURES,
     get_clinic_by_id,
@@ -740,6 +740,54 @@ async def cancel_appointment_by_admin(
     except Exception as e:
         logger.error(f"Error cancelling appointment {appointment_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/appointments/{appointment_id}/check-in")
+async def check_in_appointment_endpoint(
+    appointment_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Assign the next OPD token number to an arriving patient."""
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    result = await check_in_appointment(effective_clinic_id, appointment_id)
+    if not result:
+        raise HTTPException(
+            status_code=404, detail="Appointment not found or check-in failed"
+        )
+    await log_admin_action(
+        user=user,
+        action="PATIENT_CHECK_IN",
+        resource_type="appointment",
+        resource_id=appointment_id,
+        details={"token_number": result.get("token_number")},
+    )
+    return result
+
+
+@router.post("/doctors/{doctor_name}/queue/call-next")
+async def call_next_patient_endpoint(
+    doctor_name: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Mark current in_consultation done, and advance the next waiting patient."""
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    result = await call_next_patient(effective_clinic_id, doctor_name, today_str)
+    if not result:
+        return {"message": "No patients waiting in queue"}
+    await log_admin_action(
+        user=user,
+        action="QUEUE_CALL_NEXT",
+        resource_type="appointment",
+        resource_id=result.get("id"),
+        details={
+            "doctor_name": doctor_name,
+            "token_number": result.get("token_number"),
+        },
+    )
+    return result
 
 
 # ═══════ LAB REPORTS ═══════

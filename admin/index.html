@@ -1708,12 +1708,13 @@ async function loadAppointments() {
         if (!data?.length) { el.innerHTML = emptyState('calendar', 'No upcoming appointments'); return; }
         el.innerHTML = `<table>
             <thead><tr>
-                <th>Ref</th><th>Patient</th><th>Doctor</th>
+                <th>Ref</th><th>Token</th><th>Patient</th><th>Doctor</th>
                 <th>Department</th><th>Date</th><th>Time</th>
                 <th>Status</th><th>Action</th>
             </tr></thead>
             <tbody>${data.map(a => `<tr>
                 <td style="color:var(--accent2);font-weight:600;font-family:monospace">${a.booking_ref || '—'}</td>
+                <td>${a.token_number ? `<span style="background:var(--card-bg, #f3f4f6);padding:3px 8px;border-radius:4px;font-weight:700;color:var(--accent,#0ea5e9);">#${a.token_number}</span>` : '<span style="color:var(--text-muted,#9ca3af);">—</span>'}</td>
                 <td>${a.patient_name || a.patient_phone || '—'}</td>
                 <td>${a.doctor_name || '—'}</td>
                 <td>${a.department || '—'}</td>
@@ -1721,13 +1722,24 @@ async function loadAppointments() {
                 <td>${a.appointment_time || '—'}</td>
                 <td>${badge(a.status)}</td>
                 <td>${a.status === 'confirmed' ? 
-                    `<button 
-                        style="background:#fee2e2;color:#dc2626;border:none;
-                               padding:5px 12px;border-radius:6px;cursor:pointer;
-                               font-size:12px;font-weight:600;"
-                        onclick="cancelAppt('${a.id}')">
-                        Cancel
-                    </button>` 
+                    `<div style="display:flex;gap:6px;align-items:center;">
+                        ${!a.token_number ? `
+                            <button 
+                                style="background:var(--accent,#0ea5e9);color:#fff;border:none;
+                                       padding:5px 10px;border-radius:6px;cursor:pointer;
+                                       font-size:12px;font-weight:600;"
+                                onclick="checkInAppt('${a.id}')">
+                                Check In
+                            </button>
+                        ` : `<span style="font-size:11px;font-weight:600;color:var(--text-muted,#6b7280);text-transform:capitalize;">${a.queue_status || 'Waiting'}</span>`}
+                        <button 
+                            style="background:#fee2e2;color:#dc2626;border:none;
+                                   padding:5px 12px;border-radius:6px;cursor:pointer;
+                                   font-size:12px;font-weight:600;"
+                            onclick="cancelAppt('${a.id}')">
+                            Cancel
+                        </button>
+                    </div>` 
                     : '—'}
                 </td>
 
@@ -1966,6 +1978,25 @@ async function cancelAppt(id) {
             loadDashboard();
         } else {
             toast('Failed: ' + (data.detail || data.message || 'Error'), true);
+        }
+    } catch(e) {
+        toast('Error: ' + e.message, true);
+    }
+}
+
+async function checkInAppt(id) {
+    try {
+        const r = await fetch(API + '/admin/appointments/' + id + '/check-in?clinic_id=' + encodeURIComponent(currentClinicId || 'default'), {
+            method: 'POST',
+            headers: { Authorization: auth }
+        });
+        const data = await r.json();
+        if (r.ok && data.token_number) {
+            toast('Checked in! Assigned Token #' + data.token_number);
+            loadAppointments();
+            loadDashboard();
+        } else {
+            toast('Check-in failed: ' + (data.detail || data.message || 'Error'), true);
         }
     } catch(e) {
         toast('Error: ' + e.message, true);
