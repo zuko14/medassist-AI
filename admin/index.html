@@ -857,20 +857,45 @@
                 <div class="form-row">
                     <div class="field">
                         <label>Department</label>
-                        <select id="f-docDept">
-                            <option value="General Medicine">General Medicine</option>
-                            <option value="Cardiology">Cardiology</option>
-                            <option value="Dental">Dental</option>
-                            <option value="Orthopedics">Orthopedics</option>
-                            <option value="Gynecology">Gynecology</option>
-                            <option value="Pediatrics">Pediatrics</option>
-                            <option value="Dermatology">Dermatology</option>
-                            <option value="Ophthalmology">Ophthalmology</option>
-                            <option value="ENT">ENT</option>
-                        </select>
+                        <input list="deptOptions" id="f-docDept" placeholder="Select or type a department">
+                        <datalist id="deptOptions"></datalist>
                     </div>
                     <div class="field"><label>Consultation Fee (₹)</label><input type="number" id="f-docFee" value="500"></div>
                 </div>
+                <div class="form-row">
+                    <div class="field"><label>Morning Start</label><input type="time" id="f-docMornStart" value="09:00"></div>
+                    <div class="field"><label>Morning End</label><input type="time" id="f-docMornEnd" value="12:00"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label>Evening Start</label><input type="time" id="f-docEveStart" value="17:00"></div>
+                    <div class="field"><label>Evening End</label><input type="time" id="f-docEveEnd" value="19:00"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Slot Duration</label>
+                        <select id="f-docDuration">
+                            <option value="10">10 min</option>
+                            <option value="15">15 min</option>
+                            <option value="20">20 min</option>
+                            <option value="30" selected>30 min</option>
+                            <option value="45">45 min</option>
+                            <option value="60">60 min</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Available Days</label>
+                        <div id="f-docDays" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px">
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Mon" checked>Mon</label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Tue" checked>Tue</label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Wed" checked>Wed</label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Thu" checked>Thu</label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Fri" checked>Fri</label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Sat">Sat</label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Sun">Sun</label>
+                        </div>
+                    </div>
+                </div>
+                <div id="docSlotPreview" style="color:var(--text3); font-size:0.8rem; margin:4px 0"></div>
                 <button class="btn btn-accent" id="btn-docSubmit" onclick="submitDoctor()" style="margin-top:6px">Add Doctor</button>
                 <button class="btn" id="btn-docCancel" onclick="resetDoctorForm()" style="margin-top:6px; display:none; background:var(--surface); border:1px solid var(--border)">Cancel</button>
             </div>
@@ -1294,6 +1319,58 @@ const API = window.location.origin;
 let auth = '';
 let doctorCache = [];
 
+const DEPARTMENT_OPTIONS = [
+    'General Medicine', 'Cardiology', 'Cardiothoracic Surgery', 'Neurology', 'Neurosurgery',
+    'Orthopedics', 'Gynecology & Obstetrics', 'Pediatrics', 'Dermatology', 'Ophthalmology',
+    'ENT', 'Dental', 'Urology', 'Nephrology', 'Gastroenterology', 'Endocrinology',
+    'Pulmonology', 'Oncology', 'Psychiatry', 'General Surgery', 'Plastic Surgery',
+    'Radiology', 'Pathology', 'Anesthesiology', 'Emergency Medicine', 'Physiotherapy',
+    'Dietetics & Nutrition', 'Ayurveda', 'Homeopathy', 'IVF & Fertility', 'Rheumatology',
+    'Diabetology', 'Bariatric Surgery', 'Vascular Surgery', 'Andrology', 'Geriatrics',
+    'Sports Medicine',
+];
+
+function populateDeptOptions() {
+    const el = document.getElementById('deptOptions');
+    if (el) {
+        el.innerHTML = DEPARTMENT_OPTIONS.map(d => `<option value="${d}">`).join('');
+    }
+}
+
+function updateSlotPreview() {
+    const toMinutes = (t) => {
+        if (!t || !t.includes(':')) return 0;
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+    };
+    const countSlots = (start, end, dur) => {
+        if (!start || !end || !dur) return 0;
+        const diff = toMinutes(end) - toMinutes(start);
+        return diff > 0 ? Math.floor(diff / dur) : 0;
+    };
+    const durEl = document.getElementById('f-docDuration');
+    const mornStartEl = document.getElementById('f-docMornStart');
+    const mornEndEl = document.getElementById('f-docMornEnd');
+    const eveStartEl = document.getElementById('f-docEveStart');
+    const eveEndEl = document.getElementById('f-docEveEnd');
+    const previewEl = document.getElementById('docSlotPreview');
+    if (!durEl || !previewEl) return;
+
+    const dur = parseInt(durEl.value) || 30;
+    const morn = countSlots(mornStartEl?.value, mornEndEl?.value, dur);
+    const eve = countSlots(eveStartEl?.value, eveEndEl?.value, dur);
+    previewEl.textContent = `→ generates ${morn} morning + ${eve} evening slots`;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    populateDeptOptions();
+    updateSlotPreview();
+    ['f-docMornStart', 'f-docMornEnd', 'f-docEveStart', 'f-docEveEnd', 'f-docDuration'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', updateSlotPreview);
+    });
+});
+
 // ═══════ THEME ═══════
 function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
@@ -1702,13 +1779,20 @@ async function submitDoctor() {
     const spec = document.getElementById('f-docSpec').value.trim();
     if (!name || !spec) { msg('docMsg', 'Please fill in name and specialization', true); return; }
     try {
+        const days = Array.from(document.querySelectorAll('.doc-day-cb:checked')).map(cb => cb.value).join(',');
         const payload = {
             name,
             specialization: spec,
             department: document.getElementById('f-docDept').value,
-            consultation_fee: parseInt(document.getElementById('f-docFee').value) || 500
+            consultation_fee: parseInt(document.getElementById('f-docFee').value) || 500,
+            available_days: days || 'Mon,Tue,Wed,Thu,Fri',
+            morning_start: document.getElementById('f-docMornStart').value || null,
+            morning_end: document.getElementById('f-docMornEnd').value || null,
+            evening_start: document.getElementById('f-docEveStart').value || null,
+            evening_end: document.getElementById('f-docEveEnd').value || null,
+            slot_duration_minutes: parseInt(document.getElementById('f-docDuration').value) || 30,
         };
-        
+
         if (id) {
             await apiPut(`/admin/doctors/${id}`, payload);
             msg('docMsg', '✅ Doctor updated successfully!');
@@ -1716,7 +1800,7 @@ async function submitDoctor() {
             await apiPost('/admin/doctors', payload);
             msg('docMsg', '✅ Doctor added successfully!');
         }
-        
+
         resetDoctorForm();
         loadDoctors();
     } catch (e) { msg('docMsg', id ? 'Failed to update doctor' : 'Failed to add doctor', true); }
@@ -1726,7 +1810,17 @@ function resetDoctorForm() {
     document.getElementById('f-docId').value = '';
     document.getElementById('f-docName').value = '';
     document.getElementById('f-docSpec').value = '';
+    document.getElementById('f-docDept').value = '';
     document.getElementById('f-docFee').value = '500';
+    document.getElementById('f-docMornStart').value = '09:00';
+    document.getElementById('f-docMornEnd').value = '12:00';
+    document.getElementById('f-docEveStart').value = '17:00';
+    document.getElementById('f-docEveEnd').value = '19:00';
+    document.getElementById('f-docDuration').value = '30';
+    document.querySelectorAll('.doc-day-cb').forEach(cb => {
+        cb.checked = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(cb.value);
+    });
+    updateSlotPreview();
     document.getElementById('docFormTitle').innerHTML = '➕ Add New Doctor';
     document.getElementById('btn-docSubmit').textContent = 'Add Doctor';
     document.getElementById('btn-docCancel').style.display = 'none';
@@ -1740,11 +1834,19 @@ window.editDoctor = function(id) {
     document.getElementById('f-docSpec').value = d.specialization || '';
     document.getElementById('f-docDept').value = d.department;
     document.getElementById('f-docFee').value = d.consultation_fee;
-    
+    document.getElementById('f-docMornStart').value = (d.morning_start || '09:00').slice(0, 5);
+    document.getElementById('f-docMornEnd').value = (d.morning_end || '12:00').slice(0, 5);
+    document.getElementById('f-docEveStart').value = (d.evening_start || '17:00').slice(0, 5);
+    document.getElementById('f-docEveEnd').value = (d.evening_end || '19:00').slice(0, 5);
+    document.getElementById('f-docDuration').value = d.slot_duration_minutes || 30;
+    const activeDays = (d.available_days || 'Mon,Tue,Wed,Thu,Fri').split(',');
+    document.querySelectorAll('.doc-day-cb').forEach(cb => { cb.checked = activeDays.includes(cb.value); });
+    updateSlotPreview();
+
     document.getElementById('docFormTitle').innerHTML = '✏️ Edit Doctor Details';
     document.getElementById('btn-docSubmit').textContent = 'Update Doctor';
     document.getElementById('btn-docCancel').style.display = 'inline-block';
-    
+
     document.getElementById('f-docName').focus();
     // Scroll to form if needed
     window.scrollTo({ top: document.getElementById('pg-doctors').offsetTop, behavior: 'smooth' });
