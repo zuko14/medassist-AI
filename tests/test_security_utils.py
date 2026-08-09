@@ -58,5 +58,52 @@ class TestWebhookSignatureFailClosed:
         with patch("app.utils.security.settings") as mock_settings:
             mock_settings.app_env = "production"
             mock_settings.allow_unsigned_webhooks_dev = False
-            result = verify_webhook_signature(b"body", "sha256=wrong", "real_secret")
+            result = verify_webhook_signature(b"body", "sha256=bad", "secret")
         assert result is False
+
+
+class TestPersistentRateLimiterAtomicCheck:
+    def test_check_and_record_uses_single_rpc_call(self):
+        """The atomic path must be ONE round trip (an .rpc() call), not a
+        separate select-then-insert/update — that's the actual fix."""
+        from unittest.mock import MagicMock
+        from app.utils.security import PersistentRateLimiter
+
+        limiter = PersistentRateLimiter(max_attempts=5, window_seconds=60)
+        mock_supabase = MagicMock()
+        mock_supabase.rpc.return_value.execute.return_value = MagicMock(data=3)
+
+        with patch.object(limiter, "_get_supabase", return_value=mock_supabase):
+            is_limited = limiter.check_and_record("1.2.3.4")
+
+        assert is_limited is False  # 3 attempts < max_attempts=5
+        mock_supabase.rpc.assert_called_once_with(
+            "check_and_record_rate_limit",
+            {"p_key": "1.2.3.4", "p_max_attempts": 5, "p_window_seconds": 60},
+        )
+
+    def test_check_and_record_returns_true_when_limit_exceeded(self):
+        from unittest.mock import MagicMock
+        from app.utils.security import PersistentRateLimiter
+
+        limiter = PersistentRateLimiter(max_attempts=5, window_seconds=60)
+        mock_supabase = MagicMock()
+        mock_supabase.rpc.return_value.execute.return_value = MagicMock(data=6)
+
+        with patch.object(limiter, "_get_supabase", return_value=mock_supabase):
+            is_limited = limiter.check_and_record("1.2.3.4")
+
+        assert is_limited is True
+
+    def test_check_and_record_falls_back_to_in_memory_on_rpc_error(self):
+        from unittest.mock import MagicMock
+        from app.utils.security import PersistentRateLimiter
+
+        limiter = PersistentRateLimiter(max_attempts=2, window_seconds=60)
+        mock_supabase = MagicMock()
+        mock_supabase.rpc.side_effect = Exception("rpc not found")
+
+        with patch.object(limiter, "_get_supabase", return_value=mock_supabase):
+            assert limiter.check_and_record("1.2.3.4") is False
+            assert limiter.check_and_record("1.2.3.4") is False
+            assert limiter.check_and_record("1.2.3.4") is True  # 3rd attempt, max=2

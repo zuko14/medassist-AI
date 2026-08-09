@@ -227,6 +227,42 @@ class PersistentRateLimiter:
         # In-memory fallback
         return self._fallback_is_limited(key)
 
+    def check_and_record(self, key: str) -> bool:
+        """Atomically check-and-increment the attempt count in one round trip.
+
+        Fixes a TOCTOU race in the separate is_rate_limited()/record_attempt()
+        pair: under parallelized concurrent attempts, multiple requests could
+        each pass is_rate_limited() before any of their record_attempt()
+        writes landed, allowing more than max_attempts within one window.
+
+        Returns:
+            True if this attempt IS rate-limited (caller should reject it).
+        """
+        supabase = self._get_supabase()
+
+        if supabase and not self._use_fallback:
+            try:
+                result = supabase.rpc(
+                    "check_and_record_rate_limit",
+                    {
+                        "p_key": key,
+                        "p_max_attempts": self.max_attempts,
+                        "p_window_seconds": self.window_seconds,
+                    },
+                ).execute()
+                attempts = result.data
+                return attempts is not None and attempts > self.max_attempts
+            except Exception as e:
+                logger.warning(
+                    f"Supabase check_and_record_rate_limit RPC failed, "
+                    f"using in-memory fallback: {e}"
+                )
+                self._use_fallback = True
+
+        was_limited = self._fallback_is_limited(key)
+        self._fallback[key].append(time.time())
+        return was_limited
+
     def record_attempt(self, key: str) -> None:
         """Record a login attempt."""
         supabase = self._get_supabase()
