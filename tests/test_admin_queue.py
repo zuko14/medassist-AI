@@ -110,3 +110,34 @@ async def test_check_in_appointment_gives_up_after_max_retries():
         result = await check_in_appointment("clinic-1", "appt-1")
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_call_next_patient_retries_if_candidate_already_claimed():
+    """If a concurrent call already claimed the first candidate (guarded
+    UPDATE affects 0 rows), retry with the next waiting patient."""
+    from app.database import call_next_patient
+
+    with patch("app.database.supabase") as mock_sb:
+        mock_table = MagicMock()
+        mock_sb.table.return_value = mock_table
+
+        mock_table.update.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+
+        select_chain = mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value
+        select_chain.execute.side_effect = [
+            MagicMock(data=[{"id": "appt-1", "token_number": 1}]),
+            MagicMock(data=[{"id": "appt-2", "token_number": 2}]),
+        ]
+
+        claim_chain = mock_table.update.return_value.eq.return_value.eq.return_value.eq.return_value
+        claim_chain.execute.side_effect = [
+            MagicMock(data=[]),
+            MagicMock(data=[{"id": "appt-2", "queue_status": "in_consultation"}]),
+        ]
+
+        result = await call_next_patient("clinic-1", "Dr. Rao", "2026-08-10")
+
+    assert result is not None
+    assert result["id"] == "appt-2"
+

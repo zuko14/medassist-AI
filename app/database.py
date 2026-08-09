@@ -646,7 +646,10 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
 
 
 async def call_next_patient(clinic_id: str, doctor_name: str, date_str: str) -> Optional[dict]:
-    """Mark the current in_consultation patient done, and the next waiting patient in_consultation."""
+    """Mark the current in_consultation patient done, and the next waiting
+    patient in_consultation. Race-safe: the claiming UPDATE is conditioned
+    on queue_status still being 'waiting', so a concurrent caller that
+    already claimed the same row causes a retry instead of a double-serve."""
     try:
         supabase.table("appointments").update({"queue_status": "done"}).eq(
             "clinic_id", clinic_id
@@ -654,25 +657,35 @@ async def call_next_patient(clinic_id: str, doctor_name: str, date_str: str) -> 
             "queue_status", "in_consultation"
         ).execute()
 
-        next_result = (
-            supabase.table("appointments")
-            .select("*")
-            .eq("clinic_id", clinic_id)
-            .eq("doctor_name", doctor_name)
-            .eq("appointment_date", date_str)
-            .eq("queue_status", "waiting")
-            .order("token_number")
-            .limit(1)
-            .execute()
-        )
-        if not next_result.data:
-            return None
+        max_retries = 5
+        for _ in range(max_retries):
+            next_result = (
+                supabase.table("appointments")
+                .select("*")
+                .eq("clinic_id", clinic_id)
+                .eq("doctor_name", doctor_name)
+                .eq("appointment_date", date_str)
+                .eq("queue_status", "waiting")
+                .order("token_number")
+                .limit(1)
+                .execute()
+            )
+            if not next_result.data:
+                return None
 
-        next_appt = next_result.data[0]
-        supabase.table("appointments").update({"queue_status": "in_consultation"}).eq(
-            "clinic_id", clinic_id
-        ).eq("id", next_appt["id"]).execute()
-        return next_appt
+            candidate = next_result.data[0]
+            claimed = (
+                supabase.table("appointments")
+                .update({"queue_status": "in_consultation"})
+                .eq("clinic_id", clinic_id)
+                .eq("id", candidate["id"])
+                .eq("queue_status", "waiting")
+                .execute()
+            )
+            if claimed.data:
+                return claimed.data[0]
+
+        return None
     except Exception as e:
         logger.error(f"Error calling next patient: {e}")
         return None

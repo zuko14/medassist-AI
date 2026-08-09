@@ -101,7 +101,9 @@ async def test_call_next_patient_advances_queue():
     mock_sb = MagicMock()
     mock_update = mock_sb.table.return_value.update.return_value
     mock_update.eq.return_value = mock_update
-    mock_update.execute.return_value = MagicMock(data=[])
+    mock_update.execute.return_value = MagicMock(
+        data=[{"id": "appt-2", "token_number": 2, "queue_status": "in_consultation"}]
+    )
 
     mock_waiting = [{"id": "appt-2", "token_number": 2, "queue_status": "waiting"}]
     mock_select = mock_sb.table.return_value.select.return_value
