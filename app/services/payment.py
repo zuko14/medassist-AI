@@ -1191,25 +1191,36 @@ class PaymentService:
     def _log_payment_event_raw(
         self, booking_id: Optional[str], event_type: str, payload: dict
     ) -> None:
-        """Log payment event even when booking_id might be None (e.g. signature failures)."""
+        """Log payment event even when booking_id might be None (e.g. signature failures).
+
+        Orphan events (no booking_id) go to webhook_security_events instead
+        of payment_events, since payment_events.booking_id is a required FK —
+        this keeps signature-failure/spoofing-attempt events queryable in the
+        DB for forensic replay instead of only living in rotated app logs.
+        """
         try:
-            data = {
-                "event_type": event_type,
-                "raw_payload": json.dumps(payload, default=str),
-            }
             if booking_id:
-                data["booking_id"] = booking_id
+                supabase.table("payment_events").insert(
+                    {
+                        "booking_id": booking_id,
+                        "event_type": event_type,
+                        "raw_payload": json.dumps(payload, default=str),
+                    }
+                ).execute()
             else:
-                # Use a sentinel UUID for orphan events — FK requires a value
-                # Instead, just log to application logs since we can't write without a valid FK
-                logger.warning(
-                    f"Payment event without booking_id: {event_type} — {json.dumps(payload, default=str)}"
-                )
-                return
-            supabase.table("payment_events").insert(data).execute()
+                supabase.table("webhook_security_events").insert(
+                    {
+                        "event_type": event_type,
+                        "raw_payload": json.dumps(payload, default=str),
+                    }
+                ).execute()
         except Exception as e:
             logger.error(
                 f"CRITICAL: Failed to write raw payment_event ({event_type}): {e}"
+            )
+            logger.warning(
+                f"Payment event without persisted record: {event_type} — "
+                f"{json.dumps(payload, default=str)}"
             )
 
     async def _notify_payment_confirmed(self, booking: dict) -> None:
