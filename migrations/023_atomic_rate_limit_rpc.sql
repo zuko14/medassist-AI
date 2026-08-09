@@ -11,7 +11,11 @@ CREATE OR REPLACE FUNCTION check_and_record_rate_limit(
     p_key TEXT,
     p_max_attempts INT,
     p_window_seconds INT
-) RETURNS INT AS $$
+) RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     v_attempts INT;
 BEGIN
@@ -32,7 +36,7 @@ BEGIN
 
     RETURN v_attempts;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Verify
 SELECT proname FROM pg_proc WHERE proname = 'check_and_record_rate_limit';

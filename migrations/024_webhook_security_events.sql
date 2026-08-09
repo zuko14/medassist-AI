@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS webhook_security_events (
 CREATE INDEX IF NOT EXISTS idx_webhook_security_events_created_at
     ON webhook_security_events (created_at DESC);
 
+-- Enable RLS and grant service_role full access (used by backend API/Bot)
+ALTER TABLE webhook_security_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role access for webhook_security_events" ON webhook_security_events;
+CREATE POLICY "Service role access for webhook_security_events" ON webhook_security_events
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 -- Verify
 SELECT table_name FROM information_schema.tables
 WHERE table_name = 'webhook_security_events';
