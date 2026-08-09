@@ -14,5 +14,11 @@ CREATE TABLE IF NOT EXISTS family_members (
 CREATE INDEX IF NOT EXISTS idx_family_members_lookup
     ON family_members (clinic_id, primary_phone);
 
+-- Enable RLS and grant service_role access (used by backend API/Bot)
+ALTER TABLE family_members ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role access for family_members" ON family_members;
+CREATE POLICY "Service role access for family_members" ON family_members
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 -- Verify
 SELECT table_name FROM information_schema.tables WHERE table_name = 'family_members';
