@@ -766,12 +766,13 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────────────
 
     async def admin_confirm_booking(
-        self, booking_id: str, admin_notes: str = ""
+        self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
     ) -> dict:
-        """Manually confirm a pending_review booking (admin override)."""
-        booking_result = (
-            supabase.table("appointments").select("*").eq("id", booking_id).execute()
-        )
+        """Manually confirm a pending_review booking (admin override), scoped to clinic_id."""
+        query = supabase.table("appointments").select("*").eq("id", booking_id)
+        if clinic_id and clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        booking_result = query.execute()
 
         if not booking_result.data:
             return {"success": False, "reason": "booking_not_found"}
@@ -805,12 +806,13 @@ class PaymentService:
         return {"success": True}
 
     async def admin_reject_booking(
-        self, booking_id: str, admin_notes: str = ""
+        self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
     ) -> dict:
-        """Manually reject a pending_review booking + initiate refund."""
-        booking_result = (
-            supabase.table("appointments").select("*").eq("id", booking_id).execute()
-        )
+        """Manually reject a pending_review booking + initiate refund, scoped to clinic_id."""
+        query = supabase.table("appointments").select("*").eq("id", booking_id)
+        if clinic_id and clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        booking_result = query.execute()
 
         if not booking_result.data:
             return {"success": False, "reason": "booking_not_found"}

@@ -89,3 +89,50 @@ async def test_get_admin_audit_logs_endpoint():
         assert "audit_logs" in response
         assert len(response["audit_logs"]) == 1
         assert response["audit_logs"][0]["username"] == "dr_smith"
+
+
+@pytest.mark.asyncio
+async def test_admin_confirm_booking_route_scopes_by_clinic():
+    """A clinic_admin scoped to clinic-A cannot confirm a clinic-B booking
+    through the HTTP route — enforce_clinic_access must reject cross-tenant
+    requested_clinic_id before payment_service is even called."""
+    from app.routers.admin import admin_confirm_booking
+    from fastapi import HTTPException
+
+    user = AdminUser(
+        username="staff_a", role="clinic_admin", clinic_id="clinic-A", user_id="u-1"
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_confirm_booking(
+            booking_id="booking-1", clinic_id="clinic-B", body=None, user=user
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_confirm_booking_route_logs_audit_action():
+    """A successful confirm must write an admin_audit_logs entry."""
+    from app.routers.admin import admin_confirm_booking
+
+    user = AdminUser(
+        username="staff_a", role="clinic_admin", clinic_id="clinic-A", user_id="u-1"
+    )
+
+    with patch(
+        "app.services.payment.payment_service.admin_confirm_booking",
+        new_callable=AsyncMock,
+        return_value={"success": True},
+    ), patch(
+        "app.routers.admin.log_admin_action", new_callable=AsyncMock
+    ) as mock_log:
+        result = await admin_confirm_booking(
+            booking_id="booking-1", clinic_id="default", body=None, user=user
+        )
+
+    assert result["success"] is True
+    mock_log.assert_called_once()
+    assert mock_log.call_args.kwargs["action"] == "BOOKING_MANUAL_CONFIRM"
+    assert mock_log.call_args.kwargs["resource_id"] == "booking-1"
+

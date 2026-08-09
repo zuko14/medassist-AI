@@ -590,6 +590,137 @@ class TestRefundFlow:
         assert result["reason"] == "no_payment_to_refund"
 
 
+class TestAdminBookingScoping:
+    """Regression tests for the cross-tenant BOLA fix (Finding #1)."""
+
+    @pytest.mark.asyncio
+    async def test_admin_confirm_booking_rejects_cross_tenant_id(self):
+        """A booking belonging to clinic B must not be confirmable by a
+        request scoped to clinic A — the clinic_id filter must exclude it."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+
+        with patch("app.services.payment.supabase") as mock_sb:
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_select = MagicMock()
+            mock_table.select.return_value = mock_select
+            mock_eq_id = MagicMock()
+            mock_select.eq.return_value = mock_eq_id
+            # .eq("id", booking_id).eq("clinic_id", "clinic-A") -> no rows,
+            # because this booking actually belongs to clinic-B
+            mock_eq_id.eq.return_value.execute.return_value = MagicMock(data=[])
+
+            result = await service.admin_confirm_booking(
+                "booking-owned-by-clinic-b", clinic_id="clinic-A"
+            )
+
+        assert result["success"] is False
+        assert result["reason"] == "booking_not_found"
+
+    @pytest.mark.asyncio
+    async def test_admin_confirm_booking_succeeds_for_own_clinic(self):
+        """Same booking IS confirmable when clinic_id matches."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+        mock_booking = {
+            "id": "booking-1",
+            "clinic_id": "clinic-A",
+            "status": "pending_review",
+            "patient_phone": "+919876543210",
+        }
+
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service, "_increment_patient_visit_count", new_callable=AsyncMock
+        ), patch.object(
+            service, "_notify_payment_confirmed", new_callable=AsyncMock
+        ), patch.object(
+            service, "_log_payment_event"
+        ):
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_select = MagicMock()
+            mock_table.select.return_value = mock_select
+            mock_eq_id = MagicMock()
+            mock_select.eq.return_value = mock_eq_id
+            mock_eq_id.eq.return_value.execute.return_value = MagicMock(
+                data=[mock_booking]
+            )
+            mock_table.update.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[mock_booking])
+            )
+
+            result = await service.admin_confirm_booking(
+                "booking-1", clinic_id="clinic-A"
+            )
+
+        assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_admin_reject_booking_rejects_cross_tenant_id(self):
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+
+        with patch("app.services.payment.supabase") as mock_sb:
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_select = MagicMock()
+            mock_table.select.return_value = mock_select
+            mock_eq_id = MagicMock()
+            mock_select.eq.return_value = mock_eq_id
+            mock_eq_id.eq.return_value.execute.return_value = MagicMock(data=[])
+
+            result = await service.admin_reject_booking(
+                "booking-owned-by-clinic-b", clinic_id="clinic-A"
+            )
+
+        assert result["success"] is False
+        assert result["reason"] == "booking_not_found"
+
+    @pytest.mark.asyncio
+    async def test_admin_confirm_booking_default_clinic_id_is_unscoped(self):
+        """clinic_id='default' (super_admin path) must NOT add a clinic filter —
+        preserves existing super_admin cross-clinic behavior."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+        mock_booking = {
+            "id": "booking-1",
+            "clinic_id": "clinic-A",
+            "status": "pending_review",
+            "patient_phone": "+919876543210",
+        }
+
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service, "_increment_patient_visit_count", new_callable=AsyncMock
+        ), patch.object(
+            service, "_notify_payment_confirmed", new_callable=AsyncMock
+        ), patch.object(
+            service, "_log_payment_event"
+        ):
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_select = MagicMock()
+            mock_table.select.return_value = mock_select
+            # Only ONE .eq() call expected: .eq("id", booking_id) — no clinic filter
+            mock_select.eq.return_value.execute.return_value = MagicMock(
+                data=[mock_booking]
+            )
+            mock_table.update.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[mock_booking])
+            )
+
+            result = await service.admin_confirm_booking(
+                "booking-1", clinic_id="default"
+            )
+
+        assert result["success"] is True
+        mock_select.eq.assert_called_once_with("id", "booking-1")
+
+
 class TestHoldExpiry:
     """Test stale booking expiry and recovery path."""
 

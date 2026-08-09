@@ -1007,45 +1007,69 @@ async def get_pending_review_bookings(
 @router.post("/bookings/{booking_id}/confirm")
 async def admin_confirm_booking(
     booking_id: str,
+    clinic_id: str = "default",
     body: dict = None,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Manually confirm a pending_review booking (admin override)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         from app.services.payment import payment_service
 
         admin_notes = (body or {}).get("admin_notes", f"Confirmed by admin: {user}")
-        result = await payment_service.admin_confirm_booking(booking_id, admin_notes)
+        result = await payment_service.admin_confirm_booking(
+            booking_id, clinic_id=effective_clinic_id, admin_notes=admin_notes
+        )
         if not result["success"]:
-            raise HTTPException(status_code=400, detail=result.get("reason", "Failed"))
+            status_code = 404 if result.get("reason") == "booking_not_found" else 400
+            raise HTTPException(status_code=status_code, detail=result.get("reason", "Failed"))
+        await log_admin_action(
+            user=user,
+            action="BOOKING_MANUAL_CONFIRM",
+            resource_type="appointment",
+            resource_id=booking_id,
+            details={"admin_notes": admin_notes},
+        )
         return result
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Admin confirm booking error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/bookings/{booking_id}/reject")
 async def admin_reject_booking(
     booking_id: str,
+    clinic_id: str = "default",
     body: dict = None,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Manually reject a pending_review booking + initiate refund."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         from app.services.payment import payment_service
 
         admin_notes = (body or {}).get("admin_notes", f"Rejected by admin: {user}")
-        result = await payment_service.admin_reject_booking(booking_id, admin_notes)
+        result = await payment_service.admin_reject_booking(
+            booking_id, clinic_id=effective_clinic_id, admin_notes=admin_notes
+        )
         if not result["success"]:
-            raise HTTPException(status_code=400, detail=result.get("reason", "Failed"))
+            status_code = 404 if result.get("reason") == "booking_not_found" else 400
+            raise HTTPException(status_code=status_code, detail=result.get("reason", "Failed"))
+        await log_admin_action(
+            user=user,
+            action="BOOKING_MANUAL_REJECT",
+            resource_type="appointment",
+            resource_id=booking_id,
+            details={"admin_notes": admin_notes},
+        )
         return result
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Admin reject booking error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/bookings/{booking_id}/refund")
