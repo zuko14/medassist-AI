@@ -1128,25 +1128,28 @@ class ConversationManager:
 
         saved_family = await get_family_members(clinic["id"], phone)
         if saved_family:
-            buttons = [
+            rows = [
                 {
                     "id": "fam_self",
-                    "title": ("For Me" if lang == "en" else ("मेरे लिए" if lang == "hi" else "నా కోసం"))[:20],
+                    "title": ("For Me" if lang == "en" else ("मेरे लिए" if lang == "hi" else "నా కోసం"))[:24],
                 }
             ]
-            for i, m in enumerate(saved_family[:1]):
-                buttons.append({"id": f"fam_{i}", "title": m["full_name"][:20]})
-            buttons.append(
+            for i, m in enumerate(saved_family):
+                rows.append({"id": f"fam_{i}", "title": m["full_name"][:24]})
+            rows.append(
                 {
                     "id": "fam_new",
-                    "title": ("+ Someone Else" if lang == "en" else ("+ अन्य व्यक्ति" if lang == "hi" else "+ వేరొకరు"))[:20],
+                    "title": ("+ Someone Else" if lang == "en" else ("+ अन्य व्यक्ति" if lang == "hi" else "+ వేరొకరు"))[:24],
                 }
             )
-            await self.whatsapp.send_interactive_buttons(
+            await self.whatsapp.send_interactive_list(
                 clinic,
                 phone,
                 body=msg_str,
-                buttons=buttons,
+                button_text=(
+                    "Select" if lang == "en" else ("चुनें" if lang == "hi" else "ఎంచుకోండి")
+                ),
+                sections=[{"rows": rows}],
             )
             await self.update_state(
                 clinic,
