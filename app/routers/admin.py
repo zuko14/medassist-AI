@@ -1250,7 +1250,11 @@ async def update_payment_settings(
     require_feature(clinic, "payments_razorpay")
 
     cfg = dict(clinic.get("config") or {})
-    updates = body.dict(exclude_unset=True)
+    updates = (
+        body.model_dump(exclude_unset=True)
+        if hasattr(body, "model_dump")
+        else body.dict(exclude_unset=True)
+    )
 
     for key in ("razorpay_key_id", "razorpay_key_secret", "razorpay_webhook_secret"):
         if key in updates and updates[key] and updates[key].strip():
@@ -1274,24 +1278,64 @@ async def update_payment_settings(
             detail="payment_deposit_percent (1-99) is required when payment_mode is 'partial'",
         )
 
-    result = (
-        supabase.table("clinics")
-        .update({"config": cfg})
-        .eq("id", effective_clinic_id)
-        .execute()
-    )
-    if not result.data:
-        raise HTTPException(status_code=404, detail="Clinic not found")
+    target_clinic_id = clinic.get("id")
+    if not target_clinic_id or target_clinic_id == "default":
+        # Check if any clinic exists in DB
+        db_clinics = (
+            supabase.table("clinics")
+            .select("*")
+            .order("created_at")
+            .limit(1)
+            .execute()
+        )
+        if db_clinics.data:
+            target_clinic_id = db_clinics.data[0]["id"]
+            result = (
+                supabase.table("clinics")
+                .update({"config": cfg})
+                .eq("id", target_clinic_id)
+                .execute()
+            )
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Clinic not found")
+            updated_clinic = result.data[0]
+        else:
+            # First-time setup: initialize default clinic record
+            insert_res = (
+                supabase.table("clinics")
+                .insert({
+                    "name": settings.hospital_name,
+                    "whatsapp_number": settings.hospital_phone,
+                    "plan": "enterprise",
+                    "config": cfg,
+                })
+                .execute()
+            )
+            if not insert_res.data:
+                raise HTTPException(
+                    status_code=500, detail="Failed to initialize default clinic settings"
+                )
+            updated_clinic = insert_res.data[0]
+            target_clinic_id = updated_clinic["id"]
+    else:
+        result = (
+            supabase.table("clinics")
+            .update({"config": cfg})
+            .eq("id", target_clinic_id)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Clinic not found")
+        updated_clinic = result.data[0]
 
-    updated_clinic = result.data[0]
-    invalidate_tenant_cache(updated_clinic["whatsapp_number"])
+    invalidate_tenant_cache(updated_clinic.get("whatsapp_number"))
 
     client_ip = request.client.host if request.client else "unknown"
     await log_admin_action(
         user=user,
         action="update_payment_settings",
         resource_type="clinic_config",
-        resource_id=effective_clinic_id,
+        resource_id=target_clinic_id,
         details={
             "payment_mode": cfg.get("payment_mode"),
             "razorpay_configured": bool(cfg.get("razorpay_key_id")),

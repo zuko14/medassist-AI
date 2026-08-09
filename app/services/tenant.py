@@ -123,7 +123,7 @@ def _build_fallback_clinic() -> dict:
         "id": "default",
         "name": settings.hospital_name,
         "whatsapp_number": settings.hospital_phone,
-        "plan": "pro",
+        "plan": "enterprise",
         "is_active": True,
         "config": {
             "meta_phone_number_id": settings.whatsapp_phone_number_id,
