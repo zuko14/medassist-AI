@@ -1745,9 +1745,11 @@ class ConversationManager:
             dept_names = ["General Medicine"]
 
         rows = []
+        dept_options = {}
         for d in dept_names[:10]:  # limit to 10 for interactive list
             dept_id = f"dept_{d.lower().replace(' ', '_')}"
             rows.append({"id": dept_id, "title": d[:24], "description": ""})
+            dept_options[dept_id] = d
 
         sections = [{"title": "Departments", "rows": rows}]
 
@@ -1766,7 +1768,10 @@ class ConversationManager:
             sections=sections,
         )
 
-        merged_context = {**context}
+        # Store the actual dept_id -> department name mapping used for this
+        # list, since department names vary per clinic (up to 37 specialties)
+        # and can't all fit in a fixed lookup table.
+        merged_context = {**context, "dept_options": dept_options}
         await self.update_state(clinic, phone, "selecting_department", merged_context)
 
     async def _handle_selecting_department(
@@ -1802,7 +1807,15 @@ class ConversationManager:
                 "svc_ent": "ENT",
                 "svc_derma": "Dermatology",
             }
-            department = DEPT_MAP.get(button_id, "General Medicine")
+            # Dynamically-listed departments (dept_*) are resolved from the
+            # mapping stored when the list was shown, since a clinic can have
+            # up to 37 specialties — far more than DEPT_MAP's fixed entries
+            # cover. svc_* ids come from the fixed quick-service menu, which
+            # DEPT_MAP does cover exhaustively.
+            dept_options = context.get("dept_options") or {}
+            department = dept_options.get(button_id) or DEPT_MAP.get(
+                button_id, "General Medicine"
+            )
 
             # Fetch doctors for selected department
             from app.database import supabase

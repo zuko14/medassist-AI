@@ -35,6 +35,51 @@ async def test_check_in_endpoint_assigns_token():
 
 
 @pytest.mark.asyncio
+async def test_check_in_notifies_patient_of_token_over_whatsapp():
+    """Front desk check-in must push the token to the patient, not just show
+    it in the admin UI — patients shouldn't have to text 'queue status' to
+    learn their own OPD token number."""
+    user = AdminUser(username="admin", role="super_admin", clinic_id="c1")
+    queue_status = {
+        "checked_in": True,
+        "token_number": 5,
+        "doctor_name": "Dr. Rao",
+        "currently_serving": 3,
+        "patients_ahead": 2,
+    }
+    with patch(
+        "app.routers.admin.check_in_appointment",
+        new_callable=AsyncMock,
+        return_value={
+            "id": "appt-1",
+            "token_number": 5,
+            "queue_status": "waiting",
+            "patient_phone": "+919876543210",
+        },
+    ), patch(
+        "app.routers.admin.get_patient_queue_status",
+        new_callable=AsyncMock,
+        return_value=queue_status,
+    ), patch(
+        "app.routers.admin.get_clinic_by_id",
+        new_callable=AsyncMock,
+        return_value={"id": "c1", "name": "Default"},
+    ), patch(
+        "app.services.whatsapp.whatsapp_service.send_text", new_callable=AsyncMock
+    ) as mock_send:
+        await check_in_appointment_endpoint(
+            appointment_id="appt-1",
+            clinic_id="default",
+            user=user,
+        )
+
+    mock_send.assert_awaited_once()
+    args, _ = mock_send.call_args
+    assert args[1] == "+919876543210"
+    assert "5" in args[2]
+
+
+@pytest.mark.asyncio
 async def test_call_next_endpoint_advances_queue():
     user = AdminUser(username="admin", role="super_admin", clinic_id="c1")
     with patch(
@@ -55,6 +100,42 @@ async def test_call_next_endpoint_advances_queue():
 
     assert result["token_number"] == 2
     assert result["queue_status"] == "in_consultation"
+
+
+@pytest.mark.asyncio
+async def test_call_next_notifies_patient_of_their_turn_over_whatsapp():
+    """Advancing the queue must push a 'your turn now' WhatsApp message to the
+    newly-called patient, not just update the admin UI — mirrors the check-in
+    notification fix."""
+    user = AdminUser(username="admin", role="super_admin", clinic_id="c1")
+    with patch(
+        "app.routers.admin.call_next_patient",
+        new_callable=AsyncMock,
+        return_value={
+            "id": "appt-2",
+            "token_number": 2,
+            "queue_status": "in_consultation",
+            "patient_phone": "+919876543210",
+            "doctor_name": "Dr. Rao",
+            "clinic_id": "c1",
+        },
+    ), patch(
+        "app.routers.admin.get_clinic_by_id",
+        new_callable=AsyncMock,
+        return_value={"id": "c1", "name": "Default"},
+    ), patch(
+        "app.services.whatsapp.whatsapp_service.send_text", new_callable=AsyncMock
+    ) as mock_send:
+        await call_next_patient_endpoint(
+            doctor_name="Dr. Rao",
+            clinic_id="default",
+            user=user,
+        )
+
+    mock_send.assert_awaited_once()
+    args, _ = mock_send.call_args
+    assert args[1] == "+919876543210"
+    assert "2" in args[2]
 
 
 @pytest.mark.asyncio

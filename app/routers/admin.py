@@ -21,7 +21,12 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import settings
-from app.database import supabase, check_in_appointment, call_next_patient
+from app.database import (
+    supabase,
+    check_in_appointment,
+    call_next_patient,
+    get_patient_queue_status,
+)
 from app.services.tenant import (
     ALL_FEATURES,
     get_clinic_by_id,
@@ -760,7 +765,36 @@ async def check_in_appointment_endpoint(
         resource_id=appointment_id,
         details={"token_number": result.get("token_number")},
     )
+    await _notify_patient_checked_in(effective_clinic_id, result)
     return result
+
+
+async def _notify_patient_checked_in(clinic_id: str, appointment: dict) -> None:
+    """Push the assigned OPD token to the patient over WhatsApp immediately
+    on check-in, instead of relying on them to text 'queue status' to find out."""
+    try:
+        from app.services.whatsapp import whatsapp_service
+        from app.templates.whatsapp_templates import get_message
+
+        phone = appointment.get("patient_phone")
+        if not phone:
+            return
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        status = await get_patient_queue_status(clinic_id, phone, today_str)
+        if not status or not status.get("checked_in"):
+            return
+        clinic = await get_clinic_by_id(clinic_id)
+        msg = get_message(
+            "queue_status_waiting",
+            "en",
+            token=status["token_number"],
+            doctor=status["doctor_name"],
+            current=status["currently_serving"],
+            ahead=status["patients_ahead"],
+        )
+        await whatsapp_service.send_text(clinic, phone, msg)
+    except Exception as e:
+        logger.error(f"Failed to send check-in token notification: {e}")
 
 
 @router.post("/doctors/{doctor_name}/queue/call-next")
@@ -785,7 +819,32 @@ async def call_next_patient_endpoint(
             "token_number": result.get("token_number"),
         },
     )
+    await _notify_patient_its_turn(result)
     return result
+
+
+async def _notify_patient_its_turn(appointment: dict) -> None:
+    """Tell the newly-advanced patient over WhatsApp that it's their turn now,
+    mirroring _notify_patient_checked_in — the queue result row already has
+    everything needed (patient_phone, doctor_name, token_number), so no extra
+    DB round-trip is required."""
+    try:
+        from app.services.whatsapp import whatsapp_service
+        from app.templates.whatsapp_templates import get_message
+
+        phone = appointment.get("patient_phone")
+        if not phone:
+            return
+        clinic = await get_clinic_by_id(appointment.get("clinic_id"))
+        msg = get_message(
+            "queue_your_turn",
+            "en",
+            token=appointment.get("token_number"),
+            doctor=appointment.get("doctor_name"),
+        )
+        await whatsapp_service.send_text(clinic, phone, msg)
+    except Exception as e:
+        logger.error(f"Failed to send call-next turn notification: {e}")
 
 
 # ═══════ LAB REPORTS ═══════
