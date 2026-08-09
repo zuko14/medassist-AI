@@ -389,6 +389,11 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     "Content-Security-Policy": (
         "default-src 'self'; "
+        # 'unsafe-inline' required: admin/index.html is a single static file
+        # with inline <script>/onclick handlers, not templated — extracting
+        # to external JS is a larger refactor than this fix warrants. CSP
+        # still blocks all THIRD-PARTY script sources, which is the main
+        # protection this header provides.
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
