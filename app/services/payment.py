@@ -189,57 +189,55 @@ class PaymentService:
             logger.error(f"Booking insert failed: {e}")
             return {"success": False, "reason": "error"}
 
-        # ── Create Razorpay Order ──
+        # ── Create Razorpay Payment Link ──
+        # (Payment Links attach captured payments to a payment_link_id, not
+        # an order_id — no separate Order object is needed for this flow.)
         try:
-            order = await self._create_razorpay_order(
+            link = await self._create_payment_link(
                 amount_paise=amount_paise,
                 booking_id=booking_id,
                 booking_ref=booking_ref,
                 patient_phone=patient_phone,
+                patient_name=patient_name,
                 key_id=key_id,
                 key_secret=key_secret,
             )
 
-            razorpay_order_id = order["id"]
+            payment_link_id = link["id"]
+            payment_link = link["short_url"]
 
-            # Update booking with Razorpay order ID
             supabase.table("appointments").update(
-                {"razorpay_order_id": razorpay_order_id}
+                {"razorpay_payment_link_id": payment_link_id}
             ).eq("id", booking_id).execute()
 
-            # Log audit event
             self._log_payment_event(
                 booking_id,
-                "order_created",
+                "payment_link_created",
                 {
-                    "razorpay_order_id": razorpay_order_id,
+                    "razorpay_payment_link_id": payment_link_id,
                     "amount_paise": amount_paise,
                     "booking_ref": booking_ref,
                 },
             )
 
-            # Build the payment link
-            payment_link = self._build_payment_link(razorpay_order_id, key_id=key_id)
-
             return {
                 "success": True,
                 "booking_id": booking_id,
                 "booking_ref": booking_ref,
-                "razorpay_order_id": razorpay_order_id,
+                "razorpay_payment_link_id": payment_link_id,
                 "payment_link": payment_link,
                 "amount_paise": amount_paise,
                 "hold_expires_at": hold_expires_at,
             }
 
         except Exception as e:
-            # Razorpay order creation failed — clean up the booking
-            logger.error(f"Razorpay order creation failed: {e}")
+            logger.error(f"Razorpay payment link creation failed: {e}")
             try:
                 supabase.table("appointments").update({"status": "cancelled"}).eq(
                     "id", booking_id
                 ).execute()
                 self._log_payment_event(
-                    booking_id, "order_creation_failed", {"error": str(e)[:500]}
+                    booking_id, "payment_link_creation_failed", {"error": str(e)[:500]}
                 )
             except Exception:
                 pass
@@ -347,25 +345,14 @@ class PaymentService:
         # ── Step 3: Extract payment details ──
         payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
         payment_id = payment_entity.get("id")
-        order_id = payment_entity.get("order_id")
         amount_paid = payment_entity.get("amount")  # in paise
         notes = payment_entity.get("notes", {})
 
-        if not payment_id or not order_id:
-            logger.error("Razorpay webhook: missing payment_id or order_id")
+        if not payment_id:
+            logger.error("Razorpay webhook: missing payment_id")
             return {"status": "error", "code": 400, "reason": "missing_fields"}
 
         # ── Step 4: Idempotency check ──
-        # If this payment_id was already processed, return 200 and do nothing.
-        existing_event = (
-            supabase.table("payment_events")
-            .select("id")
-            .eq("event_type", "confirmed")
-            .eq("raw_payload->>payment_id", payment_id)
-            .execute()
-        )
-
-        # Alternative idempotency: check if any confirmed event has this payment_id
         existing_confirmed = (
             supabase.table("appointments")
             .select("id")
@@ -381,15 +368,22 @@ class PaymentService:
             return {"status": "ok", "code": 200, "reason": "already_processed"}
 
         # ── Step 5: Look up booking ──
-        booking_result = (
-            supabase.table("appointments")
-            .select("*")
-            .eq("razorpay_order_id", order_id)
-            .execute()
+        # Payment Links attach to payment_link_id — match on that first,
+        # with the notes.booking_id fallback for defense-in-depth.
+        payment_link_id = (
+            payload.get("payload", {}).get("payment_link", {}).get("entity", {}).get("id")
         )
 
-        if not booking_result.data:
-            # Try via notes.booking_id fallback
+        booking_result = None
+        if payment_link_id:
+            booking_result = (
+                supabase.table("appointments")
+                .select("*")
+                .eq("razorpay_payment_link_id", payment_link_id)
+                .execute()
+            )
+
+        if not booking_result or not booking_result.data:
             booking_id_from_notes = notes.get("booking_id")
             if booking_id_from_notes:
                 booking_result = (
@@ -399,14 +393,16 @@ class PaymentService:
                     .execute()
                 )
 
-        if not booking_result.data:
-            logger.error(f"Razorpay webhook: no booking found for order {order_id}")
+        if not booking_result or not booking_result.data:
+            logger.error(
+                f"Razorpay webhook: no booking found for payment_link {payment_link_id}"
+            )
             self._log_payment_event_raw(
                 None,
                 "webhook_received",
                 {
                     "payment_id": payment_id,
-                    "order_id": order_id,
+                    "payment_link_id": payment_link_id,
                     "error": "no_booking_found",
                     "raw": payload,
                 },
@@ -422,7 +418,7 @@ class PaymentService:
             "webhook_received",
             {
                 "payment_id": payment_id,
-                "order_id": order_id,
+                "payment_link_id": payment_link_id,
                 "amount_paid": amount_paid,
             },
         )
@@ -1028,20 +1024,48 @@ class PaymentService:
             response.raise_for_status()
             return response.json()
 
-    def _build_payment_link(self, order_id: str, key_id: str = "") -> str:
-        """Build the Razorpay checkout payment link.
+    async def _create_payment_link(
+        self,
+        amount_paise: int,
+        booking_id: str,
+        booking_ref: str,
+        patient_phone: str,
+        patient_name: str,
+        key_id: str = "",
+        key_secret: str = "",
+    ) -> dict:
+        """Create a Razorpay Payment Link — a real hosted checkout page.
 
-        For WhatsApp, we use a hosted checkout page URL that includes
-        the order ID. The patient opens this in their mobile browser.
-
-        Args:
-            key_id: Per-clinic key ID. Falls back to settings if empty.
+        Unlike the old `checkout/embedded` API endpoint (which requires
+        Razorpay's checkout.js to render and is NOT a standalone browsable
+        page), this returns a short_url (rzp.io/i/xxxxx) that works when
+        tapped directly from a WhatsApp message on a mobile browser.
         """
         effective_key_id = key_id or settings.razorpay_key_id
-        return (
-            f"https://api.razorpay.com/v1/checkout/embedded?"
-            f"key_id={effective_key_id}&order_id={order_id}"
-        )
+        effective_key_secret = key_secret or settings.razorpay_key_secret
+
+        link_data = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "accept_partial": False,
+            "description": f"Appointment booking {booking_ref}",
+            "customer": {
+                "name": patient_name,
+                "contact": patient_phone,
+            },
+            "notify": {"sms": False, "email": False},
+            "reference_id": booking_ref,
+            "notes": {"booking_id": booking_id, "booking_ref": booking_ref},
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self._razorpay_base}/payment_links",
+                json=link_data,
+                auth=(effective_key_id, effective_key_secret),
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            return response.json()
 
     async def _check_razorpay_order_status(
         self,

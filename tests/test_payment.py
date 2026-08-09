@@ -79,9 +79,10 @@ def _make_payment_webhook_payload(
     amount: int = 50000,
     booking_id: str = "test-booking-uuid",
     event: str = "payment.captured",
+    payment_link_id: str = "plink_test123",
 ) -> dict:
     """Build a Razorpay webhook payload for testing."""
-    return {
+    payload = {
         "event": event,
         "payload": {
             "payment": {
@@ -100,6 +101,13 @@ def _make_payment_webhook_payload(
             }
         },
     }
+    if payment_link_id:
+        payload["payload"]["payment_link"] = {
+            "entity": {
+                "id": payment_link_id,
+            }
+        }
+    return payload
 
 
 class TestResolvePaymentMode:
@@ -425,15 +433,15 @@ class TestBookingCreation:
         service = PaymentService()
 
         mock_booking = {"id": "new-booking-uuid", "booking_ref": "MC-2026-5678"}
-        mock_order = {"id": "order_new_test"}
+        mock_link = {"id": "plink_new_test", "short_url": "https://rzp.io/i/test1"}
 
         with patch("app.services.payment.supabase") as mock_sb, patch.object(
             service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
         ), patch.object(
             service,
-            "_create_razorpay_order",
+            "_create_payment_link",
             new_callable=AsyncMock,
-            return_value=mock_order,
+            return_value=mock_link,
         ), patch.object(
             service, "_log_payment_event"
         ):
@@ -457,7 +465,7 @@ class TestBookingCreation:
             )
 
         assert result["success"] is True
-        assert result["razorpay_order_id"] == "order_new_test"
+        assert result["razorpay_payment_link_id"] == "plink_new_test"
         assert result["amount_paise"] == 50000
         assert "payment_link" in result
 
@@ -469,15 +477,15 @@ class TestBookingCreation:
         service = PaymentService()
 
         mock_booking = {"id": "new-booking-uuid", "booking_ref": "MC-2026-5679"}
-        mock_order = {"id": "order_partial_test"}
+        mock_link = {"id": "plink_partial_test", "short_url": "https://rzp.io/i/test2"}
 
         with patch("app.services.payment.supabase") as mock_sb, patch.object(
             service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
         ), patch.object(
             service,
-            "_create_razorpay_order",
+            "_create_payment_link",
             new_callable=AsyncMock,
-            return_value=mock_order,
+            return_value=mock_link,
         ), patch.object(
             service, "_log_payment_event"
         ):
@@ -513,15 +521,15 @@ class TestBookingCreation:
         service = PaymentService()
 
         mock_booking = {"id": "new-booking-uuid", "booking_ref": "MC-2026-5680"}
-        mock_order = {"id": "order_full_test"}
+        mock_link = {"id": "plink_full_test", "short_url": "https://rzp.io/i/test3"}
 
         with patch("app.services.payment.supabase") as mock_sb, patch.object(
             service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
         ), patch.object(
             service,
-            "_create_razorpay_order",
+            "_create_payment_link",
             new_callable=AsyncMock,
-            return_value=mock_order,
+            return_value=mock_link,
         ), patch.object(
             service, "_log_payment_event"
         ):
@@ -545,6 +553,83 @@ class TestBookingCreation:
             )
 
         assert result["amount_paise"] == 50000
+
+
+class TestPaymentLinkGeneration:
+    """Regression tests for the broken checkout-URL fix (Finding #5)."""
+
+    @pytest.mark.asyncio
+    async def test_create_payment_link_returns_hosted_short_url(self):
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "id": "plink_test123",
+            "short_url": "https://rzp.io/i/abc123",
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+            result = await service._create_payment_link(
+                amount_paise=50000,
+                booking_id="booking-1",
+                booking_ref="MC-2026-1234",
+                patient_phone="+919876543210",
+                patient_name="Ramesh Sharma",
+                key_id="rzp_test_key123",
+                key_secret="rzp_test_secret456",
+            )
+
+        assert result["short_url"] == "https://rzp.io/i/abc123"
+        assert result["id"] == "plink_test123"
+        call_kwargs = mock_client.post.call_args
+        assert "payment_links" in call_kwargs.args[0]
+        assert call_kwargs.kwargs["json"]["amount"] == 50000
+        assert call_kwargs.kwargs["json"]["reference_id"] == "MC-2026-1234"
+
+    @pytest.mark.asyncio
+    async def test_booking_with_payment_returns_rzp_io_link_not_api_endpoint(self):
+        """End-to-end: the payment_link returned to the patient must be a
+        real hosted page, never the old api.razorpay.com/v1/... API URL."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+
+        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+            service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
+        ), patch.object(
+            service,
+            "_create_payment_link",
+            new_callable=AsyncMock,
+            return_value={"id": "plink_1", "short_url": "https://rzp.io/i/xyz"},
+        ):
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_table.insert.return_value.execute.return_value = MagicMock(
+                data=[{"id": "booking-1"}]
+            )
+            mock_table.update.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
+
+            result = await service.create_booking_with_payment(
+                clinic_id="test-clinic",
+                patient_phone="+919876543210",
+                patient_name="Ramesh Sharma",
+                department="Cardiology",
+                doctor_name="Dr. Rao",
+                appointment_date="2026-08-10",
+                appointment_time="10:00",
+            )
+
+        assert result["success"] is True
+        assert result["payment_link"] == "https://rzp.io/i/xyz"
+        assert "api.razorpay.com" not in result["payment_link"]
 
 
 class TestRefundFlow:
