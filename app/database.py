@@ -699,3 +699,41 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
     except Exception as e:
         logger.error(f"Error getting patient queue status: {e}")
         return None
+
+
+async def get_family_members(clinic_id: str, primary_phone: str) -> list:
+    """Return all family members registered under a primary phone number."""
+    try:
+        result = (
+            supabase.table("family_members")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("primary_phone", primary_phone)
+            .order("created_at")
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.error(f"Error getting family members: {e}")
+        return []
+
+
+async def add_family_member(
+    clinic_id: str,
+    primary_phone: str,
+    full_name: str,
+    relationship: Optional[str] = None,
+) -> Optional[dict]:
+    """Save a family member / dependent profile."""
+    try:
+        data = {
+            "clinic_id": clinic_id,
+            "primary_phone": primary_phone,
+            "full_name": full_name,
+            "relationship": relationship,
+        }
+        result = supabase.table("family_members").insert(data).execute()
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.error(f"Error adding family member: {e}")
+        return None
