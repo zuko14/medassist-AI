@@ -578,3 +578,124 @@ async def delete_patient_data(clinic_id: str, phone: str) -> bool:
     except Exception as e:
         logger.error(f"Error in tiered data deletion: {e}")
         return False
+
+
+async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[dict]:
+    """Assign the next sequential token number for this appointment's doctor+date."""
+    try:
+        appt_result = (
+            supabase.table("appointments")
+            .select("doctor_name, appointment_date")
+            .eq("clinic_id", clinic_id)
+            .eq("id", appointment_id)
+            .execute()
+        )
+        if not appt_result.data:
+            return None
+        doctor_name = appt_result.data[0]["doctor_name"]
+        appointment_date = appt_result.data[0]["appointment_date"]
+
+        max_result = (
+            supabase.table("appointments")
+            .select("token_number")
+            .eq("clinic_id", clinic_id)
+            .eq("doctor_name", doctor_name)
+            .eq("appointment_date", appointment_date)
+            .order("token_number", desc=True)
+            .limit(1)
+            .execute()
+        )
+        current_max = max_result.data[0]["token_number"] if max_result.data and max_result.data[0]["token_number"] else 0
+        next_token = current_max + 1
+
+        result = (
+            supabase.table("appointments")
+            .update({"token_number": next_token, "queue_status": "waiting"})
+            .eq("clinic_id", clinic_id)
+            .eq("id", appointment_id)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.error(f"Error checking in appointment: {e}")
+        return None
+
+
+async def call_next_patient(clinic_id: str, doctor_name: str, date_str: str) -> Optional[dict]:
+    """Mark the current in_consultation patient done, and the next waiting patient in_consultation."""
+    try:
+        supabase.table("appointments").update({"queue_status": "done"}).eq(
+            "clinic_id", clinic_id
+        ).eq("doctor_name", doctor_name).eq("appointment_date", date_str).eq(
+            "queue_status", "in_consultation"
+        ).execute()
+
+        next_result = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("doctor_name", doctor_name)
+            .eq("appointment_date", date_str)
+            .eq("queue_status", "waiting")
+            .order("token_number")
+            .limit(1)
+            .execute()
+        )
+        if not next_result.data:
+            return None
+
+        next_appt = next_result.data[0]
+        supabase.table("appointments").update({"queue_status": "in_consultation"}).eq(
+            "clinic_id", clinic_id
+        ).eq("id", next_appt["id"]).execute()
+        return next_appt
+    except Exception as e:
+        logger.error(f"Error calling next patient: {e}")
+        return None
+
+
+async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) -> Optional[dict]:
+    """Look up a patient's queue position for today's appointment."""
+    try:
+        result = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("patient_phone", phone)
+            .eq("appointment_date", date_str)
+            .eq("status", "confirmed")
+            .execute()
+        )
+        if not result.data:
+            return None
+
+        appt = result.data[0]
+        if not appt.get("token_number"):
+            return {"checked_in": False, "doctor_name": appt.get("doctor_name")}
+
+        serving_result = (
+            supabase.table("appointments")
+            .select("token_number")
+            .eq("clinic_id", clinic_id)
+            .eq("doctor_name", appt["doctor_name"])
+            .eq("appointment_date", date_str)
+            .in_("queue_status", ["waiting", "in_consultation"])
+            .order("token_number")
+            .limit(1)
+            .execute()
+        )
+        currently_serving = (
+            serving_result.data[0]["token_number"] if serving_result.data else appt["token_number"]
+        )
+        patients_ahead = max(0, appt["token_number"] - currently_serving)
+
+        return {
+            "checked_in": True,
+            "token_number": appt["token_number"],
+            "currently_serving": currently_serving,
+            "patients_ahead": patients_ahead,
+            "doctor_name": appt["doctor_name"],
+        }
+    except Exception as e:
+        logger.error(f"Error getting patient queue status: {e}")
+        return None
