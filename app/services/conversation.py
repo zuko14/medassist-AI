@@ -393,6 +393,10 @@ class ConversationManager:
                 intent = "accept_suggestion"
             elif button_id == "suggest_no":
                 intent = "reject_suggestion"
+            elif button_id == "checkin_concern":
+                intent = "health_checkin_concern"
+            elif button_id == "checkin_ok":
+                intent = "health_checkin_ok"
             elif button_id == "edit_doctor":
                 intent = "edit_doctor"
             elif button_id == "edit_date":
@@ -559,6 +563,14 @@ class ConversationManager:
         # Emergency can trigger from ANY state
         if intent == "emergency":
             await self._handle_emergency(clinic, phone, lang)
+            return
+
+        if intent == "health_checkin_concern":
+            await self._handle_health_checkin_concern(clinic, phone, lang)
+            return
+
+        if intent == "health_checkin_ok":
+            await self._handle_health_checkin_ok(clinic, phone, lang)
             return
 
         # Opt-out can trigger from ANY state
@@ -2695,6 +2707,19 @@ class ConversationManager:
 
         await self.update_state(clinic, phone, "main_menu")
         await log_analytics_event(clinic["id"], phone, "emergency_detected")
+
+    async def _handle_health_checkin_concern(
+        self, clinic: dict, phone: str, lang: str
+    ) -> None:
+        """Patient reported ongoing symptoms in a post-discharge check-in."""
+        await self.whatsapp.send_text(
+            clinic, phone, get_message("health_checkin_concern", lang, phone=clinic["whatsapp_number"])
+        )
+        await log_analytics_event(clinic["id"], phone, "discharge_checkin_concern")
+
+    async def _handle_health_checkin_ok(self, clinic: dict, phone: str, lang: str) -> None:
+        """Patient confirmed they're feeling fine in a post-discharge check-in."""
+        await self.whatsapp.send_text(clinic, phone, get_message("health_checkin_ok", lang))
 
     async def _handle_opt_out(
         self, clinic: dict, phone: str, patient: dict, lang: str
