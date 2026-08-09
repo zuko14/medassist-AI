@@ -56,6 +56,14 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # Post-discharge health check-ins (day+3, day+7 — runs daily at 10:30 AM)
+        self.scheduler.add_job(
+            self.send_health_checkins,
+            CronTrigger(hour=10, minute=30),
+            id="health_checkins",
+            replace_existing=True,
+        )
+
         # Check doctor leaves (runs daily at 8 AM)
         self.scheduler.add_job(
             self.check_doctor_leaves,
@@ -282,6 +290,66 @@ class SchedulerService:
 
         except Exception as e:
             logger.error(f"Error in followup job: {e}")
+
+    async def send_health_checkins(self):
+        """Send day+3 and day+7 post-discharge health check-ins.
+
+        Distinct from send_followups (same-day satisfaction survey) —
+        this is a clinical safety check, tracked via separate flags
+        (health_checkin_3d_sent / health_checkin_7d_sent). Uses interactive
+        buttons ("Feeling fine" / "Still have symptoms") so replies route
+        through the intent system rather than free text.
+        """
+        for offset_days, flag_field in [(3, "health_checkin_3d_sent"), (7, "health_checkin_7d_sent")]:
+            try:
+                target_date = (datetime.now() - timedelta(days=offset_days)).strftime("%Y-%m-%d")
+
+                appointments = (
+                    supabase.table("appointments")
+                    .select("*")
+                    .eq("appointment_date", target_date)
+                    .eq("status", "confirmed")
+                    .eq(flag_field, False)
+                    .execute()
+                )
+
+                for appt in appointments.data:
+                    try:
+                        clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                        lang = "en"  # patient language isn't stored on appointments; default to English
+
+                        from app.templates.whatsapp_templates import get_message
+
+                        first_name = (appt.get("patient_name") or "there").split()[0]
+                        text = get_message(
+                            "health_checkin",
+                            lang,
+                            name=first_name,
+                            doctor=appt.get("doctor_name", ""),
+                        )
+
+                        await whatsapp_service.send_interactive_buttons(
+                            clinic,
+                            appt["patient_phone"],
+                            body=text,
+                            buttons=[
+                                {"id": "checkin_ok", "title": "Feeling fine"},
+                                {"id": "checkin_concern", "title": "Still have symptoms"},
+                            ],
+                        )
+
+                        supabase.table("appointments").update({flag_field: True}).eq(
+                            "id", appt["id"]
+                        ).execute()
+
+                        logger.info(
+                            f"Sent day+{offset_days} health check-in for appointment {appt['id']}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error sending day+{offset_days} health check-in: {e}")
+
+            except Exception as e:
+                logger.error(f"Error in health check-in job (day+{offset_days}): {e}")
 
     async def check_doctor_leaves(self):
         """Check for doctor leaves and notify affected patients."""
