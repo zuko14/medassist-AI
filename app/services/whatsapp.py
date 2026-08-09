@@ -20,13 +20,15 @@ class WhatsAppService:
         return "XXXX"
 
     def _get_credentials(self, clinic: dict) -> tuple[str, str]:
-        """Extract Meta API credentials from clinic config."""
-        config = clinic.get("config", {})
-        token = config.get("meta_access_token")
-        phone_id = config.get("meta_phone_number_id")
+        """Extract Meta API credentials from clinic config with global settings fallback."""
+        config = clinic.get("config", {}) if isinstance(clinic, dict) else {}
+        token = config.get("meta_access_token") or settings.whatsapp_token
+        phone_id = config.get("meta_phone_number_id") or settings.whatsapp_phone_number_id
 
         if not token or not phone_id:
-            logger.error(f"Missing WhatsApp credentials for clinic {clinic.get('id')}")
+            logger.error(
+                f"Missing WhatsApp credentials for clinic {clinic.get('id') if isinstance(clinic, dict) else 'unknown'}"
+            )
             raise ValueError("Missing WhatsApp credentials")
 
         return token, phone_id

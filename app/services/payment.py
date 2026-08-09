@@ -337,16 +337,39 @@ class PaymentService:
 
         event_type = payload.get("event", "")
 
-        # We only care about payment.captured events
-        if event_type != "payment.captured":
+        # We care about payment.captured and payment_link.paid events
+        if event_type not in ("payment.captured", "payment_link.paid"):
             logger.info(f"Razorpay webhook: ignoring event type '{event_type}'")
             return {"status": "ignored", "code": 200}
 
         # ── Step 3: Extract payment details ──
-        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
-        payment_id = payment_entity.get("id")
-        amount_paid = payment_entity.get("amount")  # in paise
-        notes = payment_entity.get("notes", {})
+        payment_entity = (
+            payload.get("payload", {}).get("payment", {}).get("entity", {})
+        )
+        payment_link_entity = (
+            payload.get("payload", {}).get("payment_link", {}).get("entity", {})
+        )
+
+        payment_id = (
+            payment_entity.get("id")
+            or payment_link_entity.get("payment_id")
+            or payment_link_entity.get("id")
+        )
+        amount_paid = (
+            payment_entity.get("amount")
+            or payment_link_entity.get("amount_paid")
+            or payment_link_entity.get("amount")
+        )
+        notes = (
+            payment_entity.get("notes")
+            or payment_link_entity.get("notes")
+            or {}
+        )
+        payment_link_id = (
+            payment_link_entity.get("id")
+            or payment_entity.get("invoice_id")
+            or payment_entity.get("payment_link_id")
+        )
 
         if not payment_id:
             logger.error("Razorpay webhook: missing payment_id")
@@ -368,12 +391,7 @@ class PaymentService:
             return {"status": "ok", "code": 200, "reason": "already_processed"}
 
         # ── Step 5: Look up booking ──
-        # Payment Links attach to payment_link_id — match on that first,
-        # with the notes.booking_id fallback for defense-in-depth.
-        payment_link_id = (
-            payload.get("payload", {}).get("payment_link", {}).get("entity", {}).get("id")
-        )
-
+        # Match on payment_link_id first, fallback to notes.booking_id and booking_ref
         booking_result = None
         if payment_link_id:
             booking_result = (
@@ -390,6 +408,24 @@ class PaymentService:
                     supabase.table("appointments")
                     .select("*")
                     .eq("id", booking_id_from_notes)
+                    .execute()
+                )
+
+        if not booking_result or not booking_result.data:
+            booking_ref = (
+                notes.get("booking_ref")
+                or payment_link_entity.get("reference_id")
+                or (
+                    payment_entity.get("description", "")
+                    .replace("Appointment booking ", "")
+                    .strip()
+                )
+            )
+            if booking_ref:
+                booking_result = (
+                    supabase.table("appointments")
+                    .select("*")
+                    .eq("booking_ref", booking_ref)
                     .execute()
                 )
 
@@ -519,7 +555,7 @@ class PaymentService:
             {
                 "payment_id": payment_id,
                 "amount_paise": amount_paid,
-                "order_id": order_id,
+                "payment_link_id": payment_link_id,
             },
         )
 
