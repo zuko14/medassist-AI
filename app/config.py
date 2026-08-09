@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # Security
     meta_app_secret: str = ""  # Meta App Secret for X-Hub-Signature-256 verification
     rate_limit_login: str = "5/minute"  # Rate limit for admin login attempts
+    allow_unsigned_webhooks_dev: bool = False  # NEVER set true outside local dev — explicit opt-in only
 
     # ABDM / ABHA Integration (optional — leave empty to skip live verification)
     abdm_client_id: str = ""

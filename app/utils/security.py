@@ -14,6 +14,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +35,11 @@ def verify_webhook_signature(
     Meta signs every webhook payload with HMAC-SHA256 using your App Secret.
     If this doesn't match, the request was NOT from Meta — reject it.
 
+    Fails CLOSED by default in every environment when app_secret is missing.
+    The only way to accept unsigned webhooks is the explicit
+    ALLOW_UNSIGNED_WEBHOOKS_DEV=true flag, and only when APP_ENV=development —
+    never a silently-missing secret in a misconfigured staging/prod deploy.
+
     Args:
         payload_body: Raw request body bytes (before JSON parsing).
         signature_header: Value of X-Hub-Signature-256 header.
@@ -42,12 +49,17 @@ def verify_webhook_signature(
         True if signature is valid, False otherwise.
     """
     if not app_secret:
-        # If no app secret configured, log a warning but allow (backward compat)
-        logger.warning(
-            "META_APP_SECRET not configured — webhook signature verification SKIPPED. "
-            "Set META_APP_SECRET in .env for production security."
+        if settings.app_env == "development" and settings.allow_unsigned_webhooks_dev:
+            logger.warning(
+                "META_APP_SECRET not configured — signature verification SKIPPED "
+                "(ALLOW_UNSIGNED_WEBHOOKS_DEV=true, app_env=development only)."
+            )
+            return True
+        logger.error(
+            "META_APP_SECRET not configured — REJECTING webhook (fail-closed). "
+            "Set META_APP_SECRET, or ALLOW_UNSIGNED_WEBHOOKS_DEV=true for local dev only."
         )
-        return True
+        return False
 
     if not signature_header:
         logger.warning("Webhook request missing X-Hub-Signature-256 header — REJECTED")

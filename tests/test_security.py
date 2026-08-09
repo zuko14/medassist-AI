@@ -26,8 +26,8 @@ def test_signature_verification():
         verify_webhook_signature(payload, None, secret) is False
     ), "Missing sig should fail"
     assert (
-        verify_webhook_signature(payload, sig, "") is True
-    ), "No secret configured = skip"
+        verify_webhook_signature(payload, sig, "") is False
+    ), "No secret configured = fail closed"
     print("PASSED: Signature verification")
 
 
