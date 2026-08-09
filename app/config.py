@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Hospital Config
     hospital_name: str = "City Care Hospital"
     hospital_emergency_number: str = "108"
+    hospital_staff_alert_number: str = ""  # optional — WhatsApp number reception monitors for emergency alerts; blank = disabled
     hospital_phone: str = "+919876543210"
     hospital_maps_link: str = ""
     hospital_website: str = ""

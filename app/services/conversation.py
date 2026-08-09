@@ -2680,6 +2680,19 @@ class ConversationManager:
                 clinic, phone, "📍 Emergency location\n" + "\n".join(location_lines)
             )
 
+        # Alert hospital staff, if a staff alert number is configured for this clinic/platform
+        staff_alert_number = get_clinic_contact(
+            clinic, "staff_alert_number", settings.hospital_staff_alert_number
+        )
+        if staff_alert_number:
+            staff_msg = (
+                f"🚨 Emergency keyword detected\n\n"
+                f"Patient: {mask_phone(phone)}\n"
+                f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+                f"Please follow up if not already in contact."
+            )
+            await self.whatsapp.send_text(clinic, staff_alert_number, staff_msg)
+
         await self.update_state(clinic, phone, "main_menu")
         await log_analytics_event(clinic["id"], phone, "emergency_detected")
 
