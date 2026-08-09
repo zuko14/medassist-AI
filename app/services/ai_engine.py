@@ -6,6 +6,7 @@ before being passed to the LLM.
 
 import logging
 import asyncio
+from typing import Optional
 from groq import Groq, RateLimitError
 
 from app.config import settings
@@ -18,6 +19,18 @@ groq_client = Groq(api_key=settings.groq_api_key)
 
 # Intent detection keywords for fallback
 INTENT_KEYWORDS = {
+    "queue_status": [
+        "token",
+        "queue",
+        "waiting",
+        "turn",
+        "ahead",
+        "status",
+        "टोकन",
+        "कतार",
+        "టోకెన్",
+        "క్యూ",
+    ],
     "book_appointment": [
         "book",
         "appointment",
@@ -444,11 +457,12 @@ def keyword_intent_fallback(message: str) -> str:
             return "emergency"
 
     # Check other intents
+    """Keyword-based intent detection fallback if Groq is unavailable."""
+    msg_lower = message.lower().strip()
+
     for intent, keywords in INTENT_KEYWORDS.items():
-        if intent == "emergency":
-            continue  # Already checked above
         for kw in keywords:
-            if kw in msg:
+            if kw in msg_lower:
                 return intent
 
     return "unknown"
@@ -482,23 +496,22 @@ def keyword_symptom_fallback(symptom: str) -> dict:
     }
 
 
-def detect_language(message: str) -> str:
-    """Detect language from message (simplified)."""
-    # Hindi detection
-    hindi_chars = set("अआइईउऊएऐओऔकखगघचछजझटठडढतथदधनपफबभमयरलवशषसह")
-    # Telugu detection
-    telugu_chars = set("అఆఇఈఉఊఋఎఏఐఒఓఔకఖగఘఙచఛజఝఞటఠడఢణతథదధనపఫబభమయరలవశషసహ")
+def detect_language(text: str) -> str:
+    """Detect language of text (English, Telugu, Hindi)."""
+    # Check Telugu unicode range (0C00-0C7F)
+    telugu_chars = sum(1 for c in text if "\u0c00" <= c <= "\u0c7f")
+    if telugu_chars > len(text) * 0.2 and telugu_chars > 2:
+        return "te"
 
-    for char in message:
-        if char in hindi_chars:
-            return "hi"
-        if char in telugu_chars:
-            return "te"
+    # Check Hindi/Devanagari unicode range (0900-097F)
+    hindi_chars = sum(1 for c in text if "\u0900" <= c <= "\u097f")
+    if hindi_chars > len(text) * 0.2 and hindi_chars > 2:
+        return "hi"
 
     return "en"
 
 
-async def detect_intent(message: str, clinic: dict) -> str:
+async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
     """Detect intent using Groq with keyword fallback.
 
     Security: Input is sanitized for prompt injection before LLM processing.
@@ -525,7 +538,7 @@ async def detect_intent(message: str, clinic: dict) -> str:
                     "role": "user",
                     "content": f"""Classify this patient message into exactly one intent:
 book_appointment, cancel_appointment, reschedule_appointment, view_services,
-doctor_availability, emergency, opt_out, data_deletion_request, human_escalation,
+doctor_availability, queue_status, emergency, opt_out, data_deletion_request, human_escalation,
 followup_booking, greeting, or unknown.
 
 *NOTE*: If the user mentions a common symptom (e.g., 'fever', 'pain', 'cough'), the intent is book_appointment, NOT emergency.
@@ -549,6 +562,7 @@ Respond with ONLY the intent name, nothing else.""",
             "reschedule_appointment",
             "view_services",
             "doctor_availability",
+            "queue_status",
             "emergency",
             "opt_out",
             "data_deletion_request",

@@ -16,6 +16,7 @@ from app.database import (
     get_available_slots,
     find_next_available_date,
     book_appointment,
+    get_patient_queue_status,
     log_analytics_event,
 )
 from app.services.ai_engine import (
@@ -571,6 +572,10 @@ class ConversationManager:
 
         if intent == "health_checkin_ok":
             await self._handle_health_checkin_ok(clinic, phone, lang)
+            return
+
+        if intent == "queue_status":
+            await self._handle_queue_status(clinic, phone, lang)
             return
 
         # Opt-out can trigger from ANY state
@@ -2720,6 +2725,45 @@ class ConversationManager:
     async def _handle_health_checkin_ok(self, clinic: dict, phone: str, lang: str) -> None:
         """Patient confirmed they're feeling fine in a post-discharge check-in."""
         await self.whatsapp.send_text(clinic, phone, get_message("health_checkin_ok", lang))
+
+    async def _handle_queue_status(
+        self, clinic: dict, phone: str, lang: str
+    ) -> None:
+        """Handle patient query about their live OPD token / queue position."""
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        status = await get_patient_queue_status(clinic["id"], phone, today_str)
+
+        if not status:
+            await self.whatsapp.send_text(
+                clinic, phone, get_message("queue_status_none", lang)
+            )
+            return
+
+        if not status.get("checked_in"):
+            await self.whatsapp.send_text(
+                clinic,
+                phone,
+                get_message(
+                    "queue_status_not_checked_in",
+                    lang,
+                    doctor=status.get("doctor_name", "your doctor"),
+                ),
+            )
+            return
+
+        await self.whatsapp.send_text(
+            clinic,
+            phone,
+            get_message(
+                "queue_status_waiting",
+                lang,
+                token=status["token_number"],
+                doctor=status["doctor_name"],
+                current=status["currently_serving"],
+                ahead=status["patients_ahead"],
+            ),
+        )
+        await log_analytics_event(clinic["id"], phone, "queue_status_checked")
 
     async def _handle_opt_out(
         self, clinic: dict, phone: str, patient: dict, lang: str

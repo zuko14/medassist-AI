@@ -191,6 +191,9 @@ MESSAGES = {
         "health_checkin": "Hi {name}, checking in after your visit to Dr. {doctor}. How are you feeling?",
         "health_checkin_concern": "Sorry to hear that. Please call us at {phone} so we can help — don't wait if symptoms are serious.",
         "health_checkin_ok": "Great to hear! Take care, and reach out anytime if that changes.",
+        "queue_status_waiting": "🎫 *Live OPD Token Status*\n\nYour Token Number: *#{token}*\nDoctor: *{doctor}*\nCurrently Serving: *#{current}*\nPatients Ahead of You: *{ahead}*\n\nPlease be near the OPD waiting area when your token is close.",
+        "queue_status_not_checked_in": "You have an appointment today with *{doctor}*, but have not checked in yet.\n\nPlease visit the reception desk to collect your OPD token number.",
+        "queue_status_none": "You don't have a confirmed appointment scheduled for today.\n\nType *book* to schedule an appointment.",
     },
     "hi": {
         "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं MediAssist हूं, आपका AI सहायक।",
@@ -225,6 +228,9 @@ MESSAGES = {
         "health_checkin": "नमस्ते {name}, डॉ. {doctor} से आपकी मुलाकात के बाद जांच कर रहे हैं। आप कैसा महसूस कर रहे हैं?",
         "health_checkin_concern": "यह सुनकर खेद है। कृपया हमें {phone} पर कॉल करें ताकि हम मदद कर सकें — लक्षण गंभीर होने पर प्रतीक्षा न करें।",
         "health_checkin_ok": "यह सुनकर अच्छा लगा! ध्यान रखें, और कुछ बदलने पर कभी भी संपर्क करें।",
+        "queue_status_waiting": "🎫 *ओपीडी टोकन स्थिति*\n\nआपका टोकन नंबर: *#{token}*\nडॉक्टर: *{doctor}*\nवर्तमान टोकन: *#{current}*\nआपसे आगे मरीज: *{ahead}*\n\nकृपया टोकन पास आने पर प्रतीक्षा क्षेत्र में उपस्थित रहें।",
+        "queue_status_not_checked_in": "आज आपका *{doctor}* के साथ अपॉइंटमेंट है, लेकिन आपने अभी तक चेक-इन नहीं किया है।\n\nकृपया अपना ओपीडी टोकन लेने के लिए रिसेप्शन पर संपर्क करें।",
+        "queue_status_none": "आज के लिए आपका कोई कन्फर्म अपॉइंटमेंट नहीं है।\n\nअपॉइंटमेंट बुक करने के लिए *book* लिखें।",
     },
     "te": {
         "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను MediAssist, మీ AI సహాయకుడిని.",
@@ -259,6 +265,9 @@ MESSAGES = {
         "health_checkin": "నమస్తే {name}, డాక్టర్ {doctor} వద్ద మీ సందర్శన తర్వాత తనిఖీ చేస్తున్నాము. మీరు ఎలా ఫీల్ అవుతున్నారు?",
         "health_checkin_concern": "అది వినడం బాధగా ఉంది. దయచేసి మాకు {phone} కు కాల్ చేయండి — లక్షణాలు తీవ్రంగా ఉంటే వేచి ఉండకండి.",
         "health_checkin_ok": "వినడం సంతోషంగా ఉంది! జాగ్రత్తగా ఉండండి, మార్పు ఉంటే ఎప్పుడైనా సంప్రదించండి.",
+        "queue_status_waiting": "🎫 *లైవ్ ఓపీడీ టోకెన్ స్థితి*\n\nమీ టోకెన్ నంబర్: *#{token}*\nడాక్టర్: *{doctor}*\nప్రస్తుతం చూస్తున్న టోకెన్: *#{current}*\nమీ ముందున్న రోగులు: *{ahead}*\n\nదయచేసి మీ టోకెన్ దగ్గరకు వచ్చినప్పుడు వెయిటింగ్ ఏరియాలో ఉండండి.",
+        "queue_status_not_checked_in": "ఈరోజు మీకు *{doctor}* తో అపాయింట్‌మెంట్ ఉంది, కానీ మీరు ఇంకా చెక్-ఇన్ చేయలేదు.\n\nదయచేసి మీ ఓపీడీ టోకెన్ తీసుకోవడానికి రిసెప్షన్ డెస్క్‌ను సంప్రదించండి.",
+        "queue_status_none": "ఈరోజు కోసం మీకు ఎటువంటి అపాయింట్‌మెంట్ షెడ్యూల్ చేయబడలేదు.\n\nఅపాయింట్‌మెంట్ బుక్ చేసుకోవడానికి *book* అని టైప్ చేయండి.",
     },
 }
 
