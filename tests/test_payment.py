@@ -339,6 +339,50 @@ class TestPaymentWebhookProcessing:
 
         assert result["reason"] == "amount_mismatch"
 
+    @pytest.mark.asyncio
+    async def test_signature_failure_alert_is_rate_limited(self):
+        """Repeated bad-signature webhooks for the same key must not each
+        trigger a fresh _alert_admin call once the limiter says no."""
+        from app.services.payment import PaymentService
+        from app.utils.security import PersistentRateLimiter
+
+        service = PaymentService()
+        payload = json.dumps(_make_payment_webhook_payload()).encode()
+        limiter = PersistentRateLimiter(max_attempts=3, window_seconds=300)
+
+        with patch.object(service, "_log_payment_event_raw"), patch.object(
+            service, "_alert_admin", new_callable=AsyncMock
+        ) as mock_alert, patch.object(
+            limiter, "is_rate_limited", side_effect=[False, False, False, True, True]
+        ), patch.object(
+            limiter, "record_attempt"
+        ):
+            for _ in range(5):
+                await service.process_payment_webhook(
+                    payload,
+                    "bad_signature",
+                    alert_limiter=limiter,
+                    alert_key="clinic-1:1.2.3.4",
+                )
+
+        assert mock_alert.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_signature_failure_without_limiter_still_alerts(self):
+        """Backward compatibility: callers that don't pass a limiter still
+        get alerted, same as before."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+        payload = json.dumps(_make_payment_webhook_payload()).encode()
+
+        with patch.object(service, "_log_payment_event_raw"), patch.object(
+            service, "_alert_admin", new_callable=AsyncMock
+        ) as mock_alert:
+            await service.process_payment_webhook(payload, "bad_signature")
+
+        mock_alert.assert_called_once()
+
 
 class TestBookingCreation:
     """Test booking creation with payment gating."""

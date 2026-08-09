@@ -26,7 +26,10 @@ import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.utils.security import PersistentRateLimiter
 
 import httpx
 
@@ -281,12 +284,20 @@ class PaymentService:
         raw_body: bytes,
         signature: str,
         webhook_secret: Optional[str] = None,
+        alert_limiter: Optional["PersistentRateLimiter"] = None,
+        alert_key: Optional[str] = None,
     ) -> dict:
         """Process a Razorpay webhook event.
 
         Args:
             webhook_secret: Per-clinic webhook secret resolved by the router.
                             Falls back to settings if None.
+            alert_limiter: Optional PersistentRateLimiter used to throttle the
+                            _alert_admin() call on repeated signature failures
+                            (an unauthenticated attacker can otherwise flood
+                            the hospital's own WhatsApp admin number). Callers
+                            that omit this keep the old unthrottled behavior.
+            alert_key: Key to rate-limit on (e.g. "{clinic_id}:{client_ip}").
 
         Returns: {"status": "ok"|"error"|"ignored", "code": 200|400}
         """
@@ -294,7 +305,6 @@ class PaymentService:
         if not self.verify_webhook_signature(
             raw_body, signature, webhook_secret=webhook_secret
         ):
-            # Log the failure — possible spoofing attempt
             self._log_payment_event_raw(
                 None,
                 "signature_failed",
@@ -308,9 +318,16 @@ class PaymentService:
             logger.warning(
                 "⚠️ Razorpay webhook SIGNATURE FAILED — possible spoofing attempt"
             )
-            await self._alert_admin(
-                "🚨 Payment webhook signature verification FAILED. Possible spoofing attempt."
-            )
+            should_alert = True
+            if alert_limiter is not None:
+                key = alert_key or "global"
+                should_alert = not alert_limiter.is_rate_limited(key)
+                if should_alert:
+                    alert_limiter.record_attempt(key)
+            if should_alert:
+                await self._alert_admin(
+                    "🚨 Payment webhook signature verification FAILED. Possible spoofing attempt."
+                )
             return {"status": "error", "code": 400, "reason": "signature_failed"}
 
         # ── Step 2: Parse payload ──
