@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, time as time_type
 from typing import Literal, Optional
 
 from fastapi import (
@@ -301,6 +301,11 @@ class DoctorCreate(BaseModel):
     evening_slots: list[str] = ["17:00", "17:30", "18:00", "18:30"]
     is_active: bool = True
     consultation_fee: int = 500
+    morning_start: Optional[time_type] = None
+    morning_end: Optional[time_type] = None
+    evening_start: Optional[time_type] = None
+    evening_end: Optional[time_type] = None
+    slot_duration_minutes: int = 30
 
 
 class DoctorUpdate(BaseModel):
@@ -312,6 +317,11 @@ class DoctorUpdate(BaseModel):
     evening_slots: Optional[list[str]] = None
     is_active: Optional[bool] = None
     consultation_fee: Optional[int] = None
+    morning_start: Optional[time_type] = None
+    morning_end: Optional[time_type] = None
+    evening_start: Optional[time_type] = None
+    evening_end: Optional[time_type] = None
+    slot_duration_minutes: Optional[int] = None
 
 
 class PaymentSettingsUpdate(BaseModel):
@@ -447,6 +457,46 @@ async def get_doctors(
         raise HTTPException(status_code=500, detail="Failed to get doctors")
 
 
+def _apply_slot_config(data: dict) -> dict:
+    """Regenerate morning_slots/evening_slots from start/end/duration if provided.
+
+    Mutates and returns `data` in place. Raises HTTPException(422) if a
+    shift's end time isn't after its start time.
+    """
+    from app.utils.helpers import generate_slots
+    from datetime import time as time_type
+
+    def _parse_time(val):
+        if val is None or isinstance(val, time_type):
+            return val
+        if isinstance(val, str):
+            parts = val.split(":")
+            return time_type(int(parts[0]), int(parts[1]))
+        return val
+
+    duration = data.get("slot_duration_minutes") or 30
+
+    morning_start = _parse_time(data.get("morning_start"))
+    morning_end = _parse_time(data.get("morning_end"))
+    if morning_start is not None and morning_end is not None:
+        if morning_end <= morning_start:
+            raise HTTPException(
+                status_code=422, detail="morning_end must be after morning_start"
+            )
+        data["morning_slots"] = generate_slots(morning_start, morning_end, duration)
+
+    evening_start = _parse_time(data.get("evening_start"))
+    evening_end = _parse_time(data.get("evening_end"))
+    if evening_start is not None and evening_end is not None:
+        if evening_end <= evening_start:
+            raise HTTPException(
+                status_code=422, detail="evening_end must be after evening_start"
+            )
+        data["evening_slots"] = generate_slots(evening_start, evening_end, duration)
+
+    return data
+
+
 @router.post("/doctors")
 async def create_doctor(
     doctor: DoctorCreate,
@@ -457,6 +507,7 @@ async def create_doctor(
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         doctor_data = doctor.dict()
+        doctor_data = _apply_slot_config(doctor_data)
         doctor_data["clinic_id"] = effective_clinic_id
         result = supabase.table("doctors").insert(doctor_data).execute()
         return result.data[0]
@@ -478,6 +529,7 @@ async def update_doctor(
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         update_data = doctor.dict(exclude_unset=True)
+        update_data = _apply_slot_config(update_data)
         if not update_data:
             return {"message": "No fields to update"}
         query = supabase.table("doctors").update(update_data)
