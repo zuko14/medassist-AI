@@ -108,13 +108,20 @@ class ConversationManager:
             new_context["menu_shown"] = False
 
         merged = {**existing, **new_context}
-        supabase.table("conversations").update(
-            {
-                "state": new_state,
-                "context": merged,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        ).eq("clinic_id", clinic["id"]).eq("phone", phone).execute()
+        update_payload = {
+            "state": new_state,
+            "context": merged,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # Any return to main_menu must clear a stale mid-booking expiry timestamp —
+        # otherwise a leftover value from an old abandoned booking falsely times out
+        # the next booking attempt on its very first message.
+        if new_state == "main_menu":
+            update_payload["booking_context_expires_at"] = None
+
+        supabase.table("conversations").update(update_payload).eq(
+            "clinic_id", clinic["id"]
+        ).eq("phone", phone).execute()
 
     async def get_patient_language(self, clinic: dict, phone: str) -> str:
         from app.database import supabase
