@@ -188,6 +188,9 @@ MESSAGES = {
         "available_doctors_in": "Available doctors in {dept}:",
         "our_doctors_body": "Choose a doctor to book an appointment directly:",
         "our_services_body": "Here are the services we offer at {hospital_name}:",
+        "health_checkin": "Hi {name}, checking in after your visit to Dr. {doctor}. How are you feeling?",
+        "health_checkin_concern": "Sorry to hear that. Please call us at {phone} so we can help — don't wait if symptoms are serious.",
+        "health_checkin_ok": "Great to hear! Take care, and reach out anytime if that changes.",
     },
     "hi": {
         "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं MediAssist हूं, आपका AI सहायक।",
@@ -219,6 +222,9 @@ MESSAGES = {
         "available_doctors_in": "{dept} में उपलब्ध डॉक्टर:",
         "our_doctors_body": "सीधे अपॉइंटमेंट बुक करने के लिए डॉक्टर चुनें:",
         "our_services_body": "{hospital_name} में हमारी सेवाएं:",
+        "health_checkin": "नमस्ते {name}, डॉ. {doctor} से आपकी मुलाकात के बाद जांच कर रहे हैं। आप कैसा महसूस कर रहे हैं?",
+        "health_checkin_concern": "यह सुनकर खेद है। कृपया हमें {phone} पर कॉल करें ताकि हम मदद कर सकें — लक्षण गंभीर होने पर प्रतीक्षा न करें।",
+        "health_checkin_ok": "यह सुनकर अच्छा लगा! ध्यान रखें, और कुछ बदलने पर कभी भी संपर्क करें।",
     },
     "te": {
         "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను MediAssist, మీ AI సహాయకుడిని.",
@@ -250,6 +256,9 @@ MESSAGES = {
         "available_doctors_in": "{dept}లో అందుబాటులో ఉన్న డాక్టర్లు:",
         "our_doctors_body": "నేరుగా అపాయింట్మెంట్ బుక్ చేయడానికి డాక్టర్ను ఎంచుకోండి:",
         "our_services_body": "{hospital_name}లో మా సేవలు:",
+        "health_checkin": "నమస్తే {name}, డాక్టర్ {doctor} వద్ద మీ సందర్శన తర్వాత తనిఖీ చేస్తున్నాము. మీరు ఎలా ఫీల్ అవుతున్నారు?",
+        "health_checkin_concern": "అది వినడం బాధగా ఉంది. దయచేసి మాకు {phone} కు కాల్ చేయండి — లక్షణాలు తీవ్రంగా ఉంటే వేచి ఉండకండి.",
+        "health_checkin_ok": "వినడం సంతోషంగా ఉంది! జాగ్రత్తగా ఉండండి, మార్పు ఉంటే ఎప్పుడైనా సంప్రదించండి.",
     },
 }
 
