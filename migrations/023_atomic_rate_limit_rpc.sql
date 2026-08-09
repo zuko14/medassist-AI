@@ -38,5 +38,9 @@ BEGIN
 END;
 $$;
 
+-- Restrict execution to backend service_role only (block anon & authenticated roles from invoking via public REST API)
+REVOKE EXECUTE ON FUNCTION check_and_record_rate_limit(TEXT, INT, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION check_and_record_rate_limit(TEXT, INT, INT) TO service_role;
+
 -- Verify
 SELECT proname FROM pg_proc WHERE proname = 'check_and_record_rate_limit';
