@@ -1,6 +1,6 @@
 """Helper utilities."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, time as time_type
 from typing import Optional
 
 
@@ -116,3 +116,27 @@ def calculate_age(dob: date) -> int:
     """Calculate age from date of birth."""
     today = date.today()
     return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+
+def generate_slots(start: time_type, end: time_type, duration_minutes: int) -> list[str]:
+    """Generate a list of "HH:MM" slot strings from start to end in fixed steps.
+
+    Returns an empty list for any invalid input (start >= end, duration <= 0)
+    rather than raising — callers decide whether that's an error worth
+    surfacing (e.g. the admin API returns 422 for a truly invalid form
+    submission, distinct from "this shift is intentionally empty").
+    """
+    if duration_minutes <= 0 or start >= end:
+        return []
+
+    slots = []
+    current = datetime.combine(date.today(), start)
+    end_dt = datetime.combine(date.today(), end)
+    step = timedelta(minutes=duration_minutes)
+
+    while current < end_dt:
+        slots.append(current.strftime("%H:%M"))
+        current += step
+
+    return slots
+
