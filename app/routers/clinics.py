@@ -74,9 +74,13 @@ class CreateClinicRequest(BaseModel):
     branches: Optional[list[BranchSeed]] = None
 
 
-@router.post("", dependencies=[Depends(verify_admin_secret)])
-async def create_clinic(req: CreateClinicRequest):
-    """Onboard a new hospital. Zero deployment needed."""
+async def provision_clinic(req: CreateClinicRequest) -> dict:
+    """Onboard a new hospital: creates the clinic row, seeds branches, and
+    auto-provisions a self-service clinic_admin login.
+
+    Shared by the X-Admin-Secret curl API (POST /admin/clinics) and the
+    owner-platform UI (POST /platform/clinics) so both paths stay identical.
+    """
     config = {
         "meta_phone_number_id": req.meta_phone_number_id,
         "meta_access_token": req.meta_access_token,
@@ -183,6 +187,11 @@ async def create_clinic(req: CreateClinicRequest):
                 409, "A clinic with this WhatsApp number already exists"
             )
         raise HTTPException(500, f"Failed to create clinic: {e}")
+
+
+@router.post("", dependencies=[Depends(verify_admin_secret)])
+async def create_clinic(req: CreateClinicRequest):
+    return await provision_clinic(req)
 
 
 @router.get("", dependencies=[Depends(verify_admin_secret)])

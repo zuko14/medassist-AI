@@ -164,6 +164,48 @@ def test_platform_department_analytics_requires_auth():
     assert response.status_code == 401
 
 
+def test_platform_create_clinic_requires_auth():
+    response = client.post("/platform/clinics", json={
+        "name": "Apex Diagnostic Labs",
+        "whatsapp_number": "+919876543211",
+        "meta_phone_number_id": "pid",
+        "meta_access_token": "token",
+    })
+    assert response.status_code == 401
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.provision_clinic")
+def test_platform_create_clinic_success(mock_provision, mock_log_action):
+    mock_provision.return_value = {
+        "success": True,
+        "clinic": {"id": "clinic-new", "name": "Apex Diagnostic Labs"},
+        "branches": None,
+        "clinic_admin": {"username": "apexdiagabc123", "password": "generated-pw"},
+    }
+
+    headers = get_owner_auth_header()
+    response = client.post(
+        "/platform/clinics",
+        headers=headers,
+        json={
+            "name": "Apex Diagnostic Labs",
+            "whatsapp_number": "+919876543211",
+            "plan": "diagstream",
+            "meta_phone_number_id": "pid",
+            "meta_access_token": "token",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["clinic"]["id"] == "clinic-new"
+    assert data["clinic_admin"]["username"] == "apexdiagabc123"
+    mock_provision.assert_called_once()
+    mock_log_action.assert_called_once()
+
+
 def test_platform_panel_static_route():
     response = client.get("/platform-panel")
     assert response.status_code == 200

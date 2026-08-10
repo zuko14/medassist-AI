@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.database import supabase
 from app.routers.admin import AdminUser, check_password_hash, hash_password, log_admin_action
+from app.routers.clinics import CreateClinicRequest, provision_clinic
 from app.services.analytics import analytics_service
 from app.utils.security import login_rate_limiter
 
@@ -129,6 +130,31 @@ async def reset_clinic_admin_password(
 
 
 VALID_ADMIN_ROLES = {"clinic_admin", "staff"}
+
+
+@router.post("/clinics")
+async def platform_create_clinic(
+    req: CreateClinicRequest,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Onboard a new hospital/clinic/diagnostic center from the owner platform UI.
+
+    Same provisioning logic as the curl-based POST /admin/clinics (X-Admin-Secret),
+    just gated by owner Basic Auth instead, so the browser never needs to hold
+    ADMIN_SECRET. Auto-provisions a clinic_admin login, same as the curl path.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    result = await provision_clinic(req)
+    await log_admin_action(
+        user=owner,
+        action="create_clinic",
+        resource_type="clinic",
+        resource_id=result.get("clinic", {}).get("id"),
+        details={"name": req.name, "plan": req.plan, "whatsapp_number": req.whatsapp_number},
+        ip_address=client_ip,
+    )
+    return result
 
 
 class ClinicAdminCreate(BaseModel):
