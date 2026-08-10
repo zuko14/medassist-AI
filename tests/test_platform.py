@@ -117,6 +117,53 @@ def test_platform_clinics_leaderboard(mock_supabase, mock_log_action):
     assert c0["appointments_count_30d"] == 1
 
 
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_platform_department_analytics(mock_supabase, mock_log_action):
+    mock_clinics = MagicMock()
+    mock_clinics.execute.return_value.data = [
+        {"id": "c1", "name": "Hospital Alpha"},
+        {"id": "c2", "name": "Hospital Beta"},
+    ]
+
+    mock_appts = MagicMock()
+    mock_appts.execute.return_value.data = [
+        {"clinic_id": "c1", "department": "Cardiology", "created_at": "2026-08-01T09:00:00+00:00"},
+        {"clinic_id": "c1", "department": "Cardiology", "created_at": "2026-08-01T09:30:00+00:00"},
+        {"clinic_id": "c2", "department": "Orthopedics", "created_at": "2026-08-02T14:00:00+00:00"},
+    ]
+
+    def table_router(table_name):
+        mock_obj = MagicMock()
+        if table_name == "clinics":
+            mock_obj.select.return_value = mock_clinics
+        elif table_name == "appointments":
+            mock_obj.select.return_value.gte.return_value = mock_appts
+        return mock_obj
+
+    mock_supabase.table.side_effect = table_router
+
+    headers = get_owner_auth_header()
+    response = client.get("/platform/departments", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["department_leaderboard"][0]["department"] == "Cardiology"
+    assert data["department_leaderboard"][0]["count"] == 2
+    hospital_c1 = next(h for h in data["hospital_departments"] if h["clinic_id"] == "c1")
+    assert hospital_c1["clinic_name"] == "Hospital Alpha"
+    assert hospital_c1["departments"][0]["department"] == "Cardiology"
+    peak_hour_9 = next(h for h in data["peak_hours"] if h["hour"] == 9)
+    assert peak_hour_9["count"] == 2
+    assert len(data["peak_hours"]) == 24
+
+
+def test_platform_department_analytics_requires_auth():
+    response = client.get("/platform/departments")
+    assert response.status_code == 401
+
+
 def test_platform_panel_static_route():
     response = client.get("/platform-panel")
     assert response.status_code == 200

@@ -631,3 +631,96 @@ async def get_platform_activity_analytics(
     except Exception as e:
         logger.error(f"Error fetching activity analytics: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch activity analytics: {e}")
+
+
+@router.get("/departments")
+async def get_platform_department_analytics(
+    request: Request,
+    days: int = 30,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Cross-hospital department traffic rankings and peak booking hours.
+
+    Platform-owner-only — clinic admins have no route to this data since it
+    aggregates across tenants (separate router, separate credential set).
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_platform_departments",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+
+    try:
+        start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        clinics_res = supabase.table("clinics").select("id, name").execute()
+        clinic_names = {c["id"]: c["name"] for c in (clinics_res.data or [])}
+
+        appts_res = (
+            supabase.table("appointments")
+            .select("clinic_id, department, created_at")
+            .gte("created_at", start_date)
+            .execute()
+        )
+        appts = appts_res.data or []
+
+        # Platform-wide department leaderboard
+        dept_totals: dict[str, int] = {}
+        # Per-hospital department breakdown
+        by_clinic: dict[str, dict[str, int]] = {}
+        # Peak hours (0-23), platform-wide
+        hour_counts: dict[int, int] = {h: 0 for h in range(24)}
+
+        for a in appts:
+            dept = a.get("department") or "Unknown"
+            clinic_id = a.get("clinic_id", "unknown")
+            created = a.get("created_at", "")
+
+            dept_totals[dept] = dept_totals.get(dept, 0) + 1
+            by_clinic.setdefault(clinic_id, {})
+            by_clinic[clinic_id][dept] = by_clinic[clinic_id].get(dept, 0) + 1
+
+            if created:
+                try:
+                    hour = datetime.fromisoformat(created.replace("Z", "+00:00")).hour
+                    hour_counts[hour] += 1
+                except ValueError:
+                    pass
+
+        department_leaderboard = sorted(
+            [{"department": k, "count": v} for k, v in dept_totals.items()],
+            key=lambda x: x["count"],
+            reverse=True,
+        )
+
+        hospital_departments = [
+            {
+                "clinic_id": clinic_id,
+                "clinic_name": clinic_names.get(clinic_id, clinic_id),
+                "departments": sorted(
+                    [{"department": d, "count": c} for d, c in depts.items()],
+                    key=lambda x: x["count"],
+                    reverse=True,
+                ),
+            }
+            for clinic_id, depts in by_clinic.items()
+        ]
+        hospital_departments.sort(
+            key=lambda h: sum(d["count"] for d in h["departments"]), reverse=True
+        )
+
+        peak_hours = [{"hour": h, "count": hour_counts[h]} for h in range(24)]
+
+        return {
+            "success": True,
+            "period_days": days,
+            "department_leaderboard": department_leaderboard,
+            "hospital_departments": hospital_departments,
+            "peak_hours": peak_hours,
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching department analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch department analytics: {e}")

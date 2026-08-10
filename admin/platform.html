@@ -777,6 +777,33 @@
                 </div>
             </div>
 
+            <!-- Charts Row 2: Cross-Hospital Department Traffic -->
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Department Traffic Leaderboard</div>
+                            <div class="chart-subtitle">Busiest departments across all hospitals, last 30 days</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="deptChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Peak Booking Hours</div>
+                            <div class="chart-subtitle">Bookings by hour of day, platform-wide</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="peakHoursChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
             <!-- Leaderboard Table Card -->
             <div class="section-card">
                 <div class="table-toolbar">
@@ -941,6 +968,8 @@
         let globalClinicsData = [];
         let revenueChartInstance = null;
         let planChartInstance = null;
+        let deptChartInstance = null;
+        let peakHoursChartInstance = null;
 
         // On Load
         window.addEventListener('DOMContentLoaded', () => {
@@ -994,11 +1023,12 @@
 
             try {
                 // Fetch Overview, Leaderboard, Revenue, Activity in parallel
-                const [overviewRes, clinicsRes, revenueRes, activityRes] = await Promise.all([
+                const [overviewRes, clinicsRes, revenueRes, activityRes, departmentsRes] = await Promise.all([
                     fetch('/platform/overview', { headers: { 'Authorization': ownerAuthHeader } }),
                     fetch('/platform/clinics', { headers: { 'Authorization': ownerAuthHeader } }),
                     fetch('/platform/revenue', { headers: { 'Authorization': ownerAuthHeader } }),
-                    fetch('/platform/activity', { headers: { 'Authorization': ownerAuthHeader } })
+                    fetch('/platform/activity', { headers: { 'Authorization': ownerAuthHeader } }),
+                    fetch('/platform/departments', { headers: { 'Authorization': ownerAuthHeader } })
                 ]);
 
                 if (overviewRes.status === 401 || clinicsRes.status === 401) {
@@ -1010,11 +1040,13 @@
                 const clinicsData = await clinicsRes.json();
                 const revenueData = await revenueRes.json();
                 const activityData = await activityRes.json();
+                const departmentsData = await departmentsRes.json();
 
                 renderOverview(overview);
                 renderRevenueMetrics(revenueData);
                 renderLeaderboard(clinicsData.clinics || []);
                 renderCharts(overview, revenueData, activityData);
+                renderDepartmentCharts(departmentsData);
                 populateClinicDropdown(clinicsData.clinics || []);
                 loadClinicAdmins();
 
@@ -1172,6 +1204,57 @@
                     maintainAspectRatio: false,
                     plugins: {
                         legend: { position: 'bottom', labels: { color: '#94a3b8', font: { family: 'Inter' } } }
+                    }
+                }
+            });
+        }
+
+        function renderDepartmentCharts(data) {
+            const leaderboard = (data.department_leaderboard || []).slice(0, 10);
+            const ctxDept = document.getElementById('deptChart').getContext('2d');
+            if (deptChartInstance) deptChartInstance.destroy();
+            deptChartInstance = new Chart(ctxDept, {
+                type: 'bar',
+                data: {
+                    labels: leaderboard.length ? leaderboard.map(d => d.department) : ['No Data'],
+                    datasets: [{
+                        label: 'Bookings',
+                        data: leaderboard.length ? leaderboard.map(d => d.count) : [0],
+                        backgroundColor: '#6c63ff'
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#1e2540' }, ticks: { color: '#64748b' } },
+                        y: { grid: { color: '#1e2540' }, ticks: { color: '#94a3b8' } }
+                    }
+                }
+            });
+
+            const peakHours = data.peak_hours || [];
+            const ctxPeak = document.getElementById('peakHoursChart').getContext('2d');
+            if (peakHoursChartInstance) peakHoursChartInstance.destroy();
+            peakHoursChartInstance = new Chart(ctxPeak, {
+                type: 'bar',
+                data: {
+                    labels: peakHours.map(h => `${h.hour}:00`),
+                    datasets: [{
+                        label: 'Bookings',
+                        data: peakHours.map(h => h.count),
+                        backgroundColor: '#06b6d4'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#1e2540' }, ticks: { color: '#64748b' } },
+                        y: { grid: { color: '#1e2540' }, ticks: { color: '#64748b' } }
                     }
                 }
             });
