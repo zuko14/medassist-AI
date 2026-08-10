@@ -55,8 +55,8 @@ class CreateClinicRequest(BaseModel):
     ] = "soloclinic"
     meta_phone_number_id: str
     meta_access_token: str
-    clinic_name: str
-    doctor_name: str
+    clinic_name: Optional[str] = None
+    doctor_name: Optional[str] = "Medical Team"
     language: str = "en"
     timezone: str = "Asia/Kolkata"
     system_prompt: Optional[str] = None
@@ -80,10 +80,10 @@ async def create_clinic(req: CreateClinicRequest):
     config = {
         "meta_phone_number_id": req.meta_phone_number_id,
         "meta_access_token": req.meta_access_token,
-        "clinic_name": req.clinic_name,
-        "doctor_name": req.doctor_name,
-        "language": req.language,
-        "timezone": req.timezone,
+        "clinic_name": req.clinic_name or req.name,
+        "doctor_name": req.doctor_name or "Medical Team",
+        "language": req.language or "en",
+        "timezone": req.timezone or "Asia/Kolkata",
     }
     if req.system_prompt:
         config["system_prompt"] = req.system_prompt
