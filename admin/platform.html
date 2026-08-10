@@ -1129,6 +1129,7 @@
                             <div class="clinic-name-cell">
                                 <span class="clinic-title">${escapeHtml(c.name || 'Unnamed Hospital')}</span>
                                 <span class="clinic-phone">${escapeHtml(c.whatsapp_number || '')}</span>
+                                <span class="clinic-phone" style="font-family:monospace; cursor:pointer;" title="Click to copy Clinic ID" onclick="event.stopPropagation(); copyClinicId('${c.id}')">ID: ${c.id}</span>
                             </div>
                         </td>
                         <td><span class="badge badge-${plan}">${plan}</span></td>
@@ -1316,7 +1317,11 @@
         function populateClinicDropdown(clinics) {
             const sel = document.getElementById('caClinicId');
             sel.innerHTML = '<option value="">— Platform-level (no clinic) —</option>' +
-                clinics.map(c => `<option value="${c.id}">${escapeHtml(c.name || c.id)}</option>`).join('');
+                clinics.map(c => `<option value="${c.id}">${escapeHtml(c.name || 'Unnamed Hospital')} — ${c.id}</option>`).join('');
+        }
+
+        function copyClinicId(id) {
+            navigator.clipboard.writeText(id).catch(() => {});
         }
 
         async function loadClinicAdmins() {
@@ -1369,13 +1374,25 @@
             }
         }
 
-        function openCreateAdminModal() {
+        async function openCreateAdminModal() {
             document.getElementById('caUsername').value = '';
             document.getElementById('caPassword').value = '';
             document.getElementById('caPassword').type = 'password';
             document.getElementById('caRole').value = 'clinic_admin';
             document.getElementById('createAdminError').style.display = 'none';
             document.getElementById('createAdminModal').classList.add('active');
+
+            // Refresh clinics so one just created (e.g. via curl) shows up immediately
+            try {
+                const res = await fetch('/platform/clinics', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json();
+                if (data.clinics) {
+                    globalClinicsData = data.clinics;
+                    populateClinicDropdown(data.clinics);
+                }
+            } catch (e) {
+                console.error('Error refreshing clinics for admin modal:', e);
+            }
         }
 
         function closeCreateAdminModal() {
