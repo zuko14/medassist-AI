@@ -307,6 +307,82 @@ async def test_connector_compliance_lifecycle_methods():
 
 
 @pytest.mark.asyncio
+async def test_step8_wires_ocr_summary_to_whatsapp_and_lab_reports(monkeypatch):
+    """Test 11: Verify Step 8 actually calls WhatsAppDeliveryService and inserts into lab_reports,
+    instead of only logging (the wiring gap this suite guards against regressing)."""
+    from app.integrations.callmedex.ocr.schemas import (
+        CanonicalLabReport,
+        CanonicalReportMetadata,
+        ExtractedLabTest,
+        ExtractionSource,
+        LabFlag,
+    )
+    from app.integrations.callmedex.whatsapp.schemas import WhatsAppDeliveryResult, WhatsAppDeliveryStatus
+
+    runner = CallMedexWorkerRunner()
+    connector = runner.container.mocdoc_connector
+    connector.open_login_page = AsyncMock(return_value=True)
+    connector.login = AsyncMock(return_value=True)
+    connector.search_by_barcode = AsyncMock(return_value=MagicMock())
+    connector.download_report = AsyncMock(return_value=b"%PDF-1.4 real pdf")
+    connector.validate_report = AsyncMock(return_value=True)
+    connector.logout = AsyncMock(return_value=True)
+
+    canonical_report = CanonicalLabReport(
+        report_metadata=CanonicalReportMetadata(
+            report_id="job-1", patient_id="P1", barcode="BC-200", generated_at="2026-08-10T00:00:00Z"
+        ),
+        tests=[
+            ExtractedLabTest(
+                code="HB", display_name="Haemoglobin", raw_test_name="Haemoglobin", value=13.6, unit="g/dL",
+                reference_range="13.0-17.0", flag=LabFlag.NORMAL, confidence=0.99,
+                source=ExtractionSource.PDF_TEXT,
+            )
+        ],
+    )
+    runner.container.ocr_pipeline.process_pdf = MagicMock(return_value=canonical_report)
+
+    mock_storage = MagicMock()
+    mock_storage.upload.return_value = {}
+    mock_storage.create_signed_url.return_value = {"signedURL": "https://storage.test/report.pdf"}
+    mock_insert = MagicMock()
+
+    delivery_result = WhatsAppDeliveryResult(
+        message_id="wmid.test.1", status=WhatsAppDeliveryStatus.DELIVERED,
+        phone_number="+919966773300", callback_delivered=False, timestamp="2026-08-10T00:00:00Z",
+    )
+
+    with patch("app.database.supabase") as mock_supabase, \
+         patch(
+             "app.integrations.callmedex.whatsapp.service.WhatsAppDeliveryService.deliver_report_and_summary",
+             new=AsyncMock(return_value=delivery_result),
+         ) as mock_deliver:
+        mock_supabase.storage.from_.return_value = mock_storage
+        mock_supabase.table.return_value.insert.return_value = mock_insert
+
+        req = ProcessReportRequest(
+            clinic_id="c-1",
+            connector_type=ConnectorType.MOCDOC,
+            external_report_id="BC-200",
+            patient={"patient_phone": "+919966773300", "patient_name": "Wired Patient"},
+            report_name="Blood Test",
+        )
+
+        res = await runner.execute_report_job(req)
+
+    assert res.success is True
+    mock_deliver.assert_awaited_once()
+    assert mock_deliver.call_args.kwargs["phone_number"] == "+919966773300"
+    mock_supabase.table.assert_any_call("lab_reports")
+    inserted_row = mock_insert.execute.call_args is not None
+    assert inserted_row
+    row = mock_supabase.table.return_value.insert.call_args.args[0]
+    assert row["external_report_id"] == "BC-200"
+    assert row["source"] == "callmedex"
+    assert row["status"] == "sent"
+
+
+@pytest.mark.asyncio
 async def test_bearer_token_placeholder_production_boot_refusal(monkeypatch):
     """Test 10: Verify fail fast refusal when bearer_token uses placeholder in production."""
     monkeypatch.setattr(callmedex_settings, "app_env", "production")

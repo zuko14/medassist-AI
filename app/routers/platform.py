@@ -12,7 +12,14 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.database import supabase
-from app.routers.admin import AdminUser, check_password_hash, hash_password, log_admin_action
+from app.routers.admin import (
+    AdminUser,
+    ConnectorCredentialsUpdate,
+    check_password_hash,
+    hash_password,
+    log_admin_action,
+    upsert_connector_credentials,
+)
 from app.routers.clinics import CreateClinicRequest, provision_clinic
 from app.services.analytics import analytics_service
 from app.utils.security import login_rate_limiter
@@ -750,3 +757,132 @@ async def get_platform_department_analytics(
     except Exception as e:
         logger.error(f"Error fetching department analytics: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch department analytics: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CALLMEDEX PROCESSING CENTERS
+#
+# A "CallMedex processing center" is architecturally just a clinic with an
+# enabled `integration_connectors` row (MocDoc/Crelio/CloudLIMS) — the same
+# connector self-service clinic admins already use for their own EMR portal
+# login. CallMedex report jobs land via app.integrations.callmedex, wire
+# through that connector, and get delivered over WhatsApp by
+# app/integrations/callmedex/workers/runner.py, which writes a `lab_reports`
+# row tagged source='callmedex' (see migrations/026_lab_reports_callmedex_
+# attribution.sql). This dashboard reads exactly that data; no new tables.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.put("/clinics/{clinic_id}/connector")
+async def platform_upsert_connector(
+    clinic_id: str,
+    body: ConnectorCredentialsUpdate,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Owner-curated setup of a clinic's EMR connector (MocDoc/Crelio/CloudLIMS) —
+    e.g. enrolling a diagnostic center as a CallMedex processing center by
+    configuring its portal login. Delegates to the same self-service logic
+    clinic admins use (app.routers.admin.upsert_connector_credentials), just
+    reachable under owner Basic Auth so onboarding a new processing center
+    doesn't require that clinic's own admin credentials.
+    """
+    return await upsert_connector_credentials(
+        body=body, request=request, clinic_id=clinic_id, user=owner
+    )
+
+
+@router.get("/callmedex/centers")
+async def get_callmedex_processing_centers(
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Every clinic enrolled as a CallMedex processing center (an enabled EMR
+    connector), plus its CallMedex report-delivery stats."""
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_callmedex_centers",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+
+    try:
+        connectors_res = (
+            supabase.table("integration_connectors")
+            .select(
+                "id, clinic_id, connector_type, is_enabled, last_run_at, last_success_at, last_error"
+            )
+            .eq("is_enabled", True)
+            .execute()
+        )
+        connectors = connectors_res.data or []
+        if not connectors:
+            return {
+                "success": True,
+                "centers": [],
+                "total_active_centers": 0,
+                "total_reports_delivered": 0,
+            }
+
+        clinic_ids = list({c["clinic_id"] for c in connectors})
+        clinics_res = (
+            supabase.table("clinics")
+            .select("id, name, whatsapp_number, is_active")
+            .in_("id", clinic_ids)
+            .execute()
+        )
+        clinics_by_id = {c["id"]: c for c in (clinics_res.data or [])}
+
+        start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        reports_res = (
+            supabase.table("lab_reports")
+            .select("clinic_id, uploaded_at")
+            .eq("source", "callmedex")
+            .in_("clinic_id", clinic_ids)
+            .execute()
+        )
+        reports_by_clinic: dict[str, list] = {}
+        for r in reports_res.data or []:
+            reports_by_clinic.setdefault(r["clinic_id"], []).append(r.get("uploaded_at", ""))
+
+        centers = []
+        total_delivered = 0
+        for conn in connectors:
+            cid = conn["clinic_id"]
+            clinic = clinics_by_id.get(cid)
+            if not clinic:
+                continue
+            timestamps = reports_by_clinic.get(cid, [])
+            delivered_30d = sum(1 for t in timestamps if t >= start_30d)
+            total_delivered += len(timestamps)
+
+            centers.append(
+                {
+                    "clinic_id": cid,
+                    "clinic_name": clinic.get("name"),
+                    "whatsapp_number": clinic.get("whatsapp_number"),
+                    "is_active": clinic.get("is_active", True),
+                    "connector_id": conn["id"],
+                    "connector_type": conn["connector_type"],
+                    "reports_delivered_total": len(timestamps),
+                    "reports_delivered_30d": delivered_30d,
+                    "last_delivery_at": max(timestamps) if timestamps else None,
+                    "last_run_at": conn.get("last_run_at"),
+                    "last_success_at": conn.get("last_success_at"),
+                    "last_error": conn.get("last_error"),
+                }
+            )
+
+        centers.sort(key=lambda x: x["reports_delivered_30d"], reverse=True)
+
+        return {
+            "success": True,
+            "centers": centers,
+            "total_active_centers": len(centers),
+            "total_reports_delivered": total_delivered,
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching CallMedex processing centers: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch CallMedex centers: {e}")

@@ -1,7 +1,7 @@
 """Unit & Integration tests for Platform Owner / Super-Admin router and endpoints."""
 
 import base64
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -211,3 +211,118 @@ def test_platform_panel_static_route():
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Platform Owner Dashboard" in response.text
+
+
+def test_callmedex_centers_requires_auth():
+    response = client.get("/platform/callmedex/centers")
+    assert response.status_code == 401
+
+
+def test_platform_upsert_connector_requires_auth():
+    response = client.put(
+        "/platform/clinics/clinic-A/connector", json={"connector_type": "mocdoc"}
+    )
+    assert response.status_code == 401
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_callmedex_centers_empty(mock_supabase, mock_log_action):
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[]
+    )
+
+    headers = get_owner_auth_header()
+    response = client.get("/platform/callmedex/centers", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["centers"] == []
+    assert data["total_active_centers"] == 0
+    assert data["total_reports_delivered"] == 0
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_callmedex_centers_success(mock_supabase, mock_log_action):
+    mock_connectors = MagicMock()
+    mock_connectors.execute.return_value.data = [
+        {
+            "id": "conn-1",
+            "clinic_id": "clinic-A",
+            "connector_type": "mocdoc",
+            "is_enabled": True,
+            "last_run_at": "2026-08-01T00:00:00Z",
+            "last_success_at": "2026-08-01T00:00:00Z",
+            "last_error": None,
+        }
+    ]
+
+    mock_clinics = MagicMock()
+    mock_clinics.execute.return_value.data = [
+        {
+            "id": "clinic-A",
+            "name": "Apex Diagnostics",
+            "whatsapp_number": "+911111111111",
+            "is_active": True,
+        }
+    ]
+
+    mock_reports = MagicMock()
+    mock_reports.execute.return_value.data = [
+        {"clinic_id": "clinic-A", "uploaded_at": "2026-08-05T00:00:00Z"},
+        {"clinic_id": "clinic-A", "uploaded_at": "2025-01-01T00:00:00Z"},
+    ]
+
+    def table_router(table_name):
+        mock_obj = MagicMock()
+        if table_name == "integration_connectors":
+            mock_obj.select.return_value.eq.return_value = mock_connectors
+        elif table_name == "clinics":
+            mock_obj.select.return_value.in_.return_value = mock_clinics
+        elif table_name == "lab_reports":
+            mock_obj.select.return_value.eq.return_value.in_.return_value = mock_reports
+        return mock_obj
+
+    mock_supabase.table.side_effect = table_router
+
+    headers = get_owner_auth_header()
+    response = client.get("/platform/callmedex/centers", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["total_active_centers"] == 1
+    assert data["total_reports_delivered"] == 2
+    center = data["centers"][0]
+    assert center["clinic_id"] == "clinic-A"
+    assert center["clinic_name"] == "Apex Diagnostics"
+    assert center["connector_type"] == "mocdoc"
+    assert center["reports_delivered_total"] == 2
+    assert center["reports_delivered_30d"] == 1
+
+
+@patch("app.routers.platform.upsert_connector_credentials", new_callable=AsyncMock)
+def test_platform_upsert_connector_delegates_to_admin_logic(mock_upsert):
+    mock_upsert.return_value = {"success": True, "connector": {"id": "conn-1"}}
+
+    headers = get_owner_auth_header()
+    response = client.put(
+        "/platform/clinics/clinic-A/connector",
+        headers=headers,
+        json={
+            "connector_type": "mocdoc",
+            "base_url": "https://mocdoc.example.com",
+            "clinic_slug": "apex-diagnostics",
+            "is_enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    mock_upsert.assert_awaited_once()
+    call_kwargs = mock_upsert.call_args.kwargs
+    assert call_kwargs["clinic_id"] == "clinic-A"
+    assert call_kwargs["user"].role == "platform_owner"
+    assert call_kwargs["body"].connector_type == "mocdoc"

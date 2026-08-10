@@ -94,7 +94,7 @@ async def log_admin_action(
                 .insert(
                     {
                         "clinic_id": user.clinic_id if user.clinic_id and user.clinic_id != "default" else None,
-                        "user_id": user.user_id if user.user_id != "super_admin_env" else None,
+                        "user_id": user.user_id if user.user_id not in ("super_admin_env", "platform_owner_env") else None,
                         "username": user.username,
                         "role": user.role,
                         "action": action,

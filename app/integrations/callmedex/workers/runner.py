@@ -1,6 +1,7 @@
 """CallMedex Background Worker Runner & DI Container (Phase 3 & Phase R2 Implementation)."""
 
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from uuid import uuid4
 from app.integrations.callmedex.config.settings import callmedex_settings, CallMedexSettings
@@ -12,6 +13,10 @@ from app.integrations.callmedex.api.schemas import (
 )
 from app.integrations.callmedex.connectors.factory import ConnectorFactory
 from app.integrations.callmedex.ocr.engine import CanonicalOCRPipeline
+from app.integrations.callmedex.ai.reasoning import ClinicalReasoningEngine
+from app.integrations.callmedex.ai.generator import MultiAudienceSummaryGenerator
+from app.integrations.callmedex.whatsapp.service import WhatsAppDeliveryService
+from app.integrations.callmedex.whatsapp.schemas import WhatsAppDeliveryStatus
 from app.integrations.callmedex.connectors.base.connector import JobCheckpoint
 from app.integrations.callmedex.browser.session import PlaywrightBrowserSession
 from app.integrations.callmedex.storage.provider import LocalStorageProvider
@@ -226,6 +231,7 @@ class CallMedexWorkerRunner:
                 patient_name = getattr(request.patient, "patient_name", "Patient")
 
                 # OCR Processing
+                canonical_report = None
                 try:
                     canonical_report = self.container.ocr_pipeline.process_pdf(
                         pdf_bytes=pdf_bytes,
@@ -238,27 +244,73 @@ class CallMedexWorkerRunner:
                 except Exception as ocr_err:
                     logger.warning(f"OCR Pipeline extraction warning for {report_job_id}: {ocr_err}")
 
-                # AI Summary & Clinical Reasoning
-                try:
-                    from app.services.report_summarizer import ReportSummarizer
-                    summarizer = ReportSummarizer()
-                    summary_res = await summarizer.summarize(
-                        report_text=pdf_bytes.decode("latin-1", errors="ignore"),
-                        patient_name=patient_name,
-                        report_type=getattr(request, "report_type", "Laboratory") or "Laboratory",
-                    )
-                    self._emit_event("AISummarized", report_job_id, corr_id, {"summary_keys": list(summary_res.keys()) if isinstance(summary_res, dict) else []})
-                except Exception as ai_err:
-                    logger.warning(f"AI Summary execution warning for {report_job_id}: {ai_err}")
+                # AI Summary & Clinical Reasoning (Layer 1 reasoning -> Layer 2 multi-audience summary)
+                summary_report = None
+                if canonical_report is not None:
+                    try:
+                        reasoning = ClinicalReasoningEngine().analyze_report(canonical_report)
+                        summary_report = MultiAudienceSummaryGenerator().generate_summary(canonical_report, reasoning)
+                        self._emit_event("AISummarized", report_job_id, corr_id, {"status": summary_report.status.value})
+                    except Exception as ai_err:
+                        logger.warning(f"AI Summary generation warning for {report_job_id}: {ai_err}")
 
-                # WhatsApp Delivery
+                # WhatsApp Delivery — CallMedex's own shared Meta identity (not the processing center's own number),
+                # via a short-lived signed link to the report PDF buffered in the shared "lab-reports" bucket.
+                whatsapp_sent = False
+                storage_path = None
                 if patient_phone:
                     try:
-                        from app.services.whatsapp import whatsapp_service
-                        logger.info(f"Dispatching WhatsApp delivery for patient '{patient_name}'")
-                        self._emit_event("WhatsAppDelivered", report_job_id, corr_id, {"phone": patient_phone[-4:]})
+                        from app.database import supabase as _supabase
+                        storage_path = f"callmedex/{request.clinic_id}/{report_job_id}.pdf"
+                        _supabase.storage.from_("lab-reports").upload(
+                            storage_path, pdf_bytes, {"content-type": "application/pdf"}
+                        )
+                        signed = _supabase.storage.from_("lab-reports").create_signed_url(storage_path, 86400)
+                        pdf_url = signed.get("signedURL") or signed.get("signedUrl")
+
+                        if summary_report is not None and pdf_url:
+                            delivery_service = WhatsAppDeliveryService(callback_handler=self.container.callback_handler)
+                            delivery_result = await delivery_service.deliver_report_and_summary(
+                                phone_number=patient_phone,
+                                pdf_storage_url=pdf_url,
+                                summary_report=summary_report,
+                                report_job_id=report_job_id,
+                                correlation_id=corr_id,
+                            )
+                            whatsapp_sent = delivery_result.status == WhatsAppDeliveryStatus.DELIVERED
+                        self._emit_event(
+                            "WhatsAppDelivered", report_job_id, corr_id,
+                            {"phone": patient_phone[-4:], "sent": whatsapp_sent},
+                        )
                     except Exception as wa_err:
                         logger.warning(f"WhatsApp dispatch warning for {report_job_id}: {wa_err}")
+
+                # Persist the processed report — gives the processing center's own dashboard/analytics
+                # a record, and backs the /process-report idempotency check in api/router.py.
+                try:
+                    from app.database import supabase as _supabase
+                    _supabase.table("lab_reports").insert(
+                        {
+                            "clinic_id": request.clinic_id,
+                            "patient_phone": patient_phone or "",
+                            "patient_name": patient_name,
+                            "report_name": request.report_name,
+                            "report_type": request.report_type.value,
+                            "file_path": storage_path or "",
+                            "ai_summary": (
+                                " ".join(s.statement for s in summary_report.patient_summary)
+                                if summary_report else None
+                            ),
+                            "has_abnormal_values": bool(summary_report and summary_report.status.value != "success"),
+                            "status": "sent" if whatsapp_sent else "failed",
+                            "error_message": None if whatsapp_sent else "CallMedex WhatsApp delivery did not complete",
+                            "external_report_id": request.external_report_id,
+                            "source": "callmedex",
+                            "sent_at": datetime.now(timezone.utc).isoformat() if whatsapp_sent else None,
+                        }
+                    ).execute()
+                except Exception as db_err:
+                    logger.warning(f"Failed to persist lab_reports row for {report_job_id}: {db_err}")
 
 
             # Step 9: Send Signed HMAC Callback

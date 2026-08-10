@@ -204,6 +204,13 @@ async def platform_panel():
     return FileResponse("admin/platform.html", media_type="text/html")
 
 
+@app.get("/platform-panel/vendor/chart.umd.min.js")
+async def platform_panel_chartjs():
+    """Serve self-hosted Chart.js — CSP script-src is 'self' only, so this
+    can't be loaded from a third-party CDN."""
+    return FileResponse("admin/vendor/chart.umd.min.js", media_type="application/javascript")
+
+
 from fastapi.responses import HTMLResponse as HTMLResp
 
 

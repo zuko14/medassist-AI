@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediAssist AI — Platform Super-Admin Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="/platform-panel/vendor/chart.umd.min.js"></script>
     <style>
         :root {
             --bg: #060912;
@@ -880,6 +880,35 @@
                     </table>
                 </div>
             </div>
+
+            <!-- CallMedex Processing Centers -->
+            <div class="section-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="chart-title">CallMedex Processing Centers</div>
+                        <div class="chart-subtitle" id="callmedexSummary">Loading...</div>
+                    </div>
+                    <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openConnectorModal()">+ Enroll Processing Center</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr>
+                                <th>Hospital / Clinic</th>
+                                <th>Connector</th>
+                                <th>Reports (30d)</th>
+                                <th>Reports (All-time)</th>
+                                <th>Last Delivery</th>
+                                <th>Last Error</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="callmedexCentersBody">
+                            <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">Loading CallMedex processing centers...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </main>
 
         <!-- Footer -->
@@ -966,6 +995,58 @@
                 </select>
             </div>
             <button class="btn-primary" onclick="submitCreateAdmin()">Create Admin</button>
+        </div>
+    </div>
+
+    <!-- Enroll / Configure CallMedex Processing Center Modal -->
+    <div class="modal-overlay" id="connectorModal">
+        <div class="modal-panel" style="max-width:480px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Enroll CallMedex Processing Center</h3>
+                <button class="close-btn" onclick="closeConnectorModal()">✕</button>
+            </div>
+            <div class="error-msg" id="connectorError">Error</div>
+            <div class="form-group">
+                <label>Select Hospital / Clinic</label>
+                <select class="form-control" id="cnClinicSelect" onchange="onConnectorClinicSelectChange(this.value)">
+                    <option value="">— Select Hospital / Clinic —</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Or Paste Clinic ID (UUID)</label>
+                <input type="text" class="form-control" id="cnClinicId" placeholder="e.g. e4b2d1c0-8a9b-4c5d-9e1f-2a3b4c5d6e7f" style="font-family:monospace; font-size:0.85rem;">
+            </div>
+            <div class="form-group">
+                <label>Connector Type</label>
+                <select class="form-control" id="cnConnectorType">
+                    <option value="mocdoc">MocDoc</option>
+                    <option value="crelio">Crelio</option>
+                    <option value="cloudlims">CloudLIMS</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Portal Base URL</label>
+                <input type="text" class="form-control" id="cnBaseUrl" placeholder="https://mocdoc.com">
+            </div>
+            <div class="form-group">
+                <label>Clinic Slug</label>
+                <input type="text" class="form-control" id="cnClinicSlug" placeholder="e.g. visakha-multispeciality-clinics">
+            </div>
+            <div class="form-group">
+                <label>Portal Username</label>
+                <input type="text" class="form-control" id="cnUsername" placeholder="e.g. lab_user_1">
+            </div>
+            <div class="form-group">
+                <label>Portal Password</label>
+                <input type="password" class="form-control" id="cnPassword" placeholder="Leave blank to keep existing">
+            </div>
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" id="cnEnabled" checked style="width:auto;"> Enabled
+                </label>
+            </div>
+            <button class="btn-primary" onclick="submitConnector()">Save Connector</button>
         </div>
     </div>
 
@@ -1173,6 +1254,7 @@
                 renderDepartmentCharts(departmentsData);
                 populateClinicDropdown(clinicsData.clinics || []);
                 loadClinicAdmins();
+                loadCallMedexCenters();
 
             } catch (e) {
                 console.error('Error fetching platform data:', e);
@@ -1439,14 +1521,21 @@
         // ═══ Clinic Admin Accounts ═══
 
         function populateClinicDropdown(clinics) {
-            const sel = document.getElementById('caClinicSelect');
-            if (!sel) return;
-            sel.innerHTML = '<option value="">— Select Hospital / Clinic —</option>' +
+            const options = '<option value="">— Select Hospital / Clinic —</option>' +
                 clinics.map(c => `<option value="${c.id}">${escapeHtml(c.name || 'Unnamed Hospital')} (${c.id.slice(0, 8)}...)</option>`).join('');
+            ['caClinicSelect', 'cnClinicSelect'].forEach(id => {
+                const sel = document.getElementById(id);
+                if (sel) sel.innerHTML = options;
+            });
         }
 
         function onClinicSelectChange(val) {
             const input = document.getElementById('caClinicId');
+            if (input) input.value = val || '';
+        }
+
+        function onConnectorClinicSelectChange(val) {
+            const input = document.getElementById('cnClinicId');
             if (input) input.value = val || '';
         }
 
@@ -1585,6 +1674,115 @@
                 }
                 closeCreateAdminModal();
                 loadClinicAdmins();
+            } catch (e) {
+                errEl.innerText = 'Network error — please try again.';
+                errEl.style.display = 'block';
+            }
+        }
+
+        // ═══ CallMedex Processing Centers ═══
+
+        async function loadCallMedexCenters() {
+            try {
+                const res = await fetch('/platform/callmedex/centers', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json();
+                renderCallMedexCenters(data);
+            } catch (e) {
+                console.error('Error fetching CallMedex centers:', e);
+            }
+        }
+
+        function renderCallMedexCenters(data) {
+            const centers = data.centers || [];
+            document.getElementById('callmedexSummary').innerText =
+                `${data.total_active_centers || 0} active center${(data.total_active_centers || 0) === 1 ? '' : 's'} · ${data.total_reports_delivered || 0} reports delivered`;
+
+            const tbody = document.getElementById('callmedexCentersBody');
+            if (centers.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">No processing centers enrolled yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = centers.map(c => {
+                const lastDelivery = c.last_delivery_at
+                    ? new Date(c.last_delivery_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : 'Never';
+                const lastError = c.last_error
+                    ? `<span style="color:var(--red, #ef4444)">${escapeHtml(c.last_error)}</span>`
+                    : '—';
+                return `
+                    <tr>
+                        <td>
+                            <div class="clinic-name-cell">
+                                <span class="clinic-title">${escapeHtml(c.clinic_name || 'Unnamed Hospital')}</span>
+                                <span class="clinic-phone" style="font-family:monospace; cursor:pointer;" title="Click to copy Clinic ID" onclick="copyClinicId('${c.clinic_id}')">ID: ${c.clinic_id}</span>
+                            </div>
+                        </td>
+                        <td><span class="badge">${escapeHtml(c.connector_type)}</span></td>
+                        <td style="font-weight:700">${c.reports_delivered_30d || 0}</td>
+                        <td>${c.reports_delivered_total || 0}</td>
+                        <td style="font-size:0.82rem; color:var(--text2)">${lastDelivery}</td>
+                        <td style="font-size:0.78rem;">${lastError}</td>
+                        <td><button class="action-btn" onclick="openConnectorModal('${c.clinic_id}', '${c.connector_type}')">Edit</button></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function openConnectorModal(clinicId, connectorType) {
+            document.getElementById('cnClinicSelect').value = clinicId || '';
+            document.getElementById('cnClinicId').value = clinicId || '';
+            document.getElementById('cnConnectorType').value = connectorType || 'mocdoc';
+            document.getElementById('cnBaseUrl').value = '';
+            document.getElementById('cnClinicSlug').value = '';
+            document.getElementById('cnUsername').value = '';
+            document.getElementById('cnPassword').value = '';
+            document.getElementById('cnEnabled').checked = true;
+            document.getElementById('connectorError').style.display = 'none';
+            document.getElementById('connectorModal').classList.add('active');
+        }
+
+        function closeConnectorModal() {
+            document.getElementById('connectorModal').classList.remove('active');
+        }
+
+        async function submitConnector() {
+            const clinic_id = document.getElementById('cnClinicId').value.trim();
+            const connector_type = document.getElementById('cnConnectorType').value;
+            const base_url = document.getElementById('cnBaseUrl').value.trim();
+            const clinic_slug = document.getElementById('cnClinicSlug').value.trim();
+            const username = document.getElementById('cnUsername').value.trim();
+            const password = document.getElementById('cnPassword').value;
+            const is_enabled = document.getElementById('cnEnabled').checked;
+            const errEl = document.getElementById('connectorError');
+            errEl.style.display = 'none';
+
+            if (!clinic_id) {
+                errEl.innerText = 'Select or paste a Clinic ID.';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            const body = { connector_type, is_enabled };
+            if (base_url) body.base_url = base_url;
+            if (clinic_slug) body.clinic_slug = clinic_slug;
+            if (username) body.username = username;
+            if (password) body.password = password;
+
+            try {
+                const res = await fetch(`/platform/clinics/${clinic_id}/connector`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    errEl.innerText = data.detail || 'Failed to save connector.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                closeConnectorModal();
+                loadCallMedexCenters();
             } catch (e) {
                 errEl.innerText = 'Network error — please try again.';
                 errEl.style.display = 'block';
