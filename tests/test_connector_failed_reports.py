@@ -14,7 +14,7 @@ async def test_record_report_failure_new_entry():
     mock_sb.table.return_value = mock_table
 
     # Table select returns empty list (new failure)
-    mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+    mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(
         data=[]
     )
 
@@ -51,7 +51,7 @@ async def test_record_report_failure_threshold_alert():
         "external_report_id": "VAM-1001_R1",
         "failure_count": 2,
     }
-    mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+    mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(
         data=[mock_existing_row]
     )
 

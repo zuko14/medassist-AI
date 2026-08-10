@@ -768,6 +768,9 @@
             <div class="nav-link" tabindex="0" data-page="branches" data-feature="multi_branch" onclick="go('branches',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="1"></rect><rect x="9" y="6" width="2" height="2"></rect><rect x="13" y="6" width="2" height="2"></rect><rect x="9" y="11" width="2" height="2"></rect><rect x="13" y="11" width="2" height="2"></rect><rect x="10" y="16" width="4" height="6"></rect></svg></span> Branches
             </div>
+            <div class="nav-link" tabindex="0" data-page="connectors" data-feature="lab_reports" onclick="go('connectors',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span> Report Connector
+            </div>
         </div>
         <div class="nav-bottom">
             <div class="nav-link" onclick="toggleTheme()" id="themeToggleBtn" role="button" aria-label="Switch to light theme" tabindex="0">
@@ -1186,6 +1189,64 @@
             </div>
         </div>
 
+        <!-- ─── REPORT CONNECTOR (MocDoc) ─── -->
+        <div id="pg-connectors" class="sec">
+            <div class="page-head">
+                <h2>Report Connector</h2>
+                <p>MocDoc/HMIS credentials and delivery history — see exactly which patient reports were sent or failed</p>
+            </div>
+
+            <div class="form-card" id="connectorBranchCard" style="display:none;">
+                <div class="field">
+                    <label>Branch</label>
+                    <select id="f-connectorBranch" onchange="loadConnectorsPage()">
+                        <option value="">Main / No branch</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-card">
+                <h3>🔌 MocDoc Credentials</h3>
+                <div id="connectorMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Username</label><input type="text" id="f-connUsername" placeholder="MocDoc login ID"></div>
+                    <div class="field"><label>Password</label><input type="password" id="f-connPassword" placeholder="Leave blank to keep existing"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label>Clinic Slug</label><input type="text" id="f-connSlug" placeholder="e.g. visakha-multispeciality-clinics"></div>
+                    <div class="field"><label>Base URL</label><input type="text" id="f-connBaseUrl" placeholder="https://mocdoc.com"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label>Admin Alert Phone</label><input type="text" id="f-connAlertPhone" placeholder="+91XXXXXXXXXX"></div>
+                    <div class="field"><label>Poll Interval (minutes)</label><input type="number" id="f-connPollMinutes" min="1" value="10"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label><input type="checkbox" id="f-connEnabled"> Connector Enabled</label></div>
+                </div>
+                <button class="btn btn-accent" onclick="saveConnectorCredentials()">Save Credentials</button>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>📡 Run History</h3>
+                    <span id="connectorStatus" style="color:var(--text3); font-size:0.8rem;"></span>
+                </div>
+                <div class="tbl-wrap" id="connectorAuditList">
+                    <div class="loader"><div class="spin"></div>Loading run history...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>⚠️ Failed / Undelivered Reports</h3>
+                    <span id="failedReportCount" style="color:var(--text3); font-size:0.8rem;"></span>
+                </div>
+                <div class="tbl-wrap" id="failedReportsList">
+                    <div class="loader"><div class="spin"></div>Loading failed reports...</div>
+                </div>
+            </div>
+        </div>
+
     </main>
 </div>
 
@@ -1484,7 +1545,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches };
+    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage };
     if (loaders[page]) loaders[page]();
 }
 
@@ -1545,6 +1606,10 @@ function msg(id, text, err) {
 
 function emptyState(iconKey, text) {
     return `<div class="empty"><div class="empty-icon">${icon(iconKey, 32)}</div><p>${text}</p></div>`;
+}
+
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function loading() {
@@ -1657,7 +1722,7 @@ function renderDashboard(d) {
     const max = Math.max(...depts.map(x => x.count));
     el.innerHTML = depts.map(dept => `
         <div class="dept-bar">
-            <div class="dept-label"><span>${dept.department}</span><span>${dept.count}</span></div>
+            <div class="dept-label"><span>${esc(dept.department)}</span><span>${dept.count}</span></div>
             <div class="dept-track"><div class="dept-fill" style="width:0%" data-w="${(dept.count / max * 100).toFixed(0)}%"></div></div>
         </div>
     `).join('');
@@ -1679,9 +1744,9 @@ function renderDashAppts(data) {
     el.innerHTML = `<table>
         <thead><tr><th>Ref</th><th>Patient</th><th>Doctor</th><th>Date</th><th>Status</th></tr></thead>
         <tbody>${data.map(a => `<tr>
-            <td style="color:var(--accent2); font-weight:600">${a.booking_ref || '—'}</td>
-            <td>${a.patient_name || a.patient_phone || '—'}</td>
-            <td>${a.doctor_name || '—'}</td>
+            <td style="color:var(--accent2); font-weight:600">${esc(a.booking_ref) || '—'}</td>
+            <td>${esc(a.patient_name || a.patient_phone) || '—'}</td>
+            <td>${esc(a.doctor_name) || '—'}</td>
             <td>${a.appointment_date || '—'}</td>
             <td>${badge(a.status)}</td>
         </tr>`).join('')}</tbody>
@@ -1713,25 +1778,25 @@ async function loadAppointments() {
                 <th>Status</th><th>Action</th>
             </tr></thead>
             <tbody>${data.map(a => `<tr>
-                <td style="color:var(--accent2);font-weight:600;font-family:monospace">${a.booking_ref || '—'}</td>
+                <td style="color:var(--accent2);font-weight:600;font-family:monospace">${esc(a.booking_ref) || '—'}</td>
                 <td>${a.token_number ? `<span style="background:var(--card-bg, #f3f4f6);padding:3px 8px;border-radius:4px;font-weight:700;color:var(--accent,#0ea5e9);">#${a.token_number}</span>` : '<span style="color:var(--text-muted,#9ca3af);">—</span>'}</td>
-                <td>${a.patient_name || a.patient_phone || '—'}</td>
-                <td>${a.doctor_name || '—'}</td>
-                <td>${a.department || '—'}</td>
+                <td>${esc(a.patient_name || a.patient_phone) || '—'}</td>
+                <td>${esc(a.doctor_name) || '—'}</td>
+                <td>${esc(a.department) || '—'}</td>
                 <td>${a.appointment_date || '—'}</td>
                 <td>${a.appointment_time || '—'}</td>
                 <td>${badge(a.status)}</td>
-                <td>${a.status === 'confirmed' ? 
+                <td>${a.status === 'confirmed' ?
                     `<div style="display:flex;gap:6px;align-items:center;">
                         ${!a.token_number ? `
-                            <button 
+                            <button
                                 style="background:var(--accent,#0ea5e9);color:#fff;border:none;
                                        padding:5px 10px;border-radius:6px;cursor:pointer;
                                        font-size:12px;font-weight:600;"
                                 onclick="checkInAppt('${a.id}')">
                                 Check In
                             </button>
-                        ` : `<span style="font-size:11px;font-weight:600;color:var(--text-muted,#6b7280);text-transform:capitalize;">${a.queue_status || 'Waiting'}</span>`}
+                        ` : `<span style="font-size:11px;font-weight:600;color:var(--text-muted,#6b7280);text-transform:capitalize;">${esc(a.queue_status) || 'Waiting'}</span>`}
                         <button 
                             style="background:#fee2e2;color:#dc2626;border:none;
                                    padding:5px 12px;border-radius:6px;cursor:pointer;
@@ -1764,9 +1829,9 @@ async function loadDoctors() {
         el.innerHTML = `<table>
             <thead><tr><th>Name</th><th>Specialization</th><th>Department</th><th>Fee</th><th>Days</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${doctorCache.map(d => `<tr>
-                <td style="font-weight:600; color:var(--text-strong)">${d.name}</td>
-                <td>${d.specialization || '—'}</td>
-                <td>${d.department}</td>
+                <td style="font-weight:600; color:var(--text-strong)">${esc(d.name)}</td>
+                <td>${esc(d.specialization) || '—'}</td>
+                <td>${esc(d.department)}</td>
                 <td>₹${d.consultation_fee}</td>
                 <td style="color:var(--text2); font-size:0.8rem">${d.available_days || 'Mon-Fri'}</td>
                 <td>${d.is_active ? badge('active') : badge('inactive')}</td>
@@ -1780,9 +1845,20 @@ async function loadDoctors() {
 }
 
 function updateLeaveDropdown() {
-    document.getElementById('f-leaveDoc').innerHTML =
-        doctorCache.filter(d => d.is_active).map(d => `<option value="${d.name}">${d.name}</option>`).join('') ||
-        '<option value="">No doctors available</option>';
+    const sel = document.getElementById('f-leaveDoc');
+    sel.innerHTML = '';
+    const active = doctorCache.filter(d => d.is_active);
+    if (!active.length) {
+        const opt = document.createElement('option');
+        opt.value = ''; opt.textContent = 'No doctors available';
+        sel.appendChild(opt);
+        return;
+    }
+    active.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.name; opt.textContent = d.name;
+        sel.appendChild(opt);
+    });
 }
 
 async function submitDoctor() {
@@ -1883,10 +1959,10 @@ async function loadLeaves() {
         el.innerHTML = `<table>
             <thead><tr><th>Doctor</th><th>Date</th><th>Type</th><th>Reason</th><th></th></tr></thead>
             <tbody>${data.map(l => `<tr>
-                <td style="font-weight:600">${l.doctor_name}</td>
+                <td style="font-weight:600">${esc(l.doctor_name)}</td>
                 <td>${l.leave_date}</td>
                 <td>${l.leave_type === 'full' ? 'Full Day' : l.leave_type === 'half_morning' ? '½ Morning' : '½ Evening'}</td>
-                <td style="color:var(--text2)">${l.reason || '—'}</td>
+                <td style="color:var(--text2)">${esc(l.reason) || '—'}</td>
                 <td><button class="btn btn-red btn-sm" onclick="delLeave('${l.id}')">Remove</button></td>
             </tr>`).join('')}</tbody>
         </table>`;
@@ -1936,7 +2012,7 @@ async function loadHolidays() {
             <thead><tr><th>Date</th><th>Holiday</th><th></th></tr></thead>
             <tbody>${data.map(h => `<tr>
                 <td style="font-weight:600">${h.holiday_date}</td>
-                <td>${h.name}</td>
+                <td>${esc(h.name)}</td>
                 <td><button class="btn btn-red btn-sm" onclick="delHoliday('${h.holiday_date}')">Remove</button></td>
             </tr>`).join('')}</tbody>
         </table>`;
@@ -2028,9 +2104,9 @@ function renderPatientTable(list) {
     el.innerHTML = `<table>
         <thead><tr><th>Name</th><th>Phone</th><th>Language</th><th>Opted In</th><th>Visits</th><th>Actions</th></tr></thead>
         <tbody>${list.map(p => `<tr>
-            <td style="font-weight:600;color:var(--text-strong)">${p.name || '—'}</td>
-            <td>${p.phone}</td>
-            <td>${p.language || '—'}</td>
+            <td style="font-weight:600;color:var(--text-strong)">${esc(p.name) || '—'}</td>
+            <td>${esc(p.phone)}</td>
+            <td>${esc(p.language) || '—'}</td>
             <td>${p.opted_in ? badge('active') : badge('inactive')}</td>
             <td>${p.appointment_count ?? p.visit_count ?? 0}</td>
             <td><button class="btn btn-ghost btn-sm" onclick="openLabReportModalFor('${p.phone}','${(p.name||'').replace(/'/g,"\\'")}')">📋 Upload Report</button></td>
@@ -2070,10 +2146,10 @@ function renderLabTable(list) {
     el.innerHTML = `<table>
         <thead><tr><th>Patient Name</th><th>Phone</th><th>Report Name</th><th>Report Type</th><th>Uploaded At</th><th>AI Summary</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${list.map(r => `<tr>
-            <td style="font-weight:600;color:var(--text-strong)">${r.patient_name || '—'}</td>
-            <td>${r.patient_phone}</td>
-            <td>${r.report_name}</td>
-            <td>${r.report_type || 'General'}</td>
+            <td style="font-weight:600;color:var(--text-strong)">${esc(r.patient_name) || '—'}</td>
+            <td>${esc(r.patient_phone)}</td>
+            <td>${esc(r.report_name)}</td>
+            <td>${esc(r.report_type) || 'General'}</td>
             <td>${r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : '—'}</td>
             <td>${r.ai_summary ? (r.has_abnormal_values ? `<span title="${r.ai_summary.replace(/"/g,'&quot;')}" style="cursor:help;font-size:1.2rem;color:var(--amber)">⚠️</span>` : `<span title="${r.ai_summary.replace(/"/g,'&quot;')}" style="cursor:help;font-size:1.2rem;color:var(--green)">✅</span>`) : '—'}</td>
             <td>${badge(r.status)}</td>
@@ -2201,11 +2277,11 @@ function renderRxTable(list) {
     el.innerHTML = `<table>
         <thead><tr><th>Patient Name</th><th>Phone</th><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Reminder Times</th><th>End Date</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${list.map(r => `<tr>
-            <td style="font-weight:600;color:var(--text-strong)">${r.patient_name || '—'}</td>
-            <td>${r.patient_phone}</td>
-            <td>${r.medicine_name}</td>
-            <td>${r.dosage}</td>
-            <td>${r.frequency}</td>
+            <td style="font-weight:600;color:var(--text-strong)">${esc(r.patient_name) || '—'}</td>
+            <td>${esc(r.patient_phone)}</td>
+            <td>${esc(r.medicine_name)}</td>
+            <td>${esc(r.dosage)}</td>
+            <td>${esc(r.frequency)}</td>
             <td>${(r.reminder_times || []).join(', ')}</td>
             <td>${r.end_date}</td>
             <td>${r.is_active ? badge('active') : badge('inactive')}</td>
@@ -2356,9 +2432,9 @@ async function loadPayments() {
             prData.bookings.forEach(b => {
                 const amt = b.amount_paise ? '₹' + (b.amount_paise / 100).toFixed(0) : '—';
                 prHtml += `<tr>
-                    <td>${b.booking_ref || '—'}</td>
-                    <td>${b.patient_name || '—'}<br><small style="color:var(--text3)">${b.patient_phone || ''}</small></td>
-                    <td>${b.doctor_name || '—'}</td>
+                    <td>${esc(b.booking_ref) || '—'}</td>
+                    <td>${esc(b.patient_name) || '—'}<br><small style="color:var(--text3)">${esc(b.patient_phone) || ''}</small></td>
+                    <td>${esc(b.doctor_name) || '—'}</td>
                     <td>${b.appointment_date || ''} ${b.appointment_time || ''}</td>
                     <td>${amt}</td>
                     <td>
@@ -2394,10 +2470,10 @@ async function loadPayments() {
                 actions += ` <button class="btn" style="padding:4px 10px;font-size:0.75rem;color:var(--pink)" onclick="refundBooking('${b.id}')">💸 Refund</button>`;
             }
             html += `<tr>
-                <td>${b.booking_ref || '—'}</td>
-                <td>${b.patient_name || '—'}<br><small style="color:var(--text3)">${b.patient_phone || ''}</small></td>
-                <td>${b.doctor_name || '—'}</td>
-                <td>${b.branch_name || '—'}</td>
+                <td>${esc(b.booking_ref) || '—'}</td>
+                <td>${esc(b.patient_name) || '—'}<br><small style="color:var(--text3)">${esc(b.patient_phone) || ''}</small></td>
+                <td>${esc(b.doctor_name) || '—'}</td>
+                <td>${esc(b.branch_name) || '—'}</td>
                 <td>${b.appointment_date || ''} ${b.appointment_time || ''}</td>
                 <td>${badge}</td>
                 <td>${amt}</td>
@@ -2433,10 +2509,10 @@ async function showPaymentEvents(bookingId) {
                 try { payloadStr = typeof e.raw_payload === 'string' ? e.raw_payload : JSON.stringify(e.raw_payload, null, 2); } catch { payloadStr = String(e.raw_payload); }
                 html += `<div style="background:var(--surface2);padding:12px 16px;border-radius:10px;border-left:3px solid ${color}">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                        <span style="font-weight:600;color:${color};font-size:0.85rem">${e.event_type}</span>
+                        <span style="font-weight:600;color:${color};font-size:0.85rem">${esc(e.event_type)}</span>
                         <span style="color:var(--text3);font-size:0.75rem">${time}</span>
                     </div>
-                    <pre style="color:var(--text2);font-size:0.72rem;white-space:pre-wrap;word-break:break-all;margin:0;max-height:80px;overflow:auto">${payloadStr}</pre>
+                    <pre style="color:var(--text2);font-size:0.72rem;white-space:pre-wrap;word-break:break-all;margin:0;max-height:80px;overflow:auto">${esc(payloadStr)}</pre>
                 </div>`;
             });
             html += '</div>';
@@ -2501,9 +2577,9 @@ async function loadBranches() {
                 ? '<span class="badge badge-confirmed">Active</span>'
                 : '<span class="badge badge-cancelled">Inactive</span>';
             html += `<tr>
-                <td><strong>${b.name}</strong></td>
-                <td>${b.short_name || '—'}</td>
-                <td>${b.address || '—'}<br><small style="color:var(--text3)">${b.landmark || ''}</small></td>
+                <td><strong>${esc(b.name)}</strong></td>
+                <td>${esc(b.short_name) || '—'}</td>
+                <td>${esc(b.address) || '—'}<br><small style="color:var(--text3)">${esc(b.landmark) || ''}</small></td>
                 <td>${type}</td>
                 <td>${status}</td>
                 <td>${b.display_order}</td>
@@ -2621,8 +2697,8 @@ async function manageBranchDoctors(branchId, branchName) {
                 }[a.session] || a.session;
 
                 html += `<tr>
-                    <td><strong>${doc.name || 'Unknown'}</strong><br><small style="color:var(--text3)">${doc.specialization || ''}</small></td>
-                    <td>${doc.department || '—'}</td>
+                    <td><strong>${esc(doc.name) || 'Unknown'}</strong><br><small style="color:var(--text3)">${esc(doc.specialization) || ''}</small></td>
+                    <td>${esc(doc.department) || '—'}</td>
                     <td>${sessionBadge}</td>
                     <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="removeDoctorFromBranch('${branchId}', '${a.doctor_id}')">Remove</button></td>
                 </tr>`;
@@ -2640,7 +2716,10 @@ async function manageBranchDoctors(branchId, branchName) {
         const select = document.getElementById('f-assignDoctor');
         select.innerHTML = '<option value="">Select doctor...</option>';
         (Array.isArray(docs) ? docs : []).forEach(d => {
-            select.innerHTML += `<option value="${d.id}">${d.name} (${d.department})</option>`;
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = `${d.name} (${d.department})`;
+            select.appendChild(opt);
         });
     } catch (e) {}
 
@@ -2724,6 +2803,173 @@ async function savePaymentSettings() {
         loadPaymentSettings();
     } catch (e) {
         msg('paySettingsMsg', 'Error: ' + e.message, true);
+    }
+}
+
+// ═══════ REPORT CONNECTOR (MocDoc) ═══════
+let _connectorId = null;
+let _connectorBranchesLoaded = false;
+
+function _connBranchParam() {
+    const branchId = document.getElementById('f-connectorBranch').value;
+    return branchId ? '&branch_id=' + branchId : '';
+}
+
+async function loadConnectorsPage() {
+    const showBranchPicker = myFeatures === null || myFeatures.includes('multi_branch');
+    document.getElementById('connectorBranchCard').style.display = showBranchPicker ? 'block' : 'none';
+
+    if (showBranchPicker && !_connectorBranchesLoaded) {
+        try {
+            const data = await api('/admin/branches');
+            const select = document.getElementById('f-connectorBranch');
+            (data.branches || []).forEach(b => {
+                const opt = document.createElement('option');
+                opt.value = b.id;
+                opt.textContent = b.name;
+                select.appendChild(opt);
+            });
+        } catch (e) {}
+        _connectorBranchesLoaded = true;
+    }
+
+    await loadConnectorCredentials();
+    await loadConnectorAuditLog();
+    await loadFailedReports();
+}
+
+async function loadConnectorCredentials() {
+    try {
+        const data = await api('/admin/connectors?clinic_id=default' + _connBranchParam());
+        const conn = (data.connectors || [])[0];
+        _connectorId = conn ? conn.id : null;
+        const cfg = (conn && conn.config) || {};
+
+        document.getElementById('f-connUsername').value = '';
+        document.getElementById('f-connUsername').placeholder =
+            cfg.username_masked ? 'Saved: ' + cfg.username_masked : 'MocDoc login ID';
+        document.getElementById('f-connPassword').value = '';
+        document.getElementById('f-connPassword').placeholder =
+            cfg.password_set ? 'Saved — leave blank to keep existing' : 'Leave blank to keep existing';
+        document.getElementById('f-connSlug').value = cfg.clinic_slug || '';
+        document.getElementById('f-connBaseUrl').value = cfg.base_url || '';
+        document.getElementById('f-connAlertPhone').value = cfg.admin_alert_phone || '';
+        document.getElementById('f-connPollMinutes').value = cfg.poll_interval_minutes || 10;
+        document.getElementById('f-connEnabled').checked = conn ? !!conn.is_enabled : false;
+
+        const statusEl = document.getElementById('connectorStatus');
+        if (conn) {
+            const lastRun = conn.last_run_at ? new Date(conn.last_run_at).toLocaleString() : 'never';
+            const lastOk = conn.last_success_at ? new Date(conn.last_success_at).toLocaleString() : 'never';
+            statusEl.textContent = `Last run: ${lastRun} · Last success: ${lastOk}` +
+                (conn.last_error ? ` · Last error: ${conn.last_error}` : '');
+        } else {
+            statusEl.textContent = 'No connector configured yet';
+        }
+    } catch (e) {
+        msg('connectorMsg', 'Error loading connector: ' + e.message, true);
+    }
+}
+
+async function saveConnectorCredentials() {
+    const branchId = document.getElementById('f-connectorBranch').value;
+    const body = {
+        connector_type: 'mocdoc',
+        branch_id: branchId || null,
+        clinic_slug: document.getElementById('f-connSlug').value.trim() || null,
+        base_url: document.getElementById('f-connBaseUrl').value.trim() || null,
+        admin_alert_phone: document.getElementById('f-connAlertPhone').value.trim() || null,
+        poll_interval_minutes: parseInt(document.getElementById('f-connPollMinutes').value, 10) || null,
+        is_enabled: document.getElementById('f-connEnabled').checked,
+    };
+    const username = document.getElementById('f-connUsername').value.trim();
+    const password = document.getElementById('f-connPassword').value.trim();
+    if (username) body.username = username;
+    if (password) body.password = password;
+
+    try {
+        await apiPut('/admin/connectors?clinic_id=default', body);
+        msg('connectorMsg', '✅ Connector credentials saved!');
+        loadConnectorsPage();
+    } catch (e) {
+        msg('connectorMsg', 'Error: ' + e.message, true);
+    }
+}
+
+async function loadConnectorAuditLog() {
+    const el = document.getElementById('connectorAuditList');
+    if (!_connectorId) {
+        el.innerHTML = emptyState('folder', 'Save credentials above to start syncing reports.');
+        return;
+    }
+    try {
+        const data = await api('/admin/connectors/' + _connectorId + '/audit-log?limit=20');
+        const logs = data.audit_log || [];
+        if (logs.length === 0) {
+            el.innerHTML = emptyState('folder', 'No runs yet.');
+            return;
+        }
+        let html = '<table><thead><tr><th>When</th><th>Status</th><th>Found</th><th>Uploaded</th><th>Failed</th><th>Duration</th><th>Error</th></tr></thead><tbody>';
+        logs.forEach(l => {
+            const statusBadge = l.run_status === 'success'
+                ? '<span class="badge badge-confirmed">Success</span>'
+                : l.run_status === 'partial'
+                    ? '<span class="badge badge-pending">Partial</span>'
+                    : '<span class="badge badge-cancelled">Failed</span>';
+            html += `<tr>
+                <td>${new Date(l.created_at).toLocaleString()}</td>
+                <td>${statusBadge}</td>
+                <td>${l.reports_found ?? 0}</td>
+                <td>${l.reports_uploaded ?? 0}</td>
+                <td>${l.reports_failed ?? 0}</td>
+                <td>${l.duration_ms ? (l.duration_ms / 1000).toFixed(1) + 's' : '—'}</td>
+                <td><small style="color:var(--text3)">${esc(l.error_message) || '—'}</small></td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = emptyState('warning', 'Failed to load run history');
+    }
+}
+
+async function loadFailedReports() {
+    const el = document.getElementById('failedReportsList');
+    try {
+        const data = await api('/admin/connectors/failed-reports?clinic_id=default&unresolved_only=true' + _connBranchParam());
+        const rows = data.failed_reports || [];
+        document.getElementById('failedReportCount').textContent = rows.length + ' unresolved';
+
+        if (rows.length === 0) {
+            el.innerHTML = emptyState('success', 'No undelivered reports — all clear.');
+            return;
+        }
+        let html = '<table><thead><tr><th>Patient</th><th>Report ID</th><th>Failures</th><th>Last Error</th><th>Last Attempt</th><th>Actions</th></tr></thead><tbody>';
+        rows.forEach(r => {
+            html += `<tr>
+                <td><strong>${esc(r.patient_name) || 'Unknown'}</strong><br><small style="color:var(--text3)">${esc(r.vam_id)}</small></td>
+                <td>${esc(r.external_report_id)}</td>
+                <td>${r.failure_count}</td>
+                <td><small style="color:var(--text3)">${esc(r.last_error) || '—'}</small></td>
+                <td>${r.last_attempt_at ? new Date(r.last_attempt_at).toLocaleString() : '—'}</td>
+                <td><button class="btn btn-ghost btn-sm" onclick="resolveFailedReport('${r.id}')">Mark Resolved</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = emptyState('warning', 'Failed to load failed reports');
+    }
+}
+
+async function resolveFailedReport(failedReportId) {
+    const ok = await confirmDialog('Mark this report as resolved? Use this once staff has manually re-sent it to the patient.', { okText: 'Mark Resolved' });
+    if (!ok) return;
+    try {
+        await apiPost('/admin/connectors/failed-reports/' + failedReportId + '/resolve?clinic_id=default', {});
+        loadFailedReports();
+    } catch (e) {
+        toast('Error: ' + e.message, true);
     }
 }
 

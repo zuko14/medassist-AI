@@ -373,6 +373,22 @@ class DoctorBranchAssign(BaseModel):
     session: str = "both"  # morning | evening | both
 
 
+class ConnectorCredentialsUpdate(BaseModel):
+    """Self-service MocDoc/HMIS connector credentials a clinic_admin can set
+    for their own clinic (or one of their own branches). Partial update —
+    an empty/omitted password never overwrites the stored one."""
+
+    connector_type: str = "mocdoc"
+    branch_id: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    base_url: Optional[str] = None
+    clinic_slug: Optional[str] = None
+    admin_alert_phone: Optional[str] = None
+    poll_interval_minutes: Optional[int] = None
+    is_enabled: Optional[bool] = None
+
+
 class PrescriptionCreate(BaseModel):
     patient_phone: str = Field(..., description="Patient phone number")
     patient_name: str = Field(..., min_length=1, description="Patient full name")
@@ -1410,15 +1426,41 @@ async def update_payment_settings(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@router.get("/connectors", dependencies=[Depends(verify_credentials)])
-async def get_connectors(clinic_id: Optional[str] = None):
-    """Get all integration connectors with status info."""
+def _mask_connector(row: dict) -> dict:
+    """Strip/mask credential fields before returning a connector row to the
+    admin panel — the raw encrypted password blob must never round-trip
+    over the wire, and the username is shown only partially masked."""
+    row = dict(row)
+    cfg = dict(row.get("config") or {})
+    username = cfg.get("username")
+    cfg["username_masked"] = (
+        (username[:2] + "•" * max(0, len(username) - 2)) if username else None
+    )
+    cfg["password_set"] = bool(cfg.get("password_encrypted") or cfg.get("password"))
+    cfg.pop("username", None)
+    cfg.pop("password", None)
+    cfg.pop("password_encrypted", None)
+    row["config"] = cfg
+    return row
+
+
+@router.get("/connectors")
+async def get_connectors(
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Get all integration connectors with status info (credentials masked)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("integration_connectors").select("*")
-        if clinic_id:
-            query = query.eq("clinic_id", clinic_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        if branch_id:
+            query = query.eq("branch_id", branch_id)
         result = query.order("created_at", desc=True).execute()
-        return {"connectors": result.data or []}
+        connectors = [_mask_connector(row) for row in (result.data or [])]
+        return {"connectors": connectors}
     except Exception as e:
         logger.error(f"Failed to get connectors: {e}")
         raise HTTPException(status_code=500, detail="Failed to get connectors")
@@ -1428,12 +1470,129 @@ class ConnectorToggle(BaseModel):
     is_enabled: bool
 
 
+@router.put("/connectors")
+async def upsert_connector_credentials(
+    body: ConnectorCredentialsUpdate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Self-service create/update of a clinic's (or one of its branches')
+    MocDoc connector credentials. A clinic_admin may only write their own
+    clinic's connector; diagnostic-report capability (`lab_reports`) is
+    required — this is not exposed to clinics that don't take lab reports."""
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    require_feature(clinic, "lab_reports")
+
+    if body.branch_id:
+        branch = (
+            supabase.table("branches")
+            .select("id")
+            .eq("id", body.branch_id)
+            .eq("clinic_id", effective_clinic_id)
+            .execute()
+        )
+        if not branch.data:
+            raise HTTPException(status_code=404, detail="Branch not found for this clinic")
+
+    query = (
+        supabase.table("integration_connectors")
+        .select("*")
+        .eq("clinic_id", effective_clinic_id)
+        .eq("connector_type", body.connector_type)
+    )
+    query = query.eq("branch_id", body.branch_id) if body.branch_id else query.is_("branch_id", "null")
+    existing = query.execute()
+    existing_row = existing.data[0] if existing.data else None
+
+    cfg = dict(existing_row.get("config") or {}) if existing_row else {}
+
+    if body.username is not None and body.username.strip():
+        cfg["username"] = body.username.strip()
+    if body.password is not None and body.password.strip():
+        key = settings.connector_encryption_key
+        if not key:
+            raise HTTPException(
+                status_code=500,
+                detail="Connector encryption is not configured on this server — contact support before saving credentials",
+            )
+        from app.utils.connector_crypto import encrypt_password
+
+        cfg["password_encrypted"] = encrypt_password(body.password.strip(), key)
+        cfg.pop("password", None)
+    if body.base_url is not None and body.base_url.strip():
+        cfg["base_url"] = body.base_url.strip()
+    if body.clinic_slug is not None and body.clinic_slug.strip():
+        cfg["clinic_slug"] = body.clinic_slug.strip()
+    if body.admin_alert_phone is not None and body.admin_alert_phone.strip():
+        cfg["admin_alert_phone"] = body.admin_alert_phone.strip()
+    if body.poll_interval_minutes is not None:
+        cfg["poll_interval_minutes"] = body.poll_interval_minutes
+
+    now = datetime.now().isoformat()
+    if existing_row:
+        update_data = {"config": cfg, "updated_at": now}
+        if body.is_enabled is not None:
+            update_data["is_enabled"] = body.is_enabled
+        result = (
+            supabase.table("integration_connectors")
+            .update(update_data)
+            .eq("id", existing_row["id"])
+            .execute()
+        )
+        saved = result.data[0]
+    else:
+        insert_data = {
+            "clinic_id": effective_clinic_id,
+            "branch_id": body.branch_id,
+            "connector_type": body.connector_type,
+            "config": cfg,
+            "is_enabled": bool(body.is_enabled) if body.is_enabled is not None else False,
+        }
+        result = supabase.table("integration_connectors").insert(insert_data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to save connector credentials")
+        saved = result.data[0]
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="upsert_connector_credentials",
+        resource_type="integration_connector",
+        resource_id=saved.get("id"),
+        details={
+            "connector_type": body.connector_type,
+            "branch_id": body.branch_id,
+            "username_changed": bool(body.username),
+            "password_changed": bool(body.password),
+        },
+        ip_address=client_ip,
+    )
+
+    return {"success": True, "connector": _mask_connector(saved)}
+
+
 @router.post(
     "/connectors/{connector_id}/toggle", dependencies=[Depends(verify_credentials)]
 )
-async def toggle_connector(connector_id: str, body: ConnectorToggle):
+async def toggle_connector(
+    connector_id: str,
+    body: ConnectorToggle,
+    user: AdminUser = Depends(verify_credentials),
+):
     """Toggle a connector ON or OFF. This is the primary kill switch."""
     try:
+        connector = (
+            supabase.table("integration_connectors")
+            .select("clinic_id")
+            .eq("id", connector_id)
+            .execute()
+        )
+        if not connector.data:
+            raise HTTPException(status_code=404, detail="Connector not found")
+        enforce_clinic_access(user, connector.data[0]["clinic_id"])
+
         result = (
             supabase.table("integration_connectors")
             .update(
@@ -1451,7 +1610,7 @@ async def toggle_connector(connector_id: str, body: ConnectorToggle):
 
         status = "enabled" if body.is_enabled else "disabled"
         logger.info(f"Connector {connector_id} {status}")
-        return {"message": f"Connector {status}", "connector": result.data[0]}
+        return {"message": f"Connector {status}", "connector": _mask_connector(result.data[0])}
     except HTTPException:
         raise
     except Exception as e:
@@ -1459,16 +1618,19 @@ async def toggle_connector(connector_id: str, body: ConnectorToggle):
         raise HTTPException(status_code=500, detail="Failed to toggle connector")
 
 
-@router.get(
-    "/connectors/{connector_id}/audit-log", dependencies=[Depends(verify_credentials)]
-)
-async def get_connector_audit_log(connector_id: str, limit: int = 20):
-    """Get recent audit log entries for a connector."""
+@router.get("/connectors/{connector_id}/audit-log")
+async def get_connector_audit_log(
+    connector_id: str,
+    limit: int = 20,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Get recent audit log entries (run history — found/uploaded/failed
+    counts per poll) for a connector."""
     try:
-        # First get the connector to find its clinic_id and type
+        # First get the connector to find its clinic_id, type and branch
         connector = (
             supabase.table("integration_connectors")
-            .select("clinic_id, connector_type")
+            .select("clinic_id, connector_type, branch_id")
             .eq("id", connector_id)
             .single()
             .execute()
@@ -1476,16 +1638,17 @@ async def get_connector_audit_log(connector_id: str, limit: int = 20):
 
         if not connector.data:
             raise HTTPException(status_code=404, detail="Connector not found")
+        enforce_clinic_access(user, connector.data["clinic_id"])
 
-        logs = (
+        query = (
             supabase.table("connector_audit_log")
             .select("*")
             .eq("clinic_id", connector.data["clinic_id"])
             .eq("connector_type", connector.data["connector_type"])
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
         )
+        branch_id = connector.data.get("branch_id")
+        query = query.eq("branch_id", branch_id) if branch_id else query.is_("branch_id", "null")
+        logs = query.order("created_at", desc=True).limit(limit).execute()
 
         return {"audit_log": logs.data or []}
     except HTTPException:
@@ -1498,15 +1661,19 @@ async def get_connector_audit_log(connector_id: str, limit: int = 20):
 @router.get("/connectors/failed-reports")
 async def get_connector_failed_reports(
     clinic_id: str = "default",
+    branch_id: Optional[str] = None,
     unresolved_only: bool = True,
     user: AdminUser = Depends(verify_credentials),
 ):
-    """Get per-report failure tracking records for staff visibility."""
+    """Get per-report failure tracking records for staff visibility — this
+    is the "which patient documents failed to send" history."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("connector_failed_reports").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
+        if branch_id:
+            query = query.eq("branch_id", branch_id)
         if unresolved_only:
             query = query.is_("resolved_at", "null")
         result = query.order("last_attempt_at", desc=True).execute()
@@ -1514,6 +1681,32 @@ async def get_connector_failed_reports(
     except Exception as e:
         logger.error(f"Failed to get connector failed reports: {e}")
         raise HTTPException(status_code=500, detail="Failed to get failed reports")
+
+
+@router.post("/connectors/failed-reports/{failed_report_id}/resolve")
+async def resolve_connector_failed_report(
+    failed_report_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Mark a failed report as manually resolved (e.g. staff re-uploaded the
+    document by hand) so it drops off the unresolved failures list."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        query = supabase.table("connector_failed_reports").update(
+            {"resolved_at": datetime.now().isoformat()}
+        ).eq("id", failed_report_id)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        result = query.execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Failed report not found")
+        return {"success": True, "failed_report": result.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to resolve connector failed report: {e}")
+        raise HTTPException(status_code=500, detail="Failed to resolve failed report")
 
 
 @router.get("/audit-logs")

@@ -7,6 +7,9 @@ Usage:
     # One-shot test run
     python -m connectors.runner --connector mocdoc --clinic-id <uuid> --once
 
+    # One-shot test run for a specific branch of a multi-branch clinic
+    python -m connectors.runner --connector mocdoc --clinic-id <uuid> --branch-id <uuid> --once
+
     # Dry run (login + parse, NO downloads)
     python -m connectors.runner --connector mocdoc --clinic-id <uuid> --once --dry-run
 
@@ -37,6 +40,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from app.config import settings
 from app.database import supabase
+from app.utils.connector_crypto import decrypt_password, encrypt_password
 
 logger = logging.getLogger("connectors")
 
@@ -54,21 +58,12 @@ def setup_logging(level: str = "INFO"):
     logging.getLogger("playwright").setLevel(logging.WARNING)
 
 
-def decrypt_password(encrypted: str, key: str) -> str:
-    """Decrypt a Fernet-encrypted password."""
-    from cryptography.fernet import Fernet
-    f = Fernet(key.encode() if isinstance(key, str) else key)
-    return f.decrypt(encrypted.encode() if isinstance(encrypted, str) else encrypted).decode()
+def _scope_by_branch(query, branch_id: str = None):
+    """Apply a branch_id filter matching NULL (clinic-level) or a specific branch."""
+    return query.is_("branch_id", "null") if not branch_id else query.eq("branch_id", branch_id)
 
 
-def encrypt_password(plaintext: str, key: str) -> str:
-    """Encrypt a password with Fernet for storage."""
-    from cryptography.fernet import Fernet
-    f = Fernet(key.encode() if isinstance(key, str) else key)
-    return f.encrypt(plaintext.encode()).decode()
-
-
-async def send_admin_alert(clinic_id: str, message: str) -> None:
+async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) -> None:
     """Send a WhatsApp alert to the admin phone number."""
     try:
         from app.services.whatsapp import whatsapp_service
@@ -77,12 +72,13 @@ async def send_admin_alert(clinic_id: str, message: str) -> None:
         clinic = await get_clinic_by_id(clinic_id)
 
         # Get admin alert phone from connector config
-        connector = supabase.table("integration_connectors") \
-            .select("config") \
-            .eq("clinic_id", clinic_id) \
-            .eq("connector_type", "mocdoc") \
-            .single() \
-            .execute()
+        query = (
+            supabase.table("integration_connectors")
+            .select("config")
+            .eq("clinic_id", clinic_id)
+            .eq("connector_type", "mocdoc")
+        )
+        connector = _scope_by_branch(query, branch_id).single().execute()
 
         admin_phone = connector.data.get("config", {}).get("admin_alert_phone")
         if admin_phone:
@@ -102,19 +98,20 @@ async def record_report_failure(
     vam_id: str = None,
     patient_name: str = None,
     alert_threshold: int = 3,
+    branch_id: str = None,
 ) -> None:
     """Record a report failure and send an admin alert if failure threshold is reached."""
     try:
         now = datetime.now(timezone.utc).isoformat()
 
-        existing = (
+        query = (
             supabase.table("connector_failed_reports")
             .select("*")
             .eq("clinic_id", clinic_id)
             .eq("connector_type", connector_type)
             .eq("external_report_id", external_report_id)
-            .execute()
         )
+        existing = _scope_by_branch(query, branch_id).execute()
 
         if existing.data and len(existing.data) > 0:
             row = existing.data[0]
@@ -136,7 +133,7 @@ async def record_report_failure(
                     f"Consecutive Failures: {new_count}\n"
                     f"Last Error: {error_message}"
                 )
-                await send_admin_alert(clinic_id, alert_msg)
+                await send_admin_alert(clinic_id, alert_msg, branch_id=branch_id)
         else:
             supabase.table("connector_failed_reports").insert(
                 {
@@ -150,6 +147,7 @@ async def record_report_failure(
                     "first_failed_at": now,
                     "last_attempt_at": now,
                     "resolved_at": None,
+                    "branch_id": branch_id,
                 }
             ).execute()
     except Exception as e:
@@ -160,15 +158,19 @@ async def record_report_success(
     clinic_id: str,
     connector_type: str,
     external_report_id: str,
+    branch_id: str = None,
 ) -> None:
     """Clear/resolve per-report failure tracking upon successful report processing."""
     try:
         now = datetime.now(timezone.utc).isoformat()
-        supabase.table("connector_failed_reports").update(
-            {"resolved_at": now}
-        ).eq("clinic_id", clinic_id).eq("connector_type", connector_type).eq(
-            "external_report_id", external_report_id
-        ).is_("resolved_at", "null").execute()
+        query = (
+            supabase.table("connector_failed_reports")
+            .update({"resolved_at": now})
+            .eq("clinic_id", clinic_id)
+            .eq("connector_type", connector_type)
+            .eq("external_report_id", external_report_id)
+        )
+        _scope_by_branch(query, branch_id).is_("resolved_at", "null").execute()
     except Exception as e:
         logger.error(f"Failed to resolve report failure tracking: {e}")
 
@@ -179,8 +181,10 @@ async def run_connector(
     dry_run: bool = False,
     limit: int = 0,
     vam_id_filter: str = "",
+    branch_id: str = None,
 ) -> dict:
-    """Execute a single connector run for a specific clinic.
+    """Execute a single connector run for a specific clinic (and, for
+    multi-branch diagnostic centers, a specific branch's connector row).
 
     Args:
         clinic_id: UUID of the clinic
@@ -188,6 +192,8 @@ async def run_connector(
         dry_run: If True, authenticate and parse only — no downloads
         limit: Max reports to process (0 = no limit)
         vam_id_filter: Only process report matching this VAM ID
+        branch_id: UUID of the branch this connector belongs to, or None for
+            a clinic-level (single-branch) connector
 
     Returns:
         Summary dict with run results
@@ -205,12 +211,13 @@ async def run_connector(
 
     try:
         # Load connector config from database
-        result = supabase.table("integration_connectors") \
-            .select("*") \
-            .eq("clinic_id", clinic_id) \
-            .eq("connector_type", connector_type) \
-            .single() \
-            .execute()
+        query = (
+            supabase.table("integration_connectors")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("connector_type", connector_type)
+        )
+        result = _scope_by_branch(query, branch_id).single().execute()
 
         if not result.data:
             logger.error(f"No connector config found for clinic {clinic_id}")
@@ -244,7 +251,7 @@ async def run_connector(
                 msg = f"Password decryption failed: {type(e).__name__}"
                 logger.error(msg)
                 summary["error_message"] = msg
-                await send_admin_alert(clinic_id, f"⚠️ MocDoc Connector: {msg}")
+                await send_admin_alert(clinic_id, f"⚠️ MocDoc Connector: {msg}", branch_id=branch_id)
                 return summary
         elif config.get("password"):
             # Plain text password (for development only)
@@ -274,6 +281,7 @@ async def run_connector(
                 medassist_url=medassist_url,
                 integration_secret=settings.integration_secret,
                 session_dir=session_dir,
+                branch_id=branch_id,
             )
         else:
             summary["error_message"] = f"Unknown connector type: {connector_type}"
@@ -289,6 +297,7 @@ async def run_connector(
                     clinic_id,
                     "⚠️ MocDoc Connector: Authentication failed. "
                     "Check credentials or selectors.",
+                    branch_id=branch_id,
                 )
                 return summary
 
@@ -343,6 +352,7 @@ async def run_connector(
                             error_message="PDF download failed or bill due pending",
                             vam_id=meta.vam_id,
                             patient_name=meta.patient_name,
+                            branch_id=branch_id,
                         )
                         continue
                     result = await connector.submit_to_medassist(pdf_bytes, meta)
@@ -353,6 +363,7 @@ async def run_connector(
                         clinic_id=clinic_id,
                         connector_type=connector_type,
                         external_report_id=meta.external_report_id,
+                        branch_id=branch_id,
                     )
                 except Exception as e:
                     summary["reports_failed"] += 1
@@ -364,6 +375,7 @@ async def run_connector(
                         error_message=str(e),
                         vam_id=meta.vam_id,
                         patient_name=meta.patient_name,
+                        branch_id=branch_id,
                     )
 
             await connector.cleanup()
@@ -402,6 +414,7 @@ async def run_connector(
                 f"Uploaded: {summary['reports_uploaded']}\n"
                 f"Failed: {summary['reports_failed']}\n\n"
                 f"Check admin dashboard for details.",
+                branch_id=branch_id,
             )
 
     except Exception as e:
@@ -414,6 +427,7 @@ async def run_connector(
                 f"⚠️ MocDoc Connector Crashed\n\n"
                 f"Error: {type(e).__name__}: {str(e)[:100]}\n\n"
                 f"The connector will retry on the next poll.",
+                branch_id=branch_id,
             )
         except Exception:
             pass
@@ -426,6 +440,7 @@ async def run_connector(
             supabase.table("connector_audit_log").insert({
                 "clinic_id": clinic_id,
                 "connector_type": connector_type,
+                "branch_id": branch_id,
                 **summary,
             }).execute()
         except Exception as e:
@@ -441,11 +456,13 @@ async def run_connector(
             if summary["run_status"] == "success":
                 update_data["last_success_at"] = datetime.now(timezone.utc).isoformat()
 
-            supabase.table("integration_connectors") \
-                .update(update_data) \
-                .eq("clinic_id", clinic_id) \
-                .eq("connector_type", connector_type) \
-                .execute()
+            update_query = (
+                supabase.table("integration_connectors")
+                .update(update_data)
+                .eq("clinic_id", clinic_id)
+                .eq("connector_type", connector_type)
+            )
+            _scope_by_branch(update_query, branch_id).execute()
         except Exception as e:
             logger.error(f"Failed to update connector timestamps: {e}")
 
@@ -462,11 +479,12 @@ async def run_connector(
 
 
 async def run_all_connectors() -> None:
-    """Run all enabled connectors (called by scheduler)."""
+    """Run all enabled connectors (called by scheduler), one per clinic OR
+    per branch for multi-branch diagnostic centers."""
     logger.info("=== Polling all enabled connectors ===")
 
     result = supabase.table("integration_connectors") \
-        .select("clinic_id, connector_type") \
+        .select("clinic_id, connector_type, branch_id") \
         .eq("is_enabled", True) \
         .execute()
 
@@ -481,10 +499,11 @@ async def run_all_connectors() -> None:
             await run_connector(
                 clinic_id=conn["clinic_id"],
                 connector_type=conn["connector_type"],
+                branch_id=conn.get("branch_id"),
             )
         except Exception as e:
             logger.error(
-                f"Connector run failed for {conn['clinic_id']}: {e}"
+                f"Connector run failed for {conn['clinic_id']} (branch={conn.get('branch_id')}): {e}"
             )
 
         # Small delay between clinics
@@ -627,6 +646,12 @@ Examples:
         help="Specific clinic ID to run for",
     )
     parser.add_argument(
+        "--branch-id",
+        type=str,
+        default=None,
+        help="Specific branch ID (multi-branch diagnostic centers only)",
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
         help="Run once and exit (don't start scheduler)",
@@ -696,6 +721,7 @@ Examples:
                 dry_run=args.dry_run,
                 limit=args.limit,
                 vam_id_filter=args.vam_id,
+                branch_id=args.branch_id,
             )
         )
         print(f"\nResult: {json.dumps(result, indent=2)}")

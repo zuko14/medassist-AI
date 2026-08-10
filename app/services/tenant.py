@@ -205,6 +205,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "lab_reports",
         "ai_report_summary",
         "pii_sanitization",
+        "multi_branch",  # Diagnostic centers can also run multiple branches
     },
     "essential": {
         "booking",

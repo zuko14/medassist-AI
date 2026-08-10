@@ -97,7 +97,7 @@ class MocDocConnector(HospitalConnector):
     """
 
     def __init__(self, clinic_id: str, config: dict, medassist_url: str,
-                 integration_secret: str, session_dir: str):
+                 integration_secret: str, session_dir: str, branch_id: str = None):
         super().__init__(
             clinic_id=clinic_id,
             connector_type="mocdoc",
@@ -109,8 +109,12 @@ class MocDocConnector(HospitalConnector):
         self.username = config.get("username", "")
         self.password = config.get("password", "")  # Already decrypted by runner
         self.clinic_slug = config.get("clinic_slug", "")
+        self.branch_id = branch_id
         self.session_dir = session_dir
-        self.session_file = os.path.join(session_dir, f"mocdoc_{clinic_id}.json")
+        # Branch-scoped session file — two branches of the same clinic have
+        # separate MocDoc logins and must never share cookies.
+        session_key = f"{clinic_id}_{branch_id}" if branch_id else clinic_id
+        self.session_file = os.path.join(session_dir, f"mocdoc_{session_key}.json")
         self.download_dir = tempfile.mkdtemp(prefix="mocdoc_downloads_")
 
         # Playwright objects (initialized in authenticate())
