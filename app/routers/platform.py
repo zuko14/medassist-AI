@@ -97,6 +97,13 @@ async def reset_clinic_admin_password(
     """
     client_ip = request.client.host if request.client else "unknown"
 
+    if login_rate_limiter.check_and_record(f"admin-reset:{client_ip}"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many password reset attempts. Try again in 60 seconds.",
+            headers={"Retry-After": "60"},
+        )
+
     res = (
         supabase.table("clinic_admins")
         .select("id")
@@ -119,6 +126,135 @@ async def reset_clinic_admin_password(
     )
 
     return {"success": True, "message": f"Password reset for '{body.username}'"}
+
+
+VALID_ADMIN_ROLES = {"clinic_admin", "staff"}
+
+
+class ClinicAdminCreate(BaseModel):
+    clinic_id: Optional[str] = None  # None = platform-level (no clinic) account
+    username: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=8)
+    role: str = "clinic_admin"
+
+
+@router.get("/clinic-admins")
+async def list_clinic_admins(
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """List all clinic_admins accounts (no password hashes) for the owner's
+    account-management dashboard."""
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_clinic_admins",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+
+    res = (
+        supabase.table("clinic_admins")
+        .select("id, clinic_id, username, role, is_active, created_at")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return {"success": True, "admins": res.data or []}
+
+
+@router.post("/clinic-admins")
+async def create_clinic_admin(
+    body: ClinicAdminCreate,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Create a new clinic_admins login — the missing self-service piece of
+    onboarding, since these accounts previously had to be inserted by hand."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    if body.role not in VALID_ADMIN_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role must be one of {sorted(VALID_ADMIN_ROLES)}",
+        )
+
+    if body.clinic_id:
+        clinic_res = (
+            supabase.table("clinics").select("id").eq("id", body.clinic_id).execute()
+        )
+        if not clinic_res.data:
+            raise HTTPException(status_code=404, detail="Clinic not found")
+
+    existing = (
+        supabase.table("clinic_admins")
+        .select("id")
+        .eq("username", body.username)
+        .execute()
+    )
+    if existing.data:
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+    insert_res = (
+        supabase.table("clinic_admins")
+        .insert(
+            {
+                "clinic_id": body.clinic_id,
+                "username": body.username,
+                "password_hash": hash_password(body.password),
+                "role": body.role,
+                "is_active": True,
+            }
+        )
+        .execute()
+    )
+
+    await log_admin_action(
+        user=owner,
+        action="create_clinic_admin",
+        resource_type="clinic_admin",
+        resource_id=body.username,
+        details={"clinic_id": body.clinic_id, "role": body.role},
+        ip_address=client_ip,
+    )
+
+    created = insert_res.data[0] if insert_res.data else None
+    return {"success": True, "admin": created}
+
+
+@router.put("/clinic-admins/{admin_id}/toggle")
+async def toggle_clinic_admin(
+    admin_id: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Activate/deactivate a clinic_admins login — for offboarding staff
+    without deleting their audit trail."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    res = (
+        supabase.table("clinic_admins")
+        .select("id, is_active")
+        .eq("id", admin_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Admin account not found")
+
+    new_status = not res.data[0]["is_active"]
+    supabase.table("clinic_admins").update({"is_active": new_status}).eq(
+        "id", admin_id
+    ).execute()
+
+    await log_admin_action(
+        user=owner,
+        action="toggle_clinic_admin",
+        resource_type="clinic_admin",
+        resource_id=admin_id,
+        details={"is_active": new_status},
+        ip_address=client_ip,
+    )
+
+    return {"success": True, "is_active": new_status}
 
 
 @router.get("/overview")

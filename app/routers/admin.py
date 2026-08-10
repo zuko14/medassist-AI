@@ -209,6 +209,18 @@ async def verify_credentials(
     )
 
 
+async def require_admin(user: AdminUser = Depends(verify_credentials)) -> AdminUser:
+    """Gate for admin-only actions (finances, settings, roster, integrations).
+    'staff' accounts pass login but are limited to front-desk operations
+    (appointments, check-in, bookings, patients, lab report handling)."""
+    if user.role == "staff":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires an admin account. Staff accounts are limited to front-desk operations.",
+        )
+    return user
+
+
 def enforce_clinic_access(
     user: AdminUser, requested_clinic_id: str = "default"
 ) -> str:
@@ -573,7 +585,7 @@ def _apply_slot_config(data: dict) -> dict:
 async def create_doctor(
     doctor: DoctorCreate,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Create a new doctor."""
     try:
@@ -595,7 +607,7 @@ async def update_doctor(
     doctor_id: str,
     doctor: DoctorUpdate,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Update an existing doctor."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -620,7 +632,7 @@ async def update_doctor(
 
 @router.delete("/doctors/{doctor_id}")
 async def delete_doctor(
-    doctor_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
+    doctor_id: str, clinic_id: str = "default", user: AdminUser = Depends(require_admin)
 ):
     """Delete a doctor."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -640,7 +652,7 @@ async def delete_doctor(
 async def get_leaves(
     doctor: Optional[str] = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get doctor leaves."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -661,7 +673,7 @@ async def get_leaves(
 async def create_leave(
     leave: LeaveCreate,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Create a doctor leave (single day or date range)."""
     from datetime import timedelta
@@ -702,7 +714,7 @@ async def create_leave(
 
 @router.delete("/leaves/{leave_id}")
 async def delete_leave(
-    leave_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
+    leave_id: str, clinic_id: str = "default", user: AdminUser = Depends(require_admin)
 ):
     """Delete a doctor leave."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -719,7 +731,7 @@ async def delete_leave(
 
 @router.get("/holidays")
 async def get_holidays(
-    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
+    clinic_id: str = "default", user: AdminUser = Depends(require_admin)
 ):
     """Get hospital holidays."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -739,7 +751,7 @@ async def create_holiday(
     holiday_date: date,
     name: str,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Create a hospital holiday."""
     try:
@@ -767,7 +779,7 @@ async def create_holiday(
 async def delete_holiday(
     holiday_date: str,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Delete a hospital holiday."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1023,7 +1035,7 @@ async def get_patients(
 async def add_prescription(
     body: PrescriptionCreate,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Add a new prescription reminder with strict Pydantic input validation."""
     effective_clinic_id = body.clinic_id or clinic_id
@@ -1069,7 +1081,7 @@ async def get_prescriptions(
 async def deactivate_prescription(
     prescription_id: str,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Deactivate a prescription reminder."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1208,7 +1220,7 @@ async def admin_reject_booking(
 async def admin_refund_booking(
     booking_id: str,
     body: dict = None,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Initiate a refund for a confirmed booking."""
     try:
@@ -1231,7 +1243,7 @@ async def admin_refund_booking(
 @router.get("/payment-events/{booking_id}")
 async def get_payment_events(
     booking_id: str,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get the payment audit trail for a booking."""
     try:
@@ -1251,7 +1263,7 @@ async def get_payment_events(
 @router.get("/payments/reconciliation")
 async def get_payment_reconciliation(
     date_str: Optional[str] = None,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get daily payment reconciliation summary."""
     try:
@@ -1268,7 +1280,7 @@ async def get_payment_reconciliation(
 async def get_payment_stats(
     clinic_id: str = "default",
     days: int = 30,
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get payment statistics for the dashboard."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1343,7 +1355,7 @@ async def get_payment_stats(
 
 @router.get("/settings/payment")
 async def get_payment_settings(
-    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
+    clinic_id: str = "default", user: AdminUser = Depends(require_admin)
 ):
     """Return this clinic's payment settings, with secrets masked."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1373,7 +1385,7 @@ async def update_payment_settings(
     body: PaymentSettingsUpdate,
     request: Request,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Self-service update of a clinic's own Razorpay keys and payment mode.
     A clinic_admin may only update their own clinic (enforced via
@@ -1507,7 +1519,7 @@ def _mask_connector(row: dict) -> dict:
 async def get_connectors(
     clinic_id: str = "default",
     branch_id: Optional[str] = None,
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get all integration connectors with status info (credentials masked)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1534,7 +1546,7 @@ async def upsert_connector_credentials(
     body: ConnectorCredentialsUpdate,
     request: Request,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Self-service create/update of a clinic's (or one of its branches')
     MocDoc connector credentials. A clinic_admin may only write their own
@@ -1632,13 +1644,11 @@ async def upsert_connector_credentials(
     return {"success": True, "connector": _mask_connector(saved)}
 
 
-@router.post(
-    "/connectors/{connector_id}/toggle", dependencies=[Depends(verify_credentials)]
-)
+@router.post("/connectors/{connector_id}/toggle")
 async def toggle_connector(
     connector_id: str,
     body: ConnectorToggle,
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Toggle a connector ON or OFF. This is the primary kill switch."""
     try:
@@ -1681,7 +1691,7 @@ async def toggle_connector(
 async def get_connector_audit_log(
     connector_id: str,
     limit: int = 20,
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get recent audit log entries (run history — found/uploaded/failed
     counts per poll) for a connector."""
@@ -1772,7 +1782,7 @@ async def resolve_connector_failed_report(
 async def get_admin_audit_logs(
     clinic_id: str = "default",
     limit: int = 50,
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get administrative staff action audit logs for compliance auditing (NABH / DPDP)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1793,7 +1803,7 @@ async def get_admin_audit_logs(
 @router.get("/branches")
 async def get_branches(
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get all branches for a clinic."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1813,7 +1823,7 @@ async def get_branches(
 async def create_branch(
     branch: BranchCreate,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Create a new branch."""
     try:
@@ -1840,7 +1850,7 @@ async def update_branch(
     branch_id: str,
     branch: BranchUpdate,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Update a branch."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1872,7 +1882,7 @@ async def update_branch(
 async def delete_branch(
     branch_id: str,
     clinic_id: str = "default",
-    user: AdminUser = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Soft-delete a branch (deactivate it)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1896,7 +1906,7 @@ async def delete_branch(
 @router.get("/branches/{branch_id}/doctors")
 async def get_branch_doctors(
     branch_id: str,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Get doctors assigned to a specific branch."""
     try:
@@ -1916,7 +1926,7 @@ async def get_branch_doctors(
 async def assign_doctor_to_branch(
     branch_id: str,
     body: DoctorBranchAssign,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Assign a doctor to a branch with session control."""
     try:
@@ -1941,7 +1951,7 @@ async def assign_doctor_to_branch(
 async def remove_doctor_from_branch(
     branch_id: str,
     doctor_id: str,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Remove a doctor from a branch."""
     try:
@@ -1961,7 +1971,7 @@ async def update_doctor_branch_session(
     branch_id: str,
     doctor_id: str,
     body: DoctorBranchAssign,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(require_admin),
 ):
     """Update a doctor's session assignment at a branch."""
     try:

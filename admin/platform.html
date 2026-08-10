@@ -824,6 +824,33 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Clinic Admin Accounts -->
+            <div class="section-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="chart-title">Clinic Admin Accounts</div>
+                    </div>
+                    <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openCreateAdminModal()">+ Add Admin</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Hospital / Clinic</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clinicAdminsBody">
+                            <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading admin accounts...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </main>
 
         <!-- Footer -->
@@ -868,6 +895,43 @@
                     <!-- Department rows injected dynamically -->
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Create Clinic Admin Modal -->
+    <div class="modal-overlay" id="createAdminModal">
+        <div class="modal-panel" style="max-width:460px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Add Clinic Admin</h3>
+                <button class="close-btn" onclick="closeCreateAdminModal()">✕</button>
+            </div>
+            <div class="error-msg" id="createAdminError">Error</div>
+            <div class="form-group">
+                <label>Hospital / Clinic</label>
+                <select class="form-control" id="caClinicId">
+                    <option value="">— Platform-level (no clinic) —</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" class="form-control" id="caUsername" placeholder="e.g. drpatel">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <div style="position:relative;">
+                    <input type="password" class="form-control" id="caPassword" placeholder="At least 8 characters" style="padding-right:80px;">
+                    <button type="button" class="close-btn" style="position:absolute; right:44px; top:50%; transform:translateY(-50%); font-size:14px;" onclick="togglePwd('caPassword', this)" aria-label="Show password">👁</button>
+                    <button type="button" class="close-btn" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:14px;" onclick="generateAdminPassword()" aria-label="Generate password">🎲</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Role</label>
+                <select class="form-control" id="caRole">
+                    <option value="clinic_admin">clinic_admin</option>
+                    <option value="staff">staff</option>
+                </select>
+            </div>
+            <button class="btn-primary" onclick="submitCreateAdmin()">Create Admin</button>
         </div>
     </div>
 
@@ -950,6 +1014,8 @@
                 renderRevenueMetrics(revenueData);
                 renderLeaderboard(clinicsData.clinics || []);
                 renderCharts(overview, revenueData, activityData);
+                populateClinicDropdown(clinicsData.clinics || []);
+                loadClinicAdmins();
 
             } catch (e) {
                 console.error('Error fetching platform data:', e);
@@ -1159,6 +1225,131 @@
             return str.replace(/[&<>"']/g, function(m) {
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
             });
+        }
+
+        // ═══ Clinic Admin Accounts ═══
+
+        function populateClinicDropdown(clinics) {
+            const sel = document.getElementById('caClinicId');
+            sel.innerHTML = '<option value="">— Platform-level (no clinic) —</option>' +
+                clinics.map(c => `<option value="${c.id}">${escapeHtml(c.name || c.id)}</option>`).join('');
+        }
+
+        async function loadClinicAdmins() {
+            try {
+                const res = await fetch('/platform/clinic-admins', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json();
+                renderClinicAdmins(data.admins || []);
+            } catch (e) {
+                console.error('Error fetching clinic admins:', e);
+            }
+        }
+
+        function renderClinicAdmins(admins) {
+            const tbody = document.getElementById('clinicAdminsBody');
+            if (admins.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">No admin accounts yet.</td></tr>`;
+                return;
+            }
+            const clinicMap = {};
+            globalClinicsData.forEach(c => { clinicMap[c.id] = c.name; });
+
+            tbody.innerHTML = admins.map(a => {
+                const clinicName = a.clinic_id ? escapeHtml(clinicMap[a.clinic_id] || a.clinic_id) : '— Platform —';
+                const statusBadge = a.is_active
+                    ? `<span class="badge status-active">🟢 Active</span>`
+                    : `<span class="badge status-dormant">⛔ Disabled</span>`;
+                const created = a.created_at ? new Date(a.created_at).toLocaleDateString('en-IN') : '—';
+                return `
+                    <tr>
+                        <td style="font-weight:700">${escapeHtml(a.username)}</td>
+                        <td>${clinicName}</td>
+                        <td>${escapeHtml(a.role)}</td>
+                        <td>${statusBadge}</td>
+                        <td style="font-size:0.82rem; color:var(--text2)">${created}</td>
+                        <td><button class="action-btn" onclick="toggleClinicAdmin('${a.id}')">${a.is_active ? 'Disable' : 'Enable'}</button></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function toggleClinicAdmin(id) {
+            try {
+                const res = await fetch(`/platform/clinic-admins/${id}/toggle`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': ownerAuthHeader }
+                });
+                if (res.ok) loadClinicAdmins();
+            } catch (e) {
+                console.error('Error toggling clinic admin:', e);
+            }
+        }
+
+        function openCreateAdminModal() {
+            document.getElementById('caUsername').value = '';
+            document.getElementById('caPassword').value = '';
+            document.getElementById('caPassword').type = 'password';
+            document.getElementById('caRole').value = 'clinic_admin';
+            document.getElementById('createAdminError').style.display = 'none';
+            document.getElementById('createAdminModal').classList.add('active');
+        }
+
+        function closeCreateAdminModal() {
+            document.getElementById('createAdminModal').classList.remove('active');
+        }
+
+        function togglePwd(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const showing = input.type === 'text';
+            input.type = showing ? 'password' : 'text';
+            btn.textContent = showing ? '👁' : '🙈';
+        }
+
+        function generateAdminPassword() {
+            const bytes = new Uint8Array(9);
+            crypto.getRandomValues(bytes);
+            const pwd = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 12);
+            document.getElementById('caPassword').value = pwd;
+            document.getElementById('caPassword').type = 'text';
+        }
+
+        async function submitCreateAdmin() {
+            const clinic_id = document.getElementById('caClinicId').value || null;
+            const username = document.getElementById('caUsername').value.trim();
+            const password = document.getElementById('caPassword').value;
+            const role = document.getElementById('caRole').value;
+            const errEl = document.getElementById('createAdminError');
+            errEl.style.display = 'none';
+
+            if (!username || !password) {
+                errEl.innerText = 'Username and password are required.';
+                errEl.style.display = 'block';
+                return;
+            }
+            if (password.length < 8) {
+                errEl.innerText = 'Password must be at least 8 characters.';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                const res = await fetch('/platform/clinic-admins', {
+                    method: 'POST',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ clinic_id, username, password, role })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    errEl.innerText = data.detail || 'Failed to create admin account.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                closeCreateAdminModal();
+                loadClinicAdmins();
+            } catch (e) {
+                errEl.innerText = 'Network error — please try again.';
+                errEl.style.display = 'block';
+            }
         }
     </script>
 </body>
