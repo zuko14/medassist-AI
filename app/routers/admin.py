@@ -512,6 +512,25 @@ class PaymentSettingsUpdate(BaseModel):
         return v
 
 
+class ClinicProfileUpdate(BaseModel):
+    """Self-service profile a clinic_admin can set for their own clinic —
+    the things every clinic must provide: the name shown to patients in
+    WhatsApp, the address and Google Maps link sent in chat, and the
+    emergency desk phone number shown during emergency escalation."""
+
+    name: Optional[str] = None
+    hospital_address: Optional[str] = None
+    hospital_maps_link: Optional[str] = None
+    hospital_emergency_number: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("name cannot be blank")
+        return v.strip() if v else v
+
+
 class BranchCreate(BaseModel):
     name: str
     short_name: Optional[str] = None
@@ -1453,6 +1472,124 @@ async def get_payment_stats(
     except Exception as e:
         logger.error(f"Payment stats error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get payment stats")
+
+
+@router.get("/profile")
+async def get_clinic_profile(
+    clinic_id: str = "default", user: AdminUser = Depends(require_admin)
+):
+    """Return the things every clinic must self-provide: the bot's display
+    name, hospital address, Google Maps link, and emergency desk phone
+    (all shared with patients in chat). Everything else is backend/platform
+    configured."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    cfg = clinic.get("config") or {}
+    return {
+        "name": clinic.get("name") or settings.hospital_name,
+        "hospital_address": cfg.get("address") or settings.hospital_address,
+        "hospital_maps_link": cfg.get("maps_link") or settings.hospital_maps_link,
+        "hospital_emergency_number": cfg.get("emergency_number") or settings.hospital_emergency_number,
+    }
+
+
+@router.put("/profile")
+async def update_clinic_profile(
+    body: ClinicProfileUpdate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Self-service update of a clinic's own display name, address, and
+    Google Maps link. A clinic_admin may only update their own clinic
+    (enforced via enforce_clinic_access)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+
+    cfg = dict(clinic.get("config") or {})
+    updates = (
+        body.model_dump(exclude_unset=True)
+        if hasattr(body, "model_dump")
+        else body.dict(exclude_unset=True)
+    )
+
+    row_updates: dict = {}
+    if "name" in updates and updates["name"]:
+        row_updates["name"] = updates["name"]
+    if "hospital_address" in updates and updates["hospital_address"] is not None:
+        cfg["address"] = updates["hospital_address"].strip()
+    if "hospital_maps_link" in updates and updates["hospital_maps_link"] is not None:
+        cfg["maps_link"] = updates["hospital_maps_link"].strip()
+    if "hospital_emergency_number" in updates and updates["hospital_emergency_number"] is not None:
+        cfg["emergency_number"] = updates["hospital_emergency_number"].strip()
+    row_updates["config"] = cfg
+
+    target_clinic_id = clinic.get("id")
+    if not target_clinic_id or target_clinic_id == "default":
+        db_clinics = (
+            supabase.table("clinics")
+            .select("*")
+            .order("created_at")
+            .limit(1)
+            .execute()
+        )
+        if db_clinics.data:
+            target_clinic_id = db_clinics.data[0]["id"]
+            result = (
+                supabase.table("clinics")
+                .update(row_updates)
+                .eq("id", target_clinic_id)
+                .execute()
+            )
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Clinic not found")
+            updated_clinic = result.data[0]
+        else:
+            insert_res = (
+                supabase.table("clinics")
+                .insert({
+                    "name": row_updates.get("name") or settings.hospital_name,
+                    "whatsapp_number": settings.hospital_phone,
+                    "plan": "enterprise",
+                    "config": cfg,
+                })
+                .execute()
+            )
+            if not insert_res.data:
+                raise HTTPException(
+                    status_code=500, detail="Failed to initialize default clinic settings"
+                )
+            updated_clinic = insert_res.data[0]
+            target_clinic_id = updated_clinic["id"]
+    else:
+        result = (
+            supabase.table("clinics")
+            .update(row_updates)
+            .eq("id", target_clinic_id)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Clinic not found")
+        updated_clinic = result.data[0]
+
+    invalidate_tenant_cache(updated_clinic.get("whatsapp_number"))
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="update_clinic_profile",
+        resource_type="clinic_config",
+        resource_id=target_clinic_id,
+        details={
+            "name": updated_clinic.get("name"),
+            "address_set": bool(cfg.get("address")),
+            "maps_link_set": bool(cfg.get("maps_link")),
+            "emergency_number_set": bool(cfg.get("emergency_number")),
+        },
+        ip_address=client_ip,
+    )
+
+    return {"success": True}
 
 
 @router.get("/settings/payment")

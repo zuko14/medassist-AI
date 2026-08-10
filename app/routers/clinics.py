@@ -1,6 +1,8 @@
 """Clinic management routes for multi-tenant onboarding."""
 
 import logging
+import re
+import secrets
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Header, Depends
@@ -8,6 +10,7 @@ from pydantic import BaseModel
 
 from app.database import supabase
 from app.config import settings
+from app.routers.admin import hash_password
 from app.services.tenant import (
     invalidate_tenant_cache,
     invalidate_branch_cache,
@@ -139,10 +142,38 @@ async def create_clinic(req: CreateClinicRequest):
             # Invalidate branch cache for the new clinic
             invalidate_branch_cache(clinic_id)
 
+        # ── Auto-provision a self-service clinic_admin login ──
+        # Without this, a newly onboarded clinic has no way to log into
+        # admin/index.html except via the platform owner's env-based
+        # super_admin account, which can't change its own password.
+        clinic_admin = None
+        slug = re.sub(r"[^a-z0-9]", "", req.name.lower())[:20] or "clinic"
+        username = f"{slug}{secrets.token_hex(3)}"
+        password = secrets.token_urlsafe(16)
+        try:
+            admin_result = (
+                supabase.table("clinic_admins")
+                .insert(
+                    {
+                        "clinic_id": clinic_id,
+                        "username": username,
+                        "password_hash": hash_password(password),
+                        "role": "clinic_admin",
+                        "is_active": True,
+                    }
+                )
+                .execute()
+            )
+            if admin_result.data:
+                clinic_admin = {"username": username, "password": password}
+        except Exception as ae:
+            logger.warning(f"Failed to auto-provision clinic_admin for clinic {clinic_id}: {ae}")
+
         return {
             "success": True,
             "clinic": clinic,
             "branches": created_branches if created_branches else None,
+            "clinic_admin": clinic_admin,
         }
 
     except Exception as e:

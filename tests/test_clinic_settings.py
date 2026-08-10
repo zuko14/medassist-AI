@@ -11,6 +11,9 @@ from app.routers.admin import (
     get_payment_settings,
     update_payment_settings,
     PaymentSettingsUpdate,
+    get_clinic_profile,
+    update_clinic_profile,
+    ClinicProfileUpdate,
 )
 
 
@@ -211,3 +214,81 @@ async def test_update_payment_settings_empty_secret_does_not_clobber_stored():
 def test_payment_settings_update_rejects_out_of_range_percent():
     with pytest.raises(ValueError):
         PaymentSettingsUpdate(payment_mode="partial", payment_deposit_percent=150)
+
+
+@pytest.mark.asyncio
+async def test_get_clinic_profile_falls_back_to_global_defaults():
+    admin = AdminUser("drpatel", role="clinic_admin", clinic_id="clinic-1", user_id="user-1")
+    fake_clinic = {"id": "clinic-1", "plan": "soloclinic", "whatsapp_number": "+911111111111", "config": {}}
+
+    with patch(
+        "app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=fake_clinic
+    ):
+        result = await get_clinic_profile(clinic_id="default", user=admin)
+
+    assert result["name"]  # falls back to settings.hospital_name
+    assert "hospital_address" in result
+    assert "hospital_maps_link" in result
+    assert "hospital_emergency_number" in result
+
+
+@pytest.mark.asyncio
+async def test_update_clinic_profile_sets_name_address_maps_link_and_emergency_number():
+    admin = AdminUser("drpatel", role="clinic_admin", clinic_id="clinic-1", user_id="user-1")
+    fake_clinic = {"id": "clinic-1", "plan": "soloclinic", "whatsapp_number": "+911111111111", "config": {}}
+    updated_clinic = {
+        "id": "clinic-1",
+        "name": "City Care Hospital",
+        "whatsapp_number": "+911111111111",
+        "config": {
+            "address": "123 Main St",
+            "maps_link": "https://maps.google.com/xyz",
+            "emergency_number": "+919999999999",
+        },
+    }
+    mock_sb = MagicMock()
+    mock_table = MagicMock()
+    mock_sb.table.return_value = mock_table
+    mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[updated_clinic]
+    )
+
+    body = ClinicProfileUpdate(
+        name="City Care Hospital",
+        hospital_address="123 Main St",
+        hospital_maps_link="https://maps.google.com/xyz",
+        hospital_emergency_number="+919999999999",
+    )
+
+    with patch(
+        "app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=fake_clinic
+    ), patch("app.routers.admin.supabase", mock_sb), patch(
+        "app.routers.admin.invalidate_tenant_cache"
+    ):
+        result = await update_clinic_profile(
+            body=body, request=_mock_request(), clinic_id="default", user=admin
+        )
+
+    assert result["success"] is True
+    sent_updates = mock_table.update.call_args[0][0]
+    assert sent_updates["name"] == "City Care Hospital"
+    assert sent_updates["config"]["address"] == "123 Main St"
+    assert sent_updates["config"]["maps_link"] == "https://maps.google.com/xyz"
+    assert sent_updates["config"]["emergency_number"] == "+919999999999"
+
+
+@pytest.mark.asyncio
+async def test_update_clinic_profile_cross_tenant_forbidden():
+    admin = AdminUser("drpatel", role="clinic_admin", clinic_id="clinic-1", user_id="user-1")
+    body = ClinicProfileUpdate(name="Other Hospital")
+
+    with pytest.raises(HTTPException) as exc:
+        await update_clinic_profile(
+            body=body, request=_mock_request(), clinic_id="clinic-999", user=admin
+        )
+    assert exc.value.status_code == 403
+
+
+def test_clinic_profile_update_rejects_blank_name():
+    with pytest.raises(ValueError):
+        ClinicProfileUpdate(name="   ")
