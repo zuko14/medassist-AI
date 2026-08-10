@@ -826,6 +826,7 @@
                             <option value="dormant">Dormant Only (14d+)</option>
                         </select>
                     </div>
+                    <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openCreateClinicModal()">+ Create Hospital / Clinic</button>
                 </div>
 
                 <div class="table-responsive">
@@ -935,10 +936,15 @@
             </div>
             <div class="error-msg" id="createAdminError">Error</div>
             <div class="form-group">
-                <label>Hospital / Clinic</label>
-                <select class="form-control" id="caClinicId">
-                    <option value="">— Platform-level (no clinic) —</option>
+                <label>Select Hospital / Clinic</label>
+                <select class="form-control" id="caClinicSelect" onchange="onClinicSelectChange(this.value)">
+                    <option value="">— Select Hospital / Clinic —</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label>Or Paste Clinic ID (UUID)</label>
+                <input type="text" class="form-control" id="caClinicId" placeholder="e.g. e4b2d1c0-8a9b-4c5d-9e1f-2a3b4c5d6e7f" style="font-family:monospace; font-size:0.85rem;">
+                <span style="font-size:0.75rem; color:var(--text3); margin-top:3px; display:block;">Selecting above auto-fills this ID, or paste the UUID directly.</span>
             </div>
             <div class="form-group">
                 <label>Username</label>
@@ -960,6 +966,124 @@
                 </select>
             </div>
             <button class="btn-primary" onclick="submitCreateAdmin()">Create Admin</button>
+        </div>
+    </div>
+
+    <!-- Create Hospital / Clinic Modal -->
+    <div class="modal-overlay" id="createClinicModal">
+        <div class="modal-panel" style="max-width:560px; max-height:85vh; overflow-y:auto;">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Create Hospital / Clinic</h3>
+                <button class="close-btn" onclick="closeCreateClinicModal()">✕</button>
+            </div>
+
+            <div id="createClinicFormView">
+                <div class="error-msg" id="createClinicError">Error</div>
+
+                <div class="form-group">
+                    <label>Hospital / Clinic Name *</label>
+                    <input type="text" class="form-control" id="ccName" placeholder="e.g. Apex Diagnostic Labs">
+                </div>
+                <div class="form-group">
+                    <label>WhatsApp Number (E.164) *</label>
+                    <input type="text" class="form-control" id="ccWhatsapp" placeholder="+919876543210">
+                </div>
+                <div class="form-group">
+                    <label>Plan *</label>
+                    <select class="form-control" id="ccPlan">
+                        <option value="soloclinic">SoloClinic — single doctor practice</option>
+                        <option value="essential">Essential — small clinic, core booking</option>
+                        <option value="diagstream">DiagStream — diagnostic / lab center</option>
+                        <option value="polyclinic" selected>Polyclinic — multi-department hospital</option>
+                        <option value="enterprise">Enterprise — large multi-branch hospital</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Meta Phone Number ID *</label>
+                    <input type="text" class="form-control" id="ccMetaPhoneId" placeholder="e.g. 971342239407011">
+                </div>
+                <div class="form-group">
+                    <label>Meta Permanent Access Token *</label>
+                    <input type="text" class="form-control" id="ccMetaToken" placeholder="EAAG...">
+                </div>
+
+                <details style="margin:16px 0;">
+                    <summary style="cursor:pointer; color:var(--text2); font-size:0.85rem; margin-bottom:12px;">Advanced settings (optional)</summary>
+                    <div style="margin-top:12px; display:flex; flex-direction:column; gap:14px;">
+                        <div class="form-group">
+                            <label>Clinic Display Name (for AI replies)</label>
+                            <input type="text" class="form-control" id="ccClinicName" placeholder="Defaults to Hospital / Clinic Name">
+                        </div>
+                        <div class="form-group">
+                            <label>Doctor / Team Name</label>
+                            <input type="text" class="form-control" id="ccDoctorName" placeholder="e.g. Dr. Patel / Medical Team">
+                        </div>
+                        <div class="form-group">
+                            <label>Language</label>
+                            <select class="form-control" id="ccLanguage">
+                                <option value="en" selected>English</option>
+                                <option value="hi">Hindi</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Timezone</label>
+                            <input type="text" class="form-control" id="ccTimezone" value="Asia/Kolkata">
+                        </div>
+                        <div class="form-group">
+                            <label>Front-Desk Phone</label>
+                            <input type="text" class="form-control" id="ccHospitalPhone" placeholder="Distinct from WhatsApp number">
+                        </div>
+                        <div class="form-group">
+                            <label>Address</label>
+                            <input type="text" class="form-control" id="ccHospitalAddress" placeholder="Street, city, pincode">
+                        </div>
+                        <div class="form-group">
+                            <label>Google Maps Link</label>
+                            <input type="text" class="form-control" id="ccHospitalMapsLink" placeholder="https://maps.google.com/...">
+                        </div>
+                        <div class="form-group">
+                            <label>Emergency Desk Number</label>
+                            <input type="text" class="form-control" id="ccEmergencyNumber" placeholder="Clinic's own emergency line">
+                        </div>
+                        <div class="form-group">
+                            <label>Razorpay Key ID</label>
+                            <input type="text" class="form-control" id="ccRazorpayKeyId" placeholder="rzp_live_xxxxxx">
+                        </div>
+                        <div class="form-group">
+                            <label>Razorpay Key Secret</label>
+                            <input type="password" class="form-control" id="ccRazorpayKeySecret">
+                        </div>
+                        <div class="form-group">
+                            <label>Razorpay Webhook Secret</label>
+                            <input type="password" class="form-control" id="ccRazorpayWebhookSecret">
+                        </div>
+                    </div>
+                </details>
+
+                <button class="btn-primary" id="ccSubmitBtn" onclick="submitCreateClinic()">Create Hospital / Clinic</button>
+            </div>
+
+            <div id="createClinicResultView" style="display:none;">
+                <p style="color:var(--green); font-weight:700; margin-bottom:16px;">✅ Hospital created successfully.</p>
+                <div style="background:var(--surface2); padding:16px; border-radius:var(--radius-sm); border:1px solid var(--border); display:flex; flex-direction:column; gap:12px;">
+                    <div>
+                        <label style="font-size:0.78rem; color:var(--text3);">Clinic ID</label>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <code id="ccResultClinicId" style="font-size:0.85rem; color:#fff; word-break:break-all;"></code>
+                            <button type="button" class="close-btn" style="font-size:12px;" onclick="copyClinicId(document.getElementById('ccResultClinicId').innerText)">Copy</button>
+                        </div>
+                    </div>
+                    <div id="ccResultAdminBlock" style="display:none;">
+                        <label style="font-size:0.78rem; color:var(--text3);">Auto-Provisioned Clinic Admin Login</label>
+                        <div style="font-size:0.85rem; color:#fff;">Username: <code id="ccResultAdminUsername"></code></div>
+                        <div style="font-size:0.85rem; color:#fff;">Password: <code id="ccResultAdminPassword"></code>
+                            <button type="button" class="close-btn" style="font-size:12px;" onclick="copyClinicId(document.getElementById('ccResultAdminPassword').innerText)">Copy</button>
+                        </div>
+                        <p style="font-size:0.75rem; color:var(--text3); margin-top:6px;">⚠️ Shown once — save it now. Password is stored only as a hash.</p>
+                    </div>
+                </div>
+                <button class="btn-primary" style="margin-top:16px;" onclick="closeCreateClinicModal()">Done</button>
+            </div>
         </div>
     </div>
 
@@ -1315,9 +1439,15 @@
         // ═══ Clinic Admin Accounts ═══
 
         function populateClinicDropdown(clinics) {
-            const sel = document.getElementById('caClinicId');
-            sel.innerHTML = '<option value="">— Platform-level (no clinic) —</option>' +
-                clinics.map(c => `<option value="${c.id}">${escapeHtml(c.name || 'Unnamed Hospital')} — ${c.id}</option>`).join('');
+            const sel = document.getElementById('caClinicSelect');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">— Select Hospital / Clinic —</option>' +
+                clinics.map(c => `<option value="${c.id}">${escapeHtml(c.name || 'Unnamed Hospital')} (${c.id.slice(0, 8)}...)</option>`).join('');
+        }
+
+        function onClinicSelectChange(val) {
+            const input = document.getElementById('caClinicId');
+            if (input) input.value = val || '';
         }
 
         function copyClinicId(id) {
@@ -1344,7 +1474,10 @@
             globalClinicsData.forEach(c => { clinicMap[c.id] = c.name; });
 
             tbody.innerHTML = admins.map(a => {
-                const clinicName = a.clinic_id ? escapeHtml(clinicMap[a.clinic_id] || a.clinic_id) : '— Platform —';
+                const clinicName = a.clinic_id ? escapeHtml(clinicMap[a.clinic_id] || 'Unknown') : '— Platform —';
+                const clinicIdDisplay = a.clinic_id 
+                    ? `<div style="font-size:0.75rem; font-family:monospace; color:var(--cyan); cursor:pointer; margin-top:2px;" onclick="copyClinicId('${a.clinic_id}')" title="Click to copy Clinic UUID">ID: ${a.clinic_id}</div>` 
+                    : '';
                 const statusBadge = a.is_active
                     ? `<span class="badge status-active">🟢 Active</span>`
                     : `<span class="badge status-dormant">⛔ Disabled</span>`;
@@ -1352,7 +1485,10 @@
                 return `
                     <tr>
                         <td style="font-weight:700">${escapeHtml(a.username)}</td>
-                        <td>${clinicName}</td>
+                        <td>
+                            <div>${clinicName}</div>
+                            ${clinicIdDisplay}
+                        </td>
                         <td>${escapeHtml(a.role)}</td>
                         <td>${statusBadge}</td>
                         <td style="font-size:0.82rem; color:var(--text2)">${created}</td>
@@ -1375,6 +1511,8 @@
         }
 
         async function openCreateAdminModal() {
+            document.getElementById('caClinicSelect').value = '';
+            document.getElementById('caClinicId').value = '';
             document.getElementById('caUsername').value = '';
             document.getElementById('caPassword').value = '';
             document.getElementById('caPassword').type = 'password';
@@ -1450,6 +1588,105 @@
             } catch (e) {
                 errEl.innerText = 'Network error — please try again.';
                 errEl.style.display = 'block';
+            }
+        }
+
+        // ═══ Create Hospital / Clinic ═══
+
+        function openCreateClinicModal() {
+            ['ccName', 'ccWhatsapp', 'ccMetaPhoneId', 'ccMetaToken', 'ccClinicName', 'ccDoctorName',
+             'ccHospitalPhone', 'ccHospitalAddress', 'ccHospitalMapsLink', 'ccEmergencyNumber',
+             'ccRazorpayKeyId', 'ccRazorpayKeySecret', 'ccRazorpayWebhookSecret'].forEach(id => {
+                document.getElementById(id).value = '';
+            });
+            document.getElementById('ccPlan').value = 'polyclinic';
+            document.getElementById('ccLanguage').value = 'en';
+            document.getElementById('ccTimezone').value = 'Asia/Kolkata';
+            document.getElementById('createClinicError').style.display = 'none';
+            document.getElementById('createClinicFormView').style.display = 'block';
+            document.getElementById('createClinicResultView').style.display = 'none';
+            document.getElementById('ccResultAdminBlock').style.display = 'none';
+            document.getElementById('createClinicModal').classList.add('active');
+        }
+
+        function closeCreateClinicModal() {
+            document.getElementById('createClinicModal').classList.remove('active');
+            // Refresh leaderboard + dropdown so the new hospital shows up immediately
+            fetchPlatformData();
+        }
+
+        async function submitCreateClinic() {
+            const errEl = document.getElementById('createClinicError');
+            errEl.style.display = 'none';
+
+            const name = document.getElementById('ccName').value.trim();
+            const whatsapp_number = document.getElementById('ccWhatsapp').value.trim();
+            const plan = document.getElementById('ccPlan').value;
+            const meta_phone_number_id = document.getElementById('ccMetaPhoneId').value.trim();
+            const meta_access_token = document.getElementById('ccMetaToken').value.trim();
+
+            if (!name || !whatsapp_number || !meta_phone_number_id || !meta_access_token) {
+                errEl.innerText = 'Hospital name, WhatsApp number, Meta Phone Number ID, and Meta Access Token are required.';
+                errEl.style.display = 'block';
+                return;
+            }
+            if (!/^\+\d{10,15}$/.test(whatsapp_number)) {
+                errEl.innerText = 'WhatsApp number must be in E.164 format, e.g. +919876543210.';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            const body = { name, whatsapp_number, plan, meta_phone_number_id, meta_access_token };
+
+            const optionalFields = {
+                clinic_name: 'ccClinicName',
+                doctor_name: 'ccDoctorName',
+                language: 'ccLanguage',
+                timezone: 'ccTimezone',
+                hospital_phone: 'ccHospitalPhone',
+                hospital_address: 'ccHospitalAddress',
+                hospital_maps_link: 'ccHospitalMapsLink',
+                hospital_emergency_number: 'ccEmergencyNumber',
+                razorpay_key_id: 'ccRazorpayKeyId',
+                razorpay_key_secret: 'ccRazorpayKeySecret',
+                razorpay_webhook_secret: 'ccRazorpayWebhookSecret',
+            };
+            for (const [field, elId] of Object.entries(optionalFields)) {
+                const val = document.getElementById(elId).value.trim();
+                if (val) body[field] = val;
+            }
+
+            const submitBtn = document.getElementById('ccSubmitBtn');
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Creating...';
+
+            try {
+                const res = await fetch('/platform/clinics', {
+                    method: 'POST',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    errEl.innerText = data.detail || 'Failed to create hospital.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+
+                document.getElementById('ccResultClinicId').innerText = data.clinic.id;
+                if (data.clinic_admin) {
+                    document.getElementById('ccResultAdminBlock').style.display = 'block';
+                    document.getElementById('ccResultAdminUsername').innerText = data.clinic_admin.username;
+                    document.getElementById('ccResultAdminPassword').innerText = data.clinic_admin.password;
+                }
+                document.getElementById('createClinicFormView').style.display = 'none';
+                document.getElementById('createClinicResultView').style.display = 'block';
+            } catch (e) {
+                errEl.innerText = 'Network error — please try again.';
+                errEl.style.display = 'block';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerText = 'Create Hospital / Clinic';
             }
         }
     </script>
