@@ -352,6 +352,108 @@ async def change_password(
     return {"success": True, "message": "Password updated successfully"}
 
 
+class StaffCreate(BaseModel):
+    username: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=8)
+
+
+@router.get("/staff")
+async def list_staff(
+    clinic_id: str = "default", user: AdminUser = Depends(require_admin)
+):
+    """List front-desk staff accounts for this clinic (no password hashes)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    query = supabase.table("clinic_admins").select(
+        "id, username, role, is_active, created_at"
+    ).eq("role", "staff")
+    if effective_clinic_id != "default":
+        query = query.eq("clinic_id", effective_clinic_id)
+    result = query.order("created_at", desc=True).execute()
+    return {"staff": result.data or []}
+
+
+@router.post("/staff")
+async def create_staff(
+    body: StaffCreate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Clinic admin self-service: create a front-desk staff login scoped to
+    this clinic, so staff credentials don't require going through the
+    platform owner. Role is fixed to 'staff' — clinic admins can't mint
+    other clinic_admin/super_admin accounts from here."""
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+    existing = (
+        supabase.table("clinic_admins")
+        .select("id")
+        .eq("username", body.username)
+        .execute()
+    )
+    if existing.data:
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+    result = (
+        supabase.table("clinic_admins")
+        .insert(
+            {
+                "clinic_id": effective_clinic_id,
+                "username": body.username,
+                "password_hash": hash_password(body.password),
+                "role": "staff",
+                "is_active": True,
+            }
+        )
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create staff account")
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="create_staff",
+        resource_type="clinic_admin",
+        resource_id=body.username,
+        ip_address=client_ip,
+    )
+    return {"success": True, "staff": result.data[0]}
+
+
+@router.put("/staff/{staff_id}/toggle")
+async def toggle_staff(
+    staff_id: str, request: Request, user: AdminUser = Depends(require_admin)
+):
+    """Activate/deactivate a staff account — for offboarding without deleting
+    their audit trail."""
+    res = (
+        supabase.table("clinic_admins")
+        .select("id, clinic_id, is_active, role")
+        .eq("id", staff_id)
+        .execute()
+    )
+    if not res.data or res.data[0]["role"] != "staff":
+        raise HTTPException(status_code=404, detail="Staff account not found")
+    enforce_clinic_access(user, res.data[0]["clinic_id"])
+
+    new_status = not res.data[0]["is_active"]
+    supabase.table("clinic_admins").update({"is_active": new_status}).eq(
+        "id", staff_id
+    ).execute()
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="toggle_staff",
+        resource_type="clinic_admin",
+        resource_id=staff_id,
+        details={"is_active": new_status},
+        ip_address=client_ip,
+    )
+    return {"success": True, "is_active": new_status}
+
+
 class LeaveCreate(BaseModel):
     doctor_name: str
     leave_date: date

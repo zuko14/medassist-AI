@@ -785,6 +785,9 @@
             <div class="nav-link" tabindex="0" data-page="branches" data-feature="multi_branch" data-role="admin" onclick="go('branches',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="1"></rect><rect x="9" y="6" width="2" height="2"></rect><rect x="13" y="6" width="2" height="2"></rect><rect x="9" y="11" width="2" height="2"></rect><rect x="13" y="11" width="2" height="2"></rect><rect x="10" y="16" width="4" height="6"></rect></svg></span> Branches
             </div>
+            <div class="nav-link" tabindex="0" data-page="staff" data-role="admin" onclick="go('staff',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> Staff Accounts
+            </div>
             <div class="nav-link" tabindex="0" data-page="connectors" data-feature="lab_reports" onclick="go('connectors',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span> Report Connector
             </div>
@@ -1206,6 +1209,43 @@
                     </div>
                     <button class="btn btn-accent" onclick="assignDoctorToBranch()" style="height:42px;">Assign</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- ─── STAFF ACCOUNTS ─── -->
+        <div id="pg-staff" class="sec">
+            <div class="page-head">
+                <h2>Staff Accounts</h2>
+                <p>Create front-desk login credentials for your staff. Staff accounts can manage appointments, check-ins and patients, but cannot access payments, settings or roster management.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>All Staff</h3>
+                    <span id="staffCount" style="color:var(--text3); font-size:0.8rem;"></span>
+                </div>
+                <div class="tbl-wrap" id="staffList">
+                    <div class="loader"><div class="spin"></div>Loading staff...</div>
+                </div>
+            </div>
+
+            <div class="form-card" id="staffFormCard">
+                <h3>➕ Create Staff Login</h3>
+                <div id="staffMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Username</label><input type="text" id="f-staffUsername" placeholder="e.g. frontdesk1"></div>
+                    <div class="field">
+                        <label>Password</label>
+                        <div style="position:relative;">
+                            <input type="text" id="f-staffPassword" placeholder="At least 8 characters" style="padding-right:44px;">
+                            <button type="button" class="btn-ghost" style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:2px 8px; font-size:12px;" onclick="generateStaffPassword()">🎲</button>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px; margin-top:14px;">
+                    <button class="btn btn-accent" onclick="createStaff()">Create Staff Login</button>
+                </div>
+                <p style="color:var(--text3); font-size:0.8rem; margin-top:10px;">Copy the username and password shown after creation and hand them to your staff member directly — they won't be shown again.</p>
             </div>
         </div>
 
@@ -1661,7 +1701,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage };
+    const loaders = { dashboard: loadDashboard, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
     if (loaders[page]) loaders[page]();
 }
 
@@ -2788,6 +2828,70 @@ function resetBranchForm() {
     document.getElementById('f-branchDiag').value = 'false';
     document.getElementById('f-branchOrder').value = '0';
     document.getElementById('branchFormTitle').textContent = '➕ Add New Branch';
+}
+
+async function loadStaff() {
+    try {
+        const data = await api('/admin/staff');
+        const staff = data.staff || [];
+        document.getElementById('staffCount').textContent = staff.length + ' account' + (staff.length === 1 ? '' : 's');
+
+        if (staff.length === 0) {
+            document.getElementById('staffList').innerHTML = emptyState('users', 'No staff accounts yet. Create one below.');
+            return;
+        }
+
+        let html = '<table><thead><tr><th>Username</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+        staff.forEach(s => {
+            const status = s.is_active
+                ? '<span class="badge badge-confirmed">Active</span>'
+                : '<span class="badge badge-cancelled">Inactive</span>';
+            html += `<tr>
+                <td><strong>${esc(s.username)}</strong></td>
+                <td>${status}</td>
+                <td>${esc((s.created_at || '').slice(0, 10))}</td>
+                <td><button class="btn btn-ghost" onclick="toggleStaff('${s.id}')">${s.is_active ? 'Deactivate' : 'Activate'}</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('staffList').innerHTML = html;
+    } catch (e) {
+        document.getElementById('staffList').innerHTML = emptyState('warning', 'Failed to load staff: ' + esc(e.message));
+    }
+}
+
+function generateStaffPassword() {
+    const bytes = new Uint8Array(9);
+    crypto.getRandomValues(bytes);
+    const pwd = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 12);
+    document.getElementById('f-staffPassword').value = pwd;
+}
+
+async function createStaff() {
+    const username = document.getElementById('f-staffUsername').value.trim();
+    const password = document.getElementById('f-staffPassword').value;
+
+    if (!username || username.length < 3) { msg('staffMsg', 'Username must be at least 3 characters', true); return; }
+    if (!password || password.length < 8) { msg('staffMsg', 'Password must be at least 8 characters', true); return; }
+
+    try {
+        await apiPost('/admin/staff', { username, password });
+        msg('staffMsg', `✅ Staff login created — Username: <strong>${esc(username)}</strong>, Password: <strong>${esc(password)}</strong>. Copy these now and hand them to your staff member.`);
+        document.getElementById('f-staffUsername').value = '';
+        document.getElementById('f-staffPassword').value = '';
+        loadStaff();
+    } catch (e) {
+        msg('staffMsg', 'Error: ' + e.message, true);
+    }
+}
+
+async function toggleStaff(staffId) {
+    try {
+        await apiPut('/admin/staff/' + staffId + '/toggle', {});
+        loadStaff();
+    } catch (e) {
+        toast('Error: ' + e.message, true);
+    }
 }
 
 async function manageBranchDoctors(branchId, branchName) {
