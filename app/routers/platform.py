@@ -8,10 +8,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.database import supabase
-from app.routers.admin import AdminUser, check_password_hash, log_admin_action
+from app.routers.admin import AdminUser, check_password_hash, hash_password, log_admin_action
 from app.services.analytics import analytics_service
 from app.utils.security import login_rate_limiter
 
@@ -75,6 +76,49 @@ async def verify_owner_credentials(
         detail="Invalid owner credentials",
         headers={"WWW-Authenticate": "Basic"},
     )
+
+
+class ResetAdminPasswordRequest(BaseModel):
+    username: str
+    new_password: str = Field(..., min_length=8)
+
+
+@router.put("/reset-admin-password")
+async def reset_clinic_admin_password(
+    body: ResetAdminPasswordRequest,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Owner-mediated password reset — the forgot-password path for clinic_admins.
+
+    There's no email/SMS infra to verify a locked-out admin's identity
+    directly, so resets go through the platform owner (already a separate,
+    trusted auth tier), same as how these accounts are provisioned initially.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    res = (
+        supabase.table("clinic_admins")
+        .select("id")
+        .eq("username", body.username)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Admin account not found")
+
+    supabase.table("clinic_admins").update(
+        {"password_hash": hash_password(body.new_password)}
+    ).eq("username", body.username).execute()
+
+    await log_admin_action(
+        user=owner,
+        action="reset_admin_password",
+        resource_type="clinic_admin",
+        resource_id=body.username,
+        ip_address=client_ip,
+    )
+
+    return {"success": True, "message": f"Password reset for '{body.username}'"}
 
 
 @router.get("/overview")

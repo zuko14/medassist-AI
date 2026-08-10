@@ -128,6 +128,13 @@ def check_password_hash(plain_password: str, stored_hash: str) -> bool:
     )
 
 
+def hash_password(plain_password: str) -> str:
+    """Hash a plaintext password with bcrypt for storage in clinic_admins.password_hash."""
+    import bcrypt
+
+    return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
 async def verify_credentials(
     request: Request,
     credentials: HTTPBasicCredentials = Depends(security),
@@ -285,6 +292,52 @@ async def get_current_admin(user: AdminUser = Depends(verify_credentials)):
         "plan": plan,
         "features": features,
     }
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
+
+@router.put("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Self-service password change for DB-backed clinic_admins accounts."""
+    if not user.user_id or user.user_id in ("super_admin_env", "platform_owner_env"):
+        raise HTTPException(
+            status_code=400,
+            detail="This account's password is set via an environment variable and can't be changed here. Contact your platform administrator.",
+        )
+
+    res = (
+        supabase.table("clinic_admins")
+        .select("id, password_hash")
+        .eq("id", user.user_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Admin account not found")
+
+    if not check_password_hash(body.current_password, res.data[0]["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    supabase.table("clinic_admins").update(
+        {"password_hash": hash_password(body.new_password)}
+    ).eq("id", user.user_id).execute()
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="change_password",
+        resource_type="clinic_admin",
+        resource_id=user.user_id,
+        ip_address=client_ip,
+    )
+
+    return {"success": True, "message": "Password updated successfully"}
 
 
 class LeaveCreate(BaseModel):
@@ -975,6 +1028,8 @@ async def add_prescription(
     """Add a new prescription reminder with strict Pydantic input validation."""
     effective_clinic_id = body.clinic_id or clinic_id
     effective_clinic_id = enforce_clinic_access(user, effective_clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    require_feature(clinic, "booking")
     try:
         result = await PrescriptionService().add_prescription(
             clinic_id=effective_clinic_id,
@@ -1002,6 +1057,8 @@ async def get_prescriptions(
 ):
     """Get all prescriptions."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    require_feature(clinic, "booking")
     result = await PrescriptionService().get_all_prescriptions(
         effective_clinic_id, active_only
     )
@@ -1016,6 +1073,8 @@ async def deactivate_prescription(
 ):
     """Deactivate a prescription reminder."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    require_feature(clinic, "booking")
     try:
         await PrescriptionService().deactivate_prescription(
             effective_clinic_id, prescription_id
