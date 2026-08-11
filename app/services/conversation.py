@@ -3035,8 +3035,13 @@ class ConversationManager:
                 dept_groups[dept] = []
             dept_groups[dept].append(doc)
 
-        # Sort dept_groups alphabetically or logically if desired. Here we just take up to 10 sections max.
-        for dept, docs in list(dept_groups.items())[:10]:
+        # WhatsApp interactive lists allow max 10 rows TOTAL across all sections combined.
+        remaining_rows = 10
+        for dept, docs in dept_groups.items():
+            if remaining_rows <= 0:
+                break
+            docs = docs[:remaining_rows]
+            remaining_rows -= len(docs)
             sections.append(
                 {
                     "title": dept[:24],
@@ -3048,7 +3053,7 @@ class ConversationManager:
                                 :72
                             ],
                         }
-                        for doc in docs[:10]  # whatsapp limit max 10 rows per section
+                        for doc in docs
                     ],
                 }
             )
