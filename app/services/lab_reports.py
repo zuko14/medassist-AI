@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 from uuid import uuid4
 
 
@@ -10,6 +11,7 @@ from app.utils.pdf_reader import extract_text_from_pdf
 from app.services.report_summarizer import ReportSummarizer
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
+from app.utils.validators import mask_phone
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,41 @@ class LabReportService:
         patient_name: str,
         report_name: str,
         report_type: str,
+        external_report_id: Optional[str] = None,
+        source: str = "admin",
     ) -> dict:
-        """Full pipeline: extract text, AI summary, upload, send via WhatsApp, save record."""
+        """Full pipeline: extract text, AI summary, upload, send via WhatsApp, save record.
+
+        `external_report_id` is the shared dedup key across every intake path that can
+        deliver a report for this clinic (admin upload, generic EMR connector, CallMedex).
+        When set, an existing lab_reports row for (clinic_id, external_report_id) means
+        this report was already delivered — possibly via a different WhatsApp number on a
+        different intake path — so we skip re-sending instead of delivering it twice.
+        """
+
+        # Step 0 — Cross-path idempotency guard (skip if already delivered by another intake)
+        # Fail-open: if the check itself errors (network hiccup etc.), proceed with the
+        # send rather than block report delivery on a guard that's meant to prevent — not
+        # cause — a missed report.
+        if external_report_id:
+            try:
+                existing = (
+                    supabase.table("lab_reports")
+                    .select("*")
+                    .eq("clinic_id", clinic_id)
+                    .eq("external_report_id", external_report_id)
+                    .execute()
+                )
+                if isinstance(existing.data, list) and existing.data:
+                    logger.info(
+                        f"Report {external_report_id} for clinic {clinic_id} already delivered "
+                        f"(source={existing.data[0].get('source')}) — skipping duplicate send"
+                    )
+                    record = dict(existing.data[0])
+                    record["already_processed"] = True
+                    return record
+            except Exception as e:
+                logger.warning(f"Cross-path idempotency check failed (proceeding): {e}")
 
         # Step A — Extract text from PDF
         pdf_text = extract_text_from_pdf(file_bytes)
@@ -111,9 +146,9 @@ class LabReportService:
                 )
 
             sent_ok = True
-            logger.info(f"Report sent successfully to {patient_phone}")
+            logger.info(f"Report sent successfully to {mask_phone(patient_phone)}")
         except Exception as e:
-            logger.error(f"WhatsApp send failed for {patient_phone}: {e}")
+            logger.error(f"WhatsApp send failed for {mask_phone(patient_phone)}: {e}")
             error_message = str(e)
 
         # Step G — Save to database
@@ -127,6 +162,8 @@ class LabReportService:
             "ai_summary": ai_result.get("patient_message"),
             "has_abnormal_values": ai_result.get("has_abnormal", False),
             "status": "sent" if sent_ok else "failed",
+            "external_report_id": external_report_id,
+            "source": source,
             "error_message": (
                 error_message
                 if not sent_ok
@@ -144,10 +181,31 @@ class LabReportService:
             result = supabase.table("lab_reports").insert(row).execute()
             saved_record = result.data[0] if result.data else row
         except Exception as e:
-            logger.error(f"Failed to save lab report record to database: {e}")
-            row["id"] = str(uuid4())
-            row["_db_error"] = str(e)
-            saved_record = row
+            # Unique violation on (clinic_id, external_report_id) means another intake
+            # path won the race and already delivered this report — a WhatsApp message
+            # may have just gone out twice, but at least we don't record it twice.
+            if external_report_id and "23505" in str(e):
+                logger.warning(
+                    f"Race detected: {external_report_id} for clinic {clinic_id} was "
+                    f"delivered concurrently by another intake path"
+                )
+                existing = (
+                    supabase.table("lab_reports")
+                    .select("*")
+                    .eq("clinic_id", clinic_id)
+                    .eq("external_report_id", external_report_id)
+                    .execute()
+                )
+                saved_record = (
+                    existing.data[0]
+                    if isinstance(existing.data, list) and existing.data
+                    else row
+                )
+            else:
+                logger.error(f"Failed to save lab report record to database: {e}")
+                row["id"] = str(uuid4())
+                row["_db_error"] = str(e)
+                saved_record = row
 
         # Audit logging for PII-safe AI summarization and delivery
         if sent_ok:

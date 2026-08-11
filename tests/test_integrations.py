@@ -234,3 +234,65 @@ class TestIntegrationEndpoint:
             data={"clinic_id": "test", "patient_phone": "+91test"},
         )
         assert response.status_code == 401
+
+
+class TestCrossPathReportDeduplication:
+    """A report already delivered via one intake path (e.g. CallMedex's dedicated
+    WhatsApp number) must never be re-sent via another path (e.g. the processing
+    center's own number) for the same (clinic_id, external_report_id)."""
+
+    @pytest.fixture
+    def mock_settings(self):
+        with patch("app.routers.integrations.settings") as mock:
+            mock.integration_secret = "test-secret-key"
+            yield mock
+
+    def test_generic_connector_skips_report_already_delivered_by_callmedex(self, mock_settings):
+        from fastapi.testclient import TestClient
+        from app.routers.integrations import router
+        from fastapi import FastAPI
+        from unittest.mock import MagicMock
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        with patch("app.routers.integrations.supabase") as mock_integrations_supabase, \
+             patch("app.services.lab_reports.supabase") as mock_lab_reports_supabase, \
+             patch("app.services.whatsapp.whatsapp_service") as mock_whatsapp:
+            # No prior record in integration_processed_reports (this connector's own
+            # dedup table) — the report only exists because CallMedex processed it.
+            mock_integrations_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
+            # But lab_reports already has a row for this barcode, delivered via CallMedex.
+            mock_lab_reports_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{
+                    "id": "lr-1",
+                    "clinic_id": "clinic-A",
+                    "external_report_id": "BC-DUP-1",
+                    "source": "callmedex",
+                    "status": "sent",
+                }]
+            )
+
+            response = client.post(
+                "/internal/integrations/lab-report",
+                headers={"X-Integration-Secret": "test-secret-key"},
+                data={
+                    "clinic_id": "clinic-A",
+                    "patient_phone": "+919876543210",
+                    "patient_name": "Test Patient",
+                    "report_name": "CBC",
+                    "external_report_id": "BC-DUP-1",
+                    "connector_type": "mocdoc",
+                },
+                files={"file": ("report.pdf", b"%PDF-1.4 fake", "application/pdf")},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["already_processed"] is True
+        mock_whatsapp.send_text.assert_not_called()
+        mock_whatsapp.send_document.assert_not_called()

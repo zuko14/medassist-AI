@@ -792,6 +792,120 @@ async def platform_upsert_connector(
     )
 
 
+class CallMedexWhatsAppSettingsUpdate(BaseModel):
+    """Partial update — an omitted/blank field never overwrites the stored
+    value (same convention as ConnectorCredentialsUpdate)."""
+
+    phone_number_id: Optional[str] = None
+    api_token: Optional[str] = None
+
+
+@router.get("/callmedex/whatsapp-settings")
+async def get_callmedex_whatsapp_settings(
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """The single WhatsApp number CallMedex uses to deliver every CallMedex-
+    booked report, platform-wide (not per-clinic). Never returns the raw
+    token — only whether one is configured."""
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_callmedex_whatsapp_settings",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+
+    res = (
+        supabase.table("callmedex_whatsapp_settings")
+        .select("phone_number_id, api_token_encrypted, updated_at, updated_by")
+        .eq("id", "default")
+        .execute()
+    )
+    row = res.data[0] if res.data else None
+
+    if row and row.get("phone_number_id") and row.get("api_token_encrypted"):
+        return {
+            "success": True,
+            "source": "database",
+            "phone_number_id": row["phone_number_id"],
+            "token_set": True,
+            "updated_at": row.get("updated_at"),
+            "updated_by": row.get("updated_by"),
+        }
+
+    # No owner-configured override yet — report what the env-var fallback holds.
+    from app.integrations.callmedex.config.settings import callmedex_settings
+
+    env_token = callmedex_settings.whatsapp_api_token.get_secret_value()
+    return {
+        "success": True,
+        "source": "environment",
+        "phone_number_id": callmedex_settings.whatsapp_phone_number_id,
+        "token_set": bool(env_token) and env_token != "dev_whatsapp_token",
+        "updated_at": None,
+        "updated_by": None,
+    }
+
+
+@router.put("/callmedex/whatsapp-settings")
+async def update_callmedex_whatsapp_settings(
+    body: CallMedexWhatsAppSettingsUpdate,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Owner-only add/change of CallMedex's single global WhatsApp number.
+    Takes effect immediately — the CallMedex delivery path reads this table
+    live on every send, no redeploy needed."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    if not body.phone_number_id and not body.api_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide phone_number_id and/or api_token to update",
+        )
+
+    existing = (
+        supabase.table("callmedex_whatsapp_settings")
+        .select("*")
+        .eq("id", "default")
+        .execute()
+    )
+    row = dict(existing.data[0]) if existing.data else {"id": "default"}
+
+    if body.phone_number_id and body.phone_number_id.strip():
+        row["phone_number_id"] = body.phone_number_id.strip()
+
+    if body.api_token and body.api_token.strip():
+        key = settings.connector_encryption_key
+        if not key:
+            raise HTTPException(
+                status_code=500,
+                detail="Connector encryption is not configured on this server — contact support before saving the token",
+            )
+        from app.utils.connector_crypto import encrypt_password
+
+        row["api_token_encrypted"] = encrypt_password(body.api_token.strip(), key)
+
+    row["updated_at"] = datetime.now(timezone.utc).isoformat()
+    row["updated_by"] = owner.username
+
+    supabase.table("callmedex_whatsapp_settings").upsert(row).execute()
+
+    await log_admin_action(
+        user=owner,
+        action="update_callmedex_whatsapp_settings",
+        resource_type="platform",
+        details={
+            "phone_number_id_changed": bool(body.phone_number_id),
+            "token_changed": bool(body.api_token),
+        },
+        ip_address=client_ip,
+    )
+
+    return {"success": True, "phone_number_id": row.get("phone_number_id")}
+
+
 @router.get("/callmedex/centers")
 async def get_callmedex_processing_centers(
     request: Request,

@@ -92,14 +92,18 @@ class PlaywrightBrowserSession(BaseBrowserSession):
         filepath = os.path.join(callmedex_settings.artifacts_dir, filename)
         logger.info(f"Capturing screenshot artifact to {filepath}")
 
+        if page_handle is None or not hasattr(page_handle, "screenshot"):
+            logger.warning(
+                f"No live page handle available — skipping screenshot artifact '{artifact_name}' "
+                f"(no real screenshot captured, no placeholder file written)"
+            )
+            return None
+
         try:
-            if page_handle is not None and hasattr(page_handle, "screenshot"):
-                await page_handle.screenshot(path=filepath)
-            else:
-                with open(filepath, "wb") as f:
-                    f.write(b"MOCK_SCREENSHOT_BINARY_ARTIFACT_DATA")
+            await page_handle.screenshot(path=filepath)
         except Exception as e:
             logger.error(f"Failed capturing screenshot artifact {artifact_name}: {e}")
+            return None
 
         return filepath
 

@@ -41,10 +41,19 @@ async def test_sandbox_browser_environment():
     assert os.path.exists(callmedex_settings.download_dir) or os.makedirs(callmedex_settings.download_dir, exist_ok=True) or True
     assert os.path.exists(callmedex_settings.artifacts_dir) or os.makedirs(callmedex_settings.artifacts_dir, exist_ok=True) or True
 
-    # Capture failure screenshot
-    screenshot_path = await session.capture_screenshot(None, "sandbox_failure_test")
+    # Capture failure screenshot from a real page handle
+    class _FakePage:
+        async def screenshot(self, path: str):
+            with open(path, "wb") as f:
+                f.write(b"fake-png-bytes-for-test")
+
+    screenshot_path = await session.capture_screenshot(_FakePage(), "sandbox_failure_test")
     assert screenshot_path is not None
     assert "sandbox_failure_test.png" in screenshot_path
+
+    # No live page handle available — must not fabricate a placeholder file
+    no_page_result = await session.capture_screenshot(None, "sandbox_failure_test_no_page")
+    assert no_page_result is None
 
     # Clean close
     await session.close_context(session_id)

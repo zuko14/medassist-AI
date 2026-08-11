@@ -118,6 +118,9 @@ async def receive_lab_report(
     )
 
     # Step 3: Call the SAME LabReportService pipeline as admin panel
+    # external_report_id/source are passed through so upload_and_send() can check
+    # lab_reports for a duplicate delivered by another intake path (e.g. CallMedex)
+    # before sending — this is what actually prevents the double-send.
     try:
         lab_service = LabReportService()
         saved_record = await lab_service.upload_and_send(
@@ -129,12 +132,26 @@ async def receive_lab_report(
             patient_name=patient_name,
             report_name=report_name,
             report_type=report_type,
+            external_report_id=external_report_id,
+            source=connector_type,
         )
     except Exception as e:
         logger.error(f"LabReportService failed for {external_report_id}: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process report: {type(e).__name__}: {str(e)[:200]}",
+        )
+
+    if saved_record.get("already_processed"):
+        logger.info(
+            f"Report {external_report_id} already delivered via another intake "
+            f"(source={saved_record.get('source')}) — skipped duplicate send"
+        )
+        return LabReportResponse(
+            success=True,
+            already_processed=True,
+            lab_report_id=str(saved_record.get("id")) if saved_record.get("id") else None,
+            message=f"Report {external_report_id} already processed",
         )
 
     # Step 4: Record the processed report (idempotency)

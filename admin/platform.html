@@ -888,8 +888,12 @@
                         <div class="chart-title">CallMedex Processing Centers</div>
                         <div class="chart-subtitle" id="callmedexSummary">Loading...</div>
                     </div>
-                    <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openConnectorModal()">+ Enroll Processing Center</button>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-secondary" style="width:auto; padding:10px 18px;" onclick="openCallMedexNumberModal()">CallMedex WhatsApp Number</button>
+                        <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openConnectorModal()">+ Enroll Processing Center</button>
+                    </div>
                 </div>
+                <div style="padding:0 4px 16px; font-size:0.82rem; color:var(--text3)" id="callmedexNumberSummary">Loading CallMedex WhatsApp number...</div>
                 <div class="table-responsive">
                     <table class="custom-table">
                         <thead>
@@ -1047,6 +1051,30 @@
                 </label>
             </div>
             <button class="btn-primary" onclick="submitConnector()">Save Connector</button>
+        </div>
+    </div>
+
+    <!-- CallMedex WhatsApp Number Modal -->
+    <div class="modal-overlay" id="callmedexNumberModal">
+        <div class="modal-panel" style="max-width:460px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">CallMedex WhatsApp Number</h3>
+                <button class="close-btn" onclick="closeCallMedexNumberModal()">✕</button>
+            </div>
+            <div class="error-msg" id="callmedexNumberError">Error</div>
+            <p style="font-size:0.8rem; color:var(--text3); margin-bottom:16px;">
+                This is the single, platform-wide Meta WhatsApp number used to deliver every
+                CallMedex-booked report — separate from each processing center's own number.
+            </p>
+            <div class="form-group">
+                <label>Meta Phone Number ID</label>
+                <input type="text" class="form-control" id="cmNumberPhoneId" placeholder="e.g. 109876543210987">
+            </div>
+            <div class="form-group">
+                <label>Meta WhatsApp API Token</label>
+                <input type="password" class="form-control" id="cmNumberToken" placeholder="Leave blank to keep existing">
+            </div>
+            <button class="btn-primary" onclick="submitCallMedexNumber()">Save Number</button>
         </div>
     </div>
 
@@ -1255,6 +1283,7 @@
                 populateClinicDropdown(clinicsData.clinics || []);
                 loadClinicAdmins();
                 loadCallMedexCenters();
+                loadCallMedexNumber();
 
             } catch (e) {
                 console.error('Error fetching platform data:', e);
@@ -1681,6 +1710,70 @@
         }
 
         // ═══ CallMedex Processing Centers ═══
+
+        async function loadCallMedexNumber() {
+            try {
+                const res = await fetch('/platform/callmedex/whatsapp-settings', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json();
+                const summaryEl = document.getElementById('callmedexNumberSummary');
+                if (!res.ok || !data.success) {
+                    summaryEl.innerText = 'Failed to load CallMedex WhatsApp number.';
+                    return;
+                }
+                const tokenStatus = data.token_set ? 'token configured' : 'no token set';
+                const sourceLabel = data.source === 'database' ? 'owner-configured' : 'environment default';
+                summaryEl.innerText = `${data.phone_number_id || 'Not set'} · ${tokenStatus} · ${sourceLabel}`;
+            } catch (e) {
+                console.error('Error fetching CallMedex WhatsApp number:', e);
+            }
+        }
+
+        function openCallMedexNumberModal() {
+            document.getElementById('cmNumberPhoneId').value = '';
+            document.getElementById('cmNumberToken').value = '';
+            document.getElementById('callmedexNumberError').style.display = 'none';
+            document.getElementById('callmedexNumberModal').classList.add('active');
+        }
+
+        function closeCallMedexNumberModal() {
+            document.getElementById('callmedexNumberModal').classList.remove('active');
+        }
+
+        async function submitCallMedexNumber() {
+            const phone_number_id = document.getElementById('cmNumberPhoneId').value.trim();
+            const api_token = document.getElementById('cmNumberToken').value;
+            const errEl = document.getElementById('callmedexNumberError');
+            errEl.style.display = 'none';
+
+            if (!phone_number_id && !api_token) {
+                errEl.innerText = 'Enter a phone number ID and/or an API token to save.';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            const body = {};
+            if (phone_number_id) body.phone_number_id = phone_number_id;
+            if (api_token) body.api_token = api_token;
+
+            try {
+                const res = await fetch('/platform/callmedex/whatsapp-settings', {
+                    method: 'PUT',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    errEl.innerText = data.detail || 'Failed to save CallMedex WhatsApp number.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                closeCallMedexNumberModal();
+                loadCallMedexNumber();
+            } catch (e) {
+                errEl.innerText = 'Network error — please try again.';
+                errEl.style.display = 'block';
+            }
+        }
 
         async function loadCallMedexCenters() {
             try {

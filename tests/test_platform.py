@@ -326,3 +326,118 @@ def test_platform_upsert_connector_delegates_to_admin_logic(mock_upsert):
     assert call_kwargs["clinic_id"] == "clinic-A"
     assert call_kwargs["user"].role == "platform_owner"
     assert call_kwargs["body"].connector_type == "mocdoc"
+
+
+def test_callmedex_whatsapp_settings_get_requires_auth():
+    response = client.get("/platform/callmedex/whatsapp-settings")
+    assert response.status_code == 401
+
+
+def test_callmedex_whatsapp_settings_put_requires_auth():
+    response = client.put(
+        "/platform/callmedex/whatsapp-settings", json={"phone_number_id": "12345"}
+    )
+    assert response.status_code == 401
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_callmedex_whatsapp_settings_get_falls_back_to_env(mock_supabase, mock_log_action):
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[]
+    )
+
+    headers = get_owner_auth_header()
+    response = client.get("/platform/callmedex/whatsapp-settings", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["source"] == "environment"
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_callmedex_whatsapp_settings_get_returns_db_override(mock_supabase, mock_log_action):
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[
+            {
+                "phone_number_id": "109876543210987",
+                "api_token_encrypted": "gAAAA-encrypted-blob",
+                "updated_at": "2026-08-11T00:00:00Z",
+                "updated_by": "owner",
+            }
+        ]
+    )
+
+    headers = get_owner_auth_header()
+    response = client.get("/platform/callmedex/whatsapp-settings", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["source"] == "database"
+    assert data["phone_number_id"] == "109876543210987"
+    assert data["token_set"] is True
+    # Raw token must never be returned
+    assert "api_token" not in data
+    assert "api_token_encrypted" not in data
+
+
+def test_callmedex_whatsapp_settings_put_requires_a_field():
+    headers = get_owner_auth_header()
+    response = client.put(
+        "/platform/callmedex/whatsapp-settings", headers=headers, json={}
+    )
+    assert response.status_code == 400
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.utils.connector_crypto.encrypt_password", return_value="gAAAA-encrypted-blob")
+@patch("app.routers.platform.settings.connector_encryption_key", "test-fernet-key")
+@patch("app.routers.platform.supabase")
+def test_callmedex_whatsapp_settings_put_success(
+    mock_supabase, mock_encrypt, mock_log_action
+):
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[]
+    )
+    mock_supabase.table.return_value.upsert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "default", "phone_number_id": "109876543210987"}]
+    )
+
+    headers = get_owner_auth_header()
+    response = client.put(
+        "/platform/callmedex/whatsapp-settings",
+        headers=headers,
+        json={"phone_number_id": "109876543210987", "api_token": "secret-token-value"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["phone_number_id"] == "109876543210987"
+
+    upserted = mock_supabase.table.return_value.upsert.call_args[0][0]
+    assert upserted["phone_number_id"] == "109876543210987"
+    assert upserted["api_token_encrypted"] == "gAAAA-encrypted-blob"
+    assert "secret-token-value" not in str(response.json())
+
+
+@patch("app.routers.platform.settings.connector_encryption_key", None)
+@patch("app.routers.platform.supabase")
+def test_callmedex_whatsapp_settings_put_missing_encryption_key_returns_500(
+    mock_supabase,
+):
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[]
+    )
+
+    headers = get_owner_auth_header()
+    response = client.put(
+        "/platform/callmedex/whatsapp-settings",
+        headers=headers,
+        json={"api_token": "secret-token-value"},
+    )
+
+    assert response.status_code == 500

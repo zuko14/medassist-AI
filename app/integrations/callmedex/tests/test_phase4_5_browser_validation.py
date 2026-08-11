@@ -130,7 +130,12 @@ async def test_phase4_5_automated_screenshot_artifact_generation():
         "download_confirmation_regression",
     ]
 
+    class _FakePage:
+        async def screenshot(self, path: str):
+            with open(path, "wb") as f:
+                f.write(b"fake-png-bytes-for-test")
+
     for stage_label in stages:
-        filepath = await session.capture_screenshot(None, stage_label)
+        filepath = await session.capture_screenshot(_FakePage(), stage_label)
         assert filepath is not None
         assert f"{stage_label}.png" in filepath

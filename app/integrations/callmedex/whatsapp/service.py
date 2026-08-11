@@ -14,6 +14,7 @@ from app.integrations.callmedex.whatsapp.schemas import (
     WhatsAppDeliveryStatus,
     WhatsAppTemplatePayload,
 )
+from app.utils.validators import mask_phone
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +30,43 @@ class WhatsAppDeliveryService:
     def __init__(self, callback_handler: Optional[CallMedexCallbackHandler] = None):
         self._callback_handler = callback_handler or CallMedexCallbackHandler()
 
+    async def _get_effective_whatsapp_credentials(self) -> tuple[str, str]:
+        """(token, phone_number_id) — the owner-platform DB override
+        (callmedex_whatsapp_settings) takes priority so a number change
+        applies immediately with no redeploy; falls back to the
+        CALLMEDEX_WHATSAPP_* env vars if no override is set or the lookup
+        fails (fail-open, matching the idempotency-check pattern used
+        elsewhere in this pipeline)."""
+        try:
+            from app.database import supabase
+            from app.config import settings as app_settings
+            from app.utils.connector_crypto import decrypt_password
+
+            row = (
+                supabase.table("callmedex_whatsapp_settings")
+                .select("phone_number_id, api_token_encrypted")
+                .eq("id", "default")
+                .execute()
+            )
+            if isinstance(row.data, list) and row.data:
+                r = row.data[0]
+                phone_id = r.get("phone_number_id")
+                token_enc = r.get("api_token_encrypted")
+                if phone_id and token_enc and app_settings.connector_encryption_key:
+                    token = decrypt_password(token_enc, app_settings.connector_encryption_key)
+                    return token, phone_id
+        except Exception as e:
+            logger.warning(f"CallMedex WhatsApp DB override lookup failed (using env fallback): {e}")
+
+        return callmedex_settings.whatsapp_api_token.get_secret_value(), callmedex_settings.whatsapp_phone_number_id
+
     async def _send_meta_whatsapp_cloud_api(
         self,
         phone_number: str,
         payload: WhatsAppTemplatePayload,
     ) -> tuple[WhatsAppDeliveryStatus, str]:
         """Execute HTTP POST request to Meta WhatsApp Cloud API endpoint."""
-        token = callmedex_settings.whatsapp_api_token.get_secret_value()
-        phone_id = callmedex_settings.whatsapp_phone_number_id
+        token, phone_id = await self._get_effective_whatsapp_credentials()
 
         if not token or not phone_id or token in ("dev_whatsapp_token", "change_in_prod"):
             logger.info("WhatsApp Cloud API credentials not configured/placeholder — test simulation mode active")
@@ -84,10 +114,10 @@ class WhatsAppDeliveryService:
                 res.raise_for_status()
                 data = res.json()
                 msg_id = data.get("messages", [{}])[0].get("id", f"wmid.callmedex.{uuid.uuid4().hex[:12]}")
-                logger.info(f"Successfully sent Meta WhatsApp message to {phone_number} | msg_id={msg_id}")
+                logger.info(f"Successfully sent Meta WhatsApp message to {mask_phone(phone_number)} | msg_id={msg_id}")
                 return WhatsAppDeliveryStatus.DELIVERED, msg_id
         except Exception as err:
-            logger.error(f"Meta WhatsApp Cloud API delivery failed for {phone_number}: {err}")
+            logger.error(f"Meta WhatsApp Cloud API delivery failed for {mask_phone(phone_number)}: {err}")
             return WhatsAppDeliveryStatus.FAILED, ""
 
     async def deliver_report_and_summary(
@@ -100,7 +130,7 @@ class WhatsAppDeliveryService:
         callback_url: Optional[str] = None,
     ) -> WhatsAppDeliveryResult:
         """Format Meta WhatsApp Cloud API template payload, execute real send, and dispatch signed callback."""
-        logger.info(f"Phase 7 WhatsApp Delivery: Sending report '{report_job_id}' to '{phone_number}'")
+        logger.info(f"Phase 7 WhatsApp Delivery: Sending report '{report_job_id}' to '{mask_phone(phone_number)}'")
 
         patient_text = " ".join([stmt.statement for stmt in summary_report.patient_summary])
 

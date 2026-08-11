@@ -226,6 +226,37 @@ class CallMedexWorkerRunner:
 
             # Step 8: OCR Pipeline & Downstream AI/WhatsApp Delivery
             if checkpoint == JobCheckpoint.VALIDATED:
+                # Re-check idempotency right before sending — the router-level check runs
+                # before enqueueing, leaving a race window where the processing center's own
+                # EMR connector could deliver the same external_report_id via /lab-report in
+                # between. Closing it here (not just at enqueue time) prevents a double-send.
+                # Fail-open: a broken check must never block a real report from sending.
+                try:
+                    from app.database import supabase as _supabase_precheck
+                    already = (
+                        _supabase_precheck.table("lab_reports")
+                        .select("id")
+                        .eq("clinic_id", request.clinic_id)
+                        .eq("external_report_id", request.external_report_id)
+                        .execute()
+                    )
+                    if isinstance(already.data, list) and already.data:
+                        logger.info(
+                            f"Report {request.external_report_id} for clinic {request.clinic_id} "
+                            f"already delivered by another intake path — skipping CallMedex send"
+                        )
+                        return ProcessReportResponse(
+                            success=True,
+                            task_id=report_job_id,
+                            already_processed=True,
+                            lab_report_id=str(already.data[0].get("id", "")),
+                            message=f"Report {request.external_report_id} already processed",
+                            callback_delivered=True,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+                except Exception as precheck_err:
+                    logger.warning(f"Cross-path idempotency pre-check failed (proceeding): {precheck_err}")
+
                 patient_phone = getattr(request.patient, "patient_phone", None)
                 patient_id = getattr(request.patient, "patient_mrn", None) or patient_phone or "unknown"
                 patient_name = getattr(request.patient, "patient_name", "Patient")
