@@ -441,3 +441,60 @@ def test_callmedex_whatsapp_settings_put_missing_encryption_key_returns_500(
     )
 
     assert response.status_code == 500
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_platform_messaging_usage_success(mock_supabase, mock_log_action):
+    mock_clinics = MagicMock()
+    mock_clinics.execute.return_value.data = [
+        {"id": "c1", "name": "Hospital A", "plan": "essential", "is_active": True},
+        {"id": "c2", "name": "Hospital B", "plan": "enterprise", "is_active": True},
+    ]
+
+    mock_appts = MagicMock()
+    mock_appts.execute.return_value.data = [
+        {"clinic_id": "c1", "status": "confirmed", "reminder_24h_sent": True, "reminder_2h_sent": False, "followup_sent": False},
+        {"clinic_id": "c1", "status": "cancelled", "reminder_24h_sent": False, "reminder_2h_sent": False, "followup_sent": True},
+        {"clinic_id": "c2", "status": "confirmed", "reminder_24h_sent": False, "reminder_2h_sent": False, "followup_sent": False},
+    ]
+
+    mock_reports = MagicMock()
+    mock_reports.execute.return_value.data = [
+        {"clinic_id": "c1", "sent_at": "2026-08-01T00:00:00Z"},
+    ]
+
+    def table_router(table_name):
+        mock_obj = MagicMock()
+        if table_name == "clinics":
+            mock_obj.select.return_value = mock_clinics
+        elif table_name == "appointments":
+            mock_obj.select.return_value.gte.return_value = mock_appts
+        elif table_name == "lab_reports":
+            mock_obj.select.return_value.gte.return_value = mock_reports
+        return mock_obj
+
+    mock_supabase.table.side_effect = table_router
+
+    headers = get_owner_auth_header()
+    response = client.get("/platform/messaging-usage", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    # c1: confirmed(1) + cancelled(1) + reminder_24h(1) + lab report(1) = 4 utility, 1 marketing
+    # c2: confirmed(1) = 1 utility, 0 marketing
+    assert data["total_utility"] == 5
+    assert data["total_marketing"] == 1
+    assert data["total_outbound"] == 6
+    assert round(data["total_estimated_cost_inr"], 2) == round(5 * 0.12 + 1 * 0.75, 2)
+
+    clinics_by_id = {c["clinic_id"]: c for c in data["clinics"]}
+    assert clinics_by_id["c1"]["utility_count"] == 4
+    assert clinics_by_id["c1"]["marketing_count"] == 1
+    assert clinics_by_id["c2"]["utility_count"] == 1
+
+
+def test_platform_messaging_usage_requires_auth():
+    response = client.get("/platform/messaging-usage")
+    assert response.status_code == 401

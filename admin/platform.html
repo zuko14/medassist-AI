@@ -881,6 +881,59 @@
                 </div>
             </div>
 
+            <!-- WhatsApp Usage & Meta Cost Tracker -->
+            <div class="section-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="chart-title">📱 WhatsApp Usage & Meta Cost Tracker</div>
+                        <div class="chart-subtitle">Estimated Meta Cloud API billing, last 30 days</div>
+                    </div>
+                </div>
+                <div class="stats-grid" style="margin-bottom:20px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Outbound Sent</div>
+                        <div class="stat-value" id="statMsgOutbound">-</div>
+                        <div class="stat-meta">📤 Last 30 days</div>
+                        <div class="stat-icon">📤</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Utility Messages</div>
+                        <div class="stat-value" id="statMsgUtility">-</div>
+                        <div class="stat-meta">⚡ ₹0.12 / message</div>
+                        <div class="stat-icon">⚡</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Marketing Messages</div>
+                        <div class="stat-value" id="statMsgMarketing">-</div>
+                        <div class="stat-meta">📢 ₹0.75 / message</div>
+                        <div class="stat-icon">📢</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Estimated Meta Billing</div>
+                        <div class="stat-value" id="statMsgCost">₹0</div>
+                        <div class="stat-meta">💳 INR, estimated</div>
+                        <div class="stat-icon">💳</div>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr>
+                                <th>Hospital / Clinic</th>
+                                <th>Plan</th>
+                                <th>Outbound (30d)</th>
+                                <th>Utility</th>
+                                <th>Marketing</th>
+                                <th>Est. Cost (₹)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="messagingUsageBody">
+                            <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading messaging usage...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- CallMedex Processing Centers -->
             <div class="section-card">
                 <div class="table-toolbar">
@@ -1284,6 +1337,7 @@
                 loadClinicAdmins();
                 loadCallMedexCenters();
                 loadCallMedexNumber();
+                loadMessagingUsage();
 
             } catch (e) {
                 console.error('Error fetching platform data:', e);
@@ -1773,6 +1827,44 @@
                 errEl.innerText = 'Network error — please try again.';
                 errEl.style.display = 'block';
             }
+        }
+
+        // ═══ WhatsApp Usage & Meta Cost Tracker ═══
+        async function loadMessagingUsage() {
+            try {
+                const res = await fetch('/platform/messaging-usage', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json();
+                renderMessagingUsage(data);
+            } catch (e) {
+                console.error('Error fetching messaging usage:', e);
+            }
+        }
+
+        function renderMessagingUsage(data) {
+            document.getElementById('statMsgOutbound').innerText = (data.total_outbound || 0).toLocaleString('en-IN');
+            document.getElementById('statMsgUtility').innerText = (data.total_utility || 0).toLocaleString('en-IN');
+            document.getElementById('statMsgMarketing').innerText = (data.total_marketing || 0).toLocaleString('en-IN');
+            document.getElementById('statMsgCost').innerText = '₹' + (data.total_estimated_cost_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+
+            const tbody = document.getElementById('messagingUsageBody');
+            const clinics = data.clinics || [];
+            if (!clinics.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">No WhatsApp messages sent in the last 30 days.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = clinics.map(c => `
+                <tr>
+                    <td>
+                        <div>${escapeHtml(c.clinic_name || 'Unknown')}</div>
+                        <span class="clinic-phone" style="font-family:monospace; cursor:pointer;" title="Click to copy Clinic ID" onclick="copyClinicId('${c.clinic_id}')">ID: ${c.clinic_id}</span>
+                    </td>
+                    <td>${escapeHtml(c.plan || '-')}</td>
+                    <td>${c.outbound_total || 0}</td>
+                    <td>${c.utility_count || 0}</td>
+                    <td>${c.marketing_count || 0}</td>
+                    <td>₹${(c.estimated_cost_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                </tr>
+            `).join('');
         }
 
         async function loadCallMedexCenters() {

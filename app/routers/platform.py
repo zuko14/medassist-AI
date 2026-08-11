@@ -1000,3 +1000,134 @@ async def get_callmedex_processing_centers(
     except Exception as e:
         logger.error(f"Error fetching CallMedex processing centers: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch CallMedex centers: {e}")
+
+
+# Meta WhatsApp Cloud API per-message pricing (INR), per master billing spec.
+UTILITY_MSG_COST_INR = 0.12
+MARKETING_MSG_COST_INR = 0.75
+
+
+@router.get("/messaging-usage")
+async def get_platform_messaging_usage(
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Platform-wide WhatsApp outbound message volume and estimated Meta
+    Cloud API billing, broken down by clinic and template category."""
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_platform_messaging_usage",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+
+    try:
+        clinics_res = (
+            supabase.table("clinics")
+            .select("id, name, plan, is_active")
+            .execute()
+        )
+        clinics = clinics_res.data or []
+        start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+        appts_res = (
+            supabase.table("appointments")
+            .select("clinic_id, status, reminder_24h_sent, reminder_2h_sent, followup_sent, created_at")
+            .gte("created_at", start_30d)
+            .execute()
+        )
+        appts = appts_res.data or []
+
+        reports_res = (
+            supabase.table("lab_reports")
+            .select("clinic_id, sent_at")
+            .gte("sent_at", start_30d)
+            .execute()
+        )
+        reports = reports_res.data or []
+
+        usage_by_clinic: dict[str, dict] = {}
+
+        def bucket(clinic_id: str) -> dict:
+            return usage_by_clinic.setdefault(
+                clinic_id, {"utility": 0, "marketing": 0}
+            )
+
+        for a in appts:
+            cid = a.get("clinic_id")
+            if not cid:
+                continue
+            u = bucket(cid)
+            if a.get("status") == "confirmed":
+                u["utility"] += 1
+            if a.get("status") == "cancelled":
+                u["utility"] += 1
+            if a.get("reminder_24h_sent"):
+                u["utility"] += 1
+            if a.get("reminder_2h_sent"):
+                u["utility"] += 1
+            if a.get("followup_sent"):
+                u["marketing"] += 1
+
+        for r in reports:
+            cid = r.get("clinic_id")
+            if not cid or not r.get("sent_at"):
+                continue
+            bucket(cid)["utility"] += 1
+
+        clinics_table = []
+        total_utility = 0
+        total_marketing = 0
+        for c in clinics:
+            u = usage_by_clinic.get(c["id"], {"utility": 0, "marketing": 0})
+            utility_count = u["utility"]
+            marketing_count = u["marketing"]
+            total_utility += utility_count
+            total_marketing += marketing_count
+            cost_inr = round(
+                utility_count * UTILITY_MSG_COST_INR
+                + marketing_count * MARKETING_MSG_COST_INR,
+                2,
+            )
+            clinics_table.append(
+                {
+                    "clinic_id": c["id"],
+                    "clinic_name": c.get("name"),
+                    "plan": c.get("plan"),
+                    "is_active": c.get("is_active", True),
+                    "outbound_total": utility_count + marketing_count,
+                    "utility_count": utility_count,
+                    "marketing_count": marketing_count,
+                    "estimated_cost_inr": cost_inr,
+                }
+            )
+
+        clinics_table.sort(key=lambda x: x["outbound_total"], reverse=True)
+
+        total_outbound = total_utility + total_marketing
+        total_cost_inr = round(
+            total_utility * UTILITY_MSG_COST_INR
+            + total_marketing * MARKETING_MSG_COST_INR,
+            2,
+        )
+
+        return {
+            "success": True,
+            "period_days": 30,
+            "total_outbound": total_outbound,
+            "total_utility": total_utility,
+            "total_marketing": total_marketing,
+            "total_service": 0,
+            "total_estimated_cost_inr": total_cost_inr,
+            "pricing": {
+                "utility_inr": UTILITY_MSG_COST_INR,
+                "marketing_inr": MARKETING_MSG_COST_INR,
+                "service_inr": 0.0,
+            },
+            "clinics": clinics_table,
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching platform messaging usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch messaging usage: {e}")
