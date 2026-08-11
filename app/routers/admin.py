@@ -662,6 +662,27 @@ async def get_doctors(
         raise HTTPException(status_code=500, detail="Failed to get doctors")
 
 
+def _friendly_db_error(e: Exception, default: str) -> str:
+    """Turn a raw Supabase/Postgres error into an actionable admin-facing
+    message instead of a generic 500, without leaking table/column internals.
+
+    The doctor-add flow kept surfacing an opaque "Failed to create doctor"
+    with no way to tell duplicate name vs. broken clinic linkage vs. bad
+    input apart, from either the UI or (without shell/DB access) the logs —
+    so the same-looking failure could have three different real causes.
+    """
+    msg = str(e).lower()
+    if "duplicate" in msg or "unique" in msg:
+        return "A doctor with this name already exists."
+    if "foreign key" in msg:
+        return "This clinic account isn't linked to a valid clinic. Contact support."
+    if "check constraint" in msg or "violates check" in msg:
+        return "One of the values entered isn't valid (check department/fee/hours)."
+    if "value too long" in msg:
+        return "One of the fields is too long — please shorten it."
+    return default
+
+
 def _apply_slot_config(data: dict) -> dict:
     """Regenerate morning_slots/evening_slots from start/end/duration if provided.
 
@@ -699,6 +720,16 @@ def _apply_slot_config(data: dict) -> dict:
             )
         data["evening_slots"] = generate_slots(evening_start, evening_end, duration)
 
+    # DoctorCreate/DoctorUpdate type these fields as datetime.time, but the
+    # Supabase/httpx client JSON-encodes the payload with the stdlib encoder,
+    # which has no default for `time` and raises TypeError on every request
+    # that includes them (i.e. every add via the admin UI, since the form
+    # always sends default shift times). Postgres' `time` columns accept
+    # ISO strings, so normalize in place before the payload is ever sent.
+    for key in ("morning_start", "morning_end", "evening_start", "evening_end"):
+        if isinstance(data.get(key), time_type):
+            data[key] = data[key].isoformat()
+
     return data
 
 
@@ -719,8 +750,13 @@ async def create_doctor(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating doctor: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create doctor")
+        logger.error(
+            f"Error creating doctor for clinic_id={effective_clinic_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to create doctor")
+        )
 
 
 @router.put("/doctors/{doctor_id}")
@@ -747,8 +783,13 @@ async def update_doctor(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating doctor: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update doctor")
+        logger.error(
+            f"Error updating doctor {doctor_id} for clinic_id={effective_clinic_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to update doctor")
+        )
 
 
 @router.delete("/doctors/{doctor_id}")
