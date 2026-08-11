@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MediAssist AI — Admin</title>
+    <title>Kriya AI — Admin</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -713,7 +713,7 @@
     <div class="login-card">
         <div class="login-logo">
             <div class="icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></div>
-            <h2>MediAssist AI</h2>
+            <h2>Kriya AI</h2>
             <p>Admin Panel — Hospital Management</p>
         </div>
         <div id="loginError"></div>
@@ -748,7 +748,7 @@
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-head">
-            <h1><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px; margin-right:4px"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>MediAssist <span class="dot"></span></h1>
+            <h1><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px; margin-right:4px"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>Kriya AI <span class="dot"></span></h1>
             <span>Hospital Admin Panel</span>
         </div>
         <div class="nav-links">
@@ -2076,7 +2076,7 @@ async function submitDoctor() {
 
         resetDoctorForm();
         loadDoctors();
-    } catch (e) { msg('docMsg', id ? 'Failed to update doctor' : 'Failed to add doctor', true); }
+    } catch (e) { msg('docMsg', e.message || (id ? 'Failed to update doctor' : 'Failed to add doctor'), true); }
 }
 
 function resetDoctorForm() {
@@ -2177,7 +2177,7 @@ async function addLeave() {
         document.getElementById('f-leaveReason').value = '';
         document.getElementById('f-leaveEndDate').value = '';
         loadLeaves();
-    } catch (e) { msg('leaveMsg', 'Failed to add leave', true); }
+    } catch (e) { msg('leaveMsg', e.message || 'Failed to add leave', true); }
 }
 
 async function delLeave(id) {
@@ -2216,7 +2216,7 @@ async function addHoliday() {
         msg('holMsg', '✅ Holiday added successfully!');
         document.getElementById('f-holName').value = '';
         loadHolidays();
-    } catch (e) { msg('holMsg', 'Failed to add holiday', true); }
+    } catch (e) { msg('holMsg', e.message || 'Failed to add holiday', true); }
 }
 
 async function delHoliday(date) {

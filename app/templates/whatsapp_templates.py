@@ -156,8 +156,8 @@ TEMPLATES = {
 # Multilingual message templates for freeform messages
 MESSAGES = {
     "en": {
-        "welcome": "Welcome to {hospital_name} 🏥\nI'm MediAssist, your AI scheduling assistant.",
-        "disclaimer": "⚠️ MediAssist is a scheduling assistant. It does not provide medical advice. For emergencies, call {emergency}.",
+        "welcome": "Welcome to {hospital_name} 🏥\nI'm Kriya AI, your AI scheduling assistant.",
+        "disclaimer": "⚠️ Kriya AI is a scheduling assistant. It does not provide medical advice. For emergencies, call {emergency}.",
         "consent_request": "To book your appointment, I need to save your name and contact details as per our privacy policy. Reply YES to continue or NO to proceed without saving.",
         "consent_thanks": "Thank you! Your data will be stored securely.",
         "consent_no_save": "No problem! I'll help you without storing your data.",
@@ -197,8 +197,8 @@ MESSAGES = {
         "queue_status_none": "You don't have a confirmed appointment scheduled for today.\n\nType *book* to schedule an appointment.",
     },
     "hi": {
-        "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं MediAssist हूं, आपका AI सहायक।",
-        "disclaimer": "⚠️ MediAssist एक शेड्यूलिंग सहायक है। यह चिकित्सा सलाह नहीं देता। आपातकाल के लिए, {emergency} पर कॉल करें।",
+        "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं Kriya AI हूं, आपका AI सहायक।",
+        "disclaimer": "⚠️ Kriya AI एक शेड्यूलिंग सहायक है। यह चिकित्सा सलाह नहीं देता। आपातकाल के लिए, {emergency} पर कॉल करें।",
         "consent_request": "अपॉइंटमेंट बुक करने के लिए, मुझे हमारी गोपनीयता नीति के अनुसार आपका नाम और संपर्क विवरण सहेजने की आवश्यकता है। जारी रखने के लिए YES दर्ज करें या बिना सहेजे आगे बढ़ने के लिए NO।",
         "consent_thanks": "धन्यवाद! आपका डेटा सुरक्षित रूप से संग्रहीत किया जाएगा।",
         "consent_no_save": "कोई बात नहीं! मैं बिना डेटा संग्रहीत किए आपकी मदद करूंगा।",
@@ -235,8 +235,8 @@ MESSAGES = {
         "queue_status_none": "आज के लिए आपका कोई कन्फर्म अपॉइंटमेंट नहीं है।\n\nअपॉइंटमेंट बुक करने के लिए *book* लिखें।",
     },
     "te": {
-        "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను MediAssist, మీ AI సహాయకుడిని.",
-        "disclaimer": "⚠️ MediAssist షెడ్యూలింగ్ సహాయకుడు. ఇది వైద్య సలహా ఇవ్వదు. అత్యవసర పరిస్థితుల కోసం, {emergency} కు కాల్ చేయండి.",
+        "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను Kriya AI, మీ AI సహాయకుడిని.",
+        "disclaimer": "⚠️ Kriya AI షెడ్యూలింగ్ సహాయకుడు. ఇది వైద్య సలహా ఇవ్వదు. అత్యవసర పరిస్థితుల కోసం, {emergency} కు కాల్ చేయండి.",
         "consent_request": "అపాయింట్‌మెంట్ బుక్ చేయడానికి, మా ప్రైవసీ పాలసీ ప్రకారం మీ పేరు మరియు సంప్రదింపు వివరాలను సేవ్ చేయాలి. కొనసాగించడానికి YES టైప్ చేయండి లేదా సేవ్ చేయకుండా ముందుకు వెళ్లడానికి NO.",
         "consent_thanks": "ధన్యవాదాలు! మీ డేటా సురక్షితంగా నిల్వ చేయబడుతుంది.",
         "consent_no_save": "సమస్య లేదు! నేను డేటా నిల్వ చేయకుండా మీకు సహాయం చేస్తాను.",

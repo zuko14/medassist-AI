@@ -124,7 +124,7 @@ async def lifespan(app: FastAPI):
 # In production, disable interactive API docs to reduce attack surface
 is_production = settings.app_env == "production"
 app = FastAPI(
-    title="MediAssist AI",
+    title="Kriya AI",
     description="Hospital WhatsApp Assistant for appointment scheduling",
     version="2.0.0",
     lifespan=lifespan,
@@ -185,7 +185,7 @@ app.include_router(callmedex_router)
 async def root():
     """Root endpoint."""
     return {
-        "service": "MediAssist AI",
+        "service": "Kriya AI",
         "version": "2.0.0",
         "hospital": settings.hospital_name,
         "status": "running",
@@ -220,7 +220,7 @@ async def privacy_page():
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Privacy Policy - MediAssist AI</title>
+<title>Privacy Policy - Kriya AI</title>
 <style>
 body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1e293b;line-height:1.7}
 h1{color:#0d9488;border-bottom:2px solid #0d9488;padding-bottom:10px}
@@ -229,7 +229,7 @@ p{color:#475569}
 </style>
 </head>
 <body>
-<h1>Privacy Policy - MediAssist AI</h1>
+<h1>Privacy Policy - Kriya AI</h1>
 <p>Last updated: March 2026</p>
 <h2>1. Information We Collect</h2>
 <p>We collect your name, phone number, and appointment details 
@@ -268,7 +268,7 @@ using industry-standard security practices.</p>
 <p>For privacy concerns message us on WhatsApp or 
 contact the hospital directly.</p>
 <p style="margin-top:40px;color:#94a3b8;font-size:13px">
-MediAssist AI - Hospital WhatsApp Assistant - 2026</p>
+Kriya AI - Hospital WhatsApp Assistant - 2026</p>
 </body>
 </html>""")
 

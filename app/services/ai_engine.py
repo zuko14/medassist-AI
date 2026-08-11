@@ -358,7 +358,7 @@ def build_system_prompt(clinic: dict) -> str:
     """
     from app.services.tenant import has_feature
 
-    base_prompt = f"""You are MediAssist, a hospital appointment scheduling assistant for {clinic.get('name', 'our hospital')}.
+    base_prompt = f"""You are Kriya AI, a hospital appointment scheduling assistant for {clinic.get('name', 'our hospital')}.
 
 You understand medical symptoms in THREE languages:
 - English: fever, chest pain, tooth pain, back pain

@@ -477,7 +477,7 @@ async def get_platform_clinic_detail(
         # Fetch clinic basic info
         clinic_res = (
             supabase.table("clinics")
-            .select("id, name, whatsapp_number, plan, is_active, created_at")
+            .select("id, name, whatsapp_number, plan, features, is_active, created_at")
             .eq("id", clinic_id)
             .execute()
         )
@@ -498,6 +498,71 @@ async def get_platform_clinic_detail(
     except Exception as e:
         logger.error(f"Error fetching clinic detail for {clinic_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch clinic detail: {e}")
+
+
+class ClinicFeatureOverride(BaseModel):
+    """Per-clinic feature toggle — lets the owner switch a single bundled
+    plan feature (e.g. lab_reports) on/off for one clinic without changing
+    its plan tier. True/False sets an explicit override; null clears the
+    override so the clinic falls back to its plan's default for that feature."""
+
+    feature: str
+    enabled: Optional[bool] = None
+
+
+@router.patch("/clinics/{clinic_id}/features")
+async def update_clinic_feature(
+    clinic_id: str,
+    body: ClinicFeatureOverride,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Set or clear a per-clinic feature override (clinics.features JSONB).
+
+    Same mechanism `has_feature()` already reads (app/services/tenant.py) —
+    this just exposes it through the owner-authenticated dashboard instead of
+    requiring a raw SQL update or the X-Admin-Secret curl API.
+    """
+    from app.services.tenant import ALL_FEATURES, invalidate_tenant_cache
+
+    if body.feature not in ALL_FEATURES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown feature '{body.feature}'. Valid: {sorted(ALL_FEATURES)}",
+        )
+
+    client_ip = request.client.host if request.client else "unknown"
+
+    clinic_res = (
+        supabase.table("clinics").select("features").eq("id", clinic_id).execute()
+    )
+    if not clinic_res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    features = dict(clinic_res.data[0].get("features") or {})
+    if body.enabled is None:
+        features.pop(body.feature, None)
+    else:
+        features[body.feature] = body.enabled
+
+    result = (
+        supabase.table("clinics")
+        .update({"features": features})
+        .eq("id", clinic_id)
+        .execute()
+    )
+    invalidate_tenant_cache()
+
+    await log_admin_action(
+        user=owner,
+        action="update_clinic_feature",
+        resource_type="clinic",
+        resource_id=clinic_id,
+        details={"feature": body.feature, "enabled": body.enabled},
+        ip_address=client_ip,
+    )
+
+    return {"success": True, "clinic": result.data[0] if result.data else None}
 
 
 @router.get("/revenue")

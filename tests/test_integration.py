@@ -273,7 +273,7 @@ class TestEndpointSecurity:
         """Root endpoint should return service metadata."""
         response = client.get("/")
         data = response.json()
-        assert data["service"] == "MediAssist AI"
+        assert data["service"] == "Kriya AI"
         assert data["version"] == "2.0.0"
         assert "status" in data
 

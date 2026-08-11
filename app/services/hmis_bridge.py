@@ -60,7 +60,7 @@ class HMISBridge:
         # Build the payload in a common FHIR-like format most HMIS accept
         payload = {
             "event": "appointment.created",
-            "source": "MediAssist-AI",
+            "source": "Kriya-AI",
             "clinic_id": str(clinic.get("id", "")),
             "appointment": {
                 "id": str(appointment.get("id", "")),
@@ -185,7 +185,7 @@ class HMISBridge:
         patient_url = base_url.replace("/webhooks/appointments", "") + patient_path
 
         payload = {
-            "source": "MediAssist-AI",
+            "source": "Kriya-AI",
             "clinic_id": str(clinic.get("id", "")),
             "patient": {
                 "id": str(patient.get("id", "")),

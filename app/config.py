@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     whatsapp_token: str
     whatsapp_phone_number_id: str
     whatsapp_verify_token: str
-    waba_display_name: str = "MediAssist Hospital"
+    waba_display_name: str = "Kriya AI Hospital"
 
     # Groq AI
     groq_api_key: str

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MediAssist AI — Platform Super-Admin Dashboard</title>
+    <title>Kriya AI — Platform Super-Admin Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="/platform-panel/vendor/chart.umd.min.js"></script>
     <style>
@@ -706,7 +706,7 @@
             <div class="brand">
                 <div class="brand-logo">⚡</div>
                 <div>
-                    <div class="brand-title">MediAssist AI</div>
+                    <div class="brand-title">Kriya AI</div>
                     <div class="brand-subtitle">Platform Owner Dashboard</div>
                 </div>
             </div>
@@ -970,7 +970,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            MediAssist AI Platform Super-Admin Governance Engine &bull; Protected by HTTPBasic Owner Session & Security Headers
+            Kriya AI Platform Super-Admin Governance Engine &bull; Protected by HTTPBasic Owner Session & Security Headers
         </footer>
     </div>
 
@@ -1009,6 +1009,15 @@
                 <div id="modalDeptList" style="display:flex; flex-direction:column; gap:8px;">
                     <!-- Department rows injected dynamically -->
                 </div>
+            </div>
+
+            <div style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border);">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">Feature Overrides</h4>
+                <p style="color:var(--text3); font-size:0.78rem; margin-bottom:12px;">Switch a plan-bundled feature on/off for just this clinic (e.g. a Polyclinic plan with no in-house lab).</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalLabReportsToggle" onchange="toggleClinicFeature('lab_reports', this.checked)">
+                    Lab Reports enabled
+                </label>
             </div>
         </div>
     </div>
@@ -1550,9 +1559,14 @@
             });
         }
 
+        // Plans that bundle lab_reports by default (mirrors PLAN_FEATURES in app/services/tenant.py)
+        const PLANS_WITH_LAB_REPORTS = ['diagstream', 'essential', 'polyclinic', 'enterprise'];
+        let _modalClinicId = null;
+
         async function openModal(clinicId) {
             const modal = document.getElementById('detailModal');
             modal.classList.add('active');
+            _modalClinicId = clinicId;
 
             document.getElementById('modalClinicName').innerText = 'Loading...';
             document.getElementById('modalClinicPhone').innerText = '';
@@ -1562,13 +1576,18 @@
                     headers: { 'Authorization': ownerAuthHeader }
                 });
                 const data = await res.json();
-                
+
                 if (data.success) {
                     const c = data.clinic;
                     const a = data.analytics;
 
                     document.getElementById('modalClinicName').innerText = c.name || 'Unnamed Hospital';
                     document.getElementById('modalClinicPhone').innerText = c.whatsapp_number || '';
+
+                    const overrides = c.features || {};
+                    const bundledDefault = PLANS_WITH_LAB_REPORTS.includes((c.plan || '').toLowerCase());
+                    const labReportsOn = 'lab_reports' in overrides ? !!overrides.lab_reports : bundledDefault;
+                    document.getElementById('modalLabReportsToggle').checked = labReportsOn;
                     document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
                     document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
                     document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;
@@ -1593,6 +1612,26 @@
 
         function closeModal() {
             document.getElementById('detailModal').classList.remove('active');
+            _modalClinicId = null;
+        }
+
+        async function toggleClinicFeature(feature, enabled) {
+            if (!_modalClinicId) return;
+            try {
+                const res = await fetch(`/platform/clinics/${_modalClinicId}/features`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feature, enabled })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.detail || res.status);
+                }
+            } catch (e) {
+                alert(`Failed to update feature: ${e.message}`);
+                // Revert the checkbox to reflect the unsaved state
+                openModal(_modalClinicId);
+            }
         }
 
         function escapeHtml(str) {

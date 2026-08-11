@@ -21,7 +21,7 @@ async def health_check():
         status_code=200,
         content={
             "status": "ok",
-            "service": "MediAssist AI",
+            "service": "Kriya AI",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )

@@ -439,7 +439,7 @@ class SchedulerService:
             if pending_count > 0:
                 admin_phone = settings.hospital_phone
                 alert_msg = (
-                    f"⚠️ MediAssist Security Alert\n\n"
+                    f"⚠️ Kriya AI Security Alert\n\n"
                     f"{pending_count} failed message(s) pending review.\n"
                     f"These are patient messages that failed to process.\n\n"
                     f"Check the failed_messages table in Supabase."

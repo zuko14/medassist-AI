@@ -240,7 +240,7 @@ async def test_clinic(clinic_id: str, to: str):
     success = await whatsapp_service.send_text(
         clinic,
         to,
-        f"✅ Test message from {clinic['name']}. Your MediAssist AI is live!",
+        f"✅ Test message from {clinic['name']}. Your Kriya AI is live!",
     )
     return {"sent": success}
 

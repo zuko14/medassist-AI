@@ -28,7 +28,7 @@ class TestWebhook:
         """Test root endpoint."""
         response = client.get("/")
         assert response.status_code == 200
-        assert response.json()["service"] == "MediAssist AI"
+        assert response.json()["service"] == "Kriya AI"
 
     def test_webhook_verify(self):
         """Test webhook verification."""
