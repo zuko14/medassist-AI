@@ -1098,9 +1098,10 @@ class ConversationManager:
                 branch = bookable_branches[0]
                 context = {
                     "branch_id": branch["id"],
-                    "branch_name": branch["name"],
+                    "branch_name": branch.get("short_name") or branch["name"],
                     "branch_address": branch.get("address", ""),
                     "branch_landmark": branch.get("landmark", ""),
+                    "branch_maps_link": branch.get("maps_link", ""),
                 }
                 await self._continue_booking_after_branch(
                     clinic, phone, patient, lang, context
@@ -1203,21 +1204,27 @@ class ConversationManager:
     async def _send_branch_selection(
         self, clinic: dict, phone: str, branches: list, lang: str
     ) -> None:
-        """Send interactive list of branches for multi-branch clinics."""
+        """Send interactive list of branches for multi-branch clinics.
+        Title = locality (short_name) so patients see 'Madhurwada', not 'City Polyclinic'.
+        Description = short address + landmark for extra context.
+        """
         rows = []
         for branch in branches[:10]:  # WhatsApp max 10 rows
+            # Title: locality name (short_name preferred, fallback to name)
+            title = (branch.get("short_name") or branch["name"])[:24]
+
+            # Description: combine address snippet + landmark
             desc_parts = []
+            if branch.get("address"):
+                desc_parts.append(branch["address"][:50])
             if branch.get("landmark"):
-                desc_parts.append(f"📍 {branch['landmark']}")
-            elif branch.get("address"):
-                # Take first 60 chars of address as description
-                desc_parts.append(f"📍 {branch['address'][:60]}")
-            description = " ".join(desc_parts) if desc_parts else ""
+                desc_parts.append(f"Near {branch['landmark']}")
+            description = ", ".join(desc_parts) if desc_parts else ""
 
             rows.append(
                 {
                     "id": f"branch_{branch['id']}",
-                    "title": branch["name"][:24],
+                    "title": title,
                     "description": description[:72],
                 }
             )
@@ -1276,9 +1283,10 @@ class ConversationManager:
                 new_context = {
                     **context,
                     "branch_id": branch["id"],
-                    "branch_name": branch["name"],
+                    "branch_name": branch.get("short_name") or branch["name"],
                     "branch_address": branch.get("address", ""),
                     "branch_landmark": branch.get("landmark", ""),
+                    "branch_maps_link": branch.get("maps_link", ""),
                 }
 
                 # If diagnostic-only branch, redirect to reports
@@ -2275,11 +2283,11 @@ class ConversationManager:
         ).strftime("%d %b %Y")
 
         # Build confirmation body — include branch info when present
-        branch_name = context.get("branch_name")
+        branch_name = context.get("branch_name")  # Now stores locality (short_name)
         branch_landmark = context.get("branch_landmark", "")
 
         if branch_name:
-            # Multi-branch: include location in confirmation
+            # Multi-branch: include locality in confirmation
             branch_line = f"\n🏥 Branch: {branch_name}"
             if branch_landmark:
                 branch_line += f" ({branch_landmark})"
@@ -2544,9 +2552,32 @@ class ConversationManager:
                         ),
                     )
 
-                    # Send clinic location — skip for branch bookings, which already
-                    # showed their branch-specific address in the confirmation step
-                    if not context.get("branch_id"):
+                    # Send location — use branch-specific info for multi-branch,
+                    # or clinic-level info for single-branch bookings
+                    if context.get("branch_id"):
+                        # Multi-branch: send branch-specific address + Google Maps
+                        branch_name = context.get("branch_name", "")
+                        branch_address = context.get("branch_address", "")
+                        branch_landmark = context.get("branch_landmark", "")
+                        branch_maps = context.get("branch_maps_link", "")
+                        if branch_address or branch_maps or branch_landmark:
+                            location_lines = [
+                                f"📍 Location: {branch_name}"
+                            ]
+                            if branch_address:
+                                location_lines[0] += f", {branch_address}"
+                            if branch_landmark:
+                                location_lines.append(
+                                    f"Near {branch_landmark}"
+                                )
+                            if branch_maps:
+                                location_lines.append(
+                                    f"🗺️ Google Maps: {branch_maps}"
+                                )
+                            await self.whatsapp.send_text(
+                                clinic, phone, "\n".join(location_lines)
+                            )
+                    else:
                         from app.services.tenant import get_clinic_contact
 
                         clinic_address = get_clinic_contact(

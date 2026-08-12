@@ -1195,16 +1195,17 @@
                 <input type="hidden" id="f-branchId">
                 <div id="branchMsg"></div>
                 <div class="form-row">
-                    <div class="field"><label>Branch Name</label><input type="text" id="f-branchName" placeholder="e.g. Kukatpally Branch"></div>
-                    <div class="field"><label>Short Name</label><input type="text" id="f-branchShort" placeholder="e.g. KPL" maxlength="4"></div>
-                </div>
-                <div class="form-row">
-                    <div class="field"><label>Address</label><input type="text" id="f-branchAddr" placeholder="Full address"></div>
-                    <div class="field"><label>Landmark</label><input type="text" id="f-branchLandmark" placeholder="e.g. Near Metro Station"></div>
-                </div>
-                <div class="form-row">
-                    <div class="field"><label>Google Maps Link</label><input type="text" id="f-branchMaps" placeholder="https://maps.google.com/..."></div>
+                    <div class="field"><label>Branch Locality <span style="color:var(--red)">*</span></label><input type="text" id="f-branchLocality" placeholder="e.g. Madhurwada, Kancharpalem, Gajuwaka"><small style="color:var(--text3)">Area name patients will see in WhatsApp</small></div>
                     <div class="field"><label>Phone</label><input type="text" id="f-branchPhone" placeholder="Branch contact number"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field" style="flex:2"><label>Address</label><input type="text" id="f-branchAddr" placeholder="Full street address"></div>
+                    <div class="field"><label>Landmark</label><input type="text" id="f-branchLandmark" placeholder="e.g. Near Bus Stand, Opp. SBI"></div>
+                </div>
+
+                <div class="form-row">
+                    <div class="field" style="flex:2"><label>Google Maps Link</label><input type="text" id="f-branchMaps" placeholder="https://maps.google.com/..."></div>
+                    <div class="field"><label>Display Order</label><input type="number" id="f-branchOrder" value="0" min="0"></div>
                 </div>
                 <div class="form-row">
                     <div class="field">
@@ -1214,8 +1215,8 @@
                             <option value="true">Diagnostics Center (No Booking)</option>
                         </select>
                     </div>
-                    <div class="field"><label>Display Order</label><input type="number" id="f-branchOrder" value="0" min="0"></div>
                 </div>
+
                 <div style="display:flex; gap:10px; margin-top:14px;">
                     <button class="btn btn-accent" onclick="saveBranch()">Save Branch</button>
                     <button class="btn btn-ghost" onclick="resetBranchForm()">Reset</button>
@@ -2802,24 +2803,27 @@ async function loadBranches() {
             return;
         }
 
-        let html = '<table><thead><tr><th>Name</th><th>Short</th><th>Address</th><th>Type</th><th>Status</th><th>Order</th><th>Actions</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Locality</th><th>Address</th><th>Type</th><th>Status</th><th>Order</th><th>Actions</th></tr></thead><tbody>';
         branches.forEach(b => {
+            const displayName = esc(b.short_name || b.name);
             const type = b.is_diagnostic
                 ? '<span style="color:var(--cyan);font-size:0.8rem">🔬 Diagnostics</span>'
                 : '<span style="color:var(--green);font-size:0.8rem">🏥 Clinic</span>';
             const status = b.is_active
                 ? '<span class="badge badge-confirmed">Active</span>'
                 : '<span class="badge badge-cancelled">Inactive</span>';
+            const addrHtml = b.address
+                ? `${esc(b.address)}${b.landmark ? '<br><small style="color:var(--text3)">📍 ' + esc(b.landmark) + '</small>' : ''}`
+                : (b.landmark ? '<small style="color:var(--text3)">📍 ' + esc(b.landmark) + '</small>' : '—');
             html += `<tr>
-                <td><strong>${esc(b.name)}</strong></td>
-                <td>${esc(b.short_name) || '—'}</td>
-                <td>${esc(b.address) || '—'}<br><small style="color:var(--text3)">${esc(b.landmark) || ''}</small></td>
+                <td><strong>${displayName}</strong></td>
+                <td>${addrHtml}</td>
                 <td>${type}</td>
                 <td>${status}</td>
                 <td>${b.display_order}</td>
                 <td>
                     <button class="btn btn-ghost btn-sm" onclick="editBranch('${b.id}')">✏️</button>
-                    <button class="btn btn-ghost btn-sm" onclick="manageBranchDoctors('${b.id}', '${b.name.replace(/'/g, "\\'")}')">👨‍⚕️</button>
+                    <button class="btn btn-ghost btn-sm" onclick="manageBranchDoctors('${b.id}', '${(b.short_name || b.name).replace(/'/g, "\\'")}')">👨‍⚕️</button>
                     <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBranch('${b.id}')">🗑️</button>
                 </td>
             </tr>`;
@@ -2833,9 +2837,10 @@ async function loadBranches() {
 
 async function saveBranch() {
     const id = document.getElementById('f-branchId').value;
+    const locality = document.getElementById('f-branchLocality').value.trim();
     const body = {
-        name: document.getElementById('f-branchName').value.trim(),
-        short_name: document.getElementById('f-branchShort').value.trim() || null,
+        short_name: locality,
+        name: locality,
         address: document.getElementById('f-branchAddr').value.trim() || null,
         landmark: document.getElementById('f-branchLandmark').value.trim() || null,
         maps_link: document.getElementById('f-branchMaps').value.trim() || null,
@@ -2844,7 +2849,7 @@ async function saveBranch() {
         display_order: parseInt(document.getElementById('f-branchOrder').value) || 0,
     };
 
-    if (!body.name) { msg('branchMsg', 'Branch name is required', true); return; }
+    if (!locality) { msg('branchMsg', 'Branch locality is required (e.g. Madhurwada, Kancharpalem)', true); return; }
 
     try {
         if (id) {
@@ -2869,15 +2874,14 @@ async function editBranch(branchId) {
         if (!branch) return;
 
         document.getElementById('f-branchId').value = branch.id;
-        document.getElementById('f-branchName').value = branch.name || '';
-        document.getElementById('f-branchShort').value = branch.short_name || '';
+        document.getElementById('f-branchLocality').value = branch.short_name || branch.name || '';
         document.getElementById('f-branchAddr').value = branch.address || '';
         document.getElementById('f-branchLandmark').value = branch.landmark || '';
         document.getElementById('f-branchMaps').value = branch.maps_link || '';
         document.getElementById('f-branchPhone').value = branch.phone || '';
         document.getElementById('f-branchDiag').value = branch.is_diagnostic ? 'true' : 'false';
         document.getElementById('f-branchOrder').value = branch.display_order || 0;
-        document.getElementById('branchFormTitle').textContent = '✏️ Edit Branch: ' + branch.name;
+        document.getElementById('branchFormTitle').textContent = '✏️ Edit Branch: ' + (branch.short_name || branch.name);
 
         document.getElementById('branchFormCard').scrollIntoView({ behavior: 'smooth' });
     } catch (e) {

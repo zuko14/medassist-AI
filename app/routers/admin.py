@@ -536,8 +536,8 @@ class ClinicProfileUpdate(BaseModel):
 
 
 class BranchCreate(BaseModel):
-    name: str
-    short_name: Optional[str] = None
+    name: Optional[str] = None          # Auto-generated as "{ClinicName} - {short_name}" if omitted
+    short_name: str                     # Locality name: "Madhurwada", "Kancharpalem", "Gajuwaka"
     address: Optional[str] = None
     landmark: Optional[str] = None
     maps_link: Optional[str] = None
@@ -545,11 +545,11 @@ class BranchCreate(BaseModel):
     is_diagnostic: bool = False
     display_order: int = 0
 
-    @field_validator("name")
+    @field_validator("short_name")
     @classmethod
-    def validate_name(cls, v: str) -> str:
+    def validate_short_name(cls, v: str) -> str:
         if not v or not v.strip():
-            raise ValueError("Branch name is required")
+            raise ValueError("Branch locality / short name is required (e.g. Madhurwada, Gajuwaka)")
         return v.strip()
 
 
@@ -563,6 +563,7 @@ class BranchUpdate(BaseModel):
     is_diagnostic: Optional[bool] = None
     is_active: Optional[bool] = None
     display_order: Optional[int] = None
+
 
 
 class DoctorBranchAssign(BaseModel):
@@ -2287,6 +2288,25 @@ async def create_branch(
         except AttributeError:
             branch_data = branch.dict()
 
+        # Auto-generate name from clinic name + locality if not explicitly set
+        if not branch_data.get("name"):
+            try:
+                clinic_result = (
+                    supabase.table("clinics")
+                    .select("name")
+                    .eq("id", effective_clinic_id)
+                    .limit(1)
+                    .execute()
+                )
+                clinic_name = (
+                    clinic_result.data[0]["name"]
+                    if clinic_result.data
+                    else "Clinic"
+                )
+            except Exception:
+                clinic_name = "Clinic"
+            branch_data["name"] = f"{clinic_name} - {branch_data['short_name']}"
+
         branch_data["clinic_id"] = effective_clinic_id
         result = supabase.table("branches").insert(branch_data).execute()
 
@@ -2300,11 +2320,6 @@ async def create_branch(
         raise
     except Exception as e:
         error_msg = str(e).lower()
-        if "duplicate" in error_msg or "unique" in error_msg:
-            raise HTTPException(
-                status_code=409,
-                detail="A branch with this name already exists for your clinic.",
-            )
         if "foreign key" in error_msg:
             raise HTTPException(
                 status_code=400,
@@ -2327,6 +2342,26 @@ async def update_branch(
         update_data = branch.dict(exclude_unset=True)
         if not update_data:
             return {"message": "No fields to update"}
+
+        # Re-derive name when short_name changes and name wasn't explicitly set
+        if "short_name" in update_data and "name" not in update_data:
+            try:
+                clinic_result = (
+                    supabase.table("clinics")
+                    .select("name")
+                    .eq("id", effective_clinic_id)
+                    .limit(1)
+                    .execute()
+                )
+                clinic_name = (
+                    clinic_result.data[0]["name"]
+                    if clinic_result.data
+                    else "Clinic"
+                )
+            except Exception:
+                clinic_name = "Clinic"
+            update_data["name"] = f"{clinic_name} - {update_data['short_name']}"
+
         query = supabase.table("branches").update(update_data)
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -2345,6 +2380,7 @@ async def update_branch(
     except Exception as e:
         logger.error(f"Error updating branch: {e}")
         raise HTTPException(status_code=500, detail="Failed to update branch")
+
 
 
 @router.delete("/branches/{branch_id}")
