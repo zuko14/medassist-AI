@@ -476,6 +476,8 @@ class DoctorCreate(BaseModel):
     evening_start: Optional[time_type] = None
     evening_end: Optional[time_type] = None
     slot_duration_minutes: int = 30
+    branch_id: Optional[str] = None
+    branch_session: str = "both"
 
 
 class DoctorUpdate(BaseModel):
@@ -492,6 +494,8 @@ class DoctorUpdate(BaseModel):
     evening_start: Optional[time_type] = None
     evening_end: Optional[time_type] = None
     slot_duration_minutes: Optional[int] = None
+    branch_id: Optional[str] = None
+    branch_session: Optional[str] = None
 
 
 class PaymentSettingsUpdate(BaseModel):
@@ -540,6 +544,13 @@ class BranchCreate(BaseModel):
     phone: Optional[str] = None
     is_diagnostic: bool = False
     display_order: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Branch name is required")
+        return v.strip()
 
 
 class BranchUpdate(BaseModel):
@@ -647,16 +658,58 @@ async def get_popular_departments(
 
 @router.get("/doctors")
 async def get_doctors(
-    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(verify_credentials),
 ):
-    """Get all doctors."""
+    """Get all doctors, optionally filtered by branch_id.
+
+    Response enriched with branch assignment info from doctor_branches."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = supabase.table("doctors").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
         result = query.execute()
-        return result.data or []
+        doctors = result.data or []
+
+        # Enrich each doctor with their branch assignments
+        if doctors:
+            doctor_ids = [d["id"] for d in doctors]
+            db_result = (
+                supabase.table("doctor_branches")
+                .select("doctor_id, branch_id, session, branches(id, name, is_active)")
+                .in_("doctor_id", doctor_ids)
+                .execute()
+            )
+            # Build lookup: {doctor_id: [{branch_id, branch_name, session}, ...]}
+            branch_map: dict[str, list[dict]] = {}
+            for row in (db_result.data or []):
+                did = row["doctor_id"]
+                branch_info = row.get("branches") or {}
+                branch_map.setdefault(did, []).append({
+                    "branch_id": row["branch_id"],
+                    "branch_name": branch_info.get("name", ""),
+                    "session": row["session"],
+                })
+            for doc in doctors:
+                assignments = branch_map.get(doc["id"], [])
+                doc["branches"] = assignments
+                # Primary branch = first assignment (for simple display)
+                if assignments:
+                    doc["branch_name"] = assignments[0]["branch_name"]
+                    doc["branch_id"] = assignments[0]["branch_id"]
+                else:
+                    doc["branch_name"] = None
+                    doc["branch_id"] = None
+
+        # Optional: filter to a specific branch
+        if branch_id:
+            doctors = [d for d in doctors if any(
+                b["branch_id"] == branch_id for b in d.get("branches", [])
+            )]
+
+        return doctors
     except Exception as e:
         logger.error(f"Error getting doctors: {e}")
         raise HTTPException(status_code=500, detail="Failed to get doctors")
@@ -739,14 +792,81 @@ async def create_doctor(
     clinic_id: str = "default",
     user: AdminUser = Depends(require_admin),
 ):
-    """Create a new doctor."""
+    """Create a new doctor and optionally assign to a branch."""
+    effective_clinic_id = None
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
-        doctor_data = doctor.dict()
+
+        # Extract branch fields before building the doctors-table payload
+        requested_branch_id = doctor.branch_id
+        requested_branch_session = doctor.branch_session or "both"
+
+        try:
+            doctor_data = doctor.model_dump(exclude={"branch_id", "branch_session"})
+        except AttributeError:
+            doctor_data = doctor.dict()
+            doctor_data.pop("branch_id", None)
+            doctor_data.pop("branch_session", None)
+
         doctor_data = _apply_slot_config(doctor_data)
         doctor_data["clinic_id"] = effective_clinic_id
         result = supabase.table("doctors").insert(doctor_data).execute()
-        return result.data[0]
+        new_doctor = result.data[0]
+
+        # ── Branch assignment ──
+        # Determine which branch_id to use:
+        #   1. Explicit branch_id from the form
+        #   2. Auto-select if clinic has exactly 1 branch
+        branch_id_to_assign = requested_branch_id
+
+        if not branch_id_to_assign:
+            # Auto-select single branch for single-branch clinics
+            branches_result = (
+                supabase.table("branches")
+                .select("id")
+                .eq("clinic_id", effective_clinic_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            clinic_branches = branches_result.data or []
+            if len(clinic_branches) == 1:
+                branch_id_to_assign = clinic_branches[0]["id"]
+
+        if branch_id_to_assign:
+            # IDOR check: verify branch belongs to this clinic
+            branch_check = (
+                supabase.table("branches")
+                .select("id")
+                .eq("id", branch_id_to_assign)
+                .eq("clinic_id", effective_clinic_id)
+                .execute()
+            )
+            if not branch_check.data:
+                logger.warning(
+                    f"IDOR attempt: branch_id={branch_id_to_assign} does not belong "
+                    f"to clinic_id={effective_clinic_id}"
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail="Selected branch does not belong to your clinic.",
+                )
+
+            # Create junction record
+            try:
+                supabase.table("doctor_branches").insert({
+                    "doctor_id": new_doctor["id"],
+                    "branch_id": branch_id_to_assign,
+                    "session": requested_branch_session,
+                }).execute()
+                new_doctor["branch_id"] = branch_id_to_assign
+                new_doctor["branch_session"] = requested_branch_session
+            except Exception as be:
+                # Non-fatal: doctor created, branch assignment failed
+                logger.warning(
+                    f"Doctor {new_doctor['id']} created but branch assignment failed: {be}"
+                )
+
+        return new_doctor
     except HTTPException:
         raise
     except Exception as e:
@@ -766,20 +886,73 @@ async def update_doctor(
     clinic_id: str = "default",
     user: AdminUser = Depends(require_admin),
 ):
-    """Update an existing doctor."""
+    """Update an existing doctor, optionally changing branch assignment."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        update_data = doctor.dict(exclude_unset=True)
+        # Extract branch fields before building the doctors-table payload
+        requested_branch_id = doctor.branch_id
+        requested_branch_session = doctor.branch_session
+
+        try:
+            update_data = doctor.model_dump(exclude_unset=True, exclude={"branch_id", "branch_session"})
+        except AttributeError:
+            update_data = doctor.dict(exclude_unset=True)
+            update_data.pop("branch_id", None)
+            update_data.pop("branch_session", None)
+
         update_data = _apply_slot_config(update_data)
-        if not update_data:
+        if not update_data and requested_branch_id is None:
             return {"message": "No fields to update"}
-        query = supabase.table("doctors").update(update_data)
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
-        result = query.eq("id", doctor_id).execute()
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Doctor not found")
-        return result.data[0]
+
+        updated_doctor = None
+        if update_data:
+            query = supabase.table("doctors").update(update_data)
+            if effective_clinic_id != "default":
+                query = query.eq("clinic_id", effective_clinic_id)
+            result = query.eq("id", doctor_id).execute()
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Doctor not found")
+            updated_doctor = result.data[0]
+        else:
+            # Only branch change, fetch the doctor for response
+            result = supabase.table("doctors").select("*").eq("id", doctor_id).execute()
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Doctor not found")
+            updated_doctor = result.data[0]
+
+        # ── Branch assignment upsert ──
+        if requested_branch_id is not None:
+            # Resolve effective clinic_id for IDOR check
+            doc_clinic_id = updated_doctor.get("clinic_id") or effective_clinic_id
+
+            # IDOR check: verify branch belongs to the doctor's clinic
+            branch_check = (
+                supabase.table("branches")
+                .select("id")
+                .eq("id", requested_branch_id)
+                .eq("clinic_id", doc_clinic_id)
+                .execute()
+            )
+            if not branch_check.data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Selected branch does not belong to your clinic.",
+                )
+
+            session_val = requested_branch_session or "both"
+
+            # Remove existing assignments and add the new one
+            # (for single-branch dropdown; multi-branch uses the /branches/{id}/doctors endpoint)
+            supabase.table("doctor_branches").delete().eq("doctor_id", doctor_id).execute()
+            supabase.table("doctor_branches").insert({
+                "doctor_id": doctor_id,
+                "branch_id": requested_branch_id,
+                "session": session_val,
+            }).execute()
+            updated_doctor["branch_id"] = requested_branch_id
+            updated_doctor["branch_session"] = session_val
+
+        return updated_doctor
     except HTTPException:
         raise
     except Exception as e:
@@ -2108,7 +2281,12 @@ async def create_branch(
     """Create a new branch."""
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
-        branch_data = branch.dict()
+
+        try:
+            branch_data = branch.model_dump()
+        except AttributeError:
+            branch_data = branch.dict()
+
         branch_data["clinic_id"] = effective_clinic_id
         result = supabase.table("branches").insert(branch_data).execute()
 
@@ -2121,6 +2299,17 @@ async def create_branch(
     except HTTPException:
         raise
     except Exception as e:
+        error_msg = str(e).lower()
+        if "duplicate" in error_msg or "unique" in error_msg:
+            raise HTTPException(
+                status_code=409,
+                detail="A branch with this name already exists for your clinic.",
+            )
+        if "foreign key" in error_msg:
+            raise HTTPException(
+                status_code=400,
+                detail="Your clinic account isn't linked to a valid clinic. Contact support.",
+            )
         logger.error(f"Error creating branch: {e}")
         raise HTTPException(status_code=500, detail="Failed to create branch")
 

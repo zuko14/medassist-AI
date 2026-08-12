@@ -100,7 +100,10 @@ async def test_create_doctor_uses_real_clinic_admin_clinic_id():
     assert inserted["clinic_id"] == "11111111-1111-1111-1111-111111111111"
     # The "no clinic_id resolvable" fallback query must never run for a
     # properly-bound clinic_admin.
-    mock_sb.table.assert_called_once_with("doctors")
+    # Note: supabase.table() is now called for both "doctors" (insert) and
+    # "branches" (auto-branch-selection check), so we verify the first call
+    # was "doctors" and that the correct clinic_id was used.
+    assert mock_sb.table.call_args_list[0].args[0] == "doctors"
 
 
 @pytest.mark.asyncio

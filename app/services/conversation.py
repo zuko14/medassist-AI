@@ -1851,11 +1851,16 @@ class ConversationManager:
         doctors = await get_doctors(clinic["id"], department, branch_id=branch_id)
 
         if not doctors:
-            await self.whatsapp.send_text(
-                clinic,
-                phone,
-                f"Sorry, no doctors are currently available in {department}. Please try another department.",
-            )
+            branch_name = context.get("branch_name", "")
+            if branch_name:
+                no_doc_msg = {
+                    "en": f"Sorry, no doctors are available in {department} at {branch_name}. Please try another department.",
+                    "hi": f"क्षमा करें, {branch_name} में {department} में कोई डॉक्टर उपलब्ध नहीं है। कृपया अन्य विभाग आज़माएं।",
+                    "te": f"క్షమించండి, {branch_name} లో {department} లో డాక్టర్లు అందుబాటులో లేరు. దయచేసి మరొక విభాగం ప్రయత్నించండి.",
+                }.get(lang, f"Sorry, no doctors are available in {department} at {branch_name}.")
+            else:
+                no_doc_msg = f"Sorry, no doctors are currently available in {department}. Please try another department."
+            await self.whatsapp.send_text(clinic, phone, no_doc_msg)
             await self._show_department_list(clinic, phone, context, lang)
             return
 

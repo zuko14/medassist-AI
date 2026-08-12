@@ -915,6 +915,15 @@
                     </div>
                     <div class="field"><label>Consultation Fee (₹)</label><input type="number" id="f-docFee" value="500"></div>
                 </div>
+                <div class="form-row" id="docBranchRow" style="display:none;">
+                    <div class="field">
+                        <label>Branch</label>
+                        <select id="f-docBranch">
+                            <option value="">— Select Branch —</option>
+                        </select>
+                    </div>
+                    <div class="field"></div>
+                </div>
                 <div class="form-row">
                     <div class="field"><label>Morning Start</label><input type="time" id="f-docMornStart" value="09:00"></div>
                     <div class="field"><label>Morning End</label><input type="time" id="f-docMornEnd" value="12:00"></div>
@@ -1770,8 +1779,9 @@ async function apiPut(path, body) {
         headers: { Authorization: auth, 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     });
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || r.status);
+    return data;
 }
 
 async function apiDel(path) {
@@ -2009,14 +2019,17 @@ async function loadDoctors() {
     try {
         doctorCache = await api('/admin/doctors') || [];
         updateLeaveDropdown();
+        populateDocBranchDropdown(); // refresh branch dropdown when doctors page loads
         document.getElementById('docCount').textContent = `${doctorCache.length} doctor${doctorCache.length !== 1 ? 's' : ''}`;
         if (!doctorCache.length) { el.innerHTML = emptyState('doctor', 'No doctors added yet'); return; }
+        const hasBranches = doctorCache.some(d => d.branch_name);
         el.innerHTML = `<table>
-            <thead><tr><th>Name</th><th>Specialization</th><th>Department</th><th>Fee</th><th>Days</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Specialization</th><th>Department</th>${hasBranches ? '<th>Branch</th>' : ''}<th>Fee</th><th>Days</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${doctorCache.map(d => `<tr>
                 <td style="font-weight:600; color:var(--text-strong)">${esc(d.name)}</td>
                 <td>${esc(d.specialization) || '—'}</td>
                 <td>${esc(d.department)}</td>
+                ${hasBranches ? `<td><span style="font-size:0.8rem; color:var(--accent)">${esc(d.branch_name) || '—'}</span></td>` : ''}
                 <td>₹${d.consultation_fee}</td>
                 <td style="color:var(--text2); font-size:0.8rem">${d.available_days || 'Mon-Fri'}</td>
                 <td>${d.is_active ? badge('active') : badge('inactive')}</td>
@@ -2027,6 +2040,33 @@ async function loadDoctors() {
             </tr>`).join('')}</tbody>
         </table>`;
     } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load doctors'); }
+}
+
+// Populate branch dropdown in doctor form (only visible for multi-branch clinics)
+let _docBranchCache = [];
+async function populateDocBranchDropdown() {
+    const sel = document.getElementById('f-docBranch');
+    const row = document.getElementById('docBranchRow');
+    try {
+        const data = await api('/admin/branches');
+        const branches = (data.branches || []).filter(b => b.is_active);
+        _docBranchCache = branches;
+        if (branches.length < 2) {
+            // Single or no branches — hide the dropdown, backend auto-assigns
+            row.style.display = 'none';
+            sel.innerHTML = '<option value="">— Auto —</option>';
+            return;
+        }
+        // Multi-branch: show dropdown
+        row.style.display = '';
+        sel.innerHTML = '<option value="">— Select Branch —</option>';
+        branches.forEach(b => {
+            sel.innerHTML += `<option value="${b.id}">${esc(b.name)}</option>`;
+        });
+    } catch (e) {
+        // Non-fatal: branches feature may not be enabled
+        row.style.display = 'none';
+    }
 }
 
 function updateLeaveDropdown() {
@@ -2066,6 +2106,12 @@ async function submitDoctor() {
             slot_duration_minutes: parseInt(document.getElementById('f-docDuration').value) || 30,
         };
 
+        // Include branch_id if the dropdown is visible and has a value
+        const branchSel = document.getElementById('f-docBranch');
+        if (branchSel && branchSel.value) {
+            payload.branch_id = branchSel.value;
+        }
+
         if (id) {
             await apiPut(`/admin/doctors/${id}`, payload);
             msg('docMsg', '✅ Doctor updated successfully!');
@@ -2090,6 +2136,7 @@ function resetDoctorForm() {
     document.getElementById('f-docEveStart').value = '17:00';
     document.getElementById('f-docEveEnd').value = '19:00';
     document.getElementById('f-docDuration').value = '30';
+    document.getElementById('f-docBranch').value = '';
     document.querySelectorAll('.doc-day-cb').forEach(cb => {
         cb.checked = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(cb.value);
     });
@@ -2112,6 +2159,8 @@ window.editDoctor = function(id) {
     document.getElementById('f-docEveStart').value = (d.evening_start || '17:00').slice(0, 5);
     document.getElementById('f-docEveEnd').value = (d.evening_end || '19:00').slice(0, 5);
     document.getElementById('f-docDuration').value = d.slot_duration_minutes || 30;
+    // Pre-select the doctor's current branch
+    document.getElementById('f-docBranch').value = d.branch_id || '';
     const activeDays = (d.available_days || 'Mon,Tue,Wed,Thu,Fri').split(',');
     document.querySelectorAll('.doc-day-cb').forEach(cb => { cb.checked = activeDays.includes(cb.value); });
     updateSlotPreview();
@@ -2808,7 +2857,8 @@ async function saveBranch() {
         resetBranchForm();
         loadBranches();
     } catch (e) {
-        msg('branchMsg', 'Error: ' + e.message, true);
+        const detail = e.message || 'Unknown error';
+        msg('branchMsg', detail.startsWith('Error:') ? detail : 'Error: ' + detail, true);
     }
 }
 
