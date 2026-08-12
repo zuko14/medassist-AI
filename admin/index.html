@@ -924,13 +924,25 @@
                     </div>
                     <div class="field"></div>
                 </div>
-                <div class="form-row">
-                    <div class="field"><label>Morning Start</label><input type="time" id="f-docMornStart" value="09:00"></div>
-                    <div class="field"><label>Morning End</label><input type="time" id="f-docMornEnd" value="12:00"></div>
+                <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px">
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer">
+                        <input type="checkbox" id="f-docMornEnabled" checked onchange="toggleShiftFields()">
+                        🌅 Enable Morning Shift
+                    </label>
+                    <div class="form-row" id="mornShiftFields" style="margin-top:6px">
+                        <div class="field"><label>Morning Start</label><input type="time" id="f-docMornStart" value="09:00"></div>
+                        <div class="field"><label>Morning End</label><input type="time" id="f-docMornEnd" value="12:00"></div>
+                    </div>
                 </div>
-                <div class="form-row">
-                    <div class="field"><label>Evening Start</label><input type="time" id="f-docEveStart" value="17:00"></div>
-                    <div class="field"><label>Evening End</label><input type="time" id="f-docEveEnd" value="19:00"></div>
+                <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px">
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer">
+                        <input type="checkbox" id="f-docEveEnabled" checked onchange="toggleShiftFields()">
+                        🌆 Enable Evening Shift
+                    </label>
+                    <div class="form-row" id="eveShiftFields" style="margin-top:6px">
+                        <div class="field"><label>Evening Start</label><input type="time" id="f-docEveStart" value="17:00"></div>
+                        <div class="field"><label>Evening End</label><input type="time" id="f-docEveEnd" value="19:00"></div>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="field">
@@ -1548,16 +1560,39 @@ function updateSlotPreview() {
     if (!durEl || !previewEl) return;
 
     const dur = parseInt(durEl.value) || 30;
-    const morn = countSlots(mornStartEl?.value, mornEndEl?.value, dur);
-    const eve = countSlots(eveStartEl?.value, eveEndEl?.value, dur);
-    previewEl.textContent = `→ generates ${morn} morning + ${eve} evening slots`;
+    const mornEnabled = document.getElementById('f-docMornEnabled')?.checked;
+    const eveEnabled = document.getElementById('f-docEveEnabled')?.checked;
+    const morn = mornEnabled ? countSlots(mornStartEl?.value, mornEndEl?.value, dur) : 0;
+    const eve = eveEnabled ? countSlots(eveStartEl?.value, eveEndEl?.value, dur) : 0;
+    
+    if (!mornEnabled && !eveEnabled) {
+        previewEl.textContent = '⚠️ Please enable at least one shift (Morning or Evening)';
+        previewEl.style.color = 'var(--red)';
+    } else {
+        const parts = [];
+        if (mornEnabled) parts.push(`${morn} morning`);
+        if (eveEnabled) parts.push(`${eve} evening`);
+        previewEl.textContent = `→ generates ${parts.join(' + ')} slots`;
+        previewEl.style.color = 'var(--text3)';
+    }
+}
+
+function toggleShiftFields() {
+    const mornEnabled = document.getElementById('f-docMornEnabled')?.checked;
+    const eveEnabled = document.getElementById('f-docEveEnabled')?.checked;
+    const mornRow = document.getElementById('mornShiftFields');
+    const eveRow = document.getElementById('eveShiftFields');
+    if (mornRow) mornRow.style.display = mornEnabled ? 'flex' : 'none';
+    if (eveRow) eveRow.style.display = eveEnabled ? 'flex' : 'none';
+    updateSlotPreview();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     populateDeptOptions();
-    updateSlotPreview();
-    ['f-docMornStart', 'f-docMornEnd', 'f-docEveStart', 'f-docEveEnd', 'f-docDuration'].forEach(id => {
+    toggleShiftFields();
+    ['f-docMornStart', 'f-docMornEnd', 'f-docEveStart', 'f-docEveEnd', 'f-docDuration', 'f-docMornEnabled', 'f-docEveEnabled'].forEach(id => {
         const el = document.getElementById(id);
+        if (el) el.addEventListener('change', updateSlotPreview);
         if (el) el.addEventListener('input', updateSlotPreview);
     });
 });
@@ -2092,6 +2127,14 @@ async function submitDoctor() {
     const name = document.getElementById('f-docName').value.trim();
     const spec = document.getElementById('f-docSpec').value.trim();
     if (!name || !spec) { msg('docMsg', 'Please fill in name and specialization', true); return; }
+
+    const mornEnabled = document.getElementById('f-docMornEnabled').checked;
+    const eveEnabled = document.getElementById('f-docEveEnabled').checked;
+    if (!mornEnabled && !eveEnabled) {
+        msg('docMsg', 'Please enable at least one shift (Morning or Evening)', true);
+        return;
+    }
+
     try {
         const days = Array.from(document.querySelectorAll('.doc-day-cb:checked')).map(cb => cb.value).join(',');
         const payload = {
@@ -2100,10 +2143,10 @@ async function submitDoctor() {
             department: document.getElementById('f-docDept').value,
             consultation_fee: parseInt(document.getElementById('f-docFee').value) || 500,
             available_days: days || 'Mon,Tue,Wed,Thu,Fri',
-            morning_start: document.getElementById('f-docMornStart').value || null,
-            morning_end: document.getElementById('f-docMornEnd').value || null,
-            evening_start: document.getElementById('f-docEveStart').value || null,
-            evening_end: document.getElementById('f-docEveEnd').value || null,
+            morning_start: mornEnabled ? (document.getElementById('f-docMornStart').value || null) : null,
+            morning_end: mornEnabled ? (document.getElementById('f-docMornEnd').value || null) : null,
+            evening_start: eveEnabled ? (document.getElementById('f-docEveStart').value || null) : null,
+            evening_end: eveEnabled ? (document.getElementById('f-docEveEnd').value || null) : null,
             slot_duration_minutes: parseInt(document.getElementById('f-docDuration').value) || 30,
         };
 
@@ -2132,6 +2175,8 @@ function resetDoctorForm() {
     document.getElementById('f-docSpec').value = '';
     document.getElementById('f-docDept').value = '';
     document.getElementById('f-docFee').value = '500';
+    document.getElementById('f-docMornEnabled').checked = true;
+    document.getElementById('f-docEveEnabled').checked = true;
     document.getElementById('f-docMornStart').value = '09:00';
     document.getElementById('f-docMornEnd').value = '12:00';
     document.getElementById('f-docEveStart').value = '17:00';
@@ -2141,7 +2186,7 @@ function resetDoctorForm() {
     document.querySelectorAll('.doc-day-cb').forEach(cb => {
         cb.checked = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(cb.value);
     });
-    updateSlotPreview();
+    toggleShiftFields();
     document.getElementById('docFormTitle').innerHTML = '➕ Add New Doctor';
     document.getElementById('btn-docSubmit').textContent = 'Add Doctor';
     document.getElementById('btn-docCancel').style.display = 'none';
@@ -2155,16 +2200,22 @@ window.editDoctor = function(id) {
     document.getElementById('f-docSpec').value = d.specialization || '';
     document.getElementById('f-docDept').value = d.department;
     document.getElementById('f-docFee').value = d.consultation_fee;
-    document.getElementById('f-docMornStart').value = (d.morning_start || '09:00').slice(0, 5);
-    document.getElementById('f-docMornEnd').value = (d.morning_end || '12:00').slice(0, 5);
-    document.getElementById('f-docEveStart').value = (d.evening_start || '17:00').slice(0, 5);
-    document.getElementById('f-docEveEnd').value = (d.evening_end || '19:00').slice(0, 5);
+
+    const hasMorn = Boolean(d.morning_start && d.morning_start !== '00:00' && d.morning_start !== '00:00:00');
+    const hasEve = Boolean(d.evening_start && d.evening_start !== '00:00' && d.evening_start !== '00:00:00');
+
+    document.getElementById('f-docMornEnabled').checked = hasMorn;
+    document.getElementById('f-docEveEnabled').checked = hasEve;
+    document.getElementById('f-docMornStart').value = hasMorn ? d.morning_start.slice(0, 5) : '09:00';
+    document.getElementById('f-docMornEnd').value = hasMorn ? d.morning_end.slice(0, 5) : '12:00';
+    document.getElementById('f-docEveStart').value = hasEve ? d.evening_start.slice(0, 5) : '17:00';
+    document.getElementById('f-docEveEnd').value = hasEve ? d.evening_end.slice(0, 5) : '19:00';
     document.getElementById('f-docDuration').value = d.slot_duration_minutes || 30;
     // Pre-select the doctor's current branch
     document.getElementById('f-docBranch').value = d.branch_id || '';
     const activeDays = (d.available_days || 'Mon,Tue,Wed,Thu,Fri').split(',');
     document.querySelectorAll('.doc-day-cb').forEach(cb => { cb.checked = activeDays.includes(cb.value); });
-    updateSlotPreview();
+    toggleShiftFields();
 
     document.getElementById('docFormTitle').innerHTML = '✏️ Edit Doctor Details';
     document.getElementById('btn-docSubmit').textContent = 'Update Doctor';

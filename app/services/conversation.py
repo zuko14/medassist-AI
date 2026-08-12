@@ -2225,19 +2225,37 @@ class ConversationManager:
             except ValueError:
                 return time_24
 
-        sections = [
-            {
-                "title": (
-                    "Select Time"
-                    if lang == "en"
-                    else ("समय चुनें" if lang == "hi" else "సమయం ఎంచుకోండి")
-                ),
+        morning_slots_list = []
+        evening_slots_list = []
+        for s in slots:
+            try:
+                hour = int(s.split(":")[0])
+                if hour < 12:
+                    morning_slots_list.append(s)
+                else:
+                    evening_slots_list.append(s)
+            except Exception:
+                morning_slots_list.append(s)
+
+        sections = []
+        if morning_slots_list and evening_slots_list:
+            morn_title = {"en": "🌅 Morning", "hi": "🌅 सुबह", "te": "🌅 ఉదయం"}.get(lang, "🌅 Morning")
+            eve_title = {"en": "🌆 Evening", "hi": "🌆 शाम", "te": "🌆 సాయంత్రం"}.get(lang, "🌆 Evening")
+
+            morn_rows = [{"id": f"slot_{slot}", "title": to_ampm(slot), "description": ""} for slot in morning_slots_list[:5]]
+            eve_rows = [{"id": f"slot_{slot}", "title": to_ampm(slot), "description": ""} for slot in evening_slots_list[:5]]
+
+            sections.append({"title": morn_title, "rows": morn_rows})
+            sections.append({"title": eve_title, "rows": eve_rows})
+        else:
+            title_text = "Select Time" if lang == "en" else ("समय चुनें" if lang == "hi" else "సమయం ఎంచుకోండి")
+            sections.append({
+                "title": title_text,
                 "rows": [
                     {"id": f"slot_{slot}", "title": to_ampm(slot), "description": ""}
-                    for slot in slots[:10]  # Max 10 slots
+                    for slot in slots[:10]
                 ],
-            }
-        ]
+            })
 
         await self.whatsapp.send_interactive_list(
             clinic,

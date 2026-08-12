@@ -86,7 +86,13 @@ async def test_create_doctor_uses_real_clinic_admin_clinic_id():
         role="clinic_admin",
         clinic_id="11111111-1111-1111-1111-111111111111",
     )
-    payload = DoctorCreate(name="Dr. Test", specialization="Cardiologist", department="Cardiology")
+    payload = DoctorCreate(
+        name="Dr. Test",
+        specialization="Cardiologist",
+        department="Cardiology",
+        morning_start="09:00",
+        morning_end="12:00",
+    )
 
     mock_sb = MagicMock()
     mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
@@ -98,11 +104,6 @@ async def test_create_doctor_uses_real_clinic_admin_clinic_id():
 
     inserted = mock_sb.table.return_value.insert.call_args[0][0]
     assert inserted["clinic_id"] == "11111111-1111-1111-1111-111111111111"
-    # The "no clinic_id resolvable" fallback query must never run for a
-    # properly-bound clinic_admin.
-    # Note: supabase.table() is now called for both "doctors" (insert) and
-    # "branches" (auto-branch-selection check), so we verify the first call
-    # was "doctors" and that the correct clinic_id was used.
     assert mock_sb.table.call_args_list[0].args[0] == "doctors"
 
 
@@ -111,7 +112,13 @@ async def test_create_doctor_surfaces_friendly_error_on_db_failure():
     admin_user = AdminUser(
         username="clinic123abc", role="clinic_admin", clinic_id="clinic-1"
     )
-    payload = DoctorCreate(name="Dr. Test", specialization="Cardiologist", department="Cardiology")
+    payload = DoctorCreate(
+        name="Dr. Test",
+        specialization="Cardiologist",
+        department="Cardiology",
+        morning_start="09:00",
+        morning_end="12:00",
+    )
 
     mock_sb = MagicMock()
     mock_sb.table.return_value.insert.return_value.execute.side_effect = Exception(
@@ -134,13 +141,6 @@ def test_friendly_db_error_classifies_common_postgres_errors():
 
 
 def test_apply_slot_config_output_is_json_serializable():
-    """Regression test: DoctorCreate.morning_start/etc are typed as
-    datetime.time, and the Supabase/httpx client JSON-encodes the payload
-    with the stdlib encoder (no default for `time`). Every admin-panel
-    doctor-add sends these fields (the form always populates them), so any
-    raw `time` object left in the payload after _apply_slot_config crashes
-    every real insert with a TypeError, surfaced to the client as a generic
-    "Failed to create doctor" 500."""
     payload = DoctorCreate(
         name="Dr. Test",
         specialization="Cardiologist",
@@ -159,25 +159,67 @@ def test_apply_slot_config_output_is_json_serializable():
 
 
 @pytest.mark.asyncio
-async def test_create_doctor_sends_json_serializable_payload_to_supabase():
-    admin_user = AdminUser(username="clinic123abc", role="clinic_admin", clinic_id="clinic-1")
+async def test_create_doctor_morning_only_shift():
+    """Verify that creating a doctor with morning-only shift sets morning_slots and clears evening_slots."""
     payload = DoctorCreate(
-        name="Dr. Test",
-        specialization="Cardiologist",
-        department="Cardiology",
+        name="Dr. Morning Only",
+        specialization="General",
+        department="OPD",
         morning_start="09:00",
-        morning_end="12:00",
-        evening_start="17:00",
-        evening_end="19:00",
+        morning_end="11:00",
+        slot_duration_minutes=30,
     )
-
     mock_sb = MagicMock()
     mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
-        data=[{"id": "doc-1", "name": "Dr. Test"}]
+        data=[{"id": "doc-morn", "name": "Dr. Morning Only"}]
     )
 
     with patch("app.routers.admin.supabase", mock_sb):
-        await create_doctor(payload, clinic_id="default", user=admin_user)
+        await create_doctor(payload, clinic_id="default", user=MagicMock())
 
     inserted = mock_sb.table.return_value.insert.call_args[0][0]
-    json.dumps(inserted)  # this is what actually crashed in production
+    assert inserted["morning_slots"] == ["09:00", "09:30", "10:00", "10:30"]
+    assert inserted["evening_slots"] == []
+    assert inserted["evening_start"] is None
+    assert inserted["evening_end"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_doctor_evening_only_shift():
+    """Verify that creating a doctor with evening-only shift sets evening_slots and clears morning_slots."""
+    payload = DoctorCreate(
+        name="Dr. Evening Only",
+        specialization="General",
+        department="OPD",
+        evening_start="17:00",
+        evening_end="19:00",
+        slot_duration_minutes=30,
+    )
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "doc-eve", "name": "Dr. Evening Only"}]
+    )
+
+    with patch("app.routers.admin.supabase", mock_sb):
+        await create_doctor(payload, clinic_id="default", user=MagicMock())
+
+    inserted = mock_sb.table.return_value.insert.call_args[0][0]
+    assert inserted["evening_slots"] == ["17:00", "17:30", "18:00", "18:30"]
+    assert inserted["morning_slots"] == []
+    assert inserted["morning_start"] is None
+    assert inserted["morning_end"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_doctor_rejects_both_shifts_disabled():
+    """Verify that attempting to create a doctor with no shifts enabled raises 422."""
+    payload = DoctorCreate(
+        name="Dr. No Shift",
+        specialization="General",
+        department="OPD",
+    )
+    with pytest.raises(HTTPException) as exc:
+        await create_doctor(payload, clinic_id="default", user=MagicMock())
+    assert exc.value.status_code == 422
+    assert "at least one shift" in exc.value.detail.lower()
+

@@ -345,11 +345,21 @@ async def get_available_slots(
         if day_name not in available_days:
             return [], "doctor_off_day"
 
-        all_slots = []
-        morning_slots = doc.get(
-            "morning_slots", ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
-        )
-        evening_slots = doc.get("evening_slots", ["17:00", "17:30", "18:00", "18:30"])
+        raw_morn = doc.get("morning_slots")
+        if raw_morn is not None:
+            morning_slots = raw_morn
+        elif doc.get("morning_start") is None and doc.get("morning_end") is None and "morning_slots" in doc:
+            morning_slots = []
+        else:
+            morning_slots = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
+
+        raw_eve = doc.get("evening_slots")
+        if raw_eve is not None:
+            evening_slots = raw_eve
+        elif doc.get("evening_start") is None and doc.get("evening_end") is None and "evening_slots" in doc:
+            evening_slots = []
+        else:
+            evening_slots = ["17:00", "17:30", "18:00", "18:30"]
 
         include_morning = "morning" not in blocked_sessions
         include_evening = "evening" not in blocked_sessions
@@ -359,6 +369,7 @@ async def get_available_slots(
         elif branch_session == "evening":
             include_morning = False
 
+        all_slots = []
         if include_morning:
             all_slots.extend(morning_slots)
         if include_evening:

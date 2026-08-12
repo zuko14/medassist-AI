@@ -467,8 +467,8 @@ class DoctorCreate(BaseModel):
     specialization: str
     department: str
     available_days: str = "Mon,Tue,Wed,Thu,Fri"
-    morning_slots: list[str] = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
-    evening_slots: list[str] = ["17:00", "17:30", "18:00", "18:30"]
+    morning_slots: Optional[list[str]] = None
+    evening_slots: Optional[list[str]] = None
     is_active: bool = True
     consultation_fee: int = 500
     morning_start: Optional[time_type] = None
@@ -740,8 +740,8 @@ def _friendly_db_error(e: Exception, default: str) -> str:
 def _apply_slot_config(data: dict) -> dict:
     """Regenerate morning_slots/evening_slots from start/end/duration if provided.
 
-    Mutates and returns `data` in place. Raises HTTPException(422) if a
-    shift's end time isn't after its start time.
+    Mutates and returns `data` in place. Raises HTTPException(422) if shift timing
+    is invalid or if both morning and evening shifts are completely disabled.
     """
     from app.utils.helpers import generate_slots
     from datetime import time as time_type
@@ -750,6 +750,9 @@ def _apply_slot_config(data: dict) -> dict:
         if val is None or isinstance(val, time_type):
             return val
         if isinstance(val, str):
+            val = val.strip()
+            if not val or val == "00:00":
+                return None
             parts = val.split(":")
             return time_type(int(parts[0]), int(parts[1]))
         return val
@@ -764,6 +767,15 @@ def _apply_slot_config(data: dict) -> dict:
                 status_code=422, detail="morning_end must be after morning_start"
             )
         data["morning_slots"] = generate_slots(morning_start, morning_end, duration)
+    elif morning_start is not None or morning_end is not None:
+        raise HTTPException(
+            status_code=422, detail="Both morning_start and morning_end must be provided for morning shift"
+        )
+    else:
+        if "morning_start" in data or "morning_end" in data or data.get("morning_slots") is None:
+            data["morning_slots"] = []
+            data["morning_start"] = None
+            data["morning_end"] = None
 
     evening_start = _parse_time(data.get("evening_start"))
     evening_end = _parse_time(data.get("evening_end"))
@@ -773,18 +785,32 @@ def _apply_slot_config(data: dict) -> dict:
                 status_code=422, detail="evening_end must be after evening_start"
             )
         data["evening_slots"] = generate_slots(evening_start, evening_end, duration)
+    elif evening_start is not None or evening_end is not None:
+        raise HTTPException(
+            status_code=422, detail="Both evening_start and evening_end must be provided for evening shift"
+        )
+    else:
+        if "evening_start" in data or "evening_end" in data or data.get("evening_slots") is None:
+            data["evening_slots"] = []
+            data["evening_start"] = None
+            data["evening_end"] = None
 
-    # DoctorCreate/DoctorUpdate type these fields as datetime.time, but the
-    # Supabase/httpx client JSON-encodes the payload with the stdlib encoder,
-    # which has no default for `time` and raises TypeError on every request
-    # that includes them (i.e. every add via the admin UI, since the form
-    # always sends default shift times). Postgres' `time` columns accept
-    # ISO strings, so normalize in place before the payload is ever sent.
+    has_morning = bool(data.get("morning_slots"))
+    has_evening = bool(data.get("evening_slots"))
+    touching_shifts = any(
+        k in data for k in ("morning_start", "morning_end", "evening_start", "evening_end", "morning_slots", "evening_slots")
+    )
+    if touching_shifts and not has_morning and not has_evening:
+        raise HTTPException(
+            status_code=422, detail="At least one shift (morning or evening) must be enabled"
+        )
+
     for key in ("morning_start", "morning_end", "evening_start", "evening_end"):
         if isinstance(data.get(key), time_type):
             data[key] = data[key].isoformat()
 
     return data
+
 
 
 @router.post("/doctors")
