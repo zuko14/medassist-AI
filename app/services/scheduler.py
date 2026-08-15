@@ -181,6 +181,7 @@ class SchedulerService:
                         appt["patient_phone"],
                         "appointment_reminder_24h",
                         components=components,
+                        _source="scheduler",
                     )
 
                     # Mark as sent
@@ -236,6 +237,7 @@ class SchedulerService:
                             appt["patient_phone"],
                             "appointment_reminder_2h",
                             components=components,
+                            _source="scheduler",
                         )
 
                         # Mark as sent
@@ -287,6 +289,7 @@ class SchedulerService:
                         appt["patient_phone"],
                         "post_appointment_followup",
                         components=components,
+                        _source="scheduler",
                     )
 
                     # Mark as sent
@@ -346,6 +349,7 @@ class SchedulerService:
                                 {"id": "checkin_ok", "title": "Feeling fine"},
                                 {"id": "checkin_concern", "title": "Still have symptoms"},
                             ],
+                            _source="scheduler",
                         )
 
                         supabase.table("appointments").update({flag_field: True}).eq(
@@ -408,6 +412,7 @@ class SchedulerService:
                             appt["patient_phone"],
                             "appointment_cancelled_doctor_leave",
                             components=components,
+                            _source="scheduler",
                         )
 
                         logger.info(
@@ -450,7 +455,7 @@ class SchedulerService:
                     from app.services.tenant import resolve_tenant
 
                     clinic = await resolve_tenant(admin_phone)
-                    await whatsapp_service.send_text(clinic, admin_phone, alert_msg)
+                    await whatsapp_service.send_text(clinic, admin_phone, alert_msg, _source="scheduler")
                     logger.info(f"Sent failed messages alert: {pending_count} pending")
                 except Exception:
                     # If we can't resolve a clinic for the admin phone, just log it
@@ -488,7 +493,7 @@ class SchedulerService:
                     from app.services.tenant import resolve_tenant
 
                     clinic = await resolve_tenant(admin_phone)
-                    await whatsapp_service.send_text(clinic, admin_phone, alert_msg)
+                    await whatsapp_service.send_text(clinic, admin_phone, alert_msg, _source="scheduler")
                     logger.warning(
                         f"Sent message queue fail-open alert: {delta} fail-open events"
                     )

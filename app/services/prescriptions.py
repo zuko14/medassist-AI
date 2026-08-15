@@ -53,7 +53,7 @@ class PrescriptionService:
                 f"Reply STOP anytime to opt out."
             )
             clinic = await get_clinic_by_id(clinic_id)
-            await whatsapp_service.send_text(clinic, patient_phone, message)
+            await whatsapp_service.send_text(clinic, patient_phone, message, _source="prescriptions")
         except Exception as e:
             logger.error(f"Failed to send prescription confirmation: {e}")
 
@@ -132,7 +132,7 @@ class PrescriptionService:
                             f"Stay healthy! 🏥 {clinic['name']}"
                         )
                         await whatsapp_service.send_text(
-                            clinic, rx["patient_phone"], message
+                            clinic, rx["patient_phone"], message, _source="prescriptions"
                         )
                         count_sent += 1
                     except Exception as e:

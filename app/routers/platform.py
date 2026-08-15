@@ -1067,18 +1067,25 @@ async def get_callmedex_processing_centers(
         raise HTTPException(status_code=500, detail=f"Failed to fetch CallMedex centers: {e}")
 
 
-# Meta WhatsApp Cloud API per-message pricing (INR), per master billing spec.
-UTILITY_MSG_COST_INR = 0.12
-MARKETING_MSG_COST_INR = 0.75
+# ═══════ MESSAGING USAGE & BILLING (OWNER-ONLY, FULL FINANCIAL VISIBILITY) ═══════
+# These endpoints are OWNER-ONLY. They return full Meta pricing, cost estimates,
+# and financial breakdowns. The customer-facing equivalent is GET /admin/messaging-usage.
 
 
 @router.get("/messaging-usage")
 async def get_platform_messaging_usage(
     request: Request,
+    days: int = 30,
     owner: AdminUser = Depends(verify_owner_credentials),
 ):
-    """Platform-wide WhatsApp outbound message volume and estimated Meta
-    Cloud API billing, broken down by clinic and template category."""
+    """Platform-wide outbound message usage with full financial breakdown.
+
+    Reads actual per-message counts from outbound_message_ledger and pricing
+    from meta_pricing_config. This replaces the old appointment-estimation approach.
+
+    OWNER-ONLY: Returns Meta cost estimates, pricing rates, per-clinic
+    financial detail. This data MUST NEVER be exposed to clinic-facing APIs.
+    """
     client_ip = request.client.host if request.client else "unknown"
     await log_admin_action(
         user=owner,
@@ -1088,111 +1095,181 @@ async def get_platform_messaging_usage(
     )
 
     try:
-        clinics_res = (
-            supabase.table("clinics")
-            .select("id, name, plan, is_active")
-            .execute()
-        )
-        clinics = clinics_res.data or []
-        start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        from app.services.message_accounting import get_platform_usage
 
-        appts_res = (
-            supabase.table("appointments")
-            .select("clinic_id, status, reminder_24h_sent, reminder_2h_sent, followup_sent, created_at")
-            .gte("created_at", start_30d)
-            .execute()
-        )
-        appts = appts_res.data or []
-
-        reports_res = (
-            supabase.table("lab_reports")
-            .select("clinic_id, sent_at")
-            .gte("sent_at", start_30d)
-            .execute()
-        )
-        reports = reports_res.data or []
-
-        usage_by_clinic: dict[str, dict] = {}
-
-        def bucket(clinic_id: str) -> dict:
-            return usage_by_clinic.setdefault(
-                clinic_id, {"utility": 0, "marketing": 0}
-            )
-
-        for a in appts:
-            cid = a.get("clinic_id")
-            if not cid:
-                continue
-            u = bucket(cid)
-            if a.get("status") == "confirmed":
-                u["utility"] += 1
-            if a.get("status") == "cancelled":
-                u["utility"] += 1
-            if a.get("reminder_24h_sent"):
-                u["utility"] += 1
-            if a.get("reminder_2h_sent"):
-                u["utility"] += 1
-            if a.get("followup_sent"):
-                u["marketing"] += 1
-
-        for r in reports:
-            cid = r.get("clinic_id")
-            if not cid or not r.get("sent_at"):
-                continue
-            bucket(cid)["utility"] += 1
-
-        clinics_table = []
-        total_utility = 0
-        total_marketing = 0
-        for c in clinics:
-            u = usage_by_clinic.get(c["id"], {"utility": 0, "marketing": 0})
-            utility_count = u["utility"]
-            marketing_count = u["marketing"]
-            total_utility += utility_count
-            total_marketing += marketing_count
-            cost_inr = round(
-                utility_count * UTILITY_MSG_COST_INR
-                + marketing_count * MARKETING_MSG_COST_INR,
-                2,
-            )
-            clinics_table.append(
-                {
-                    "clinic_id": c["id"],
-                    "clinic_name": c.get("name"),
-                    "plan": c.get("plan"),
-                    "is_active": c.get("is_active", True),
-                    "outbound_total": utility_count + marketing_count,
-                    "utility_count": utility_count,
-                    "marketing_count": marketing_count,
-                    "estimated_cost_inr": cost_inr,
-                }
-            )
-
-        clinics_table.sort(key=lambda x: x["outbound_total"], reverse=True)
-
-        total_outbound = total_utility + total_marketing
-        total_cost_inr = round(
-            total_utility * UTILITY_MSG_COST_INR
-            + total_marketing * MARKETING_MSG_COST_INR,
-            2,
-        )
-
-        return {
-            "success": True,
-            "period_days": 30,
-            "total_outbound": total_outbound,
-            "total_utility": total_utility,
-            "total_marketing": total_marketing,
-            "total_service": 0,
-            "total_estimated_cost_inr": total_cost_inr,
-            "pricing": {
-                "utility_inr": UTILITY_MSG_COST_INR,
-                "marketing_inr": MARKETING_MSG_COST_INR,
-                "service_inr": 0.0,
-            },
-            "clinics": clinics_table,
-        }
+        usage = await get_platform_usage(days=days)
+        return usage
 
     except Exception as e:
         logger.error(f"Error fetching platform messaging usage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch messaging usage: {e}")
+
+
+@router.get("/pricing")
+async def get_pricing_config(
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Get current Meta messaging pricing configuration.
+
+    OWNER-ONLY. Returns per-category cost rates in paise and INR.
+    """
+    try:
+        result = (
+            supabase.table("meta_pricing_config")
+            .select("*")
+            .eq("id", "default")
+            .execute()
+        )
+        if not result.data:
+            return {"error": "No pricing config found. Run migration 033."}
+
+        config = result.data[0]
+        return {
+            "utility_paise": config.get("utility_paise", 12),
+            "marketing_paise": config.get("marketing_paise", 75),
+            "authentication_paise": config.get("authentication_paise", 10),
+            "service_paise": config.get("service_paise", 0),
+            "utility_inr": round(config.get("utility_paise", 12) / 100, 2),
+            "marketing_inr": round(config.get("marketing_paise", 75) / 100, 2),
+            "authentication_inr": round(config.get("authentication_paise", 10) / 100, 2),
+            "service_inr": round(config.get("service_paise", 0) / 100, 2),
+            "currency": config.get("currency", "INR"),
+            "effective_from": config.get("effective_from"),
+            "updated_at": config.get("updated_at"),
+            "updated_by": config.get("updated_by"),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching pricing config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch pricing config")
+
+
+@router.put("/pricing")
+async def update_pricing_config(
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Update Meta messaging pricing configuration.
+
+    OWNER-ONLY. All values in integer paise. Invalidates pricing cache.
+    """
+    body = await request.json()
+
+    # Validate — all paise values must be non-negative integers
+    allowed_fields = {"utility_paise", "marketing_paise", "authentication_paise", "service_paise"}
+    update_data = {}
+    for field in allowed_fields:
+        if field in body:
+            val = body[field]
+            if not isinstance(val, int) or val < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field} must be a non-negative integer (paise)",
+                )
+            update_data[field] = val
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    update_data["updated_by"] = owner.username
+    update_data["effective_from"] = datetime.now(timezone.utc).isoformat()
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        supabase.table("meta_pricing_config").update(update_data).eq("id", "default").execute()
+
+        # Invalidate the in-memory cache
+        from app.services.message_accounting import invalidate_pricing_cache
+        invalidate_pricing_cache()
+
+        await log_admin_action(
+            user=owner,
+            action="update_pricing_config",
+            resource_type="platform",
+            details=update_data,
+        )
+
+        return {"success": True, "updated_fields": list(update_data.keys())}
+
+    except Exception as e:
+        logger.error(f"Error updating pricing config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update pricing config")
+
+
+@router.get("/plan-tiers")
+async def get_plan_tiers(
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Get all plan tier configurations with message quotas.
+
+    OWNER-ONLY. Returns plan names, display names, quotas, and pricing.
+    """
+    try:
+        result = (
+            supabase.table("plan_tiers")
+            .select("*")
+            .order("included_messages_month")
+            .execute()
+        )
+        return {"plan_tiers": result.data or []}
+    except Exception as e:
+        logger.error(f"Error fetching plan tiers: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch plan tiers")
+
+
+@router.put("/plan-tiers/{plan_name}")
+async def update_plan_tier(
+    plan_name: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Update a plan tier's message quota or pricing.
+
+    OWNER-ONLY. Allows updating included_messages_month, overage_price_paise,
+    monthly_price_paise, and display_name without code changes.
+    """
+    valid_plans = {"soloclinic", "diagstream", "essential", "polyclinic", "enterprise"}
+    if plan_name not in valid_plans:
+        raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_name}")
+
+    body = await request.json()
+    allowed = {"display_name", "monthly_price_paise", "included_messages_month", "overage_price_paise", "is_active"}
+    update_data = {}
+    for field in allowed:
+        if field in body:
+            val = body[field]
+            if field in ("monthly_price_paise", "included_messages_month", "overage_price_paise"):
+                if not isinstance(val, int) or val < 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{field} must be a non-negative integer",
+                    )
+            update_data[field] = val
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    try:
+        result = (
+            supabase.table("plan_tiers")
+            .update(update_data)
+            .eq("plan_name", plan_name)
+            .execute()
+        )
+
+        # Invalidate the plan tiers cache
+        from app.services.message_accounting import invalidate_plan_tiers_cache
+        invalidate_plan_tiers_cache()
+
+        await log_admin_action(
+            user=owner,
+            action="update_plan_tier",
+            resource_type="platform",
+            resource_id=plan_name,
+            details=update_data,
+        )
+
+        return {"success": True, "plan": plan_name, "updated_fields": list(update_data.keys())}
+
+    except Exception as e:
+        logger.error(f"Error updating plan tier {plan_name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update plan tier")

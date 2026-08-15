@@ -26,6 +26,9 @@ RUN playwright install --with-deps chromium
 # Copy application code
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+COPY admin/ ./admin/
+COPY connectors/ ./connectors/
+COPY tests/ ./tests/
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

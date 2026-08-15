@@ -704,6 +704,23 @@
         @media (min-width: 1441px) {
             .main { max-width: 1400px; }
         }
+
+        /* ═══════ MESSAGING USAGE CARD ═══════ */
+        .usage-bar-wrap { margin: 16px 0 12px; }
+        .usage-bar-track { background: var(--bg3); border-radius: 8px; height: 12px; overflow: hidden; }
+        .usage-bar-fill { height: 100%; border-radius: 8px; transition: width 0.8s ease; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+        .usage-bar-fill.over { background: linear-gradient(90deg, #ef4444, #f97316); }
+        .usage-numbers { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text3); margin-top: 6px; }
+        .usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
+        .usage-metric { text-align: center; padding: 12px; background: var(--bg2); border-radius: 10px; }
+        .usage-metric .val { font-size: 1.4rem; font-weight: 700; color: var(--text-strong); }
+        .usage-metric .lbl { font-size: 0.75rem; color: var(--text3); margin-top: 2px; }
+        .overage-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(239,68,68,0.12); color: #ef4444; border-radius: 6px; padding: 6px 12px; font-size: 0.82rem; font-weight: 600; margin-top: 10px; }
+        .upgrade-cta { display: inline-block; margin-top: 8px; padding: 6px 16px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: none; }
+        .upgrade-cta:hover { opacity: 0.9; }
+        .daily-chart { display: flex; align-items: flex-end; gap: 2px; height: 40px; margin-top: 12px; }
+        .daily-bar { flex: 1; min-width: 4px; background: var(--accent2); border-radius: 2px 2px 0 0; transition: height 0.5s ease; opacity: 0.7; }
+        .daily-bar:hover { opacity: 1; }
     </style>
 </head>
 <body>
@@ -867,6 +884,17 @@
                 </div>
                 <div class="tbl-wrap" id="dashAppts">
                     <div class="loader"><div class="spin"></div>Loading...</div>
+                </div>
+            </div>
+
+            <!-- ─── MESSAGING USAGE CARD (customer-safe, no costs) ─── -->
+            <div class="card" id="usageCard" style="margin-top:1.5rem">
+                <div class="card-head">
+                    <h3>📊 Messaging Usage</h3>
+                    <span id="usagePlan" style="font-size:0.85rem;color:var(--accent2);font-weight:600"></span>
+                </div>
+                <div id="usageContent">
+                    <div class="loader"><div class="spin"></div>Loading usage data...</div>
                 </div>
             </div>
         </div>
@@ -1929,6 +1957,7 @@ async function loadDashboard() {
         ]);
         renderDashboard(stats);
         renderDashAppts(appts);
+        loadMessagingUsage();  // fire-and-forget, don't block dashboard
     } catch (e) { console.error('Dashboard:', e); }
 }
 
@@ -1993,6 +2022,96 @@ function animateNum(el, target) {
         if (current >= target) { current = target; clearInterval(timer); }
         el.textContent = current;
     }, 30);
+}
+
+// ═══════ MESSAGING USAGE (customer-safe) ═══════
+async function loadMessagingUsage() {
+    try {
+        const data = await api('/admin/messaging-usage');
+        if (data && !data.message) {
+            renderUsageCard(data);
+        } else {
+            // Super admin or no clinic — hide card
+            const card = document.getElementById('usageCard');
+            if (card) card.style.display = 'none';
+        }
+    } catch (e) {
+        console.warn('Messaging usage load skipped:', e);
+        const el = document.getElementById('usageContent');
+        if (el) el.innerHTML = '<p style="color:var(--text3);font-size:0.85rem;padding:8px">Usage data unavailable</p>';
+    }
+}
+
+function renderUsageCard(d) {
+    // Plan badge
+    const planEl = document.getElementById('usagePlan');
+    if (planEl) planEl.textContent = d.plan_display_name || d.plan || '';
+
+    const el = document.getElementById('usageContent');
+    if (!el) return;
+
+    const sent = d.messages_sent || 0;
+    const quota = d.included_messages || 0;
+    const remaining = d.messages_remaining || 0;
+    const pct = d.usage_percent || 0;
+    const isUnlimited = quota <= 0 || quota >= 999999;
+    const isOver = pct > 100;
+    const overCount = isOver ? sent - quota : 0;
+
+    // Build progress bar
+    const barPct = Math.min(pct, 100);
+    const barClass = isOver ? 'usage-bar-fill over' : 'usage-bar-fill';
+
+    let html = '';
+
+    // Metrics row
+    html += `<div class="usage-grid">`;
+    html += `<div class="usage-metric"><div class="val">${sent.toLocaleString()}</div><div class="lbl">Messages Sent</div></div>`;
+    if (!isUnlimited) {
+        html += `<div class="usage-metric"><div class="val">${quota.toLocaleString()}</div><div class="lbl">Monthly Quota</div></div>`;
+        html += `<div class="usage-metric"><div class="val">${remaining >= 0 ? remaining.toLocaleString() : '0'}</div><div class="lbl">Remaining</div></div>`;
+        html += `<div class="usage-metric"><div class="val">${pct.toFixed(1)}%</div><div class="lbl">Usage</div></div>`;
+    } else {
+        html += `<div class="usage-metric"><div class="val">∞</div><div class="lbl">Unlimited Plan</div></div>`;
+    }
+    html += `</div>`;
+
+    // Progress bar (skip for unlimited)
+    if (!isUnlimited) {
+        html += `<div class="usage-bar-wrap">`;
+        html += `<div class="usage-bar-track"><div class="${barClass}" style="width:0%" data-w="${barPct}%"></div></div>`;
+        html += `<div class="usage-numbers"><span>${d.period_start || ''} → ${d.period_end || ''}</span><span>${sent} / ${quota}</span></div>`;
+        html += `</div>`;
+    }
+
+    // Overage badge
+    if (isOver && !isUnlimited) {
+        html += `<div class="overage-badge">⚠️ ${overCount} messages over quota</div><br>`;
+        html += `<a class="upgrade-cta" href="#" onclick="alert('Contact support to upgrade your plan.');return false;">Upgrade Plan →</a>`;
+    }
+
+    // Daily sparkline chart
+    const daily = d.daily_breakdown || [];
+    if (daily.length) {
+        const maxD = Math.max(...daily.map(x => x.count), 1);
+        html += `<div class="daily-chart" title="Daily sends (${daily.length} days)">`;
+        daily.forEach(day => {
+            const h = Math.max(2, (day.count / maxD) * 40);
+            html += `<div class="daily-bar" style="height:0px" data-h="${h}px" title="${day.date}: ${day.count}"></div>`;
+        });
+        html += `</div>`;
+    }
+
+    el.innerHTML = html;
+
+    // Animate bar and sparkline
+    requestAnimationFrame(() => {
+        const fill = el.querySelector('.usage-bar-fill');
+        if (fill) fill.style.width = fill.dataset.w;
+        el.querySelectorAll('.daily-bar').forEach(bar => {
+            bar.style.height = bar.dataset.h;
+        });
+    });
 }
 
 // ═══════ APPOINTMENTS ═══════

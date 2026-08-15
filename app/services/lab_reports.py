@@ -116,7 +116,7 @@ class LabReportService:
                     summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
                 summary_message += "\n\n📄 Your full report is attached below."
                 text_sent = await whatsapp_service.send_text(
-                    clinic, patient_phone, summary_message
+                    clinic, patient_phone, summary_message, _source="lab_reports"
                 )
             else:
                 fallback_text = (
@@ -126,7 +126,7 @@ class LabReportService:
                     f"Consult your doctor for interpretation."
                 )
                 text_sent = await whatsapp_service.send_text(
-                    clinic, patient_phone, fallback_text
+                    clinic, patient_phone, fallback_text, _source="lab_reports"
                 )
 
             if not text_sent:
@@ -137,7 +137,7 @@ class LabReportService:
             # Step F — Send the actual PDF document
             caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
             doc_sent = await whatsapp_service.send_document(
-                clinic, patient_phone, media_id, filename, caption
+                clinic, patient_phone, media_id, filename, caption, _source="lab_reports"
             )
 
             if not doc_sent:
@@ -311,7 +311,7 @@ class LabReportService:
                     summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
                 summary_message += "\n\n📄 Your full report is attached below."
                 text_sent = await whatsapp_service.send_text(
-                    clinic, report["patient_phone"], summary_message
+                    clinic, report["patient_phone"], summary_message, _source="lab_reports"
                 )
             else:
                 fallback_text = (
@@ -321,7 +321,7 @@ class LabReportService:
                     f"Consult your doctor for interpretation."
                 )
                 text_sent = await whatsapp_service.send_text(
-                    clinic, report["patient_phone"], fallback_text
+                    clinic, report["patient_phone"], fallback_text, _source="lab_reports"
                 )
 
             if not text_sent:
@@ -331,7 +331,7 @@ class LabReportService:
 
             caption = f"📋 {report['report_name']} | {report_type} | {clinic['name']}"
             doc_sent = await whatsapp_service.send_document(
-                clinic, report["patient_phone"], media_id, filename, caption
+                clinic, report["patient_phone"], media_id, filename, caption, _source="lab_reports"
             )
 
             if not doc_sent:

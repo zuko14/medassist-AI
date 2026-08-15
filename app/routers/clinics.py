@@ -241,6 +241,7 @@ async def test_clinic(clinic_id: str, to: str):
         clinic,
         to,
         f"✅ Test message from {clinic['name']}. Your Kriya AI is live!",
+        _source="clinics",
     )
     return {"sent": success}
 

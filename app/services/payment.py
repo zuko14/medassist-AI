@@ -1311,7 +1311,7 @@ class PaymentService:
                         location_line += f"\nGoogle Maps: {clinic_maps_link}"
                     msg += location_line
 
-            await whatsapp_service.send_text(clinic, booking["patient_phone"], msg)
+            await whatsapp_service.send_text(clinic, booking["patient_phone"], msg, _source="payment")
             logger.info(
                 f"Sent payment confirmation to {booking['patient_phone'][:6]}***"
             )
@@ -1356,7 +1356,7 @@ class PaymentService:
                 f"any questions or would like to book a new appointment."
             )
 
-            await whatsapp_service.send_text(clinic, booking["patient_phone"], msg)
+            await whatsapp_service.send_text(clinic, booking["patient_phone"], msg, _source="payment")
             logger.info(
                 f"Sent cancellation notice to {booking['patient_phone'][:6]}***"
             )
@@ -1372,7 +1372,7 @@ class PaymentService:
 
             admin_phone = settings.hospital_phone
             clinic = await resolve_tenant(admin_phone)
-            await whatsapp_service.send_text(clinic, admin_phone, message)
+            await whatsapp_service.send_text(clinic, admin_phone, message, _source="payment")
         except Exception as e:
             logger.error(f"Failed to send admin alert: {e}")
             # At minimum, log the alert content

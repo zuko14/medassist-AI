@@ -899,13 +899,13 @@
                     <div class="stat-card">
                         <div class="stat-label">Utility Messages</div>
                         <div class="stat-value" id="statMsgUtility">-</div>
-                        <div class="stat-meta">⚡ ₹0.12 / message</div>
+                        <div class="stat-meta">⚡ per message (from config)</div>
                         <div class="stat-icon">⚡</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Marketing Messages</div>
                         <div class="stat-value" id="statMsgMarketing">-</div>
-                        <div class="stat-meta">📢 ₹0.75 / message</div>
+                        <div class="stat-meta">📢 per message (from config)</div>
                         <div class="stat-icon">📢</div>
                     </div>
                     <div class="stat-card">
@@ -931,6 +931,28 @@
                             <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading messaging usage...</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- Pricing & Plan Tier Management (Owner-only) -->
+            <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;">
+                <div class="section-card" style="flex:1;min-width:300px;">
+                    <div class="table-toolbar">
+                        <div class="toolbar-left">
+                            <div class="chart-title">Meta Pricing Config</div>
+                            <div class="chart-subtitle">Current per-message rates (paise)</div>
+                        </div>
+                    </div>
+                    <div id="pricingConfigDisplay" style="padding:12px 16px; font-size:0.9rem; color:var(--text3);">Loading...</div>
+                </div>
+                <div class="section-card" style="flex:1;min-width:300px;">
+                    <div class="table-toolbar">
+                        <div class="toolbar-left">
+                            <div class="chart-title">Plan Tiers & Quotas</div>
+                            <div class="chart-subtitle">Message quotas per plan</div>
+                        </div>
+                    </div>
+                    <div id="planTiersDisplay" style="padding:12px 16px; font-size:0.9rem; color:var(--text3);">Loading...</div>
                 </div>
             </div>
 
@@ -1347,6 +1369,8 @@
                 loadCallMedexCenters();
                 loadCallMedexNumber();
                 loadMessagingUsage();
+                loadPricingConfig();
+                loadPlanTiers();
 
             } catch (e) {
                 console.error('Error fetching platform data:', e);
@@ -1904,6 +1928,73 @@
                     <td>₹${(c.estimated_cost_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                 </tr>
             `).join('');
+        }
+
+        // ═══════ PRICING CONFIG (Owner-only) ═══════
+        async function loadPricingConfig() {
+            try {
+                const res = await fetch('/platform/pricing', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json();
+                renderPricingConfig(data);
+            } catch (e) {
+                console.warn('Pricing config load skipped:', e);
+                document.getElementById('pricingConfigDisplay').innerHTML = '<span style="color:var(--text3)">Unavailable</span>';
+            }
+        }
+
+        function renderPricingConfig(data) {
+            const el = document.getElementById('pricingConfigDisplay');
+            if (!el) return;
+            if (data.error) { el.innerHTML = `<span style="color:var(--red,#ef4444)">${escapeHtml(data.error)}</span>`; return; }
+            el.innerHTML = `
+                <table style="width:100%;font-size:0.85rem;">
+                    <tr><td style="padding:4px 0">⚡ Utility</td><td style="text-align:right;font-weight:600">${data.utility_paise || 0} paise (₹${data.utility_inr || 0})</td></tr>
+                    <tr><td style="padding:4px 0">📢 Marketing</td><td style="text-align:right;font-weight:600">${data.marketing_paise || 0} paise (₹${data.marketing_inr || 0})</td></tr>
+                    <tr><td style="padding:4px 0">🔐 Authentication</td><td style="text-align:right;font-weight:600">${data.authentication_paise || 0} paise (₹${data.authentication_inr || 0})</td></tr>
+                    <tr><td style="padding:4px 0">🔧 Service</td><td style="text-align:right;font-weight:600">${data.service_paise || 0} paise (₹${data.service_inr || 0})</td></tr>
+                </table>
+                <div style="margin-top:8px;font-size:0.78rem;color:var(--text3)">
+                    ${data.effective_from ? 'Effective: ' + new Date(data.effective_from).toLocaleDateString('en-IN') : ''}
+                    ${data.updated_by ? ' · Updated by: ' + escapeHtml(data.updated_by) : ''}
+                </div>
+            `;
+        }
+
+        // ═══════ PLAN TIERS (Owner-only) ═══════
+        async function loadPlanTiers() {
+            try {
+                const res = await fetch('/platform/plan-tiers', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json();
+                renderPlanTiers(data);
+            } catch (e) {
+                console.warn('Plan tiers load skipped:', e);
+                document.getElementById('planTiersDisplay').innerHTML = '<span style="color:var(--text3)">Unavailable</span>';
+            }
+        }
+
+        function renderPlanTiers(data) {
+            const el = document.getElementById('planTiersDisplay');
+            if (!el) return;
+            const tiers = data.plan_tiers || [];
+            if (!tiers.length) { el.innerHTML = '<span style="color:var(--text3)">No plan tiers configured. Run migration 033.</span>'; return; }
+            el.innerHTML = `
+                <table style="width:100%;font-size:0.85rem;">
+                    <thead><tr style="color:var(--text3);font-weight:600;font-size:0.78rem;">
+                        <th style="text-align:left;padding:4px 0">Plan</th>
+                        <th style="text-align:right;padding:4px 0">Quota/mo</th>
+                        <th style="text-align:right;padding:4px 0">Price/mo</th>
+                    </tr></thead>
+                    <tbody>
+                    ${tiers.map(t => `
+                        <tr>
+                            <td style="padding:4px 0;font-weight:600">${escapeHtml(t.display_name || t.plan_name)}</td>
+                            <td style="text-align:right">${t.included_messages_month >= 999999 ? '∞' : (t.included_messages_month || 0).toLocaleString('en-IN')}</td>
+                            <td style="text-align:right">₹${((t.monthly_price_paise || 0) / 100).toLocaleString('en-IN')}</td>
+                        </tr>
+                    `).join('')}
+                    </tbody>
+                </table>
+            `;
         }
 
         async function loadCallMedexCenters() {

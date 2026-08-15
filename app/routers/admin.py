@@ -1235,7 +1235,7 @@ async def _notify_patient_checked_in(clinic_id: str, appointment: dict) -> None:
             current=status["currently_serving"],
             ahead=status["patients_ahead"],
         )
-        await whatsapp_service.send_text(clinic, phone, msg)
+        await whatsapp_service.send_text(clinic, phone, msg, _source="admin")
     except Exception as e:
         logger.error(f"Failed to send check-in token notification: {e}")
 
@@ -1285,7 +1285,7 @@ async def _notify_patient_its_turn(appointment: dict) -> None:
             token=appointment.get("token_number"),
             doctor=appointment.get("doctor_name"),
         )
-        await whatsapp_service.send_text(clinic, phone, msg)
+        await whatsapp_service.send_text(clinic, phone, msg, _source="admin")
     except Exception as e:
         logger.error(f"Failed to send call-next turn notification: {e}")
 
@@ -2524,4 +2524,74 @@ async def update_doctor_branch_session(
         logger.error(f"Error updating doctor branch session: {e}")
         raise HTTPException(
             status_code=500, detail="Failed to update doctor branch session"
+        )
+
+
+# ═══════ MESSAGING USAGE (CUSTOMER-SAFE) ═══════
+# This endpoint returns ONLY volumetric usage data.
+# It NEVER returns costs, pricing, Meta rates, markup, or any financial fields.
+# All financial visibility is restricted to /platform/* (owner-only).
+
+
+@router.get("/messaging-usage")
+async def get_messaging_usage(
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Get outbound message usage for the current billing period.
+
+    SECURITY: This is a CUSTOMER-FACING endpoint. The response MUST NOT
+    contain any fields related to costs, pricing, Meta rates, markup,
+    or Kriya's messaging economics. Only volumetric counts are returned.
+
+    Returns:
+        - plan name and display name
+        - billing period (calendar month start/end)
+        - included messages in plan
+        - messages sent this period
+        - messages remaining
+        - usage percentage
+        - daily breakdown (date + count)
+        - category breakdown (utility/marketing counts only)
+    """
+    try:
+        from app.services.message_accounting import get_clinic_usage
+
+        # Determine which clinic this admin belongs to
+        clinic_id = user.clinic_id
+        plan_name = "essential"  # default
+
+        if clinic_id and clinic_id != "default":
+            # Fetch clinic plan from database
+            try:
+                clinic_data = await get_clinic_by_id(clinic_id)
+                plan_name = clinic_data.get("plan", "essential")
+            except Exception:
+                pass
+        elif user.role == "super_admin":
+            # Super admin viewing default — show aggregate or default
+            clinic_id = "default"
+
+        if not clinic_id or clinic_id == "default":
+            # For super_admin without a specific clinic, return guidance
+            return {
+                "message": "Super admin: use /platform/messaging-usage for platform-wide view. "
+                           "Specify clinic_id query parameter for per-clinic usage.",
+                "plan": "N/A",
+            }
+
+        usage = await get_clinic_usage(clinic_id, plan_name)
+
+        await log_admin_action(
+            user=user,
+            action="VIEW_MESSAGING_USAGE",
+            resource_type="billing",
+            details={"clinic_id": clinic_id, "messages_sent": usage.get("messages_sent", 0)},
+        )
+
+        return usage
+
+    except Exception as e:
+        logger.error(f"Error fetching messaging usage: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to fetch messaging usage"
         )

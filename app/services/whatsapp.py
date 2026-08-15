@@ -1,9 +1,18 @@
-"""WhatsApp Cloud API service for sending messages (Multi-Tenant Scoped)."""
+"""WhatsApp Cloud API service for sending messages (Multi-Tenant Scoped).
 
+INSTRUMENTED for outbound message accounting.
+Every Meta API call is logged to the outbound_message_ledger via
+message_accounting.log_outbound(). Logging is fire-and-forget — a
+failed INSERT never blocks or delays message delivery.
+"""
+
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +41,48 @@ class WhatsAppService:
             raise ValueError("Missing WhatsApp credentials")
 
         return token, phone_id
+
+    def _extract_clinic_id(self, clinic: dict) -> Optional[str]:
+        """Safely extract clinic_id for accounting. Returns None if unavailable."""
+        if isinstance(clinic, dict):
+            cid = clinic.get("id")
+            if cid and cid != "default":
+                return str(cid)
+        return None
+
+    async def _log_to_ledger(
+        self,
+        clinic: dict,
+        phone: str,
+        message_type: str,
+        source_service: str,
+        send_success: bool,
+        meta_message_id: Optional[str] = None,
+        template_name: Optional[str] = None,
+    ) -> None:
+        """Fire-and-forget ledger write. NEVER raises."""
+        clinic_id = self._extract_clinic_id(clinic)
+        if not clinic_id:
+            return  # Cannot attribute to a tenant — skip ledger
+
+        try:
+            from app.services.message_accounting import log_outbound
+
+            # Fire-and-forget: create_task so the caller is never blocked
+            asyncio.create_task(
+                log_outbound(
+                    clinic_id=clinic_id,
+                    recipient_phone=phone,
+                    message_type=message_type,
+                    source_service=source_service,
+                    send_success=send_success,
+                    meta_message_id=meta_message_id,
+                    template_name=template_name,
+                )
+            )
+        except Exception as e:
+            # Absolute safety net — logging must never affect message delivery
+            logger.debug(f"Ledger dispatch failed (non-fatal): {e}")
 
     async def _make_request(self, clinic: dict, endpoint: str, payload: dict) -> dict:
         """Make HTTP request to WhatsApp API with retry."""
@@ -67,7 +118,17 @@ class WhatsAppService:
 
         return {}
 
-    async def send_text(self, clinic: dict, phone: str, message: str) -> bool:
+    def _extract_meta_message_id(self, response: dict) -> Optional[str]:
+        """Extract wamid from Meta API response."""
+        messages = response.get("messages", [])
+        if messages and isinstance(messages, list) and len(messages) > 0:
+            return messages[0].get("id")
+        return None
+
+    async def send_text(
+        self, clinic: dict, phone: str, message: str,
+        _source: str = "conversation",
+    ) -> bool:
         """Send a simple text message."""
         # Check session expiry before sending
         if not await self._can_send_freeform(clinic, phone):
@@ -85,11 +146,21 @@ class WhatsAppService:
         }
 
         try:
-            await self._make_request(clinic, "messages", payload)
+            result = await self._make_request(clinic, "messages", payload)
+            meta_msg_id = self._extract_meta_message_id(result)
             logger.info(f"Sent text message to {self._mask_phone(phone)}")
+
+            # ── Accounting ──
+            await self._log_to_ledger(
+                clinic, phone, "text", _source,
+                send_success=True, meta_message_id=meta_msg_id,
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to send text message: {e}")
+            await self._log_to_ledger(
+                clinic, phone, "text", _source, send_success=False,
+            )
             return False
 
     async def send_template(
@@ -99,6 +170,7 @@ class WhatsAppService:
         template_name: str,
         language: str = "en",
         components: Optional[list] = None,
+        _source: str = "conversation",
     ) -> bool:
         """Send a pre-approved template message (for 24h+ sessions)."""
         payload = {
@@ -114,11 +186,23 @@ class WhatsAppService:
         }
 
         try:
-            await self._make_request(clinic, "messages", payload)
+            result = await self._make_request(clinic, "messages", payload)
+            meta_msg_id = self._extract_meta_message_id(result)
             logger.info(f"Sent template '{template_name}' to {self._mask_phone(phone)}")
+
+            # ── Accounting ──
+            await self._log_to_ledger(
+                clinic, phone, "template", _source,
+                send_success=True, meta_message_id=meta_msg_id,
+                template_name=template_name,
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to send template message: {e}")
+            await self._log_to_ledger(
+                clinic, phone, "template", _source,
+                send_success=False, template_name=template_name,
+            )
             return False
 
     async def send_interactive_buttons(
@@ -128,6 +212,7 @@ class WhatsAppService:
         body: str,
         buttons: list[dict],
         header: Optional[str] = None,
+        _source: str = "conversation",
     ) -> bool:
         """Send interactive button message."""
         if not await self._can_send_freeform(clinic, phone):
@@ -166,11 +251,21 @@ class WhatsAppService:
         }
 
         try:
-            await self._make_request(clinic, "messages", payload)
+            result = await self._make_request(clinic, "messages", payload)
+            meta_msg_id = self._extract_meta_message_id(result)
             logger.info(f"Sent interactive buttons to {self._mask_phone(phone)}")
+
+            # ── Accounting ──
+            await self._log_to_ledger(
+                clinic, phone, "interactive_buttons", _source,
+                send_success=True, meta_message_id=meta_msg_id,
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to send interactive buttons: {e}")
+            await self._log_to_ledger(
+                clinic, phone, "interactive_buttons", _source, send_success=False,
+            )
             return False
 
     async def send_interactive_list(
@@ -181,6 +276,7 @@ class WhatsAppService:
         button_text: str,
         sections: list[dict],
         header: Optional[str] = None,
+        _source: str = "conversation",
     ) -> bool:
         """Send interactive list message."""
         if not await self._can_send_freeform(clinic, phone):
@@ -223,15 +319,26 @@ class WhatsAppService:
         }
 
         try:
-            await self._make_request(clinic, "messages", payload)
+            result = await self._make_request(clinic, "messages", payload)
+            meta_msg_id = self._extract_meta_message_id(result)
             logger.info(f"Sent interactive list to {self._mask_phone(phone)}")
+
+            # ── Accounting ──
+            await self._log_to_ledger(
+                clinic, phone, "interactive_list", _source,
+                send_success=True, meta_message_id=meta_msg_id,
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to send interactive list: {e}")
+            await self._log_to_ledger(
+                clinic, phone, "interactive_list", _source, send_success=False,
+            )
             return False
 
     async def send_location(
-        self, clinic: dict, phone: str, lat: float, lng: float, name: str, address: str
+        self, clinic: dict, phone: str, lat: float, lng: float, name: str, address: str,
+        _source: str = "conversation",
     ) -> bool:
         """Send location message."""
         if not await self._can_send_freeform(clinic, phone):
@@ -254,11 +361,21 @@ class WhatsAppService:
         }
 
         try:
-            await self._make_request(clinic, "messages", payload)
+            result = await self._make_request(clinic, "messages", payload)
+            meta_msg_id = self._extract_meta_message_id(result)
             logger.info(f"Sent location to {self._mask_phone(phone)}")
+
+            # ── Accounting ──
+            await self._log_to_ledger(
+                clinic, phone, "location", _source,
+                send_success=True, meta_message_id=meta_msg_id,
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to send location: {e}")
+            await self._log_to_ledger(
+                clinic, phone, "location", _source, send_success=False,
+            )
             return False
 
     async def upload_media(
@@ -298,7 +415,8 @@ class WhatsAppService:
         return ""
 
     async def send_document(
-        self, clinic: dict, phone: str, media_id: str, filename: str, caption: str
+        self, clinic: dict, phone: str, media_id: str, filename: str, caption: str,
+        _source: str = "conversation",
     ) -> bool:
         """Send a document message."""
         if not await self._can_send_freeform(clinic, phone):
@@ -316,11 +434,21 @@ class WhatsAppService:
         }
 
         try:
-            await self._make_request(clinic, "messages", payload)
+            result = await self._make_request(clinic, "messages", payload)
+            meta_msg_id = self._extract_meta_message_id(result)
             logger.info(f"Sent document to {self._mask_phone(phone)}")
+
+            # ── Accounting ──
+            await self._log_to_ledger(
+                clinic, phone, "document", _source,
+                send_success=True, meta_message_id=meta_msg_id,
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to send document: {e}")
+            await self._log_to_ledger(
+                clinic, phone, "document", _source, send_success=False,
+            )
             return False
 
     async def mark_as_read(self, clinic: dict, message_id: str) -> bool:
@@ -334,6 +462,8 @@ class WhatsAppService:
         try:
             await self._make_request(clinic, "messages", payload)
             logger.info(f"Marked message {message_id} as read")
+            # mark_as_read is NOT logged to the billing ledger — it's a
+            # status update, not a billable outbound message.
             return True
         except Exception as e:
             logger.error(f"Failed to mark message as read: {e}")
