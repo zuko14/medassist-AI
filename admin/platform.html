@@ -826,7 +826,10 @@
                             <option value="dormant">Dormant Only (14d+)</option>
                         </select>
                     </div>
-                    <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openCreateClinicModal()">+ Create Hospital / Clinic</button>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-primary" style="width:auto; padding:10px 18px; background:linear-gradient(135deg, #a855f7, #6c63ff); border:none;" onclick="openBroadcastModal()">📢 Broadcast Message</button>
+                        <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openCreateClinicModal()">+ Create Hospital / Clinic</button>
+                    </div>
                 </div>
 
                 <div class="table-responsive">
@@ -1280,6 +1283,139 @@
         </div>
     </div>
 
+    <!-- Broadcast & Admin Messaging Modal -->
+    <div class="modal-overlay" id="broadcastModal">
+        <div class="modal-panel" style="max-width:620px; max-height:88vh; overflow-y:auto;">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:1.4rem;">📢</span>
+                    <div>
+                        <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Platform Owner Broadcast</h3>
+                        <div style="font-size:0.75rem; color:var(--cyan); font-weight:600; text-transform:uppercase;">Admin Notification Dispatch</div>
+                    </div>
+                </div>
+                <button class="close-btn" onclick="closeBroadcastModal()">✕</button>
+            </div>
+
+            <!-- Tabs: Compose vs History -->
+            <div style="display:flex; gap:8px; margin-bottom:20px; border-bottom:1px solid var(--border); padding-bottom:12px;">
+                <button id="tabBroadcastCompose" class="action-btn" style="background:var(--accent); color:#fff; border:none; padding:8px 16px;" onclick="switchBroadcastTab('compose')">✏️ New Broadcast</button>
+                <button id="tabBroadcastHistory" class="action-btn" style="background:var(--surface2); color:var(--text2); border:1px solid var(--border); padding:8px 16px;" onclick="switchBroadcastTab('history')">📜 Dispatch History</button>
+            </div>
+
+            <div id="broadcastComposeView">
+                <div class="error-msg" id="broadcastError" style="display:none;"></div>
+                <div id="broadcastSuccessMsg" style="display:none; background:var(--green-bg); color:var(--green); border:1px solid rgba(16,185,129,0.3); border-radius:var(--radius-sm); padding:12px; margin-bottom:16px; font-size:0.88rem; font-weight:600;"></div>
+
+                <div class="form-group">
+                    <label>Broadcast Title *</label>
+                    <input type="text" class="form-control" id="bcTitle" placeholder="e.g. Scheduled System Maintenance Notice">
+                </div>
+
+                <div class="form-group">
+                    <label>Broadcast Message Body *</label>
+                    <textarea class="form-control" id="bcMessage" rows="5" placeholder="Enter message text (e.g. maintenance schedule, pricing update, emergency alert)..." style="resize:vertical; line-height:1.5;"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Target Audience Scope</label>
+                    <div style="display:flex; gap:16px; margin-top:6px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text); font-size:0.9rem;">
+                            <input type="radio" name="bcTargetType" value="ALL" checked onchange="toggleBroadcastTarget('ALL')">
+                            All Active Clinics
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text); font-size:0.9rem;">
+                            <input type="radio" name="bcTargetType" value="SELECTIVE" onchange="toggleBroadcastTarget('SELECTIVE')">
+                            Selective Targeting
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Selective Clinics Picker -->
+                <div id="bcSelectiveContainer" style="display:none; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <span style="font-size:0.82rem; font-weight:700; color:var(--text2); text-transform:uppercase;">Select Target Clinics:</span>
+                        <button type="button" class="action-btn" style="padding:4px 8px; font-size:0.75rem;" onclick="toggleSelectAllClinics()">Toggle All</button>
+                    </div>
+                    <input type="text" id="bcClinicSearch" class="form-control" placeholder="Filter clinics..." style="margin-bottom:10px; font-size:0.82rem; padding:6px 10px;" onkeyup="filterBroadcastClinics()">
+                    <div id="bcClinicList" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;">
+                        <!-- Checkboxes populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Recipient Preview Badge -->
+                <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(108,99,255,0.08); border:1px solid rgba(108,99,255,0.2); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:20px;">
+                    <span style="font-size:0.85rem; color:var(--text2);">Estimated Recipient Scope:</span>
+                    <span id="bcRecipientCountBadge" class="badge badge-enterprise" style="font-size:0.82rem;">All Clinics</span>
+                </div>
+
+                <button class="btn-primary" id="bcSubmitBtn" onclick="submitBroadcast()" style="background:linear-gradient(135deg, #a855f7, #6c63ff); border:none;">
+                    🚀 Dispatch Broadcast Message
+                </button>
+            </div>
+
+            <div id="broadcastHistoryView" style="display:none;">
+                <div id="broadcastHistoryList" style="display:flex; flex-direction:column; gap:12px;">
+                    <div style="text-align:center; padding:30px; color:var(--text3);">Loading broadcast history...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Safe Clinic Deletion Modal -->
+    <div class="modal-overlay" id="deleteClinicModal">
+        <div class="modal-panel" style="max-width:520px;">
+            <div class="modal-header" style="border-bottom-color:rgba(239,68,68,0.3);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:1.4rem;">⚠️</span>
+                    <div>
+                        <h3 style="font-size:1.2rem; font-weight:800; color:#ef4444;">Delete Clinic Safely</h3>
+                        <div style="font-size:0.75rem; color:var(--text3); font-weight:600; text-transform:uppercase;">Non-Destructive Soft-Delete</div>
+                    </div>
+                </div>
+                <button class="close-btn" onclick="closeDeleteClinicModal()">✕</button>
+            </div>
+
+            <div class="error-msg" id="deleteClinicError" style="display:none;"></div>
+
+            <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:var(--radius-sm); padding:14px; margin-bottom:18px;">
+                <p style="font-size:0.85rem; color:#fca5a5; line-height:1.5;">
+                    You are about to soft-delete <strong id="deleteClinicNameTarget" style="color:#fff;">Clinic</strong> (<span id="deleteClinicIdTarget" style="font-family:monospace; font-size:0.78rem;"></span>).
+                </p>
+                <ul style="font-size:0.8rem; color:var(--text2); margin-top:8px; padding-left:18px; line-height:1.6;">
+                    <li>Clinic status becomes <code style="color:#f87171;">DELETED</code> and login is revoked.</li>
+                    <li>WhatsApp bot routing for this tenant is disabled.</li>
+                    <li><strong>Historical appointments & financial audit logs remain preserved</strong> for compliance.</li>
+                </ul>
+            </div>
+
+            <!-- Impact Summary -->
+            <div id="deleteImpactSummary" style="display:grid; grid-template-columns:repeat(2, 1fr); gap:10px; margin-bottom:18px;">
+                <div class="mini-stat">
+                    <div style="font-size:0.75rem; color:var(--text3); text-transform:uppercase;">Doctors Impacted</div>
+                    <div class="mini-stat-val" id="delDoctorCount" style="color:#f87171;">-</div>
+                </div>
+                <div class="mini-stat">
+                    <div style="font-size:0.75rem; color:var(--text3); text-transform:uppercase;">Historical Appts</div>
+                    <div class="mini-stat-val" id="delApptCount" style="color:var(--cyan);">-</div>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:20px;">
+                <label style="color:#fca5a5;">Security Confirmation</label>
+                <p style="font-size:0.8rem; color:var(--text3); margin-bottom:8px;">Type <strong style="color:#fff; letter-spacing:0.5px;">CONFIRM DELETE</strong> below to proceed:</p>
+                <input type="text" class="form-control" id="deleteConfirmInput" placeholder="CONFIRM DELETE" onkeyup="checkDeleteConfirmInput()" style="border-color:rgba(239,68,68,0.4); text-transform:uppercase;">
+            </div>
+
+            <div style="display:flex; gap:12px;">
+                <button class="btn-secondary" onclick="closeDeleteClinicModal()" style="flex:1;">Cancel</button>
+                <button class="btn-primary" id="deleteClinicConfirmBtn" onclick="submitDeleteClinic()" disabled style="flex:1; background:var(--red); opacity:0.5; cursor:not-allowed; border:none;">
+                    Confirm Soft-Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let ownerAuthHeader = '';
         let globalClinicsData = [];
@@ -1458,9 +1594,11 @@
                         <td style="font-weight:700">${c.appointments_count_30d || 0}</td>
                         <td>${c.patients_count || 0}</td>
                         <td style="font-weight:700; color:var(--green)">₹${rev}</td>
-                        <td style="font-size:0.82rem; color:var(--text2)">${lastActStr}</td>
                         <td>${statusBadge}</td>
-                        <td><button class="action-btn" onclick="event.stopPropagation(); openModal('${c.id}')">Analytics</button></td>
+                        <td style="white-space:nowrap;">
+                            <button class="action-btn" onclick="event.stopPropagation(); openModal('${c.id}')">Analytics</button>
+                            <button class="action-btn" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#f87171; margin-left:6px;" onclick="event.stopPropagation(); openDeleteClinicModal('${c.id}', '${escapeHtml(c.name || 'Hospital')}')">Delete</button>
+                        </td>
                     </tr>
                 `;
             }).join('');
@@ -2200,6 +2338,382 @@
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.innerText = 'Create Hospital / Clinic';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Broadcast Messaging Handlers
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        let selectedBroadcastClinicIds = new Set();
+
+        function openBroadcastModal() {
+            document.getElementById('bcTitle').value = '';
+            document.getElementById('bcMessage').value = '';
+            document.getElementById('broadcastError').style.display = 'none';
+            document.getElementById('broadcastSuccessMsg').style.display = 'none';
+            
+            // Set scope radio to ALL
+            const radios = document.getElementsByName('bcTargetType');
+            radios.forEach(r => { if (r.value === 'ALL') r.checked = true; });
+            document.getElementById('bcSelectiveContainer').style.display = 'none';
+
+            // Populate clinic checkboxes
+            populateBroadcastClinicList();
+            updateBroadcastRecipientCount();
+            switchBroadcastTab('compose');
+
+            document.getElementById('broadcastModal').classList.add('active');
+        }
+
+        function closeBroadcastModal() {
+            document.getElementById('broadcastModal').classList.remove('active');
+        }
+
+        function switchBroadcastTab(tab) {
+            const composeTabBtn = document.getElementById('tabBroadcastCompose');
+            const historyTabBtn = document.getElementById('tabBroadcastHistory');
+            const composeView = document.getElementById('broadcastComposeView');
+            const historyView = document.getElementById('broadcastHistoryView');
+
+            if (tab === 'compose') {
+                composeTabBtn.style.background = 'var(--accent)';
+                composeTabBtn.style.color = '#fff';
+                composeTabBtn.style.borderColor = 'transparent';
+                historyTabBtn.style.background = 'var(--surface2)';
+                historyTabBtn.style.color = 'var(--text2)';
+                historyTabBtn.style.borderColor = 'var(--border)';
+                composeView.style.display = 'block';
+                historyView.style.display = 'none';
+            } else {
+                historyTabBtn.style.background = 'var(--accent)';
+                historyTabBtn.style.color = '#fff';
+                historyTabBtn.style.borderColor = 'transparent';
+                composeTabBtn.style.background = 'var(--surface2)';
+                composeTabBtn.style.color = 'var(--text2)';
+                composeTabBtn.style.borderColor = 'var(--border)';
+                composeView.style.display = 'none';
+                historyView.style.display = 'block';
+                loadBroadcastHistory();
+            }
+        }
+
+        function toggleBroadcastTarget(mode) {
+            const container = document.getElementById('bcSelectiveContainer');
+            if (mode === 'SELECTIVE') {
+                container.style.display = 'block';
+            } else {
+                container.style.display = 'none';
+            }
+            updateBroadcastRecipientCount();
+        }
+
+        function populateBroadcastClinicList() {
+            const listEl = document.getElementById('bcClinicList');
+            selectedBroadcastClinicIds.clear();
+
+            if (!globalClinicsData || globalClinicsData.length === 0) {
+                listEl.innerHTML = '<div style="color:var(--text3); font-size:0.8rem; padding:8px;">No active clinics found.</div>';
+                return;
+            }
+
+            listEl.innerHTML = globalClinicsData.map(c => {
+                const plan = (c.plan || 'soloclinic').toLowerCase();
+                return `
+                    <label class="bc-clinic-item" style="display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; background:var(--surface); border:1px solid var(--border); font-size:0.82rem;" data-name="${escapeHtml(c.name || '').toLowerCase()}" data-id="${c.id}">
+                        <input type="checkbox" value="${c.id}" onchange="onBroadcastClinicCheckboxChange('${c.id}', this.checked)" style="width:auto;">
+                        <span style="font-weight:600; color:#fff; flex:1;">${escapeHtml(c.name || 'Unnamed Hospital')}</span>
+                        <span class="badge badge-${plan}" style="font-size:0.68rem; padding:2px 6px;">${plan}</span>
+                    </label>
+                `;
+            }).join('');
+        }
+
+        function onBroadcastClinicCheckboxChange(clinicId, isChecked) {
+            if (isChecked) {
+                selectedBroadcastClinicIds.add(clinicId);
+            } else {
+                selectedBroadcastClinicIds.delete(clinicId);
+            }
+            updateBroadcastRecipientCount();
+        }
+
+        function toggleSelectAllClinics() {
+            const checkboxes = document.querySelectorAll('#bcClinicList input[type="checkbox"]');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => {
+                cb.checked = !allChecked;
+                if (!allChecked) {
+                    selectedBroadcastClinicIds.add(cb.value);
+                } else {
+                    selectedBroadcastClinicIds.delete(cb.value);
+                }
+            });
+            updateBroadcastRecipientCount();
+        }
+
+        function filterBroadcastClinics() {
+            const query = document.getElementById('bcClinicSearch').value.toLowerCase();
+            const items = document.querySelectorAll('.bc-clinic-item');
+            items.forEach(item => {
+                const name = item.getAttribute('data-name') || '';
+                if (name.includes(query)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        function updateBroadcastRecipientCount() {
+            const targetType = document.querySelector('input[name="bcTargetType"]:checked').value;
+            const badge = document.getElementById('bcRecipientCountBadge');
+            if (targetType === 'ALL') {
+                const count = (globalClinicsData || []).length;
+                badge.innerText = `All Active Clinics (${count} hospitals)`;
+                badge.className = 'badge badge-enterprise';
+            } else {
+                const selectedCount = selectedBroadcastClinicIds.size;
+                badge.innerText = `${selectedCount} Clinic${selectedCount === 1 ? '' : 's'} Selected`;
+                badge.className = selectedCount > 0 ? 'badge badge-essential' : 'badge status-dormant';
+            }
+        }
+
+        async function submitBroadcast() {
+            const errEl = document.getElementById('broadcastError');
+            const successEl = document.getElementById('broadcastSuccessMsg');
+            errEl.style.display = 'none';
+            successEl.style.display = 'none';
+
+            const title = document.getElementById('bcTitle').value.trim();
+            const message = document.getElementById('bcMessage').value.trim();
+            const targetType = document.querySelector('input[name="bcTargetType"]:checked').value;
+
+            if (!title) {
+                errEl.innerText = 'Broadcast title is required.';
+                errEl.style.display = 'block';
+                return;
+            }
+            if (!message) {
+                errEl.innerText = 'Broadcast message body cannot be empty.';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            let targetClinicIds = [];
+            if (targetType === 'SELECTIVE') {
+                targetClinicIds = Array.from(selectedBroadcastClinicIds);
+                if (targetClinicIds.length === 0) {
+                    errEl.innerText = 'Please select at least one target clinic for selective broadcast.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+            }
+
+            const btn = document.getElementById('bcSubmitBtn');
+            btn.disabled = true;
+            btn.innerText = 'Dispatching Broadcast...';
+
+            try {
+                const res = await fetch('/platform/broadcasts', {
+                    method: 'POST',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: title,
+                        message: message,
+                        target_type: targetType,
+                        target_clinic_ids: targetType === 'SELECTIVE' ? targetClinicIds : null
+                    })
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    errEl.innerText = data.detail || 'Failed to dispatch broadcast.';
+                    errEl.style.display = 'block';
+                    return;
+                }
+
+                successEl.innerText = `✅ Broadcast dispatched successfully! Message enqueued to target clinics.`;
+                successEl.style.display = 'block';
+
+                document.getElementById('bcTitle').value = '';
+                document.getElementById('bcMessage').value = '';
+                selectedBroadcastClinicIds.clear();
+                populateBroadcastClinicList();
+                updateBroadcastRecipientCount();
+
+                setTimeout(() => {
+                    switchBroadcastTab('history');
+                }, 1200);
+
+            } catch (e) {
+                errEl.innerText = 'Network error while dispatching broadcast.';
+                errEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.innerText = '🚀 Dispatch Broadcast Message';
+            }
+        }
+
+        async function loadBroadcastHistory() {
+            const listEl = document.getElementById('broadcastHistoryList');
+            listEl.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text3);"><div class="spinner"></div><br><br>Loading broadcast dispatches...</div>';
+
+            try {
+                const res = await fetch('/platform/broadcasts', {
+                    headers: { 'Authorization': ownerAuthHeader }
+                });
+                const data = await res.json();
+                const broadcasts = data.broadcasts || [];
+
+                if (broadcasts.length === 0) {
+                    listEl.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text3);">No broadcast messages have been sent yet.</div>';
+                    return;
+                }
+
+                listEl.innerHTML = broadcasts.map(b => {
+                    const createdDate = b.created_at ? new Date(b.created_at).toLocaleDateString('en-IN', {
+                        month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                    }) : 'Unknown';
+
+                    const targetBadge = b.target_type === 'ALL' 
+                        ? '<span class="badge badge-enterprise">All Clinics</span>'
+                        : '<span class="badge badge-essential">Selective</span>';
+
+                    const delivered = b.delivered_count || 0;
+                    const readCount = b.read_count || 0;
+
+                    return `
+                        <div style="background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:16px;">
+                            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                                <div>
+                                    <h4 style="font-size:0.95rem; font-weight:700; color:#fff;">${escapeHtml(b.title)}</h4>
+                                    <div style="font-size:0.75rem; color:var(--text3); margin-top:2px;">Sent by ${escapeHtml(b.sender_id || 'Owner')} on ${createdDate}</div>
+                                </div>
+                                ${targetBadge}
+                            </div>
+                            <p style="font-size:0.85rem; color:var(--text2); line-height:1.5; white-space:pre-wrap; margin-bottom:12px; max-height:80px; overflow-y:auto;">${escapeHtml(b.message)}</p>
+                            <div style="display:flex; gap:16px; font-size:0.78rem; color:var(--text3); border-top:1px solid var(--border); padding-top:8px;">
+                                <span>📬 Delivered: <strong style="color:var(--text);">${delivered}</strong></span>
+                                <span>👁️ Read: <strong style="color:var(--green);">${readCount}</strong></span>
+                                <span>⏳ Unread: <strong style="color:var(--amber);">${Math.max(0, delivered - readCount)}</strong></span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                listEl.innerHTML = '<div style="color:var(--red); font-size:0.85rem; padding:16px;">Failed to load broadcast history.</div>';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Safe Clinic Deletion Handlers
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        let currentDeleteClinicId = null;
+        let currentDeleteClinicName = '';
+
+        async function openDeleteClinicModal(clinicId, clinicName) {
+            currentDeleteClinicId = clinicId;
+            currentDeleteClinicName = clinicName;
+
+            document.getElementById('deleteClinicNameTarget').innerText = clinicName;
+            document.getElementById('deleteClinicIdTarget').innerText = clinicId;
+            document.getElementById('deleteConfirmInput').value = '';
+            document.getElementById('deleteClinicError').style.display = 'none';
+
+            const confirmBtn = document.getElementById('deleteClinicConfirmBtn');
+            confirmBtn.disabled = true;
+            confirmBtn.style.opacity = '0.5';
+            confirmBtn.style.cursor = 'not-allowed';
+
+            document.getElementById('delDoctorCount').innerText = '...';
+            document.getElementById('delApptCount').innerText = '...';
+
+            document.getElementById('deleteClinicModal').classList.add('active');
+
+            // Fetch deletion impact preview
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/deletion-preview`, {
+                    headers: { 'Authorization': ownerAuthHeader }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const preview = data.impact_preview || {};
+                    document.getElementById('delDoctorCount').innerText = preview.doctor_count || 0;
+                    document.getElementById('delApptCount').innerText = preview.appointment_count || 0;
+                } else {
+                    document.getElementById('delDoctorCount').innerText = '-';
+                    document.getElementById('delApptCount').innerText = '-';
+                }
+            } catch (e) {
+                document.getElementById('delDoctorCount').innerText = '-';
+                document.getElementById('delApptCount').innerText = '-';
+            }
+        }
+
+        function closeDeleteClinicModal() {
+            document.getElementById('deleteClinicModal').classList.remove('active');
+            currentDeleteClinicId = null;
+            currentDeleteClinicName = '';
+        }
+
+        function checkDeleteConfirmInput() {
+            const inputVal = document.getElementById('deleteConfirmInput').value.trim().toUpperCase();
+            const confirmBtn = document.getElementById('deleteClinicConfirmBtn');
+            if (inputVal === 'CONFIRM DELETE') {
+                confirmBtn.disabled = false;
+                confirmBtn.style.opacity = '1';
+                confirmBtn.style.cursor = 'pointer';
+            } else {
+                confirmBtn.disabled = true;
+                confirmBtn.style.opacity = '0.5';
+                confirmBtn.style.cursor = 'not-allowed';
+            }
+        }
+
+        async function submitDeleteClinic() {
+            if (!currentDeleteClinicId) return;
+
+            const errEl = document.getElementById('deleteClinicError');
+            errEl.style.display = 'none';
+
+            const confirmBtn = document.getElementById('deleteClinicConfirmBtn');
+            confirmBtn.disabled = true;
+            confirmBtn.innerText = 'Deleting...';
+
+            const targetId = currentDeleteClinicId;
+            const targetName = currentDeleteClinicName;
+
+            try {
+                const res = await fetch(`/platform/clinics/${targetId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': ownerAuthHeader }
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    errEl.innerText = data.detail || 'Failed to delete clinic.';
+                    errEl.style.display = 'block';
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerText = 'Confirm Soft-Delete';
+                    return;
+                }
+
+                closeDeleteClinicModal();
+
+                // Optimistic UI update: filter out the deleted clinic from local array and re-render
+                globalClinicsData = globalClinicsData.filter(c => c.id !== targetId);
+                filterLeaderboard();
+
+                // Refresh platform stats
+                fetchPlatformData();
+
+            } catch (e) {
+                errEl.innerText = 'Network error while deleting clinic.';
+                errEl.style.display = 'block';
+                confirmBtn.disabled = false;
+                confirmBtn.innerText = 'Confirm Soft-Delete';
             }
         }
     </script>

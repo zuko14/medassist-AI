@@ -444,7 +444,7 @@ def test_callmedex_whatsapp_settings_put_missing_encryption_key_returns_500(
 
 
 @patch("app.routers.platform.log_admin_action")
-@patch("app.routers.platform.supabase")
+@patch("app.database.supabase")
 def test_platform_messaging_usage_success(mock_supabase, mock_log_action):
     mock_clinics = MagicMock()
     mock_clinics.execute.return_value.data = [
@@ -452,26 +452,32 @@ def test_platform_messaging_usage_success(mock_supabase, mock_log_action):
         {"id": "c2", "name": "Hospital B", "plan": "enterprise", "is_active": True},
     ]
 
-    mock_appts = MagicMock()
-    mock_appts.execute.return_value.data = [
-        {"clinic_id": "c1", "status": "confirmed", "reminder_24h_sent": True, "reminder_2h_sent": False, "followup_sent": False},
-        {"clinic_id": "c1", "status": "cancelled", "reminder_24h_sent": False, "reminder_2h_sent": False, "followup_sent": True},
-        {"clinic_id": "c2", "status": "confirmed", "reminder_24h_sent": False, "reminder_2h_sent": False, "followup_sent": False},
+    mock_ledger = MagicMock()
+    mock_ledger.execute.return_value.data = [
+        {"clinic_id": "c1", "category": "utility", "send_success": True, "message_type": "template"},
+        {"clinic_id": "c1", "category": "utility", "send_success": True, "message_type": "template"},
+        {"clinic_id": "c1", "category": "utility", "send_success": True, "message_type": "template"},
+        {"clinic_id": "c1", "category": "utility", "send_success": True, "message_type": "template"},
+        {"clinic_id": "c1", "category": "marketing", "send_success": True, "message_type": "template"},
+        {"clinic_id": "c2", "category": "utility", "send_success": True, "message_type": "template"},
     ]
 
-    mock_reports = MagicMock()
-    mock_reports.execute.return_value.data = [
-        {"clinic_id": "c1", "sent_at": "2026-08-01T00:00:00Z"},
+    mock_pricing = MagicMock()
+    mock_pricing.execute.return_value.data = [
+        {"utility_paise": 12, "marketing_paise": 75, "authentication_paise": 10, "service_paise": 0}
     ]
 
     def table_router(table_name):
         mock_obj = MagicMock()
         if table_name == "clinics":
             mock_obj.select.return_value = mock_clinics
-        elif table_name == "appointments":
-            mock_obj.select.return_value.gte.return_value = mock_appts
-        elif table_name == "lab_reports":
-            mock_obj.select.return_value.gte.return_value = mock_reports
+            mock_obj.select.return_value.execute.return_value.data = mock_clinics.execute.return_value.data
+        elif table_name == "outbound_message_ledger":
+            mock_obj.select.return_value.eq.return_value.neq.return_value.gte.return_value = mock_ledger
+            mock_obj.select.return_value.eq.return_value.neq.return_value.gte.return_value.execute.return_value.data = mock_ledger.execute.return_value.data
+        elif table_name == "meta_pricing_config":
+            mock_obj.select.return_value.eq.return_value = mock_pricing
+            mock_obj.select.return_value.eq.return_value.execute.return_value.data = mock_pricing.execute.return_value.data
         return mock_obj
 
     mock_supabase.table.side_effect = table_router

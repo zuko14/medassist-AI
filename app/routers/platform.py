@@ -4,7 +4,7 @@ import asyncio
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -22,6 +22,8 @@ from app.routers.admin import (
 )
 from app.routers.clinics import CreateClinicRequest, provision_clinic
 from app.services.analytics import analytics_service
+from app.services.broadcast import broadcast_service
+from app.services.tenant import invalidate_branch_cache, invalidate_tenant_cache
 from app.utils.security import login_rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -1273,3 +1275,241 @@ async def update_plan_tier(
     except Exception as e:
         logger.error(f"Error updating plan tier {plan_name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update plan tier")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PLATFORM OWNER BROADCAST & NOTIFICATION SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class BroadcastCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    message: str = Field(..., min_length=1)
+    target_type: Literal["ALL", "SELECTIVE", "SINGLE"] = "ALL"
+    target_clinic_ids: Optional[List[str]] = None
+
+
+@router.post("/broadcasts")
+async def create_broadcast(
+    body: BroadcastCreateRequest,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Platform owner endpoint to create and dispatch system-wide or selective broadcast messages."""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        broadcast = await broadcast_service.create_broadcast(
+            sender_id=owner.username,
+            title=body.title,
+            message=body.message,
+            target_type=body.target_type,
+            target_clinic_ids=body.target_clinic_ids,
+        )
+
+        await log_admin_action(
+            user=owner,
+            action="create_broadcast",
+            resource_type="broadcast",
+            resource_id=broadcast.get("id"),
+            details={
+                "title": body.title,
+                "target_type": body.target_type,
+                "target_clinic_ids": body.target_clinic_ids,
+            },
+            ip_address=client_ip,
+        )
+
+        return {"success": True, "broadcast": broadcast}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error creating broadcast: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create broadcast: {e}")
+
+
+@router.get("/broadcasts")
+async def list_broadcasts(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Retrieve platform broadcast history with live delivery & read metrics."""
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_broadcasts",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+    broadcasts = await broadcast_service.get_broadcasts(limit=limit, offset=offset)
+    return {"success": True, "broadcasts": broadcasts}
+
+
+@router.get("/broadcasts/{broadcast_id}")
+async def get_broadcast_detail(
+    broadcast_id: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Get single broadcast record and delivery summary."""
+    client_ip = request.client.host if request.client else "unknown"
+    summary = await broadcast_service.get_broadcast_by_id(broadcast_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Broadcast not found")
+
+    await log_admin_action(
+        user=owner,
+        action="view_broadcast_detail",
+        resource_type="broadcast",
+        resource_id=broadcast_id,
+        ip_address=client_ip,
+    )
+    return {"success": True, **summary}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SAFE CLINIC LIFECYCLE MANAGEMENT & DELETION ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/clinics/{clinic_id}/deletion-preview")
+async def get_clinic_deletion_preview(
+    clinic_id: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Preview entity impact stats before soft-deleting a clinic."""
+    clinic_res = (
+        supabase.table("clinics")
+        .select("id, name, whatsapp_number, plan, is_active, status, created_at")
+        .eq("id", clinic_id)
+        .execute()
+    )
+    if not clinic_res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    clinic = clinic_res.data[0]
+    if clinic.get("status") == "DELETED":
+        raise HTTPException(status_code=400, detail="Clinic is already deleted")
+
+    doc_res = (
+        supabase.table("doctors")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    doctor_count = doc_res.count if doc_res.count is not None else len(doc_res.data or [])
+
+    appt_res = (
+        supabase.table("appointments")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    appointment_count = appt_res.count if appt_res.count is not None else len(appt_res.data or [])
+
+    pat_res = (
+        supabase.table("patients")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    patient_count = pat_res.count if pat_res.count is not None else len(pat_res.data or [])
+
+    adm_res = (
+        supabase.table("clinic_admins")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .eq("is_active", True)
+        .execute()
+    )
+    active_admin_count = adm_res.count if adm_res.count is not None else len(adm_res.data or [])
+
+    return {
+        "success": True,
+        "clinic": clinic,
+        "impact_preview": {
+            "doctor_count": doctor_count,
+            "appointment_count": appointment_count,
+            "patient_count": patient_count,
+            "active_admin_count": active_admin_count,
+            "note": "Historical appointments and patients will remain immutably preserved for audit compliance.",
+        },
+    }
+
+
+@router.delete("/clinics/{clinic_id}")
+async def delete_clinic(
+    clinic_id: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Safe non-destructive soft-deletion of a clinic preserving historical compliance records."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    # 1. Fetch clinic
+    clinic_res = (
+        supabase.table("clinics")
+        .select("id, name, whatsapp_number, is_active, status")
+        .eq("id", clinic_id)
+        .execute()
+    )
+    if not clinic_res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    clinic = clinic_res.data[0]
+    if clinic.get("status") == "DELETED":
+        raise HTTPException(status_code=400, detail="Clinic is already deleted")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    try:
+        # 2. Soft-delete master clinic row
+        supabase.table("clinics").update(
+            {
+                "status": "DELETED",
+                "deleted_at": now_iso,
+                "is_active": False,
+            }
+        ).eq("id", clinic_id).execute()
+
+        # 3. Deactivate all clinic admin accounts for this tenant
+        supabase.table("clinic_admins").update(
+            {"is_active": False}
+        ).eq("clinic_id", clinic_id).execute()
+
+        # 4. Deactivate all integration connectors
+        supabase.table("integration_connectors").update(
+            {"is_enabled": False}
+        ).eq("clinic_id", clinic_id).execute()
+
+        # 5. Invalidate tenant & branch in-memory caches
+        invalidate_tenant_cache(clinic.get("whatsapp_number"))
+        invalidate_branch_cache(clinic_id)
+
+        # 6. Audit logging
+        await log_admin_action(
+            user=owner,
+            action="soft_delete_clinic",
+            resource_type="clinic",
+            resource_id=clinic_id,
+            details={
+                "clinic_name": clinic.get("name"),
+                "whatsapp_number": clinic.get("whatsapp_number"),
+                "deleted_at": now_iso,
+            },
+            ip_address=client_ip,
+        )
+
+        return {
+            "success": True,
+            "message": f"Clinic '{clinic.get('name')}' successfully soft-deleted.",
+            "clinic_id": clinic_id,
+            "deleted_at": now_iso,
+        }
+
+    except Exception as e:
+        logger.error(f"Error during soft-delete of clinic {clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete clinic: {e}")
+

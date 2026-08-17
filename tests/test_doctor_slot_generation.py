@@ -151,7 +151,7 @@ def test_apply_slot_config_output_is_json_serializable():
         evening_end="19:00",
         slot_duration_minutes=30,
     )
-    data = _apply_slot_config(payload.dict())
+    data = _apply_slot_config(payload.model_dump())
 
     json.dumps(data)  # must not raise TypeError
     assert data["morning_start"] == "09:00:00"

@@ -35,6 +35,7 @@ from app.services.tenant import (
     require_feature,
 )
 from app.services.analytics import analytics_service
+from app.services.broadcast import broadcast_service
 from app.services.lab_reports import LabReportService
 from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
@@ -121,11 +122,14 @@ def check_password_hash(plain_password: str, stored_hash: str) -> bool:
             return bcrypt.checkpw(
                 plain_password.encode("utf-8"), stored_hash.encode("utf-8")
             )
-        except Exception:
-            pass
-    return secrets.compare_digest(
-        plain_password.encode("utf-8"), stored_hash.encode("utf-8")
-    )
+        except (Exception, BaseException):
+            return False
+    try:
+        return secrets.compare_digest(
+            plain_password.encode("utf-8"), stored_hash.encode("utf-8")
+        )
+    except Exception:
+        return False
 
 
 def hash_password(plain_password: str) -> str:
@@ -2595,3 +2599,78 @@ async def get_messaging_usage(
         raise HTTPException(
             status_code=500, detail="Failed to fetch messaging usage"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLINIC ADMIN IN-APP NOTIFICATIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/notifications")
+async def get_admin_notifications(
+    unread_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Retrieve in-app broadcast alerts for the authenticated clinic admin."""
+    clinic_id = await resolve_clinic_id_for_write(user)
+    notifications = await broadcast_service.get_admin_notifications(
+        clinic_id=clinic_id,
+        admin_id=user.user_id,
+        unread_only=unread_only,
+        limit=limit,
+        offset=offset,
+    )
+    return {"success": True, "notifications": notifications}
+
+
+@router.get("/notifications/unread-count")
+async def get_admin_notifications_unread_count(
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Get the live count of unread notifications for the header bell badge."""
+    clinic_id = await resolve_clinic_id_for_write(user)
+    count = await broadcast_service.get_unread_count(
+        clinic_id=clinic_id,
+        admin_id=user.user_id,
+    )
+    return {"success": True, "unread_count": count}
+
+
+@router.patch("/notifications/{notification_id}/read")
+async def mark_admin_notification_read(
+    notification_id: str,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Mark a specific notification as read within the authenticated admin's tenant scope."""
+    clinic_id = await resolve_clinic_id_for_write(user)
+    success = await broadcast_service.mark_notification_read(
+        notification_id=notification_id,
+        clinic_id=clinic_id,
+        admin_id=user.user_id,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail="Notification not found or does not belong to this clinic",
+        )
+    return {"success": True, "message": "Notification marked as read"}
+
+
+@router.post("/notifications/mark-all-read")
+async def mark_all_admin_notifications_read(
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Mark all unread notifications as read for the authenticated admin's clinic."""
+    clinic_id = await resolve_clinic_id_for_write(user)
+    updated_count = await broadcast_service.mark_all_notifications_read(
+        clinic_id=clinic_id,
+        admin_id=user.user_id,
+    )
+    return {
+        "success": True,
+        "message": f"Marked {updated_count} notifications as read",
+        "updated_count": updated_count,
+    }
+

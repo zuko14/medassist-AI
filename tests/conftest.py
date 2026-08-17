@@ -12,6 +12,8 @@ def set_dummy_env_vars():
         "WHATSAPP_PHONE_NUMBER_ID": "000000000000",
         "WHATSAPP_VERIFY_TOKEN": "test_verify_token",
         "WABA_DISPLAY_NAME": "Test Hospital",
+        "OPENROUTER_API_KEY": "test_openrouter_key",
+        "OPENROUTER_MODEL": "deepseek/deepseek-chat",
         "GROQ_API_KEY": "test_groq_key",
         "GROQ_MODEL": "llama-3.3-70b-versatile",
         "SUPABASE_URL": "https://test.supabase.co",

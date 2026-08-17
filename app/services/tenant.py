@@ -67,10 +67,10 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
     # Check cache first (TTL-enabled)
     cached_clinic = _get_cached_item(_tenant_cache, phone)
     if cached_clinic is not None:
-        if cached_clinic.get("is_active", True):
+        if cached_clinic.get("is_active", True) and cached_clinic.get("status") != "DELETED" and not cached_clinic.get("deleted_at"):
             return cached_clinic
         else:
-            raise TenantNotFound(f"Clinic for {phone} is inactive.")
+            raise TenantNotFound(f"Clinic for {phone} is inactive or deleted.")
 
     # Try DB lookup
     db_failed = False
@@ -86,9 +86,13 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
 
         if result.data:
             clinic = result.data[0]
+            if clinic.get("status") == "DELETED" or clinic.get("deleted_at") is not None:
+                raise TenantNotFound(f"Clinic for {phone} has been deleted.")
             _set_cached_item(_tenant_cache, phone, clinic)
             return clinic
 
+    except TenantNotFound:
+        raise
     except Exception as e:
         db_failed = True
         db_error = e
@@ -99,10 +103,16 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
         raise RuntimeError(f"Database error during tenant resolution for {phone}: {db_error}") from db_error
 
     # Fallback: single-tenant mode
-    # Fetch the first clinic in the database as the fallback
+    # Fetch the first active clinic in the database as the fallback
     try:
         fallback = (
-            supabase.table("clinics").select("*").order("created_at").limit(1).execute()
+            supabase.table("clinics")
+            .select("*")
+            .eq("is_active", True)
+            .neq("status", "DELETED")
+            .order("created_at")
+            .limit(1)
+            .execute()
         )
         if fallback.data:
             clinic = fallback.data[0]
@@ -156,7 +166,10 @@ async def get_clinic_by_id(clinic_id: str) -> dict:
 
     if not result.data:
         raise TenantNotFound(f"Clinic {clinic_id} not found")
-    return result.data[0]
+    clinic = result.data[0]
+    if clinic.get("status") == "DELETED" or clinic.get("deleted_at") is not None:
+        raise TenantNotFound(f"Clinic {clinic_id} has been deleted")
+    return clinic
 
 
 def get_clinic_contact(clinic: dict, key: str, fallback: str) -> str:

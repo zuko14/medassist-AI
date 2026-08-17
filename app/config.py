@@ -8,8 +8,14 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str
     waba_display_name: str = "Kriya AI Hospital"
 
-    # Groq AI
-    groq_api_key: str
+    # OpenRouter AI (Primary MedAssist LLM Provider)
+    openrouter_api_key: str = ""
+    openrouter_model: str = "deepseek/deepseek-chat"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1/chat/completions"
+    openrouter_timeout: int = 8
+
+    # Groq AI (Deprecated Fallback)
+    groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
     # Supabase
