@@ -574,6 +574,18 @@
             color: #fff;
         }
 
+        .action-btn-danger {
+            background: rgba(239,68,68,0.15);
+            border: 1px solid rgba(239,68,68,0.3);
+            color: #f87171;
+            margin-left: 6px;
+        }
+
+        .action-btn-danger:hover {
+            background: rgba(239,68,68,0.85);
+            color: #fff;
+        }
+
         /* Modal Side Panel */
         .modal-overlay {
             position: fixed;
@@ -1594,10 +1606,11 @@
                         <td style="font-weight:700">${c.appointments_count_30d || 0}</td>
                         <td>${c.patients_count || 0}</td>
                         <td style="font-weight:700; color:var(--green)">₹${rev}</td>
+                        <td style="font-size:0.82rem; color:var(--text2)">${lastActStr}</td>
                         <td>${statusBadge}</td>
                         <td style="white-space:nowrap;">
                             <button class="action-btn" onclick="event.stopPropagation(); openModal('${c.id}')">Analytics</button>
-                            <button class="action-btn" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#f87171; margin-left:6px;" onclick="event.stopPropagation(); openDeleteClinicModal('${c.id}', '${escapeHtml(c.name || 'Hospital')}')">Delete</button>
+                            <button class="action-btn action-btn-danger" onclick="event.stopPropagation(); openDeleteClinicModal('${c.id}', '${escapeHtml(c.name || 'Hospital')}')">Delete</button>
                         </td>
                     </tr>
                 `;
