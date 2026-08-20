@@ -3100,16 +3100,24 @@ async function deleteBranch(branchId) {
 }
 
 function resetBranchForm() {
-    document.getElementById('f-branchId').value = '';
-    document.getElementById('f-branchName').value = '';
-    document.getElementById('f-branchShort').value = '';
-    document.getElementById('f-branchAddr').value = '';
-    document.getElementById('f-branchLandmark').value = '';
-    document.getElementById('f-branchMaps').value = '';
-    document.getElementById('f-branchPhone').value = '';
-    document.getElementById('f-branchDiag').value = 'false';
-    document.getElementById('f-branchOrder').value = '0';
-    document.getElementById('branchFormTitle').textContent = '➕ Add New Branch';
+    const elId = document.getElementById('f-branchId');
+    if (elId) elId.value = '';
+    const elLocality = document.getElementById('f-branchLocality');
+    if (elLocality) elLocality.value = '';
+    const elAddr = document.getElementById('f-branchAddr');
+    if (elAddr) elAddr.value = '';
+    const elLandmark = document.getElementById('f-branchLandmark');
+    if (elLandmark) elLandmark.value = '';
+    const elMaps = document.getElementById('f-branchMaps');
+    if (elMaps) elMaps.value = '';
+    const elPhone = document.getElementById('f-branchPhone');
+    if (elPhone) elPhone.value = '';
+    const elDiag = document.getElementById('f-branchDiag');
+    if (elDiag) elDiag.value = 'false';
+    const elOrder = document.getElementById('f-branchOrder');
+    if (elOrder) elOrder.value = '0';
+    const elTitle = document.getElementById('branchFormTitle');
+    if (elTitle) elTitle.textContent = '➕ Add New Branch';
 }
 
 async function loadStaff() {

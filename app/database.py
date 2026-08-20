@@ -46,20 +46,28 @@ async def create_patient(
     name: Optional[str] = None,
     language: Optional[str] = None,
 ) -> dict:
-    """Create a new patient."""
+    """Create a new patient in a race-safe manner."""
     try:
+        from datetime import datetime, timezone
+
+        now_iso = datetime.now(timezone.utc).isoformat()
         data = {
             "clinic_id": clinic_id,
             "phone": phone,
             "name": name,
             "language": language,
             "opted_in": True,
-            "opted_in_at": "now()",
-            "last_seen_at": "now()",
+            "opted_in_at": now_iso,
+            "last_seen_at": now_iso,
         }
         result = supabase.table("patients").insert(data).execute()
         return result.data[0]
     except Exception as e:
+        error_str = str(e).lower()
+        if "unique" in error_str or "duplicate" in error_str or "23505" in error_str:
+            existing = await get_patient_by_phone(clinic_id, phone)
+            if existing:
+                return existing
         logger.error(f"Error creating patient: {e}")
         raise
 
@@ -99,19 +107,25 @@ async def create_conversation(clinic_id: str, phone: str) -> dict:
     try:
         from datetime import datetime, timedelta, timezone
 
+        now_dt = datetime.now(timezone.utc)
         data = {
             "clinic_id": clinic_id,
             "phone": phone,
             "state": "idle",
             "context": {},
             "session_expires_at": (
-                datetime.now(timezone.utc) + timedelta(hours=24)
+                now_dt + timedelta(hours=24)
             ).isoformat(),
-            "last_message_at": "now()",
+            "last_message_at": now_dt.isoformat(),
         }
         result = supabase.table("conversations").insert(data).execute()
         return result.data[0]
     except Exception as e:
+        error_str = str(e).lower()
+        if "unique" in error_str or "duplicate" in error_str or "23505" in error_str:
+            existing = await get_conversation(clinic_id, phone)
+            if existing:
+                return existing
         logger.error(f"Error creating conversation: {e}")
         raise
 
@@ -119,7 +133,9 @@ async def create_conversation(clinic_id: str, phone: str) -> dict:
 async def update_conversation(clinic_id: str, phone: str, updates: dict) -> bool:
     """Update conversation session."""
     try:
-        updates["updated_at"] = "now()"
+        from datetime import datetime, timezone
+
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         supabase.table("conversations").update(updates).eq("clinic_id", clinic_id).eq(
             "phone", phone
         ).execute()
@@ -130,11 +146,18 @@ async def update_conversation(clinic_id: str, phone: str, updates: dict) -> bool
 
 
 async def get_or_create_conversation(clinic_id: str, phone: str) -> dict:
-    """Get existing conversation or create new one."""
+    """Get existing conversation or create new one in a race-safe manner."""
     conv = await get_conversation(clinic_id, phone)
     if conv:
         return conv
-    return await create_conversation(clinic_id, phone)
+    try:
+        return await create_conversation(clinic_id, phone)
+    except Exception:
+        # If another concurrent request created the record, re-fetch it
+        conv = await get_conversation(clinic_id, phone)
+        if conv:
+            return conv
+        raise
 
 
 async def get_doctors(
