@@ -60,7 +60,6 @@ logs/
 *.sqlite3
 
 # Render/Railway
-render.yaml
 
 # Integration Connector Sessions (contains encrypted cookies)
 .connector_sessions/
