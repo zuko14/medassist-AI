@@ -89,7 +89,12 @@ class HospitalConnector(ABC):
         ...
 
     async def submit_to_medassist(
-        self, pdf_bytes: bytes, meta: ReportMetadata
+        self,
+        pdf_bytes: bytes,
+        meta: ReportMetadata,
+        match_confidence: Optional[float] = None,
+        match_source: Optional[str] = None,
+        matched_patient_id: Optional[str] = None,
     ) -> dict:
         """POST a downloaded report to MedAssist AI's internal API.
 
@@ -99,19 +104,27 @@ class HospitalConnector(ABC):
         url = f"{self.medassist_url}/internal/integrations/lab-report"
         filename = f"{meta.external_report_id}.pdf"
 
+        post_data = {
+            "clinic_id": self.clinic_id,
+            "patient_phone": meta.patient_phone,
+            "patient_name": meta.patient_name,
+            "report_name": meta.report_name,
+            "report_type": meta.report_type,
+            "external_report_id": meta.external_report_id,
+            "connector_type": self.connector_type,
+        }
+        if match_confidence is not None:
+            post_data["match_confidence"] = match_confidence
+        if match_source:
+            post_data["match_source"] = match_source
+        if matched_patient_id:
+            post_data["matched_patient_id"] = matched_patient_id
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 url,
                 headers={"X-Integration-Secret": self.integration_secret},
-                data={
-                    "clinic_id": self.clinic_id,
-                    "patient_phone": meta.patient_phone,
-                    "patient_name": meta.patient_name,
-                    "report_name": meta.report_name,
-                    "report_type": meta.report_type,
-                    "external_report_id": meta.external_report_id,
-                    "connector_type": self.connector_type,
-                },
+                data=post_data,
                 files={"file": (filename, pdf_bytes, "application/pdf")},
             )
 

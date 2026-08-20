@@ -216,6 +216,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "compliance_dpdp",
         "compliance_nmc",
         "lab_reports",
+        "diagnostic_reports",
         "ai_report_summary",
         "pii_sanitization",
         "multi_branch",  # Diagnostic centers can also run multiple branches
@@ -250,6 +251,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "compliance_dpdp",
         "compliance_nmc",
         "lab_reports",
+        "diagnostic_reports",
         "ai_report_summary",
         "pii_sanitization",
         "feedback",

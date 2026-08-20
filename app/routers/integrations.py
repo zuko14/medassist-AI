@@ -65,6 +65,9 @@ async def receive_lab_report(
     report_type: str = Form(default="Laboratory"),
     external_report_id: str = Form(...),
     connector_type: str = Form(default="mocdoc"),
+    match_confidence: Optional[float] = Form(default=None),
+    match_source: Optional[str] = Form(default=None),
+    matched_patient_id: Optional[str] = Form(default=None),
     file: UploadFile = File(...),
 ):
     """Receive a lab report from a connector and process it.
@@ -134,6 +137,9 @@ async def receive_lab_report(
             report_type=report_type,
             external_report_id=external_report_id,
             source=connector_type,
+            match_confidence=match_confidence,
+            match_source=match_source,
+            matched_patient_id=matched_patient_id,
         )
     except Exception as e:
         logger.error(f"LabReportService failed for {external_report_id}: {e}")

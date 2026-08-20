@@ -108,3 +108,141 @@ async def test_toggle_staff_rejects_non_staff_target():
         with pytest.raises(HTTPException) as exc:
             await toggle_staff(staff_id="a1", request=_mock_request(), user=_clinic_admin("clinic-1"))
     assert exc.value.status_code == 404
+
+
+def _staff_with_perms(permissions, branch_id=None, clinic_id="clinic-1"):
+    return AdminUser(
+        "delegator",
+        role="staff",
+        clinic_id=clinic_id,
+        user_id="s-del",
+        permissions=permissions,
+        branch_id=branch_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_staff_resolves_role_preset_permissions():
+    body = StaffCreate(username="sched1", password="password1", staff_role="DOCTOR_SCHEDULE_MANAGER")
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+    mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "new-2", "username": "sched1", "role": "staff"}]
+    )
+
+    with patch("app.routers.admin.supabase", mock_sb), patch("app.routers.admin.log_admin_action"):
+        await create_staff(body=body, request=_mock_request(), user=_clinic_admin("clinic-1"))
+
+    insert_call = mock_sb.table.return_value.insert.call_args[0][0]
+    assert "DOCTORS_UPDATE" in insert_call["permissions"]
+    assert "HOLIDAYS_CREATE" in insert_call["permissions"]
+    assert insert_call["staff_role"] == "DOCTOR_SCHEDULE_MANAGER"
+
+
+@pytest.mark.asyncio
+async def test_create_staff_validates_branch_belongs_to_own_clinic():
+    body = StaffCreate(username="sched1", password="password1", branch_id="branch-x")
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+
+    with patch("app.routers.admin.supabase", mock_sb):
+        with pytest.raises(HTTPException) as exc:
+            await create_staff(body=body, request=_mock_request(), user=_clinic_admin("clinic-1"))
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_staff_caps_extra_permissions_to_granters_own_authority():
+    body = StaffCreate(
+        username="sched2",
+        password="password1",
+        staff_role="STAFF",
+        extra_permissions=["DOCTORS_CREATE", "STAFF_CREATE"],
+    )
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+    mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "new-3", "username": "sched2", "role": "staff"}]
+    )
+
+    # Granter is staff with only DOCTORS_CREATE and STAFF_CREATE (which allows them to call the endpoint)
+    # But if granter only holds DOCTORS_CREATE + STAFF_CREATE, requesting a permission they don't hold is stripped.
+    with patch("app.routers.admin.supabase", mock_sb), patch("app.routers.admin.log_admin_action"):
+        await create_staff(
+            body=body,
+            request=_mock_request(),
+            user=_staff_with_perms(["DOCTORS_CREATE", "STAFF_CREATE"]),
+        )
+
+    insert_call = mock_sb.table.return_value.insert.call_args[0][0]
+    assert insert_call["permissions"] == ["DOCTORS_CREATE", "STAFF_CREATE"]
+
+
+@pytest.mark.asyncio
+async def test_update_staff_changes_role_and_permissions():
+    from app.routers.admin import StaffUpdate, update_staff
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "s1", "clinic_id": "clinic-1", "role": "staff", "permissions": [], "branch_id": None}]
+    )
+    mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "s1", "staff_role": "DOCTOR_SCHEDULE_MANAGER"}]
+    )
+
+    body = StaffUpdate(staff_role="DOCTOR_SCHEDULE_MANAGER")
+    with patch("app.routers.admin.supabase", mock_sb), patch("app.routers.admin.log_admin_action"):
+        result = await update_staff(
+            staff_id="s1",
+            body=body,
+            request=_mock_request(),
+            user=_clinic_admin("clinic-1"),
+        )
+
+    assert result["success"] is True
+    update_call = mock_sb.table.return_value.update.call_args[0][0]
+    assert "DOCTORS_UPDATE" in update_call["permissions"]
+
+
+@pytest.mark.asyncio
+async def test_update_staff_rejects_cross_clinic_target():
+    from app.routers.admin import StaffUpdate, update_staff
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "s2", "clinic_id": "clinic-2", "role": "staff", "permissions": [], "branch_id": None}]
+    )
+
+    body = StaffUpdate(staff_role="RECEPTIONIST")
+    with patch("app.routers.admin.supabase", mock_sb):
+        with pytest.raises(HTTPException) as exc:
+            await update_staff(
+                staff_id="s2",
+                body=body,
+                request=_mock_request(),
+                user=_clinic_admin("clinic-1"),
+            )
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_staff_rejects_non_staff_target():
+    from app.routers.admin import StaffUpdate, update_staff
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "a1", "clinic_id": "clinic-1", "role": "clinic_admin", "permissions": [], "branch_id": None}]
+    )
+
+    body = StaffUpdate(staff_role="RECEPTIONIST")
+    with patch("app.routers.admin.supabase", mock_sb):
+        with pytest.raises(HTTPException) as exc:
+            await update_staff(
+                staff_id="a1",
+                body=body,
+                request=_mock_request(),
+                user=_clinic_admin("clinic-1"),
+            )
+    assert exc.value.status_code == 404
+

@@ -41,8 +41,14 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from app.config import settings
 from app.database import supabase
 from app.utils.connector_crypto import decrypt_password, encrypt_password
+from app.services.patient_match import patient_match_service
+from connectors.mocdoc.worker import MocDocConnector
 
 logger = logging.getLogger("connectors")
+
+CONNECTOR_REGISTRY = {
+    "mocdoc": MocDocConnector,
+}
 
 
 def setup_logging(level: str = "INFO"):
@@ -61,6 +67,52 @@ def setup_logging(level: str = "INFO"):
 def _scope_by_branch(query, branch_id: str = None):
     """Apply a branch_id filter matching NULL (clinic-level) or a specific branch."""
     return query.is_("branch_id", "null") if not branch_id else query.eq("branch_id", branch_id)
+
+
+async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1") -> bool:
+    """Acquire distributed advisory lock on connector record (15 min lease)."""
+    try:
+        res = (
+            supabase.table("integration_connectors")
+            .select("id, locked_at")
+            .eq("id", connector_id)
+            .execute()
+        )
+        if not res.data:
+            return False
+        row = res.data[0]
+        locked_at = row.get("locked_at")
+        if locked_at:
+            try:
+                dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - dt < timedelta(minutes=15):
+                    logger.warning(
+                        f"Connector {connector_id} is locked by another process (locked_at={locked_at})"
+                    )
+                    return False
+            except Exception:
+                pass
+
+        now_str = datetime.now(timezone.utc).isoformat()
+        supabase.table("integration_connectors").update({
+            "locked_at": now_str,
+            "locked_by": worker_id,
+        }).eq("id", connector_id).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"Could not acquire lock for connector {connector_id} (proceeding): {e}")
+        return True
+
+
+async def release_connector_lock(connector_id: str) -> None:
+    """Release distributed advisory lock on connector record."""
+    try:
+        supabase.table("integration_connectors").update({
+            "locked_at": None,
+            "locked_by": None,
+        }).eq("id", connector_id).execute()
+    except Exception as e:
+        logger.warning(f"Could not release lock for connector {connector_id}: {e}")
 
 
 async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) -> None:
@@ -272,138 +324,157 @@ async def run_connector(
         session_dir = os.path.join(PROJECT_ROOT, ".connector_sessions")
         os.makedirs(session_dir, exist_ok=True)
 
-        # Instantiate connector
-        if connector_type == "mocdoc":
-            from connectors.mocdoc.worker import MocDocConnector
-            connector = MocDocConnector(
-                clinic_id=clinic_id,
-                config=config,
-                medassist_url=medassist_url,
-                integration_secret=settings.integration_secret,
-                session_dir=session_dir,
-                branch_id=branch_id,
-            )
-        else:
+        connector_id = connector_row.get("id")
+        if connector_id:
+            locked = await acquire_connector_lock(connector_id)
+            if not locked:
+                summary["run_status"] = "locked"
+                summary["error_message"] = "Connector is currently locked by another worker"
+                return summary
+
+        # Instantiate connector via registry
+        connector_cls = CONNECTOR_REGISTRY.get(connector_type)
+        if not connector_cls:
             summary["error_message"] = f"Unknown connector type: {connector_type}"
             return summary
 
-        if dry_run:
-            # Dry run: authenticate and parse only
-            logger.info("=== DRY RUN MODE — No downloads or uploads ===")
-            authenticated = await connector.authenticate()
-            if not authenticated:
-                summary["error_message"] = "Authentication failed"
-                await send_admin_alert(
-                    clinic_id,
-                    "⚠️ MocDoc Connector: Authentication failed. "
-                    "Check credentials or selectors.",
-                    branch_id=branch_id,
-                )
-                return summary
+        connector = connector_cls(
+            clinic_id=clinic_id,
+            config=config,
+            medassist_url=medassist_url,
+            integration_secret=settings.integration_secret,
+            session_dir=session_dir,
+            branch_id=branch_id,
+        )
 
-            reports = await connector.fetch_new_reports()
-            summary["reports_found"] = len(reports)
-            summary["run_status"] = "dry_run"
-
-            # Apply filters for display
-            if vam_id_filter:
-                reports = [r for r in reports if r.vam_id == vam_id_filter]
-                logger.info(f"Filtered to VAM ID {vam_id_filter}: {len(reports)} match")
-            if limit > 0:
-                reports = reports[:limit]
-
-            logger.info(f"=== DRY RUN RESULTS: {len(reports)} reports found ===")
-            for r in reports:
-                logger.info(f"  → {r}")
-
+        authenticated = await connector.authenticate()
+        if not authenticated:
+            summary["error_message"] = "Authentication failed"
+            await send_admin_alert(
+                clinic_id,
+                "⚠️ MocDoc Connector: Authentication failed. Check credentials or selectors.",
+                branch_id=branch_id,
+            )
             await connector.cleanup()
             return summary
 
-        # Full run — with optional limit/vam_id filtering
-        if limit > 0 or vam_id_filter:
-            # Filtered run: we control the loop here
-            authenticated = await connector.authenticate()
-            if not authenticated:
-                summary["error_message"] = "Authentication failed"
-                await connector.cleanup()
-                return summary
+        reports = await connector.fetch_new_reports()
+        summary["reports_found"] = len(reports)
 
-            reports = await connector.fetch_new_reports()
-            summary["reports_found"] = len(reports)
+        if vam_id_filter:
+            reports = [r for r in reports if r.vam_id == vam_id_filter]
+            logger.info(f"Filtered to VAM ID {vam_id_filter}: {len(reports)} match")
+        if limit > 0:
+            reports = reports[:limit]
+            logger.info(f"Limited to {limit} report(s)")
 
-            if vam_id_filter:
-                reports = [r for r in reports if r.vam_id == vam_id_filter]
-                logger.info(f"Filtered to VAM ID {vam_id_filter}: {len(reports)} match")
-            if limit > 0:
-                reports = reports[:limit]
-                logger.info(f"Limited to {limit} report(s)")
+        summary["reports_new"] = len(reports)
 
-            summary["reports_new"] = len(reports)
+        if dry_run:
+            logger.info("=== DRY RUN MODE — No downloads or uploads ===")
+            logger.info(f"=== DRY RUN RESULTS: {len(reports)} reports found ===")
+            for r in reports:
+                logger.info(f"  → {r}")
+            summary["run_status"] = "dry_run"
+            await connector.cleanup()
+            return summary
 
-            for meta in reports:
-                try:
-                    pdf_bytes = await connector.download_report(meta)
-                    if not pdf_bytes:
-                        summary["reports_failed"] += 1
-                        await record_report_failure(
-                            clinic_id=clinic_id,
-                            connector_type=connector_type,
-                            external_report_id=meta.external_report_id,
-                            error_message="PDF download failed or bill due pending",
-                            vam_id=meta.vam_id,
-                            patient_name=meta.patient_name,
-                            branch_id=branch_id,
-                        )
-                        continue
-                    result = await connector.submit_to_medassist(pdf_bytes, meta)
-                    if not result.get("already_processed"):
-                        summary["reports_uploaded"] += 1
-                        logger.info(f"Uploaded: {meta}")
-                    await record_report_success(
-                        clinic_id=clinic_id,
-                        connector_type=connector_type,
-                        external_report_id=meta.external_report_id,
-                        branch_id=branch_id,
-                    )
-                except Exception as e:
+        for meta in reports:
+            try:
+                # Step 1: Patient matching safety gate
+                match_result = await patient_match_service.match(
+                    clinic_id=clinic_id,
+                    scraped_name=meta.patient_name,
+                    scraped_phone=meta.patient_phone,
+                    branch_id=branch_id,
+                )
+
+                if not match_result.is_safe_to_send:
                     summary["reports_failed"] += 1
-                    logger.error(f"Failed: {meta.external_report_id}: {e}")
+                    logger.warning(
+                        f"NEEDS_REVIEW for report {meta.external_report_id}: {match_result.review_reason}"
+                    )
+                    try:
+                        supabase.table("lab_reports").insert({
+                            "clinic_id": clinic_id,
+                            "patient_phone": meta.patient_phone or "MISSING",
+                            "patient_name": meta.patient_name or "Unknown",
+                            "report_name": meta.report_name or "Lab Report",
+                            "report_type": meta.report_type or "Laboratory",
+                            "file_path": f"pending_review/{meta.external_report_id}",
+                            "status": "needs_review",
+                            "external_report_id": meta.external_report_id,
+                            "source": connector_type,
+                            "match_confidence": match_result.match_confidence,
+                            "match_source": match_result.match_source,
+                            "error_message": match_result.review_reason,
+                        }).execute()
+                    except Exception as e_nr:
+                        logger.error(f"Failed to record needs_review row: {e_nr}")
+
                     await record_report_failure(
                         clinic_id=clinic_id,
                         connector_type=connector_type,
                         external_report_id=meta.external_report_id,
-                        error_message=str(e),
+                        error_message=match_result.review_reason or "Patient match conflict / needs review",
                         vam_id=meta.vam_id,
                         patient_name=meta.patient_name,
                         branch_id=branch_id,
                     )
+                    continue
 
-            await connector.cleanup()
+                # Step 2: Download PDF
+                pdf_bytes = await connector.download_report(meta)
+                if not pdf_bytes:
+                    summary["reports_failed"] += 1
+                    await record_report_failure(
+                        clinic_id=clinic_id,
+                        connector_type=connector_type,
+                        external_report_id=meta.external_report_id,
+                        error_message="PDF download failed or bill due pending",
+                        vam_id=meta.vam_id,
+                        patient_name=meta.patient_name,
+                        branch_id=branch_id,
+                    )
+                    continue
 
-            summary["run_status"] = (
-                "success" if summary["reports_failed"] == 0
-                else "partial" if summary["reports_uploaded"] > 0
-                else "failed"
-            )
-        else:
-            # Unfiltered full run
-            run_summary = await connector.run()
-            summary.update({
-                "reports_found": run_summary["reports_found"],
-                "reports_new": run_summary["reports_new"],
-                "reports_uploaded": run_summary["reports_uploaded"],
-                "reports_failed": run_summary["reports_failed"],
-                "run_status": (
-                    "success" if run_summary["reports_failed"] == 0
-                    else "partial" if run_summary["reports_uploaded"] > 0
-                    else "failed"
-                ),
-                "error_message": (
-                    "; ".join(run_summary["errors"][:3])
-                    if run_summary["errors"]
-                    else None
-                ),
-            })
+                # Step 3: Submit to MedAssist API
+                result = await connector.submit_to_medassist(
+                    pdf_bytes,
+                    meta,
+                    match_confidence=match_result.match_confidence,
+                    match_source=match_result.match_source,
+                    matched_patient_id=match_result.matched_patient_id,
+                )
+                if not result.get("already_processed"):
+                    summary["reports_uploaded"] += 1
+                    logger.info(f"Uploaded: {meta}")
+                await record_report_success(
+                    clinic_id=clinic_id,
+                    connector_type=connector_type,
+                    external_report_id=meta.external_report_id,
+                    branch_id=branch_id,
+                )
+            except Exception as e:
+                summary["reports_failed"] += 1
+                logger.error(f"Failed: {meta.external_report_id}: {e}")
+                await record_report_failure(
+                    clinic_id=clinic_id,
+                    connector_type=connector_type,
+                    external_report_id=meta.external_report_id,
+                    error_message=str(e),
+                    vam_id=meta.vam_id,
+                    patient_name=meta.patient_name,
+                    branch_id=branch_id,
+                )
+
+        await connector.cleanup()
+
+        summary["run_status"] = (
+            "success" if summary["reports_failed"] == 0
+            else "partial" if summary["reports_uploaded"] > 0
+            else "failed"
+        )
 
         # Alert admin if there were failures
         if summary.get("reports_failed", 0) > 0:
@@ -465,6 +536,13 @@ async def run_connector(
             _scope_by_branch(update_query, branch_id).execute()
         except Exception as e:
             logger.error(f"Failed to update connector timestamps: {e}")
+
+        # Release advisory lock
+        if connector_id:
+            try:
+                await release_connector_lock(connector_id)
+            except Exception as e:
+                logger.warning(f"Failed to release connector lock: {e}")
 
     logger.info(
         f"Connector run complete: "

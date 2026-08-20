@@ -797,7 +797,7 @@
             <div class="nav-link on" tabindex="0" data-page="dashboard" onclick="go('dashboard',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span> Dashboard
             </div>
-            <div class="nav-link" tabindex="0" data-page="profile" data-role="admin" onclick="go('profile',this)">
+            <div class="nav-link" tabindex="0" data-page="profile" data-feature="booking" data-role="admin" onclick="go('profile',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></span> Hospital Profile
             </div>
             <div class="nav-link" tabindex="0" data-page="appointments" data-feature="booking" onclick="go('appointments',this)">
@@ -812,8 +812,11 @@
             <div class="nav-link" tabindex="0" data-page="holidays" data-feature="roster_management" data-role="admin" onclick="go('holidays',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></span> Holidays
             </div>
-            <div class="nav-link" tabindex="0" data-page="patients" onclick="go('patients',this)">
+            <div class="nav-link" tabindex="0" data-page="patients" data-feature="booking" onclick="go('patients',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> Patients
+            </div>
+            <div class="nav-link" tabindex="0" data-page="diagreports" data-feature="diagnostic_reports" onclick="go('diagreports',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span> Report Automation
             </div>
             <div class="nav-link" tabindex="0" data-page="labreports" data-feature="lab_reports" onclick="go('labreports',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L15 8V2"></path><line x1="9" y1="2" x2="15" y2="2"></line><line x1="7" y1="14" x2="17" y2="14"></line></svg></span> Lab Reports
@@ -833,7 +836,7 @@
             <div class="nav-link" tabindex="0" data-page="staff" data-role="admin" onclick="go('staff',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> Staff Accounts
             </div>
-            <div class="nav-link" tabindex="0" data-page="connectors" data-feature="lab_reports" onclick="go('connectors',this)">
+            <div class="nav-link" tabindex="0" data-page="connectors" data-feature="diagnostic_reports" onclick="go('connectors',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span> Report Connector
             </div>
         </div>
@@ -879,47 +882,123 @@
         </div>
 
         <div id="pg-dashboard" class="sec on">
-            <div class="page-head">
-                <h2>Dashboard</h2>
-                <p>Overview of your hospital's activity • Last 30 days</p>
+            <!-- Standard Clinic / Hospital View -->
+            <div id="clinicDashboardContent">
+                <div class="page-head">
+                    <h2>Dashboard</h2>
+                    <p>Overview of your hospital's activity • Last 30 days</p>
+                </div>
+
+                <div class="stats stagger-in">
+                    <div class="stat"><div class="glow"></div><div class="label">Total Appointments</div><div class="num" id="s-total">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Confirmed</div><div class="num" id="s-confirmed">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Cancelled</div><div class="num" id="s-cancelled">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Completed</div><div class="num" id="s-completed">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-patients">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">New Patients</div><div class="num" id="s-new">—</div></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <h3>Department Breakdown</h3>
+                    </div>
+                    <div id="deptBars">
+                        <div class="loader"><div class="spin"></div>Loading departments...</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <h3>Recent Appointments</h3>
+                        <button class="btn btn-ghost btn-sm" onclick="go('appointments',null)">View All →</button>
+                    </div>
+                    <div class="tbl-wrap" id="dashAppts">
+                        <div class="loader"><div class="spin"></div>Loading...</div>
+                    </div>
+                </div>
+
+                <!-- ─── MESSAGING USAGE CARD (customer-safe, no costs) ─── -->
+                <div class="card" id="usageCard" style="margin-top:1.5rem">
+                    <div class="card-head">
+                        <h3>📊 Messaging Usage</h3>
+                        <span id="usagePlan" style="font-size:0.85rem;color:var(--accent2);font-weight:600"></span>
+                    </div>
+                    <div id="usageContent">
+                        <div class="loader"><div class="spin"></div>Loading usage data...</div>
+                    </div>
+                </div>
             </div>
 
-            <div class="stats stagger-in">
-                <div class="stat"><div class="glow"></div><div class="label">Total Appointments</div><div class="num" id="s-total">—</div></div>
-                <div class="stat"><div class="glow"></div><div class="label">Confirmed</div><div class="num" id="s-confirmed">—</div></div>
-                <div class="stat"><div class="glow"></div><div class="label">Cancelled</div><div class="num" id="s-cancelled">—</div></div>
-                <div class="stat"><div class="glow"></div><div class="label">Completed</div><div class="num" id="s-completed">—</div></div>
-                <div class="stat"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-patients">—</div></div>
-                <div class="stat"><div class="glow"></div><div class="label">New Patients</div><div class="num" id="s-new">—</div></div>
-            </div>
+            <!-- Diagnostic Center Operations Dashboard View -->
+            <div id="diagDashboardContent" style="display:none;">
+                <div class="page-head">
+                    <h2>Diagnostic Operations Dashboard</h2>
+                    <p>Live status of automated report extraction and WhatsApp deliveries</p>
+                </div>
 
-            <div class="card">
-                <div class="card-head">
-                    <h3>Department Breakdown</h3>
+                <!-- Automation Status Strip -->
+                <div class="card" id="diagStatusStrip" style="background:var(--surface2); border:1px solid var(--border2); margin-bottom:20px; padding:16px 20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <span id="diagStatusDot" style="width:12px; height:12px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green);"></span>
+                            <div>
+                                <strong id="diagStatusTitle" style="font-size:0.95rem; color:#fff;">Report Connector: Active</strong>
+                                <span id="diagStatusSub" style="display:block; font-size:0.78rem; color:var(--text3);">Polling every 10 minutes</span>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn btn-ghost btn-sm" onclick="loadDiagnosticDashboard()">🔄 Refresh</button>
+                            <button class="btn btn-accent btn-sm" onclick="go('connectors',null)">⚙️ Connector Settings</button>
+                        </div>
+                    </div>
                 </div>
-                <div id="deptBars">
-                    <div class="loader"><div class="spin"></div>Loading departments...</div>
-                </div>
-            </div>
 
-            <div class="card">
-                <div class="card-head">
-                    <h3>Recent Appointments</h3>
-                    <button class="btn btn-ghost btn-sm" onclick="go('appointments',null)">View All →</button>
+                <!-- Today's Operations Stats -->
+                <div class="stats stagger-in">
+                    <div class="stat"><div class="glow"></div><div class="label">Discovered Today</div><div class="num" id="s-diag-found" style="color:var(--accent2)">0</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Delivered Today</div><div class="num" id="s-diag-sent" style="color:var(--green)">0</div></div>
+                    <div class="stat" style="border-color:rgba(255,200,87,0.3)"><div class="glow" style="background:var(--amber)"></div><div class="label">⚠️ Needs Review</div><div class="num" id="s-diag-review" style="color:var(--amber)">0</div></div>
+                    <div class="stat" style="border-color:rgba(255,107,107,0.3)"><div class="glow" style="background:var(--red)"></div><div class="label">Delivery Failures</div><div class="num" id="s-diag-failed" style="color:var(--red)">0</div></div>
                 </div>
-                <div class="tbl-wrap" id="dashAppts">
-                    <div class="loader"><div class="spin"></div>Loading...</div>
-                </div>
-            </div>
 
-            <!-- ─── MESSAGING USAGE CARD (customer-safe, no costs) ─── -->
-            <div class="card" id="usageCard" style="margin-top:1.5rem">
-                <div class="card-head">
-                    <h3>📊 Messaging Usage</h3>
-                    <span id="usagePlan" style="font-size:0.85rem;color:var(--accent2);font-weight:600"></span>
+                <!-- ⚠️ Needs Review Triage Table -->
+                <div class="card" style="border-left:4px solid var(--amber);">
+                    <div class="card-head">
+                        <div>
+                            <h3 style="color:var(--amber);">⚠️ Needs-Review Triage Queue</h3>
+                            <p style="color:var(--text3); font-size:0.8rem; margin-top:2px;">Reports requiring phone or identity verification before WhatsApp delivery</p>
+                        </div>
+                        <span id="diagReviewCountBadge" class="badge badge-pending">0 Pending</span>
+                    </div>
+                    <div class="tbl-wrap" id="diagReviewQueue">
+                        <div class="loader"><div class="spin"></div>Loading triage queue...</div>
+                    </div>
                 </div>
-                <div id="usageContent">
-                    <div class="loader"><div class="spin"></div>Loading usage data...</div>
+
+                <!-- 🛑 Undelivered / Failed Reports Table -->
+                <div class="card" style="border-left:4px solid var(--red);">
+                    <div class="card-head">
+                        <div>
+                            <h3 style="color:var(--red);">🛑 Failed Deliveries Queue</h3>
+                            <p style="color:var(--text3); font-size:0.8rem; margin-top:2px;">Reports where delivery failed due to network, recipient, or storage issues</p>
+                        </div>
+                        <span id="diagFailedCountBadge" class="badge badge-failed">0 Failed</span>
+                    </div>
+                    <div class="tbl-wrap" id="diagFailedQueue">
+                        <div class="loader"><div class="spin"></div>Loading failed deliveries...</div>
+                    </div>
+                </div>
+
+                <!-- 90-Day Retention Notice -->
+                <div class="card" id="diagRetentionCard" style="background:rgba(77,166,255,0.04); border:1px solid rgba(77,166,255,0.2);">
+                    <div style="display:flex; gap:14px; align-items:flex-start;">
+                        <span style="font-size:1.5rem;">ℹ️</span>
+                        <div>
+                            <strong style="color:var(--blue); font-size:0.92rem;">DPDP & NABH 90-Day Storage Policy Notice</strong>
+                            <p style="font-size:0.82rem; color:var(--text2); margin-top:4px; line-height:1.5;">PDF report files are securely deleted after 90 days of delivery to maintain DPDP data minimization compliance. Clinical audit metadata and summaries remain permanently archived.</p>
+                            <div id="diagRetentionExpiringNotice" style="margin-top:6px; font-size:0.8rem; color:var(--amber); display:none;">⚠️ <span id="diagExpiringCount">0</span> reports approaching the 90-day retention window.</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1040,7 +1119,7 @@
                     <div class="loader"><div class="spin"></div>Loading...</div>
                 </div>
             </div>
-            <div class="form-card">
+            <div class="form-card" id="leaveFormCard">
                 <h3>➕ Add Leave</h3>
                 <div id="leaveMsg"></div>
                 <div class="form-row">
@@ -1075,7 +1154,7 @@
                     <div class="loader"><div class="spin"></div>Loading...</div>
                 </div>
             </div>
-            <div class="form-card">
+            <div class="form-card" id="holFormCard">
                 <h3>➕ Add Holiday</h3>
                 <div id="holMsg"></div>
                 <div class="form-row">
@@ -1101,6 +1180,28 @@
             <div class="card">
                 <div class="tbl-wrap" id="patientList">
                     <div class="loader"><div class="spin"></div>Loading patients...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── REPORT AUTOMATION / DIAGNOSTIC QUEUE ─── -->
+        <div id="pg-diagreports" class="sec">
+            <div class="page-head">
+                <h2>Report Automation Queue</h2>
+                <p>Live triage queue for automated lab report processing, identity validation, and WhatsApp delivery</p>
+            </div>
+            <div class="top-row">
+                <input type="text" class="search-bar" id="diagReportSearch" placeholder="Search by patient name, phone, or report ID..." oninput="filterDiagReports()">
+                <button class="btn btn-accent" onclick="openLabReportModal()">📤 Manual Upload</button>
+            </div>
+            <div class="toggle-group">
+                <button class="toggle-btn on" id="diagFilterAll" onclick="setDiagQueueFilter('all')">All Queue</button>
+                <button class="toggle-btn" id="diagFilterReview" onclick="setDiagQueueFilter('needs_review')">Needs Review</button>
+                <button class="toggle-btn" id="diagFilterFailed" onclick="setDiagQueueFilter('failed')">Failed Only</button>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="diagReportsQueueList">
+                    <div class="loader"><div class="spin"></div>Loading triage queue...</div>
                 </div>
             </div>
         </div>
@@ -1318,7 +1419,7 @@
         <div id="pg-staff" class="sec">
             <div class="page-head">
                 <h2>Staff Accounts</h2>
-                <p>Create front-desk login credentials for your staff. Staff accounts can manage appointments, check-ins and patients, but cannot access payments, settings or roster management.</p>
+                <p>Create and manage staff login credentials with delegated roles, permissions, and branch scoping.</p>
             </div>
 
             <div class="card">
@@ -1342,6 +1443,44 @@
                             <input type="text" id="f-staffPassword" placeholder="At least 8 characters" style="padding-right:44px;">
                             <button type="button" class="btn-ghost" style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:2px 8px; font-size:12px;" onclick="generateStaffPassword()">🎲</button>
                         </div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Staff Role</label>
+                        <select id="f-staffRole" onchange="onStaffRoleChange()">
+                            <option value="STAFF">Staff (Front Desk)</option>
+                            <option value="RECEPTIONIST">Receptionist</option>
+                            <option value="FRONT_DESK">Front Desk</option>
+                            <option value="APPOINTMENT_MANAGER">Appointment Manager</option>
+                            <option value="LAB_OPERATOR">Lab Operator</option>
+                            <option value="PHARMACY_OPERATOR">Pharmacy Operator</option>
+                            <option value="DOCTOR_SCHEDULE_MANAGER">Doctor & Schedule Manager</option>
+                            <option value="BRANCH_MANAGER">Branch Manager</option>
+                            <option value="CUSTOM_ROLE">Custom Permissions</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Branch Scope</label>
+                        <select id="f-staffBranch">
+                            <option value="">All Branches (Tenant-wide)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field" style="margin-top:10px;">
+                    <label>Extra / Delegated Permissions</label>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; background:var(--surface2); padding:12px; border-radius:10px; border:1px solid var(--border);">
+                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -1410,6 +1549,39 @@
         </div>
 
     </main>
+</div>
+
+<!-- ═══ RESOLVE MATCH MODAL ═══ -->
+<div class="modal-overlay" id="resolveMatchModal">
+    <div class="modal">
+        <h3>🔍 Resolve Patient Identity & Send</h3>
+        <p style="color:var(--text3); font-size:0.82rem; margin-bottom:16px;">Verify or correct the recipient phone number to deliver this medical report.</p>
+        <input type="hidden" id="m-resolveReportId">
+        <div id="resolveModalMsg"></div>
+        <div class="field">
+            <label>Report Name</label>
+            <input type="text" id="m-resolveReportName" readonly style="opacity:0.7;">
+        </div>
+        <div class="field">
+            <label>Patient Name</label>
+            <input type="text" id="m-resolvePatientName" placeholder="Patient full name">
+        </div>
+        <div class="field">
+            <label>Recipient WhatsApp Phone <span style="color:var(--red)">*</span></label>
+            <input type="text" id="m-resolvePhone" placeholder="e.g. +91XXXXXXXXXX or 10-digit mobile">
+            <small style="color:var(--text3)">Must be a valid 10-digit Indian phone number</small>
+        </div>
+        <div class="field" style="margin-top:12px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="m-resolveSendNow" checked>
+                🚀 Deliver PDF via WhatsApp immediately upon saving
+            </label>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeResolveMatchModal()">Cancel</button>
+            <button class="btn btn-accent" id="btn-resolveSubmit" onclick="submitResolveMatch()">Save & Deliver</button>
+        </div>
+    </div>
 </div>
 
 <!-- ═══ UPLOAD REPORT MODAL ═══ -->
@@ -1514,6 +1686,70 @@
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeRxModal()">Cancel</button>
             <button class="btn btn-accent" id="btn-rxSubmit" onclick="submitPrescription()">Add Prescription</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ EDIT STAFF MODAL ═══ -->
+<div class="modal-overlay" id="editStaffModal">
+    <div class="modal">
+        <h3>✏️ Edit Staff Account</h3>
+        <div id="editStaffMsg"></div>
+        <input type="hidden" id="m-editStaffId">
+        <div class="form-row">
+            <div class="field">
+                <label>Username</label>
+                <input type="text" id="m-editStaffUsername" disabled style="opacity:0.7">
+            </div>
+            <div class="field">
+                <label>Role</label>
+                <select id="m-editStaffRole" onchange="onEditStaffRoleChange()">
+                    <option value="STAFF">Staff (Front Desk)</option>
+                    <option value="RECEPTIONIST">Receptionist</option>
+                    <option value="FRONT_DESK">Front Desk</option>
+                    <option value="APPOINTMENT_MANAGER">Appointment Manager</option>
+                    <option value="LAB_OPERATOR">Lab Operator</option>
+                    <option value="PHARMACY_OPERATOR">Pharmacy Operator</option>
+                    <option value="DOCTOR_SCHEDULE_MANAGER">Doctor & Schedule Manager</option>
+                    <option value="BRANCH_MANAGER">Branch Manager</option>
+                    <option value="CUSTOM_ROLE">Custom Permissions</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="field">
+                <label>Branch Scope</label>
+                <select id="m-editStaffBranch">
+                    <option value="">All Branches (Tenant-wide)</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>Account Status</label>
+                <select id="m-editStaffStatus">
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                </select>
+            </div>
+        </div>
+        <div class="field" style="margin-top:10px;">
+            <label>Extra / Delegated Permissions</label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; background:var(--surface2); padding:12px; border-radius:10px; border:1px solid var(--border);">
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeEditStaffModal()">Cancel</button>
+            <button class="btn btn-accent" onclick="submitEditStaff()">Save Changes</button>
         </div>
     </div>
 </div>
@@ -1706,8 +1942,17 @@ function icon(name, size = 20) {
 const icon_ = icon; // alias so the toast() function's local `icon` element var doesn't shadow the helper
 
 // ═══════ AUTH ═══════
+let myPlan = null;
 let myFeatures = null; // null = super_admin, sees everything
 let myRole = null;
+let myPermissions = [];
+let myBranchId = null;
+let myStaffRole = null;
+
+function hasPermission(perm) {
+    if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
+    return Boolean(myPermissions && myPermissions.includes(perm));
+}
 
 function applyFeatureVisibility() {
     document.querySelectorAll('[data-feature]').forEach(el => {
@@ -1716,8 +1961,34 @@ function applyFeatureVisibility() {
         el.style.display = visible ? '' : 'none';
     });
     document.querySelectorAll('[data-role="admin"]').forEach(el => {
-        el.style.display = myRole === 'staff' ? 'none' : '';
+        const page = el.dataset.page;
+        if (myRole === 'staff') {
+            if (page === 'doctors') {
+                el.style.display = (hasPermission('DOCTORS_CREATE') || hasPermission('DOCTORS_UPDATE') || hasPermission('DOCTORS_DELETE')) ? '' : 'none';
+            } else if (page === 'leaves') {
+                el.style.display = (hasPermission('DOCTOR_LEAVES_CREATE') || hasPermission('DOCTOR_LEAVES_DELETE')) ? '' : 'none';
+            } else if (page === 'holidays') {
+                el.style.display = (hasPermission('HOLIDAYS_CREATE') || hasPermission('HOLIDAYS_DELETE')) ? '' : 'none';
+            } else if (page === 'branches') {
+                el.style.display = hasPermission('DOCTOR_BRANCH_ASSIGN') ? '' : 'none';
+            } else if (page === 'staff') {
+                el.style.display = (hasPermission('STAFF_VIEW') || hasPermission('STAFF_CREATE') || hasPermission('STAFF_UPDATE')) ? '' : 'none';
+            } else {
+                el.style.display = 'none';
+            }
+        } else {
+            el.style.display = '';
+        }
     });
+
+    const docForm = document.getElementById('docFormCard');
+    if (docForm) docForm.style.display = hasPermission('DOCTORS_CREATE') ? '' : 'none';
+    const leaveForm = document.getElementById('leaveFormCard');
+    if (leaveForm) leaveForm.style.display = hasPermission('DOCTOR_LEAVES_CREATE') ? '' : 'none';
+    const holForm = document.getElementById('holFormCard');
+    if (holForm) holForm.style.display = hasPermission('HOLIDAYS_CREATE') ? '' : 'none';
+    const staffForm = document.getElementById('staffFormCard');
+    if (staffForm) staffForm.style.display = hasPermission('STAFF_CREATE') ? '' : 'none';
 }
 
 function login() {
@@ -1734,9 +2005,16 @@ function login() {
         fetchNotificationCount();
         startNotificationPolling();
         api('/admin/me').then(me => {
+            myPlan = me.plan;
             myFeatures = me.features; // null for super_admin
             myRole = me.role;
+            myPermissions = me.permissions || [];
+            myBranchId = me.branch_id || null;
+            myStaffRole = me.staff_role || null;
             applyFeatureVisibility();
+            if (myPlan === 'diagstream') {
+                loadDiagnosticDashboard();
+            }
         }).catch(() => {});
     }).catch(() => {
         auth = '';
@@ -1749,8 +2027,12 @@ function logout() {
     stopNotificationPolling();
     closeNotifDrawer();
     auth = '';
+    myPlan = null;
     myFeatures = null;
     myRole = null;
+    myPermissions = [];
+    myBranchId = null;
+    myStaffRole = null;
     doctorCache = [];
     document.getElementById('app').classList.remove('open');
     document.getElementById('loginScreen').style.display = '';
@@ -1830,7 +2112,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
+    const loaders = { dashboard: loadDashboard, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
     if (loaders[page]) loaders[page]();
 }
 
@@ -1979,6 +2261,15 @@ async function promptDialog(message, opts = {}) {
 
 // ═══════ DASHBOARD ═══════
 async function loadDashboard() {
+    if (myPlan === 'diagstream') {
+        loadDiagnosticDashboard();
+        return;
+    }
+    const clinicDash = document.getElementById('clinicDashboardContent');
+    const diagDash = document.getElementById('diagDashboardContent');
+    if (clinicDash) clinicDash.style.display = 'block';
+    if (diagDash) diagDash.style.display = 'none';
+
     try {
         const [stats, appts] = await Promise.all([
             api('/admin/stats?days=30'),
@@ -2218,8 +2509,8 @@ async function loadDoctors() {
                 <td style="color:var(--text2); font-size:0.8rem">${d.available_days || 'Mon-Fri'}</td>
                 <td>${d.is_active ? badge('active') : badge('inactive')}</td>
                 <td>
-                    <button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--surface); min-width:auto" onclick="editDoctor('${d.id}')">✏️</button>
-                    <button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--red-bg); color:var(--red); min-width:auto" onclick="delDoctor('${d.id}')">🗑️</button>
+                    ${hasPermission('DOCTORS_UPDATE') ? `<button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--surface); min-width:auto" onclick="editDoctor('${d.id}')">✏️</button>` : ''}
+                    ${hasPermission('DOCTORS_DELETE') ? `<button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--red-bg); color:var(--red); min-width:auto" onclick="delDoctor('${d.id}')">🗑️</button>` : ''}
                 </td>
             </tr>`).join('')}</tbody>
         </table>`;
@@ -2397,7 +2688,7 @@ async function loadLeaves() {
                 <td>${l.leave_date}</td>
                 <td>${l.leave_type === 'full' ? 'Full Day' : l.leave_type === 'half_morning' ? '½ Morning' : '½ Evening'}</td>
                 <td style="color:var(--text2)">${esc(l.reason) || '—'}</td>
-                <td><button class="btn btn-red btn-sm" onclick="delLeave('${l.id}')">Remove</button></td>
+                <td>${hasPermission('DOCTOR_LEAVES_DELETE') ? `<button class="btn btn-red btn-sm" onclick="delLeave('${l.id}')">Remove</button>` : ''}</td>
             </tr>`).join('')}</tbody>
         </table>`;
     } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load leaves'); }
@@ -2447,7 +2738,7 @@ async function loadHolidays() {
             <tbody>${data.map(h => `<tr>
                 <td style="font-weight:600">${h.holiday_date}</td>
                 <td>${esc(h.name)}</td>
-                <td><button class="btn btn-red btn-sm" onclick="delHoliday('${h.holiday_date}')">Remove</button></td>
+                <td>${hasPermission('HOLIDAYS_DELETE') ? `<button class="btn btn-red btn-sm" onclick="delHoliday('${h.holiday_date}')">Remove</button>` : ''}</td>
             </tr>`).join('')}</tbody>
         </table>`;
     } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load holidays'); }
@@ -3021,9 +3312,9 @@ async function loadBranches() {
                 <td>${status}</td>
                 <td>${b.display_order}</td>
                 <td>
-                    <button class="btn btn-ghost btn-sm" onclick="editBranch('${b.id}')">✏️</button>
-                    <button class="btn btn-ghost btn-sm" onclick="manageBranchDoctors('${b.id}', '${(b.short_name || b.name).replace(/'/g, "\\'")}')">👨‍⚕️</button>
-                    <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBranch('${b.id}')">🗑️</button>
+                    ${myRole !== 'staff' ? `<button class="btn btn-ghost btn-sm" onclick="editBranch('${b.id}')">✏️</button>` : ''}
+                    ${(myRole !== 'staff' || hasPermission('DOCTOR_BRANCH_ASSIGN')) ? `<button class="btn btn-ghost btn-sm" onclick="manageBranchDoctors('${b.id}', '${(b.short_name || b.name).replace(/'/g, "\\'")}')">👨‍⚕️</button>` : ''}
+                    ${myRole !== 'staff' ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBranch('${b.id}')">🗑️</button>` : ''}
                 </td>
             </tr>`;
         });
@@ -3120,10 +3411,69 @@ function resetBranchForm() {
     if (elTitle) elTitle.textContent = '➕ Add New Branch';
 }
 
+const ROLE_PRESETS = {
+    'STAFF': [],
+    'RECEPTIONIST': [],
+    'FRONT_DESK': [],
+    'APPOINTMENT_MANAGER': [],
+    'LAB_OPERATOR': [],
+    'PHARMACY_OPERATOR': [],
+    'DOCTOR_SCHEDULE_MANAGER': [
+        'DOCTORS_UPDATE', 'DOCTOR_BRANCH_ASSIGN', 'DOCTOR_LEAVES_CREATE',
+        'DOCTOR_LEAVES_DELETE', 'HOLIDAYS_CREATE', 'HOLIDAYS_DELETE'
+    ],
+    'BRANCH_MANAGER': [
+        'DOCTORS_UPDATE', 'DOCTOR_BRANCH_ASSIGN', 'DOCTOR_LEAVES_CREATE',
+        'DOCTOR_LEAVES_DELETE', 'HOLIDAYS_CREATE', 'HOLIDAYS_DELETE',
+        'DOCTORS_CREATE', 'DOCTORS_DELETE', 'STAFF_VIEW'
+    ],
+    'CUSTOM_ROLE': []
+};
+
+async function populateStaffBranchDropdowns() {
+    try {
+        const data = await api('/admin/branches');
+        const branches = (data.branches || []).filter(b => b.is_active);
+        const selCreate = document.getElementById('f-staffBranch');
+        const selEdit = document.getElementById('m-editStaffBranch');
+        if (selCreate) {
+            selCreate.innerHTML = '<option value="">All Branches (Tenant-wide)</option>';
+            branches.forEach(b => {
+                selCreate.innerHTML += `<option value="${b.id}">${esc(b.name)}</option>`;
+            });
+        }
+        if (selEdit) {
+            selEdit.innerHTML = '<option value="">All Branches (Tenant-wide)</option>';
+            branches.forEach(b => {
+                selEdit.innerHTML += `<option value="${b.id}">${esc(b.name)}</option>`;
+            });
+        }
+    } catch (e) {}
+}
+
+function onStaffRoleChange() {
+    const role = document.getElementById('f-staffRole').value;
+    const defaults = ROLE_PRESETS[role] || [];
+    document.querySelectorAll('.staff-perm-cb').forEach(cb => {
+        cb.checked = defaults.includes(cb.value);
+    });
+}
+
+function onEditStaffRoleChange() {
+    const role = document.getElementById('m-editStaffRole').value;
+    const defaults = ROLE_PRESETS[role] || [];
+    document.querySelectorAll('.edit-staff-perm-cb').forEach(cb => {
+        cb.checked = defaults.includes(cb.value);
+    });
+}
+
+let _staffCache = [];
 async function loadStaff() {
     try {
+        await populateStaffBranchDropdowns();
         const data = await api('/admin/staff');
         const staff = data.staff || [];
+        _staffCache = staff;
         document.getElementById('staffCount').textContent = staff.length + ' account' + (staff.length === 1 ? '' : 's');
 
         if (staff.length === 0) {
@@ -3131,16 +3481,26 @@ async function loadStaff() {
             return;
         }
 
-        let html = '<table><thead><tr><th>Username</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Username</th><th>Role</th><th>Branch</th><th>Permissions</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
         staff.forEach(s => {
             const status = s.is_active
                 ? '<span class="badge badge-confirmed">Active</span>'
                 : '<span class="badge badge-cancelled">Inactive</span>';
+            const roleBadge = `<span class="badge badge-completed">${esc(s.staff_role || 'STAFF')}</span>`;
+            const branchLabel = s.branch_id ? `<span style="font-size:0.8rem; color:var(--accent)">Branch Scoped</span>` : '<span style="font-size:0.8rem; color:var(--text3)">All Branches</span>';
+            const perms = (s.permissions && s.permissions.length) ? `<span title="${esc(s.permissions.join(', '))}" style="font-size:0.75rem; color:var(--text2);">${s.permissions.length} granted</span>` : '<span style="font-size:0.75rem; color:var(--text3);">Default</span>';
+
             html += `<tr>
                 <td><strong>${esc(s.username)}</strong></td>
+                <td>${roleBadge}</td>
+                <td>${branchLabel}</td>
+                <td>${perms}</td>
                 <td>${status}</td>
                 <td>${esc((s.created_at || '').slice(0, 10))}</td>
-                <td><button class="btn btn-ghost" onclick="toggleStaff('${s.id}')">${s.is_active ? 'Deactivate' : 'Activate'}</button></td>
+                <td>
+                    ${hasPermission('STAFF_UPDATE') ? `<button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; margin-right:4px;" onclick="openEditStaff('${s.id}')">Edit</button>
+                    <button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem;" onclick="toggleStaff('${s.id}')">${s.is_active ? 'Deactivate' : 'Activate'}</button>` : ''}
+                </td>
             </tr>`;
         });
         html += '</tbody></table>';
@@ -3160,18 +3520,70 @@ function generateStaffPassword() {
 async function createStaff() {
     const username = document.getElementById('f-staffUsername').value.trim();
     const password = document.getElementById('f-staffPassword').value;
+    const staff_role = document.getElementById('f-staffRole').value;
+    const branch_id = document.getElementById('f-staffBranch').value || null;
+    const extra_permissions = Array.from(document.querySelectorAll('.staff-perm-cb:checked')).map(cb => cb.value);
 
     if (!username || username.length < 3) { msg('staffMsg', 'Username must be at least 3 characters', true); return; }
     if (!password || password.length < 8) { msg('staffMsg', 'Password must be at least 8 characters', true); return; }
 
     try {
-        await apiPost('/admin/staff', { username, password });
+        await apiPost('/admin/staff', {
+            username,
+            password,
+            staff_role,
+            branch_id,
+            extra_permissions
+        });
         msg('staffMsg', `✅ Staff login created — Username: <strong>${esc(username)}</strong>, Password: <strong>${esc(password)}</strong>. Copy these now and hand them to your staff member.`);
         document.getElementById('f-staffUsername').value = '';
         document.getElementById('f-staffPassword').value = '';
+        document.querySelectorAll('.staff-perm-cb').forEach(cb => cb.checked = false);
         loadStaff();
     } catch (e) {
         msg('staffMsg', 'Error: ' + e.message, true);
+    }
+}
+
+function openEditStaff(staffId) {
+    const s = _staffCache.find(x => x.id === staffId);
+    if (!s) return;
+    document.getElementById('m-editStaffId').value = s.id;
+    document.getElementById('m-editStaffUsername').value = s.username;
+    document.getElementById('m-editStaffRole').value = s.staff_role || 'STAFF';
+    document.getElementById('m-editStaffBranch').value = s.branch_id || '';
+    document.getElementById('m-editStaffStatus').value = s.is_active ? 'true' : 'false';
+    const held = s.permissions || [];
+    document.querySelectorAll('.edit-staff-perm-cb').forEach(cb => {
+        cb.checked = held.includes(cb.value);
+    });
+    document.getElementById('editStaffMsg').innerHTML = '';
+    document.getElementById('editStaffModal').classList.add('open');
+}
+
+function closeEditStaffModal() {
+    document.getElementById('editStaffModal').classList.remove('open');
+}
+
+async function submitEditStaff() {
+    const staffId = document.getElementById('m-editStaffId').value;
+    const staff_role = document.getElementById('m-editStaffRole').value;
+    const branch_id = document.getElementById('m-editStaffBranch').value || null;
+    const is_active = document.getElementById('m-editStaffStatus').value === 'true';
+    const extra_permissions = Array.from(document.querySelectorAll('.edit-staff-perm-cb:checked')).map(cb => cb.value);
+
+    try {
+        await apiPut('/admin/staff/' + staffId, {
+            staff_role,
+            branch_id,
+            is_active,
+            extra_permissions
+        });
+        closeEditStaffModal();
+        toast('Staff account updated successfully!');
+        loadStaff();
+    } catch (e) {
+        msg('editStaffMsg', 'Error: ' + e.message, true);
     }
 }
 
@@ -3210,7 +3622,7 @@ async function manageBranchDoctors(branchId, branchName) {
                     <td><strong>${esc(doc.name) || 'Unknown'}</strong><br><small style="color:var(--text3)">${esc(doc.specialization) || ''}</small></td>
                     <td>${esc(doc.department) || '—'}</td>
                     <td>${sessionBadge}</td>
-                    <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="removeDoctorFromBranch('${branchId}', '${a.doctor_id}')">Remove</button></td>
+                    <td>${(myRole !== 'staff' || hasPermission('DOCTOR_BRANCH_ASSIGN')) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="removeDoctorFromBranch('${branchId}', '${a.doctor_id}')">Remove</button>` : ''}</td>
                 </tr>`;
             });
             html += '</tbody></table>';
@@ -3511,6 +3923,314 @@ async function resolveFailedReport(failedReportId) {
         loadFailedReports();
     } catch (e) {
         toast('Error: ' + e.message, true);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Diagnostic Center Operations & Report Triage
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _diagQueueFilter = 'all';
+let _diagQueueData = null;
+
+async function loadDiagnosticDashboard() {
+    const clinicDash = document.getElementById('clinicDashboardContent');
+    const diagDash = document.getElementById('diagDashboardContent');
+    if (clinicDash) clinicDash.style.display = 'none';
+    if (diagDash) diagDash.style.display = 'block';
+
+    try {
+        const [stats, queue] = await Promise.all([
+            api('/admin/diagnostic/stats'),
+            api('/admin/reports/queue'),
+        ]);
+
+        // Render Stats
+        const rep = stats.reports_today || {};
+        document.getElementById('s-diag-found').textContent = rep.total || 0;
+        document.getElementById('s-diag-sent').textContent = rep.sent || 0;
+        document.getElementById('s-diag-review').textContent = rep.needs_review || 0;
+        document.getElementById('s-diag-failed').textContent = rep.failed || 0;
+
+        // Render Connector Status
+        const conn = stats.connector;
+        const statusDot = document.getElementById('diagStatusDot');
+        const statusTitle = document.getElementById('diagStatusTitle');
+        const statusSub = document.getElementById('diagStatusSub');
+
+        if (conn) {
+            if (conn.health === 'healthy') {
+                statusDot.style.background = 'var(--green)';
+                statusDot.style.boxShadow = '0 0 10px var(--green)';
+                statusTitle.textContent = 'Report Connector: Active & Healthy';
+                statusTitle.style.color = '#fff';
+            } else if (conn.health === 'warning') {
+                statusDot.style.background = 'var(--amber)';
+                statusDot.style.boxShadow = '0 0 10px var(--amber)';
+                statusTitle.textContent = 'Report Connector: Warning / Error';
+                statusTitle.style.color = 'var(--amber)';
+            } else {
+                statusDot.style.background = 'var(--text3)';
+                statusDot.style.boxShadow = 'none';
+                statusTitle.textContent = 'Report Connector: Disabled';
+                statusTitle.style.color = 'var(--text2)';
+            }
+            const lastRunStr = conn.last_run_at ? new Date(conn.last_run_at).toLocaleTimeString() : 'Never';
+            statusSub.textContent = `Last run: ${lastRunStr}` + (conn.last_error ? ` · Error: ${conn.last_error}` : '');
+        } else {
+            statusDot.style.background = 'var(--text3)';
+            statusDot.style.boxShadow = 'none';
+            statusTitle.textContent = 'Report Connector: Not Configured';
+            statusSub.textContent = 'Configure MocDoc credentials in Report Connector settings.';
+        }
+
+        // Render 90-Day Retention notice
+        const expiringCount = stats.expiring_retention_count || 0;
+        if (expiringCount > 0) {
+            document.getElementById('diagRetentionExpiringNotice').style.display = 'block';
+            document.getElementById('diagExpiringCount').textContent = expiringCount;
+        } else {
+            document.getElementById('diagRetentionExpiringNotice').style.display = 'none';
+        }
+
+        // Render Needs-Review Queue
+        renderDiagReviewQueue(queue.needs_review || []);
+
+        // Render Failed Deliveries Queue
+        renderDiagFailedQueue(queue.failed_reports || [], queue.connector_failures || []);
+
+    } catch (e) {
+        console.error('Failed to load diagnostic dashboard:', e);
+    }
+}
+
+function renderDiagReviewQueue(items) {
+    const el = document.getElementById('diagReviewQueue');
+    document.getElementById('diagReviewCountBadge').textContent = items.length + ' Pending';
+    document.getElementById('diagReviewCountBadge').className = items.length > 0 ? 'badge badge-pending' : 'badge badge-confirmed';
+
+    if (!items || items.length === 0) {
+        el.innerHTML = emptyState('success', '✨ All clear! No reports pending verification.');
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Patient</th><th>Phone</th><th>Report Name</th><th>Conflict / Reason</th><th>Actions</th></tr></thead><tbody>';
+    items.forEach(r => {
+        const phone = r.patient_phone || 'Missing';
+        const name = r.patient_name || 'Unknown';
+        const reason = r.error_message || 'Patient match ambiguity / name mismatch';
+        html += `<tr>
+            <td><strong>${esc(name)}</strong></td>
+            <td><code>${esc(phone)}</code></td>
+            <td>${esc(r.report_name || r.report_type || 'Report')}</td>
+            <td><span style="color:var(--amber); font-size:0.82rem;">⚠️ ${esc(reason)}</span></td>
+            <td>
+                <button class="btn btn-accent btn-sm" onclick="openResolveMatchModal('${r.id}', '${esc(name)}', '${esc(phone)}', '${esc(r.report_name || '')}')">Resolve & Send</button>
+            </td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+function renderDiagFailedQueue(labFailures, connectorFailures) {
+    const el = document.getElementById('diagFailedQueue');
+    const totalFailed = (labFailures.length || 0) + (connectorFailures.length || 0);
+    document.getElementById('diagFailedCountBadge').textContent = totalFailed + ' Failed';
+
+    if (totalFailed === 0) {
+        el.innerHTML = emptyState('success', '✨ All clear! Zero failed deliveries.');
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Patient</th><th>Type / ID</th><th>Failure Details</th><th>Time</th><th>Actions</th></tr></thead><tbody>';
+
+    labFailures.forEach(r => {
+        const dateStr = r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : '—';
+        html += `<tr>
+            <td><strong>${esc(r.patient_name || 'Unknown')}</strong><br><small style="color:var(--text3)">${esc(r.patient_phone)}</small></td>
+            <td><span class="badge badge-failed">WhatsApp Send</span><br><small style="color:var(--text3)">${esc(r.report_name)}</small></td>
+            <td><small style="color:var(--red)">${esc(r.error_message || 'Delivery rejected')}</small></td>
+            <td><small style="color:var(--text3)">${dateStr}</small></td>
+            <td>
+                <button class="btn btn-ghost btn-sm" onclick="retryFailedReport('${r.id}')">🔄 Retry</button>
+            </td>
+        </tr>`;
+    });
+
+    connectorFailures.forEach(r => {
+        const dateStr = r.last_attempt_at ? new Date(r.last_attempt_at).toLocaleString() : '—';
+        html += `<tr>
+            <td><strong>${esc(r.patient_name || 'Unknown')}</strong><br><small style="color:var(--text3)">VAM: ${esc(r.vam_id)}</small></td>
+            <td><span class="badge badge-pending">Connector Download</span><br><small style="color:var(--text3)">${esc(r.external_report_id)}</small></td>
+            <td><small style="color:var(--amber)">${esc(r.last_error || 'Download failed')}</small></td>
+            <td><small style="color:var(--text3)">${dateStr}</small></td>
+            <td>
+                <button class="btn btn-ghost btn-sm" onclick="resolveFailedReport('${r.id}')">Mark Resolved</button>
+            </td>
+        </tr>`;
+    });
+
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+// ═══════ REPORT AUTOMATION QUEUE PAGE ═══════
+async function loadDiagnosticQueuePage() {
+    const el = document.getElementById('diagReportsQueueList');
+    try {
+        const filter = _diagQueueFilter === 'all' ? '' : `?status_filter=${_diagQueueFilter}`;
+        const queue = await api('/admin/reports/queue' + filter);
+        _diagQueueData = queue;
+        renderDiagQueuePageTable(queue);
+    } catch (e) {
+        el.innerHTML = emptyState('warning', 'Failed to load report automation queue.');
+    }
+}
+
+function setDiagQueueFilter(filter) {
+    _diagQueueFilter = filter;
+    document.getElementById('diagFilterAll').className = 'toggle-btn ' + (filter === 'all' ? 'on' : '');
+    document.getElementById('diagFilterReview').className = 'toggle-btn ' + (filter === 'needs_review' ? 'on' : '');
+    document.getElementById('diagFilterFailed').className = 'toggle-btn ' + (filter === 'failed' ? 'on' : '');
+    loadDiagnosticQueuePage();
+}
+
+function renderDiagQueuePageTable(queue) {
+    const el = document.getElementById('diagReportsQueueList');
+    const items = [];
+    if (_diagQueueFilter === 'all' || _diagQueueFilter === 'needs_review') {
+        (queue.needs_review || []).forEach(r => items.push({ ...r, _queue_type: 'needs_review' }));
+    }
+    if (_diagQueueFilter === 'all' || _diagQueueFilter === 'failed') {
+        (queue.failed_reports || []).forEach(r => items.push({ ...r, _queue_type: 'failed_report' }));
+        (queue.connector_failures || []).forEach(r => items.push({ ...r, _queue_type: 'connector_failure' }));
+    }
+
+    if (items.length === 0) {
+        el.innerHTML = emptyState('success', '✨ All clear! No items in this queue.');
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Patient</th><th>Phone</th><th>Report</th><th>Status / Issue</th><th>Date</th><th>Actions</th></tr></thead><tbody>';
+    items.forEach(r => {
+        const name = r.patient_name || 'Unknown';
+        const phone = r.patient_phone || r.vam_id || '—';
+        const report = r.report_name || r.external_report_id || 'Report';
+        const dateStr = r.uploaded_at || r.last_attempt_at ? new Date(r.uploaded_at || r.last_attempt_at).toLocaleDateString() : '—';
+
+        let statusHtml = '';
+        let actionHtml = '';
+
+        if (r._queue_type === 'needs_review') {
+            statusHtml = `<span class="badge badge-pending">Needs Review</span><br><small style="color:var(--amber)">${esc(r.error_message || 'Name mismatch')}</small>`;
+            actionHtml = `<button class="btn btn-accent btn-sm" onclick="openResolveMatchModal('${r.id}', '${esc(name)}', '${esc(phone)}', '${esc(report)}')">Resolve & Send</button>`;
+        } else if (r._queue_type === 'failed_report') {
+            statusHtml = `<span class="badge badge-failed">Delivery Failed</span><br><small style="color:var(--red)">${esc(r.error_message || 'Rejected')}</small>`;
+            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="retryFailedReport('${r.id}')">🔄 Retry</button>`;
+        } else {
+            statusHtml = `<span class="badge badge-pending">Fetch Failed</span><br><small style="color:var(--amber)">${esc(r.last_error || 'HMIS error')}</small>`;
+            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="resolveFailedReport('${r.id}')">Mark Resolved</button>`;
+        }
+
+        html += `<tr>
+            <td><strong>${esc(name)}</strong></td>
+            <td><code>${esc(phone)}</code></td>
+            <td>${esc(report)}</td>
+            <td>${statusHtml}</td>
+            <td><small style="color:var(--text3)">${dateStr}</small></td>
+            <td>${actionHtml}</td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+function filterDiagReports() {
+    const q = (document.getElementById('diagReportSearch').value || '').toLowerCase().trim();
+    if (!_diagQueueData) return;
+    if (!q) {
+        renderDiagQueuePageTable(_diagQueueData);
+        return;
+    }
+    const filtered = {
+        needs_review: (_diagQueueData.needs_review || []).filter(r =>
+            (r.patient_name || '').toLowerCase().includes(q) || (r.patient_phone || '').includes(q) || (r.report_name || '').toLowerCase().includes(q)
+        ),
+        failed_reports: (_diagQueueData.failed_reports || []).filter(r =>
+            (r.patient_name || '').toLowerCase().includes(q) || (r.patient_phone || '').includes(q) || (r.report_name || '').toLowerCase().includes(q)
+        ),
+        connector_failures: (_diagQueueData.connector_failures || []).filter(r =>
+            (r.patient_name || '').toLowerCase().includes(q) || (r.vam_id || '').toLowerCase().includes(q) || (r.external_report_id || '').toLowerCase().includes(q)
+        ),
+    };
+    renderDiagQueuePageTable(filtered);
+}
+
+// ═══════ RESOLVE MATCH MODAL ACTIONS ═══════
+function openResolveMatchModal(reportId, patientName, patientPhone, reportName) {
+    document.getElementById('m-resolveReportId').value = reportId;
+    document.getElementById('m-resolveReportName').value = reportName || 'Lab Report';
+    document.getElementById('m-resolvePatientName').value = patientName && patientName !== 'Unknown' ? patientName : '';
+    document.getElementById('m-resolvePhone').value = patientPhone && !patientPhone.includes('MISSING') ? patientPhone : '';
+    document.getElementById('m-resolveSendNow').checked = true;
+    document.getElementById('resolveModalMsg').innerHTML = '';
+    document.getElementById('resolveMatchModal').classList.add('open');
+}
+
+function closeResolveMatchModal() {
+    document.getElementById('resolveMatchModal').classList.remove('open');
+}
+
+async function submitResolveMatch() {
+    const reportId = document.getElementById('m-resolveReportId').value;
+    const phone = document.getElementById('m-resolvePhone').value.trim();
+    const name = document.getElementById('m-resolvePatientName').value.trim();
+    const sendNow = document.getElementById('m-resolveSendNow').checked;
+
+    if (!phone) {
+        msg('resolveModalMsg', 'Please enter a valid phone number', true);
+        return;
+    }
+
+    const btn = document.getElementById('btn-resolveSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        await apiPost(`/admin/reports/${reportId}/resolve-match`, {
+            patient_phone: phone,
+            patient_name: name || null,
+            send_now: sendNow,
+        });
+
+        toast('✅ Report resolved and updated!');
+        closeResolveMatchModal();
+        if (myPlan === 'diagstream') {
+            loadDiagnosticDashboard();
+        }
+        loadDiagnosticQueuePage();
+    } catch (e) {
+        msg('resolveModalMsg', 'Error: ' + (e.message || 'Failed to resolve report'), true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save & Deliver';
+    }
+}
+
+async function retryFailedReport(reportId) {
+    const ok = await confirmDialog('Retry sending this medical report via WhatsApp?', { okText: 'Retry Now' });
+    if (!ok) return;
+
+    try {
+        await apiPost(`/admin/reports/${reportId}/resend`, {});
+        toast('✅ Report delivery retried successfully!');
+        if (myPlan === 'diagstream') {
+            loadDiagnosticDashboard();
+        }
+        loadDiagnosticQueuePage();
+    } catch (e) {
+        toast('Retry error: ' + (e.message || 'Delivery rejected'), true);
     }
 }
 

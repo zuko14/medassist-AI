@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import secrets
-from datetime import date, datetime, time as time_type
+from datetime import date, datetime, time as time_type, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import (
@@ -37,8 +37,10 @@ from app.services.tenant import (
 from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
 from app.services.lab_reports import LabReportService
+from app.services.permissions import enforce_branch_scope, require_permission
 from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
+from app.utils.validators import normalize_phone, validate_phone
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +49,16 @@ security = HTTPBasic()
 
 
 class AdminUser(str):
-    """Authenticated admin user with RBAC role, clinic scope, and staff user ID."""
+    """Authenticated admin user with RBAC role, clinic scope, staff user ID,
+    delegated permissions, optional branch scope, and optional staff role."""
 
     username: str
     role: str
     clinic_id: Optional[str]
     user_id: Optional[str]
+    permissions: list[str]
+    branch_id: Optional[str]
+    staff_role: Optional[str]
 
     def __new__(
         cls,
@@ -60,12 +66,18 @@ class AdminUser(str):
         role: str = "clinic_admin",
         clinic_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        permissions: Optional[list[str]] = None,
+        branch_id: Optional[str] = None,
+        staff_role: Optional[str] = None,
     ):
         obj = super().__new__(cls, username)
         obj.username = username
         obj.role = role
         obj.clinic_id = clinic_id
         obj.user_id = user_id
+        obj.permissions = permissions or []
+        obj.branch_id = branch_id
+        obj.staff_role = staff_role
         return obj
 
     def can_access_clinic(self, target_clinic_id: str) -> bool:
@@ -178,6 +190,9 @@ async def verify_credentials(
                     role=user_row.get("role", "clinic_admin"),
                     clinic_id=user_row.get("clinic_id"),
                     user_id=user_row.get("id"),
+                    permissions=user_row.get("permissions") or [],
+                    branch_id=user_row.get("branch_id"),
+                    staff_role=user_row.get("staff_role"),
                 )
     except Exception as e:
         logger.warning(f"Database error during admin auth lookup: {e}")
@@ -285,11 +300,17 @@ async def get_current_admin(user: AdminUser = Depends(verify_credentials)):
     """Return the caller's identity plus their clinic's plan and resolved
     feature set, so the admin panel frontend can show/hide tabs without
     duplicating the PLAN_FEATURES registry in JS."""
+    base_response = {
+        "username": user.username,
+        "role": user.role,
+        "clinic_id": user.clinic_id,
+        "permissions": user.permissions,
+        "branch_id": user.branch_id,
+        "staff_role": user.staff_role,
+    }
     if user.role == "super_admin" or not user.clinic_id:
         return {
-            "username": user.username,
-            "role": user.role,
-            "clinic_id": user.clinic_id,
+            **base_response,
             "plan": None,
             "features": None,
         }
@@ -302,9 +323,7 @@ async def get_current_admin(user: AdminUser = Depends(verify_credentials)):
         else [f for f in ALL_FEATURES if has_feature(clinic, f)]
     )
     return {
-        "username": user.username,
-        "role": user.role,
-        "clinic_id": user.clinic_id,
+        **base_response,
         "plan": plan,
         "features": features,
     }
@@ -359,16 +378,27 @@ async def change_password(
 class StaffCreate(BaseModel):
     username: str = Field(..., min_length=3)
     password: str = Field(..., min_length=8)
+    staff_role: str = "STAFF"
+    extra_permissions: list[str] = Field(default_factory=list)
+    branch_id: Optional[str] = None
+
+
+class StaffUpdate(BaseModel):
+    staff_role: Optional[str] = None
+    extra_permissions: Optional[list[str]] = None
+    branch_id: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 @router.get("/staff")
 async def list_staff(
-    clinic_id: str = "default", user: AdminUser = Depends(require_admin)
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("STAFF_VIEW")),
 ):
-    """List front-desk staff accounts for this clinic (no password hashes)."""
+    """List staff accounts for this clinic (no password hashes)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     query = supabase.table("clinic_admins").select(
-        "id, username, role, is_active, created_at"
+        "id, username, role, staff_role, permissions, branch_id, is_active, created_at"
     ).eq("role", "staff")
     if effective_clinic_id != "default":
         query = query.eq("clinic_id", effective_clinic_id)
@@ -379,15 +409,58 @@ async def list_staff(
 @router.post("/staff")
 async def create_staff(
     body: StaffCreate,
-    request: Request,
+    request: Request = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("STAFF_CREATE")),
 ):
-    """Clinic admin self-service: create a front-desk staff login scoped to
-    this clinic, so staff credentials don't require going through the
-    platform owner. Role is fixed to 'staff' — clinic admins can't mint
-    other clinic_admin/super_admin accounts from here."""
+    """Clinic admin self-service: create a staff login scoped to this clinic,
+    with a role preset and optional extra delegated permissions / branch scope.
+    Role is fixed to 'staff' at the tier level — caller cannot mint clinic_admin/
+    super_admin accounts. Grants are capped to the caller's own authority."""
+    from app.services.permissions import (
+        cap_permissions_to_authority,
+        resolve_permissions,
+        validate_staff_role,
+    )
+
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+    try:
+        validate_staff_role(body.staff_role)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        resolved_permissions = resolve_permissions(body.staff_role, body.extra_permissions)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    final_permissions = cap_permissions_to_authority(
+        requested=resolved_permissions,
+        granter_permissions=user.permissions,
+        granter_role=user.role,
+    )
+
+    if body.branch_id:
+        branch_check = (
+            supabase.table("branches")
+            .select("id")
+            .eq("id", body.branch_id)
+            .eq("clinic_id", effective_clinic_id)
+            .execute()
+        )
+        if not branch_check.data:
+            raise HTTPException(
+                status_code=400, detail="Selected branch does not belong to your clinic."
+            )
+        # If caller is branch-scoped staff, they cannot assign to a branch other than their own
+        if user.role == "staff" and user.branch_id and str(body.branch_id) != str(user.branch_id):
+            raise HTTPException(
+                status_code=403, detail="You cannot assign staff to a branch other than your own."
+            )
+    elif user.role == "staff" and user.branch_id:
+        # Branch-scoped staff cannot create tenant-wide (unscoped) staff
+        body.branch_id = str(user.branch_id)
 
     existing = (
         supabase.table("clinic_admins")
@@ -406,6 +479,9 @@ async def create_staff(
                 "username": body.username,
                 "password_hash": hash_password(body.password),
                 "role": "staff",
+                "staff_role": body.staff_role,
+                "permissions": final_permissions,
+                "branch_id": body.branch_id,
                 "is_active": True,
             }
         )
@@ -414,39 +490,152 @@ async def create_staff(
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create staff account")
 
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = request.client.host if (request and request.client) else "unknown"
     await log_admin_action(
         user=user,
         action="create_staff",
         resource_type="clinic_admin",
-        resource_id=body.username,
+        resource_id=result.data[0]["id"],
+        details={"staff_role": body.staff_role, "permissions": final_permissions, "branch_id": body.branch_id},
         ip_address=client_ip,
     )
     return {"success": True, "staff": result.data[0]}
 
 
-@router.put("/staff/{staff_id}/toggle")
-async def toggle_staff(
-    staff_id: str, request: Request, user: AdminUser = Depends(require_admin)
+@router.put("/staff/{staff_id}")
+async def update_staff(
+    staff_id: str,
+    body: StaffUpdate,
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("STAFF_UPDATE")),
 ):
-    """Activate/deactivate a staff account — for offboarding without deleting
-    their audit trail."""
+    """Edit an existing staff account's role, delegated permissions, branch
+    scope, or active status. Grants are re-capped to the caller's own
+    authority on every edit — a staff granter can never escalate a target
+    account past their own permission ceiling."""
+    from app.services.permissions import (
+        cap_permissions_to_authority,
+        resolve_permissions,
+        validate_staff_role,
+    )
+
     res = (
         supabase.table("clinic_admins")
-        .select("id, clinic_id, is_active, role")
+        .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active")
         .eq("id", staff_id)
         .execute()
     )
     if not res.data or res.data[0]["role"] != "staff":
         raise HTTPException(status_code=404, detail="Staff account not found")
-    enforce_clinic_access(user, res.data[0]["clinic_id"])
+    target = res.data[0]
 
-    new_status = not res.data[0]["is_active"]
+    enforce_clinic_access(user, target["clinic_id"] or "default")
+
+    # If caller is branch-scoped staff, verify target staff is in their branch
+    if user.role == "staff" and user.branch_id:
+        if str(target.get("branch_id")) != str(user.branch_id):
+            raise HTTPException(
+                status_code=403, detail="You cannot edit staff outside your assigned branch."
+            )
+
+    update_data: dict = {}
+    if body.is_active is not None:
+        update_data["is_active"] = body.is_active
+
+    if body.staff_role is not None or body.extra_permissions is not None:
+        new_role = body.staff_role or target.get("staff_role") or "CUSTOM_ROLE"
+        try:
+            validate_staff_role(new_role)
+            resolved = resolve_permissions(new_role, body.extra_permissions or [])
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        update_data["staff_role"] = new_role
+        update_data["permissions"] = cap_permissions_to_authority(
+            requested=resolved,
+            granter_permissions=user.permissions,
+            granter_role=user.role,
+        )
+
+    if body.branch_id is not None:
+        if body.branch_id:
+            branch_check = (
+                supabase.table("branches")
+                .select("id")
+                .eq("id", body.branch_id)
+                .eq("clinic_id", target["clinic_id"])
+                .execute()
+            )
+            if not branch_check.data:
+                raise HTTPException(
+                    status_code=400, detail="Selected branch does not belong to this clinic."
+                )
+            if user.role == "staff" and user.branch_id and str(body.branch_id) != str(user.branch_id):
+                raise HTTPException(
+                    status_code=403, detail="You cannot assign staff to a branch other than your own."
+                )
+            update_data["branch_id"] = body.branch_id
+        else:
+            if user.role == "staff" and user.branch_id:
+                raise HTTPException(
+                    status_code=403, detail="Branch-scoped staff cannot make accounts tenant-wide."
+                )
+            update_data["branch_id"] = None
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No changes provided")
+
+    result = supabase.table("clinic_admins").update(update_data).eq("id", staff_id).execute()
+
+    client_ip = request.client.host if (request and request.client) else "unknown"
+    await log_admin_action(
+        user=user,
+        action="update_staff",
+        resource_type="clinic_admin",
+        resource_id=staff_id,
+        details={
+            "before": {
+                "staff_role": target.get("staff_role"),
+                "permissions": target.get("permissions"),
+                "branch_id": target.get("branch_id"),
+                "is_active": target.get("is_active"),
+            },
+            "after": update_data,
+        },
+        ip_address=client_ip,
+    )
+    return {"success": True, "staff": result.data[0] if result.data else None}
+
+
+@router.put("/staff/{staff_id}/toggle")
+async def toggle_staff(
+    staff_id: str,
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("STAFF_UPDATE")),
+):
+    """Activate/deactivate a staff account — for offboarding without deleting
+    their audit trail."""
+    res = (
+        supabase.table("clinic_admins")
+        .select("id, clinic_id, is_active, role, branch_id")
+        .eq("id", staff_id)
+        .execute()
+    )
+    if not res.data or res.data[0]["role"] != "staff":
+        raise HTTPException(status_code=404, detail="Staff account not found")
+    target = res.data[0]
+    enforce_clinic_access(user, target["clinic_id"])
+
+    if user.role == "staff" and user.branch_id and str(target.get("branch_id")) != str(user.branch_id):
+        raise HTTPException(
+            status_code=403, detail="You cannot toggle staff outside your assigned branch."
+        )
+
+    new_status = not target["is_active"]
     supabase.table("clinic_admins").update({"is_active": new_status}).eq(
         "id", staff_id
     ).execute()
 
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = request.client.host if (request and request.client) else "unknown"
     await log_admin_action(
         user=user,
         action="toggle_staff",
@@ -820,8 +1009,9 @@ def _apply_slot_config(data: dict) -> dict:
 @router.post("/doctors")
 async def create_doctor(
     doctor: DoctorCreate,
+    request: Request = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("DOCTORS_CREATE")),
 ):
     """Create a new doctor and optionally assign to a branch."""
     effective_clinic_id = None
@@ -831,6 +1021,12 @@ async def create_doctor(
         # Extract branch fields before building the doctors-table payload
         requested_branch_id = doctor.branch_id
         requested_branch_session = doctor.branch_session or "both"
+
+        if user.role == "staff" and user.branch_id:
+            if requested_branch_id:
+                enforce_branch_scope(user, requested_branch_id)
+            else:
+                requested_branch_id = str(user.branch_id)
 
         try:
             doctor_data = doctor.model_dump(exclude={"branch_id", "branch_session"})
@@ -845,9 +1041,6 @@ async def create_doctor(
         new_doctor = result.data[0]
 
         # ── Branch assignment ──
-        # Determine which branch_id to use:
-        #   1. Explicit branch_id from the form
-        #   2. Auto-select if clinic has exactly 1 branch
         branch_id_to_assign = requested_branch_id
 
         if not branch_id_to_assign:
@@ -859,7 +1052,7 @@ async def create_doctor(
                 .eq("is_active", True)
                 .execute()
             )
-            clinic_branches = branches_result.data or []
+            clinic_branches = branches_result.data if isinstance(branches_result.data, list) else []
             if len(clinic_branches) == 1:
                 branch_id_to_assign = clinic_branches[0]["id"]
 
@@ -892,10 +1085,19 @@ async def create_doctor(
                 new_doctor["branch_id"] = branch_id_to_assign
                 new_doctor["branch_session"] = requested_branch_session
             except Exception as be:
-                # Non-fatal: doctor created, branch assignment failed
                 logger.warning(
                     f"Doctor {new_doctor['id']} created but branch assignment failed: {be}"
                 )
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="create_doctor",
+            resource_type="doctor",
+            resource_id=new_doctor["id"],
+            details={"name": new_doctor.get("name"), "branch_id": branch_id_to_assign},
+            ip_address=client_ip,
+        )
 
         return new_doctor
     except HTTPException:
@@ -914,15 +1116,34 @@ async def create_doctor(
 async def update_doctor(
     doctor_id: str,
     doctor: DoctorUpdate,
+    request: Request = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("DOCTORS_UPDATE")),
 ):
     """Update an existing doctor, optionally changing branch assignment."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # Branch-scoped staff check on existing doctor
+        if user.role == "staff" and user.branch_id:
+            doc_branches = (
+                supabase.table("doctor_branches")
+                .select("branch_id")
+                .eq("doctor_id", doctor_id)
+                .execute()
+            )
+            if doc_branches.data:
+                assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
+                if str(user.branch_id) not in assigned_branch_ids:
+                    raise HTTPException(
+                        status_code=403, detail="Doctor is not assigned to your branch."
+                    )
+
         # Extract branch fields before building the doctors-table payload
         requested_branch_id = doctor.branch_id
         requested_branch_session = doctor.branch_session
+
+        if user.role == "staff" and user.branch_id and requested_branch_id:
+            enforce_branch_scope(user, requested_branch_id)
 
         try:
             update_data = doctor.model_dump(exclude_unset=True, exclude={"branch_id", "branch_session"})
@@ -953,10 +1174,8 @@ async def update_doctor(
 
         # ── Branch assignment upsert ──
         if requested_branch_id is not None:
-            # Resolve effective clinic_id for IDOR check
             doc_clinic_id = updated_doctor.get("clinic_id") or effective_clinic_id
 
-            # IDOR check: verify branch belongs to the doctor's clinic
             branch_check = (
                 supabase.table("branches")
                 .select("id")
@@ -972,8 +1191,6 @@ async def update_doctor(
 
             session_val = requested_branch_session or "both"
 
-            # Remove existing assignments and add the new one
-            # (for single-branch dropdown; multi-branch uses the /branches/{id}/doctors endpoint)
             supabase.table("doctor_branches").delete().eq("doctor_id", doctor_id).execute()
             supabase.table("doctor_branches").insert({
                 "doctor_id": doctor_id,
@@ -982,6 +1199,16 @@ async def update_doctor(
             }).execute()
             updated_doctor["branch_id"] = requested_branch_id
             updated_doctor["branch_session"] = session_val
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="update_doctor",
+            resource_type="doctor",
+            resource_id=doctor_id,
+            details={"updated_fields": list(update_data.keys()), "branch_id": requested_branch_id},
+            ip_address=client_ip,
+        )
 
         return updated_doctor
     except HTTPException:
@@ -998,17 +1225,46 @@ async def update_doctor(
 
 @router.delete("/doctors/{doctor_id}")
 async def delete_doctor(
-    doctor_id: str, clinic_id: str = "default", user: AdminUser = Depends(require_admin)
+    doctor_id: str,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("DOCTORS_DELETE")),
 ):
     """Delete a doctor."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # Branch-scoped staff check
+        if user.role == "staff" and user.branch_id:
+            doc_branches = (
+                supabase.table("doctor_branches")
+                .select("branch_id")
+                .eq("doctor_id", doctor_id)
+                .execute()
+            )
+            if doc_branches.data:
+                assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
+                if str(user.branch_id) not in assigned_branch_ids:
+                    raise HTTPException(
+                        status_code=403, detail="Doctor is not assigned to your branch."
+                    )
+
         query = supabase.table("doctors").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
         query.eq("id", doctor_id).execute()
-        # Note: if doctor has appointments, foreign key constraints might fail unless cascading is enabled
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="delete_doctor",
+            resource_type="doctor",
+            resource_id=doctor_id,
+            ip_address=client_ip,
+        )
+
         return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting doctor: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete doctor")
@@ -1018,7 +1274,7 @@ async def delete_doctor(
 async def get_leaves(
     doctor: Optional[str] = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(verify_credentials),
 ):
     """Get doctor leaves."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1038,14 +1294,41 @@ async def get_leaves(
 @router.post("/leaves")
 async def create_leave(
     leave: LeaveCreate,
+    request: Request = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("DOCTOR_LEAVES_CREATE")),
 ):
     """Create a doctor leave (single day or date range)."""
     from datetime import timedelta
 
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+        # Branch-scoped staff check on doctor
+        if user.role == "staff" and user.branch_id:
+            doc_res = (
+                supabase.table("doctors")
+                .select("id")
+                .eq("name", leave.doctor_name)
+                .eq("clinic_id", effective_clinic_id)
+                .execute()
+            )
+            if doc_res.data:
+                doc_id = doc_res.data[0]["id"]
+                doc_branches = (
+                    supabase.table("doctor_branches")
+                    .select("branch_id")
+                    .eq("doctor_id", doc_id)
+                    .execute()
+                )
+                if doc_branches.data:
+                    assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
+                    if str(user.branch_id) not in assigned_branch_ids:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Doctor is not assigned to your branch.",
+                        )
+
         start_date = leave.leave_date
         end_date = leave.end_date or start_date
 
@@ -1058,7 +1341,10 @@ async def create_leave(
         current_date = start_date
 
         while current_date <= end_date:
-            leave_data = leave.dict(exclude={"end_date"})
+            try:
+                leave_data = leave.model_dump(exclude={"end_date"})
+            except AttributeError:
+                leave_data = leave.dict(exclude={"end_date"})
             leave_data["leave_date"] = str(current_date)
             leave_data["clinic_id"] = effective_clinic_id
             leaves_to_insert.append(leave_data)
@@ -1066,8 +1352,16 @@ async def create_leave(
 
         result = supabase.table("doctor_leaves").insert(leaves_to_insert).execute()
 
-        # Return the first inserted leave just to satisfy the previous API signature somewhat
-        # in case the frontend depends on it
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="create_leave",
+            resource_type="doctor_leave",
+            resource_id=leave.doctor_name,
+            details={"start_date": str(start_date), "end_date": str(end_date), "count": len(leaves_to_insert)},
+            ip_address=client_ip,
+        )
+
         if result.data:
             return result.data[0]
         return {"status": "success", "count": len(leaves_to_insert)}
@@ -1080,16 +1374,63 @@ async def create_leave(
 
 @router.delete("/leaves/{leave_id}")
 async def delete_leave(
-    leave_id: str, clinic_id: str = "default", user: AdminUser = Depends(require_admin)
+    leave_id: str,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("DOCTOR_LEAVES_DELETE")),
 ):
     """Delete a doctor leave."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        if user.role == "staff" and user.branch_id:
+            leave_res = (
+                supabase.table("doctor_leaves")
+                .select("doctor_name, clinic_id")
+                .eq("id", leave_id)
+                .execute()
+            )
+            if leave_res.data:
+                doc_name = leave_res.data[0]["doctor_name"]
+                doc_res = (
+                    supabase.table("doctors")
+                    .select("id")
+                    .eq("name", doc_name)
+                    .eq("clinic_id", leave_res.data[0]["clinic_id"])
+                    .execute()
+                )
+                if doc_res.data:
+                    doc_id = doc_res.data[0]["id"]
+                    doc_branches = (
+                        supabase.table("doctor_branches")
+                        .select("branch_id")
+                        .eq("doctor_id", doc_id)
+                        .execute()
+                    )
+                    if doc_branches.data:
+                        assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
+                        if str(user.branch_id) not in assigned_branch_ids:
+                            raise HTTPException(
+                                status_code=403,
+                                detail="Doctor is not assigned to your branch.",
+                            )
+
         query = supabase.table("doctor_leaves").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
         query.eq("id", leave_id).execute()
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="delete_leave",
+            resource_type="doctor_leave",
+            resource_id=leave_id,
+            ip_address=client_ip,
+        )
+
         return {"status": "deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting leave: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete leave")
@@ -1097,7 +1438,7 @@ async def delete_leave(
 
 @router.get("/holidays")
 async def get_holidays(
-    clinic_id: str = "default", user: AdminUser = Depends(require_admin)
+    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
     """Get hospital holidays."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1116,8 +1457,9 @@ async def get_holidays(
 async def create_holiday(
     holiday_date: date,
     name: str,
+    request: Request = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("HOLIDAYS_CREATE")),
 ):
     """Create a hospital holiday."""
     try:
@@ -1133,6 +1475,17 @@ async def create_holiday(
             )
             .execute()
         )
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="create_holiday",
+            resource_type="hospital_holiday",
+            resource_id=str(holiday_date),
+            details={"name": name},
+            ip_address=client_ip,
+        )
+
         return result.data[0]
     except HTTPException:
         raise
@@ -1144,8 +1497,9 @@ async def create_holiday(
 @router.delete("/holidays/{holiday_date}")
 async def delete_holiday(
     holiday_date: str,
+    request: Request = None,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("HOLIDAYS_DELETE")),
 ):
     """Delete a hospital holiday."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -1154,7 +1508,19 @@ async def delete_holiday(
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
         query.eq("holiday_date", holiday_date).execute()
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="delete_holiday",
+            resource_type="hospital_holiday",
+            resource_id=holiday_date,
+            ip_address=client_ip,
+        )
+
         return {"status": "deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting holiday: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete holiday")
@@ -2262,6 +2628,264 @@ async def resolve_connector_failed_report(
         raise HTTPException(status_code=500, detail="Failed to resolve failed report")
 
 
+class ResolveMatchRequest(BaseModel):
+    patient_phone: str
+    patient_name: Optional[str] = None
+    send_now: bool = True
+
+
+class ResendReportRequest(BaseModel):
+    new_phone: Optional[str] = None
+
+
+@router.get("/reports/queue")
+async def get_diagnostic_reports_queue(
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    user: AdminUser = Depends(require_permission("REPORTS_VIEW")),
+):
+    """Retrieve unified triage queue for diagnostic center operations:
+    - Reports in 'needs_review' state (conflict or missing phone)
+    - Reports in 'failed' state
+    - Unresolved connector failed reports
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    target_branch = user.branch_id if user.role == "staff" and user.branch_id else branch_id
+    if target_branch:
+        enforce_branch_scope(user, target_branch)
+
+    try:
+        # 1. Fetch lab_reports in needs_review or failed
+        lr_query = supabase.table("lab_reports").select("*")
+        if effective_clinic_id != "default":
+            lr_query = lr_query.eq("clinic_id", effective_clinic_id)
+
+        if status_filter == "needs_review":
+            lr_query = lr_query.eq("status", "needs_review")
+        elif status_filter == "failed":
+            lr_query = lr_query.eq("status", "failed")
+        else:
+            lr_query = lr_query.in_("status", ["needs_review", "failed"])
+
+        lr_res = lr_query.order("uploaded_at", desc=True).limit(100).execute()
+        lab_reports_queue = lr_res.data or []
+
+        # 2. Fetch connector_failed_reports that are unresolved
+        cfr_query = supabase.table("connector_failed_reports").select("*").is_("resolved_at", "null")
+        if effective_clinic_id != "default":
+            cfr_query = cfr_query.eq("clinic_id", effective_clinic_id)
+        if target_branch:
+            cfr_query = cfr_query.eq("branch_id", target_branch)
+        cfr_res = cfr_query.order("last_attempt_at", desc=True).limit(50).execute()
+        connector_failures = cfr_res.data or []
+
+        return {
+            "needs_review": [r for r in lab_reports_queue if r.get("status") == "needs_review"],
+            "failed_reports": [r for r in lab_reports_queue if r.get("status") == "failed"],
+            "connector_failures": connector_failures,
+            "total_queued": len(lab_reports_queue) + len(connector_failures),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get diagnostic reports queue: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get reports queue")
+
+
+@router.post("/reports/{report_id}/resolve-match")
+async def resolve_report_match(
+    report_id: str,
+    body: ResolveMatchRequest,
+    clinic_id: str = "default",
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("REPORTS_RESOLVE")),
+):
+    """Manually resolve a report in 'needs_review' state and optionally trigger WhatsApp send."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+
+    existing = (
+        supabase.table("lab_reports")
+        .select("*")
+        .eq("id", report_id)
+        .execute()
+    )
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = existing.data[0]
+    enforce_clinic_access(user, report["clinic_id"])
+
+    norm_phone = normalize_phone(body.patient_phone)
+    if not validate_phone(norm_phone):
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+    update_payload = {
+        "patient_phone": norm_phone,
+        "patient_name": body.patient_name.strip() if body.patient_name else report.get("patient_name"),
+        "match_source": "manual",
+        "match_confidence": 1.0,
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+        "resolved_by": user.username,
+        "status": "matched",
+    }
+
+    # If send_now is True, attempt delivery via LabReportService
+    if body.send_now and report.get("file_path") and not str(report.get("file_path", "")).startswith("pending_review"):
+        try:
+            lab_service = LabReportService()
+            supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
+            await lab_service.resend_report(report_id, new_phone=norm_phone)
+            update_payload["status"] = "sent"
+        except Exception as e:
+            logger.error(f"Failed to resend resolved report {report_id}: {e}")
+            update_payload["status"] = "failed"
+            update_payload["error_message"] = str(e)
+            supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
+    else:
+        supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
+
+    client_ip = request.client.host if request and request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="resolve_report_match",
+        resource_type="lab_report",
+        resource_id=report_id,
+        details={
+            "old_phone": report.get("patient_phone"),
+            "new_phone": norm_phone,
+            "patient_name": update_payload.get("patient_name"),
+            "send_now": body.send_now,
+        },
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "report_id": report_id,
+        "status": update_payload["status"],
+        "patient_phone": norm_phone,
+    }
+
+
+@router.post("/reports/{report_id}/resend")
+async def resend_lab_report(
+    report_id: str,
+    body: Optional[ResendReportRequest] = None,
+    clinic_id: str = "default",
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("REPORTS_RESOLVE")),
+):
+    """Resend a previously failed or existing lab report via WhatsApp."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+
+    existing = (
+        supabase.table("lab_reports")
+        .select("*")
+        .eq("id", report_id)
+        .execute()
+    )
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = existing.data[0]
+    enforce_clinic_access(user, report["clinic_id"])
+
+    new_phone = body.new_phone if body and body.new_phone else None
+    if new_phone:
+        new_phone = normalize_phone(new_phone)
+        if not validate_phone(new_phone):
+            raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+    lab_service = LabReportService()
+    try:
+        res = await lab_service.resend_report(report_id, new_phone=new_phone)
+    except Exception as e:
+        logger.error(f"Resend failed for report {report_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resend report: {str(e)}")
+
+    client_ip = request.client.host if request and request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="resend_lab_report",
+        resource_type="lab_report",
+        resource_id=report_id,
+        details={"new_phone": new_phone},
+        ip_address=client_ip,
+    )
+
+    return {"success": True, "report": res}
+
+
+@router.get("/diagnostic/stats")
+async def get_diagnostic_stats(
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(require_permission("REPORTS_VIEW")),
+):
+    """Get operational stats for Diagnostic Center dashboard."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    target_branch = user.branch_id if user.role == "staff" and user.branch_id else branch_id
+    if target_branch:
+        enforce_branch_scope(user, target_branch)
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    retention_cutoff = (datetime.now(timezone.utc) - timedelta(days=80)).isoformat()
+
+    try:
+        # 1. Query lab_reports
+        lr_query = supabase.table("lab_reports").select("id, status, uploaded_at, sent_at, file_path")
+        if effective_clinic_id != "default":
+            lr_query = lr_query.eq("clinic_id", effective_clinic_id)
+
+        lr_res = lr_query.execute()
+        all_reports = lr_res.data or []
+
+        today_reports = [r for r in all_reports if (r.get("uploaded_at") or "") >= today_start]
+        sent_today = sum(1 for r in today_reports if r.get("status") == "sent")
+        failed_today = sum(1 for r in today_reports if r.get("status") == "failed")
+        needs_review_total = sum(1 for r in all_reports if r.get("status") == "needs_review")
+        expiring_soon = sum(
+            1 for r in all_reports
+            if (r.get("uploaded_at") or "") <= retention_cutoff and r.get("file_path")
+        )
+
+        # 2. Connector status
+        conn_query = supabase.table("integration_connectors").select("*")
+        if effective_clinic_id != "default":
+            conn_query = conn_query.eq("clinic_id", effective_clinic_id)
+        if target_branch:
+            conn_query = conn_query.eq("branch_id", target_branch)
+        conn_res = conn_query.execute()
+        connectors = conn_res.data or []
+
+        connector_info = None
+        if connectors:
+            c = connectors[0]
+            is_enabled = c.get("is_enabled", False)
+            last_error = c.get("last_error")
+            health = "healthy" if is_enabled and not last_error else ("warning" if is_enabled and last_error else "disabled")
+            connector_info = {
+                "id": c.get("id"),
+                "connector_type": c.get("connector_type"),
+                "is_enabled": is_enabled,
+                "last_run_at": c.get("last_run_at"),
+                "last_success_at": c.get("last_success_at"),
+                "last_error": last_error,
+                "health": health,
+            }
+
+        return {
+            "reports_today": {
+                "total": len(today_reports),
+                "sent": sent_today,
+                "failed": failed_today,
+                "needs_review": needs_review_total,
+            },
+            "expiring_retention_count": expiring_soon,
+            "connector": connector_info,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get diagnostic stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get diagnostic stats")
+
+
 @router.get("/audit-logs")
 async def get_admin_audit_logs(
     clinic_id: str = "default",
@@ -2441,9 +3065,10 @@ async def delete_branch(
 @router.get("/branches/{branch_id}/doctors")
 async def get_branch_doctors(
     branch_id: str,
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Get doctors assigned to a specific branch."""
+    enforce_branch_scope(user, branch_id)
     try:
         result = (
             supabase.table("doctor_branches")
@@ -2452,6 +3077,8 @@ async def get_branch_doctors(
             .execute()
         )
         return {"doctor_branches": result.data or []}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting branch doctors: {e}")
         raise HTTPException(status_code=500, detail="Failed to get branch doctors")
@@ -2461,17 +3088,46 @@ async def get_branch_doctors(
 async def assign_doctor_to_branch(
     branch_id: str,
     body: DoctorBranchAssign,
-    user: AdminUser = Depends(require_admin),
+    request: Request,
+    user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Assign a doctor to a branch with session control."""
+    enforce_branch_scope(user, branch_id)
     try:
+        # Verify branch belongs to user's clinic
+        if user.clinic_id and user.clinic_id != "default":
+            branch_check = (
+                supabase.table("branches")
+                .select("id")
+                .eq("id", branch_id)
+                .eq("clinic_id", user.clinic_id)
+                .execute()
+            )
+            if not branch_check.data:
+                raise HTTPException(
+                    status_code=400, detail="Selected branch does not belong to your clinic."
+                )
+
         data = {
             "doctor_id": body.doctor_id,
             "branch_id": branch_id,
             "session": body.session,
         }
         result = supabase.table("doctor_branches").insert(data).execute()
+
+        client_ip = request.client.host if request.client else "unknown"
+        await log_admin_action(
+            user=user,
+            action="assign_doctor_to_branch",
+            resource_type="doctor_branch",
+            resource_id=f"{branch_id}:{body.doctor_id}",
+            details={"session": body.session},
+            ip_address=client_ip,
+        )
+
         return result.data[0]
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = str(e).lower()
         if "duplicate" in error_msg or "unique" in error_msg:
@@ -2486,14 +3142,28 @@ async def assign_doctor_to_branch(
 async def remove_doctor_from_branch(
     branch_id: str,
     doctor_id: str,
-    user: AdminUser = Depends(require_admin),
+    request: Request,
+    user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Remove a doctor from a branch."""
+    enforce_branch_scope(user, branch_id)
     try:
         supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
             "doctor_id", doctor_id
         ).execute()
+
+        client_ip = request.client.host if request.client else "unknown"
+        await log_admin_action(
+            user=user,
+            action="remove_doctor_from_branch",
+            resource_type="doctor_branch",
+            resource_id=f"{branch_id}:{doctor_id}",
+            ip_address=client_ip,
+        )
+
         return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error removing doctor from branch: {e}")
         raise HTTPException(
@@ -2506,9 +3176,11 @@ async def update_doctor_branch_session(
     branch_id: str,
     doctor_id: str,
     body: DoctorBranchAssign,
-    user: AdminUser = Depends(require_admin),
+    request: Request,
+    user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Update a doctor's session assignment at a branch."""
+    enforce_branch_scope(user, branch_id)
     try:
         result = (
             supabase.table("doctor_branches")
@@ -2521,6 +3193,17 @@ async def update_doctor_branch_session(
             raise HTTPException(
                 status_code=404, detail="Doctor-branch assignment not found"
             )
+
+        client_ip = request.client.host if request.client else "unknown"
+        await log_admin_action(
+            user=user,
+            action="update_doctor_branch_session",
+            resource_type="doctor_branch",
+            resource_id=f"{branch_id}:{doctor_id}",
+            details={"session": body.session},
+            ip_address=client_ip,
+        )
+
         return result.data[0]
     except HTTPException:
         raise

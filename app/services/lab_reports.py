@@ -33,6 +33,9 @@ class LabReportService:
         report_type: str,
         external_report_id: Optional[str] = None,
         source: str = "admin",
+        match_confidence: Optional[float] = None,
+        match_source: Optional[str] = None,
+        matched_patient_id: Optional[str] = None,
     ) -> dict:
         """Full pipeline: extract text, AI summary, upload, send via WhatsApp, save record.
 
@@ -164,6 +167,9 @@ class LabReportService:
             "status": "sent" if sent_ok else "failed",
             "external_report_id": external_report_id,
             "source": source,
+            "match_confidence": match_confidence,
+            "match_source": match_source,
+            "matched_patient_id": matched_patient_id,
             "error_message": (
                 error_message
                 if not sent_ok
@@ -257,12 +263,15 @@ class LabReportService:
         result = query.execute()
         return result.data or []
 
-    async def resend_report(self, report_id: str) -> dict:
+    async def resend_report(self, report_id: str, new_phone: Optional[str] = None) -> dict:
         """Resend a previously uploaded lab report."""
         report = supabase.table("lab_reports").select("*").eq("id", report_id).execute()
         if not report.data:
             raise ValueError("Report not found")
         report = report.data[0]
+        if new_phone:
+            report["patient_phone"] = new_phone
+            supabase.table("lab_reports").update({"patient_phone": new_phone}).eq("id", report_id).execute()
 
         try:
             # Check if PDF has been cleaned up by storage retention policy

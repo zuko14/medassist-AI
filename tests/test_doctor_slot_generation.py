@@ -38,7 +38,7 @@ async def test_create_doctor_generates_morning_and_evening_slots():
     with patch("app.routers.admin.supabase", mock_sb):
         await create_doctor(payload, clinic_id="default", user=MagicMock())
 
-    inserted = mock_sb.table.return_value.insert.call_args[0][0]
+    inserted = mock_sb.table.return_value.insert.call_args_list[0][0][0]
     assert inserted["morning_slots"] == ["09:00", "09:30", "10:00", "10:30"]
     assert inserted["evening_slots"] == ["17:00", "17:30"]
 
@@ -177,7 +177,7 @@ async def test_create_doctor_morning_only_shift():
     with patch("app.routers.admin.supabase", mock_sb):
         await create_doctor(payload, clinic_id="default", user=MagicMock())
 
-    inserted = mock_sb.table.return_value.insert.call_args[0][0]
+    inserted = mock_sb.table.return_value.insert.call_args_list[0][0][0]
     assert inserted["morning_slots"] == ["09:00", "09:30", "10:00", "10:30"]
     assert inserted["evening_slots"] == []
     assert inserted["evening_start"] is None
@@ -203,7 +203,7 @@ async def test_create_doctor_evening_only_shift():
     with patch("app.routers.admin.supabase", mock_sb):
         await create_doctor(payload, clinic_id="default", user=MagicMock())
 
-    inserted = mock_sb.table.return_value.insert.call_args[0][0]
+    inserted = mock_sb.table.return_value.insert.call_args_list[0][0][0]
     assert inserted["evening_slots"] == ["17:00", "17:30", "18:00", "18:30"]
     assert inserted["morning_slots"] == []
     assert inserted["morning_start"] is None
