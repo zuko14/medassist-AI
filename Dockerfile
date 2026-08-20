@@ -38,4 +38,4 @@ USER appuser
 EXPOSE 8000
 
 # Run the application (binds to $PORT on Render/Railway, defaults to 8000 locally)
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
