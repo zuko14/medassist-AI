@@ -2369,7 +2369,7 @@ def _mask_connector(row: dict) -> dict:
 async def get_connectors(
     clinic_id: str = "default",
     branch_id: Optional[str] = None,
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
     """Get all integration connectors with status info (credentials masked)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -2396,7 +2396,7 @@ async def upsert_connector_credentials(
     body: ConnectorCredentialsUpdate,
     request: Request,
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
     """Self-service create/update of a clinic's (or one of its branches')
     MocDoc connector credentials. A clinic_admin may only write their own
@@ -2498,7 +2498,7 @@ async def upsert_connector_credentials(
 async def toggle_connector(
     connector_id: str,
     body: ConnectorToggle,
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
     """Toggle a connector ON or OFF. This is the primary kill switch."""
     try:

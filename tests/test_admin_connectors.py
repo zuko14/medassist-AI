@@ -6,6 +6,7 @@ GET /connectors/{id}/audit-log, GET/POST /connectors/failed-reports*."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException, Request
+from app.services.permissions import require_permission
 
 from app.routers.admin import (
     AdminUser,
@@ -311,3 +312,47 @@ async def test_resolve_failed_report_own_clinic_succeeds():
         )
 
     assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_connectors_allows_diagnostic_operator_staff():
+    """A staff account with CONNECTOR_MANAGE (e.g. DIAGNOSTIC_OPERATOR role)
+    must be able to list connectors — require_admin previously 403'd every
+    staff account unconditionally, making the CONNECTOR_MANAGE grant dead."""
+    staff = AdminUser(
+        "diag_op", role="staff", clinic_id="clinic-3", user_id="user-3",
+        permissions=["REPORTS_VIEW", "REPORTS_RESOLVE", "CONNECTOR_MANAGE"],
+    )
+    mock_sb = MagicMock()
+    mock_table = MagicMock()
+    mock_sb.table.return_value = mock_table
+    mock_table.select.return_value.eq.return_value.order.return_value.execute.return_value = MagicMock(data=[])
+
+    with patch("app.routers.admin.supabase", mock_sb):
+        result = await get_connectors(clinic_id="default", user=staff)
+
+    assert result == {"connectors": []}
+
+
+@pytest.mark.asyncio
+async def test_get_connectors_rejects_staff_without_connector_manage():
+    """A staff account without CONNECTOR_MANAGE must still be rejected."""
+    staff = AdminUser(
+        "front_desk", role="staff", clinic_id="clinic-3", user_id="user-4",
+        permissions=["REPORTS_VIEW"],
+    )
+    # When evaluated through require_permission or direct gate
+    dep = require_permission("CONNECTOR_MANAGE")
+    with pytest.raises(HTTPException) as exc:
+        await dep(user=staff)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_connector_manage_dependency_rejects_missing_permission():
+    dep = require_permission("CONNECTOR_MANAGE")
+    staff = AdminUser("x", role="staff", clinic_id="clinic-3", user_id="user-5", permissions=[])
+    with pytest.raises(HTTPException) as exc:
+        await dep(user=staff)
+    assert exc.value.status_code == 403
+
