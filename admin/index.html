@@ -1525,6 +1525,8 @@
                     <div class="field"><label><input type="checkbox" id="f-connEnabled"> Connector Enabled</label></div>
                 </div>
                 <button class="btn btn-accent" onclick="saveConnectorCredentials()">Save Credentials</button>
+                <button class="btn btn-ghost" onclick="testConnector()" id="btn-connTest">🔍 Test Connection</button>
+                <button class="btn btn-ghost" onclick="runConnectorNow()" id="btn-connRunNow">▶️ Run Now</button>
             </div>
 
             <div class="card">
@@ -3849,6 +3851,41 @@ async function saveConnectorCredentials() {
     }
 }
 
+async function testConnector() {
+    const id = _connectorId;
+    if (!id) { toast('Save credentials first, then test.', true); return; }
+    const btn = document.getElementById('btn-connTest');
+    btn.disabled = true; btn.textContent = 'Testing...';
+    try {
+        const res = await apiPost(`/admin/connectors/${id}/test`, {});
+        const r = res.result || {};
+        toast(res.success ? `✅ Login OK — ${r.reports_found || 0} report(s) found` : `⚠️ ${r.error_message || 'Test failed'}`, !res.success);
+    } catch (e) {
+        toast('Error: ' + e.message, true);
+    } finally {
+        btn.disabled = false; btn.textContent = '🔍 Test Connection';
+    }
+}
+
+async function runConnectorNow() {
+    const id = _connectorId;
+    if (!id) { toast('Save credentials first.', true); return; }
+    const ok = await confirmDialog('Run the connector now instead of waiting for the next scheduled poll?', { okText: 'Run Now' });
+    if (!ok) return;
+    const btn = document.getElementById('btn-connRunNow');
+    btn.disabled = true; btn.textContent = 'Running...';
+    try {
+        const res = await apiPost(`/admin/connectors/${id}/run-now`, {});
+        const r = res.result || {};
+        toast(res.success ? `✅ Run complete — ${r.reports_uploaded || 0} uploaded, ${r.reports_failed || 0} failed` : `⚠️ ${r.error_message || 'Run failed'}`, !res.success);
+        loadConnectorsPage();
+    } catch (e) {
+        toast('Error: ' + e.message, true);
+    } finally {
+        btn.disabled = false; btn.textContent = '▶️ Run Now';
+    }
+}
+
 async function loadConnectorAuditLog() {
     const el = document.getElementById('connectorAuditList');
     if (!_connectorId) {
@@ -3977,6 +4014,11 @@ async function loadDiagnosticDashboard() {
             }
             const lastRunStr = conn.last_run_at ? new Date(conn.last_run_at).toLocaleTimeString() : 'Never';
             statusSub.textContent = `Last run: ${lastRunStr}` + (conn.last_error ? ` · Error: ${conn.last_error}` : '');
+            if (conn.next_run_at) {
+                const nextRun = new Date(conn.next_run_at);
+                const mins = Math.max(0, Math.round((nextRun - new Date()) / 60000));
+                statusSub.textContent += ` · Next run in ~${mins}m`;
+            }
         } else {
             statusDot.style.background = 'var(--text3)';
             statusDot.style.boxShadow = 'none';
