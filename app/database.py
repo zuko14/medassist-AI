@@ -16,10 +16,10 @@ _holiday_cache: dict[str, dict] = {}
 DOCTOR_CACHE_TTL_SECONDS = 300
 HOLIDAY_CACHE_TTL_SECONDS = 300
 
-# Initialize Supabase client
-supabase: Client = create_client(
-    settings.supabase_url, settings.supabase_service_role_key
-)
+# Initialize Supabase client with fallback for zero-downtime boots
+_sb_url = settings.supabase_url if (settings.supabase_url and settings.supabase_url.startswith("http")) else "https://placeholder.supabase.co"
+_sb_key = settings.supabase_service_role_key or "placeholder-key"
+supabase: Client = create_client(_sb_url, _sb_key)
 
 
 async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:

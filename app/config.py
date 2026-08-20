@@ -3,9 +3,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Meta WhatsApp Cloud API
-    whatsapp_token: str
-    whatsapp_phone_number_id: str
-    whatsapp_verify_token: str
+    whatsapp_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_verify_token: str = ""
     waba_display_name: str = "Kriya AI Hospital"
 
     # OpenRouter AI (Primary MedAssist LLM Provider)
@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
 
     # Supabase
-    supabase_url: str
-    supabase_service_role_key: str
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
 
     # Hospital Config
     hospital_name: str = "City Care Hospital"
