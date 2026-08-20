@@ -2537,6 +2537,72 @@ async def toggle_connector(
         raise HTTPException(status_code=500, detail="Failed to toggle connector")
 
 
+async def _load_connector_for_action(connector_id: str, user: "AdminUser", clinic_id: str) -> dict:
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    row = (
+        supabase.table("integration_connectors")
+        .select("*")
+        .eq("id", connector_id)
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    connector = row.data[0]
+    enforce_clinic_access(user, connector["clinic_id"])
+    enforce_branch_scope(user, connector.get("branch_id"))
+    return connector
+
+
+@router.post("/connectors/{connector_id}/test")
+async def test_connector(
+    connector_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
+):
+    """Dry-run the connector: authenticate and parse only, no downloads or sends."""
+    connector = await _load_connector_for_action(connector_id, user, clinic_id)
+
+    from connectors.runner import run_connector
+
+    try:
+        result = await run_connector(
+            clinic_id=connector["clinic_id"],
+            connector_type=connector.get("connector_type", "mocdoc"),
+            dry_run=True,
+            branch_id=connector.get("branch_id"),
+        )
+    except Exception as e:
+        logger.error(f"Connector test run failed for {connector_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Test run failed: {str(e)}")
+
+    return {"success": result.get("run_status") in ("dry_run", "success"), "result": result}
+
+
+@router.post("/connectors/{connector_id}/run-now")
+async def run_connector_now(
+    connector_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
+):
+    """Trigger one full connector poll cycle immediately, outside the scheduler."""
+    connector = await _load_connector_for_action(connector_id, user, clinic_id)
+
+    from connectors.runner import run_connector as run_connector_cycle
+
+    try:
+        result = await run_connector_cycle(
+            clinic_id=connector["clinic_id"],
+            connector_type=connector.get("connector_type", "mocdoc"),
+            dry_run=False,
+            branch_id=connector.get("branch_id"),
+        )
+    except Exception as e:
+        logger.error(f"Manual connector run failed for {connector_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Run failed: {str(e)}")
+
+    return {"success": result.get("run_status") in ("success", "partial"), "result": result}
+
+
 @router.get("/connectors/{connector_id}/audit-log")
 async def get_connector_audit_log(
     connector_id: str,

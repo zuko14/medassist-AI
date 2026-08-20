@@ -356,3 +356,50 @@ async def test_connector_manage_dependency_rejects_missing_permission():
         await dep(user=staff)
     assert exc.value.status_code == 403
 
+
+@pytest.mark.asyncio
+async def test_test_connector_calls_dry_run():
+    from app.routers.admin import test_connector
+
+    admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
+    mock_sb = MagicMock()
+    mock_table = MagicMock()
+    mock_sb.table.return_value = mock_table
+    mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "conn-1", "clinic_id": "clinic-2", "branch_id": None, "connector_type": "mocdoc"}]
+    )
+
+    fake_summary = {"run_status": "dry_run", "reports_found": 3, "error_message": None}
+
+    with patch("app.routers.admin.supabase", mock_sb), \
+         patch("connectors.runner.run_connector", new_callable=AsyncMock, return_value=fake_summary) as mock_run:
+        result = await test_connector(connector_id="conn-1", clinic_id="default", user=admin)
+
+    mock_run.assert_called_once()
+    assert mock_run.call_args.kwargs["dry_run"] is True
+    assert result["result"]["reports_found"] == 3
+
+
+@pytest.mark.asyncio
+async def test_run_connector_now_calls_run_connector_not_dry_run():
+    from app.routers.admin import run_connector_now
+
+    admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
+    mock_sb = MagicMock()
+    mock_table = MagicMock()
+    mock_sb.table.return_value = mock_table
+    mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "conn-1", "clinic_id": "clinic-2", "branch_id": None, "connector_type": "mocdoc"}]
+    )
+
+    fake_summary = {"run_status": "success", "reports_uploaded": 2, "error_message": None}
+
+    with patch("app.routers.admin.supabase", mock_sb), \
+         patch("connectors.runner.run_connector", new_callable=AsyncMock, return_value=fake_summary) as mock_run:
+        result = await run_connector_now(connector_id="conn-1", clinic_id="default", user=admin)
+
+    mock_run.assert_called_once()
+    assert mock_run.call_args.kwargs["dry_run"] is False
+    assert result["result"]["reports_uploaded"] == 2
+
+
