@@ -1384,7 +1384,7 @@
                 </div>
 
                 <div style="display:flex; gap:10px; margin-top:14px;">
-                    <button class="btn btn-accent" onclick="saveBranch()">Save Branch</button>
+                    <button class="btn btn-accent" id="btn-branchSave" onclick="saveBranch()">Save Branch</button>
                     <button class="btn btn-ghost" onclick="resetBranchForm()">Reset</button>
                 </div>
             </div>
@@ -3343,6 +3343,12 @@ async function saveBranch() {
 
     if (!locality) { msg('branchMsg', 'Branch locality is required (e.g. Madhurwada, Kancharpalem)', true); return; }
 
+    const btn = document.getElementById('btn-branchSave');
+    if (btn.disabled) return; // guards against double-click / double-submit creating duplicate branches
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Saving...';
+
     try {
         if (id) {
             await apiPut('/admin/branches/' + id, body);
@@ -3356,6 +3362,9 @@ async function saveBranch() {
     } catch (e) {
         const detail = e.message || 'Unknown error';
         msg('branchMsg', detail.startsWith('Error:') ? detail : 'Error: ' + detail, true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
     }
 }
 
