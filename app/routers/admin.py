@@ -2927,14 +2927,25 @@ async def get_diagnostic_stats(
             is_enabled = c.get("is_enabled", False)
             last_error = c.get("last_error")
             health = "healthy" if is_enabled and not last_error else ("warning" if is_enabled and last_error else "disabled")
+            poll_minutes = (c.get("config") or {}).get("poll_interval_minutes", 10)
+            last_run_at = c.get("last_run_at")
+            next_run_at = None
+            if last_run_at:
+                try:
+                    dt = datetime.fromisoformat(last_run_at.replace("Z", "+00:00"))
+                    next_run_at = (dt + timedelta(minutes=poll_minutes)).isoformat()
+                except Exception:
+                    next_run_at = None
             connector_info = {
                 "id": c.get("id"),
                 "connector_type": c.get("connector_type"),
                 "is_enabled": is_enabled,
-                "last_run_at": c.get("last_run_at"),
+                "last_run_at": last_run_at,
                 "last_success_at": c.get("last_success_at"),
                 "last_error": last_error,
                 "health": health,
+                "poll_interval_minutes": poll_minutes,
+                "next_run_at": next_run_at,
             }
 
         return {

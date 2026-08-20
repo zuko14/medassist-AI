@@ -193,6 +193,7 @@ async def test_get_diagnostic_stats():
                 "last_run_at": "2099-01-01T12:00:00Z",
                 "last_success_at": "2099-01-01T12:00:00Z",
                 "last_error": None,
+                "config": {"poll_interval_minutes": 10},
             }
         ]
     )
@@ -205,3 +206,6 @@ async def test_get_diagnostic_stats():
     assert stats["reports_today"]["needs_review"] == 1
     assert stats["reports_today"]["failed"] == 1
     assert stats["connector"]["health"] == "healthy"
+    assert stats["connector"]["poll_interval_minutes"] == 10
+    assert stats["connector"]["next_run_at"] is not None
+
