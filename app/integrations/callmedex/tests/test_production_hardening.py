@@ -17,9 +17,23 @@ from app.integrations.callmedex.storage.provider import LocalStorageProvider
 from app.integrations.callmedex.api.exceptions import ValidationError
 from app.integrations.callmedex.api.router import replay_cache
 from app.utils.logger import sanitize_log_message
+from app.utils.security import login_rate_limiter
 
 client = TestClient(app)
 PREFIX = "/internal/integrations/callmedex"
+
+
+@pytest.fixture(autouse=True)
+def _reset_shared_rate_limiter():
+    """login_rate_limiter is a process-wide singleton keyed by client IP, and
+    TestClient always reports "testclient" as the IP. Every test module that
+    hits a rate-limited endpoint shares that one counter, so without a reset
+    this module's own requests accumulate across tests and eventually trip
+    429 before reaching the assertions under test. Real deployments don't hit
+    this since callers have distinct IPs."""
+    login_rate_limiter.reset("testclient")
+    yield
+    login_rate_limiter.reset("testclient")
 
 
 def get_valid_headers(payload_bytes: bytes):

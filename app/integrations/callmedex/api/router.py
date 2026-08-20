@@ -89,9 +89,11 @@ async def verify_callmedex_auth_and_hmac(
     """Verify Bearer token / X-Integration-Secret header, 5-minute replay window, duplicate signature cache, and HMAC-SHA256."""
     set_security_headers(response)
 
-    # Rate limiting on IP level
+    # Rate limiting on IP level (atomic check-and-increment — the previous
+    # is_rate_limited()-only call never recorded an attempt, so the counter
+    # never advanced and this check was always a no-op).
     client_ip = request.client.host if request.client else "unknown"
-    if login_rate_limiter.is_rate_limited(client_ip):
+    if login_rate_limiter.check_and_record(client_ip):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded for integration endpoints",

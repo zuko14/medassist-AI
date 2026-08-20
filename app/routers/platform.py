@@ -48,7 +48,7 @@ async def verify_owner_credentials(
 
     client_ip = request.client.host if request.client else "unknown"
 
-    if login_rate_limiter.is_rate_limited(client_ip):
+    if login_rate_limiter.check_and_record(client_ip):
         remaining_wait = 60
         logger.warning(f"Platform owner login rate limit exceeded — IP={client_ip}")
         raise HTTPException(
@@ -56,8 +56,6 @@ async def verify_owner_credentials(
             detail=f"Too many login attempts. Try again in {remaining_wait} seconds.",
             headers={"Retry-After": str(remaining_wait)},
         )
-
-    login_rate_limiter.record_attempt(client_ip)
 
     username_ok = secrets.compare_digest(
         credentials.username.encode("utf-8"),

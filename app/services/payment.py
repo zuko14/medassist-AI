@@ -319,9 +319,7 @@ class PaymentService:
             should_alert = True
             if alert_limiter is not None:
                 key = alert_key or "global"
-                should_alert = not alert_limiter.is_rate_limited(key)
-                if should_alert:
-                    alert_limiter.record_attempt(key)
+                should_alert = not alert_limiter.check_and_record(key)
             if should_alert:
                 await self._alert_admin(
                     "🚨 Payment webhook signature verification FAILED. Possible spoofing attempt."

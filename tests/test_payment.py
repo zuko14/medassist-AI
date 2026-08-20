@@ -361,9 +361,7 @@ class TestPaymentWebhookProcessing:
         with patch.object(service, "_log_payment_event_raw"), patch.object(
             service, "_alert_admin", new_callable=AsyncMock
         ) as mock_alert, patch.object(
-            limiter, "is_rate_limited", side_effect=[False, False, False, True, True]
-        ), patch.object(
-            limiter, "record_attempt"
+            limiter, "check_and_record", side_effect=[False, False, False, True, True]
         ):
             for _ in range(5):
                 await service.process_payment_webhook(

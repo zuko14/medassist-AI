@@ -554,16 +554,15 @@ The platform exposes **42 backend endpoints** structured across 7 functional rou
 * **Non-Root Execution:** Runs as non-root user `appuser` (UID 1000) ([Dockerfile:L30-32](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/hospital-bot/Dockerfile#L30-L32)).
 * **Production Startup Failsafe:** In production mode (`APP_ENV=production`), the application refuses to boot if placeholder/default secrets are detected for `META_APP_SECRET`, `ADMIN_PASSWORD`, `OWNER_PASSWORD`, or `INTEGRATION_SECRET` ([app/main.py:L82-98](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/hospital-bot/app/main.py#L82-L98)).
 
-### Identified Deployment Gap (P0 Fix Required in Dockerfile)
-In [Dockerfile:L27-28](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/hospital-bot/Dockerfile#L27-L28):
+### Deployment Gap — RESOLVED (2026-08-20)
+`Dockerfile` now copies `admin/`, `connectors/`, and `migrations/` alongside `app/`. The P0 gap originally flagged in this audit no longer applies — verified by reading the current `Dockerfile` directly, not re-asserted from this document.
 ```dockerfile
-# Copy application code
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+COPY admin/ ./admin/
+COPY connectors/ ./connectors/
+COPY tests/ ./tests/
 ```
-> [!WARNING]
-> **Missing Frontend Copy in Docker Image:** The Dockerfile does not copy the `admin/` directory. When deploying this container image to Railway or Render, accessing `/admin-panel` or `/platform-panel` will return a `FileNotFoundError` (HTTP 500).  
-> **Fix:** Add `COPY admin/ ./admin/` and `COPY connectors/ ./connectors/` to `Dockerfile`.
 
 ---
 
@@ -619,14 +618,14 @@ COPY migrations/ ./migrations/
 | **AI Reliability & Safety** | **95 / 100** | Deterministic zero-LLM clinical safety firewall; trilingual fallback keyword triage. |
 | **Data Accuracy** | **93 / 100** | Parallel query engine evaluates holidays, doctor leaves, shift windows, and 30-min buffer. |
 | **Testing & Test Coverage** | **96 / 100** | 438 passing automated tests covering all critical clinical and payment paths. |
-| **DevOps & Packaging** | **75 / 100** | Dockerfile missing `COPY admin/` and `COPY connectors/` lines (simple 2-line fix). |
+| **DevOps & Packaging** | **93 / 100** | Dockerfile copies `admin/`, `connectors/`, `migrations/` (fixed 2026-08-20); single-worker Uvicorn on Railway (`railway.toml`), so no multi-worker rate-limit drift risk today. |
 | **Client Pitch Readiness** | **92 / 100** | Highly demonstrable live workflows for hospital administrators, doctors, and patients. |
 
 ---
 
 ## 27. Critical Security Findings
 
-1. **In-Memory Rate Limiter Worker Drift (P1 - Security):** In multi-worker Uvicorn setups, in-memory counters reset across worker restarts unless PostgreSQL RPC rate limiting (`check_rate_limit_atomic`) is strictly enforced.
+1. **Rate Limiter RPC Enforcement — FIXED (2026-08-20):** `PersistentRateLimiter.check_and_record()` (Supabase RPC `check_and_record_rate_limit`, migration 023) is now used at every login/rate-limit gate — `admin.py` already used it; `platform.py` owner login and `callmedex/api/router.py`'s integration auth previously used the racy `is_rate_limited()` + `record_attempt()` pair (a TOCTOU gap), and the CallMeDex path never called `record_attempt()` at all, so its rate limit never incremented. Both now call `check_and_record()`. Current deploy (`railway.toml`) runs a single Uvicorn worker with no `--workers` flag, so multi-worker drift isn't an active risk today, but the RPC path is now consistently enforced for when that changes.
 2. **Meta App Secret Production Failsafe:** Application properly refuses to boot in production if `META_APP_SECRET` is unset or set to placeholder strings.
 
 ---
@@ -656,8 +655,8 @@ COPY migrations/ ./migrations/
 
 | Gap Identified | Severity | Impact | Remediation Plan |
 | :--- | :--- | :--- | :--- |
-| **Dockerfile Missing Admin Copy** | **P0 (Critical)** | HTTP 500 when accessing admin panel in container | Add `COPY admin/ ./admin/` to Dockerfile |
-| **Multi-Worker Rate Limiting** | **P1 (High)** | In-memory limiter drift under Gunicorn/Uvicorn workers | Enforce Supabase RPC rate limiting across workers |
+| ~~Dockerfile Missing Admin Copy~~ | RESOLVED | ~~HTTP 500 when accessing admin panel in container~~ | Fixed — `COPY admin/ ./admin/` present in current Dockerfile |
+| ~~Rate Limiter RPC Enforcement~~ | RESOLVED | ~~2 of 3 login/integration gates used a racy check-then-record pattern~~ | Fixed — `platform.py` and `callmedex/api/router.py` now use `check_and_record()` |
 | **ABDM Production Keys** | **P2 (Medium)** | ABHA lookups fall back to format validation | Secure ABDM production gateway credentials |
 
 ---
@@ -677,8 +676,8 @@ COPY migrations/ ./migrations/
 
 ## 33. P0 / P1 / P2 / P3 Roadmap
 
-* **P0 (Pre-Deployment Immediate):** Patch `Dockerfile` to include `admin/` directory.
-* **P1 (Pre-Pilot Hardening):** Deploy Redis or enforce Supabase atomic RPC for distributed multi-worker rate limiting.
+* **P0 (Pre-Deployment Immediate):** ~~Patch `Dockerfile` to include `admin/` directory.~~ RESOLVED 2026-08-20.
+* **P1 (Pre-Pilot Hardening):** ~~Enforce Supabase atomic RPC for distributed multi-worker rate limiting.~~ RESOLVED 2026-08-20 — all login/integration gates now call `check_and_record()`.
 * **P2 (Commercial Scale):** Implement Meta BSP Embedded Signup for automated 5-minute hospital WhatsApp onboarding.
 * **P3 (Future Expansion):** Add multilingual voice note transcription (Whisper API) for patient voice queries.
 
@@ -772,12 +771,14 @@ COPY migrations/ ./migrations/
 ```
                                     FINAL VERDICT
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│  STATUS: PILOT READY & DEMO READY (Production Grade after 2-line Dockerfile fix)      │
+│  STATUS: PRODUCTION-GRADE FOR PILOT & DEMO (2026-08-20 remediation applied)             │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│  ✓ Strengths: Flawless test suite (438 passing tests), rock-solid database integrity, │
-│    deterministic clinical safety firewall, seamless Razorpay payments, and live queue  │
-│    management.                                                                         │
-│  ! Blocker to resolve: Add 'COPY admin/ ./admin/' to Dockerfile for cloud containers.  │
+│  ✓ Strengths: 438/438 passing tests, rock-solid database integrity, deterministic      │
+│    clinical safety firewall, seamless Razorpay payments, and live queue management.    │
+│  ✓ Former blockers resolved: Dockerfile admin/connectors copy, rate-limiter RPC        │
+│    enforcement on platform-owner login and CallMeDex integration auth.                 │
+│  ! Still unverified: Razorpay live-mode webhook smoke test (only mocked so far —       │
+│    needs real rzp_test_ credentials to confirm, see security remediation notes).       │
 │  ★ Ready to demonstrate confidently to hospital management and clinical directors.    │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
