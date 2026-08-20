@@ -841,7 +841,13 @@ class ConversationManager:
         emergency_number = get_clinic_contact(
             clinic, "emergency_number", settings.hospital_emergency_number
         )
-        await self.whatsapp.send_text(clinic, phone, get_message("welcome", selected))
+        await self.whatsapp.send_text(
+            clinic,
+            phone,
+            get_message(
+                "welcome", selected, hospital_name=clinic.get("name", settings.hospital_name)
+            ),
+        )
         await self.whatsapp.send_text(
             clinic,
             phone,
@@ -878,7 +884,13 @@ class ConversationManager:
             await update_patient(
                 clinic["id"], phone, {"data_consent": True, "data_consent_at": "now()"}
             )
-            await self.whatsapp.send_text(clinic, phone, get_message("welcome", lang))
+            await self.whatsapp.send_text(
+                clinic,
+                phone,
+                get_message(
+                    "welcome", lang, hospital_name=clinic.get("name", settings.hospital_name)
+                ),
+            )
             await self.whatsapp.send_text(
                 clinic,
                 phone,
@@ -894,7 +906,13 @@ class ConversationManager:
             "కాదు",
         ]:
             await update_patient(clinic["id"], phone, {"data_consent": False})
-            await self.whatsapp.send_text(clinic, phone, get_message("welcome", lang))
+            await self.whatsapp.send_text(
+                clinic,
+                phone,
+                get_message(
+                    "welcome", lang, hospital_name=clinic.get("name", settings.hospital_name)
+                ),
+            )
             await self.whatsapp.send_text(
                 clinic,
                 phone,
@@ -3014,7 +3032,9 @@ class ConversationManager:
             header={"en": "Our Services", "hi": "हमारी सेवाएँ", "te": "మా సేవలు"}.get(
                 lang, "Our Services"
             ),
-            body=get_message("our_services_body", lang),
+            body=get_message(
+                "our_services_body", lang, hospital_name=clinic.get("name", settings.hospital_name)
+            ),
             button_text={"en": "Select", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(
                 lang, "Select"
             ),
