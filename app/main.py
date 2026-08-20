@@ -92,8 +92,9 @@ async def lifespan(app: FastAPI):
             placeholder_secrets.append("CALLMEDEX_BEARER_TOKEN")
 
         if placeholder_secrets:
-            error_msg = f"Running in production mode with default/placeholder secrets: {', '.join(placeholder_secrets)}"
-            logger.warning(f"⚠️  SECURITY WARNING: {error_msg}")
+            error_msg = f"Refusing to boot in production mode with default/placeholder secrets: {', '.join(placeholder_secrets)}"
+            logger.critical(f"FATAL: {error_msg}")
+            raise RuntimeError(error_msg)
 
     # Storage orphan cleanup and pre-flight directory check
     import os
