@@ -54,6 +54,13 @@ class HospitalConnector(ABC):
     identical for all connectors.
     """
 
+    # Ordered list of {key, label, type, placeholder, required} describing
+    # the credential fields this connector type needs. The admin panel
+    # fetches this via GET /admin/connectors/types to render a form without
+    # hardcoding any connector's field names. Empty by default — every
+    # concrete subclass overrides it.
+    CONFIG_SCHEMA: list[dict] = []
+
     def __init__(
         self,
         clinic_id: str,

@@ -96,6 +96,13 @@ class MocDocConnector(HospitalConnector):
         4. For each new report: View → Download → POST to MedAssist
     """
 
+    CONFIG_SCHEMA = [
+        {"key": "username", "label": "Username", "type": "text", "placeholder": "MocDoc login ID", "required": True},
+        {"key": "password", "label": "Password", "type": "password", "placeholder": "Leave blank to keep existing", "required": True},
+        {"key": "clinic_slug", "label": "Clinic Slug", "type": "text", "placeholder": "e.g. visakha-multispeciality-clinics", "required": False},
+        {"key": "base_url", "label": "Base URL", "type": "text", "placeholder": "https://mocdoc.com", "required": False},
+    ]
+
     def __init__(self, clinic_id: str, config: dict, medassist_url: str,
                  integration_secret: str, session_dir: str, branch_id: str = None):
         super().__init__(
