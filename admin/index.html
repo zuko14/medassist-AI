@@ -1590,16 +1590,12 @@
             </div>
 
             <div class="form-card">
-                <h3>🔌 MocDoc Credentials</h3>
+                <h3>🔌 Connector Credentials</h3>
                 <div id="connectorMsg"></div>
                 <div class="form-row">
-                    <div class="field"><label>Username</label><input type="text" id="f-connUsername" placeholder="MocDoc login ID"></div>
-                    <div class="field"><label>Password</label><input type="password" id="f-connPassword" placeholder="Leave blank to keep existing"></div>
+                    <div class="field"><label>Connector Type</label><select id="f-connType" onchange="loadConnectorsPage()"></select></div>
                 </div>
-                <div class="form-row">
-                    <div class="field"><label>Clinic Slug</label><input type="text" id="f-connSlug" placeholder="e.g. visakha-multispeciality-clinics"></div>
-                    <div class="field"><label>Base URL</label><input type="text" id="f-connBaseUrl" placeholder="https://mocdoc.com"></div>
-                </div>
+                <div class="form-row" id="connFieldsContainer"></div>
                 <div class="form-row">
                     <div class="field"><label>Admin Alert Phone</label><input type="text" id="f-connAlertPhone" placeholder="+91XXXXXXXXXX"></div>
                     <div class="field"><label>Poll Interval (minutes)</label><input type="number" id="f-connPollMinutes" min="1" value="10"></div>
@@ -4129,6 +4125,7 @@ async function savePaymentSettings() {
 // ═══════ REPORT CONNECTOR (MocDoc) ═══════
 let _connectorId = null;
 let _connectorBranchesLoaded = false;
+let _connectorTypes = [];
 
 function _connBranchParam() {
     const branchId = document.getElementById('f-connectorBranch').value;
@@ -4153,9 +4150,51 @@ async function loadConnectorsPage() {
         _connectorBranchesLoaded = true;
     }
 
+    if (_connectorTypes.length === 0) {
+        await loadConnectorTypes();
+    }
     await loadConnectorCredentials();
     await loadConnectorAuditLog();
     await loadFailedReports();
+}
+
+async function loadConnectorTypes() {
+    try {
+        const data = await api('/admin/connectors/types');
+        _connectorTypes = data.types || [];
+        const select = document.getElementById('f-connType');
+        const previousValue = select.value;
+        select.innerHTML = '';
+        _connectorTypes.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.type;
+            opt.textContent = t.display_name;
+            select.appendChild(opt);
+        });
+        if (previousValue) select.value = previousValue;
+    } catch (e) {
+        _connectorTypes = [];
+    }
+}
+
+function _currentSchema() {
+    const type = document.getElementById('f-connType').value || 'mocdoc';
+    const entry = _connectorTypes.find(t => t.type === type);
+    return (entry && entry.schema) || [];
+}
+
+function _renderConnFields(cfg) {
+    const container = document.getElementById('connFieldsContainer');
+    const schema = _currentSchema();
+    container.innerHTML = schema.map(f => {
+        const isSecret = f.type === 'password';
+        let placeholder = f.placeholder;
+        if (isSecret && cfg.password_set) placeholder = 'Saved — leave blank to keep existing';
+        if (f.key === 'username' && cfg.username_masked) placeholder = 'Saved: ' + cfg.username_masked;
+        const value = (!isSecret && f.key !== 'username') ? (cfg[f.key] || '') : '';
+        return `<div class="field"><label>${esc(f.label)}</label>` +
+            `<input type="${isSecret ? 'password' : 'text'}" id="f-connField-${f.key}" placeholder="${esc(placeholder)}" value="${esc(value)}"></div>`;
+    }).join('');
 }
 
 async function loadConnectorCredentials() {
@@ -4165,14 +4204,11 @@ async function loadConnectorCredentials() {
         _connectorId = conn ? conn.id : null;
         const cfg = (conn && conn.config) || {};
 
-        document.getElementById('f-connUsername').value = '';
-        document.getElementById('f-connUsername').placeholder =
-            cfg.username_masked ? 'Saved: ' + cfg.username_masked : 'MocDoc login ID';
-        document.getElementById('f-connPassword').value = '';
-        document.getElementById('f-connPassword').placeholder =
-            cfg.password_set ? 'Saved — leave blank to keep existing' : 'Leave blank to keep existing';
-        document.getElementById('f-connSlug').value = cfg.clinic_slug || '';
-        document.getElementById('f-connBaseUrl').value = cfg.base_url || '';
+        if (conn && conn.connector_type) {
+            document.getElementById('f-connType').value = conn.connector_type;
+        }
+        _renderConnFields(cfg);
+
         document.getElementById('f-connAlertPhone').value = cfg.admin_alert_phone || '';
         document.getElementById('f-connPollMinutes').value = cfg.poll_interval_minutes || 10;
         document.getElementById('f-connEnabled').checked = conn ? !!conn.is_enabled : false;
@@ -4193,19 +4229,26 @@ async function loadConnectorCredentials() {
 
 async function saveConnectorCredentials() {
     const branchId = document.getElementById('f-connectorBranch').value;
+    const connectorType = document.getElementById('f-connType').value || 'mocdoc';
     const body = {
-        connector_type: 'mocdoc',
+        connector_type: connectorType,
         branch_id: branchId || null,
-        clinic_slug: document.getElementById('f-connSlug').value.trim() || null,
-        base_url: document.getElementById('f-connBaseUrl').value.trim() || null,
         admin_alert_phone: document.getElementById('f-connAlertPhone').value.trim() || null,
         poll_interval_minutes: parseInt(document.getElementById('f-connPollMinutes').value, 10) || null,
         is_enabled: document.getElementById('f-connEnabled').checked,
     };
-    const username = document.getElementById('f-connUsername').value.trim();
-    const password = document.getElementById('f-connPassword').value.trim();
-    if (username) body.username = username;
-    if (password) body.password = password;
+    _currentSchema().forEach(f => {
+        const el = document.getElementById('f-connField-' + f.key);
+        if (!el) return;
+        const val = el.value.trim();
+        if (f.type === 'password') {
+            if (val) body.password = val;
+        } else if (f.key === 'username') {
+            if (val) body.username = val;
+        } else {
+            body[f.key] = val || null;
+        }
+    });
 
     const btn = document.querySelector('#pg-connectors .btn-accent');
     const origText = btn ? btn.textContent : '';
