@@ -26,6 +26,7 @@ import json
 import logging
 import math
 import os
+import signal
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -688,6 +689,13 @@ def start_scheduled_mode():
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
 
+    def _handle_sigterm(signum, frame):
+        # Render sends SIGTERM on redeploy/stop. Route it through the same
+        # shutdown path as Ctrl-C so in-flight locks get released below.
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     scheduler = AsyncIOScheduler()
 
     # Poll every 10 minutes
@@ -721,6 +729,7 @@ def start_scheduled_mode():
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down connector runner...")
         scheduler.shutdown()
+        loop.run_until_complete(release_all_locks_held())
 
 
 def main():

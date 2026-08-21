@@ -118,6 +118,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down MediAssist AI...")
     await callmedex_container.queue_engine.shutdown()
     scheduler_service.shutdown()
+    from connectors.runner import release_all_locks_held
+    await release_all_locks_held()
 
 
 # Create FastAPI app

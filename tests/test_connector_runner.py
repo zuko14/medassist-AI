@@ -72,3 +72,26 @@ async def test_release_connector_lock_clears_fields_and_untracks():
     update_call = mock_table.update.call_args_list[-1][0][0]
     assert update_call == {"locked_at": None, "locked_by": None}
     assert "conn-1" not in _locks_held_by_this_process
+
+
+def test_lifespan_shutdown_calls_release_all_locks_held():
+    """Regression guard: FastAPI's shutdown path must release any connector
+    lock this process holds, or a killed web worker leaves a stale lock."""
+    import inspect
+    from app import main
+
+    source = inspect.getsource(main.lifespan)
+    shutdown_section = source.split("# Shutdown", 1)[1]
+    assert "release_all_locks_held" in shutdown_section
+
+
+def test_scheduled_mode_releases_locks_on_sigterm():
+    """Regression guard: the connector worker's scheduled mode must release
+    its locks on SIGTERM (the signal Render sends on redeploy/stop), not
+    just on KeyboardInterrupt."""
+    import inspect
+    from connectors import runner
+
+    source = inspect.getsource(runner.start_scheduled_mode)
+    assert "signal.signal(signal.SIGTERM" in source
+    assert "release_all_locks_held" in source
