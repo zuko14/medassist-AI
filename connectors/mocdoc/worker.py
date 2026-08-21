@@ -350,45 +350,58 @@ class MocDocConnector(HospitalConnector):
         # Small pause to let MocDoc's JS fully bind event handlers
         await self._page.wait_for_timeout(1000)
 
-        # Fill credentials using type() — MocDoc's jQuery listens for keyup
-        # events to enable the login button (removes .btndisabled class).
-        # Playwright's fill() dispatches input/change but NOT keyup/keydown,
-        # leaving the button permanently disabled.
+        # ── Fill credentials ──
+        # MocDoc's jQuery listens for specific events to enable the login
+        # button.  Neither Playwright's fill() nor type() reliably fires
+        # the exact jQuery handlers.  We use a two-phase approach:
+        #   Phase 1: Playwright type() for realistic keyboard input
+        #   Phase 2: JS evaluate() to trigger jQuery events + force-enable btn
         username_field = self._page.locator(S.USERNAME_FIELD)
         password_field = self._page.locator(S.PASSWORD_FIELD)
 
-        # Click into username, clear any existing value, and type character-by-character
+        # Phase 1 — type into fields (provides realistic input events)
         await username_field.click()
-        await username_field.fill("")  # Clear first
-        await username_field.type(self.username, delay=50)
-        await self._page.wait_for_timeout(300)
+        await username_field.fill("")
+        await username_field.type(self.username, delay=30)
+        await self._page.wait_for_timeout(200)
 
-        # Tab to password field (triggers JS blur/focus events for AES binding)
-        await self._page.keyboard.press("Tab")
-        await self._page.wait_for_timeout(300)
-
-        # Click into password and type character-by-character
         await password_field.click()
-        await password_field.fill("")  # Clear first
-        await password_field.type(self.password, delay=50)
-        await self._page.wait_for_timeout(500)
+        await password_field.fill("")
+        await password_field.type(self.password, delay=30)
+        await self._page.wait_for_timeout(300)
 
-        # Wait for MocDoc's JS to enable the login button (remove btndisabled)
-        login_btn = self._page.locator(S.LOGIN_BUTTON)
-        try:
-            await login_btn.wait_for(state="visible", timeout=5000)
-            # Check if button has disabled class — wait up to 3s for it to clear
-            for _ in range(6):
-                btn_class = await login_btn.get_attribute("class") or ""
-                if "btndisabled" not in btn_class and "disabled" not in btn_class:
-                    break
-                await self._page.wait_for_timeout(500)
-            else:
-                logger.warning("Login button still shows disabled class — clicking anyway")
-        except Exception:
-            logger.warning("Login button wait timed out — attempting click anyway")
+        # Phase 2 — ensure jQuery sees the values and enable the button.
+        # MocDoc pages load jQuery, so we can trigger events directly.
+        await self._page.evaluate("""([uSel, pSel, btnSel]) => {
+            // Set values via DOM (in case type() missed anything)
+            const uField = document.querySelector(uSel);
+            const pField = document.querySelector(pSel);
+            if (uField) {
+                uField.dispatchEvent(new Event('input',  {bubbles: true}));
+                uField.dispatchEvent(new Event('change', {bubbles: true}));
+                uField.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+            }
+            if (pField) {
+                pField.dispatchEvent(new Event('input',  {bubbles: true}));
+                pField.dispatchEvent(new Event('change', {bubbles: true}));
+                pField.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+            }
+            // Also try jQuery .trigger() if jQuery is loaded
+            if (typeof $ !== 'undefined') {
+                try { $(uSel).trigger('keyup').trigger('change'); } catch(e) {}
+                try { $(pSel).trigger('keyup').trigger('change'); } catch(e) {}
+            }
+            // Force-remove disabled class from login button
+            const btn = document.querySelector(btnSel);
+            if (btn) {
+                btn.classList.remove('btndisabled', 'disabled');
+                btn.removeAttribute('disabled');
+            }
+        }""", [S.USERNAME_FIELD, S.PASSWORD_FIELD, S.LOGIN_BUTTON])
+        await self._page.wait_for_timeout(300)
 
         # Click login button — page JS handles AES encryption and form submission
+        login_btn = self._page.locator(S.LOGIN_BUTTON)
         await login_btn.click()
 
         # Wait for navigation or network to settle
