@@ -21,6 +21,13 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # Copy requirements first for better caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Playwright's default cache dir is under $HOME, which differs between the
+# root user (build-time RUN) and appuser (runtime USER below). Pinning an
+# absolute path here makes both resolve to the same directory, so the
+# browser appuser installed at build time is the one it finds at runtime —
+# no more per-boot Chromium re-download.
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright
 RUN playwright install --with-deps chromium
 
 # Copy application code
