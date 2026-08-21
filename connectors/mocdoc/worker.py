@@ -18,6 +18,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from connectors.base import HospitalConnector, ReportMetadata
 from connectors.mocdoc import selectors as S
@@ -605,7 +606,7 @@ class MocDocConnector(HospitalConnector):
         # Navigate to lab reports page (with retry)
         lab_url = (
             f"{self.base_url}"
-            f"{S.LAB_REPORTS_URL_TEMPLATE.format(clinic_slug=self.clinic_slug)}"
+            f"{S.LAB_REPORTS_URL_TEMPLATE.format(clinic_slug=quote(self.clinic_slug, safe=''))}"
         )
         for nav_attempt in range(2):
             try:
