@@ -45,7 +45,7 @@ class TestIsMissingBrowserError:
 
 
 class TestTryInstallChromium:
-    def test_runs_playwright_install_command(self):
+    def test_runs_playwright_install_without_deps_first(self):
         import app.utils.browser_errors as mod
 
         # Reset the install-attempted flag
@@ -56,8 +56,9 @@ class TestTryInstallChromium:
             result = mod._try_install_chromium()
 
         assert result is True
+        # Should try without --with-deps first
         mock_run.assert_called_once_with(
-            ["playwright", "install", "--with-deps", "chromium"],
+            ["playwright", "install", "chromium"],
             capture_output=True,
             text=True,
             timeout=300,
@@ -84,11 +85,14 @@ class TestTryInstallChromium:
 
         with patch.object(mod.subprocess, "run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stderr="fail")
-            mod._try_install_chromium()  # first attempt
-            result = mod._try_install_chromium()  # second attempt
+            mod._try_install_chromium()  # first attempt runs candidate commands
+            first_call_count = mock_run.call_count
+            assert first_call_count > 0
+
+            result = mod._try_install_chromium()  # second attempt must be short-circuited
 
         assert result is False
-        assert mock_run.call_count == 1  # only called once
+        assert mock_run.call_count == first_call_count  # no additional subprocess calls
         mod._install_attempted = False
 
     def test_returns_false_when_playwright_not_on_path(self):

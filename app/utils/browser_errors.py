@@ -24,34 +24,42 @@ def _try_install_chromium() -> bool:
 
     logger.warning(
         "Chromium browser binary not found — attempting runtime install "
-        "via 'playwright install --with-deps chromium'. This may take 1-2 minutes."
+        "via 'playwright install chromium'. This may take 1-2 minutes."
     )
-    try:
-        result = subprocess.run(
-            ["playwright", "install", "--with-deps", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout
-        )
-        if result.returncode == 0:
-            logger.info("Playwright Chromium installed successfully at runtime.")
-            return True
-        else:
-            logger.error(
-                "Playwright Chromium install failed (exit %d): %s",
-                result.returncode,
-                result.stderr[:500],
+    # Try without --with-deps first (works on Render free tier where
+    # root/sudo is unavailable but OS deps are already present).
+    # Fall back to --with-deps if the first attempt fails (e.g. Docker).
+    for cmd in [
+        ["playwright", "install", "chromium"],
+        ["playwright", "install", "--with-deps", "chromium"],
+    ]:
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout
             )
+            if result.returncode == 0:
+                logger.info("Playwright Chromium installed successfully at runtime via: %s", " ".join(cmd))
+                return True
+            else:
+                logger.warning(
+                    "Command '%s' failed (exit %d): %s",
+                    " ".join(cmd),
+                    result.returncode,
+                    result.stderr[:300],
+                )
+        except FileNotFoundError:
+            logger.error("'playwright' CLI not found on PATH — cannot auto-install.")
             return False
-    except FileNotFoundError:
-        logger.error("'playwright' CLI not found on PATH — cannot auto-install.")
-        return False
-    except subprocess.TimeoutExpired:
-        logger.error("Playwright Chromium install timed out after 300s.")
-        return False
-    except Exception as e:
-        logger.error("Unexpected error during Playwright install: %s", e)
-        return False
+        except subprocess.TimeoutExpired:
+            logger.error("Playwright Chromium install timed out after 300s.")
+            return False
+        except Exception as e:
+            logger.error("Unexpected error during Playwright install: %s", e)
+            return False
+    return False
 
 
 def friendly_browser_launch_error(exc: Exception) -> str:
