@@ -24,6 +24,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -69,8 +70,21 @@ def _scope_by_branch(query, branch_id: str = None):
     return query.is_("branch_id", "null") if not branch_id else query.eq("branch_id", branch_id)
 
 
-async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1") -> bool:
-    """Acquire distributed advisory lock on connector record (15 min lease)."""
+LOCK_LEASE = timedelta(minutes=5)
+
+# Connector IDs this process currently holds the advisory lock for.
+# Drained on graceful shutdown (see release_all_locks_held) so a killed
+# process doesn't leave a stale lock blocking the next Test Connection.
+_locks_held_by_this_process: set[str] = set()
+
+
+async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1") -> tuple[bool, int]:
+    """Acquire distributed advisory lock on connector record (5 min lease).
+
+    Returns (acquired, remaining_minutes). remaining_minutes is 0 when
+    acquired; otherwise it's the lock's remaining TTL rounded up to the
+    nearest minute (minimum 1), for surfacing "retry in ~Nm" to the admin UI.
+    """
     try:
         res = (
             supabase.table("integration_connectors")
@@ -79,17 +93,19 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
             .execute()
         )
         if not res.data:
-            return False
+            return False, 0
         row = res.data[0]
         locked_at = row.get("locked_at")
         if locked_at:
             try:
                 dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - dt < timedelta(minutes=15):
+                elapsed = datetime.now(timezone.utc) - dt
+                if elapsed < LOCK_LEASE:
+                    remaining = max(1, math.ceil((LOCK_LEASE - elapsed).total_seconds() / 60))
                     logger.warning(
                         f"Connector {connector_id} is locked by another process (locked_at={locked_at})"
                     )
-                    return False
+                    return False, remaining
             except Exception:
                 pass
 
@@ -98,10 +114,11 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
             "locked_at": now_str,
             "locked_by": worker_id,
         }).eq("id", connector_id).execute()
-        return True
+        _locks_held_by_this_process.add(connector_id)
+        return True, 0
     except Exception as e:
         logger.warning(f"Could not acquire lock for connector {connector_id} (proceeding): {e}")
-        return True
+        return True, 0
 
 
 async def release_connector_lock(connector_id: str) -> None:
@@ -113,6 +130,19 @@ async def release_connector_lock(connector_id: str) -> None:
         }).eq("id", connector_id).execute()
     except Exception as e:
         logger.warning(f"Could not release lock for connector {connector_id}: {e}")
+    finally:
+        _locks_held_by_this_process.discard(connector_id)
+
+
+async def release_all_locks_held() -> None:
+    """Release every connector lock this process currently holds.
+
+    Called on graceful shutdown (FastAPI lifespan, SIGTERM in scheduled
+    mode) so a killed process doesn't leave a stale lock blocking the
+    next Test Connection for the full lease.
+    """
+    for connector_id in list(_locks_held_by_this_process):
+        await release_connector_lock(connector_id)
 
 
 async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) -> None:
@@ -328,10 +358,10 @@ async def run_connector(
 
         connector_id = connector_row.get("id")
         if connector_id:
-            locked = await acquire_connector_lock(connector_id)
+            locked, remaining = await acquire_connector_lock(connector_id)
             if not locked:
                 summary["run_status"] = "locked"
-                summary["error_message"] = "Connector is currently locked by another worker"
+                summary["error_message"] = f"Connector is busy — retry in ~{remaining}m"
                 return summary
 
         # Instantiate connector via registry
