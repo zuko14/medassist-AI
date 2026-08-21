@@ -4276,8 +4276,8 @@ function _renderConnectorTestResult(r, success) {
     const sample = r.sample || [];
     let sampleHtml = '';
     if (sample.length > 0) {
-        sampleHtml = '<table style="margin-top:8px;width:100%"><thead><tr><th>Patient</th><th>VAM ID</th><th>Report</th></tr></thead><tbody>' +
-            sample.map(s => `<tr><td>${esc(s.patient_name_masked || '')}</td><td>${esc(s.vam_id || '—')}</td><td>${esc(s.report_name || '')}</td></tr>`).join('') +
+        sampleHtml = '<table style="margin-top:8px;width:100%"><thead><tr><th>Patient</th><th>Phone</th><th>VAM ID</th><th>Report</th></tr></thead><tbody>' +
+            sample.map(s => `<tr><td>${esc(s.patient_name_masked || '')}</td><td>${esc(s.patient_phone_masked || '')}</td><td>${esc(s.vam_id || '—')}</td><td>${esc(s.report_name || '')}</td></tr>`).join('') +
             '</tbody></table>';
     }
     return `<div class="card" style="margin-top:12px;padding:12px">${statusLine}${sampleHtml}</div>`;

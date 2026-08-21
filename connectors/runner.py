@@ -79,6 +79,15 @@ def _mask_sample_name(name: str) -> str:
     return " ".join(w[:1] + "•" * max(0, len(w) - 1) for w in name.split())
 
 
+def _mask_phone(phone: str) -> str:
+    """Mask a patient phone for the dry-run sample: last 4 digits only
+    (e.g. '+919999999999' -> '***9999'), matching ReportMetadata.__repr__'s
+    existing masking convention used in logs."""
+    if not phone:
+        return ""
+    return f"***{phone[-4:]}"
+
+
 LOCK_LEASE = timedelta(minutes=5)
 
 # Connector IDs this process currently holds the advisory lock for.
@@ -420,6 +429,7 @@ async def run_connector(
             summary["sample"] = [
                 {
                     "patient_name_masked": _mask_sample_name(r.patient_name),
+                    "patient_phone_masked": _mask_phone(r.patient_phone),
                     "vam_id": r.vam_id,
                     "report_name": r.report_name,
                 }

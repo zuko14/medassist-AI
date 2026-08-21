@@ -99,7 +99,7 @@ def test_scheduled_mode_releases_locks_on_sigterm():
 
 @pytest.mark.asyncio
 async def test_run_connector_dry_run_includes_masked_sample_excluded_from_audit_log():
-    from connectors.runner import run_connector, CONNECTOR_REGISTRY, _mask_sample_name
+    from connectors.runner import run_connector, CONNECTOR_REGISTRY, _mask_sample_name, _mask_phone
     from connectors.base import ReportMetadata
 
     class _FakeConnector:
@@ -146,6 +146,7 @@ async def test_run_connector_dry_run_includes_masked_sample_excluded_from_audit_
     assert result["run_status"] == "dry_run"
     assert len(result["sample"]) == 5
     assert result["sample"][0]["patient_name_masked"] == _mask_sample_name("Patient 0")
+    assert result["sample"][0]["patient_phone_masked"] == _mask_phone("+919999999999")
     assert result["sample"][0]["vam_id"] == "VAM-0"
     assert result["sample"][0]["report_name"] == "CBC Report 0"
 
