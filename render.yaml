@@ -5,3 +5,10 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: true
+
+  - type: worker
+    name: mediassist-connector-worker
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m connectors.runner --all
+    autoDeploy: true
