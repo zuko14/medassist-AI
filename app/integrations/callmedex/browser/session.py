@@ -52,8 +52,15 @@ class PlaywrightBrowserSession(BaseBrowserSession):
             try:
                 browser = await playwright_obj.chromium.launch(headless=headless)
             except Exception as e:
-                from app.utils.browser_errors import friendly_browser_launch_error
-                raise RuntimeError(friendly_browser_launch_error(e)) from e
+                from app.utils.browser_errors import (
+                    is_missing_browser_error,
+                    _try_install_chromium,
+                    friendly_browser_launch_error,
+                )
+                if is_missing_browser_error(e) and _try_install_chromium():
+                    browser = await playwright_obj.chromium.launch(headless=headless)
+                else:
+                    raise RuntimeError(friendly_browser_launch_error(e)) from e
             context = await browser.new_context()
             page = await context.new_page()
 

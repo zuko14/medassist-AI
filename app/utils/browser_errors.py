@@ -1,6 +1,57 @@
 """Translates opaque Playwright browser-launch failures into an actionable
-message, so on-call staff reading a WhatsApp admin alert don't have to
-parse a raw Playwright stack trace to know what to do next."""
+message, and provides auto-install fallback so the connector self-heals
+when the Chromium binary is missing at runtime (e.g. Render native buildpack)."""
+
+import logging
+import subprocess
+
+logger = logging.getLogger(__name__)
+
+# Track whether we've already attempted an install this process
+_install_attempted = False
+
+
+def _try_install_chromium() -> bool:
+    """Attempt to install Playwright Chromium at runtime.
+
+    Returns True if installation succeeded, False otherwise.
+    Only attempts once per process lifetime to avoid infinite retry loops.
+    """
+    global _install_attempted
+    if _install_attempted:
+        return False
+    _install_attempted = True
+
+    logger.warning(
+        "Chromium browser binary not found — attempting runtime install "
+        "via 'playwright install --with-deps chromium'. This may take 1-2 minutes."
+    )
+    try:
+        result = subprocess.run(
+            ["playwright", "install", "--with-deps", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout
+        )
+        if result.returncode == 0:
+            logger.info("Playwright Chromium installed successfully at runtime.")
+            return True
+        else:
+            logger.error(
+                "Playwright Chromium install failed (exit %d): %s",
+                result.returncode,
+                result.stderr[:500],
+            )
+            return False
+    except FileNotFoundError:
+        logger.error("'playwright' CLI not found on PATH — cannot auto-install.")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error("Playwright Chromium install timed out after 300s.")
+        return False
+    except Exception as e:
+        logger.error("Unexpected error during Playwright install: %s", e)
+        return False
 
 
 def friendly_browser_launch_error(exc: Exception) -> str:
@@ -13,3 +64,9 @@ def friendly_browser_launch_error(exc: Exception) -> str:
             "then redeploy."
         )
     return text
+
+
+def is_missing_browser_error(exc: Exception) -> bool:
+    """Check if an exception is a missing Chromium binary error."""
+    text = str(exc)
+    return "Executable doesn't exist" in text or "playwright install" in text.lower()

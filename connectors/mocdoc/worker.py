@@ -131,7 +131,11 @@ class MocDocConnector(HospitalConnector):
         self._processed_row_indices: set = set()
 
     async def _init_browser(self) -> None:
-        """Launch headless Chromium with download directory configured."""
+        """Launch headless Chromium with download directory configured.
+
+        If Chromium is not installed (common on Render's native Python
+        buildpack), attempts a one-time runtime install before retrying.
+        """
         from playwright.async_api import async_playwright
 
         self._playwright = await async_playwright().start()
@@ -145,8 +149,23 @@ class MocDocConnector(HospitalConnector):
                 ],
             )
         except Exception as e:
-            from app.utils.browser_errors import friendly_browser_launch_error
-            raise RuntimeError(friendly_browser_launch_error(e)) from e
+            from app.utils.browser_errors import (
+                is_missing_browser_error,
+                _try_install_chromium,
+                friendly_browser_launch_error,
+            )
+            if is_missing_browser_error(e) and _try_install_chromium():
+                # Retry after successful install
+                self._browser = await self._playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                    ],
+                )
+            else:
+                raise RuntimeError(friendly_browser_launch_error(e)) from e
         self._context = await self._browser.new_context(
             viewport={"width": 1920, "height": 1080},
             accept_downloads=True,
