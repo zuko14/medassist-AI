@@ -291,26 +291,40 @@ class MocDocConnector(HospitalConnector):
     async def _login(self) -> bool:
         """Perform a full login using username/password.
 
-        MocDoc's login page at /user/login generates a server-side session
-        token that can expire. We navigate, wait for full page load (so the
-        token is ready), fill fields quickly, and submit. If we get a
-        'session expired' message, we reload and retry once.
+        MocDoc's login page at /user/loginform generates a server-side session
+        token.  On a cold browser (no cookies), the first form submission
+        almost always returns "Your login screen session expired" because
+        MocDoc needs a prior visit to seed its CSRF / session state.
 
-        The page's own JavaScript handles AES-256 encryption of the
-        password before form submission.
+        Strategy:
+            1. Warm-up visit to /user/loginform (establishes server session)
+            2. Reload the page (fresh token, now with valid session cookies)
+            3. Fill and submit credentials
+            4. Retry up to 3 times total for resilience
         """
-        max_attempts = 2
+        max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             logger.info(f"Login attempt {attempt}/{max_attempts}")
+
+            # On the first attempt, do a warm-up visit before filling the form.
+            # This seeds MocDoc's server session so the token is valid.
+            if attempt == 1:
+                warmup_url = f"{self.base_url}{S.LOGIN_URL_PATH}"
+                logger.info(f"Warm-up visit to {warmup_url}")
+                try:
+                    await self._page.goto(warmup_url, wait_until="domcontentloaded", timeout=30000)
+                    await self._page.wait_for_timeout(2000)
+                except Exception as e:
+                    logger.warning(f"Warm-up navigation failed: {e}")
 
             success = await self._try_login_once()
             if success:
                 return True
 
-            # Check if it was a session expiry — worth retrying
+            # Check for "session expired" text — a warm-up retry is likely to fix it
             if attempt < max_attempts:
                 logger.info("Retrying login with a fresh page load...")
-                await self._page.wait_for_timeout(1000)
+                await self._page.wait_for_timeout(1500)
 
         return False
 
