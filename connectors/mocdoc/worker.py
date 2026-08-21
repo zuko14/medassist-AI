@@ -350,26 +350,46 @@ class MocDocConnector(HospitalConnector):
         # Small pause to let MocDoc's JS fully bind event handlers
         await self._page.wait_for_timeout(1000)
 
-        # Fill credentials quickly — use keyboard typing to trigger JS events
+        # Fill credentials using type() — MocDoc's jQuery listens for keyup
+        # events to enable the login button (removes .btndisabled class).
+        # Playwright's fill() dispatches input/change but NOT keyup/keydown,
+        # leaving the button permanently disabled.
         username_field = self._page.locator(S.USERNAME_FIELD)
         password_field = self._page.locator(S.PASSWORD_FIELD)
 
-        # Click into username, clear, and type
+        # Click into username, clear any existing value, and type character-by-character
         await username_field.click()
-        await username_field.fill(self.username)
+        await username_field.fill("")  # Clear first
+        await username_field.type(self.username, delay=50)
         await self._page.wait_for_timeout(300)
 
         # Tab to password field (triggers JS blur/focus events for AES binding)
         await self._page.keyboard.press("Tab")
         await self._page.wait_for_timeout(300)
 
-        # Click into password and type
+        # Click into password and type character-by-character
         await password_field.click()
-        await password_field.fill(self.password)
-        await self._page.wait_for_timeout(300)
+        await password_field.fill("")  # Clear first
+        await password_field.type(self.password, delay=50)
+        await self._page.wait_for_timeout(500)
+
+        # Wait for MocDoc's JS to enable the login button (remove btndisabled)
+        login_btn = self._page.locator(S.LOGIN_BUTTON)
+        try:
+            await login_btn.wait_for(state="visible", timeout=5000)
+            # Check if button has disabled class — wait up to 3s for it to clear
+            for _ in range(6):
+                btn_class = await login_btn.get_attribute("class") or ""
+                if "btndisabled" not in btn_class and "disabled" not in btn_class:
+                    break
+                await self._page.wait_for_timeout(500)
+            else:
+                logger.warning("Login button still shows disabled class — clicking anyway")
+        except Exception:
+            logger.warning("Login button wait timed out — attempting click anyway")
 
         # Click login button — page JS handles AES encryption and form submission
-        await self._page.click(S.LOGIN_BUTTON)
+        await login_btn.click()
 
         # Wait for navigation or network to settle
         try:
@@ -380,8 +400,10 @@ class MocDocConnector(HospitalConnector):
 
         current_url = self._page.url
 
-        # Success: we navigated away from any login page
-        if "/user/login" not in current_url and S.LOGIN_URL_PATH not in current_url:
+        # Success: navigated to dashboard or any non-login page
+        login_paths = ("/user/login", "/user/loginform", "/ptuser/login")
+        on_login_page = any(p in current_url for p in login_paths)
+        if not on_login_page:
             logger.info(f"Login successful — navigated to {current_url}")
             await self._save_session()
             return True

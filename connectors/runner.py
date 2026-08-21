@@ -251,6 +251,7 @@ async def run_connector(
         Summary dict with run results
     """
     start_time = time.time()
+    connector_id = None  # Must be set before try so finally-block guard works
     summary = {
         "run_status": "failed",
         "reports_found": 0,
