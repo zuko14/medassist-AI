@@ -3,6 +3,7 @@
 GET/PUT /admin/connectors, POST /connectors/{id}/toggle,
 GET /connectors/{id}/audit-log, GET/POST /connectors/failed-reports*."""
 
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException, Request
@@ -359,7 +360,7 @@ async def test_connector_manage_dependency_rejects_missing_permission():
 
 @pytest.mark.asyncio
 async def test_test_connector_calls_dry_run():
-    from app.routers.admin import test_connector
+    from app.routers.admin import test_connector, _connector_tasks
 
     admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
     mock_sb = MagicMock()
@@ -374,15 +375,23 @@ async def test_test_connector_calls_dry_run():
     with patch("app.routers.admin.supabase", mock_sb), \
          patch("connectors.runner.run_connector", new_callable=AsyncMock, return_value=fake_summary) as mock_run:
         result = await test_connector(connector_id="conn-1", clinic_id="default", user=admin)
+        # Endpoint returns immediately with "running" status
+        assert result["status"] == "running"
+
+        # Let the background task complete
+        await asyncio.sleep(0.1)
 
     mock_run.assert_called_once()
     assert mock_run.call_args.kwargs["dry_run"] is True
-    assert result["result"]["reports_found"] == 3
+    # Background task should have stored the result
+    task = _connector_tasks.get("conn-1", {})
+    assert task.get("status") == "done"
+    assert task["result"]["reports_found"] == 3
 
 
 @pytest.mark.asyncio
 async def test_run_connector_now_calls_run_connector_not_dry_run():
-    from app.routers.admin import run_connector_now
+    from app.routers.admin import run_connector_now, _connector_tasks
 
     admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
     mock_sb = MagicMock()
@@ -397,10 +406,18 @@ async def test_run_connector_now_calls_run_connector_not_dry_run():
     with patch("app.routers.admin.supabase", mock_sb), \
          patch("connectors.runner.run_connector", new_callable=AsyncMock, return_value=fake_summary) as mock_run:
         result = await run_connector_now(connector_id="conn-1", clinic_id="default", user=admin)
+        # Endpoint returns immediately with "running" status
+        assert result["status"] == "running"
+
+        # Let the background task complete
+        await asyncio.sleep(0.1)
 
     mock_run.assert_called_once()
     assert mock_run.call_args.kwargs["dry_run"] is False
-    assert result["result"]["reports_uploaded"] == 2
+    # Background task should have stored the result
+    task = _connector_tasks.get("conn-1", {})
+    assert task.get("status") == "done"
+    assert task["result"]["reports_uploaded"] == 2
 
 
 @pytest.mark.asyncio

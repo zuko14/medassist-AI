@@ -4219,15 +4219,24 @@ async function testConnector() {
     const id = _connectorId;
     if (!id) { toast('Save credentials first, then test.', true); return; }
     const btn = document.getElementById('btn-connTest');
-    btn.disabled = true; btn.textContent = 'Testing...';
+    btn.disabled = true; btn.textContent = '⏳ Starting test...';
     try {
-        const res = await apiPost(`/admin/connectors/${id}/test`, {});
-        const r = res.result || {};
-        toast(res.success ? `✅ Login OK — ${r.reports_found || 0} report(s) found` : `⚠️ ${r.error_message || 'Test failed'}`, !res.success);
+        await apiPost(`/admin/connectors/${id}/test`, {});
+        btn.textContent = '⏳ Testing (polling...)';
+        const result = await _pollConnectorStatus(id);
+        if (result.status === 'done') {
+            const r = result.result || {};
+            toast(result.success ? `✅ Login OK — ${r.reports_found || 0} report(s) found` : `⚠️ ${r.error_message || 'Test failed'}`, !result.success);
+        } else if (result.status === 'error') {
+            toast(`⚠️ ${(result.result || {}).error_message || 'Test failed'}`, true);
+        } else {
+            toast('⚠️ Test timed out — check logs for details', true);
+        }
     } catch (e) {
         toast('Error: ' + e.message, true);
     } finally {
         btn.disabled = false; btn.textContent = '🔍 Test Connection';
+        loadConnectorsPage();
     }
 }
 
@@ -4237,17 +4246,38 @@ async function runConnectorNow() {
     const ok = await confirmDialog('Run the connector now instead of waiting for the next scheduled poll?', { okText: 'Run Now' });
     if (!ok) return;
     const btn = document.getElementById('btn-connRunNow');
-    btn.disabled = true; btn.textContent = 'Running...';
+    btn.disabled = true; btn.textContent = '⏳ Starting run...';
     try {
-        const res = await apiPost(`/admin/connectors/${id}/run-now`, {});
-        const r = res.result || {};
-        toast(res.success ? `✅ Run complete — ${r.reports_uploaded || 0} uploaded, ${r.reports_failed || 0} failed` : `⚠️ ${r.error_message || 'Run failed'}`, !res.success);
+        await apiPost(`/admin/connectors/${id}/run-now`, {});
+        btn.textContent = '⏳ Running (polling...)';
+        const result = await _pollConnectorStatus(id);
+        if (result.status === 'done') {
+            const r = result.result || {};
+            toast(result.success ? `✅ Run complete — ${r.reports_uploaded || 0} uploaded, ${r.reports_failed || 0} failed` : `⚠️ ${r.error_message || 'Run failed'}`, !result.success);
+        } else if (result.status === 'error') {
+            toast(`⚠️ ${(result.result || {}).error_message || 'Run failed'}`, true);
+        } else {
+            toast('⚠️ Run timed out — check logs for details', true);
+        }
         loadConnectorsPage();
     } catch (e) {
         toast('Error: ' + e.message, true);
     } finally {
         btn.disabled = false; btn.textContent = '▶️ Run Now';
     }
+}
+
+async function _pollConnectorStatus(connectorId, maxWaitSec = 300) {
+    const interval = 5000; // poll every 5 seconds
+    const maxPolls = Math.ceil((maxWaitSec * 1000) / interval);
+    for (let i = 0; i < maxPolls; i++) {
+        await new Promise(r => setTimeout(r, interval));
+        try {
+            const data = await api(`/admin/connectors/${connectorId}/test-status?clinic_id=default`);
+            if (data.status === 'done' || data.status === 'error') return data;
+        } catch (e) { /* network blip — keep polling */ }
+    }
+    return { status: 'timeout' };
 }
 
 async function loadConnectorAuditLog() {

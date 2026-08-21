@@ -2941,30 +2941,102 @@ async def _load_connector_for_action(connector_id: str, user: "AdminUser", clini
     return connector
 
 
+# ── In-memory connector task tracker ──────────────────────────────
+# Stores results for fire-and-forget test/run operations.
+# Keyed by connector_id.  Auto-cleaned after 10 minutes.
+_connector_tasks: dict[str, dict] = {}
+
+def _clean_stale_tasks() -> None:
+    """Remove task entries older than 10 minutes."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stale = [k for k, v in _connector_tasks.items() if v.get("started_at", cutoff) < cutoff]
+    for k in stale:
+        _connector_tasks.pop(k, None)
+
+async def _run_connector_background(
+    connector_id: str,
+    clinic_id: str,
+    connector_type: str,
+    dry_run: bool,
+    branch_id: str | None,
+) -> None:
+    """Run connector in background and store result in _connector_tasks."""
+    from connectors.runner import run_connector
+    try:
+        result = await run_connector(
+            clinic_id=clinic_id,
+            connector_type=connector_type,
+            dry_run=dry_run,
+            branch_id=branch_id,
+            ignore_enabled=True,
+        )
+        run_status = result.get("run_status", "")
+        success = run_status in ("dry_run", "success", "partial") if dry_run else run_status in ("success", "partial")
+        _connector_tasks[connector_id] = {
+            **_connector_tasks.get(connector_id, {}),
+            "status": "done",
+            "success": success,
+            "result": result,
+            "finished_at": datetime.now(timezone.utc),
+        }
+    except Exception as e:
+        logger.error(f"Background connector {'test' if dry_run else 'run'} failed for {connector_id}: {e}")
+        _connector_tasks[connector_id] = {
+            **_connector_tasks.get(connector_id, {}),
+            "status": "error",
+            "success": False,
+            "result": {"error_message": str(e)},
+            "finished_at": datetime.now(timezone.utc),
+        }
+
+
 @router.post("/connectors/{connector_id}/test")
 async def test_connector(
     connector_id: str,
     clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
-    """Dry-run the connector: authenticate and parse only, no downloads or sends."""
+    """Kick off a dry-run test in the background. Returns immediately.
+
+    The test takes 1-5 minutes (browser startup, login, page scrape).
+    Poll GET /connectors/{connector_id}/test-status for the result.
+    """
     connector = await _load_connector_for_action(connector_id, user, clinic_id)
 
-    from connectors.runner import run_connector
+    _clean_stale_tasks()
+    _connector_tasks[connector_id] = {
+        "status": "running",
+        "mode": "test",
+        "started_at": datetime.now(timezone.utc),
+    }
 
-    try:
-        result = await run_connector(
+    asyncio.ensure_future(
+        _run_connector_background(
+            connector_id=connector_id,
             clinic_id=connector["clinic_id"],
             connector_type=connector.get("connector_type", "mocdoc"),
             dry_run=True,
             branch_id=connector.get("branch_id"),
-            ignore_enabled=True,
         )
-    except Exception as e:
-        logger.error(f"Connector test run failed for {connector_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Test run failed: {str(e)}")
+    )
 
-    return {"success": result.get("run_status") in ("dry_run", "success"), "result": result}
+    return {"success": True, "status": "running", "message": "Test started — this takes 1-2 minutes. Polling for result..."}
+
+
+@router.get("/connectors/{connector_id}/test-status")
+async def test_connector_status(
+    connector_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
+):
+    """Poll for the result of a background test/run operation."""
+    # Verify access
+    await _load_connector_for_action(connector_id, user, clinic_id)
+
+    task = _connector_tasks.get(connector_id)
+    if not task:
+        return {"status": "idle", "message": "No test in progress"}
+    return task
 
 
 @router.post("/connectors/{connector_id}/run-now")
@@ -2973,23 +3045,30 @@ async def run_connector_now(
     clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
-    """Trigger one full connector poll cycle immediately, outside the scheduler."""
+    """Trigger one full connector poll cycle in the background. Returns immediately.
+
+    Poll GET /connectors/{connector_id}/test-status for the result.
+    """
     connector = await _load_connector_for_action(connector_id, user, clinic_id)
 
-    from connectors.runner import run_connector as run_connector_cycle
+    _clean_stale_tasks()
+    _connector_tasks[connector_id] = {
+        "status": "running",
+        "mode": "run",
+        "started_at": datetime.now(timezone.utc),
+    }
 
-    try:
-        result = await run_connector_cycle(
+    asyncio.ensure_future(
+        _run_connector_background(
+            connector_id=connector_id,
             clinic_id=connector["clinic_id"],
             connector_type=connector.get("connector_type", "mocdoc"),
             dry_run=False,
             branch_id=connector.get("branch_id"),
         )
-    except Exception as e:
-        logger.error(f"Manual connector run failed for {connector_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Run failed: {str(e)}")
+    )
 
-    return {"success": result.get("run_status") in ("success", "partial"), "result": result}
+    return {"success": True, "status": "running", "message": "Run started — this takes 2-5 minutes. Polling for result..."}
 
 
 @router.get("/connectors/{connector_id}/audit-log")
