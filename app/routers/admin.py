@@ -3086,7 +3086,7 @@ async def run_connector_now(
 async def get_connector_audit_log(
     connector_id: str,
     limit: int = 20,
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
     """Get recent audit log entries (run history — found/uploaded/failed
     counts per poll) for a connector."""

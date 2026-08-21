@@ -466,4 +466,43 @@ def test_mocdoc_worker_normalizes_base_url():
     assert worker_with_path.base_url == "https://mocdoc.com"
 
 
+def test_audit_log_uses_connector_manage_permission_not_require_admin():
+    """Regression guard: the audit-log route's dependency must match every
+    other /admin/connectors/* endpoint (require_permission), not
+    require_admin, which 403s every staff account unconditionally."""
+    import inspect
+    from app.routers.admin import get_connector_audit_log
+
+    source = inspect.getsource(get_connector_audit_log)
+    assert "require_admin" not in source
+    assert 'require_permission("CONNECTOR_MANAGE")' in source
+
+
+@pytest.mark.asyncio
+async def test_audit_log_allows_diagnostic_operator_staff():
+    """A staff account with CONNECTOR_MANAGE (e.g. DIAGNOSTIC_OPERATOR role)
+    must be able to load run history — this was 403ing before the fix."""
+    from app.routers.admin import get_connector_audit_log
+
+    staff = AdminUser(
+        "diag_op", role="staff", clinic_id="clinic-3", user_id="user-3",
+        permissions=["REPORTS_VIEW", "REPORTS_RESOLVE", "CONNECTOR_MANAGE"],
+    )
+    mock_sb = MagicMock()
+    mock_table = MagicMock()
+    mock_sb.table.return_value = mock_table
+    mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"clinic_id": "clinic-3", "connector_type": "mocdoc", "branch_id": None}
+    )
+    mock_table.select.return_value.eq.return_value.eq.return_value.is_.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[{"id": "log-1", "run_status": "success", "reports_found": 2}]
+    )
+
+    with patch("app.routers.admin.supabase", mock_sb):
+        result = await get_connector_audit_log(connector_id="conn-1", limit=20, user=staff)
+
+    assert result["audit_log"][0]["id"] == "log-1"
+
+
+
 
