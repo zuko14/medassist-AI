@@ -1610,6 +1610,7 @@
                 <button class="btn btn-accent" onclick="saveConnectorCredentials()">Save Credentials</button>
                 <button class="btn btn-ghost" onclick="testConnector()" id="btn-connTest">🔍 Test Connection</button>
                 <button class="btn btn-ghost" onclick="runConnectorNow()" id="btn-connRunNow">▶️ Run Now</button>
+                <div id="connTestResult"></div>
             </div>
 
             <div class="card">
@@ -4225,10 +4226,26 @@ async function saveConnectorCredentials() {
     }
 }
 
+function _renderConnectorTestResult(r, success) {
+    const statusLine = success
+        ? `<strong style="color:#2e7d32">✅ Login successful</strong> — ${r.reports_found || 0} report(s) found on the portal`
+        : `<strong style="color:#c62828">⚠️ ${esc(r.error_message || 'Test failed')}</strong>`;
+    const sample = r.sample || [];
+    let sampleHtml = '';
+    if (sample.length > 0) {
+        sampleHtml = '<table style="margin-top:8px;width:100%"><thead><tr><th>Patient</th><th>VAM ID</th><th>Report</th></tr></thead><tbody>' +
+            sample.map(s => `<tr><td>${esc(s.patient_name_masked || '')}</td><td>${esc(s.vam_id || '—')}</td><td>${esc(s.report_name || '')}</td></tr>`).join('') +
+            '</tbody></table>';
+    }
+    return `<div class="card" style="margin-top:12px;padding:12px">${statusLine}${sampleHtml}</div>`;
+}
+
 async function testConnector() {
     const id = _connectorId;
     if (!id) { toast('Save credentials first, then test.', true); return; }
     const btn = document.getElementById('btn-connTest');
+    const resultEl = document.getElementById('connTestResult');
+    resultEl.innerHTML = '';
     btn.disabled = true; btn.textContent = '⏳ Starting test...';
     try {
         await apiPost(`/admin/connectors/${id}/test`, {});
@@ -4237,8 +4254,11 @@ async function testConnector() {
         if (result.status === 'done') {
             const r = result.result || {};
             toast(result.success ? `✅ Login OK — ${r.reports_found || 0} report(s) found` : `⚠️ ${r.error_message || 'Test failed'}`, !result.success);
+            resultEl.innerHTML = _renderConnectorTestResult(r, result.success);
         } else if (result.status === 'error') {
-            toast(`⚠️ ${(result.result || {}).error_message || 'Test failed'}`, true);
+            const r = (result.result || {});
+            toast(`⚠️ ${r.error_message || 'Test failed'}`, true);
+            resultEl.innerHTML = _renderConnectorTestResult(r, false);
         } else {
             toast('⚠️ Test timed out — check logs for details', true);
         }
