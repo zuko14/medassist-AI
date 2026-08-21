@@ -86,6 +86,8 @@ class ConversationState(str, Enum):
     AWAITING_DATA_DELETION = "awaiting_data_deletion"
     VIEWING_REPORTS = "viewing_reports"
     DOWNLOADING_REPORT = "downloading_report"
+    BROWSING_LAB_TESTS = "browsing_lab_tests"
+    CONFIRMING_COLLECTION_DATE = "confirming_collection_date"
 
 
 class ConversationManager:
@@ -667,6 +669,14 @@ class ConversationManager:
             await self._handle_awaiting_payment(
                 clinic, phone, message, context, patient, lang
             )
+        elif state == "browsing_lab_tests":
+            await self._handle_browsing_lab_tests(
+                clinic, phone, message, intent, context, lang, interactive_data
+            )
+        elif state == "confirming_collection_date":
+            await self._handle_confirming_collection_date(
+                clinic, phone, message, intent, context, patient, lang, interactive_data
+            )
         elif state == "viewing_reports":
             await self._handle_viewing_reports(clinic, phone, message, session, lang)
         elif state == "emergency":
@@ -1128,6 +1138,16 @@ class ConversationManager:
         # ── End Multi-Branch Check ──────────────────────────────────────────
 
         # Single-branch / no branches: proceed directly
+        # Diagnostics-only branch: If clinic has lab_test_booking enabled and NO
+        # doctors registered, route directly into the lab test booking flow.
+        # This prevents the recursion crash in _show_department_list.
+        from app.services.tenant import has_feature
+        if has_feature(clinic, "lab_test_booking"):
+            doctors = await get_doctors(clinic["id"])
+            if not doctors:
+                await self._show_lab_test_list(clinic, phone, {}, lang)
+                return
+
         await self._continue_booking_after_branch(clinic, phone, patient, lang, {})
 
     async def _continue_booking_after_branch(
@@ -1887,7 +1907,17 @@ class ConversationManager:
             else:
                 no_doc_msg = f"Sorry, no doctors are currently available in {department}. Please try another department."
             await self.whatsapp.send_text(clinic, phone, no_doc_msg)
-            await self._show_department_list(clinic, phone, context, lang)
+
+            # Only retry department selection if there's an alternative
+            # department to pick — otherwise (single-department clinics,
+            # e.g. diagnostics-only centers with zero doctors) retrying
+            # calls straight back into this same no-doctors branch forever.
+            from app.services.tenant import has_feature
+
+            if has_feature(clinic, "multi_department"):
+                await self._show_department_list(clinic, phone, context, lang)
+            else:
+                await self._send_main_menu(clinic, phone, lang)
             return
 
         sections = [
@@ -3316,6 +3346,224 @@ class ConversationManager:
             )
             return
 
+    async def _show_lab_test_list(
+        self, clinic: dict, phone: str, context: dict, lang: str
+    ) -> None:
+        """Fetch active lab tests for this clinic/branch and display as interactive list."""
+        from app.database import get_lab_tests
+
+        branch_id = context.get("branch_id")
+        tests = await get_lab_tests(clinic["id"], branch_id=branch_id, active_only=True)
+
+        if not tests:
+            msg = {
+                "en": "No lab tests are currently available for online booking. Please call our center directly.",
+                "hi": "वर्तमान में ऑनलाइन बुकिंग के लिए कोई लैब टेस्ट उपलब्ध नहीं है। कृपया सीधे हमारे केंद्र पर कॉल करें।",
+                "te": "ఆన్‌లైన్ బుకింగ్ కోసం ప్రస్తుతం ల్యాబ్ పరీక్షలు అందుబాటులో లేవు. దయచేసి మా కేంద్రాన్ని నేరుగా సంప్రదించండి.",
+            }.get(lang, "No lab tests are currently available for online booking.")
+            await self.whatsapp.send_text(clinic, phone, msg)
+            await self._send_main_menu(clinic, phone, lang)
+            return
+
+        rows = []
+        for t in tests[:10]:  # WhatsApp list limit: max 10 rows per section
+            price_str = f"₹{t['price_paise'] // 100}"
+            sample_str = f" • {t['sample_type']}" if t.get("sample_type") else ""
+            desc = f"{price_str}{sample_str}"[:72]
+            rows.append({
+                "id": f"labtest_{t['id']}",
+                "title": t["name"][:24],
+                "description": desc,
+            })
+
+        body = {
+            "en": "Select a lab test to book your sample collection:",
+            "hi": "सैंपल कलेक्शन बुक करने के लिए लैब टेस्ट चुनें:",
+            "te": "శాంపిల్ కలెక్షన్ బుక్ చేసుకోవడానికి ల్యాబ్ పరీక్షను ఎంచుకోండి:",
+        }.get(lang, "Select a lab test:")
+
+        button_text = {
+            "en": "View Tests",
+            "hi": "टेस्ट देखें",
+            "te": "పరీక్షలు చూడండి",
+        }.get(lang, "View Tests")
+
+        await self.whatsapp.send_interactive_list(
+            clinic,
+            phone,
+            body=body,
+            button_text=button_text,
+            sections=[{"title": "Available Tests", "rows": rows}],
+        )
+        await self.update_state(clinic, phone, "browsing_lab_tests", context)
+
+    def _next_collection_dates(self, allowed_days_str: str, count: int = 3) -> list[str]:
+        """Compute the next `count` calendar dates (YYYY-MM-DD) whose weekday is in allowed_days_str."""
+        allowed = {d.strip() for d in allowed_days_str.split(",") if d.strip()}
+        day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        out = []
+        cur = datetime.now(timezone.utc).date() + timedelta(days=1)  # start tomorrow
+        while len(out) < count:
+            if day_names[cur.weekday()] in allowed:
+                out.append(cur.strftime("%Y-%m-%d"))
+            cur += timedelta(days=1)
+        return out
+
+    async def _handle_browsing_lab_tests(
+        self,
+        clinic: dict,
+        phone: str,
+        message: str,
+        intent: str,
+        context: dict,
+        lang: str,
+        interactive_data: Optional[dict] = None,
+    ) -> None:
+        """Handle patient picking a lab test from the interactive list."""
+        from app.database import get_lab_test_by_id, get_lab_collection_window
+
+        selected_id = None
+        if interactive_data and interactive_data.get("id", "").startswith("labtest_"):
+            selected_id = interactive_data["id"].removeprefix("labtest_")
+
+        if not selected_id:
+            # Fallback: patient typed something instead of tapping a list row
+            # Re-present the list
+            await self._show_lab_test_list(clinic, phone, context, lang)
+            return
+
+        test = await get_lab_test_by_id(selected_id)
+        if not test or not test.get("is_active"):
+            msg = {
+                "en": "That test is no longer available. Please pick another.",
+                "hi": "वह टेस्ट अब उपलब्ध नहीं है। कृपया दूसरा चुनें।",
+                "te": "ఆ పరీక్ష ఇప్పుడు అందుబాటులో లేదు. దయచేసి మరొకటి ఎంచుకోండి.",
+            }.get(lang, "That test is no longer available.")
+            await self.whatsapp.send_text(clinic, phone, msg)
+            await self._show_lab_test_list(clinic, phone, context, lang)
+            return
+
+        # Stash test details in conversation context
+        context["lab_test_id"] = test["id"]
+        context["lab_test_name"] = test["name"]
+        context["lab_test_price_paise"] = test["price_paise"]
+        context["lab_test_fasting_required"] = test.get("fasting_required", False)
+        context["lab_test_prep_instructions"] = test.get("prep_instructions")
+        context["lab_test_turnaround_hours"] = test.get("turnaround_hours")
+
+        # Fetch collection window for branch or clinic
+        window = await get_lab_collection_window(clinic["id"], branch_id=context.get("branch_id"))
+        dates = self._next_collection_dates(window.get("days", "Mon,Tue,Wed,Thu,Fri,Sat,Sun"), count=3)
+
+        # Build date selection buttons
+        buttons = []
+        for d in dates:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            buttons.append({
+                "id": f"labdate_{d}",
+                "title": dt.strftime("%a, %d %b")[:20],
+            })
+
+        # Format test summary + instructions
+        price_rupees = test["price_paise"] // 100
+        instructions_line = ""
+        if test.get("fasting_required"):
+            instructions_line = "\n⚠️ *Fasting Required:* 10-12 hours fasting before collection."
+        if test.get("prep_instructions"):
+            instructions_line += f"\n📋 *Prep:* {test['prep_instructions']}"
+
+        body = (
+            f"*{test['name']}*\n"
+            f"💰 Price: ₹{price_rupees}\n"
+            f"⏱️ Turnaround: {test.get('turnaround_hours') or 24} hours\n"
+            f"🏠 Collection window: {window.get('start', '07:00')} - {window.get('end', '11:00')}"
+            f"{instructions_line}\n\n"
+            f"Please choose your preferred sample collection date:"
+        )
+
+        await self.whatsapp.send_interactive_buttons(
+            clinic,
+            phone,
+            body=body,
+            buttons=buttons,
+        )
+        await self.update_state(clinic, phone, "confirming_collection_date", context)
+
+    async def _handle_confirming_collection_date(
+        self,
+        clinic: dict,
+        phone: str,
+        message: str,
+        intent: str,
+        context: dict,
+        patient: Optional[dict],
+        lang: str,
+        interactive_data: Optional[dict] = None,
+    ) -> None:
+        """Handle patient selecting a collection date and initialize payment-gated booking."""
+        from app.services.payment import payment_service
+
+        selected_date = None
+        if interactive_data and interactive_data.get("id", "").startswith("labdate_"):
+            selected_date = interactive_data["id"].removeprefix("labdate_")
+
+        if not selected_date:
+            msg = {
+                "en": "Please tap one of the date buttons above to continue.",
+                "hi": "आगे बढ़ने के लिए कृपया ऊपर दिए गए तारीख बटन में से एक पर टैप करें।",
+                "te": "కొనసాగడానికి దయచేసి పైన ఉన్న తేదీ బటన్‌లలో ఒకదాన్ని నొక్కండి.",
+            }.get(lang, "Please tap one of the date buttons above.")
+            await self.whatsapp.send_text(clinic, phone, msg)
+            return
+
+        patient_name = (patient or {}).get("name") or context.get("patient_name") or "Patient"
+
+        result = await payment_service.create_booking_with_payment(
+            clinic=clinic,
+            patient_phone=phone,
+            patient_name=patient_name,
+            doctor_name=None,
+            appointment_date=selected_date,
+            appointment_time=None,
+            booking_type="lab_test",
+            lab_test_id=context.get("lab_test_id"),
+            lab_test_name=context.get("lab_test_name"),
+            branch_id=context.get("branch_id"),
+            branch_name=context.get("branch_name"),
+        )
+
+        if not result.get("success"):
+            logger.error(f"Failed to create lab test booking: {result.get('error')}")
+            err_msg = {
+                "en": "We couldn't initialize your booking. Please try again or contact the center.",
+                "hi": "हम आपकी बुकिंग शुरू नहीं कर सके। कृपया पुनः प्रयास करें।",
+                "te": "మేము మీ బుకింగ్‌ను ప్రారంభించలేకపోయాము. దయచేసి మళ్లీ ప్రయత్నించండి.",
+            }.get(lang, "Failed to initialize booking.")
+            await self.whatsapp.send_text(clinic, phone, err_msg)
+            await self._send_main_menu(clinic, phone, lang)
+            return
+
+        # Send payment link to patient
+        amount_rupees = result["amount_paise"] // 100
+        pay_msg = (
+            f"🧪 *Lab Test Booking Reserved*\n\n"
+            f"Test: *{context.get('lab_test_name')}*\n"
+            f"Date: *{selected_date}*\n"
+            f"Amount: *₹{amount_rupees}*\n\n"
+            f"Please complete your payment within 15 minutes to confirm:\n"
+            f"{result['payment_link']}\n\n"
+            f"Ref: `{result['booking_ref']}`"
+        )
+        await self.whatsapp.send_text(clinic, phone, pay_msg)
+
+        context["booking_id"] = result["booking_id"]
+        context["booking_ref"] = result["booking_ref"]
+        context["payment_link"] = result["payment_link"]
+        context["hold_expires_at"] = result["hold_expires_at"]
+
+        await self.update_state(clinic, phone, "awaiting_payment", context)
+
 
 # Global instance
 conversation_manager = ConversationManager()
+

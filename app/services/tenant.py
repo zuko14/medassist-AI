@@ -191,7 +191,8 @@ def invalidate_tenant_cache(whatsapp_number: str = None):
 #
 # Plans:
 #   soloclinic  — Solo doctor / small clinic (booking + payments only)
-#   diagstream  — Diagnostics / lab-only centres (lab reports, no booking)
+#   diagstream  — Diagnostics / lab-only centres (lab reports + lab-test
+#                 booking; no *doctor* booking)
 #   essential   — Full-service hospital (everything except enterprise wildcard)
 #   polyclinic  — Multi-branch hospital / polyclinic + diagnostics (essential + multi_branch)
 #   enterprise  — Unlimited (all current + future features via wildcard)
@@ -220,6 +221,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "ai_report_summary",
         "pii_sanitization",
         "multi_branch",  # Diagnostic centers can also run multiple branches
+        "lab_test_booking",
     },
     "essential": {
         "booking",
@@ -260,6 +262,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "payments_razorpay",
         "staff_training",
         "multi_branch",  # Multi-branch support
+        "lab_test_booking",
     },
     "enterprise": {
         # Sentinel — checked first, bypasses set lookup entirely

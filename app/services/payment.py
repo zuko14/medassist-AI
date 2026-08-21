@@ -101,15 +101,18 @@ class PaymentService:
         patient_phone: str,
         patient_name: str,
         department: str,
-        doctor_name: str,
+        doctor_name: Optional[str],
         appointment_date: str,
-        appointment_time: str,
+        appointment_time: Optional[str],
         symptoms: str = "",
         patient_id: Optional[str] = None,
         clinic: Optional[dict] = None,
         branch_id: Optional[str] = None,
         branch_name: Optional[str] = None,
         deposit_percent: int = 100,
+        booking_type: str = "consultation",
+        lab_test_id: Optional[str] = None,
+        lab_test_name: Optional[str] = None,
     ) -> dict:
         """Create a pending_payment booking and a Razorpay order.
 
@@ -129,8 +132,11 @@ class PaymentService:
         # ── Resolve per-clinic Razorpay credentials ──
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
 
-        # ── Determine fee from doctor's consultation_fee, scaled for deposits ──
-        amount_paise = await self._get_doctor_fee_paise(clinic_id, doctor_name)
+        # ── Determine fee based on booking type ──
+        if booking_type == "lab_test":
+            amount_paise = await self._get_lab_test_fee_paise(clinic_id, lab_test_id)
+        else:
+            amount_paise = await self._get_doctor_fee_paise(clinic_id, doctor_name)
         if deposit_percent < 100:
             amount_paise = round(amount_paise * deposit_percent / 100)
 
@@ -162,7 +168,11 @@ class PaymentService:
             "amount_paise": amount_paise,
             "hold_expires_at": hold_expires_at,
             "booking_ref": booking_ref,
+            "booking_type": booking_type,
         }
+        if booking_type == "lab_test":
+            booking_data["lab_test_id"] = lab_test_id
+            booking_data["lab_test_name"] = lab_test_name
 
         # Include branch info when booking at a specific branch
         if branch_id:
@@ -1015,6 +1025,23 @@ class PaymentService:
 
         return settings.booking_fee_paise
 
+    async def _get_lab_test_fee_paise(self, clinic_id: str, lab_test_id: str) -> int:
+        """Get a lab test's price in paise directly from the catalog."""
+        try:
+            result = (
+                supabase.table("lab_tests")
+                .select("price_paise")
+                .eq("clinic_id", clinic_id)
+                .eq("id", lab_test_id)
+                .execute()
+            )
+            if result.data and result.data[0].get("price_paise"):
+                return int(result.data[0]["price_paise"])
+        except Exception as e:
+            logger.error(f"Error fetching lab test fee: {e}")
+
+        return settings.booking_fee_paise
+
     async def _create_razorpay_order(
         self,
         amount_paise: int,
@@ -1277,18 +1304,29 @@ class PaymentService:
 
             amount_rupees = booking.get("amount_paise", 0) / 100
 
-            msg = (
-                f"✅ *Payment Confirmed — Appointment Booked!*\n\n"
-                f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
-                f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
-                f"🏥 *Department:* {booking.get('department', 'N/A')}\n"
-                f"📅 *Date:* {date_display}\n"
-                f"🕐 *Time:* {booking.get('appointment_time', 'N/A')}\n"
-                f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
-                f"📌 Please arrive 15 minutes early with any relevant medical records.\n\n"
-                f"_Cancellation with full refund available up to {settings.refund_window_hours} hours before your appointment. "
-                f"No-show bookings are non-refundable._"
-            )
+            if booking.get("booking_type") == "lab_test":
+                msg = (
+                    f"✅ *Payment Confirmed — Test Booked!*\n\n"
+                    f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
+                    f"🧪 *Test:* {booking.get('lab_test_name', 'N/A')}\n"
+                    f"📅 *Collection Date:* {date_display}\n"
+                    f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
+                    f"📌 Please arrive during our sample collection hours with a valid ID.\n\n"
+                    f"_Cancellation with full refund available up to {settings.refund_window_hours} hours before your collection date._"
+                )
+            else:
+                msg = (
+                    f"✅ *Payment Confirmed — Appointment Booked!*\n\n"
+                    f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
+                    f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
+                    f"🏥 *Department:* {booking.get('department', 'N/A')}\n"
+                    f"📅 *Date:* {date_display}\n"
+                    f"🕐 *Time:* {booking.get('appointment_time', 'N/A')}\n"
+                    f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
+                    f"📌 Please arrive 15 minutes early with any relevant medical records.\n\n"
+                    f"_Cancellation with full refund available up to {settings.refund_window_hours} hours before your appointment. "
+                    f"No-show bookings are non-refundable._"
+                )
 
             # Append clinic location — skip for branch bookings, which already
             # have their own branch-specific address shown during booking

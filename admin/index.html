@@ -821,6 +821,9 @@
             <div class="nav-link" tabindex="0" data-page="labreports" data-feature="lab_reports" onclick="go('labreports',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L15 8V2"></path><line x1="9" y1="2" x2="15" y2="2"></line><line x1="7" y1="14" x2="17" y2="14"></line></svg></span> Lab Reports
             </div>
+            <div class="nav-link" tabindex="0" data-page="labtests" data-feature="lab_test_booking" onclick="go('labtests',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.31L4.1 20.3a2 2 0 0 0 1.7 2.7h12.4a2 2 0 0 0 1.7-2.7L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg></span> Lab Tests
+            </div>
             <div class="nav-link" tabindex="0" data-page="prescriptions" data-feature="booking" data-role="admin" onclick="go('prescriptions',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9.5" width="18" height="5" rx="2.5" transform="rotate(-45 12 12)"></rect><line x1="8.5" y1="15.5" x2="15.5" y2="8.5"></line></svg></span> Prescriptions
             </div>
@@ -1227,6 +1230,80 @@
             </div>
         </div>
 
+        <!-- ─── LAB TESTS CATALOG ─── -->
+        <div id="pg-labtests" class="sec">
+            <div class="page-head">
+                <h2>🧪 Lab Test Catalog</h2>
+                <p>Manage diagnostic tests, pricing, and sample collection windows</p>
+            </div>
+
+            <!-- Collection Window Card -->
+            <div class="card" style="margin-bottom:20px;">
+                <div class="card-head">
+                    <h3>Sample Collection Window</h3>
+                </div>
+                <div style="padding:16px;">
+                    <p style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;">Patients will be offered collection on days and hours specified below.</p>
+                    <form id="collection-window-form" onsubmit="submitCollectionWindow(event)">
+                        <div class="form-row">
+                            <div class="field"><label>Start Time</label><input type="time" id="cw-start" required value="07:00"></div>
+                            <div class="field"><label>End Time</label><input type="time" id="cw-end" required value="11:00"></div>
+                            <div class="field"><label>Operating Days (comma-separated)</label><input type="text" id="cw-days" required value="Mon,Tue,Wed,Thu,Fri,Sat,Sun" placeholder="Mon,Tue,Wed,Thu,Fri,Sat,Sun"></div>
+                        </div>
+                        <div style="margin-top:12px;">
+                            <button type="submit" class="btn btn-accent">Save Window</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="top-row">
+                <input type="text" class="search-bar" id="labTestSearch" placeholder="Search lab tests by name or sample type..." oninput="filterLabTests()">
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-ghost" onclick="openLabCsvModal()">📥 Import CSV</button>
+                    <button class="btn btn-accent" onclick="openAddLabTestModal()">➕ Add Lab Test</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>Test Catalog</h3>
+                    <span id="labTestCount" style="color:var(--text3); font-size:0.8rem;"></span>
+                </div>
+                <div class="tbl-wrap" id="labTestList">
+                    <div class="loader"><div class="spin"></div>Loading lab tests...</div>
+                </div>
+            </div>
+
+            <!-- Add/Edit Lab Test Form Card -->
+            <div class="form-card" id="labTestFormCard" style="display:none; margin-top:20px;">
+                <h3 id="labTestFormTitle">➕ Add Lab Test</h3>
+                <input type="hidden" id="f-labTestId">
+                <div id="labTestMsg"></div>
+                <div class="form-row">
+                    <div class="field"><label>Test Name *</label><input type="text" id="f-ltName" placeholder="e.g. Complete Blood Count (CBC)"></div>
+                    <div class="field"><label>Sample Type</label><input type="text" id="f-ltSampleType" placeholder="e.g. Blood, Urine"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label>Price (₹) *</label><input type="number" id="f-ltPriceRupees" min="1" step="1" placeholder="e.g. 500"></div>
+                    <div class="field"><label>Turnaround (hours)</label><input type="number" id="f-ltTurnaround" min="1" step="1" placeholder="e.g. 24"></div>
+                </div>
+                <div class="field" style="margin-top:8px;">
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer;">
+                        <input type="checkbox" id="f-ltFasting"> ⚠️ Fasting Required (10-12 hours overnight)
+                    </label>
+                </div>
+                <div class="field" style="margin-top:8px;">
+                    <label>Preparation Instructions</label>
+                    <textarea id="f-ltPrep" rows="2" style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:8px;" placeholder="e.g. 10-12 hours overnight fasting required. Water is permitted."></textarea>
+                </div>
+                <div style="display:flex; gap:10px; margin-top:14px;">
+                    <button class="btn btn-accent" id="btnSaveLabTest" onclick="submitLabTest(event)">Save Test</button>
+                    <button class="btn btn-ghost" onclick="cancelLabTestForm()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <!-- ─── PRESCRIPTIONS ─── -->
         <div id="pg-prescriptions" class="sec">
             <div class="page-head">
@@ -1481,6 +1558,7 @@
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -1747,11 +1825,29 @@
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
             </div>
         </div>
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeEditStaffModal()">Cancel</button>
             <button class="btn btn-accent" onclick="submitEditStaff()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ LAB CSV IMPORT MODAL ═══ -->
+<div class="modal-overlay" id="labCsvModal">
+    <div class="modal">
+        <h3>📥 Bulk Import Lab Tests</h3>
+        <p style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;">Upload a CSV with columns: <code>name, sample_type, price_rupees, turnaround_hours, fasting_required, prep_instructions</code></p>
+        <div class="field">
+            <label>Select CSV File</label>
+            <input type="file" id="f-labCsvFile" accept=".csv">
+        </div>
+        <div id="labCsvResults" style="display:none; margin-top:10px; font-size:0.85rem;"></div>
+        <div class="modal-actions" style="margin-top:16px;">
+            <button class="btn btn-ghost" onclick="closeLabCsvModal()">Close</button>
+            <button class="btn btn-accent" id="btnUploadLabCsv" onclick="submitLabTestCsv()">Upload & Import</button>
         </div>
     </div>
 </div>
@@ -2114,7 +2210,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
+    const loaders = { dashboard: loadDashboard, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
     if (loaders[page]) loaders[page]();
 }
 
@@ -2979,6 +3075,252 @@ async function resendReport(id) {
             toast('Resend failed: ' + (data.detail || data.error || 'Error'), true);
         }
     } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+// ═══════ LAB TESTS ═══════
+let labTestsCache = [];
+
+async function loadLabTests() {
+    const el = document.getElementById('labTestList');
+    if (!el) return;
+    el.innerHTML = loading();
+    try {
+        labTestsCache = await api('/admin/lab-tests') || [];
+        const countEl = document.getElementById('labTestCount');
+        if (countEl) countEl.textContent = `${labTestsCache.length} test${labTestsCache.length !== 1 ? 's' : ''}`;
+        renderLabTestsTable(labTestsCache);
+    } catch (e) {
+        el.innerHTML = emptyState('warning', 'Failed to load lab tests');
+    }
+}
+
+function renderLabTestsTable(tests) {
+    const el = document.getElementById('labTestList');
+    if (!el) return;
+    if (!tests.length) {
+        el.innerHTML = emptyState('clipboard', 'No lab tests added yet');
+        return;
+    }
+    el.innerHTML = `<table>
+        <thead>
+            <tr>
+                <th>Test Name</th>
+                <th>Sample Type</th>
+                <th>Price</th>
+                <th>Turnaround</th>
+                <th>Fasting</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>${tests.map(t => `<tr>
+            <td style="font-weight:600; color:var(--text-strong)">${esc(t.name)}</td>
+            <td>${esc(t.sample_type) || '—'}</td>
+            <td>₹${t.price_paise / 100}</td>
+            <td>${t.turnaround_hours ? t.turnaround_hours + 'h' : '—'}</td>
+            <td>${t.fasting_required ? '<span style="color:var(--amber)">⚠️ Yes</span>' : 'No'}</td>
+            <td>${t.is_active ? badge('active') : badge('inactive')}</td>
+            <td>
+                ${hasPermission('LAB_TESTS_MANAGE') ? `<button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--surface); min-width:auto" onclick="editLabTest('${t.id}')">✏️</button>` : ''}
+                ${hasPermission('LAB_TESTS_MANAGE') ? `<button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--red-bg); color:var(--red); min-width:auto" onclick="delLabTest('${t.id}')">🗑️</button>` : ''}
+            </td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function filterLabTests() {
+    const q = (document.getElementById('labTestSearch')?.value || '').toLowerCase().trim();
+    if (!q) {
+        renderLabTestsTable(labTestsCache);
+        return;
+    }
+    const filtered = labTestsCache.filter(t => 
+        (t.name || '').toLowerCase().includes(q) || 
+        (t.sample_type || '').toLowerCase().includes(q)
+    );
+    renderLabTestsTable(filtered);
+}
+
+function openAddLabTestModal() {
+    resetLabTestForm();
+    const card = document.getElementById('labTestFormCard');
+    if (card) {
+        card.style.display = 'block';
+        card.scrollIntoView({ behavior: 'smooth' });
+    }
+}
+
+function cancelLabTestForm() {
+    resetLabTestForm();
+    const card = document.getElementById('labTestFormCard');
+    if (card) card.style.display = 'none';
+}
+
+function resetLabTestForm() {
+    document.getElementById('f-labTestId').value = '';
+    document.getElementById('f-ltName').value = '';
+    document.getElementById('f-ltSampleType').value = '';
+    document.getElementById('f-ltPriceRupees').value = '';
+    document.getElementById('f-ltTurnaround').value = '';
+    document.getElementById('f-ltFasting').checked = false;
+    document.getElementById('f-ltPrep').value = '';
+    document.getElementById('labTestFormTitle').textContent = '➕ Add Lab Test';
+    const msgEl = document.getElementById('labTestMsg');
+    if (msgEl) msgEl.innerHTML = '';
+}
+
+window.editLabTest = function(id) {
+    const test = labTestsCache.find(t => t.id === id);
+    if (!test) return;
+    document.getElementById('f-labTestId').value = test.id;
+    document.getElementById('f-ltName').value = test.name || '';
+    document.getElementById('f-ltSampleType').value = test.sample_type || '';
+    document.getElementById('f-ltPriceRupees').value = test.price_paise ? test.price_paise / 100 : '';
+    document.getElementById('f-ltTurnaround').value = test.turnaround_hours || '';
+    document.getElementById('f-ltFasting').checked = !!test.fasting_required;
+    document.getElementById('f-ltPrep').value = test.prep_instructions || '';
+    document.getElementById('labTestFormTitle').textContent = '✏️ Edit Lab Test';
+    const card = document.getElementById('labTestFormCard');
+    if (card) {
+        card.style.display = 'block';
+        card.scrollIntoView({ behavior: 'smooth' });
+    }
+};
+
+window.delLabTest = async function(id) {
+    const test = labTestsCache.find(t => t.id === id);
+    const name = test ? test.name : 'this test';
+    const ok = await confirmDialog(`Are you sure you want to remove "${name}" from your catalog?`, { title: 'Delete Lab Test', danger: true, okText: 'Delete' });
+    if (!ok) return;
+    try {
+        await apiDel('/admin/lab-tests/' + id);
+        toast('Lab test deleted');
+        loadLabTests();
+    } catch (e) {
+        toast(e.message || 'Failed to delete lab test', true);
+    }
+};
+
+async function submitLabTest(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const id = document.getElementById('f-labTestId').value;
+    const name = document.getElementById('f-ltName').value.trim();
+    const sampleType = document.getElementById('f-ltSampleType').value.trim() || null;
+    const priceRupees = parseInt(document.getElementById('f-ltPriceRupees').value, 10);
+    const turnaround = parseInt(document.getElementById('f-ltTurnaround').value, 10) || null;
+    const fasting = document.getElementById('f-ltFasting').checked;
+    const prep = document.getElementById('f-ltPrep').value.trim() || null;
+
+    if (!name) {
+        toast('Please enter test name', true);
+        return;
+    }
+    if (isNaN(priceRupees) || priceRupees <= 0) {
+        toast('Please enter a valid price in rupees', true);
+        return;
+    }
+
+    const payload = {
+        name,
+        sample_type: sampleType,
+        price_rupees: priceRupees,
+        turnaround_hours: turnaround,
+        fasting_required: fasting,
+        prep_instructions: prep,
+    };
+
+    const btn = document.getElementById('btnSaveLabTest');
+    if (btn) btn.disabled = true;
+
+    try {
+        if (id) {
+            await apiPut('/admin/lab-tests/' + id, payload);
+            toast('Lab test updated');
+        } else {
+            await apiPost('/admin/lab-tests', payload);
+            toast('Lab test created');
+        }
+        cancelLabTestForm();
+        loadLabTests();
+    } catch (err) {
+        toast(err.message || 'Failed to save lab test', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+function openLabCsvModal() {
+    const modal = document.getElementById('labCsvModal');
+    if (modal) {
+        modal.classList.add('open');
+        document.getElementById('f-labCsvFile').value = '';
+        const resEl = document.getElementById('labCsvResults');
+        if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
+    }
+}
+
+function closeLabCsvModal() {
+    const modal = document.getElementById('labCsvModal');
+    if (modal) modal.classList.remove('open');
+}
+
+async function submitLabTestCsv() {
+    const fileInput = document.getElementById('f-labCsvFile');
+    if (!fileInput || !fileInput.files || !fileInput.files.length) {
+        toast('Please select a CSV file', true);
+        return;
+    }
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const btn = document.getElementById('btnUploadLabCsv');
+    if (btn) btn.disabled = true;
+    const resEl = document.getElementById('labCsvResults');
+
+    try {
+        const resp = await fetch(API + '/admin/lab-tests/import-csv', {
+            method: 'POST',
+            headers: { Authorization: auth },
+            body: formData,
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Import failed');
+
+        if (resEl) {
+            resEl.style.display = 'block';
+            let html = `<div style="color:var(--green); font-weight:600;">✅ Created: ${data.created}, Updated: ${data.updated}</div>`;
+            if (data.errors && data.errors.length) {
+                html += `<div style="color:var(--red); margin-top:6px;">⚠️ Errors (${data.errors.length}):<br>${data.errors.map(e => esc(e)).join('<br>')}</div>`;
+            }
+            resEl.innerHTML = html;
+        }
+        toast(`Import finished: ${data.created} created, ${data.updated} updated`);
+        loadLabTests();
+    } catch (e) {
+        toast(e.message || 'Import failed', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function submitCollectionWindow(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const start = document.getElementById('cw-start').value;
+    const end = document.getElementById('cw-end').value;
+    const days = document.getElementById('cw-days').value.trim();
+
+    if (!start || !end || !days) {
+        toast('Please fill all collection window fields', true);
+        return;
+    }
+
+    try {
+        await apiPut('/admin/lab-collection-window', { start, end, days });
+        toast('Sample collection window saved');
+    } catch (e) {
+        toast(e.message || 'Failed to save collection window', true);
+    }
 }
 
 // ═══════ PRESCRIPTIONS ═══════

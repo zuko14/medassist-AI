@@ -1,6 +1,8 @@
 """Admin router for analytics and management — Security Hardened."""
 
 import asyncio
+import csv
+import io
 import logging
 import re
 import secrets
@@ -691,6 +693,48 @@ class DoctorUpdate(BaseModel):
     branch_session: Optional[str] = None
 
 
+class LabTestCreate(BaseModel):
+    name: str
+    sample_type: Optional[str] = None
+    prep_instructions: Optional[str] = None
+    fasting_required: bool = False
+    price_rupees: int
+    turnaround_hours: Optional[int] = None
+    is_active: bool = True
+    branch_id: Optional[str] = None
+
+    @field_validator("price_rupees")
+    @classmethod
+    def validate_price(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("price_rupees must be greater than 0")
+        return v
+
+
+class LabTestUpdate(BaseModel):
+    name: Optional[str] = None
+    sample_type: Optional[str] = None
+    prep_instructions: Optional[str] = None
+    fasting_required: Optional[bool] = None
+    price_rupees: Optional[int] = None
+    turnaround_hours: Optional[int] = None
+    is_active: Optional[bool] = None
+    branch_id: Optional[str] = None
+
+
+class LabCollectionWindowUpdate(BaseModel):
+    start: str
+    end: str
+    days: str = "Mon,Tue,Wed,Thu,Fri,Sat"
+
+    @field_validator("start", "end")
+    @classmethod
+    def validate_time_format(cls, v: str) -> str:
+        if not re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", v):
+            raise ValueError("Time must be in HH:MM format")
+        return v
+
+
 class PaymentSettingsUpdate(BaseModel):
     """Self-service payment settings a clinic_admin can set for their own
     clinic. Partial update — only fields explicitly sent are changed."""
@@ -1268,6 +1312,295 @@ async def delete_doctor(
     except Exception as e:
         logger.error(f"Error deleting doctor: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete doctor")
+
+
+@router.get("/lab-tests")
+async def get_lab_tests_admin(
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Get the clinic's lab test catalog."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        query = supabase.table("lab_tests").select("*")
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        if branch_id:
+            query = query.eq("branch_id", branch_id)
+        result = query.order("name").execute()
+        return result.data or []
+    except Exception as e:
+        logger.error(f"Error fetching lab tests for clinic_id={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail=_friendly_db_error(e, "Failed to fetch lab tests"))
+
+
+@router.post("/lab-tests")
+async def create_lab_test(
+    test: LabTestCreate,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Create a new lab test catalog entry."""
+    effective_clinic_id = None
+    try:
+        effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+        if test.branch_id:
+            enforce_branch_scope(user, test.branch_id)
+            branch_check = (
+                supabase.table("branches")
+                .select("id")
+                .eq("id", test.branch_id)
+                .eq("clinic_id", effective_clinic_id)
+                .execute()
+            )
+            if not branch_check.data:
+                raise HTTPException(
+                    status_code=400, detail="Selected branch does not belong to your clinic."
+                )
+
+        try:
+            test_data = test.model_dump(exclude={"price_rupees"})
+        except AttributeError:
+            test_data = test.dict(exclude={"price_rupees"})
+        test_data["price_paise"] = test.price_rupees * 100
+        test_data["clinic_id"] = effective_clinic_id
+
+        result = supabase.table("lab_tests").insert(test_data).execute()
+        new_test = result.data[0]
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="create_lab_test",
+            resource_type="lab_test",
+            resource_id=new_test["id"],
+            details={"name": new_test.get("name")},
+            ip_address=client_ip,
+        )
+        return new_test
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error creating lab test for clinic_id={effective_clinic_id}: {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to create lab test")
+        )
+
+
+@router.put("/lab-tests/{test_id}")
+async def update_lab_test(
+    test_id: str,
+    test: LabTestUpdate,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Update an existing lab test catalog entry."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        if test.branch_id:
+            enforce_branch_scope(user, test.branch_id)
+
+        try:
+            update_data = test.model_dump(exclude_unset=True, exclude={"price_rupees"})
+        except AttributeError:
+            update_data = test.dict(exclude_unset=True, exclude={"price_rupees"})
+        if test.price_rupees is not None:
+            update_data["price_paise"] = test.price_rupees * 100
+        if not update_data:
+            return {"message": "No fields to update"}
+
+        query = supabase.table("lab_tests").update(update_data)
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        result = query.eq("id", test_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Lab test not found")
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="update_lab_test",
+            resource_type="lab_test",
+            resource_id=test_id,
+            details={"updated_fields": list(update_data.keys())},
+            ip_address=client_ip,
+        )
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating lab test {test_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to update lab test")
+        )
+
+
+@router.delete("/lab-tests/{test_id}")
+async def delete_lab_test(
+    test_id: str,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Delete a lab test catalog entry."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        query = supabase.table("lab_tests").delete()
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        result = query.eq("id", test_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Lab test not found")
+
+        client_ip = request.client.host if (request and request.client) else "unknown"
+        await log_admin_action(
+            user=user,
+            action="delete_lab_test",
+            resource_type="lab_test",
+            resource_id=test_id,
+            details={},
+            ip_address=client_ip,
+        )
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting lab test {test_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to delete lab test")
+        )
+
+
+@router.post("/lab-tests/import-csv")
+async def import_lab_tests_csv(
+    file: UploadFile = File(...),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Bulk-import lab tests from a CSV file.
+
+    Expected columns: name,sample_type,price_rupees,turnaround_hours,
+    fasting_required,prep_instructions. Each row is upserted by
+    (clinic_id, name). Malformed rows are reported individually — a single
+    bad row never aborts the whole import.
+    """
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded CSV")
+
+    reader = csv.DictReader(io.StringIO(text))
+    required_cols = {"name", "price_rupees"}
+    if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
+        raise HTTPException(
+            status_code=400, detail="CSV must include at least 'name' and 'price_rupees' columns"
+        )
+
+    created, updated, errors = 0, 0, []
+    for i, row in enumerate(reader, start=2):  # header is row 1
+        name = (row.get("name") or "").strip()
+        price_raw = (row.get("price_rupees") or "").strip()
+        if not name:
+            errors.append(f"Row {i}: missing name")
+            continue
+        try:
+            price_rupees = int(price_raw)
+            if price_rupees <= 0:
+                raise ValueError
+        except ValueError:
+            errors.append(f"Row {i} ('{name}'): price_rupees must be a positive whole number")
+            continue
+
+        turnaround_raw = (row.get("turnaround_hours") or "").strip()
+        test_data = {
+            "clinic_id": effective_clinic_id,
+            "name": name,
+            "price_paise": price_rupees * 100,
+            "sample_type": (row.get("sample_type") or "").strip() or None,
+            "turnaround_hours": int(turnaround_raw) if turnaround_raw.isdigit() else None,
+            "fasting_required": (row.get("fasting_required") or "").strip().lower() in ("true", "1", "yes"),
+            "prep_instructions": (row.get("prep_instructions") or "").strip() or None,
+        }
+
+        try:
+            existing = (
+                supabase.table("lab_tests")
+                .select("id")
+                .eq("clinic_id", effective_clinic_id)
+                .eq("name", name)
+                .execute()
+            )
+            if existing.data:
+                supabase.table("lab_tests").update(test_data).eq("id", existing.data[0]["id"]).execute()
+                updated += 1
+            else:
+                supabase.table("lab_tests").insert(test_data).execute()
+                created += 1
+        except Exception as e:
+            errors.append(f"Row {i} ('{name}'): {_friendly_db_error(e, 'save failed')}")
+
+    await log_admin_action(
+        user=user,
+        action="import_lab_tests_csv",
+        resource_type="lab_test",
+        resource_id=None,
+        details={"created": created, "updated": updated, "errors": len(errors)},
+        ip_address="unknown",
+    )
+    return {"created": created, "updated": updated, "errors": errors}
+
+
+@router.put("/lab-collection-window")
+async def update_lab_collection_window(
+    payload: LabCollectionWindowUpdate,
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Set the daily sample collection window for a branch, or the clinic
+    itself for single-location clinics (branch_id omitted)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    window = {"start": payload.start, "end": payload.end, "days": payload.days}
+
+    try:
+        if branch_id:
+            enforce_branch_scope(user, branch_id)
+            branch_result = (
+                supabase.table("branches")
+                .select("config")
+                .eq("id", branch_id)
+                .eq("clinic_id", effective_clinic_id)
+                .execute()
+            )
+            if not branch_result.data:
+                raise HTTPException(status_code=404, detail="Branch not found")
+            config = branch_result.data[0].get("config") or {}
+            config["lab_collection"] = window
+            supabase.table("branches").update({"config": config}).eq("id", branch_id).execute()
+        else:
+            clinic_result = supabase.table("clinics").select("config").eq("id", effective_clinic_id).execute()
+            if not clinic_result.data:
+                raise HTTPException(status_code=404, detail="Clinic not found")
+            config = clinic_result.data[0].get("config") or {}
+            config["lab_collection"] = window
+            supabase.table("clinics").update({"config": config}).eq("id", effective_clinic_id).execute()
+
+        return {"success": True, "lab_collection": window}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating lab collection window: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to update collection window")
+        )
 
 
 @router.get("/leaves")

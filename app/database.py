@@ -192,6 +192,71 @@ async def get_doctors(
         return []
 
 
+async def get_lab_tests(
+    clinic_id: str, branch_id: Optional[str] = None, active_only: bool = True
+) -> list:
+    """Get a clinic's lab test catalog, optionally filtered by branch.
+
+    A test with branch_id=NULL is clinic-wide and is included regardless of
+    the branch_id filter (mirrors the catalog's "unset = all branches" rule).
+    """
+    try:
+        query = supabase.table("lab_tests").select("*").eq("clinic_id", clinic_id)
+        if active_only:
+            query = query.eq("is_active", True)
+        result = query.order("name").execute()
+        tests = result.data or []
+        if branch_id:
+            tests = [
+                t for t in tests if not t.get("branch_id") or t["branch_id"] == branch_id
+            ]
+        return tests
+    except Exception as e:
+        logger.error(f"Error getting lab tests: {e}")
+        return []
+
+
+async def get_lab_test_by_id(clinic_id: str, lab_test_id: str) -> Optional[dict]:
+    """Get a single active lab test by id, scoped to the clinic."""
+    try:
+        result = (
+            supabase.table("lab_tests")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .eq("id", lab_test_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.error(f"Error getting lab test {lab_test_id}: {e}")
+        return None
+
+
+async def get_lab_collection_window(clinic: dict, branch_id: Optional[str] = None) -> dict:
+    """Resolve the sample collection window for a booking.
+
+    Branch-level config takes priority; falls back to clinic-level config
+    for single-location clinics; falls back to a hardcoded default if
+    neither is configured.
+    """
+    default = {"start": "07:00", "end": "11:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat"}
+    try:
+        if branch_id:
+            result = (
+                supabase.table("branches").select("config").eq("id", branch_id).execute()
+            )
+            if result.data:
+                window = (result.data[0].get("config") or {}).get("lab_collection")
+                if window:
+                    return window
+        window = (clinic.get("config") or {}).get("lab_collection")
+        return window or default
+    except Exception as e:
+        logger.error(f"Error getting lab collection window: {e}")
+        return default
+
+
 async def get_doctors_at_branch(
     clinic_id: str,
     branch_id: str,
