@@ -3420,10 +3420,14 @@ async def get_diagnostic_stats(
         if target_branch:
             conn_query = conn_query.eq("branch_id", target_branch)
         conn_res = conn_query.execute()
-        connectors = conn_res.data or []
+        connectors = sorted(conn_res.data or [], key=lambda c: c.get("updated_at") or "", reverse=True)
 
         connector_info = None
         if connectors:
+            # Multiple branches can each have their own connector row; without
+            # an explicit branch_id filter, always surface the one most
+            # recently touched rather than an arbitrary/stale row — otherwise
+            # the dashboard can show a dead connector's old error forever.
             c = connectors[0]
             is_enabled = c.get("is_enabled", False)
             last_error = c.get("last_error")
@@ -3439,6 +3443,7 @@ async def get_diagnostic_stats(
                     next_run_at = None
             connector_info = {
                 "id": c.get("id"),
+                "branch_id": c.get("branch_id"),
                 "connector_type": c.get("connector_type"),
                 "is_enabled": is_enabled,
                 "last_run_at": last_run_at,
@@ -3615,26 +3620,45 @@ async def update_branch(
 
 
 
+_BRANCH_DEPENDENT_TABLES = ["appointments", "doctor_branches", "integration_connectors", "clinic_admins"]
+
+
 @router.delete("/branches/{branch_id}")
 async def delete_branch(
     branch_id: str,
     clinic_id: str = "default",
     user: AdminUser = Depends(require_admin),
 ):
-    """Soft-delete a branch (deactivate it)."""
+    """Permanently delete a branch if nothing references it (appointments,
+    doctor assignments, connectors, staff accounts). Otherwise deactivate
+    it and report why, so duplicate/unused branches can actually be
+    removed instead of accumulating forever as inactive clutter."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        query = supabase.table("branches").update({"is_active": False})
+        from app.services.tenant import invalidate_branch_cache
+
+        for table in _BRANCH_DEPENDENT_TABLES:
+            dep = supabase.table(table).select("id").eq("branch_id", branch_id).limit(1).execute()
+            if dep.data:
+                query = supabase.table("branches").update({"is_active": False})
+                if effective_clinic_id != "default":
+                    query = query.eq("clinic_id", effective_clinic_id)
+                query.eq("id", branch_id).execute()
+                invalidate_branch_cache(effective_clinic_id)
+                label = table.replace("_", " ")
+                return {
+                    "success": True,
+                    "deleted": False,
+                    "message": f"Branch has existing {label} records — deactivated instead of deleted.",
+                }
+
+        query = supabase.table("branches").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
         query.eq("id", branch_id).execute()
-
-        # Invalidate branch cache
-        from app.services.tenant import invalidate_branch_cache
-
         invalidate_branch_cache(effective_clinic_id)
 
-        return {"success": True}
+        return {"success": True, "deleted": True, "message": "Branch permanently deleted."}
     except Exception as e:
         logger.error(f"Error deleting branch: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete branch")

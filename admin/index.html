@@ -3743,10 +3743,11 @@ async function editBranch(branchId) {
 }
 
 async function deleteBranch(branchId) {
-    const ok = await confirmDialog('Deactivate this branch? Existing appointments will not be affected.', { okText: 'Deactivate', danger: true });
+    const ok = await confirmDialog('Delete this branch? If it has no appointments, doctors, or connectors linked, it will be removed permanently — otherwise it will be deactivated.', { okText: 'Delete', danger: true });
     if (!ok) return;
     try {
-        await apiDel('/admin/branches/' + branchId);
+        const res = await apiDel('/admin/branches/' + branchId);
+        toast(res.deleted ? '✅ Branch deleted' : 'ℹ️ ' + (res.message || 'Branch deactivated'));
         loadBranches();
     } catch (e) {
         toast('Error: ' + e.message, true);
@@ -4140,12 +4141,20 @@ async function loadConnectorsPage() {
         try {
             const data = await api('/admin/branches');
             const select = document.getElementById('f-connectorBranch');
-            (data.branches || []).forEach(b => {
+            const branches = (data.branches || []).filter(b => b.is_active);
+            branches.forEach(b => {
                 const opt = document.createElement('option');
                 opt.value = b.id;
                 opt.textContent = b.name;
                 select.appendChild(opt);
             });
+            // Default to this admin's own branch, else the branch they last
+            // saved connector credentials under, so the form doesn't appear
+            // empty after logout/reload just because the picker reset.
+            const remembered = myBranchId || localStorage.getItem('mediassist_connector_branch');
+            if (remembered && branches.some(b => b.id === remembered)) {
+                select.value = remembered;
+            }
         } catch (e) {}
         _connectorBranchesLoaded = true;
     }
@@ -4257,6 +4266,7 @@ async function saveConnectorCredentials() {
     try {
         const res = await apiPut('/admin/connectors?clinic_id=default', body);
         toast('✅ Connector credentials saved!');
+        if (branchId) localStorage.setItem('mediassist_connector_branch', branchId);
         // Small delay so the user sees the toast before the page refreshes
         setTimeout(() => loadConnectorsPage(), 500);
     } catch (e) {
@@ -4444,10 +4454,12 @@ async function loadDiagnosticDashboard() {
     if (diagDash) diagDash.style.display = 'block';
 
     try {
-        const [stats, queue] = await Promise.all([
+        const [stats, queue, branchesResp] = await Promise.all([
             api('/admin/diagnostic/stats'),
             api('/admin/reports/queue'),
+            api('/admin/branches').catch(() => ({ branches: [] })),
         ]);
+        const allBranches = branchesResp.branches || [];
 
         // Render Stats
         const rep = stats.reports_today || {};
@@ -4463,20 +4475,25 @@ async function loadDiagnosticDashboard() {
         const statusSub = document.getElementById('diagStatusSub');
 
         if (conn) {
+            // Only label which branch this status is for when there's more
+            // than one active branch — otherwise it's just noise.
+            const connBranch = allBranches.find(b => b.id === conn.branch_id);
+            const branchSuffix = (allBranches.filter(b => b.is_active).length > 1 && connBranch)
+                ? ` (${connBranch.short_name || connBranch.name})` : '';
             if (conn.health === 'healthy') {
                 statusDot.style.background = 'var(--green)';
                 statusDot.style.boxShadow = '0 0 10px var(--green)';
-                statusTitle.textContent = 'Report Connector: Active & Healthy';
+                statusTitle.textContent = 'Report Connector: Active & Healthy' + branchSuffix;
                 statusTitle.style.color = '#fff';
             } else if (conn.health === 'warning') {
                 statusDot.style.background = 'var(--amber)';
                 statusDot.style.boxShadow = '0 0 10px var(--amber)';
-                statusTitle.textContent = 'Report Connector: Warning / Error';
+                statusTitle.textContent = 'Report Connector: Warning / Error' + branchSuffix;
                 statusTitle.style.color = 'var(--amber)';
             } else {
                 statusDot.style.background = 'var(--text3)';
                 statusDot.style.boxShadow = 'none';
-                statusTitle.textContent = 'Report Connector: Disabled';
+                statusTitle.textContent = 'Report Connector: Disabled' + branchSuffix;
                 statusTitle.style.color = 'var(--text2)';
             }
             const lastRunStr = conn.last_run_at ? new Date(conn.last_run_at).toLocaleTimeString() : 'Never';

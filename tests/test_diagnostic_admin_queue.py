@@ -209,3 +209,60 @@ async def test_get_diagnostic_stats():
     assert stats["connector"]["poll_interval_minutes"] == 10
     assert stats["connector"]["next_run_at"] is not None
 
+
+@pytest.mark.asyncio
+async def test_get_diagnostic_stats_picks_most_recently_updated_connector():
+    """When no branch_id is given and multiple connector rows exist (one
+    per branch), the dashboard must surface the most recently active one
+    instead of an arbitrary/stale row — regression guard for the dashboard
+    showing a dead connector's old Chromium error after a working one was
+    configured for a different branch."""
+    admin = AdminUser("diag_staff", role="clinic_admin", clinic_id="clinic-diag-1", user_id="user-diag-1")
+
+    mock_sb = MagicMock()
+    mock_lab_table = MagicMock()
+    mock_conn_table = MagicMock()
+
+    def table_side_effect(name):
+        if name == "lab_reports":
+            return mock_lab_table
+        elif name == "integration_connectors":
+            return mock_conn_table
+        return MagicMock()
+
+    mock_sb.table.side_effect = table_side_effect
+    mock_lab_table.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+    mock_conn_table.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[
+            {
+                "id": "conn-old",
+                "branch_id": "branch-old",
+                "connector_type": "mocdoc",
+                "is_enabled": False,
+                "last_run_at": "2026-01-01T00:00:00Z",
+                "last_success_at": None,
+                "last_error": "RuntimeError: Chromium browser is not installed",
+                "config": {},
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "id": "conn-new",
+                "branch_id": "branch-new",
+                "connector_type": "mocdoc",
+                "is_enabled": True,
+                "last_run_at": "2099-01-01T12:00:00Z",
+                "last_success_at": "2099-01-01T12:00:00Z",
+                "last_error": None,
+                "config": {"poll_interval_minutes": 5},
+                "updated_at": "2099-01-01T12:00:00Z",
+            },
+        ]
+    )
+
+    with patch("app.routers.admin.supabase", mock_sb):
+        stats = await get_diagnostic_stats(clinic_id="clinic-diag-1", user=admin)
+
+    assert stats["connector"]["id"] == "conn-new"
+    assert stats["connector"]["health"] == "healthy"
+    assert stats["connector"]["branch_id"] == "branch-new"
+
