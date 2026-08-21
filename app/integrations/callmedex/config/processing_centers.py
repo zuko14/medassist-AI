@@ -92,7 +92,9 @@ async def resolve_processing_center(
         )
 
     config: dict = result.data.get("config", {})
-    base_url = config.get("base_url", "").rstrip("/")
+    base_url = config.get("base_url", "").strip().rstrip("/")
+    if base_url and not base_url.startswith(("http://", "https://")):
+        base_url = f"https://{base_url}"
     clinic_slug = config.get("clinic_slug", "")
     username = config.get("username")
     password = config.get("password") or config.get("password_encrypted")

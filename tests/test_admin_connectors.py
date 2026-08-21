@@ -403,3 +403,41 @@ async def test_run_connector_now_calls_run_connector_not_dry_run():
     assert result["result"]["reports_uploaded"] == 2
 
 
+@pytest.mark.asyncio
+async def test_upsert_connector_normalizes_base_url():
+    admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
+    fake_clinic = {"id": "clinic-2", "plan": "diagstream", "whatsapp_number": "+911111111111"}
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "conn-1", "config": {}, "is_enabled": True}]
+    )
+    mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "conn-1", "clinic_id": "clinic-2", "connector_type": "mocdoc", "config": {"base_url": "https://www.mocdoc.com"}}]
+    )
+
+    body = ConnectorCredentialsUpdate(base_url="www.mocdoc.com/", username="admin")
+
+    with patch("app.routers.admin.supabase", mock_sb), \
+         patch("app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=fake_clinic), \
+         patch("app.routers.admin.log_admin_action", new_callable=AsyncMock):
+        result = await upsert_connector_credentials(body=body, request=_mock_request(), clinic_id="default", user=admin)
+
+    update_call = mock_sb.table.return_value.update.call_args[0][0]
+    assert update_call["config"]["base_url"] == "https://www.mocdoc.com"
+
+
+def test_mocdoc_worker_normalizes_base_url():
+    from connectors.mocdoc.worker import MocDocConnector
+
+    worker = MocDocConnector(
+        clinic_id="c-1",
+        config={"base_url": "www.mocdoc.com/"},
+        medassist_url="http://localhost:8000",
+        integration_secret="secret",
+        session_dir="/tmp",
+    )
+    assert worker.base_url == "https://www.mocdoc.com"
+
+
+

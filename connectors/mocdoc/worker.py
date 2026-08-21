@@ -105,7 +105,10 @@ class MocDocConnector(HospitalConnector):
             medassist_url=medassist_url,
             integration_secret=integration_secret,
         )
-        self.base_url = config.get("base_url", "https://mocdoc.com").rstrip("/")
+        raw_url = (config.get("base_url") or "https://mocdoc.com").strip().rstrip("/")
+        if not raw_url.startswith(("http://", "https://")):
+            raw_url = f"https://{raw_url}"
+        self.base_url = raw_url
         self.username = config.get("username", "")
         self.password = config.get("password", "")  # Already decrypted by runner
         self.clinic_slug = config.get("clinic_slug", "")
