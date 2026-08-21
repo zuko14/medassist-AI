@@ -4206,12 +4206,22 @@ async function saveConnectorCredentials() {
     if (username) body.username = username;
     if (password) body.password = password;
 
+    const btn = document.querySelector('#pg-connectors .btn-accent');
+    const origText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
     try {
-        await apiPut('/admin/connectors?clinic_id=default', body);
-        msg('connectorMsg', '✅ Connector credentials saved!');
-        loadConnectorsPage();
+        const res = await apiPut('/admin/connectors?clinic_id=default', body);
+        toast('✅ Connector credentials saved!');
+        // Small delay so the user sees the toast before the page refreshes
+        setTimeout(() => loadConnectorsPage(), 500);
     } catch (e) {
-        msg('connectorMsg', 'Error: ' + e.message, true);
+        const errMsg = e.message || 'Unknown error';
+        toast('❌ Save failed: ' + errMsg, true);
+        msg('connectorMsg', 'Error: ' + errMsg, true);
+        console.error('saveConnectorCredentials failed:', e);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = origText; }
     }
 }
 

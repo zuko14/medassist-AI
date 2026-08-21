@@ -2840,44 +2840,55 @@ async def upsert_connector_credentials(
         cfg["poll_interval_minutes"] = body.poll_interval_minutes
 
     now = datetime.now().isoformat()
-    if existing_row:
-        update_data = {"config": cfg, "updated_at": now}
-        if body.is_enabled is not None:
-            update_data["is_enabled"] = body.is_enabled
-        result = (
-            supabase.table("integration_connectors")
-            .update(update_data)
-            .eq("id", existing_row["id"])
-            .execute()
-        )
-        saved = result.data[0]
-    else:
-        insert_data = {
-            "clinic_id": effective_clinic_id,
-            "branch_id": body.branch_id,
-            "connector_type": body.connector_type,
-            "config": cfg,
-            "is_enabled": bool(body.is_enabled) if body.is_enabled is not None else False,
-        }
-        result = supabase.table("integration_connectors").insert(insert_data).execute()
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to save connector credentials")
-        saved = result.data[0]
+    try:
+        if existing_row:
+            update_data = {"config": cfg, "updated_at": now}
+            if body.is_enabled is not None:
+                update_data["is_enabled"] = body.is_enabled
+            result = (
+                supabase.table("integration_connectors")
+                .update(update_data)
+                .eq("id", existing_row["id"])
+                .execute()
+            )
+            if not result.data:
+                raise HTTPException(status_code=500, detail="Update returned no data — row may have been deleted")
+            saved = result.data[0]
+        else:
+            insert_data = {
+                "clinic_id": effective_clinic_id,
+                "branch_id": body.branch_id,
+                "connector_type": body.connector_type,
+                "config": cfg,
+                "is_enabled": bool(body.is_enabled) if body.is_enabled is not None else False,
+            }
+            result = supabase.table("integration_connectors").insert(insert_data).execute()
+            if not result.data:
+                raise HTTPException(status_code=500, detail="Failed to save connector credentials")
+            saved = result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Connector credentials save failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error saving connector: {str(e)}")
 
     client_ip = request.client.host if request.client else "unknown"
-    await log_admin_action(
-        user=user,
-        action="upsert_connector_credentials",
-        resource_type="integration_connector",
-        resource_id=saved.get("id"),
-        details={
-            "connector_type": body.connector_type,
-            "branch_id": body.branch_id,
-            "username_changed": bool(body.username),
-            "password_changed": bool(body.password),
-        },
-        ip_address=client_ip,
-    )
+    try:
+        await log_admin_action(
+            user=user,
+            action="upsert_connector_credentials",
+            resource_type="integration_connector",
+            resource_id=saved.get("id"),
+            details={
+                "connector_type": body.connector_type,
+                "branch_id": body.branch_id,
+                "username_changed": bool(body.username),
+                "password_changed": bool(body.password),
+            },
+            ip_address=client_ip,
+        )
+    except Exception as e:
+        logger.warning(f"Audit log failed for connector save (non-fatal): {e}")
 
     return {"success": True, "connector": _mask_connector(saved)}
 
