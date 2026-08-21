@@ -2824,10 +2824,14 @@ async def upsert_connector_credentials(
         cfg["password_encrypted"] = encrypt_password(body.password.strip(), key)
         cfg.pop("password", None)
     if body.base_url is not None and body.base_url.strip():
-        val = body.base_url.strip().rstrip("/")
+        val = body.base_url.strip()
         if not val.startswith(("http://", "https://")):
             val = f"https://{val}"
-        cfg["base_url"] = val
+        from urllib.parse import urlparse
+        p = urlparse(val)
+        scheme = p.scheme or "https"
+        netloc = p.netloc or p.path.split("/")[0]
+        cfg["base_url"] = f"{scheme}://{netloc}".rstrip("/")
     if body.clinic_slug is not None and body.clinic_slug.strip():
         cfg["clinic_slug"] = body.clinic_slug.strip()
     if body.admin_alert_phone is not None and body.admin_alert_phone.strip():

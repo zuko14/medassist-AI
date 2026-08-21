@@ -439,5 +439,14 @@ def test_mocdoc_worker_normalizes_base_url():
     )
     assert worker.base_url == "https://www.mocdoc.com"
 
+    worker_with_path = MocDocConnector(
+        clinic_id="c-1",
+        config={"base_url": "https://mocdoc.com/user/loginform"},
+        medassist_url="http://localhost:8000",
+        integration_secret="secret",
+        session_dir="/tmp",
+    )
+    assert worker_with_path.base_url == "https://mocdoc.com"
+
 
 

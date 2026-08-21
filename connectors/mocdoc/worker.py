@@ -105,10 +105,14 @@ class MocDocConnector(HospitalConnector):
             medassist_url=medassist_url,
             integration_secret=integration_secret,
         )
-        raw_url = (config.get("base_url") or "https://mocdoc.com").strip().rstrip("/")
-        if not raw_url.startswith(("http://", "https://")):
+        raw_url = (config.get("base_url") or "https://mocdoc.com").strip()
+        if raw_url and not raw_url.startswith(("http://", "https://")):
             raw_url = f"https://{raw_url}"
-        self.base_url = raw_url
+        from urllib.parse import urlparse
+        parsed = urlparse(raw_url)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or parsed.path.split("/")[0]
+        self.base_url = f"{scheme}://{netloc}".rstrip("/")
         self.username = config.get("username", "")
         self.password = config.get("password", "")  # Already decrypted by runner
         self.clinic_slug = config.get("clinic_slug", "")
@@ -312,8 +316,8 @@ class MocDocConnector(HospitalConnector):
 
     async def _try_login_once(self) -> bool:
         """Single login attempt: navigate, fill, submit, check result."""
-        # Navigate directly to /user/login (the actual login page)
-        login_url = f"{self.base_url}/user/login"
+        # Navigate directly to /user/loginform (the actual login page)
+        login_url = f"{self.base_url}{S.LOGIN_URL_PATH}"
         logger.info(f"Navigating to login page: {login_url}")
 
         await self._page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
