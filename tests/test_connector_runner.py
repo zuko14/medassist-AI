@@ -95,3 +95,61 @@ def test_scheduled_mode_releases_locks_on_sigterm():
     source = inspect.getsource(runner.start_scheduled_mode)
     assert "signal.signal(signal.SIGTERM" in source
     assert "release_all_locks_held" in source
+
+
+@pytest.mark.asyncio
+async def test_run_connector_dry_run_includes_masked_sample_excluded_from_audit_log():
+    from connectors.runner import run_connector, CONNECTOR_REGISTRY, _mask_sample_name
+    from connectors.base import ReportMetadata
+
+    class _FakeConnector:
+        def __init__(self, **kwargs):
+            pass
+
+        async def authenticate(self):
+            return True
+
+        async def fetch_new_reports(self):
+            return [
+                ReportMetadata(
+                    patient_name=f"Patient {i}",
+                    patient_phone="+919999999999",
+                    report_name=f"CBC Report {i}",
+                    report_type="lab",
+                    external_report_id=f"ext-{i}",
+                    vam_id=f"VAM-{i}",
+                )
+                for i in range(7)
+            ]
+
+        async def cleanup(self):
+            pass
+
+    mock_sb = MagicMock()
+    mock_table = MagicMock()
+    mock_sb.table.return_value = mock_table
+    mock_table.select.return_value.eq.return_value.eq.return_value.is_.return_value.single.return_value.execute.return_value = MagicMock(
+        data={
+            "id": "conn-1",
+            "clinic_id": "clinic-2",
+            "is_enabled": True,
+            "config": {"username": "labadmin", "password": "plaintext-dev-only"},
+        }
+    )
+
+    with patch("connectors.runner.supabase", mock_sb), \
+         patch.dict(CONNECTOR_REGISTRY, {"mocdoc": _FakeConnector}), \
+         patch("connectors.runner.acquire_connector_lock", new_callable=AsyncMock, return_value=(True, 0)), \
+         patch("connectors.runner.release_connector_lock", new_callable=AsyncMock):
+        result = await run_connector(clinic_id="clinic-2", dry_run=True)
+
+    assert result["run_status"] == "dry_run"
+    assert len(result["sample"]) == 5
+    assert result["sample"][0]["patient_name_masked"] == _mask_sample_name("Patient 0")
+    assert result["sample"][0]["vam_id"] == "VAM-0"
+    assert result["sample"][0]["report_name"] == "CBC Report 0"
+
+    insert_payload = mock_table.insert.call_args[0][0]
+    assert "sample" not in insert_payload
+    assert insert_payload["run_status"] == "dry_run"
+

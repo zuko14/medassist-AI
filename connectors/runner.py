@@ -71,6 +71,14 @@ def _scope_by_branch(query, branch_id: str = None):
     return query.is_("branch_id", "null") if not branch_id else query.eq("branch_id", branch_id)
 
 
+def _mask_sample_name(name: str) -> str:
+    """Mask a patient name for the dry-run sample: keep each word's first
+    letter (e.g. 'John Smith' -> 'J•••• S••••'), never expose the full name."""
+    if not name:
+        return ""
+    return " ".join(w[:1] + "•" * max(0, len(w) - 1) for w in name.split())
+
+
 LOCK_LEASE = timedelta(minutes=5)
 
 # Connector IDs this process currently holds the advisory lock for.
@@ -409,6 +417,14 @@ async def run_connector(
             for r in reports:
                 logger.info(f"  → {r}")
             summary["run_status"] = "dry_run"
+            summary["sample"] = [
+                {
+                    "patient_name_masked": _mask_sample_name(r.patient_name),
+                    "vam_id": r.vam_id,
+                    "report_name": r.report_name,
+                }
+                for r in reports[:5]
+            ]
             await connector.cleanup()
             return summary
 
@@ -539,13 +555,15 @@ async def run_connector(
     finally:
         summary["duration_ms"] = int((time.time() - start_time) * 1000)
 
-        # Save audit log
+        # Save audit log. "sample" is excluded — connector_audit_log has no
+        # such column, and sending it would make every dry-run insert fail.
         try:
+            audit_row = {k: v for k, v in summary.items() if k != "sample"}
             supabase.table("connector_audit_log").insert({
                 "clinic_id": clinic_id,
                 "connector_type": connector_type,
                 "branch_id": branch_id,
-                **summary,
+                **audit_row,
             }).execute()
         except Exception as e:
             logger.error(f"Failed to save audit log: {e}")
