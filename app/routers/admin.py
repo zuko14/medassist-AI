@@ -2768,6 +2768,28 @@ async def get_connectors(
         raise HTTPException(status_code=500, detail="Failed to get connectors")
 
 
+@router.get("/connectors/types")
+async def get_connector_types(
+    user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
+):
+    """List every registered connector type and its credential schema, so
+    the admin panel can render a type-appropriate form instead of
+    hardcoding MocDoc-specific field names."""
+    from connectors.runner import CONNECTOR_REGISTRY
+
+    display_names = {"mocdoc": "MocDoc"}
+    return {
+        "types": [
+            {
+                "type": connector_type,
+                "display_name": display_names.get(connector_type, connector_type.title()),
+                "schema": getattr(connector_cls, "CONFIG_SCHEMA", []),
+            }
+            for connector_type, connector_cls in CONNECTOR_REGISTRY.items()
+        ]
+    }
+
+
 class ConnectorToggle(BaseModel):
     is_enabled: bool
 

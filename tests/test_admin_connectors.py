@@ -504,5 +504,19 @@ async def test_audit_log_allows_diagnostic_operator_staff():
     assert result["audit_log"][0]["id"] == "log-1"
 
 
+@pytest.mark.asyncio
+async def test_get_connector_types_returns_mocdoc_schema():
+    from app.routers.admin import get_connector_types
+
+    admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
+    result = await get_connector_types(user=admin)
+
+    types_by_key = {t["type"]: t for t in result["types"]}
+    assert "mocdoc" in types_by_key
+    assert types_by_key["mocdoc"]["display_name"] == "MocDoc"
+    schema_keys = [f["key"] for f in types_by_key["mocdoc"]["schema"]]
+    assert schema_keys == ["username", "password", "clinic_slug", "base_url"]
+
+
 
 
