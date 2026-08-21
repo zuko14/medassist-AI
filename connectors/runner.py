@@ -234,6 +234,7 @@ async def run_connector(
     limit: int = 0,
     vam_id_filter: str = "",
     branch_id: str = None,
+    ignore_enabled: bool = False,
 ) -> dict:
     """Execute a single connector run for a specific clinic (and, for
     multi-branch diagnostic centers, a specific branch's connector row).
@@ -280,8 +281,8 @@ async def run_connector(
         connector_row = result.data
         config = connector_row.get("config", {})
 
-        # Check kill switch
-        if not connector_row.get("is_enabled", False):
+        # Check kill switch (bypassed for admin-triggered test runs)
+        if not connector_row.get("is_enabled", False) and not ignore_enabled:
             logger.info(f"Connector disabled for clinic {clinic_id} — skipping")
             summary["run_status"] = "skipped"
             return summary

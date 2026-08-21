@@ -2958,6 +2958,7 @@ async def test_connector(
             connector_type=connector.get("connector_type", "mocdoc"),
             dry_run=True,
             branch_id=connector.get("branch_id"),
+            ignore_enabled=True,
         )
     except Exception as e:
         logger.error(f"Connector test run failed for {connector_id}: {e}")
