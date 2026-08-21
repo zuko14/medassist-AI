@@ -49,7 +49,11 @@ class PlaywrightBrowserSession(BaseBrowserSession):
         try:
             from playwright.async_api import async_playwright
             playwright_obj = await async_playwright().start()
-            browser = await playwright_obj.chromium.launch(headless=headless)
+            try:
+                browser = await playwright_obj.chromium.launch(headless=headless)
+            except Exception as e:
+                from app.utils.browser_errors import friendly_browser_launch_error
+                raise RuntimeError(friendly_browser_launch_error(e)) from e
             context = await browser.new_context()
             page = await context.new_page()
 

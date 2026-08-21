@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: mediassist-ai
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true

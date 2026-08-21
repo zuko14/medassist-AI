@@ -375,6 +375,9 @@ class ConversationManager:
             elif button_id.startswith("slot_"):
                 intent = "select_slot"
                 message = button_id.replace("slot_", "")
+            elif button_id.startswith("dtslot_"):
+                intent = "select_datetime"
+                message = button_id.replace("dtslot_", "")
             elif button_id.startswith("date_"):
                 intent = "select_date"
                 message = button_id.replace("date_", "")
@@ -382,7 +385,7 @@ class ConversationManager:
                 intent = "confirm_booking"
             elif button_id == "confirm_no":
                 intent = "edit_booking"
-            elif button_id == "go_main_menu":
+            elif button_id in ["main_menu", "go_main_menu"]:
                 lang = await get_lang(clinic, phone)
                 await self.update_state(
                     clinic, phone, "main_menu", {"menu_shown": False}
@@ -537,8 +540,7 @@ class ConversationManager:
                 context["department"] = doc["department"]
                 context["selected_doctor_id"] = message
                 lang = await get_lang(clinic, phone)
-                await self._show_date_picker(clinic, phone, context, lang)
-                await self.update_state(clinic, phone, "selecting_date", context)
+                await self._show_combined_slot_picker(clinic, phone, context, lang)
             return
 
         # Process based on state and intent
@@ -957,49 +959,31 @@ class ConversationManager:
 
     async def _send_main_menu(self, clinic: dict, phone: str, lang: str) -> None:
         """Send main menu with buttons."""
-        titles = {
-            "en": [
-                "Book Appointment",
-                "Our Services",
-                "Our Doctors",
-                "Emergency",
-                "Talk to Staff",
-            ],
-            "hi": [
-                "Book Appointment",
-                "Our Services",
-                "Our Doctors",
-                "Emergency",
-                "Talk to Staff",
-            ],
-            "te": [
-                "Book Appointment",
-                "Our Services",
-                "Our Doctors",
-                "Emergency",
-                "Talk to Staff",
-            ],
-        }
+        diagnostics_only = await self._is_diagnostics_only(clinic)
 
+        book_title = {
+            "en": "Book Lab Test" if diagnostics_only else "Book Appointment",
+            "hi": "Book Lab Test" if diagnostics_only else "Book Appointment",
+            "te": "Book Lab Test" if diagnostics_only else "Book Appointment",
+        }.get(lang, "Book Lab Test" if diagnostics_only else "Book Appointment")
+
+        titles = {
+            "en": ["Our Doctors", "Emergency", "Talk to Staff"],
+            "hi": ["Our Doctors", "Emergency", "Talk to Staff"],
+            "te": ["Our Doctors", "Emergency", "Talk to Staff"],
+        }
         t = titles.get(lang, titles["en"])
 
-        sections = [
-            {
-                "title": "Menu",
-                "rows": [
-                    {"id": "menu_book", "title": t[0][:24], "description": ""},
-                    {"id": "menu_services", "title": t[1][:24], "description": ""},
-                    {"id": "menu_doctors", "title": t[2][:24], "description": ""},
-                    {
-                        "id": "menu_reports",
-                        "title": "📋 My Reports"[:24],
-                        "description": "",
-                    },
-                    {"id": "menu_emergency", "title": t[3][:24], "description": ""},
-                    {"id": "menu_human", "title": t[4][:24], "description": ""},
-                ],
-            }
-        ]
+        rows = [{"id": "menu_book", "title": book_title[:24], "description": ""}]
+        if not diagnostics_only:
+            services_title = {"en": "Our Services", "hi": "Our Services", "te": "Our Services"}.get(lang, "Our Services")
+            rows.append({"id": "menu_services", "title": services_title[:24], "description": ""})
+            rows.append({"id": "menu_doctors", "title": t[0][:24], "description": ""})
+        rows.append({"id": "menu_reports", "title": "📋 My Reports"[:24], "description": ""})
+        rows.append({"id": "menu_emergency", "title": t[1][:24], "description": ""})
+        rows.append({"id": "menu_human", "title": t[2][:24], "description": ""})
+
+        sections = [{"title": "Menu", "rows": rows}]
 
         await self.whatsapp.send_interactive_list(
             clinic,
@@ -1051,9 +1035,15 @@ class ConversationManager:
         ]:
             await self._start_booking(clinic, phone, patient, lang)
         elif intent == "view_services":
-            await self._show_services(clinic, phone, lang)
+            if await self._is_diagnostics_only(clinic):
+                await self._show_lab_test_list(clinic, phone, {}, lang)
+            else:
+                await self._show_services(clinic, phone, lang)
         elif intent == "doctor_availability":
-            await self._show_doctors(clinic, phone, lang)
+            if await self._is_diagnostics_only(clinic):
+                await self._show_lab_test_list(clinic, phone, {}, lang)
+            else:
+                await self._show_doctors(clinic, phone, lang)
         elif intent == "view_reports":
             await self._handle_view_reports(clinic, phone, lang)
         elif intent == "cancel_appointment":
@@ -1092,6 +1082,16 @@ class ConversationManager:
             context["menu_shown"] = True
             await self.update_state(clinic, phone, "main_menu", context)
 
+    async def _is_diagnostics_only(self, clinic: dict) -> bool:
+        """True if this clinic offers lab-test booking and has zero active
+        doctors — i.e. it should never see the doctor/department flow."""
+        from app.services.tenant import has_feature
+
+        if not has_feature(clinic, "lab_test_booking"):
+            return False
+        doctors = await get_doctors(clinic["id"])
+        return not doctors
+
     async def _start_booking(
         self, clinic: dict, phone: str, patient: Optional[dict], lang: str
     ) -> None:
@@ -1103,6 +1103,12 @@ class ConversationManager:
             await self._send_language_selection(clinic, phone)
             await self.update_state(clinic, phone, "selecting_language")
             return
+
+        # ── Diagnostics-Only Routing ─────────────────────────────────────────
+        if await self._is_diagnostics_only(clinic):
+            await self._show_lab_test_list(clinic, phone, {}, lang)
+            return
+        # ── End Diagnostics-Only Routing ─────────────────────────────────────
 
         # ── Multi-Branch Check ──────────────────────────────────────────────
         # If this clinic has 2+ branches with multi_branch feature,
@@ -1136,17 +1142,6 @@ class ConversationManager:
                 )
                 return
         # ── End Multi-Branch Check ──────────────────────────────────────────
-
-        # Single-branch / no branches: proceed directly
-        # Diagnostics-only branch: If clinic has lab_test_booking enabled and NO
-        # doctors registered, route directly into the lab test booking flow.
-        # This prevents the recursion crash in _show_department_list.
-        from app.services.tenant import has_feature
-        if has_feature(clinic, "lab_test_booking"):
-            doctors = await get_doctors(clinic["id"])
-            if not doctors:
-                await self._show_lab_test_list(clinic, phone, {}, lang)
-                return
 
         await self._continue_booking_after_branch(clinic, phone, patient, lang, {})
 
@@ -2086,13 +2081,12 @@ class ConversationManager:
         context["doctor_name"] = doctor_name
         context["doctor"] = doctor
 
-        # Ask for date — show interactive date picker
+        # Ask for date & time — show combined slot picker
         context["doctor_name"] = doctor_name
         context["doctor"] = doctor
         merged_context = {**context}
 
-        await self._show_date_picker(clinic, phone, merged_context, lang)
-        await self.update_state(clinic, phone, "selecting_date", merged_context)
+        await self._show_combined_slot_picker(clinic, phone, merged_context, lang)
 
     async def _handle_selecting_date(
         self, clinic: dict, phone: str, message: str, context: dict, lang: str
@@ -2259,20 +2253,97 @@ class ConversationManager:
             sections=sections,
         )
 
+    async def _show_combined_slot_picker(
+        self, clinic: dict, phone: str, context: dict, lang: str
+    ) -> None:
+        """Show date+time as ONE interactive list instead of two separate
+        messages — merges what used to be _show_date_picker followed by
+        _show_slot_list into a single patient tap."""
+        today = datetime.now().date()
+
+        day_labels = {
+            "en": ["Today", "Tomorrow"],
+            "hi": ["आज", "कल"],
+            "te": ["ఈరోజు", "రేపు"],
+        }
+        labels = day_labels.get(lang, day_labels["en"])
+
+        sections = []
+        rows_used = 0
+        days_with_slots = 0
+        MAX_ROWS = 10
+        MAX_DAYS = 4
+
+        for i in range(14):
+            if rows_used >= MAX_ROWS or days_with_slots >= MAX_DAYS:
+                break
+            d = today + timedelta(days=i)
+            date_str = d.strftime("%Y-%m-%d")
+
+            slots, _reason = await get_available_slots(
+                clinic["id"], context["doctor_name"], date_str
+            )
+            if not slots:
+                continue
+
+            remaining = MAX_ROWS - rows_used
+            day_slots = slots[: min(3, remaining)]
+            if not day_slots:
+                break
+
+            if i == 0:
+                title = f"{labels[0]} ({d.strftime('%d %b')})"
+            elif i == 1:
+                title = f"{labels[1]} ({d.strftime('%d %b')})"
+            else:
+                title = d.strftime("%A, %d %b")
+
+            sections.append(
+                {
+                    "title": title[:24],
+                    "rows": [
+                        {
+                            "id": f"dtslot_{date_str}_{slot}",
+                            "title": self._to_ampm(slot),
+                            "description": "",
+                        }
+                        for slot in day_slots
+                    ],
+                }
+            )
+            rows_used += len(day_slots)
+            days_with_slots += 1
+
+        if not sections:
+            await self._suggest_other_doctors(clinic, phone, context, lang)
+            return
+
+        await self.whatsapp.send_interactive_list(
+            clinic,
+            phone,
+            body=get_message("select_datetime", lang),
+            button_text=(
+                "Select" if lang == "en" else ("चुनें" if lang == "hi" else "ఎంచుకోండి")
+            ),
+            sections=sections,
+        )
+
+        await self.update_state(clinic, phone, "selecting_slot", context)
+
+    def _to_ampm(self, time_24: str) -> str:
+        """Convert a 24h 'HH:MM' time string to 12h AM/PM display format."""
+        from datetime import datetime
+
+        try:
+            t = datetime.strptime(time_24.strip(), "%H:%M")
+            return t.strftime("%I:%M %p").lstrip("0")
+        except ValueError:
+            return time_24
+
     async def _show_slot_list(
         self, clinic: dict, phone: str, slots: list, context: dict, lang: str
     ) -> None:
         """Show available time slots in 12-hour AM/PM format."""
-        from datetime import datetime
-
-        def to_ampm(time_24: str) -> str:
-            """Convert 24h time string to 12h AM/PM."""
-            try:
-                t = datetime.strptime(time_24.strip(), "%H:%M")
-                return t.strftime("%I:%M %p").lstrip("0")
-            except ValueError:
-                return time_24
-
         morning_slots_list = []
         evening_slots_list = []
         for s in slots:
@@ -2290,8 +2361,8 @@ class ConversationManager:
             morn_title = {"en": "🌅 Morning", "hi": "🌅 सुबह", "te": "🌅 ఉదయం"}.get(lang, "🌅 Morning")
             eve_title = {"en": "🌆 Evening", "hi": "🌆 शाम", "te": "🌆 సాయంత్రం"}.get(lang, "🌆 Evening")
 
-            morn_rows = [{"id": f"slot_{slot}", "title": to_ampm(slot), "description": ""} for slot in morning_slots_list[:5]]
-            eve_rows = [{"id": f"slot_{slot}", "title": to_ampm(slot), "description": ""} for slot in evening_slots_list[:5]]
+            morn_rows = [{"id": f"slot_{slot}", "title": self._to_ampm(slot), "description": ""} for slot in morning_slots_list[:5]]
+            eve_rows = [{"id": f"slot_{slot}", "title": self._to_ampm(slot), "description": ""} for slot in evening_slots_list[:5]]
 
             sections.append({"title": morn_title, "rows": morn_rows})
             sections.append({"title": eve_title, "rows": eve_rows})
@@ -2300,7 +2371,7 @@ class ConversationManager:
             sections.append({
                 "title": title_text,
                 "rows": [
-                    {"id": f"slot_{slot}", "title": to_ampm(slot), "description": ""}
+                    {"id": f"slot_{slot}", "title": self._to_ampm(slot), "description": ""}
                     for slot in slots[:10]
                 ],
             })
@@ -2326,14 +2397,18 @@ class ConversationManager:
         context: dict,
         lang: str,
     ) -> None:
-        """Handle slot selection."""
+        """Handle slot selection — combined date+time tap, legacy single-day
+        slot tap, or free-text date input (delegates to the date parser)."""
 
-        if intent == "select_slot":
-            time_str = message
+        if intent == "select_datetime":
+            date_str, _, time_str = message.partition("_")
+            context["appointment_date"] = date_str
+            context["appointment_time"] = time_str
+        elif intent == "select_slot":
+            context["appointment_time"] = message.strip()
         else:
-            time_str = message.strip()
-
-        context["appointment_time"] = time_str
+            await self._handle_selecting_date(clinic, phone, message, context, lang)
+            return
 
         # Show confirmation
         await self._show_booking_confirmation(clinic, phone, context, lang)
@@ -2695,7 +2770,6 @@ class ConversationManager:
                         phone,
                         body=follow_up_msg,
                         buttons=[
-                            {"id": "book_another", "title": "Book Appointment"},
                             {"id": "main_menu", "title": "Main Menu"},
                         ],
                     )
@@ -3131,6 +3205,18 @@ class ConversationManager:
         )
         doctors = response.data
 
+        if not doctors:
+            no_doctors_msg = {
+                "en": "We don't have any doctors listed for online booking right now. Please call us directly.",
+                "hi": "अभी ऑनलाइन बुकिंग के लिए कोई डॉक्टर सूचीबद्ध नहीं है। कृपया सीधे हमें कॉल करें।",
+                "te": "ప్రస్తుతం ఆన్‌లైన్ బుకింగ్ కోసం డాక్టర్లు జాబితా చేయబడలేదు. దయచేసి నేరుగా మాకు కాల్ చేయండి.",
+            }.get(
+                lang,
+                "We don't have any doctors listed for online booking right now. Please call us directly.",
+            )
+            await self.whatsapp.send_text(clinic, phone, no_doctors_msg)
+            return
+
         sections = []
         dept_groups = {}
         for doc in doctors:
@@ -3420,7 +3506,7 @@ class ConversationManager:
         interactive_data: Optional[dict] = None,
     ) -> None:
         """Handle patient picking a lab test from the interactive list."""
-        from app.database import get_lab_test_by_id, get_lab_collection_window
+        from app.database import get_lab_test_by_id, get_lab_collection_window, format_collection_window
 
         selected_id = None
         if interactive_data and interactive_data.get("id", "").startswith("labtest_"):
@@ -3476,7 +3562,7 @@ class ConversationManager:
             f"*{test['name']}*\n"
             f"💰 Price: ₹{price_rupees}\n"
             f"⏱️ Turnaround: {test.get('turnaround_hours') or 24} hours\n"
-            f"🏠 Collection window: {window.get('start', '07:00')} - {window.get('end', '11:00')}"
+            f"🏠 Collection window: {format_collection_window(window)}"
             f"{instructions_line}\n\n"
             f"Please choose your preferred sample collection date:"
         )

@@ -726,10 +726,14 @@ class LabCollectionWindowUpdate(BaseModel):
     start: str
     end: str
     days: str = "Mon,Tue,Wed,Thu,Fri,Sat"
+    sunday_start: Optional[str] = None
+    sunday_end: Optional[str] = None
 
-    @field_validator("start", "end")
+    @field_validator("start", "end", "sunday_start", "sunday_end")
     @classmethod
-    def validate_time_format(cls, v: str) -> str:
+    def validate_time_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         if not re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", v):
             raise ValueError("Time must be in HH:MM format")
         return v
@@ -1477,6 +1481,38 @@ async def delete_lab_test(
         )
 
 
+_CSV_HEADER_ALIASES: dict[str, set[str]] = {
+    "name": {"name", "test name", "testname", "test_name"},
+    "price_rupees": {
+        "price_rupees", "price", "price in rupees", "price(rs)", "price (rs)",
+        "mrp", "rate", "amount",
+    },
+    "sample_type": {"sample_type", "sample type", "specimen", "specimen type"},
+    "turnaround_hours": {
+        "turnaround_hours", "turnaround hours", "turnaround (hours)", "tat", "tat (hours)",
+    },
+    "fasting_required": {"fasting_required", "fasting", "fasting required"},
+    "prep_instructions": {"prep_instructions", "preparation", "prep instructions", "instructions"},
+}
+
+
+def _normalize_csv_headers(fieldnames: list[str]) -> dict[str, str]:
+    """Map each raw CSV header to its canonical field name, case/whitespace-insensitively.
+
+    Headers that don't match any known alias are left unmapped (ignored on
+    each row) rather than rejected — a stray "Notes" column shouldn't block
+    an otherwise-valid import.
+    """
+    header_map: dict[str, str] = {}
+    for raw in fieldnames:
+        norm = raw.strip().lower()
+        for canonical, aliases in _CSV_HEADER_ALIASES.items():
+            if norm in aliases:
+                header_map[raw] = canonical
+                break
+    return header_map
+
+
 @router.post("/lab-tests/import-csv")
 async def import_lab_tests_csv(
     file: UploadFile = File(...),
@@ -1486,9 +1522,9 @@ async def import_lab_tests_csv(
     """Bulk-import lab tests from a CSV file.
 
     Expected columns: name,sample_type,price_rupees,turnaround_hours,
-    fasting_required,prep_instructions. Each row is upserted by
-    (clinic_id, name). Malformed rows are reported individually — a single
-    bad row never aborts the whole import.
+    fasting_required,prep_instructions (aliases accepted, case-insensitive).
+    Each row is upserted by (clinic_id, name). Malformed rows are reported
+    individually — a single bad row never aborts the whole import.
     """
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
     raw = await file.read()
@@ -1498,32 +1534,41 @@ async def import_lab_tests_csv(
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded CSV")
 
     reader = csv.DictReader(io.StringIO(text))
-    required_cols = {"name", "price_rupees"}
-    if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV file has no header row")
+
+    header_map = _normalize_csv_headers(reader.fieldnames)
+    canonical_present = set(header_map.values())
+    if not {"name", "price_rupees"}.issubset(canonical_present):
         raise HTTPException(
-            status_code=400, detail="CSV must include at least 'name' and 'price_rupees' columns"
+            status_code=400,
+            detail=(
+                "CSV must include a test-name column (e.g. 'name' or 'Test Name') "
+                "and a price column (e.g. 'price_rupees' or 'Price in Rupees')"
+            ),
         )
 
     created, updated, errors = 0, 0, []
-    for i, row in enumerate(reader, start=2):  # header is row 1
+    for i, raw_row in enumerate(reader, start=2):  # header is row 1
+        row = {header_map.get(k, k): v for k, v in raw_row.items() if k is not None}
         name = (row.get("name") or "").strip()
-        price_raw = (row.get("price_rupees") or "").strip()
+        price_raw = (row.get("price_rupees") or "").strip().replace(",", "").replace("₹", "")
         if not name:
             errors.append(f"Row {i}: missing name")
             continue
         try:
-            price_rupees = int(price_raw)
-            if price_rupees <= 0:
+            price_rupees_val = float(price_raw)
+            if price_rupees_val <= 0:
                 raise ValueError
         except ValueError:
-            errors.append(f"Row {i} ('{name}'): price_rupees must be a positive whole number")
+            errors.append(f"Row {i} ('{name}'): price_rupees must be a positive number")
             continue
 
         turnaround_raw = (row.get("turnaround_hours") or "").strip()
         test_data = {
             "clinic_id": effective_clinic_id,
             "name": name,
-            "price_paise": price_rupees * 100,
+            "price_paise": int(round(price_rupees_val * 100)),
             "sample_type": (row.get("sample_type") or "").strip() or None,
             "turnaround_hours": int(turnaround_raw) if turnaround_raw.isdigit() else None,
             "fasting_required": (row.get("fasting_required") or "").strip().lower() in ("true", "1", "yes"),
@@ -1569,6 +1614,9 @@ async def update_lab_collection_window(
     itself for single-location clinics (branch_id omitted)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     window = {"start": payload.start, "end": payload.end, "days": payload.days}
+    if payload.sunday_start and payload.sunday_end:
+        window["sunday_start"] = payload.sunday_start
+        window["sunday_end"] = payload.sunday_end
 
     try:
         if branch_id:

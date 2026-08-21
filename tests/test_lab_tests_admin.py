@@ -253,6 +253,150 @@ class TestLabTestsCsvImport:
         assert len(body["errors"]) == 1
         assert "Row 2" in body["errors"][0]
 
+    def test_accepts_real_world_aliased_headers(self):
+        """Matches the actual ACCUMAX CHATBOT.csv export format: 'TEST NAME,PRICE IN RUPEES'."""
+        from app.routers.admin import router
+        from fastapi import FastAPI
+        from app.routers import admin as admin_module
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return _make_admin_user()
+
+        from app.routers.admin import verify_credentials
+        app.dependency_overrides[verify_credentials] = fake_user
+
+        csv_content = (
+            "TEST NAME,PRICE IN RUPEES\n"
+            "BRUCELLOSIS IGG/IGM (EACH),4430\n"
+            "HSV PCR,6450\n"
+        )
+
+        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+            admin_module, "resolve_clinic_id_for_write", new_callable=AsyncMock, return_value="clinic-1"
+        ), patch.object(admin_module, "log_admin_action", new_callable=AsyncMock):
+            mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
+            mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+                data=[{"id": "new-id"}]
+            )
+            client = TestClient(app)
+            resp = client.post(
+                "/admin/lab-tests/import-csv",
+                files={"file": ("tests.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["created"] == 2
+        assert body["errors"] == []
+
+    def test_still_rejects_csv_missing_a_price_column_entirely(self):
+        from app.routers.admin import router
+        from fastapi import FastAPI
+        from app.routers import admin as admin_module
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return _make_admin_user()
+
+        from app.routers.admin import verify_credentials
+        app.dependency_overrides[verify_credentials] = fake_user
+
+        csv_content = "TEST NAME,NOTES\nCBC,routine\n"
+
+        with patch.object(admin_module, "resolve_clinic_id_for_write", new_callable=AsyncMock, return_value="clinic-1"):
+            client = TestClient(app)
+            resp = client.post(
+                "/admin/lab-tests/import-csv",
+                files={"file": ("tests.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            )
+
+        assert resp.status_code == 400
+
+    def test_accepts_decimal_rupee_prices(self):
+        """Real ACCUMAX export rows like 'PROTEIN - PLEURAL FLUID,3601.2'."""
+        from app.routers.admin import router
+        from fastapi import FastAPI
+        from app.routers import admin as admin_module
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return _make_admin_user()
+
+        from app.routers.admin import verify_credentials
+        app.dependency_overrides[verify_credentials] = fake_user
+
+        csv_content = "TEST NAME,PRICE IN RUPEES\nPROTEIN - PLEURAL FLUID,3601.2\n"
+
+        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+            admin_module, "resolve_clinic_id_for_write", new_callable=AsyncMock, return_value="clinic-1"
+        ), patch.object(admin_module, "log_admin_action", new_callable=AsyncMock):
+            mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
+            mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+                data=[{"id": "new-id"}]
+            )
+            client = TestClient(app)
+            resp = client.post(
+                "/admin/lab-tests/import-csv",
+                files={"file": ("tests.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["created"] == 1
+        insert_call = mock_sb.table.return_value.insert.call_args[0][0]
+        assert insert_call["price_paise"] == 360120
+
+    def test_import_real_accumax_csv_file(self):
+        """Imports the actual issues/ACCUMAX CHATBOT.csv file if present."""
+        import pathlib
+        csv_path = pathlib.Path("issues/ACCUMAX CHATBOT.csv")
+        if not csv_path.exists():
+            pytest.skip("issues/ACCUMAX CHATBOT.csv not found")
+
+        from app.routers.admin import router
+        from fastapi import FastAPI
+        from app.routers import admin as admin_module
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return _make_admin_user()
+
+        from app.routers.admin import verify_credentials
+        app.dependency_overrides[verify_credentials] = fake_user
+
+        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+            admin_module, "resolve_clinic_id_for_write", new_callable=AsyncMock, return_value="clinic-1"
+        ), patch.object(admin_module, "log_admin_action", new_callable=AsyncMock):
+            mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
+            mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+                data=[{"id": "new-id"}]
+            )
+            client = TestClient(app)
+            with open(csv_path, "rb") as f:
+                resp = client.post(
+                    "/admin/lab-tests/import-csv",
+                    files={"file": ("ACCUMAX CHATBOT.csv", f, "text/csv")},
+                )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["created"] == 1392
+        assert len(body["errors"]) == 4
+
 
 class TestLabCollectionWindowEndpoint:
     def test_sets_clinic_level_window_when_no_branch_id(self):
@@ -306,3 +450,124 @@ class TestLabCollectionWindowEndpoint:
             json={"start": "7am", "end": "11:00", "days": "Mon,Tue"},
         )
         assert resp.status_code == 422
+
+
+class TestLabCollectionWindowSundayOverride:
+    def test_persists_sunday_override_when_both_fields_given(self):
+        from app.routers.admin import router
+        from fastapi import FastAPI
+        from app.routers import admin as admin_module
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return _make_admin_user()
+
+        from app.routers.admin import verify_credentials
+        app.dependency_overrides[verify_credentials] = fake_user
+
+        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+            admin_module, "enforce_clinic_access", return_value="clinic-1"
+        ):
+            mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"config": {}}]
+            )
+            mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": "clinic-1"}]
+            )
+            client = TestClient(app)
+            resp = client.put(
+                "/admin/lab-collection-window",
+                json={
+                    "start": "07:00", "end": "21:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                    "sunday_start": "09:00", "sunday_end": "13:00",
+                },
+            )
+
+        assert resp.status_code == 200
+        saved = resp.json()["lab_collection"]
+        assert saved["sunday_start"] == "09:00"
+        assert saved["sunday_end"] == "13:00"
+
+    def test_omits_sunday_override_when_not_given(self):
+        from app.routers.admin import router
+        from fastapi import FastAPI
+        from app.routers import admin as admin_module
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return _make_admin_user()
+
+        from app.routers.admin import verify_credentials
+        app.dependency_overrides[verify_credentials] = fake_user
+
+        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+            admin_module, "enforce_clinic_access", return_value="clinic-1"
+        ):
+            mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"config": {}}]
+            )
+            mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": "clinic-1"}]
+            )
+            client = TestClient(app)
+            resp = client.put(
+                "/admin/lab-collection-window",
+                json={"start": "07:00", "end": "21:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat"},
+            )
+
+        assert resp.status_code == 200
+        saved = resp.json()["lab_collection"]
+        assert "sunday_start" not in saved
+        assert "sunday_end" not in saved
+
+    def test_rejects_bad_sunday_time_format(self):
+        from app.routers.admin import router
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return _make_admin_user()
+
+        from app.routers.admin import verify_credentials
+        app.dependency_overrides[verify_credentials] = fake_user
+
+        client = TestClient(app)
+        resp = client.put(
+            "/admin/lab-collection-window",
+            json={"start": "07:00", "end": "21:00", "days": "Sun", "sunday_start": "9am", "sunday_end": "13:00"},
+        )
+        assert resp.status_code == 422
+
+
+class TestFormatCollectionWindow:
+    def test_no_sunday_override_returns_flat_range(self):
+        from app.database import format_collection_window
+
+        window = {"start": "07:00", "end": "21:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat,Sun"}
+        assert format_collection_window(window) == "07:00 - 21:00"
+
+    def test_sunday_override_appended_when_sunday_is_an_operating_day(self):
+        from app.database import format_collection_window
+
+        window = {
+            "start": "07:00", "end": "21:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+            "sunday_start": "09:00", "sunday_end": "13:00",
+        }
+        assert format_collection_window(window) == "07:00 - 21:00 (Sun: 09:00 - 13:00)"
+
+    def test_sunday_override_ignored_when_sunday_not_an_operating_day(self):
+        from app.database import format_collection_window
+
+        window = {
+            "start": "07:00", "end": "21:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat",
+            "sunday_start": "09:00", "sunday_end": "13:00",
+        }
+        assert format_collection_window(window) == "07:00 - 21:00"
+
+

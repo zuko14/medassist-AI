@@ -257,6 +257,23 @@ async def get_lab_collection_window(clinic: dict, branch_id: Optional[str] = Non
         return default
 
 
+def format_collection_window(window: dict) -> str:
+    """Human-readable collection-window text for the WhatsApp booking flow.
+
+    Appends a Sunday-specific note only when the clinic both operates on
+    Sunday and has configured different Sunday hours — otherwise identical
+    to the flat start-end string clinics have always seen.
+    """
+    base = f"{window.get('start', '07:00')} - {window.get('end', '11:00')}"
+    sunday_start = window.get("sunday_start")
+    sunday_end = window.get("sunday_end")
+    if sunday_start and sunday_end:
+        days = {d.strip() for d in window.get("days", "").split(",") if d.strip()}
+        if "Sun" in days:
+            return f"{base} (Sun: {sunday_start} - {sunday_end})"
+    return base
+
+
 async def get_doctors_at_branch(
     clinic_id: str,
     branch_id: str,

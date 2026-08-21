@@ -135,14 +135,18 @@ class MocDocConnector(HospitalConnector):
         from playwright.async_api import async_playwright
 
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        )
+        try:
+            self._browser = await self._playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+        except Exception as e:
+            from app.utils.browser_errors import friendly_browser_launch_error
+            raise RuntimeError(friendly_browser_launch_error(e)) from e
         self._context = await self._browser.new_context(
             viewport={"width": 1920, "height": 1080},
             accept_downloads=True,

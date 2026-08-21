@@ -1352,6 +1352,23 @@ class PaymentService:
                 f"Sent payment confirmation to {booking['patient_phone'][:6]}***"
             )
 
+            follow_up_msg = {
+                "en": "What would you like to do next?",
+            }.get("en", "What would you like to do next?")
+            await whatsapp_service.send_interactive_buttons(
+                clinic,
+                booking["patient_phone"],
+                body=follow_up_msg,
+                buttons=[{"id": "main_menu", "title": "Main Menu"}],
+                _source="payment",
+            )
+
+            from app.services.conversation import conversation_manager
+
+            await conversation_manager.update_state(
+                clinic, booking["patient_phone"], "main_menu"
+            )
+
         except Exception as e:
             logger.error(f"Failed to send payment confirmation notification: {e}")
 

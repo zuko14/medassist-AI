@@ -822,7 +822,7 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L15 8V2"></path><line x1="9" y1="2" x2="15" y2="2"></line><line x1="7" y1="14" x2="17" y2="14"></line></svg></span> Lab Reports
             </div>
             <div class="nav-link" tabindex="0" data-page="labtests" data-feature="lab_test_booking" onclick="go('labtests',this)">
-                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.31L4.1 20.3a2 2 0 0 0 1.7 2.7h12.4a2 2 0 0 0 1.7-2.7L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg></span> Lab Tests
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.31L4.1 20.3a2 2 0 0 0 1.7 2.7h12.4a2 2 0 0 0 1.7-2.7L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg></span> Lab Tests / Services
             </div>
             <div class="nav-link" tabindex="0" data-page="prescriptions" data-feature="booking" data-role="admin" onclick="go('prescriptions',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9.5" width="18" height="5" rx="2.5" transform="rotate(-45 12 12)"></rect><line x1="8.5" y1="15.5" x2="15.5" y2="8.5"></line></svg></span> Prescriptions
@@ -1233,7 +1233,7 @@
         <!-- ─── LAB TESTS CATALOG ─── -->
         <div id="pg-labtests" class="sec">
             <div class="page-head">
-                <h2>🧪 Lab Test Catalog</h2>
+                <h2>🧪 Lab Tests / Services Catalog</h2>
                 <p>Manage diagnostic tests, pricing, and sample collection windows</p>
             </div>
 
@@ -1250,6 +1250,11 @@
                             <div class="field"><label>End Time</label><input type="time" id="cw-end" required value="11:00"></div>
                             <div class="field"><label>Operating Days (comma-separated)</label><input type="text" id="cw-days" required value="Mon,Tue,Wed,Thu,Fri,Sat,Sun" placeholder="Mon,Tue,Wed,Thu,Fri,Sat,Sun"></div>
                         </div>
+                        <div class="form-row" style="margin-top:8px;">
+                            <div class="field"><label>Sunday Start (optional override)</label><input type="time" id="cw-sunday-start"></div>
+                            <div class="field"><label>Sunday End (optional override)</label><input type="time" id="cw-sunday-end"></div>
+                        </div>
+                        <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Leave the Sunday fields blank if Sunday uses the same hours as your other operating days.</p>
                         <div style="margin-top:12px;">
                             <button type="submit" class="btn btn-accent">Save Window</button>
                         </div>
@@ -3309,14 +3314,22 @@ async function submitCollectionWindow(e) {
     const start = document.getElementById('cw-start').value;
     const end = document.getElementById('cw-end').value;
     const days = document.getElementById('cw-days').value.trim();
+    const sundayStart = document.getElementById('cw-sunday-start').value;
+    const sundayEnd = document.getElementById('cw-sunday-end').value;
 
     if (!start || !end || !days) {
         toast('Please fill all collection window fields', true);
         return;
     }
 
+    const payload = { start, end, days };
+    if (sundayStart && sundayEnd) {
+        payload.sunday_start = sundayStart;
+        payload.sunday_end = sundayEnd;
+    }
+
     try {
-        await apiPut('/admin/lab-collection-window', { start, end, days });
+        await apiPut('/admin/lab-collection-window', payload);
         toast('Sample collection window saved');
     } catch (e) {
         toast(e.message || 'Failed to save collection window', true);
