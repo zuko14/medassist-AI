@@ -100,9 +100,19 @@ class LabReportService:
         capture = {}
         try:
             clinic = await get_clinic_by_id(clinic_id)
-            from app.services.message_queue import acquire_phone_lock_with_timeout
+            from app.services.message_queue import (
+                acquire_phone_lock_with_timeout,
+                get_phone_lock,
+                release_phone_lock,
+            )
 
-            async with acquire_phone_lock_with_timeout(patient_phone):
+            acquired = await acquire_phone_lock_with_timeout(patient_phone)
+            if not acquired:
+                raise ValueError(
+                    f"Phone lock timeout for {mask_phone(patient_phone)} — "
+                    f"another delivery in progress. Will retry next cycle."
+                )
+            try:
                 if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
                     template = settings.lab_report_template_name
                     if not template:
@@ -193,6 +203,10 @@ class LabReportService:
                         )
 
                     sent_ok = True
+            finally:
+                phone_lock = await get_phone_lock(patient_phone)
+                phone_lock.release()
+                await release_phone_lock(patient_phone)
             logger.info(f"Report sent successfully to {mask_phone(patient_phone)}")
         except Exception as e:
             logger.error(f"WhatsApp send failed for {mask_phone(patient_phone)}: {e}")
@@ -350,9 +364,19 @@ class LabReportService:
             report_type = report.get("report_type", "General")
             capture = {}
 
-            from app.services.message_queue import acquire_phone_lock_with_timeout
+            from app.services.message_queue import (
+                acquire_phone_lock_with_timeout,
+                get_phone_lock,
+                release_phone_lock,
+            )
 
-            async with acquire_phone_lock_with_timeout(patient_phone):
+            acquired = await acquire_phone_lock_with_timeout(patient_phone)
+            if not acquired:
+                raise ValueError(
+                    f"Phone lock timeout for {mask_phone(patient_phone)} — "
+                    f"another delivery in progress"
+                )
+            try:
                 if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
                     template = settings.lab_report_template_name
                     if not template:
@@ -441,6 +465,10 @@ class LabReportService:
                         raise ValueError(
                             "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
                         )
+            finally:
+                phone_lock = await get_phone_lock(patient_phone)
+                phone_lock.release()
+                await release_phone_lock(patient_phone)
 
             supabase.table("lab_reports").update(
                 {
