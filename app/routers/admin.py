@@ -3063,13 +3063,38 @@ async def test_connector_status(
     user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
     """Poll for the result of a background test/run operation."""
-    # Verify access
-    await _load_connector_for_action(connector_id, user, clinic_id)
+    connector = await _load_connector_for_action(connector_id, user, clinic_id)
 
     task = _connector_tasks.get(connector_id)
-    if not task:
-        return {"status": "idle", "message": "No test in progress"}
-    return task
+    if task:
+        return task
+
+    # No in-process task record — either genuinely idle, or a prior run
+    # was interrupted by a server restart (deploy/OOM) and the in-memory
+    # dict was wiped. Fall back to the DB advisory lock: it's written at
+    # run-start and outlives the process that set it.
+    from connectors.runner import LOCK_LEASE
+
+    locked_at = connector.get("locked_at")
+    if locked_at:
+        try:
+            dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+            elapsed = datetime.now(timezone.utc) - dt
+        except Exception:
+            elapsed = None
+        if elapsed is not None and elapsed < LOCK_LEASE:
+            return {"status": "running", "message": "Test still in progress (resumed after restart)..."}
+        # Lease expired: the run that held it never finished. Clear it so
+        # the next test isn't blocked for the rest of the lease window.
+        from connectors.runner import release_connector_lock
+        await release_connector_lock(connector_id)
+        return {
+            "status": "error",
+            "success": False,
+            "result": {"error_message": "Previous test was interrupted (server restarted mid-run). Please try again."},
+        }
+
+    return {"status": "idle", "message": "No test in progress"}
 
 
 @router.post("/connectors/{connector_id}/run-now")
