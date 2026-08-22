@@ -99,3 +99,122 @@ async def test_record_report_success_resolves_failure():
         update_data = mock_table.update.call_args[0][0]
         assert "resolved_at" in update_data
         assert update_data["resolved_at"] is not None
+
+
+def test_admin_alert_reports_refused_send_as_failure():
+    """send_text returns False (never raises) when outside the 24h window.
+
+    Treating that as success meant a connector could fail repeatedly while
+    every alert about it was silently dropped.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from connectors.runner import send_admin_alert
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value \
+        .single.return_value.execute.return_value.data = {
+            "config": {"admin_alert_phone": "+919999999929"}
+        }
+
+    mock_wa = MagicMock()
+    mock_wa.send_text = AsyncMock(return_value=False)
+
+    with patch("connectors.runner.supabase", mock_sb), \
+         patch("connectors.runner._scope_by_branch", lambda q, b: q), \
+         patch("app.services.whatsapp.whatsapp_service", mock_wa), \
+         patch("app.services.tenant.get_clinic_by_id",
+               new_callable=AsyncMock, return_value={"id": "c1", "name": "Test"}):
+        assert asyncio.run(send_admin_alert("c1", "connector is down")) is False
+
+        mock_wa.send_text = AsyncMock(return_value=True)
+        assert asyncio.run(send_admin_alert("c1", "connector is down")) is True
+
+
+def test_admin_alert_missing_phone_returns_false():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from connectors.runner import send_admin_alert
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value \
+        .single.return_value.execute.return_value.data = {"config": {}}
+
+    with patch("connectors.runner.supabase", mock_sb), \
+         patch("connectors.runner._scope_by_branch", lambda q, b: q), \
+         patch("app.services.tenant.get_clinic_by_id",
+               new_callable=AsyncMock, return_value={"id": "c1", "name": "Test"}):
+        assert asyncio.run(send_admin_alert("c1", "msg")) is False
+
+
+def _alert_mocks(template_name, send_text_ok, send_template_ok):
+    from unittest.mock import AsyncMock, MagicMock
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value \
+        .single.return_value.execute.return_value.data = {
+            "config": {"admin_alert_phone": "+919999999929"}
+        }
+    mock_wa = MagicMock()
+    mock_wa.send_text = AsyncMock(return_value=send_text_ok)
+    mock_wa.send_template = AsyncMock(return_value=send_template_ok)
+    return mock_sb, mock_wa
+
+
+def test_admin_alert_falls_back_to_template_with_flattened_body():
+    """Outside the 24h window the alert must go via template.
+
+    Meta rejects newlines/tabs/4+ spaces inside template parameters (132000),
+    and every connector alert body is multi-line — so it must be flattened.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from connectors.runner import send_admin_alert
+
+    mock_sb, mock_wa = _alert_mocks("connector_admin_alert", False, True)
+    multiline = "⚠️ MocDoc Connector Alert\n\nFound: 17\nFailed: 17\n\nCheck dashboard."
+
+    with patch("connectors.runner.supabase", mock_sb), \
+         patch("connectors.runner._scope_by_branch", lambda q, b: q), \
+         patch("connectors.runner.settings.admin_alert_template_name", "connector_admin_alert"), \
+         patch("app.services.whatsapp.whatsapp_service", mock_wa), \
+         patch("app.services.tenant.get_clinic_by_id",
+               new_callable=AsyncMock, return_value={"id": "c1", "name": "Test"}):
+        assert asyncio.run(send_admin_alert("c1", multiline)) is True
+
+    body = mock_wa.send_template.await_args.kwargs["components"][0]
+    sent_text = body["parameters"][0]["text"]
+    assert "\n" not in sent_text and "\t" not in sent_text
+    assert "    " not in sent_text
+    assert len(sent_text) <= 1000
+    assert "Failed: 17" in sent_text
+
+
+def test_admin_alert_false_when_template_also_refused():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from connectors.runner import send_admin_alert
+
+    mock_sb, mock_wa = _alert_mocks("connector_admin_alert", False, False)
+    with patch("connectors.runner.supabase", mock_sb), \
+         patch("connectors.runner._scope_by_branch", lambda q, b: q), \
+         patch("connectors.runner.settings.admin_alert_template_name", "connector_admin_alert"), \
+         patch("app.services.whatsapp.whatsapp_service", mock_wa), \
+         patch("app.services.tenant.get_clinic_by_id",
+               new_callable=AsyncMock, return_value={"id": "c1", "name": "Test"}):
+        assert asyncio.run(send_admin_alert("c1", "boom")) is False
+
+
+def test_admin_alert_skips_template_when_unconfigured():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from connectors.runner import send_admin_alert
+
+    mock_sb, mock_wa = _alert_mocks("", False, True)
+    with patch("connectors.runner.supabase", mock_sb), \
+         patch("connectors.runner._scope_by_branch", lambda q, b: q), \
+         patch("connectors.runner.settings.admin_alert_template_name", ""), \
+         patch("app.services.whatsapp.whatsapp_service", mock_wa), \
+         patch("app.services.tenant.get_clinic_by_id",
+               new_callable=AsyncMock, return_value={"id": "c1", "name": "Test"}):
+        assert asyncio.run(send_admin_alert("c1", "boom")) is False
+    mock_wa.send_template.assert_not_awaited()

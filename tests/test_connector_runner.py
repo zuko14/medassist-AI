@@ -154,3 +154,28 @@ async def test_run_connector_dry_run_includes_masked_sample_excluded_from_audit_
     assert "sample" not in insert_payload
     assert insert_payload["run_status"] == "dry_run"
 
+
+
+def test_renew_lock_only_touches_locks_this_process_holds():
+    """Heartbeat must not resurrect a lock another worker owns.
+
+    A 17-report run takes ~6 min > LOCK_LEASE (5 min), so the lease is renewed
+    per report. Renewing a lock we do not hold would let two workers keep each
+    other's leases alive forever.
+    """
+    import asyncio
+    from unittest.mock import MagicMock, patch
+    from connectors.runner import renew_connector_lock, _locks_held_by_this_process
+
+    mock_sb = MagicMock()
+    with patch("connectors.runner.supabase", mock_sb):
+        _locks_held_by_this_process.discard("not-ours")
+        asyncio.run(renew_connector_lock("not-ours"))
+        assert mock_sb.table.call_count == 0
+
+        _locks_held_by_this_process.add("ours")
+        try:
+            asyncio.run(renew_connector_lock("ours"))
+            assert mock_sb.table.call_count == 1
+        finally:
+            _locks_held_by_this_process.discard("ours")

@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     )
     medassist_url: str = "http://localhost:8000"  # Base URL where FastAPI is running
     lab_report_template_name: str = ""  # Meta pre-approved utility template for reports outside 24h window
+    admin_alert_template_name: str = ""  # Meta utility template (1 body var) for connector alerts outside 24h window
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

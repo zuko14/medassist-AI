@@ -26,6 +26,7 @@ import json
 import logging
 import math
 import os
+import re
 import signal
 import sys
 import time
@@ -140,6 +141,25 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
         return True, 0
 
 
+async def renew_connector_lock(connector_id: str) -> None:
+    """Push the lock lease forward while a run is still making progress.
+
+    A full 17-report run takes ~6 min, which is longer than LOCK_LEASE (5 min).
+    Without renewal the lease expires mid-run and a second worker starts a
+    concurrent run against the same MocDoc account — observed in production as
+    two interleaved download temp dirs. Called after each report so a genuinely
+    crashed run still frees the lock within one lease.
+    """
+    if connector_id not in _locks_held_by_this_process:
+        return
+    try:
+        supabase.table("integration_connectors").update({
+            "locked_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", connector_id).execute()
+    except Exception as e:
+        logger.warning(f"Could not renew lock for connector {connector_id}: {e}")
+
+
 async def release_connector_lock(connector_id: str) -> None:
     """Release distributed advisory lock on connector record."""
     try:
@@ -164,8 +184,14 @@ async def release_all_locks_held() -> None:
         await release_connector_lock(connector_id)
 
 
-async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) -> None:
-    """Send a WhatsApp alert to the admin phone number."""
+async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) -> bool:
+    """Send a WhatsApp alert to the admin phone number. Returns True if delivered.
+
+    send_text returns False (it does not raise) when the send is refused — most
+    commonly because the admin's 24h customer-service window has expired. This
+    used to be logged as "Admin alert sent", so a connector could fail 17 times
+    while every alert about it was silently dropped.
+    """
     try:
         from app.services.whatsapp import whatsapp_service
         from app.services.tenant import get_clinic_by_id
@@ -182,13 +208,52 @@ async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) 
         connector = _scope_by_branch(query, branch_id).single().execute()
 
         admin_phone = connector.data.get("config", {}).get("admin_alert_phone")
-        if admin_phone:
-            await whatsapp_service.send_text(clinic, admin_phone, message)
-            logger.info(f"Admin alert sent to ***{admin_phone[-4:]}")
-        else:
+        if not admin_phone:
             logger.warning("No admin_alert_phone configured — alert not sent")
+            return False
+
+        sent = await whatsapp_service.send_text(clinic, admin_phone, message)
+        if sent:
+            logger.info(f"Admin alert sent to ***{admin_phone[-4:]}")
+            return True
+
+        # Freeform was refused — almost always the admin's 24h customer-service
+        # window has expired. Alerts matter most exactly when nobody has been
+        # chatting with the bot, so fall back to the approved utility template.
+        template = settings.admin_alert_template_name
+        if not template:
+            logger.error(
+                f"ADMIN_ALERT_UNDELIVERED to ***{admin_phone[-4:]} — outside the "
+                f"24h window and ADMIN_ALERT_TEMPLATE_NAME is not configured. "
+                f"Undelivered alert: {message[:200]}"
+            )
+            return False
+
+        # Meta rejects newlines, tabs and 4+ consecutive spaces inside template
+        # parameters (error 132000). Every alert body here is multi-line, so it
+        # must be flattened; 1024 is Meta's per-parameter ceiling.
+        flat = re.sub(r"\s+", " ", message).strip()[:1000]
+        sent = await whatsapp_service.send_template(
+            clinic,
+            admin_phone,
+            template_name=template,
+            components=[
+                {"type": "body", "parameters": [{"type": "text", "text": flat}]}
+            ],
+            _source="connector_alert",
+        )
+        if sent:
+            logger.info(f"Admin alert sent to ***{admin_phone[-4:]} via template")
+        else:
+            logger.error(
+                f"ADMIN_ALERT_UNDELIVERED to ***{admin_phone[-4:]} — both freeform "
+                f"and template '{template}' were refused. "
+                f"Undelivered alert: {message[:200]}"
+            )
+        return sent
     except Exception as e:
         logger.error(f"Failed to send admin alert: {e}")
+        return False
 
 
 async def record_report_failure(
@@ -368,11 +433,21 @@ async def run_connector(
             summary["error_message"] = msg
             return summary
 
-        # Build the MedAssist API URL
-        medassist_url = os.environ.get(
-            "MEDASSIST_URL",
-            f"http://localhost:{settings.app_port}",
-        )
+        # Build the MedAssist API URL.
+        # The fallback must use the port uvicorn actually binds — the Dockerfile
+        # runs `--port ${PORT:-8000}`, so on Render/Railway PORT is set by the
+        # platform and settings.app_port (8000) is wrong. Guessing 8000 made
+        # every submit_to_medassist fail with "All connection attempts failed"
+        # right after a perfectly good PDF download.
+        medassist_url = os.environ.get("MEDASSIST_URL")
+        if not medassist_url:
+            port = os.environ.get("PORT") or settings.app_port
+            medassist_url = f"http://127.0.0.1:{port}"
+            logger.warning(
+                f"MEDASSIST_URL not set — falling back to {medassist_url}. "
+                f"This only works when the connector runs inside the web "
+                f"process; the standalone worker MUST set MEDASSIST_URL."
+            )
 
         # Session directory for cookies
         session_dir = os.path.join(PROJECT_ROOT, ".connector_sessions")
@@ -443,6 +518,8 @@ async def run_connector(
             return summary
 
         for meta in reports:
+            if connector_id:
+                await renew_connector_lock(connector_id)
             try:
                 # Step 1: Patient matching safety gate
                 match_result = await patient_match_service.match(
