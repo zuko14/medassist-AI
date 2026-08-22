@@ -3482,15 +3482,16 @@ async def get_lab_report_deliveries(
             sent_at = r.get("sent_at")
             delivery_updated_at = r.get("delivery_updated_at")
 
-            # Unified state derivation matching frontend getDeliveryItemState:
-            if status_col == "failed" or delivery_status == "failed":
-                derived_state = "failed"
+            # Standardized primary state derivation:
+            if status_col == "sent" or delivery_status in ("read", "delivered", "sent"):
+                derived_state = "delivered"
             elif status_col == "needs_review":
                 derived_state = "needs_review"
-            elif status_col == "sent" or delivery_status in ("read", "delivered", "sent"):
-                derived_state = "delivered"
+            elif status_col == "failed" or delivery_status == "failed":
+                derived_state = "failed"
             else:
                 derived_state = status_col or "pending"
+
 
             if state != "all":
                 target_state = state.lower()

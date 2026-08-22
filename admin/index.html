@@ -4666,29 +4666,30 @@ function getDeliveryItemState(d) {
     const delStatus = (d.delivery_status || '').toLowerCase();
     const state = (d.state || '').toLowerCase();
 
-    // 1. If explicitly failed
-    if (state === 'failed' || status === 'failed' || delStatus === 'failed') {
-        return 'failed';
-    }
-
-    // 2. If needs review / unmatched
-    if (state === 'needs_review' || status === 'needs_review') {
-        return 'needs_review';
-    }
-
-    // 3. If delivered, sent, or read confirmation received
+    // 1. Delivered / Sent has top priority if status is sent or webhook confirmed
     if (
-        delStatus === 'read' ||
-        delStatus === 'delivered' ||
-        delStatus === 'sent' ||
         status === 'sent' ||
-        state === 'delivered'
+        state === 'delivered' ||
+        delStatus === 'delivered' ||
+        delStatus === 'read' ||
+        delStatus === 'sent'
     ) {
         return 'delivered';
     }
 
+    // 2. Needs Review / Unmatched
+    if (status === 'needs_review' || state === 'needs_review') {
+        return 'needs_review';
+    }
+
+    // 3. Explicit Failed
+    if (status === 'failed' || state === 'failed' || delStatus === 'failed') {
+        return 'failed';
+    }
+
     return 'pending';
 }
+
 
 function filterDiagDeliveries(state) {
     _diagDeliveryFilter = state || 'all';

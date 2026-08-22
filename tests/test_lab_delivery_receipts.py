@@ -120,6 +120,18 @@ async def test_get_lab_report_deliveries_filters():
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "sent_at": datetime.now(timezone.utc).isoformat(),
         },
+        {
+            "id": "r-4",
+            "patient_name": "Patient Four",
+            "patient_phone": "+919876500000",
+            "report_name": "Thyroid Profile",
+            "report_type": "Laboratory",
+            "source": "mocdoc",
+            "status": "sent",
+            "delivery_status": None,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+        },
     ]
 
     mock_supabase = MagicMock()
@@ -136,19 +148,20 @@ async def test_get_lab_report_deliveries_filters():
             state="all",
             user=admin_user,
         )
-        assert len(res_all["deliveries"]) == 3
+        assert len(res_all["deliveries"]) == 4
         assert res_all["deliveries"][0]["patient_phone"] == "+91XXXXXX3210"
 
-        # Delivered only (includes both 'delivered' and 'sent')
+        # Delivered only (includes all 'status: sent' and 'delivered' reports)
         res_del = await get_lab_report_deliveries(
             clinic_id="test-clinic",
             state="delivered",
             user=admin_user,
         )
-        assert len(res_del["deliveries"]) == 2
+        assert len(res_del["deliveries"]) == 3
         delivered_ids = [d["id"] for d in res_del["deliveries"]]
         assert "r-1" in delivered_ids
         assert "r-3" in delivered_ids
+        assert "r-4" in delivered_ids
 
         # Failed only
         res_fail = await get_lab_report_deliveries(
@@ -158,6 +171,7 @@ async def test_get_lab_report_deliveries_filters():
         )
         assert len(res_fail["deliveries"]) == 1
         assert res_fail["deliveries"][0]["id"] == "r-2"
+
 
 
 
