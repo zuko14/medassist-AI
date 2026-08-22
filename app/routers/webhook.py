@@ -98,19 +98,39 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "error"}
 
 
+_DELIVERY_RANK = {"sent": 1, "delivered": 2, "read": 3, "failed": 4}
+
+
 async def record_delivery_status(status: dict) -> None:
-    """Persist a Meta delivery receipt (sent/delivered/read/failed).
+    """Persist a Meta delivery receipt with monotonic rank enforcement (H2).
 
     Without this a report reads status='sent' while Meta already reported it
-    undeliverable — invisible to staff.
+    undeliverable — invisible to staff. Out-of-order receipts (e.g. delivered after read)
+    are ignored.
     """
     wamid = status.get("id")
     state = status.get("status")
     if not wamid or not state:
         return
     err = (status.get("errors") or [{}])[0]
+    new_rank = _DELIVERY_RANK.get(state, 0)
     try:
         from app.database import supabase
+        curr_row = (
+            supabase.table("lab_reports")
+            .select("delivery_status")
+            .eq("whatsapp_message_id", wamid)
+            .execute()
+        )
+        if curr_row.data:
+            old_state = curr_row.data[0].get("delivery_status") or ""
+            old_rank = _DELIVERY_RANK.get(old_state, 0)
+            if old_rank > new_rank and state != "failed":
+                logger.info(
+                    f"Ignoring out-of-order delivery status {state} (rank {new_rank}) for {wamid} which is already {old_state} (rank {old_rank})"
+                )
+                return
+
         supabase.table("lab_reports").update({
             "delivery_status": state,
             "delivery_error": err.get("title") or err.get("message") if err else None,
@@ -123,32 +143,43 @@ async def record_delivery_status(status: dict) -> None:
 
 
 async def process_message_safe(message, display_phone: str, raw_payload: dict):
-    """Wrapper that catches failures and logs them to a dead-letter queue.
+    """Wrapper that catches failures and logs them to a dead-letter queue with release for retry.
 
     In a hospital bot, silently dropping a patient message is unacceptable.
-    If processing fails (e.g. mid-restart crash), the raw payload is saved
+    If processing fails (e.g. mid-restart crash), the raw payload is sanitized and saved
     to Supabase `failed_messages` table for manual retry or investigation.
     """
     try:
         await process_message(message, display_phone)
     except Exception as e:
         logger.error(f"Message processing failed, saving to dead-letter queue: {e}")
+        # Release claim from processed_messages to allow DLQ replay
+        try:
+            message_id = getattr(message, "id", None)
+            if message_id:
+                await message_queue.release(message_id)
+        except Exception as rel_err:
+            logger.warning(f"Failed to release message lock for {message_id}: {rel_err}")
+
         try:
             import json
             from app.database import supabase
+            from app.utils.pii_sanitizer import sanitize_pii
+
+            raw_str = json.dumps(raw_payload) if raw_payload else "{}"
+            masked_payload = sanitize_pii(raw_str)
 
             supabase.table("failed_messages").insert(
                 {
                     "phone": getattr(message, "from_", "unknown"),
                     "display_phone": display_phone,
-                    "payload": json.dumps(raw_payload) if raw_payload else "{}",
+                    "payload": masked_payload,
                     "error": str(e)[:500],
                     "status": "pending",
                 }
             ).execute()
             logger.info("Failed message saved to dead-letter queue for retry")
         except Exception as dlq_err:
-            # If even the dead-letter queue fails, at least we logged the error above
             logger.error(f"Dead-letter queue write also failed: {dlq_err}")
 
 
@@ -158,8 +189,17 @@ async def process_message(message, display_phone: str):
         message_id = message.id
 
         # Resolve tenant clinic first to capture clinic attribution
-        clinic = await resolve_tenant(display_phone)
-        clinic_id = clinic.get("id") if clinic else None
+        try:
+            clinic = await resolve_tenant(display_phone)
+        except Exception as ten_err:
+            logger.error(f"Could not resolve tenant for display_phone={display_phone}: {ten_err}")
+            raise
+
+        if not clinic:
+            logger.error(f"Tenant resolution returned None for display_phone={display_phone}")
+            return
+
+        clinic_id = clinic.get("id")
 
         # ── Primary Idempotency: Atomic Supabase INSERT (closes the race window) ──
         acquired = await message_queue.acquire(message_id, clinic_id=clinic_id)
@@ -173,10 +213,13 @@ async def process_message(message, display_phone: str):
         phone = normalize_phone(message.from_)
         message_type = message.type
 
-        # Mark as read (fire-and-forget)
-        import asyncio
+        # Mark as read (fire-and-forget, with strong task reference)
+        from app.utils.async_tasks import spawn_background_task
 
-        asyncio.create_task(whatsapp_service.mark_as_read(clinic, message_id))
+        spawn_background_task(
+            whatsapp_service.mark_as_read(clinic, message_id),
+            name=f"mark_as_read_{message_id}",
+        )
 
         # Extract message content based on type
         content = ""
@@ -201,7 +244,7 @@ async def process_message(message, display_phone: str):
         safe_phone = phone[:6] + "..." if len(phone) > 6 else phone
         safe_content = content[:50].replace("\n", " ") if content else ""
         logger.info(
-            f"[{clinic['name']}] Processing message from {safe_phone}: {safe_content}"
+            f"[{clinic.get('name', 'Clinic')}] Processing message from {safe_phone}: {safe_content}"
         )
 
         # Process through conversation manager

@@ -24,9 +24,10 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.utils.security import PersistentRateLimiter
@@ -295,6 +296,7 @@ class PaymentService:
         webhook_secret: Optional[str] = None,
         alert_limiter: Optional["PersistentRateLimiter"] = None,
         alert_key: Optional[str] = None,
+        clinic_id: Optional[str] = None,
     ) -> dict:
         """Process a Razorpay webhook event.
 
@@ -307,6 +309,7 @@ class PaymentService:
                             the hospital's own WhatsApp admin number). Callers
                             that omit this keep the old unthrottled behavior.
             alert_key: Key to rate-limit on (e.g. "{clinic_id}:{client_ip}").
+            clinic_id: Clinic ID from the webhook endpoint path (authoritative).
 
         Returns: {"status": "ok"|"error"|"ignored", "code": 200|400}
         """
@@ -322,6 +325,7 @@ class PaymentService:
                         signature[:20] + "..." if signature else "none"
                     ),
                     "body_length": len(raw_body),
+                    "clinic_id": clinic_id,
                 },
             )
             logger.warning(
@@ -384,14 +388,16 @@ class PaymentService:
             logger.error("Razorpay webhook: missing payment_id")
             return {"status": "error", "code": 400, "reason": "missing_fields"}
 
-        # ── Step 4: Idempotency check ──
-        existing_confirmed = (
+        # ── Step 4: Idempotency check (scoped) ──
+        idemp_query = (
             supabase.table("appointments")
             .select("id")
             .eq("payment_id", payment_id)
             .eq("status", "confirmed")
-            .execute()
         )
+        if clinic_id:
+            idemp_query = idemp_query.eq("clinic_id", clinic_id)
+        existing_confirmed = idemp_query.execute()
 
         if existing_confirmed.data:
             logger.info(
@@ -399,26 +405,23 @@ class PaymentService:
             )
             return {"status": "ok", "code": 200, "reason": "already_processed"}
 
-        # ── Step 5: Look up booking ──
+        # ── Step 5: Look up booking (CLINIC SCOPED) ──
         # Match on payment_link_id first, fallback to notes.booking_id and booking_ref
         booking_result = None
+
+        def _scoped():
+            q = supabase.table("appointments").select("*")
+            if clinic_id:
+                q = q.eq("clinic_id", clinic_id)
+            return q
+
         if payment_link_id:
-            booking_result = (
-                supabase.table("appointments")
-                .select("*")
-                .eq("razorpay_payment_link_id", payment_link_id)
-                .execute()
-            )
+            booking_result = _scoped().eq("razorpay_payment_link_id", payment_link_id).execute()
 
         if not booking_result or not booking_result.data:
             booking_id_from_notes = notes.get("booking_id")
             if booking_id_from_notes:
-                booking_result = (
-                    supabase.table("appointments")
-                    .select("*")
-                    .eq("id", booking_id_from_notes)
-                    .execute()
-                )
+                booking_result = _scoped().eq("id", booking_id_from_notes).execute()
 
         if not booking_result or not booking_result.data:
             booking_ref = (
@@ -431,24 +434,20 @@ class PaymentService:
                 )
             )
             if booking_ref:
-                booking_result = (
-                    supabase.table("appointments")
-                    .select("*")
-                    .eq("booking_ref", booking_ref)
-                    .execute()
-                )
+                booking_result = _scoped().eq("booking_ref", booking_ref).execute()
 
         if not booking_result or not booking_result.data:
             logger.error(
-                f"Razorpay webhook: no booking found for payment_link {payment_link_id}"
+                f"Razorpay webhook: no booking found for clinic={clinic_id} payment_link={payment_link_id}"
             )
             self._log_payment_event_raw(
                 None,
                 "webhook_received",
                 {
+                    "clinic_id": clinic_id,
                     "payment_id": payment_id,
                     "payment_link_id": payment_link_id,
-                    "error": "no_booking_found",
+                    "error": "no_booking_found_in_clinic",
                     "raw": payload,
                 },
             )
@@ -516,7 +515,50 @@ class PaymentService:
             logger.info(f"Booking {booking_id} already confirmed (idempotent)")
             return {"status": "ok", "code": 200, "reason": "already_confirmed"}
 
-        if current_status not in ("pending_payment", "expired"):
+        if current_status == "expired":
+            logger.warning(
+                f"LATE_PAYMENT booking={booking_id} ref={booking.get('booking_ref')} "
+                f"payment_id={payment_id} — hold already expired, auto-refunding"
+            )
+            self._log_payment_event(
+                booking_id,
+                "late_payment_after_expiry",
+                {"payment_id": payment_id, "amount_paise": amount_paid},
+            )
+            from app.services.tenant import get_clinic_by_id
+            clinic = None
+            try:
+                clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+            except Exception as e:
+                logger.warning(f"Could not load clinic for late payment refund: {e}")
+
+            refund = await self._refund_payment_id(
+                payment_id=payment_id,
+                amount_paise=amount_paid,
+                booking_id=booking_id,
+                reason="Payment received after slot hold expired",
+                clinic=clinic,
+            )
+            supabase.table("appointments").update({
+                "status": "refunded_late_payment",
+                "payment_id": payment_id,
+                "refund_id": refund.get("refund_id"),
+            }).eq("id", booking_id).eq("status", "expired").execute()
+
+            await self._notify_late_payment_refunded(booking, refund)
+            await self._alert_admin(
+                clinic,
+                f"Late payment auto-refunded: {booking.get('booking_ref')} "
+                f"({amount_paid / 100:.0f} INR). Slot was already released.",
+            )
+            return {
+                "status": "ok",
+                "code": 200,
+                "action": "late_payment_refunded",
+                "reason": "expired_hold_refunded",
+            }
+
+        if current_status != "pending_payment":
             # Booking is in an unexpected state
             logger.warning(
                 f"Booking {booking_id} in unexpected state '{current_status}' during webhook"
@@ -547,7 +589,7 @@ class PaymentService:
                 }
             )
             .eq("id", booking_id)
-            .in_("status", ["pending_payment", "expired"])
+            .eq("status", "pending_payment")
             .execute()
         )
 
@@ -813,6 +855,48 @@ class PaymentService:
             )
             return {"success": False, "reason": f"razorpay_error: {str(e)[:200]}"}
 
+    async def _refund_payment_id(
+        self,
+        payment_id: str,
+        amount_paise: int,
+        booking_id: str,
+        reason: str,
+        clinic: Optional[dict] = None,
+    ) -> dict:
+        """Issue an immediate refund by Razorpay payment_id directly.
+
+        Useful for late payments where internal booking is expired or cancelled,
+        bypassing booking status checks.
+        """
+        key_id, key_secret, _ = get_razorpay_creds(clinic or {})
+        effective_key_id = key_id or settings.razorpay_key_id
+        effective_key_secret = key_secret or settings.razorpay_key_secret
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{self._razorpay_base}/payments/{payment_id}/refund",
+                    json={"amount": amount_paise, "notes": {"reason": reason[:255]}},
+                    headers={"X-Razorpay-Idempotency-Key": f"late-{payment_id}"},
+                    auth=(effective_key_id, effective_key_secret),
+                    timeout=15.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            self._log_payment_event(
+                booking_id,
+                "auto_refund_issued",
+                {"payment_id": payment_id, "refund_id": data.get("id"), "reason": reason},
+            )
+            return {"success": True, "refund_id": data.get("id")}
+        except Exception as e:
+            logger.error(f"AUTO_REFUND_FAILED payment={payment_id}: {e}")
+            self._log_payment_event(
+                booking_id,
+                "auto_refund_failed",
+                {"payment_id": payment_id, "error": str(e)[:500], "reason": reason},
+            )
+            return {"success": False, "error": str(e)}
+
     # ─────────────────────────────────────────────────────────────────────
     # 6. MANUAL ADMIN ACTIONS
     # ─────────────────────────────────────────────────────────────────────
@@ -860,7 +944,11 @@ class PaymentService:
     async def admin_reject_booking(
         self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
     ) -> dict:
-        """Manually reject a pending_review booking + initiate refund, scoped to clinic_id."""
+        """Manually reject a pending_review booking + initiate refund, scoped to clinic_id.
+
+        initiate_refund() checks status in ('confirmed', 'pending_review'), so refunding
+        BEFORE cancelling ensures the refund is processed rather than blocked.
+        """
         query = supabase.table("appointments").select("*").eq("id", booking_id)
         if clinic_id and clinic_id != "default":
             query = query.eq("clinic_id", clinic_id)
@@ -871,32 +959,74 @@ class PaymentService:
 
         booking = booking_result.data[0]
 
-        if booking["status"] != "pending_review":
+        if booking["status"] not in ("pending_review", "confirmed"):
             return {
                 "success": False,
                 "reason": f"can_only_reject_pending_review_not_{booking['status']}",
             }
 
-        # Cancel + refund
-        supabase.table("appointments").update({"status": "cancelled"}).eq(
-            "id", booking_id
-        ).execute()
+        resolved_clinic_id = booking.get("clinic_id") or clinic_id or "default"
+        from app.services.tenant import get_clinic_by_id
+        clinic = None
+        try:
+            clinic = await get_clinic_by_id(resolved_clinic_id)
+        except Exception as e:
+            logger.warning(f"Could not load clinic {resolved_clinic_id} for reject: {e}")
+
+        # ── Step 1: refund while the row is still refundable ──
+        refund_result = {"success": True, "reason": "no_payment_to_refund"}
+        if booking.get("payment_id"):
+            refund_result = await self.initiate_refund(
+                booking_id,
+                reason=f"Admin rejected: {admin_notes}"[:255],
+                clinic=clinic,
+            )
+            if not refund_result.get("success"):
+                logger.error(
+                    f"REFUND_FAILED_ON_REJECT booking={booking_id} "
+                    f"reason={refund_result.get('reason')}"
+                )
+                self._log_payment_event(
+                    booking_id, "reject_aborted_refund_failed", refund_result
+                )
+                await self._alert_admin(
+                    clinic,
+                    f"Reject aborted for {booking.get('booking_ref')}: refund failed "
+                    f"({refund_result.get('reason')}). Booking left in current status.",
+                )
+                return {
+                    "success": False,
+                    "reason": "refund_failed",
+                    "detail": refund_result,
+                }
+
+        # ── Step 2: only now cancel ──
+        update_data = {
+            "status": "cancelled",
+            "admin_notes": admin_notes,
+        }
+        if refund_result.get("refund_id"):
+            update_data["refund_id"] = refund_result.get("refund_id")
+
+        update_query = (
+            supabase.table("appointments")
+            .update(update_data)
+            .eq("id", booking_id)
+        )
+        if clinic_id and clinic_id != "default":
+            update_query = update_query.eq("clinic_id", clinic_id)
+        update_query.execute()
 
         self._log_payment_event(
             booking_id,
             "manual_reject",
             {
                 "admin_notes": admin_notes,
+                "refund": refund_result,
             },
         )
-
-        # Initiate refund if payment was captured
-        if booking.get("payment_id"):
-            await self.initiate_refund(
-                booking_id, reason=f"Admin rejected: {admin_notes}"
-            )
-
-        return {"success": True}
+        await self._notify_booking_cancelled(booking, refunded=bool(booking.get("payment_id")))
+        return {"success": True, "refund": refund_result}
 
     async def admin_cancel_confirmed_booking(
         self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
@@ -955,38 +1085,45 @@ class PaymentService:
     # 7. RECONCILIATION
     # ─────────────────────────────────────────────────────────────────────
 
-    async def get_daily_reconciliation(self, date_str: str = None) -> dict:
+    async def get_daily_reconciliation(
+        self, date_str: Optional[str] = None, clinic_id: Optional[str] = None
+    ) -> dict:
         """Compare confirmed bookings against Razorpay for a given date.
 
-        Returns a reconciliation summary. Discrepancies must be reviewed by a human.
+        When clinic_id is provided, scopes the reconciliation summary strictly to that clinic.
         """
         if not date_str:
             date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         # Get confirmed bookings for the date
-        bookings = (
+        query = (
             supabase.table("appointments")
             .select("id, amount_paise, payment_id, booking_ref, patient_phone")
             .eq("status", "confirmed")
             .eq("appointment_date", date_str)
             .not_.is_("payment_id", "null")
-            .execute()
         )
+        if clinic_id:
+            query = query.eq("clinic_id", clinic_id)
+        bookings = query.execute()
 
         total_bookings = len(bookings.data) if bookings.data else 0
         total_amount = sum(b.get("amount_paise", 0) for b in (bookings.data or []))
 
         # Get pending_review bookings
-        pending_review = (
+        pr_query = (
             supabase.table("appointments")
             .select("id")
             .eq("status", "pending_review")
             .eq("appointment_date", date_str)
-            .execute()
         )
+        if clinic_id:
+            pr_query = pr_query.eq("clinic_id", clinic_id)
+        pending_review = pr_query.execute()
 
         return {
             "date": date_str,
+            "clinic_id": clinic_id,
             "confirmed_count": total_bookings,
             "confirmed_total_paise": total_amount,
             "confirmed_total_rupees": total_amount / 100,
@@ -1100,10 +1237,15 @@ class PaymentService:
         effective_key_id = key_id or settings.razorpay_key_id
         effective_key_secret = key_secret or settings.razorpay_key_secret
 
+        # Razorpay requires expire_by >= now + 15 min. Our internal hold is
+        # settings.booking_hold_minutes, so use max(hold, 16 min).
+        expire_by = int(time.time()) + max(settings.booking_hold_minutes * 60, 16 * 60)
+
         link_data = {
             "amount": amount_paise,
             "currency": "INR",
             "accept_partial": False,
+            "expire_by": expire_by,
             "description": f"Appointment booking {booking_ref}",
             "customer": {
                 "name": patient_name,
@@ -1444,19 +1586,57 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Failed to send cancellation notification: {e}")
 
-    async def _alert_admin(self, message: str) -> None:
-        """Send alert to admin phone."""
+    async def _notify_late_payment_refunded(self, booking: dict, refund: dict) -> None:
+        """Send WhatsApp notice when payment arrived after slot hold expired and was auto-refunded."""
         try:
             from app.services.whatsapp import whatsapp_service
-            from app.services.tenant import resolve_tenant
+            from app.services.tenant import get_clinic_by_id
 
-            admin_phone = settings.hospital_phone
-            clinic = await resolve_tenant(admin_phone)
-            await whatsapp_service.send_text(clinic, admin_phone, message, _source="payment")
+            clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+            amount_rupees = (booking.get("amount_paise") or 0) / 100
+            msg = (
+                f"⚠️ *Payment Received After Slot Hold Expired*\n\n"
+                f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
+                f"💰 We received your payment of ₹{amount_rupees:.0f}, but the slot hold had already expired.\n\n"
+                f"A full refund of ₹{amount_rupees:.0f} has been automatically initiated (Refund ID: {refund.get('refund_id', 'pending')}) "
+                f"and will reflect in your account within 5-7 business days.\n\n"
+                f"Please visit {clinic.get('whatsapp_number', '')} to select a new appointment slot."
+            )
+            await whatsapp_service.send_text(clinic, booking["patient_phone"], msg, _source="payment")
+        except Exception as e:
+            logger.error(f"Failed to send late payment refund notification: {e}")
+
+    async def _alert_admin(self, clinic_or_message: Union[dict, str, None], message: Optional[str] = None) -> None:
+        """Send alert to clinic admin phone with platform operator fallback."""
+        if isinstance(clinic_or_message, str):
+            msg = clinic_or_message
+            clinic = {}
+        else:
+            clinic = clinic_or_message or {}
+            msg = message or ""
+
+        try:
+            from app.services.whatsapp import whatsapp_service
+            from app.services.tenant import get_clinic_contact, resolve_tenant
+
+            admin_phone = ""
+            if clinic:
+                admin_phone = get_clinic_contact(clinic, "admin_phone", "") or get_clinic_contact(clinic, "phone", "")
+            if not admin_phone:
+                admin_phone = settings.hospital_phone
+
+            target_clinic = clinic
+            if not target_clinic:
+                try:
+                    target_clinic = await resolve_tenant(admin_phone)
+                except Exception:
+                    target_clinic = {}
+
+            if admin_phone:
+                await whatsapp_service.send_text(target_clinic, admin_phone, msg, _source="payment")
         except Exception as e:
             logger.error(f"Failed to send admin alert: {e}")
-            # At minimum, log the alert content
-            logger.warning(f"ADMIN ALERT (undelivered): {message}")
+            logger.warning(f"ADMIN ALERT (undelivered): {msg}")
 
     def _parse_slot_datetime(self, date_str: str, time_str: str) -> Optional[datetime]:
         """Parse appointment date+time into a timezone-aware datetime."""

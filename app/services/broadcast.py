@@ -87,15 +87,18 @@ class BroadcastService:
         broadcast = res.data[0]
         broadcast_id = broadcast["id"]
 
-        # 2. Asynchronously dispatch in-app notifications in background
-        asyncio.create_task(
+        # 2. Asynchronously dispatch in-app notifications in background with strong reference
+        from app.utils.async_tasks import spawn_background_task
+
+        spawn_background_task(
             BroadcastService._dispatch_notifications(
                 broadcast_id=broadcast_id,
                 target_type=target_type,
                 target_clinic_ids=clinic_ids,
                 title=title.strip(),
                 message=message.strip(),
-            )
+            ),
+            name=f"broadcast_dispatch_{broadcast_id}",
         )
 
         return broadcast

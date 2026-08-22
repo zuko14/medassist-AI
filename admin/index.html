@@ -2975,7 +2975,7 @@ function renderPatientTable(list) {
             <td>${esc(p.language) || '—'}</td>
             <td>${p.opted_in ? badge('active') : badge('inactive')}</td>
             <td>${p.appointment_count ?? p.visit_count ?? 0}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="openLabReportModalFor('${p.phone}','${(p.name||'').replace(/'/g,"\\'")}')">📋 Upload Report</button></td>
+            <td><button class="btn btn-ghost btn-sm" data-phone="${esc(p.phone)}" data-name="${esc(p.name || '')}" onclick="openLabReportModalFor(this.dataset.phone, this.dataset.name)">📋 Upload Report</button></td>
         </tr>`).join('')}</tbody>
     </table>`;
 }
@@ -3708,7 +3708,7 @@ async function loadBranches() {
                 <td>${b.display_order}</td>
                 <td>
                     ${myRole !== 'staff' ? `<button class="btn btn-ghost btn-sm" onclick="editBranch('${b.id}')">✏️</button>` : ''}
-                    ${(myRole !== 'staff' || hasPermission('DOCTOR_BRANCH_ASSIGN')) ? `<button class="btn btn-ghost btn-sm" onclick="manageBranchDoctors('${b.id}', '${(b.short_name || b.name).replace(/'/g, "\\'")}')">👨‍⚕️</button>` : ''}
+                    ${(myRole !== 'staff' || hasPermission('DOCTOR_BRANCH_ASSIGN')) ? `<button class="btn btn-ghost btn-sm" data-id="${esc(b.id)}" data-name="${esc(b.short_name || b.name)}" onclick="manageBranchDoctors(this.dataset.id, this.dataset.name)">👨‍⚕️</button>` : ''}
                     ${myRole !== 'staff' ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBranch('${b.id}')">🗑️</button>` : ''}
                 </td>
             </tr>`;
@@ -4607,7 +4607,7 @@ function renderDiagReviewQueue(items) {
             <td>${esc(r.report_name || r.report_type || 'Report')}</td>
             <td><span style="color:var(--amber); font-size:0.82rem;">⚠️ ${esc(reason)}</span></td>
             <td>
-                <button class="btn btn-accent btn-sm" onclick="openResolveMatchModal('${r.id}', '${esc(name)}', '${esc(phone)}', '${esc(r.report_name || '')}')">Resolve & Send</button>
+                <button class="btn btn-accent btn-sm" data-id="${esc(r.id)}" data-name="${esc(name)}" data-phone="${esc(phone)}" data-report="${esc(r.report_name || '')}" onclick="openResolveMatchModal(this.dataset.id, this.dataset.name, this.dataset.phone, this.dataset.report)">Resolve & Send</button>
             </td>
         </tr>`;
     });
@@ -4786,7 +4786,7 @@ function renderDiagDeliveries(items) {
             <td>${badgeHtml}</td>
             <td>
                 ${d.state === 'failed' ? `<button class="btn btn-ghost btn-sm" onclick="retryFailedReport('${d.id}')">🔄 Retry</button>` : ''}
-                ${d.state === 'needs_review' ? `<button class="btn btn-accent btn-sm" onclick="openResolveMatchModal('${d.id}', '${esc(d.patient_name)}', '${esc(d.patient_phone)}', '${esc(d.report_name)}')">Resolve</button>` : ''}
+                ${d.state === 'needs_review' ? `<button class="btn btn-accent btn-sm" data-id="${esc(d.id)}" data-name="${esc(d.patient_name)}" data-phone="${esc(d.patient_phone)}" data-report="${esc(d.report_name)}" onclick="openResolveMatchModal(this.dataset.id, this.dataset.name, this.dataset.phone, this.dataset.report)">Resolve</button>` : ''}
             </td>
         </tr>`;
     });
@@ -4843,7 +4843,7 @@ function renderDiagQueuePageTable(queue) {
 
         if (r._queue_type === 'needs_review') {
             statusHtml = `<span class="badge badge-pending">Needs Review</span><br><small style="color:var(--amber)">${esc(r.error_message || 'Name mismatch')}</small>`;
-            actionHtml = `<button class="btn btn-accent btn-sm" onclick="openResolveMatchModal('${r.id}', '${esc(name)}', '${esc(phone)}', '${esc(report)}')">Resolve & Send</button>`;
+            actionHtml = `<button class="btn btn-accent btn-sm" data-id="${esc(r.id)}" data-name="${esc(name)}" data-phone="${esc(phone)}" data-report="${esc(report)}" onclick="openResolveMatchModal(this.dataset.id, this.dataset.name, this.dataset.phone, this.dataset.report)">Resolve & Send</button>`;
         } else if (r._queue_type === 'failed_report') {
             statusHtml = `<span class="badge badge-failed">Delivery Failed</span><br><small style="color:var(--red)">${esc(r.error_message || 'Rejected')}</small>`;
             actionHtml = `<button class="btn btn-ghost btn-sm" onclick="retryFailedReport('${r.id}')">🔄 Retry</button>`;

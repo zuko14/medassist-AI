@@ -1,6 +1,7 @@
 """Database module for Supabase integration (Multi-Tenant Scoped)."""
 
 import asyncio
+from datetime import datetime, date as dt_date, timedelta, timezone
 import logging
 import time
 from typing import Optional
@@ -375,7 +376,7 @@ async def get_available_slots(
     try:
         check_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
-        async def _fetch_holiday():
+        def _sync_fetch_holiday():
             cache_key = f"{clinic_id}:{date_str}"
             cached = _holiday_cache.get(cache_key)
             if cached and (time.time() - cached.get("cached_at", 0) < HOLIDAY_CACHE_TTL_SECONDS):
@@ -392,7 +393,7 @@ async def get_available_slots(
             _holiday_cache[cache_key] = {"data": data, "cached_at": time.time()}
             return data
 
-        async def _fetch_leave():
+        def _sync_fetch_leave():
             res = (
                 supabase.table("doctor_leaves")
                 .select("leave_type")
@@ -403,17 +404,35 @@ async def get_available_slots(
             )
             return res.data or []
 
-        async def _fetch_booked():
+        def _sync_fetch_booked():
             res = (
                 supabase.table("appointments")
-                .select("appointment_time")
+                .select("appointment_time, status, hold_expires_at, created_at")
                 .eq("clinic_id", clinic_id)
                 .eq("doctor_name", doctor_name)
                 .eq("appointment_date", date_str)
-                .eq("status", "confirmed")
+                .in_("status", ["confirmed", "pending_payment"])
                 .execute()
             )
-            return res.data or []
+            rows = res.data or []
+            now_utc = datetime.now(timezone.utc)
+            booked = []
+            for r in rows:
+                status = r.get("status")
+                if status in ("confirmed", None):
+                    booked.append(r)
+                elif status == "pending_payment":
+                    hold_exp = r.get("hold_expires_at")
+                    if hold_exp:
+                        try:
+                            exp_dt = datetime.fromisoformat(hold_exp.replace("Z", "+00:00"))
+                            if exp_dt > now_utc:
+                                booked.append(r)
+                        except Exception:
+                            booked.append(r)
+                    else:
+                        booked.append(r)
+            return booked
 
         async def _fetch_doc():
             res = get_doctor_by_name(clinic_id, doctor_name)
@@ -421,12 +440,12 @@ async def get_available_slots(
                 return await res
             return res
 
-        # Execute non-interdependent queries in parallel via asyncio.gather
+        # Execute non-interdependent queries in parallel via asyncio.to_thread and asyncio.gather
         holiday_data, leave_data, doc, booked_data = await asyncio.gather(
-            _fetch_holiday(),
-            _fetch_leave(),
+            asyncio.to_thread(_sync_fetch_holiday),
+            asyncio.to_thread(_sync_fetch_leave),
             _fetch_doc(),
-            _fetch_booked(),
+            asyncio.to_thread(_sync_fetch_booked),
         )
 
         if holiday_data:
@@ -480,11 +499,16 @@ async def get_available_slots(
         if include_evening:
             all_slots.extend(evening_slots)
 
+        # IST timezone (UTC+5:30) for cutoff calculation
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(ist)
+        today_ist = now_ist.date()
+
         booked_times = {row["appointment_time"] for row in booked_data if "appointment_time" in row}
         available = [s for s in all_slots if s not in booked_times]
 
-        if check_date == dt_date.today():
-            cutoff = (datetime.now() + timedelta(minutes=30)).strftime("%H:%M")
+        if check_date == today_ist:
+            cutoff = (now_ist + timedelta(minutes=30)).strftime("%H:%M")
             available = [s for s in available if s > cutoff]
 
         return available, None

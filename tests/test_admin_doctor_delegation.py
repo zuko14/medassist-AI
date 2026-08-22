@@ -148,15 +148,19 @@ async def test_get_branch_doctors_enforces_branch_scope():
 @pytest.mark.asyncio
 async def test_assign_doctor_to_branch_success():
     mock_sb = MagicMock()
-    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
-        data=[{"id": "branch-1"}]
+    mock_select = MagicMock()
+    mock_sb.table.return_value.select.return_value = mock_select
+    mock_select.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "branch-1", "clinic_id": "clinic-1"}]
     )
     mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
         data=[{"doctor_id": "doc-1", "branch_id": "branch-1", "session": "morning"}]
     )
 
     body = DoctorBranchAssign(doctor_id="doc-1", session="morning")
-    with patch("app.routers.admin.supabase", mock_sb), patch("app.routers.admin.log_admin_action"):
+    with patch("app.routers.admin.supabase", mock_sb), patch(
+        "app.database.supabase", mock_sb
+    ), patch("app.routers.admin.log_admin_action"):
         res = await assign_doctor_to_branch(
             branch_id="branch-1",
             body=body,

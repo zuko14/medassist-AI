@@ -1006,7 +1006,12 @@ class TestHoldExpiry:
             )
 
             # Update returns empty data (0 rows affected due to concurrent update)
-            mock_table.update.return_value.eq.return_value.in_.return_value.execute.return_value = (
+            mock_update = MagicMock()
+            mock_table.update.return_value = mock_update
+            mock_update.eq.return_value.eq.return_value.execute.return_value = (
+                MagicMock(data=[])
+            )
+            mock_update.eq.return_value.in_.return_value.execute.return_value = (
                 MagicMock(data=[])
             )
 

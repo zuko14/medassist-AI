@@ -68,8 +68,10 @@ class WhatsAppService:
         try:
             from app.services.message_accounting import log_outbound
 
-            # Fire-and-forget: create_task so the caller is never blocked
-            asyncio.create_task(
+            from app.utils.async_tasks import spawn_background_task
+
+            # Fire-and-forget: spawn_background_task so caller is not blocked and task is not GC'd
+            spawn_background_task(
                 log_outbound(
                     clinic_id=clinic_id,
                     recipient_phone=phone,
@@ -78,7 +80,8 @@ class WhatsAppService:
                     send_success=send_success,
                     meta_message_id=meta_message_id,
                     template_name=template_name,
-                )
+                ),
+                name=f"log_outbound_{clinic_id}",
             )
         except Exception as e:
             # Absolute safety net — logging must never affect message delivery
@@ -570,8 +573,8 @@ class WhatsAppService:
 
             return datetime.now(timezone.utc) < expires_at
         except Exception as e:
-            logger.error(f"Error checking session expiry: {e}")
-            return True
+            logger.error(f"Error checking session expiry (failing closed to template): {e}")
+            return False
 
 
 # Global instance

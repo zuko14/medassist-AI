@@ -144,3 +144,32 @@ def enforce_branch_scope(user: "AdminUser", resource_branch_id: Optional[str]) -
             status_code=403,
             detail="This action is outside your assigned branch.",
         )
+
+
+assert_staff_not_pinned_elsewhere = enforce_branch_scope
+
+
+def resolve_owned_branch(user: "AdminUser", branch_id: str) -> dict:
+    """Verify that branch_id exists and belongs to user's clinic, then enforce branch pinning.
+
+    Raises 403 if the user is a staff member pinned to a different branch,
+    and 404 if the branch does not exist or belongs to a different clinic (to prevent cross-tenant IDOR).
+    """
+    # 1. Branch-pinning check for branch-scoped staff (fail fast before DB call)
+    enforce_branch_scope(user, branch_id)
+
+    from app.database import supabase
+
+    result = supabase.table("branches").select("*").eq("id", branch_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    branch = result.data[0]
+    # 2. Cross-tenant IDOR check: non-super_admins can only access branches in their own clinic
+    if user.role != "super_admin":
+        user_clinic_id = str(user.clinic_id or "default")
+        branch_clinic_id = str(branch.get("clinic_id") or "default")
+        if branch_clinic_id != user_clinic_id:
+            raise HTTPException(status_code=404, detail="Branch not found")
+
+    return branch

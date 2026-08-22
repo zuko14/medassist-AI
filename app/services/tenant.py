@@ -102,28 +102,41 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
     if db_failed:
         raise RuntimeError(f"Database error during tenant resolution for {phone}: {db_error}") from db_error
 
-    # Fallback: single-tenant mode
-    # Fetch the first active clinic in the database as the fallback
+    # Fallback: single-tenant mode ONLY.
+    # If the database contains more than 1 active clinic, routing an unknown
+    # phone number to an arbitrary clinic is an active cross-tenant security hazard (C1).
     try:
-        fallback = (
+        active_clinics_res = (
             supabase.table("clinics")
             .select("*")
             .eq("is_active", True)
             .neq("status", "DELETED")
-            .order("created_at")
-            .limit(1)
+            .limit(2)
             .execute()
         )
-        if fallback.data:
-            clinic = fallback.data[0]
-            _set_cached_item(_tenant_cache, phone, clinic)
-            return clinic
-    except Exception as e:
-        logger.warning(f"Fallback clinic lookup failed: {e}")
+        active_clinics = active_clinics_res.data or []
+        if len(active_clinics) > 1:
+            logger.error(
+                f"TENANT_NOT_FOUND phone={phone}: multi-tenant deployment has {len(active_clinics)}+ active clinics. "
+                "Refusing to guess tenant."
+            )
+            raise TenantNotFound(
+                f"No clinic registered for WhatsApp number {phone} in multi-tenant environment."
+            )
 
-    # Absolute fallback using env vars (will fail if DB expects UUID, but safe if table doesn't exist)
+        if len(active_clinics) == 1:
+            clinic = active_clinics[0]
+            clinic_phone = clinic.get("whatsapp_number") or phone
+            _set_cached_item(_tenant_cache, clinic_phone, clinic)
+            return clinic
+    except TenantNotFound:
+        raise
+    except Exception as e:
+        logger.warning(f"Fallback clinic count lookup failed: {e}")
+
+    # Single-tenant env-var fallback if 0 clinics in DB (e.g. initial setup)
     clinic = _build_fallback_clinic()
-    _set_cached_item(_tenant_cache, phone, clinic)
+    _set_cached_item(_tenant_cache, clinic.get("whatsapp_number", phone), clinic)
     return clinic
 
 

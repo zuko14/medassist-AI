@@ -15,10 +15,10 @@ os.environ.setdefault("ADMIN_PASSWORD", "admin")
 
 
 @pytest.mark.asyncio
-async def test_acquire_fail_open_increments_counter():
-    """A non-duplicate DB error on acquire() must still fail open (process
-    the message — don't drop real patient messages) but now increments a
-    counter the scheduler can alert on if this becomes sustained."""
+async def test_acquire_fail_closed_increments_counter():
+    """A non-duplicate DB error on acquire() must fail closed (return False)
+    and increment the fail count so messages are not processed in duplicate
+    during database outages, and can be replayed safely via DLQ."""
     from app.services.message_queue import MessageQueueManager, get_fail_open_count
 
     manager = MessageQueueManager()
@@ -32,7 +32,7 @@ async def test_acquire_fail_open_increments_counter():
     with patch.dict("sys.modules", {"app.database": mock_db_module}):
         result = await manager.acquire("msg-1", clinic_id=None)
 
-    assert result is True  # still fails open
+    assert result is False  # C5: fails closed
     assert get_fail_open_count() == before + 1
 
 

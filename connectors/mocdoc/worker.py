@@ -987,7 +987,7 @@ class MocDocConnector(HospitalConnector):
 
                 # Dump main page HTML (sanitized / encrypted)
                 raw_html = await self._page.content()
-                sanitized_html = sanitize_report_text(raw_html)
+                sanitized_html, _ = sanitize_report_text(raw_html)
 
                 if encryption_key:
                     from cryptography.fernet import Fernet

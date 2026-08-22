@@ -39,7 +39,11 @@ from app.services.tenant import (
 from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
 from app.services.lab_reports import LabReportService
-from app.services.permissions import enforce_branch_scope, require_permission
+from app.services.permissions import (
+    enforce_branch_scope,
+    require_permission,
+    resolve_owned_branch,
+)
 from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
 from app.utils.validators import normalize_phone, validate_phone
@@ -2360,6 +2364,19 @@ async def get_payment_events(
 ):
     """Get the payment audit trail for a booking."""
     try:
+        # IDOR check: verify booking belongs to user's clinic unless super_admin
+        if user.role != "super_admin":
+            clinic_id = user.clinic_id or "default"
+            booking_check = (
+                supabase.table("appointments")
+                .select("id")
+                .eq("id", booking_id)
+                .eq("clinic_id", clinic_id)
+                .execute()
+            )
+            if not booking_check.data:
+                raise HTTPException(status_code=404, detail="Booking not found")
+
         result = (
             supabase.table("payment_events")
             .select("*")
@@ -2368,6 +2385,8 @@ async def get_payment_events(
             .execute()
         )
         return {"events": result.data or []}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting payment events: {e}")
         raise HTTPException(status_code=500, detail="Failed to get payment events")
@@ -2376,14 +2395,18 @@ async def get_payment_events(
 @router.get("/payments/reconciliation")
 async def get_payment_reconciliation(
     date_str: Optional[str] = None,
+    clinic_id: Optional[str] = None,
     user: AdminUser = Depends(require_admin),
 ):
-    """Get daily payment reconciliation summary."""
+    """Get daily payment reconciliation summary scoped to user's clinic."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id or user.clinic_id or "default")
     try:
         from app.services.payment import payment_service
 
-        summary = await payment_service.get_daily_reconciliation(date_str)
+        summary = await payment_service.get_daily_reconciliation(date_str, clinic_id=effective_clinic_id)
         return summary
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Reconciliation error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get reconciliation data")
@@ -3843,7 +3866,7 @@ async def get_branch_doctors(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Get doctors assigned to a specific branch."""
-    enforce_branch_scope(user, branch_id)
+    resolve_owned_branch(user, branch_id)
     try:
         result = (
             supabase.table("doctor_branches")
@@ -3867,22 +3890,8 @@ async def assign_doctor_to_branch(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Assign a doctor to a branch with session control."""
-    enforce_branch_scope(user, branch_id)
+    resolve_owned_branch(user, branch_id)
     try:
-        # Verify branch belongs to user's clinic
-        if user.clinic_id and user.clinic_id != "default":
-            branch_check = (
-                supabase.table("branches")
-                .select("id")
-                .eq("id", branch_id)
-                .eq("clinic_id", user.clinic_id)
-                .execute()
-            )
-            if not branch_check.data:
-                raise HTTPException(
-                    status_code=400, detail="Selected branch does not belong to your clinic."
-                )
-
         data = {
             "doctor_id": body.doctor_id,
             "branch_id": branch_id,
@@ -3921,7 +3930,7 @@ async def remove_doctor_from_branch(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Remove a doctor from a branch."""
-    enforce_branch_scope(user, branch_id)
+    resolve_owned_branch(user, branch_id)
     try:
         supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
             "doctor_id", doctor_id
@@ -3955,7 +3964,7 @@ async def update_doctor_branch_session(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Update a doctor's session assignment at a branch."""
-    enforce_branch_scope(user, branch_id)
+    resolve_owned_branch(user, branch_id)
     try:
         result = (
             supabase.table("doctor_branches")

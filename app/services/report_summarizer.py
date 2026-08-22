@@ -59,8 +59,7 @@ class ReportSummarizer:
                 {
                     "role": "user",
                     "content": (
-                        # Use patient_name directly for context (sanitized_text has it redacted)
-                        f"Patient name: {patient_name}\n"
+                        "Patient name: [PATIENT]\n"
                         f"Report type: {report_type}\n"
                         # Send sanitized text — no raw PII reaches OpenRouter
                         f"Report text:\n{sanitized_text[:3000]}\n\n"
@@ -69,7 +68,7 @@ class ReportSummarizer:
                         '  "summary_lines": ["line1", "line2", "line3"],\n'
                         '  "has_abnormal_values": true or false,\n'
                         '  "patient_message": "A 2-3 sentence plain English message to send to the patient '
-                        "explaining the key findings. Start with their name. End with advising them to consult "
+                        "explaining the key findings. Refer to the patient as [PATIENT]. End with advising them to consult "
                         'their doctor if anything is marked abnormal.",\n'
                         '  "doctor_flag_reason": "One sentence reason to flag for doctor review, or null if '
                         'everything is normal"\n'

@@ -435,7 +435,7 @@ class ConversationManager:
                 # Cancel in database
                 from app.database import cancel_appointment as db_cancel
 
-                success = await db_cancel(clinic_id, appointment_id)
+                success = await db_cancel(clinic["id"], appointment_id)
 
                 if success:
                     cancel_msg = {
@@ -2552,6 +2552,8 @@ class ConversationManager:
                         else ""
                     )
 
+                    hold_mins = getattr(settings, "booking_hold_minutes", 10)
+
                     payment_msg = {
                         "en": (
                             f"💳 *Payment Required to Confirm Booking*\n\n"
@@ -2560,7 +2562,7 @@ class ConversationManager:
                             f"🕐 Time: {context['appointment_time']}\n"
                             f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_en}"
-                            f"⏱️ *This slot is held for 10 minutes.* Pay before it expires.\n\n"
+                            f"⏱️ *This slot is held for {hold_mins} minutes.* Pay before it expires.\n\n"
                             f"👉 Click below to pay securely via Razorpay:\n"
                             f"{result['payment_link']}\n\n"
                             f"_Amount is refundable if cancelled {settings.refund_window_hours}+ hours before appointment. "
@@ -2573,7 +2575,7 @@ class ConversationManager:
                             f"🕐 समय: {context['appointment_time']}\n"
                             f"💰 राशि: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_hi}"
-                            f"⏱️ *यह स्लॉट 10 मिनट के लिए होल्ड है।* समय से पहले भुगतान करें।\n\n"
+                            f"⏱️ *यह स्लॉट {hold_mins} मिनट के लिए होल्ड है।* समय से पहले भुगतान करें।\n\n"
                             f"👉 Razorpay से सुरक्षित भुगतान करें:\n"
                             f"{result['payment_link']}\n\n"
                             f"_अपॉइंटमेंट से {settings.refund_window_hours}+ घंटे पहले रद्द करने पर राशि वापस की जाएगी। "
@@ -2586,7 +2588,7 @@ class ConversationManager:
                             f"🕐 సమయం: {context['appointment_time']}\n"
                             f"💰 మొత్తం: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_te}"
-                            f"⏱️ *ఈ స్లాట్ 10 నిమిషాలు హోల్డ్ చేయబడింది.* గడువులోపు చెల్లించండి.\n\n"
+                            f"⏱️ *ఈ స్లాట్ {hold_mins} నిమిషాలు హోల్డ్ చేయబడింది.* గడువులోపు చెల్లించండి.\n\n"
                             f"👉 Razorpay ద్వారా సురక్షితంగా చెల్లించండి:\n"
                             f"{result['payment_link']}\n\n"
                             f"_అపాయింట్‌మెంట్‌కు {settings.refund_window_hours}+ గంటల ముందు రద్దు చేస్తే మొత్తం రీఫండ్ అవుతుంది. "
@@ -2602,7 +2604,7 @@ class ConversationManager:
                             f"🕐 Time: {context['appointment_time']}\n"
                             f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_en}"
-                            f"⏱️ *This slot is held for 10 minutes.* Pay before it expires.\n\n"
+                            f"⏱️ *This slot is held for {hold_mins} minutes.* Pay before it expires.\n\n"
                             f"👉 Click below to pay securely via Razorpay:\n"
                             f"{result['payment_link']}\n\n"
                             f"_Refundable if cancelled {settings.refund_window_hours}+ hours before appointment. "
@@ -2839,9 +2841,10 @@ class ConversationManager:
             if booking_id:
                 from app.database import supabase
 
-                supabase.table("appointments").update({"status": "cancelled"}).eq(
-                    "id", booking_id
-                ).eq("status", "pending_payment").execute()
+                query = supabase.table("appointments").update({"status": "cancelled"}).eq("id", booking_id)
+                if clinic and clinic.get("id"):
+                    query = query.eq("clinic_id", clinic["id"])
+                query.eq("status", "pending_payment").execute()
 
             cancel_msg = {
                 "en": "Booking cancelled. The slot has been released.",
@@ -2859,12 +2862,10 @@ class ConversationManager:
             if booking_id:
                 from app.database import supabase
 
-                result = (
-                    supabase.table("appointments")
-                    .select("status, booking_ref")
-                    .eq("id", booking_id)
-                    .execute()
-                )
+                query = supabase.table("appointments").select("status, booking_ref").eq("id", booking_id)
+                if clinic and clinic.get("id"):
+                    query = query.eq("clinic_id", clinic["id"])
+                result = query.execute()
                 if result.data:
                     status = result.data[0]["status"]
                     if status == "confirmed":

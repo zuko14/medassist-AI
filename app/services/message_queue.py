@@ -93,72 +93,75 @@ class MessageQueueManager:
         if clinic_id:
             payload["clinic_id"] = clinic_id
 
-        try:
-            # Atomic INSERT ON CONFLICT DO NOTHING
-            result = supabase.table("processed_messages").insert(payload).execute()
+        for attempt in range(2):
+            try:
+                # Atomic INSERT ON CONFLICT DO NOTHING
+                result = supabase.table("processed_messages").insert(payload).execute()
 
-            # If insert succeeded, result.data will have the new row
-            if result.data:
-                logger.debug(f"Message queue: acquired lock for {message_id}")
-                return True
-            else:
-                # ON CONFLICT: row already existed
-                logger.info(f"Message queue: duplicate dropped for {message_id}")
-                return False
+                # If insert succeeded, result.data will have the new row
+                if result.data:
+                    logger.debug(f"Message queue: acquired lock for {message_id}")
+                    return True
+                else:
+                    # ON CONFLICT: row already existed
+                    logger.info(f"Message queue: duplicate dropped for {message_id}")
+                    return False
 
-        except Exception as e:
-            if _is_duplicate(e):
-                logger.info(
-                    f"Message queue: duplicate (unique violation) for {message_id}"
+            except Exception as e:
+                if _is_duplicate(e):
+                    logger.info(
+                        f"Message queue: duplicate (unique violation) for {message_id}"
+                    )
+                    return False
+
+                # Fallback to insert without clinic_id if schema lacks clinic_id column
+                if clinic_id:
+                    try:
+                        result = (
+                            supabase.table("processed_messages")
+                            .insert({"message_id": message_id})
+                            .execute()
+                        )
+                        if result.data:
+                            logger.warning(
+                                f"Message queue: acquired lock for {message_id} without "
+                                f"clinic_id attribution (insert with clinic_id failed: {e})"
+                            )
+                            return True
+                        logger.info(f"Message queue: duplicate dropped for {message_id}")
+                        return False
+                    except Exception as e2:
+                        if _is_duplicate(e2):
+                            logger.info(
+                                f"Message queue: duplicate (unique violation) for {message_id}"
+                            )
+                            return False
+
+                if attempt == 0:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                # Fail CLOSED on database error to protect financial and booking integrity
+                _record_fail_open()
+                logger.error(
+                    f"MESSAGE_QUEUE_FAIL_CLOSED message_id={message_id}: database error during acquire: {e}"
                 )
                 return False
 
-            # If we tried to attribute a clinic_id and the insert failed for a
-            # different reason (e.g. the clinic_id column/migration isn't
-            # present yet), retry the bare insert. Without this, a missing
-            # migration silently disables the PRIMARY atomic dedup gate for
-            # every single message platform-wide (falling straight to the
-            # fail-open branch below) instead of just losing the per-clinic
-            # message-volume attribution used by the platform dashboard.
-            if clinic_id:
-                try:
-                    result = (
-                        supabase.table("processed_messages")
-                        .insert({"message_id": message_id})
-                        .execute()
-                    )
-                    if result.data:
-                        logger.warning(
-                            f"Message queue: acquired lock for {message_id} without "
-                            f"clinic_id attribution (insert with clinic_id failed: {e})"
-                        )
-                        return True
-                    logger.info(f"Message queue: duplicate dropped for {message_id}")
-                    return False
-                except Exception as e2:
-                    if _is_duplicate(e2):
-                        logger.info(
-                            f"Message queue: duplicate (unique violation) for {message_id}"
-                        )
-                        return False
-                    logger.warning(f"Message queue: acquire error (failing open): {e2}")
-                    _record_fail_open()
-                    return True
-
-            # On any other error, fail open (allow processing) to avoid dropping real messages
-            logger.warning(f"Message queue: acquire error (failing open): {e}")
-            _record_fail_open()
-            return True
+        return False
 
     async def release(self, message_id: str) -> None:
-        """Mark message processing as complete (no-op — Supabase row persists).
+        """Release message lock by deleting row from processed_messages on processing failure.
 
-        The processed_messages table row serves as the permanent dedup record.
-        No action needed on release — the row stays as the idempotency proof.
-
-        This method exists for API symmetry in try/finally blocks.
+        Allows subsequent DLQ retry or webhook replay to claim the message.
         """
-        # The Supabase row was already inserted on acquire() — nothing to do.
+        from app.database import supabase
+
+        try:
+            supabase.table("processed_messages").delete().eq("message_id", message_id).execute()
+            logger.info(f"Message queue: released claim for message_id={message_id}")
+        except Exception as e:
+            logger.warning(f"Message queue: failed to delete processed_messages row for {message_id}: {e}")
 
     async def is_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed.

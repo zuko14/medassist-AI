@@ -82,6 +82,7 @@ async def test_get_lab_report_deliveries_filters():
     admin_user.permissions = ["REPORTS_VIEW"]
     admin_user.branch_id = None
 
+    now = datetime.now(timezone.utc)
     sample_reports = [
         {
             "id": "r-1",
@@ -92,8 +93,8 @@ async def test_get_lab_report_deliveries_filters():
             "source": "mocdoc",
             "status": "sent",
             "delivery_status": "delivered",
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_at": (now + timedelta(seconds=10)).isoformat(),
+            "sent_at": (now + timedelta(seconds=10)).isoformat(),
         },
         {
             "id": "r-2",
@@ -105,7 +106,7 @@ async def test_get_lab_report_deliveries_filters():
             "status": "failed",
             "delivery_status": "failed",
             "error_message": "Meta template error",
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_at": (now + timedelta(seconds=5)).isoformat(),
             "sent_at": None,
         },
         {
@@ -117,8 +118,8 @@ async def test_get_lab_report_deliveries_filters():
             "source": "mocdoc",
             "status": "sent",
             "delivery_status": "sent",
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_at": (now + timedelta(seconds=2)).isoformat(),
+            "sent_at": (now + timedelta(seconds=2)).isoformat(),
         },
         {
             "id": "r-4",
@@ -129,8 +130,8 @@ async def test_get_lab_report_deliveries_filters():
             "source": "mocdoc",
             "status": "sent",
             "delivery_status": None,
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_at": (now + timedelta(seconds=1)).isoformat(),
+            "sent_at": (now + timedelta(seconds=1)).isoformat(),
         },
     ]
 

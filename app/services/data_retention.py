@@ -92,13 +92,41 @@ class DataRetentionService:
             )
             count = len(result.data) if result.data else 0
             if count > 0:
-                logger.info(
-                    f"Data retention: purged {count} expired analytics events "
-                    f"(older than {ANALYTICS_PURGE_MONTHS} months)"
-                )
+                    logger.info(
+                        f"Data retention: purged {count} expired analytics events "
+                        f"(older than {ANALYTICS_PURGE_MONTHS} months)"
+                    )
             return count
         except Exception as e:
             logger.error(f"Analytics purge error: {e}")
+            return 0
+
+    async def purge_failed_messages_dlq(self, days: int = 30) -> int:
+        """Purge dead-letter failed_messages records older than `days` (default 30 days).
+
+        Returns:
+            Number of DLQ records purged.
+        """
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=days)
+        ).isoformat()
+
+        try:
+            result = (
+                supabase.table("failed_messages")
+                .delete()
+                .lt("created_at", cutoff)
+                .execute()
+            )
+            count = len(result.data) if result.data else 0
+            if count > 0:
+                logger.info(
+                    f"Data retention: purged {count} failed_messages DLQ records "
+                    f"(older than {days} days)"
+                )
+            return count
+        except Exception as e:
+            logger.error(f"Failed messages DLQ purge error: {e}")
             return 0
 
     # ── Tier 1: Clinical Record Anonymization ─────────────────────────────────

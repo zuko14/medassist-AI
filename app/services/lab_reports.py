@@ -47,29 +47,61 @@ class LabReportService:
         different intake path — so we skip re-sending instead of delivering it twice.
         """
 
-        # Step 0 — Cross-path idempotency guard (skip if already delivered by another intake)
-        # Fail-open: if the check itself errors (network hiccup etc.), proceed with the
-        # send rather than block report delivery on a guard that's meant to prevent — not
-        # cause — a missed report.
+        # Step 0 — Cross-path idempotency guard (atomic claim row before sending)
+        claim_id = None
         if external_report_id:
             try:
-                existing = (
-                    supabase.table("lab_reports")
-                    .select("*")
-                    .eq("clinic_id", clinic_id)
-                    .eq("external_report_id", external_report_id)
-                    .execute()
-                )
-                if isinstance(existing.data, list) and existing.data:
-                    logger.info(
-                        f"Report {external_report_id} for clinic {clinic_id} already delivered "
-                        f"(source={existing.data[0].get('source')}) — skipping duplicate send"
-                    )
-                    record = dict(existing.data[0])
-                    record["already_processed"] = True
-                    return record
+                # Atomic INSERT with status='processing' to claim the slot before WhatsApp send
+                claim_row = {
+                    "clinic_id": clinic_id,
+                    "external_report_id": external_report_id,
+                    "patient_phone": patient_phone,
+                    "patient_name": patient_name,
+                    "report_name": report_name,
+                    "report_type": report_type,
+                    "status": "processing",
+                    "delivery_status": "processing",
+                    "source": source,
+                }
+                claim_result = supabase.table("lab_reports").insert(claim_row).execute()
+                if claim_result.data:
+                    claim_id = claim_result.data[0]["id"]
             except Exception as e:
-                logger.warning(f"Cross-path idempotency check failed (proceeding): {e}")
+                error_str = str(e).lower()
+                if "unique" in error_str or "duplicate" in error_str or "23505" in error_str:
+                    logger.info(
+                        f"Report {external_report_id} for clinic {clinic_id} already claimed/delivered — skipping duplicate send"
+                    )
+                    try:
+                        existing = (
+                            supabase.table("lab_reports")
+                            .select("*")
+                            .eq("clinic_id", clinic_id)
+                            .eq("external_report_id", external_report_id)
+                            .execute()
+                        )
+                        if (
+                            existing
+                            and existing.data
+                            and isinstance(existing.data, list)
+                            and len(existing.data) > 0
+                            and isinstance(existing.data[0], dict)
+                        ):
+                            record = dict(existing.data[0])
+                            record["status"] = record.get("status") or "skipped"
+                            record["already_processed"] = True
+                            record["reason"] = "duplicate_report_id"
+                            return record
+                    except Exception:
+                        pass
+                    return {
+                        "id": None,
+                        "status": "skipped",
+                        "delivery_status": "already_claimed",
+                        "already_processed": True,
+                        "reason": "duplicate_report_id",
+                    }
+                logger.warning(f"Lab report claim insert failed (proceeding): {e}")
 
         # Step A — Extract text from PDF
         pdf_text = extract_text_from_pdf(file_bytes)
@@ -247,12 +279,15 @@ class LabReportService:
             row["sent_at"] = datetime.now(timezone.utc).isoformat()
 
         try:
-            result = supabase.table("lab_reports").insert(row).execute()
-            saved_record = result.data[0] if result.data else row
+            if claim_id:
+                result = supabase.table("lab_reports").update(row).eq("id", claim_id).execute()
+                saved_record = result.data[0] if result.data else row
+            else:
+                result = supabase.table("lab_reports").insert(row).execute()
+                saved_record = result.data[0] if result.data else row
         except Exception as e:
             # Unique violation on (clinic_id, external_report_id) means another intake
-            # path won the race and already delivered this report — a WhatsApp message
-            # may have just gone out twice, but at least we don't record it twice.
+            # path won the race and already delivered this report.
             if external_report_id and "23505" in str(e):
                 logger.warning(
                     f"Race detected: {external_report_id} for clinic {clinic_id} was "
@@ -272,7 +307,7 @@ class LabReportService:
                 )
             else:
                 logger.error(f"Failed to save lab report record to database: {e}")
-                row["id"] = str(uuid4())
+                row["id"] = claim_id or str(uuid4())
                 row["_db_error"] = str(e)
                 saved_record = row
 

@@ -27,39 +27,47 @@ async def razorpay_webhook(clinic_id: str, request: Request):
       2. Extract the per-clinic razorpay_webhook_secret (falls back to global settings).
       3. Read raw body (before parsing).
       4. Extract X-Razorpay-Signature header.
-      5. Delegate to PaymentService.process_payment_webhook() with the resolved secret.
+      5. Delegate to PaymentService.process_payment_webhook() with the resolved secret and clinic_id.
       6. Return appropriate HTTP status.
     """
     try:
-        from app.services.tenant import get_clinic_by_id
+        try:
+            from app.services.tenant import get_clinic_by_id
 
-        clinic = await get_clinic_by_id(clinic_id)
-    except Exception as e:
-        logger.warning(f"Razorpay webhook: unknown clinic_id={clinic_id} — {e}")
-        return JSONResponse(status_code=200, content={"status": "unknown_clinic"})
+            clinic = await get_clinic_by_id(clinic_id)
+        except Exception as e:
+            logger.warning(f"Razorpay webhook: unknown clinic_id={clinic_id} — {e}")
+            return JSONResponse(status_code=200, content={"status": "unknown_clinic"})
 
-    _, _, webhook_secret = get_razorpay_creds(clinic)
+        _, _, webhook_secret = get_razorpay_creds(clinic)
 
-    raw_body = await request.body()
+        raw_body = await request.body()
 
-    signature = request.headers.get("X-Razorpay-Signature", "")
-    client_ip = request.client.host if request.client else "unknown"
+        signature = request.headers.get("X-Razorpay-Signature", "")
+        client_ip = request.client.host if request.client else "unknown"
 
-    if not signature:
-        logger.warning(
-            f"Razorpay webhook: NO signature header — "
-            f"clinic={clinic_id} IP={client_ip}"
+        if not signature:
+            logger.warning(
+                f"Razorpay webhook: NO signature header — "
+                f"clinic={clinic_id} IP={client_ip}"
+            )
+
+        result = await payment_service.process_payment_webhook(
+            raw_body,
+            signature,
+            webhook_secret=webhook_secret,
+            alert_limiter=_signature_alert_limiter,
+            alert_key=f"{clinic_id}:{client_ip}",
+            clinic_id=clinic_id,
         )
 
-    result = await payment_service.process_payment_webhook(
-        raw_body,
-        signature,
-        webhook_secret=webhook_secret,
-        alert_limiter=_signature_alert_limiter,
-        alert_key=f"{clinic_id}:{client_ip}",
-    )
-
-    return JSONResponse(
-        status_code=result.get("code", 200),
-        content={"status": result.get("status", "ok")},
-    )
+        return JSONResponse(
+            status_code=result.get("code", 200),
+            content={"status": result.get("status", "ok")},
+        )
+    except Exception as exc:
+        logger.exception(f"Unhandled exception in razorpay_webhook for clinic={clinic_id}: {exc}")
+        return JSONResponse(
+            status_code=200,
+            content={"status": "error", "reason": "internal_error"},
+        )

@@ -39,14 +39,15 @@ _EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b", re.IGNORECASE
 )
 
-# Date of Birth patterns: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, DD.MM.YYYY
+# Date of Birth patterns: labeled DOB only (DOB: DD/MM/YYYY, etc.) to avoid redacting test/report dates
 _DOB_PATTERN = re.compile(
-    r"\b(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}|\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2})\b"
+    r"\b(?:dob|d\.o\.b|date\s*of\s*birth|birth\s*date)\s*[:\-]?\s*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}|\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2})\b",
+    re.IGNORECASE,
 )
 
-# Age patterns: "Age: 35", "Age/Sex: 35/M", "35 years", "35Y"
+# Age patterns: "Age: 35", "Age/Sex: 35/M", "35 years old", "35 yrs"
 _AGE_PATTERN = re.compile(
-    r"\b(?:age|age/sex)\s*:?\s*\d{1,3}(?:/[MFmf])?\b|\b\d{1,3}\s*(?:years?|yrs?|Y)\b",
+    r"\b(?:age|age/sex)\s*:?\s*\d{1,3}(?:/[MFmf])?\b|\b\d{1,3}\s*(?:years?|yrs?)\s*(?:old)?\b",
     re.IGNORECASE,
 )
 
@@ -97,11 +98,6 @@ def sanitize_report_text(
             - sanitized_text: Text with PII replaced by placeholders.
             - redaction_map: Dict mapping placeholder → original value
               (used to restore context in final WhatsApp message).
-
-    Example:
-        sanitized, rmap = sanitize_report_text(text, "Rahul Sharma")
-        summary = call_llm(sanitized)
-        final_msg = restore_pii(summary, rmap)
     """
     redaction_map: dict = {}
     counter = [0]  # mutable for nested closure
@@ -153,13 +149,13 @@ def sanitize_report_text(
 
     redacted = _PATIENT_ID_PATTERN.sub(_replace_pid, redacted)
 
-    # 7. Redact DOB (keep date context but strip the value)
+    # 7. Redact DOB (only when explicitly labeled to protect medical dates)
     def _replace_dob(m: re.Match) -> str:
         return make_placeholder("DOB", m.group(0))
 
     redacted = _DOB_PATTERN.sub(_replace_dob, redacted)
 
-    # 8. Redact age patterns (but preserve in medical context — only if labeled)
+    # 8. Redact age patterns (only when labeled)
     def _replace_age(m: re.Match) -> str:
         return make_placeholder("AGE", m.group(0))
 
@@ -181,24 +177,33 @@ def sanitize_report_text(
     return redacted, redaction_map
 
 
+def sanitize_pii(text: str) -> str:
+    """Scrub PII (phones, aadhaar, emails, abha, patient IDs) from arbitrary text for logging/DLQ."""
+    if not text:
+        return text
+    s = _ABHA_PATTERN.sub("[ABHA_REDACTED]", text)
+    s = _PHONE_PATTERN.sub("[PHONE_REDACTED]", s)
+    s = _AADHAAR_PATTERN.sub("[AADHAAR_REDACTED]", s)
+    s = _EMAIL_PATTERN.sub("[EMAIL_REDACTED]", s)
+    return s
+
+
 def restore_pii(text: str, redaction_map: dict) -> str:
     """Restore patient name into the LLM summary for final WhatsApp delivery.
 
     NOTE: We only restore the PATIENT name placeholder — all other PII
     (phone, Aadhaar, email) is intentionally left redacted in the
     outbound summary, as patients already know their own details.
-
-    Args:
-        text: LLM-generated summary (may reference placeholders).
-        redaction_map: Map from sanitize_report_text().
-
-    Returns:
-        Text with patient name restored.
     """
     result = text
     for placeholder, original in redaction_map.items():
-        if "[PATIENT_" in placeholder:
+        if "PATIENT" in placeholder:
             result = result.replace(placeholder, original)
+    if "[PATIENT]" in result:
+        for placeholder, original in redaction_map.items():
+            if "PATIENT" in placeholder:
+                result = result.replace("[PATIENT]", original)
+                break
     return result
 
 
