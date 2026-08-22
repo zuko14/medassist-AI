@@ -4661,11 +4661,11 @@ let _allDiagDeliveries = [];
 let _diagDeliveryFilter = 'all';
 
 function filterDiagDeliveries(state) {
-    _diagDeliveryFilter = state;
+    _diagDeliveryFilter = state || 'all';
     ['all', 'delivered', 'pending', 'failed', 'needs_review'].forEach(s => {
         const btn = document.getElementById('df-' + s);
         if (btn) {
-            if (s === state) {
+            if (s === _diagDeliveryFilter) {
                 btn.className = 'btn btn-sm diag-filter-btn active';
             } else {
                 btn.className = 'btn btn-sm btn-ghost diag-filter-btn';
@@ -4676,27 +4676,51 @@ function filterDiagDeliveries(state) {
 }
 
 function applyDiagDeliveryFilter() {
-    if (!_allDiagDeliveries) return;
-    let filtered = _allDiagDeliveries;
-    if (_diagDeliveryFilter === 'delivered') {
-        filtered = _allDiagDeliveries.filter(d => 
-            (d.state === 'delivered' || d.status === 'sent' || d.delivery_status === 'sent' || d.delivery_status === 'delivered' || d.delivery_status === 'read') &&
-            d.state !== 'failed' && d.status !== 'failed' && d.delivery_status !== 'failed'
-        );
-    } else if (_diagDeliveryFilter === 'failed') {
-        filtered = _allDiagDeliveries.filter(d => 
-            d.state === 'failed' || d.status === 'failed' || d.delivery_status === 'failed'
-        );
-    } else if (_diagDeliveryFilter === 'needs_review') {
-        filtered = _allDiagDeliveries.filter(d => 
-            d.state === 'needs_review' || d.status === 'needs_review'
-        );
-    } else if (_diagDeliveryFilter === 'pending') {
-        filtered = _allDiagDeliveries.filter(d => 
-            (d.state === 'pending' || d.status === 'pending') &&
-            d.state !== 'delivered' && d.status !== 'sent' && d.delivery_status !== 'sent'
-        );
+    const el = document.getElementById('diagDeliveryLog');
+    if (!el) return;
+
+    if (!_allDiagDeliveries || _allDiagDeliveries.length === 0) {
+        // If not loaded yet, fetch and apply
+        loadDiagDeliveries();
+        return;
     }
+
+    let filtered = _allDiagDeliveries;
+    const filter = (_diagDeliveryFilter || 'all').toLowerCase();
+
+    if (filter === 'delivered') {
+        filtered = _allDiagDeliveries.filter(d => {
+            const st = (d.state || '').toLowerCase();
+            const status = (d.status || '').toLowerCase();
+            const delSt = (d.delivery_status || '').toLowerCase();
+            const isFailed = st === 'failed' || status === 'failed' || delSt === 'failed';
+            if (isFailed) return false;
+            return st === 'delivered' || st === 'sent' || status === 'sent' || delSt === 'sent' || delSt === 'delivered' || delSt === 'read';
+        });
+    } else if (filter === 'failed') {
+        filtered = _allDiagDeliveries.filter(d => {
+            const st = (d.state || '').toLowerCase();
+            const status = (d.status || '').toLowerCase();
+            const delSt = (d.delivery_status || '').toLowerCase();
+            return st === 'failed' || status === 'failed' || delSt === 'failed';
+        });
+    } else if (filter === 'needs_review') {
+        filtered = _allDiagDeliveries.filter(d => {
+            const st = (d.state || '').toLowerCase();
+            const status = (d.status || '').toLowerCase();
+            return st === 'needs_review' || status === 'needs_review';
+        });
+    } else if (filter === 'pending') {
+        filtered = _allDiagDeliveries.filter(d => {
+            const st = (d.state || '').toLowerCase();
+            const status = (d.status || '').toLowerCase();
+            const delSt = (d.delivery_status || '').toLowerCase();
+            const isDelivered = st === 'delivered' || st === 'sent' || status === 'sent' || delSt === 'sent' || delSt === 'delivered' || delSt === 'read';
+            const isFailed = st === 'failed' || status === 'failed' || delSt === 'failed';
+            return !isDelivered && !isFailed;
+        });
+    }
+
     renderDiagDeliveries(filtered);
 }
 
@@ -4711,6 +4735,7 @@ async function loadDiagDeliveries() {
         el.innerHTML = emptyState('warning', 'Failed to load delivery log.');
     }
 }
+
 
 
 function renderDiagDeliveries(items) {

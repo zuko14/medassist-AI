@@ -197,13 +197,30 @@ async def root():
 @app.get("/admin-panel")
 async def admin_panel():
     """Serve admin panel HTML."""
-    return FileResponse("admin/index.html", media_type="text/html")
+    return FileResponse(
+        "admin/index.html",
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/platform-panel")
 async def platform_panel():
     """Serve platform super-admin owner panel HTML."""
-    return FileResponse("admin/platform.html", media_type="text/html")
+    return FileResponse(
+        "admin/platform.html",
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
 
 
 @app.get("/platform-panel/vendor/chart.umd.min.js")
