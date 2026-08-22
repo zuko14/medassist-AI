@@ -4698,17 +4698,20 @@ function renderDiagDeliveries(items) {
     items.forEach(d => {
         const timeStr = d.sent_at ? new Date(d.sent_at).toLocaleString() : (d.uploaded_at ? new Date(d.uploaded_at).toLocaleString() : '—');
         let badgeHtml = '';
-        if (d.state === 'delivered') {
-            badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed delivery/read">✅ Delivered</span>`;
-        } else if (d.state === 'failed') {
+        if (d.delivery_status === 'read') {
+            badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed read by patient">✅ Read</span>`;
+        } else if (d.delivery_status === 'delivered') {
+            badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed delivery to device">✅ Delivered</span>`;
+        } else if (d.state === 'delivered' || d.status === 'sent' || d.delivery_status === 'sent') {
+            badgeHtml = `<span class="badge badge-confirmed" style="background:rgba(0,200,115,0.15); color:var(--green);" title="Delivered / Sent to WhatsApp">✅ Delivered</span>`;
+        } else if (d.state === 'failed' || d.status === 'failed' || d.delivery_status === 'failed') {
             badgeHtml = `<span class="badge badge-failed" title="${esc(d.delivery_error || 'Delivery failed')}">❌ Failed</span><br><small style="color:var(--red); font-size:0.75rem;">${esc(d.delivery_error || 'Delivery failed')}</small>`;
-        } else if (d.state === 'needs_review') {
+        } else if (d.state === 'needs_review' || d.status === 'needs_review') {
             badgeHtml = `<span class="badge badge-pending" title="Unmatched or requires review">🟠 Unmatched</span>`;
-        } else if (d.state === 'awaiting_receipt_stale') {
-            badgeHtml = `<span class="badge" style="background:rgba(255,200,87,0.15); color:var(--amber);" title="Sent to Meta >30m ago without delivery receipt">🕓 Sent (No receipt)</span>`;
         } else {
-            badgeHtml = `<span class="badge badge-pending" title="Sent to WhatsApp">🕓 Sent</span>`;
+            badgeHtml = `<span class="badge badge-pending" title="Pending">🕓 Pending</span>`;
         }
+
 
         const sourceBadge = d.source === 'mocdoc' 
             ? `<span class="badge" style="background:rgba(108,99,255,0.15); color:var(--accent2)">MocDoc</span>` 

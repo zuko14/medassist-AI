@@ -3465,32 +3465,23 @@ async def get_lab_report_deliveries(
             sent_at = r.get("sent_at")
             delivery_updated_at = r.get("delivery_updated_at")
 
-            # Derive single state for UI badge
-            if status_col == "needs_review":
-                derived_state = "needs_review"
-            elif delivery_status in ("read", "delivered"):
-                derived_state = "delivered"
-            elif delivery_status == "failed" or status_col == "failed":
+            # Derive single state for UI badge and filter tabs:
+            # A report is 'delivered' if status is 'sent' or delivery_status is 'sent'/'delivered'/'read'
+            if status_col == "failed" or delivery_status == "failed":
                 derived_state = "failed"
-            elif delivery_status == "sent" or status_col == "sent":
-                is_stale = False
-                if sent_at:
-                    try:
-                        sdt = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
-                        if datetime.now(timezone.utc) - sdt > timedelta(minutes=30):
-                            is_stale = True
-                    except Exception:
-                        pass
-                derived_state = "awaiting_receipt_stale" if is_stale else "pending"
+            elif status_col == "needs_review":
+                derived_state = "needs_review"
+            elif delivery_status in ("read", "delivered") or status_col == "sent" or delivery_status == "sent":
+                derived_state = "delivered"
             else:
                 derived_state = status_col or "pending"
 
             if state != "all":
-                if state == "delivered" and derived_state != "delivered":
+                if state == "delivered" and derived_state not in ("delivered", "sent", "read"):
                     continue
                 elif state == "failed" and derived_state != "failed":
                     continue
-                elif state == "pending" and derived_state not in ("pending", "awaiting_receipt_stale"):
+                elif state == "pending" and derived_state not in ("pending", "awaiting_receipt"):
                     continue
                 elif state == "needs_review" and derived_state != "needs_review":
                     continue
@@ -3514,6 +3505,7 @@ async def get_lab_report_deliveries(
                 "state": derived_state,
                 "uploaded_at": r.get("uploaded_at"),
             })
+
 
         return {"deliveries": deliveries, "total": len(deliveries)}
     except Exception as e:

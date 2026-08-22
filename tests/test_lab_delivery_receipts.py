@@ -108,6 +108,18 @@ async def test_get_lab_report_deliveries_filters():
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "sent_at": None,
         },
+        {
+            "id": "r-3",
+            "patient_name": "Kuncha Santhosh Kumar",
+            "patient_phone": "+919804824365",
+            "report_name": "Lab Report",
+            "report_type": "Laboratory",
+            "source": "mocdoc",
+            "status": "sent",
+            "delivery_status": "sent",
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+        },
     ]
 
     mock_supabase = MagicMock()
@@ -124,17 +136,19 @@ async def test_get_lab_report_deliveries_filters():
             state="all",
             user=admin_user,
         )
-        assert len(res_all["deliveries"]) == 2
+        assert len(res_all["deliveries"]) == 3
         assert res_all["deliveries"][0]["patient_phone"] == "+91XXXXXX3210"
 
-        # Delivered only
+        # Delivered only (includes both 'delivered' and 'sent')
         res_del = await get_lab_report_deliveries(
             clinic_id="test-clinic",
             state="delivered",
             user=admin_user,
         )
-        assert len(res_del["deliveries"]) == 1
-        assert res_del["deliveries"][0]["id"] == "r-1"
+        assert len(res_del["deliveries"]) == 2
+        delivered_ids = [d["id"] for d in res_del["deliveries"]]
+        assert "r-1" in delivered_ids
+        assert "r-3" in delivered_ids
 
         # Failed only
         res_fail = await get_lab_report_deliveries(
@@ -144,6 +158,7 @@ async def test_get_lab_report_deliveries_filters():
         )
         assert len(res_fail["deliveries"]) == 1
         assert res_fail["deliveries"][0]["id"] == "r-2"
+
 
 
 @pytest.mark.asyncio
