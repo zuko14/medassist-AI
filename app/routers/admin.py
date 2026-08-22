@@ -3441,20 +3441,37 @@ async def get_lab_report_deliveries(
             res = query.order("uploaded_at", desc=True).limit(500).execute()
             all_records = res.data or []
         except Exception:
-            # Fallback for any older schema variations
-            query = supabase.table("lab_reports").select("*")
-            if effective_clinic_id != "default":
-                query = query.eq("clinic_id", effective_clinic_id)
-            res = query.order("uploaded_at", desc=True).limit(500).execute()
-            all_records = res.data or []
+            # Fallback for older schema variations
+            try:
+                query = supabase.table("lab_reports").select("*")
+                if effective_clinic_id != "default":
+                    query = query.eq("clinic_id", effective_clinic_id)
+                res = query.order("uploaded_at", desc=True).limit(500).execute()
+                all_records = res.data or []
+            except Exception:
+                query = supabase.table("lab_reports").select("*")
+                if effective_clinic_id != "default":
+                    query = query.eq("clinic_id", effective_clinic_id)
+                res = query.execute()
+                all_records = res.data or []
 
-        # Python-side date filter (same approach as diagnostic/stats)
-        records = [r for r in all_records if (r.get("uploaded_at") or "") >= cutoff]
+        # Sort newest first using either uploaded_at or sent_at
+        all_records.sort(
+            key=lambda r: r.get("uploaded_at") or r.get("sent_at") or "",
+            reverse=True,
+        )
+
+        # Python-side date filter: keep records within cutoff or where date is unset
+        records = [
+            r for r in all_records
+            if not (r.get("uploaded_at") or r.get("sent_at")) or (r.get("uploaded_at") or r.get("sent_at") or "") >= cutoff
+        ]
 
         logger.info(
             f"Delivery log query: clinic={effective_clinic_id}, cutoff={cutoff}, "
             f"state_filter={state}, total_fetched={len(all_records)}, after_date_filter={len(records)}"
         )
+
 
 
 
