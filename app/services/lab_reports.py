@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import uuid4
 
 
+from app.config import settings
 from app.database import supabase, log_analytics_event
 from app.utils.pdf_reader import extract_text_from_pdf
 from app.services.report_summarizer import ReportSummarizer
@@ -98,6 +99,7 @@ class LabReportService:
         sent_ok = False
         error_message = None
         capture = {}
+        clinic = None
         try:
             clinic = await get_clinic_by_id(clinic_id)
             from app.services.message_queue import (
@@ -213,8 +215,9 @@ class LabReportService:
             error_message = str(e)
 
         # Step G — Save to database
+        resolved_clinic_id = clinic["id"] if clinic else clinic_id
         row = {
-            "clinic_id": clinic["id"],
+            "clinic_id": resolved_clinic_id,
             "patient_phone": patient_phone,
             "patient_name": patient_name,
             "report_name": report_name,
@@ -276,7 +279,7 @@ class LabReportService:
         # Audit logging for PII-safe AI summarization and delivery
         if sent_ok:
             await log_analytics_event(
-                clinic_id=clinic["id"],
+                clinic_id=resolved_clinic_id,
                 phone=patient_phone,
                 event_type="report_delivered",
                 metadata={
