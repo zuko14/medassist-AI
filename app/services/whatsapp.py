@@ -219,7 +219,15 @@ class WhatsAppService:
             )
             return True
         except Exception as e:
+            # httpx.HTTPStatusError stores the Meta error JSON in
+            # e.response.text, not in str(e) which is just the HTTP status line
             err_text = str(e)
+            resp = getattr(e, "response", None)
+            if resp is not None:
+                try:
+                    err_text = f"{err_text} | {resp.text}"
+                except Exception:
+                    pass
 
             # ── Retry without header if template has no document header ──
             # Meta error 132018: "Template does not contain title component,
@@ -228,6 +236,7 @@ class WhatsAppService:
                 c.get("type") == "header" for c in (components or [])
             )
             if has_header and ("132018" in err_text or "does not contain title" in err_text):
+
                 logger.warning(
                     f"Template '{template_name}' has no document header — "
                     f"retrying body-only so patient at least gets a text notification. "
