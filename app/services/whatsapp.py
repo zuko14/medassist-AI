@@ -186,7 +186,12 @@ class WhatsAppService:
         _source: str = "conversation",
         _capture: Optional[dict] = None,
     ) -> bool:
-        """Send a pre-approved template message (for 24h+ sessions)."""
+        """Send a pre-approved template message (for 24h+ sessions).
+
+        Resilient: if the template lacks a document header and Meta returns
+        error 132018, we automatically retry with body-only components so the
+        patient at least gets a text notification.
+        """
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -214,12 +219,59 @@ class WhatsAppService:
             )
             return True
         except Exception as e:
+            err_text = str(e)
+
+            # ── Retry without header if template has no document header ──
+            # Meta error 132018: "Template does not contain title component,
+            # no parameters allowed"
+            has_header = any(
+                c.get("type") == "header" for c in (components or [])
+            )
+            if has_header and ("132018" in err_text or "does not contain title" in err_text):
+                logger.warning(
+                    f"Template '{template_name}' has no document header — "
+                    f"retrying body-only so patient at least gets a text notification. "
+                    f"ACTION REQUIRED: Edit the template in Meta WhatsApp Manager "
+                    f"and add a Document header to attach PDFs."
+                )
+                body_only = [
+                    c for c in (components or []) if c.get("type") != "header"
+                ]
+                payload["template"]["components"] = body_only
+                try:
+                    result = await self._make_request(clinic, "messages", payload)
+                    meta_msg_id = self._extract_meta_message_id(result)
+                    if _capture is not None:
+                        _capture["meta_message_id"] = meta_msg_id
+                        _capture["header_stripped"] = True
+                    logger.info(
+                        f"Sent template '{template_name}' (body-only) to "
+                        f"{self._mask_phone(phone)}"
+                    )
+                    await self._log_to_ledger(
+                        clinic, phone, "template", _source,
+                        send_success=True, meta_message_id=meta_msg_id,
+                        template_name=template_name,
+                    )
+                    return True
+                except Exception as retry_err:
+                    logger.error(
+                        f"Body-only retry also failed for template "
+                        f"'{template_name}': {retry_err}"
+                    )
+                    await self._log_to_ledger(
+                        clinic, phone, "template", _source,
+                        send_success=False, template_name=template_name,
+                    )
+                    return False
+
             logger.error(f"Failed to send template message: {e}")
             await self._log_to_ledger(
                 clinic, phone, "template", _source,
                 send_success=False, template_name=template_name,
             )
             return False
+
 
     async def send_interactive_buttons(
         self,
