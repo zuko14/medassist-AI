@@ -276,11 +276,15 @@
         .main {
             margin-left: 260px;
             flex: 1;
+            min-width: 0;
+            width: calc(100% - 260px);
+            box-sizing: border-box;
             padding: 32px 36px;
             background:
                 radial-gradient(ellipse at 80% 0%, rgba(108,99,255,0.03) 0%, transparent 50%),
                 var(--bg);
             min-height: 100vh;
+            overflow-x: hidden;
         }
 
         .page-head { margin-bottom: 28px; }
@@ -360,7 +364,16 @@
         .card-head h3 { font-size: 1rem; font-weight: 600; color: var(--text-strong); }
 
         /* ═══════ TABLES ═══════ */
-        .tbl-wrap { overflow-x: auto; border-radius: 10px; }
+        .tbl-wrap {
+            overflow-x: auto;
+            border-radius: 10px;
+            max-width: 100%;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .tbl-wrap::-webkit-scrollbar { height: 6px; }
+        .tbl-wrap::-webkit-scrollbar-track { background: var(--surface); }
+        .tbl-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
         table { width: 100%; border-collapse: collapse; }
 
@@ -381,6 +394,14 @@
             font-size: 0.87rem;
             border-bottom: 1px solid rgba(30,37,64,0.5);
             white-space: nowrap;
+        }
+
+        td.cell-wrap, .cell-wrap {
+            white-space: normal !important;
+            word-break: break-word;
+            max-width: 320px;
+            min-width: 160px;
+            line-height: 1.4;
         }
 
         tr { transition: background 0.1s; }
@@ -4611,7 +4632,7 @@ function renderDiagFailedQueue(labFailures, connectorFailures) {
         html += `<tr>
             <td><strong>${esc(r.patient_name || 'Unknown')}</strong><br><small style="color:var(--text3)">${esc(r.patient_phone)}</small></td>
             <td><span class="badge badge-failed">WhatsApp Send</span><br><small style="color:var(--text3)">${esc(r.report_name)}</small></td>
-            <td><small style="color:var(--red)">${esc(r.error_message || 'Delivery rejected')}</small></td>
+            <td class="cell-wrap"><small style="color:var(--red)">${esc(r.error_message || 'Delivery rejected')}</small></td>
             <td><small style="color:var(--text3)">${dateStr}</small></td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="retryFailedReport('${r.id}')">🔄 Retry</button>
@@ -4624,7 +4645,7 @@ function renderDiagFailedQueue(labFailures, connectorFailures) {
         html += `<tr>
             <td><strong>${esc(r.patient_name || 'Unknown')}</strong><br><small style="color:var(--text3)">VAM: ${esc(r.vam_id)}</small></td>
             <td><span class="badge badge-pending">Connector Download</span><br><small style="color:var(--text3)">${esc(r.external_report_id)}</small></td>
-            <td><small style="color:var(--amber)">${esc(r.last_error || 'Download failed')}</small></td>
+            <td class="cell-wrap"><small style="color:var(--amber)">${esc(r.last_error || 'Download failed')}</small></td>
             <td><small style="color:var(--text3)">${dateStr}</small></td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="resolveFailedReport('${r.id}')">Mark Resolved</button>
