@@ -3429,43 +3429,33 @@ async def get_lab_report_deliveries(
     try:
         # Match the proven stats endpoint pattern: fetch rows, filter in Python.
         # This avoids PostgREST timezone comparison issues with .gte() on TIMESTAMPTZ.
-        query = supabase.table("lab_reports").select(
+        cols = (
             "id, clinic_id, patient_phone, patient_name, report_name, report_type, "
-            "status, sent_at, uploaded_at, source, external_report_id, error_message"
+            "status, sent_at, uploaded_at, source, external_report_id, error_message, "
+            "whatsapp_message_id, delivery_status, delivery_error, delivery_updated_at"
         )
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
-        res = query.order("uploaded_at", desc=True).limit(500).execute()
-        all_records = res.data or []
+        try:
+            query = supabase.table("lab_reports").select(cols)
+            if effective_clinic_id != "default":
+                query = query.eq("clinic_id", effective_clinic_id)
+            res = query.order("uploaded_at", desc=True).limit(500).execute()
+            all_records = res.data or []
+        except Exception:
+            # Fallback for any older schema variations
+            query = supabase.table("lab_reports").select("*")
+            if effective_clinic_id != "default":
+                query = query.eq("clinic_id", effective_clinic_id)
+            res = query.order("uploaded_at", desc=True).limit(500).execute()
+            all_records = res.data or []
 
         # Python-side date filter (same approach as diagnostic/stats)
         records = [r for r in all_records if (r.get("uploaded_at") or "") >= cutoff]
-
-        # Enrich with delivery receipt columns (may not exist if migration 041 missing)
-        if records:
-            try:
-                wamids = [r.get("id") for r in records if r.get("id")]
-                receipt_query = supabase.table("lab_reports").select(
-                    "id, whatsapp_message_id, delivery_status, delivery_error, delivery_updated_at"
-                ).in_("id", wamids).execute()
-                receipt_map = {r["id"]: r for r in (receipt_query.data or [])}
-                for r in records:
-                    receipt = receipt_map.get(r.get("id"), {})
-                    r["delivery_status"] = receipt.get("delivery_status")
-                    r["delivery_error"] = receipt.get("delivery_error")
-                    r["delivery_updated_at"] = receipt.get("delivery_updated_at")
-                    r["whatsapp_message_id"] = receipt.get("whatsapp_message_id")
-            except Exception as receipt_err:
-                logger.debug(f"Could not enrich delivery receipts (migration 041 may be missing): {receipt_err}")
-                for r in records:
-                    r.setdefault("delivery_status", None)
-                    r.setdefault("delivery_error", None)
-                    r.setdefault("delivery_updated_at", None)
 
         logger.info(
             f"Delivery log query: clinic={effective_clinic_id}, cutoff={cutoff}, "
             f"state_filter={state}, total_fetched={len(all_records)}, after_date_filter={len(records)}"
         )
+
 
 
         deliveries = []

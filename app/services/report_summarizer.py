@@ -1,18 +1,18 @@
-"""AI-powered lab report summarizer using Groq.
+"""AI-powered lab report summarizer using OpenRouter (DeepSeek / configurable).
 
 Security: Integrates PII sanitization middleware (app/utils/pii_sanitizer.py)
 to strip patient-identifying information from report text BEFORE sending it
-to the Groq external API. Patient name is restored in the final message.
+to the OpenRouter external API. Patient name is restored in the final message.
 
 Compliant with India DPDP Act 2023 data minimization requirements.
 """
 
 import json
 import logging
-
-from groq import Groq
+from typing import Any, Dict
 
 from app.config import settings
+from app.services.ai_engine import call_openrouter_with_backoff
 from app.utils.pii_sanitizer import (
     sanitize_report_text,
     restore_pii,
@@ -21,18 +21,16 @@ from app.utils.pii_sanitizer import (
 
 logger = logging.getLogger(__name__)
 
-groq_client = Groq(api_key=settings.groq_api_key)
-
 
 class ReportSummarizer:
-    """Summarize lab reports into patient-friendly messages using Groq AI."""
+    """Summarize lab reports into patient-friendly messages using OpenRouter AI."""
 
     async def summarize(
         self, report_text: str, patient_name: str, report_type: str
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """Summarize a lab report and return structured result.
 
-        PII is stripped before calling Groq and restored in the output.
+        PII is stripped before calling OpenRouter and restored in the output.
         """
 
         if not report_text or len(report_text) < 50:
@@ -47,64 +45,79 @@ class ReportSummarizer:
         # ── End PII Sanitization ───────────────────────────────────────────────
 
         try:
-            response = groq_client.chat.completions.create(
-                model=settings.groq_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a medical report interpreter for a hospital WhatsApp bot in India. "
-                            "Your job is to read lab reports and explain them in simple, clear language that a "
-                            "non-medical patient can understand. Always be reassuring but honest. Use simple English. "
-                            "Never give diagnosis. Always recommend consulting the doctor for anything abnormal. "
-                            "Respond ONLY in valid JSON with no markdown, no backticks, no preamble."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            # Use patient_name directly for context (sanitized_text has it redacted)
-                            f"Patient name: {patient_name}\n"
-                            f"Report type: {report_type}\n"
-                            # Send sanitized text — no raw PII reaches Groq
-                            f"Report text:\n{sanitized_text[:3000]}\n\n"
-                            "Respond with JSON in exactly this format:\n"
-                            "{\n"
-                            '  "summary_lines": ["line1", "line2", "line3"],\n'
-                            '  "has_abnormal_values": true or false,\n'
-                            '  "patient_message": "A 2-3 sentence plain English message to send to the patient '
-                            "explaining the key findings. Start with their name. End with advising them to consult "
-                            'their doctor if anything is marked abnormal.",\n'
-                            '  "doctor_flag_reason": "One sentence reason to flag for doctor review, or null if '
-                            'everything is normal"\n'
-                            "}"
-                        ),
-                    },
-                ],
-                timeout=15,
-                max_tokens=500,
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a medical report interpreter for a hospital WhatsApp bot in India. "
+                        "Your job is to read lab reports and explain them in simple, clear language that a "
+                        "non-medical patient can understand. Always be reassuring but honest. Use simple English. "
+                        "Never give diagnosis. Always recommend consulting the doctor for anything abnormal. "
+                        "Respond ONLY in valid JSON with no markdown, no backticks, no preamble."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        # Use patient_name directly for context (sanitized_text has it redacted)
+                        f"Patient name: {patient_name}\n"
+                        f"Report type: {report_type}\n"
+                        # Send sanitized text — no raw PII reaches OpenRouter
+                        f"Report text:\n{sanitized_text[:3000]}\n\n"
+                        "Respond with JSON in exactly this format:\n"
+                        "{\n"
+                        '  "summary_lines": ["line1", "line2", "line3"],\n'
+                        '  "has_abnormal_values": true or false,\n'
+                        '  "patient_message": "A 2-3 sentence plain English message to send to the patient '
+                        "explaining the key findings. Start with their name. End with advising them to consult "
+                        'their doctor if anything is marked abnormal.",\n'
+                        '  "doctor_flag_reason": "One sentence reason to flag for doctor review, or null if '
+                        'everything is normal"\n'
+                        "}"
+                    ),
+                },
+            ]
+
+            response = await call_openrouter_with_backoff(
+                messages=messages,
+                timeout=float(settings.openrouter_timeout or 12),
+                max_tokens=600,
+                response_format={"type": "json_object"},
             )
 
-            content = response.choices[0].message.content.strip()
+            if isinstance(response, dict) and "choices" in response:
+                content = response["choices"][0]["message"]["content"]
+            elif hasattr(response, "choices"):
+                choice = response.choices[0]
+                content = getattr(choice.message, "content", None) or choice.message["content"]
+            else:
+                raise ValueError(f"Unexpected LLM response format: {type(response)}")
+
+            content = content.strip()
 
             # Strip markdown code fences if present
             if "```json" in content:
-                content = content.split("```json")[1].split("```")[0]
+                content = content.split("```json", 1)[1].split("```", 1)[0].strip()
             elif "```" in content:
-                parts = content.split("```")
-                content = parts[1] if len(parts) > 1 else content
+                content = content.split("```", 1)[1].split("```", 1)[0].strip()
+
+            # Robust JSON boundary extraction
+            start_idx = content.find("{")
+            end_idx = content.rfind("}")
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                content = content[start_idx : end_idx + 1]
 
             parsed = json.loads(content.strip())
 
             # ── Restore patient name in the patient-facing message ─────────────
             patient_msg = parsed.get("patient_message", "")
-            if redaction_map:
+            if redaction_map and patient_msg:
                 patient_msg = restore_pii(patient_msg, redaction_map)
             # ── End PII Restore ────────────────────────────────────────────────
 
             return {
                 "patient_message": patient_msg,
-                "has_abnormal": parsed.get("has_abnormal_values", False),
+                "has_abnormal": bool(parsed.get("has_abnormal_values", False)),
                 "doctor_flag_reason": parsed.get("doctor_flag_reason"),
                 "fallback": False,
             }

@@ -2,7 +2,7 @@
 
 A zero-LLM deterministic safety layer that intercepts messages requesting
 medical advice, medication recommendations, or diagnoses BEFORE they reach
-the Groq LLM.
+the OpenRouter LLM.
 
 This protects the hospital against National Medical Commission (NMC) liability
 for AI-generated medical advice. The LLM is NEVER called for these inputs.

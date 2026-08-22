@@ -164,8 +164,10 @@ async def call_openrouter_with_backoff(
     messages: List[Dict[str, str]],
     timeout: float = 5,
     max_tokens: int = 200,
+    temperature: float = 0.1,
     response_format: Optional[Dict[str, str]] = None,
     clinic_id: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> Any:
     """Execute completion via OpenRouter provider with standard budget."""
     # Check if groq_client was patched in unit tests
@@ -184,7 +186,9 @@ async def call_openrouter_with_backoff(
 
     return await llm_provider.create_chat_completion(
         messages=messages,
+        model=model,
         max_tokens=max_tokens,
+        temperature=temperature,
         response_format=response_format,
         timeout=timeout,
     )
@@ -192,6 +196,7 @@ async def call_openrouter_with_backoff(
 
 # Backward-compatibility alias
 call_groq_with_backoff = call_openrouter_with_backoff
+
 
 
 # ─── Intent & Symptom Keyword Dictionaries (Deterministic Fallbacks) ──────────

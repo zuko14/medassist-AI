@@ -1,7 +1,7 @@
 """PII Sanitization Middleware for MediAssist AI.
 
 Scrubs personally identifiable information (PII) from lab report text
-BEFORE sending it to external LLM APIs (Groq), preventing patient data
+BEFORE sending it to external LLM APIs (OpenRouter), preventing patient data
 leakage to third-party services.
 
 Compliant with India DPDP Act 2023 data minimization requirements.
