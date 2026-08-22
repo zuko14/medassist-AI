@@ -3494,14 +3494,28 @@ async def get_lab_report_deliveries(
                 derived_state = status_col or "pending"
 
             if state != "all":
-                if state == "delivered" and derived_state not in ("delivered", "sent", "read"):
-                    continue
-                elif state == "failed" and derived_state != "failed":
-                    continue
-                elif state == "pending" and derived_state not in ("pending", "awaiting_receipt"):
-                    continue
-                elif state == "needs_review" and derived_state != "needs_review":
-                    continue
+                if state == "delivered":
+                    is_delivered = (
+                        derived_state in ("delivered", "sent", "read")
+                        or status_col == "sent"
+                        or delivery_status in ("sent", "delivered", "read")
+                    )
+                    if not is_delivered or status_col == "failed" or delivery_status == "failed":
+                        continue
+                elif state == "failed":
+                    is_failed = derived_state == "failed" or status_col == "failed" or delivery_status == "failed"
+                    if not is_failed:
+                        continue
+                elif state == "needs_review":
+                    if derived_state != "needs_review" and status_col != "needs_review":
+                        continue
+                elif state == "pending":
+                    if (
+                        derived_state not in ("pending", "awaiting_receipt")
+                        and status_col != "pending"
+                    ):
+                        continue
+
 
             phone = r.get("patient_phone") or ""
             deliveries.append({

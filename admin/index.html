@@ -4657,6 +4657,7 @@ function renderDiagFailedQueue(labFailures, connectorFailures) {
     el.innerHTML = html;
 }
 
+let _allDiagDeliveries = [];
 let _diagDeliveryFilter = 'all';
 
 function filterDiagDeliveries(state) {
@@ -4671,20 +4672,46 @@ function filterDiagDeliveries(state) {
             }
         }
     });
-    loadDiagDeliveries();
+    applyDiagDeliveryFilter();
+}
+
+function applyDiagDeliveryFilter() {
+    if (!_allDiagDeliveries) return;
+    let filtered = _allDiagDeliveries;
+    if (_diagDeliveryFilter === 'delivered') {
+        filtered = _allDiagDeliveries.filter(d => 
+            (d.state === 'delivered' || d.status === 'sent' || d.delivery_status === 'sent' || d.delivery_status === 'delivered' || d.delivery_status === 'read') &&
+            d.state !== 'failed' && d.status !== 'failed' && d.delivery_status !== 'failed'
+        );
+    } else if (_diagDeliveryFilter === 'failed') {
+        filtered = _allDiagDeliveries.filter(d => 
+            d.state === 'failed' || d.status === 'failed' || d.delivery_status === 'failed'
+        );
+    } else if (_diagDeliveryFilter === 'needs_review') {
+        filtered = _allDiagDeliveries.filter(d => 
+            d.state === 'needs_review' || d.status === 'needs_review'
+        );
+    } else if (_diagDeliveryFilter === 'pending') {
+        filtered = _allDiagDeliveries.filter(d => 
+            (d.state === 'pending' || d.status === 'pending') &&
+            d.state !== 'delivered' && d.status !== 'sent' && d.delivery_status !== 'sent'
+        );
+    }
+    renderDiagDeliveries(filtered);
 }
 
 async function loadDiagDeliveries() {
     const el = document.getElementById('diagDeliveryLog');
     if (!el) return;
     try {
-        const filterQuery = _diagDeliveryFilter === 'all' ? '' : `?state=${_diagDeliveryFilter}`;
-        const res = await api('/admin/lab-reports/deliveries' + filterQuery);
-        renderDiagDeliveries(res.deliveries || []);
+        const res = await api('/admin/lab-reports/deliveries');
+        _allDiagDeliveries = res.deliveries || [];
+        applyDiagDeliveryFilter();
     } catch (e) {
         el.innerHTML = emptyState('warning', 'Failed to load delivery log.');
     }
 }
+
 
 function renderDiagDeliveries(items) {
     const el = document.getElementById('diagDeliveryLog');
