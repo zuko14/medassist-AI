@@ -4660,6 +4660,36 @@ function renderDiagFailedQueue(labFailures, connectorFailures) {
 let _allDiagDeliveries = [];
 let _diagDeliveryFilter = 'all';
 
+function getDeliveryItemState(d) {
+    if (!d) return 'pending';
+    const status = (d.status || '').toLowerCase();
+    const delStatus = (d.delivery_status || '').toLowerCase();
+    const state = (d.state || '').toLowerCase();
+
+    // 1. If explicitly failed
+    if (state === 'failed' || status === 'failed' || delStatus === 'failed') {
+        return 'failed';
+    }
+
+    // 2. If needs review / unmatched
+    if (state === 'needs_review' || status === 'needs_review') {
+        return 'needs_review';
+    }
+
+    // 3. If delivered, sent, or read confirmation received
+    if (
+        delStatus === 'read' ||
+        delStatus === 'delivered' ||
+        delStatus === 'sent' ||
+        status === 'sent' ||
+        state === 'delivered'
+    ) {
+        return 'delivered';
+    }
+
+    return 'pending';
+}
+
 function filterDiagDeliveries(state) {
     _diagDeliveryFilter = state || 'all';
     ['all', 'delivered', 'pending', 'failed', 'needs_review'].forEach(s => {
@@ -4680,7 +4710,6 @@ function applyDiagDeliveryFilter() {
     if (!el) return;
 
     if (!_allDiagDeliveries || _allDiagDeliveries.length === 0) {
-        // If not loaded yet, fetch and apply
         loadDiagDeliveries();
         return;
     }
@@ -4688,37 +4717,10 @@ function applyDiagDeliveryFilter() {
     let filtered = _allDiagDeliveries;
     const filter = (_diagDeliveryFilter || 'all').toLowerCase();
 
-    if (filter === 'delivered') {
-        filtered = _allDiagDeliveries.filter(d => {
-            const st = (d.state || '').toLowerCase();
-            const status = (d.status || '').toLowerCase();
-            const delSt = (d.delivery_status || '').toLowerCase();
-            const isFailed = st === 'failed' || status === 'failed' || delSt === 'failed';
-            if (isFailed) return false;
-            return st === 'delivered' || st === 'sent' || status === 'sent' || delSt === 'sent' || delSt === 'delivered' || delSt === 'read';
-        });
-    } else if (filter === 'failed') {
-        filtered = _allDiagDeliveries.filter(d => {
-            const st = (d.state || '').toLowerCase();
-            const status = (d.status || '').toLowerCase();
-            const delSt = (d.delivery_status || '').toLowerCase();
-            return st === 'failed' || status === 'failed' || delSt === 'failed';
-        });
-    } else if (filter === 'needs_review') {
-        filtered = _allDiagDeliveries.filter(d => {
-            const st = (d.state || '').toLowerCase();
-            const status = (d.status || '').toLowerCase();
-            return st === 'needs_review' || status === 'needs_review';
-        });
-    } else if (filter === 'pending') {
-        filtered = _allDiagDeliveries.filter(d => {
-            const st = (d.state || '').toLowerCase();
-            const status = (d.status || '').toLowerCase();
-            const delSt = (d.delivery_status || '').toLowerCase();
-            const isDelivered = st === 'delivered' || st === 'sent' || status === 'sent' || delSt === 'sent' || delSt === 'delivered' || delSt === 'read';
-            const isFailed = st === 'failed' || status === 'failed' || delSt === 'failed';
-            return !isDelivered && !isFailed;
-        });
+    if (filter === 'all') {
+        filtered = _allDiagDeliveries;
+    } else {
+        filtered = _allDiagDeliveries.filter(d => getDeliveryItemState(d) === filter);
     }
 
     renderDiagDeliveries(filtered);
@@ -4736,8 +4738,6 @@ async function loadDiagDeliveries() {
     }
 }
 
-
-
 function renderDiagDeliveries(items) {
     const el = document.getElementById('diagDeliveryLog');
     if (!el) return;
@@ -4749,20 +4749,27 @@ function renderDiagDeliveries(items) {
     let html = '<table><thead><tr><th>Time</th><th>Patient</th><th>Phone</th><th>Report Details</th><th>Source</th><th>Status / Delivery Confirmation</th><th>Actions</th></tr></thead><tbody>';
     items.forEach(d => {
         const timeStr = d.sent_at ? new Date(d.sent_at).toLocaleString() : (d.uploaded_at ? new Date(d.uploaded_at).toLocaleString() : '—');
+        const itemState = getDeliveryItemState(d);
         let badgeHtml = '';
-        if (d.delivery_status === 'read') {
-            badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed read by patient">✅ Read</span>`;
-        } else if (d.delivery_status === 'delivered') {
-            badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed delivery to device">✅ Delivered</span>`;
-        } else if (d.state === 'delivered' || d.status === 'sent' || d.delivery_status === 'sent') {
-            badgeHtml = `<span class="badge badge-confirmed" style="background:rgba(0,200,115,0.15); color:var(--green);" title="Delivered / Sent to WhatsApp">✅ Delivered</span>`;
-        } else if (d.state === 'failed' || d.status === 'failed' || d.delivery_status === 'failed') {
-            badgeHtml = `<span class="badge badge-failed" title="${esc(d.delivery_error || 'Delivery failed')}">❌ Failed</span><br><small style="color:var(--red); font-size:0.75rem;">${esc(d.delivery_error || 'Delivery failed')}</small>`;
-        } else if (d.state === 'needs_review' || d.status === 'needs_review') {
+
+        if (itemState === 'failed') {
+            const err = d.delivery_error || d.error_message || 'Delivery failed';
+            badgeHtml = `<span class="badge badge-failed" title="${esc(err)}">❌ Failed</span><br><small style="color:var(--red); font-size:0.75rem;">${esc(err)}</small>`;
+        } else if (itemState === 'needs_review') {
             badgeHtml = `<span class="badge badge-pending" title="Unmatched or requires review">🟠 Unmatched</span>`;
+        } else if (itemState === 'delivered') {
+            const delSt = (d.delivery_status || '').toLowerCase();
+            if (delSt === 'read') {
+                badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed read by patient">✅ Read</span>`;
+            } else if (delSt === 'delivered') {
+                badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed delivery to device">✅ Delivered</span>`;
+            } else {
+                badgeHtml = `<span class="badge badge-confirmed" style="background:rgba(0,200,115,0.15); color:var(--green);" title="Delivered / Sent to WhatsApp">✅ Delivered</span>`;
+            }
         } else {
             badgeHtml = `<span class="badge badge-pending" title="Pending">🕓 Pending</span>`;
         }
+
 
 
         const sourceBadge = d.source === 'mocdoc' 

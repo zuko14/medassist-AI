@@ -3477,45 +3477,25 @@ async def get_lab_report_deliveries(
 
         deliveries = []
         for r in records:
-            status_col = r.get("status")
-            delivery_status = r.get("delivery_status")
+            status_col = (r.get("status") or "").lower()
+            delivery_status = (r.get("delivery_status") or "").lower()
             sent_at = r.get("sent_at")
             delivery_updated_at = r.get("delivery_updated_at")
 
-            # Derive single state for UI badge and filter tabs:
-            # A report is 'delivered' if status is 'sent' or delivery_status is 'sent'/'delivered'/'read'
+            # Unified state derivation matching frontend getDeliveryItemState:
             if status_col == "failed" or delivery_status == "failed":
                 derived_state = "failed"
             elif status_col == "needs_review":
                 derived_state = "needs_review"
-            elif delivery_status in ("read", "delivered") or status_col == "sent" or delivery_status == "sent":
+            elif status_col == "sent" or delivery_status in ("read", "delivered", "sent"):
                 derived_state = "delivered"
             else:
                 derived_state = status_col or "pending"
 
             if state != "all":
-                if state == "delivered":
-                    is_delivered = (
-                        derived_state in ("delivered", "sent", "read")
-                        or status_col == "sent"
-                        or delivery_status in ("sent", "delivered", "read")
-                    )
-                    if not is_delivered or status_col == "failed" or delivery_status == "failed":
-                        continue
-                elif state == "failed":
-                    is_failed = derived_state == "failed" or status_col == "failed" or delivery_status == "failed"
-                    if not is_failed:
-                        continue
-                elif state == "needs_review":
-                    if derived_state != "needs_review" and status_col != "needs_review":
-                        continue
-                elif state == "pending":
-                    if (
-                        derived_state not in ("pending", "awaiting_receipt")
-                        and status_col != "pending"
-                    ):
-                        continue
-
+                target_state = state.lower()
+                if derived_state != target_state:
+                    continue
 
             phone = r.get("patient_phone") or ""
             deliveries.append({
