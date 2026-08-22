@@ -1,6 +1,7 @@
 """Webhook router for WhatsApp Cloud API (Multi-Tenant) — Security Hardened."""
 
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException, Query, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 
@@ -69,6 +70,10 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
         for entry in payload.entry:
             for change in entry.changes:
+                if change.value.statuses:
+                    for status in change.value.statuses:
+                        background_tasks.add_task(record_delivery_status, status)
+
                 if change.value.messages:
                     metadata = change.value.metadata
                     display_phone = metadata.get("display_phone_number")
@@ -91,6 +96,30 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.error(f"Error processing webhook: {e}")
         # Never expose stack traces in webhook responses
         return {"status": "error"}
+
+
+async def record_delivery_status(status: dict) -> None:
+    """Persist a Meta delivery receipt (sent/delivered/read/failed).
+
+    Without this a report reads status='sent' while Meta already reported it
+    undeliverable — invisible to staff.
+    """
+    wamid = status.get("id")
+    state = status.get("status")
+    if not wamid or not state:
+        return
+    err = (status.get("errors") or [{}])[0]
+    try:
+        from app.database import supabase
+        supabase.table("lab_reports").update({
+            "delivery_status": state,
+            "delivery_error": err.get("title") or err.get("message") if err else None,
+            "delivery_updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("whatsapp_message_id", wamid).execute()
+        if state == "failed":
+            logger.error(f"Meta delivery FAILED for wamid {wamid}: {err}")
+    except Exception as e:
+        logger.warning(f"Could not record delivery status for {wamid}: {e}")
 
 
 async def process_message_safe(message, display_phone: str, raw_payload: dict):

@@ -97,58 +97,102 @@ class LabReportService:
         # Steps D, E, F — WhatsApp delivery
         sent_ok = False
         error_message = None
+        capture = {}
         try:
             clinic = await get_clinic_by_id(clinic_id)
+            from app.services.message_queue import acquire_phone_lock_with_timeout
 
-            # Step D — Upload PDF to WhatsApp media
-            media_id = await whatsapp_service.upload_media(
-                clinic, file_bytes, filename, content_type
-            )
+            async with acquire_phone_lock_with_timeout(patient_phone):
+                if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
+                    template = settings.lab_report_template_name
+                    if not template:
+                        raise ValueError(
+                            "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
+                            "cannot deliver to this patient"
+                        )
+                    media_id = await whatsapp_service.upload_media(
+                        clinic, file_bytes, filename, content_type
+                    )
+                    if not media_id:
+                        raise ValueError("Failed to upload media to WhatsApp")
+                    sent_ok = await whatsapp_service.send_template(
+                        clinic,
+                        patient_phone,
+                        template_name=template,
+                        components=[
+                            {
+                                "type": "header",
+                                "parameters": [
+                                    {
+                                        "type": "document",
+                                        "document": {"id": media_id, "filename": filename},
+                                    }
+                                ],
+                            },
+                            {
+                                "type": "body",
+                                "parameters": [
+                                    {"type": "text", "text": patient_name},
+                                    {"type": "text", "text": report_name},
+                                ],
+                            },
+                        ],
+                        _source="lab_reports",
+                        _capture=capture,
+                    )
+                    if not sent_ok:
+                        raise ValueError("WhatsApp rejected the utility template send")
+                else:
+                    # Step D — Upload PDF to WhatsApp media
+                    media_id = await whatsapp_service.upload_media(
+                        clinic, file_bytes, filename, content_type
+                    )
 
-            if not media_id:
-                raise ValueError("Failed to upload media to WhatsApp")
+                    if not media_id:
+                        raise ValueError("Failed to upload media to WhatsApp")
 
-            # Step E — Send AI summary message to patient
-            if not ai_result["fallback"]:
-                summary_message = (
-                    f"🏥 *{clinic['name']} — Lab Report Ready*\n\n"
-                    f"Dear {patient_name},\n\n"
-                    f"{ai_result['patient_message']}"
-                )
-                if ai_result["has_abnormal"]:
-                    summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
-                summary_message += "\n\n📄 Your full report is attached below."
-                text_sent = await whatsapp_service.send_text(
-                    clinic, patient_phone, summary_message, _source="lab_reports"
-                )
-            else:
-                fallback_text = (
-                    f"🏥 *{clinic['name']}*\n\n"
-                    f"Dear {patient_name}, your *{report_type}* report is ready. "
-                    f"Please find the full report attached below. "
-                    f"Consult your doctor for interpretation."
-                )
-                text_sent = await whatsapp_service.send_text(
-                    clinic, patient_phone, fallback_text, _source="lab_reports"
-                )
+                    # Step E — Send AI summary message to patient
+                    if not ai_result["fallback"]:
+                        summary_message = (
+                            f"🏥 *{clinic['name']} — Lab Report Ready*\n\n"
+                            f"Dear {patient_name},\n\n"
+                            f"{ai_result['patient_message']}"
+                        )
+                        if ai_result["has_abnormal"]:
+                            summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
+                        summary_message += "\n\n📄 Your full report is attached below."
+                        text_sent = await whatsapp_service.send_text(
+                            clinic, patient_phone, summary_message, _source="lab_reports"
+                        )
+                    else:
+                        fallback_text = (
+                            f"🏥 *{clinic['name']}*\n\n"
+                            f"Dear {patient_name}, your *{report_type}* report is ready. "
+                            f"Please find the full report attached below. "
+                            f"Consult your doctor for interpretation."
+                        )
+                        text_sent = await whatsapp_service.send_text(
+                            clinic, patient_phone, fallback_text, _source="lab_reports"
+                        )
 
-            if not text_sent:
-                raise ValueError(
-                    "WhatsApp API rejected the summary message — check recipient allowlist and 24h session window"
-                )
+                    if not text_sent:
+                        raise ValueError(
+                            "WhatsApp API rejected the summary message — check recipient allowlist and 24h session window"
+                        )
 
-            # Step F — Send the actual PDF document
-            caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
-            doc_sent = await whatsapp_service.send_document(
-                clinic, patient_phone, media_id, filename, caption, _source="lab_reports"
-            )
+                    # Step F — Send the actual PDF document
+                    caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
+                    doc_sent = await whatsapp_service.send_document(
+                        clinic, patient_phone, media_id, filename, caption,
+                        _source="lab_reports", _capture=capture,
+                    )
 
-            if not doc_sent:
-                raise ValueError(
-                    "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
-                )
+                    if not doc_sent:
+                        raise ValueError(
+                            "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
+                        )
 
-            sent_ok = True
+                    sent_ok = True
             logger.info(f"Report sent successfully to {mask_phone(patient_phone)}")
         except Exception as e:
             logger.error(f"WhatsApp send failed for {mask_phone(patient_phone)}: {e}")
@@ -165,6 +209,8 @@ class LabReportService:
             "ai_summary": ai_result.get("patient_message"),
             "has_abnormal_values": ai_result.get("has_abnormal", False),
             "status": "sent" if sent_ok else "failed",
+            "whatsapp_message_id": capture.get("meta_message_id"),
+            "delivery_status": "sent" if sent_ok else "failed",
             "external_report_id": external_report_id,
             "source": source,
             "match_confidence": match_confidence,
@@ -298,60 +344,111 @@ class LabReportService:
 
             clinic = await get_clinic_by_id(report.get("clinic_id", "default"))
             filename = report["file_path"].split("/")[-1]
-            media_id = await whatsapp_service.upload_media(
-                clinic, file_bytes, filename, "application/pdf"
-            )
-
-            if not media_id:
-                raise ValueError("Failed to upload media to WhatsApp")
-
-            # Send summary or fallback text
+            patient_phone = report["patient_phone"]
             patient_name = report.get("patient_name", "Patient")
+            report_name = report.get("report_name", "Lab Report")
             report_type = report.get("report_type", "General")
-            ai_summary = report.get("ai_summary")
+            capture = {}
 
-            if ai_summary:
-                summary_message = (
-                    f"🏥 *{clinic['name']} — Lab Report Ready*\n\n"
-                    f"Dear {patient_name},\n\n"
-                    f"{ai_summary}"
-                )
-                if report.get("has_abnormal_values"):
-                    summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
-                summary_message += "\n\n📄 Your full report is attached below."
-                text_sent = await whatsapp_service.send_text(
-                    clinic, report["patient_phone"], summary_message, _source="lab_reports"
-                )
-            else:
-                fallback_text = (
-                    f"🏥 *{clinic['name']}*\n\n"
-                    f"Dear {patient_name}, your *{report_type}* report is ready. "
-                    f"Please find the full report attached below. "
-                    f"Consult your doctor for interpretation."
-                )
-                text_sent = await whatsapp_service.send_text(
-                    clinic, report["patient_phone"], fallback_text, _source="lab_reports"
-                )
+            from app.services.message_queue import acquire_phone_lock_with_timeout
 
-            if not text_sent:
-                raise ValueError(
-                    "WhatsApp API rejected the summary message — check recipient allowlist and 24h session window"
-                )
+            async with acquire_phone_lock_with_timeout(patient_phone):
+                if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
+                    template = settings.lab_report_template_name
+                    if not template:
+                        raise ValueError(
+                            "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
+                            "cannot deliver to this patient"
+                        )
+                    media_id = await whatsapp_service.upload_media(
+                        clinic, file_bytes, filename, "application/pdf"
+                    )
+                    if not media_id:
+                        raise ValueError("Failed to upload media to WhatsApp")
+                    sent_ok = await whatsapp_service.send_template(
+                        clinic,
+                        patient_phone,
+                        template_name=template,
+                        components=[
+                            {
+                                "type": "header",
+                                "parameters": [
+                                    {
+                                        "type": "document",
+                                        "document": {"id": media_id, "filename": filename},
+                                    }
+                                ],
+                            },
+                            {
+                                "type": "body",
+                                "parameters": [
+                                    {"type": "text", "text": patient_name},
+                                    {"type": "text", "text": report_name},
+                                ],
+                            },
+                        ],
+                        _source="lab_reports",
+                        _capture=capture,
+                    )
+                    if not sent_ok:
+                        raise ValueError("WhatsApp rejected the utility template send")
+                else:
+                    media_id = await whatsapp_service.upload_media(
+                        clinic, file_bytes, filename, "application/pdf"
+                    )
 
-            caption = f"📋 {report['report_name']} | {report_type} | {clinic['name']}"
-            doc_sent = await whatsapp_service.send_document(
-                clinic, report["patient_phone"], media_id, filename, caption, _source="lab_reports"
-            )
+                    if not media_id:
+                        raise ValueError("Failed to upload media to WhatsApp")
 
-            if not doc_sent:
-                raise ValueError(
-                    "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
-                )
+                    # Send summary or fallback text
+                    ai_summary = report.get("ai_summary")
+
+                    if ai_summary:
+                        summary_message = (
+                            f"🏥 *{clinic['name']} — Lab Report Ready*\n\n"
+                            f"Dear {patient_name},\n\n"
+                            f"{ai_summary}"
+                        )
+                        if report.get("has_abnormal_values"):
+                            summary_message += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
+                        summary_message += "\n\n📄 Your full report is attached below."
+                        text_sent = await whatsapp_service.send_text(
+                            clinic, patient_phone, summary_message, _source="lab_reports"
+                        )
+                    else:
+                        fallback_text = (
+                            f"🏥 *{clinic['name']}*\n\n"
+                            f"Dear {patient_name}, your *{report_type}* report is ready. "
+                            f"Please find the full report attached below. "
+                            f"Consult your doctor for interpretation."
+                        )
+                        text_sent = await whatsapp_service.send_text(
+                            clinic, patient_phone, fallback_text, _source="lab_reports"
+                        )
+
+                    if not text_sent:
+                        raise ValueError(
+                            "WhatsApp API rejected the summary message — check recipient allowlist and 24h session window"
+                        )
+
+                    caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
+                    doc_sent = await whatsapp_service.send_document(
+                        clinic, patient_phone, media_id, filename, caption,
+                        _source="lab_reports", _capture=capture,
+                    )
+
+                    if not doc_sent:
+                        raise ValueError(
+                            "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
+                        )
 
             supabase.table("lab_reports").update(
                 {
                     "status": "sent",
                     "sent_at": datetime.now(timezone.utc).isoformat(),
+                    "whatsapp_message_id": capture.get("meta_message_id"),
+                    "delivery_status": "sent",
+                    "delivery_error": None,
                     "error_message": None,
                 }
             ).eq("id", report_id).execute()
@@ -359,6 +456,7 @@ class LabReportService:
             supabase.table("lab_reports").update(
                 {
                     "status": "failed",
+                    "delivery_status": "failed",
                     "error_message": str(e),
                 }
             ).eq("id", report_id).execute()

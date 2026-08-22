@@ -992,6 +992,26 @@
                     </div>
                 </div>
 
+                <!-- 📋 WhatsApp Delivery Log Table -->
+                <div class="card">
+                    <div class="card-head" style="flex-wrap:wrap; gap:10px;">
+                        <div>
+                            <h3>📋 WhatsApp Delivery Log</h3>
+                            <p style="color:var(--text3); font-size:0.8rem; margin-top:2px;">Real-time per-report delivery status and Meta webhook confirmations</p>
+                        </div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;" id="diagFilterButtons">
+                            <button class="btn btn-sm diag-filter-btn active" id="df-all" onclick="filterDiagDeliveries('all')">All</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-delivered" onclick="filterDiagDeliveries('delivered')">✅ Delivered</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-pending" onclick="filterDiagDeliveries('pending')">🕓 Awaiting Receipt</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-failed" onclick="filterDiagDeliveries('failed')">❌ Failed</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-needs_review" onclick="filterDiagDeliveries('needs_review')">🟠 Unmatched</button>
+                        </div>
+                    </div>
+                    <div class="tbl-wrap" id="diagDeliveryLog">
+                        <div class="loader"><div class="spin"></div>Loading delivery log...</div>
+                    </div>
+                </div>
+
                 <!-- 90-Day Retention Notice -->
                 <div class="card" id="diagRetentionCard" style="background:rgba(77,166,255,0.04); border:1px solid rgba(77,166,255,0.2);">
                     <div style="display:flex; gap:14px; align-items:flex-start;">
@@ -4480,16 +4500,28 @@ async function loadDiagnosticDashboard() {
             const connBranch = allBranches.find(b => b.id === conn.branch_id);
             const branchSuffix = (allBranches.filter(b => b.is_active).length > 1 && connBranch)
                 ? ` (${connBranch.short_name || connBranch.name})` : '';
-            if (conn.health === 'healthy') {
+            const runningTag = conn.is_running_now ? ' ⏳ (Executing run now...)' : '';
+
+            if (conn.health === 'active' || conn.health === 'healthy') {
                 statusDot.style.background = 'var(--green)';
                 statusDot.style.boxShadow = '0 0 10px var(--green)';
-                statusTitle.textContent = 'Report Connector: Active & Healthy' + branchSuffix;
+                statusTitle.textContent = 'Report Connector: Active & Healthy' + branchSuffix + runningTag;
                 statusTitle.style.color = '#fff';
-            } else if (conn.health === 'warning') {
+            } else if (conn.health === 'degraded' || conn.health === 'warning') {
                 statusDot.style.background = 'var(--amber)';
                 statusDot.style.boxShadow = '0 0 10px var(--amber)';
-                statusTitle.textContent = 'Report Connector: Warning / Error' + branchSuffix;
+                statusTitle.textContent = 'Report Connector: Running with Errors' + branchSuffix + runningTag;
                 statusTitle.style.color = 'var(--amber)';
+            } else if (conn.health === 'stalled') {
+                statusDot.style.background = 'var(--red)';
+                statusDot.style.boxShadow = '0 0 10px var(--red)';
+                statusTitle.textContent = 'Report Connector: Stalled / Inactive' + branchSuffix;
+                statusTitle.style.color = 'var(--red)';
+            } else if (conn.health === 'never_run') {
+                statusDot.style.background = 'var(--text3)';
+                statusDot.style.boxShadow = 'none';
+                statusTitle.textContent = 'Report Connector: Enabled (Awaiting Initial Run)' + branchSuffix;
+                statusTitle.style.color = 'var(--text2)';
             } else {
                 statusDot.style.background = 'var(--text3)';
                 statusDot.style.boxShadow = 'none';
@@ -4498,7 +4530,7 @@ async function loadDiagnosticDashboard() {
             }
             const lastRunStr = conn.last_run_at ? new Date(conn.last_run_at).toLocaleTimeString() : 'Never';
             statusSub.textContent = `Last run: ${lastRunStr}` + (conn.last_error ? ` · Error: ${conn.last_error}` : '');
-            if (conn.next_run_at) {
+            if (conn.next_run_at && conn.health !== 'disabled') {
                 const nextRun = new Date(conn.next_run_at);
                 const mins = Math.max(0, Math.round((nextRun - new Date()) / 60000));
                 statusSub.textContent += ` · Next run in ~${mins}m`;
@@ -4524,6 +4556,9 @@ async function loadDiagnosticDashboard() {
 
         // Render Failed Deliveries Queue
         renderDiagFailedQueue(queue.failed_reports || [], queue.connector_failures || []);
+
+        // Render WhatsApp Delivery Log
+        loadDiagDeliveries();
 
     } catch (e) {
         console.error('Failed to load diagnostic dashboard:', e);
@@ -4597,6 +4632,80 @@ function renderDiagFailedQueue(labFailures, connectorFailures) {
         </tr>`;
     });
 
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+let _diagDeliveryFilter = 'all';
+
+function filterDiagDeliveries(state) {
+    _diagDeliveryFilter = state;
+    ['all', 'delivered', 'pending', 'failed', 'needs_review'].forEach(s => {
+        const btn = document.getElementById('df-' + s);
+        if (btn) {
+            if (s === state) {
+                btn.className = 'btn btn-sm diag-filter-btn active';
+            } else {
+                btn.className = 'btn btn-sm btn-ghost diag-filter-btn';
+            }
+        }
+    });
+    loadDiagDeliveries();
+}
+
+async function loadDiagDeliveries() {
+    const el = document.getElementById('diagDeliveryLog');
+    if (!el) return;
+    try {
+        const filterQuery = _diagDeliveryFilter === 'all' ? '' : `?state=${_diagDeliveryFilter}`;
+        const res = await api('/admin/lab-reports/deliveries' + filterQuery);
+        renderDiagDeliveries(res.deliveries || []);
+    } catch (e) {
+        el.innerHTML = emptyState('warning', 'Failed to load delivery log.');
+    }
+}
+
+function renderDiagDeliveries(items) {
+    const el = document.getElementById('diagDeliveryLog');
+    if (!el) return;
+    if (!items || items.length === 0) {
+        el.innerHTML = emptyState('info', 'No delivery events match the selected filter.');
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Time</th><th>Patient</th><th>Phone</th><th>Report Details</th><th>Source</th><th>Status / Delivery Confirmation</th><th>Actions</th></tr></thead><tbody>';
+    items.forEach(d => {
+        const timeStr = d.sent_at ? new Date(d.sent_at).toLocaleString() : (d.uploaded_at ? new Date(d.uploaded_at).toLocaleString() : '—');
+        let badgeHtml = '';
+        if (d.state === 'delivered') {
+            badgeHtml = `<span class="badge badge-confirmed" title="Meta confirmed delivery/read">✅ Delivered</span>`;
+        } else if (d.state === 'failed') {
+            badgeHtml = `<span class="badge badge-failed" title="${esc(d.delivery_error || 'Delivery failed')}">❌ Failed</span><br><small style="color:var(--red); font-size:0.75rem;">${esc(d.delivery_error || 'Delivery failed')}</small>`;
+        } else if (d.state === 'needs_review') {
+            badgeHtml = `<span class="badge badge-pending" title="Unmatched or requires review">🟠 Unmatched</span>`;
+        } else if (d.state === 'awaiting_receipt_stale') {
+            badgeHtml = `<span class="badge" style="background:rgba(255,200,87,0.15); color:var(--amber);" title="Sent to Meta >30m ago without delivery receipt">🕓 Sent (No receipt)</span>`;
+        } else {
+            badgeHtml = `<span class="badge badge-pending" title="Sent to WhatsApp">🕓 Sent</span>`;
+        }
+
+        const sourceBadge = d.source === 'mocdoc' 
+            ? `<span class="badge" style="background:rgba(108,99,255,0.15); color:var(--accent2)">MocDoc</span>` 
+            : `<span class="badge" style="background:var(--surface2); color:var(--text3)">Manual</span>`;
+
+        html += `<tr>
+            <td><small style="color:var(--text3)">${timeStr}</small></td>
+            <td><strong>${esc(d.patient_name)}</strong></td>
+            <td><code>${esc(d.patient_phone)}</code></td>
+            <td><strong>${esc(d.report_name)}</strong><br><small style="color:var(--text3)">${esc(d.report_type)}</small></td>
+            <td>${sourceBadge}</td>
+            <td>${badgeHtml}</td>
+            <td>
+                ${d.state === 'failed' ? `<button class="btn btn-ghost btn-sm" onclick="retryFailedReport('${d.id}')">🔄 Retry</button>` : ''}
+                ${d.state === 'needs_review' ? `<button class="btn btn-accent btn-sm" onclick="openResolveMatchModal('${d.id}', '${esc(d.patient_name)}', '${esc(d.patient_phone)}', '${esc(d.report_name)}')">Resolve</button>` : ''}
+            </td>
+        </tr>`;
+    });
     html += '</tbody></table>';
     el.innerHTML = html;
 }

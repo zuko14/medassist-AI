@@ -3485,10 +3485,12 @@ class ConversationManager:
 
     def _next_collection_dates(self, allowed_days_str: str, count: int = 3) -> list[str]:
         """Compute the next `count` calendar dates (YYYY-MM-DD) whose weekday is in allowed_days_str."""
+        from zoneinfo import ZoneInfo
+        IST = ZoneInfo("Asia/Kolkata")
         allowed = {d.strip() for d in allowed_days_str.split(",") if d.strip()}
         day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         out = []
-        cur = datetime.now(timezone.utc).date() + timedelta(days=1)  # start tomorrow
+        cur = datetime.now(IST).date() + timedelta(days=1)  # start tomorrow in IST
         while len(out) < count:
             if day_names[cur.weekday()] in allowed:
                 out.append(cur.strftime("%Y-%m-%d"))
@@ -3636,7 +3638,7 @@ class ConversationManager:
             f"Test: *{context.get('lab_test_name')}*\n"
             f"Date: *{selected_date}*\n"
             f"Amount: *₹{amount_rupees}*\n\n"
-            f"Please complete your payment within 15 minutes to confirm:\n"
+            f"Please complete your payment within {settings.booking_hold_minutes} minutes to confirm:\n"
             f"{result['payment_link']}\n\n"
             f"Ref: `{result['booking_ref']}`"
         )

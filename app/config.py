@@ -79,6 +79,7 @@ class Settings(BaseSettings):
         ""  # Fernet key for encrypting HMIS credentials at rest
     )
     medassist_url: str = "http://localhost:8000"  # Base URL where FastAPI is running
+    lab_report_template_name: str = ""  # Meta pre-approved utility template for reports outside 24h window
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

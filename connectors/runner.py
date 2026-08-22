@@ -30,6 +30,7 @@ import signal
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 # Add project root to path so we can import app modules
@@ -305,7 +306,10 @@ async def run_connector(
         "run_status": "failed",
         "reports_found": 0,
         "reports_new": 0,
+        "reports_matched": 0,
+        "reports_needs_review": 0,
         "reports_uploaded": 0,
+        "reports_delivered": 0,
         "reports_failed": 0,
         "duration_ms": 0,
         "error_message": None,
@@ -448,8 +452,12 @@ async def run_connector(
                     branch_id=branch_id,
                 )
 
+                if match_result.normalized_phone:
+                    meta.patient_phone = match_result.normalized_phone
+
                 if not match_result.is_safe_to_send:
                     summary["reports_failed"] += 1
+                    summary["reports_needs_review"] += 1
                     logger.warning(
                         f"NEEDS_REVIEW for report {meta.external_report_id}: {match_result.review_reason}"
                     )
@@ -482,6 +490,8 @@ async def run_connector(
                     )
                     continue
 
+                summary["reports_matched"] += 1
+
                 # Step 2: Download PDF
                 pdf_bytes = await connector.download_report(meta)
                 if not pdf_bytes:
@@ -505,6 +515,8 @@ async def run_connector(
                     match_source=match_result.match_source,
                     matched_patient_id=match_result.matched_patient_id,
                 )
+                if result.get("success"):
+                    summary["reports_delivered"] += 1
                 if not result.get("already_processed"):
                     summary["reports_uploaded"] += 1
                     logger.info(f"Uploaded: {meta}")
@@ -619,11 +631,14 @@ async def run_connector(
 
 async def run_all_connectors() -> None:
     """Run all enabled connectors (called by scheduler), one per clinic OR
-    per branch for multi-branch diagnostic centers."""
+    per branch for multi-branch diagnostic centers.
+
+    Respects each connector's configured poll_interval_minutes dynamically.
+    """
     logger.info("=== Polling all enabled connectors ===")
 
     result = supabase.table("integration_connectors") \
-        .select("clinic_id, connector_type, branch_id") \
+        .select("clinic_id, connector_type, branch_id, config, last_run_at") \
         .eq("is_enabled", True) \
         .execute()
 
@@ -633,7 +648,23 @@ async def run_all_connectors() -> None:
         logger.info("No enabled connectors found")
         return
 
+    now = datetime.now(timezone.utc)
     for conn in connectors:
+        config = conn.get("config") or {}
+        poll_interval = config.get("poll_interval_minutes", 10)
+        last_run_at = conn.get("last_run_at")
+        if last_run_at:
+            try:
+                last_dt = datetime.fromisoformat(last_run_at.replace("Z", "+00:00"))
+                if (now - last_dt) < timedelta(minutes=poll_interval - 0.5):
+                    logger.debug(
+                        f"Skipping {conn['clinic_id']} branch={conn.get('branch_id')} — "
+                        f"poll interval {poll_interval}m not elapsed since {last_run_at}"
+                    )
+                    continue
+            except Exception:
+                pass
+
         try:
             await run_connector(
                 clinic_id=conn["clinic_id"],
@@ -724,20 +755,20 @@ def start_scheduled_mode():
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Kolkata"))
 
-    # Poll every 10 minutes
+    # Check connectors every 1 minute (each evaluates its own poll_interval_minutes)
     scheduler.add_job(
         run_all_connectors,
-        IntervalTrigger(minutes=10),
+        IntervalTrigger(minutes=1),
         id="poll_connectors",
         replace_existing=True,
     )
 
-    # Storage cleanup daily at 2 AM
+    # Storage cleanup daily at 2 AM IST
     scheduler.add_job(
         cleanup_expired_storage,
-        CronTrigger(hour=2, minute=0),
+        CronTrigger(hour=2, minute=0, timezone=ZoneInfo("Asia/Kolkata")),
         id="cleanup_storage",
         replace_existing=True,
     )
@@ -745,7 +776,7 @@ def start_scheduled_mode():
     scheduler.start()
     logger.info(
         "Connector runner started in scheduled mode. "
-        "Polling every 10 minutes. Storage cleanup daily at 2 AM."
+        "Dynamic per-connector interval (evaluated every 1m). Storage cleanup daily at 2 AM IST."
     )
 
     # Run immediately on startup

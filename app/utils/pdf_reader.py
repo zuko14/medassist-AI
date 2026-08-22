@@ -1,5 +1,8 @@
-import pdfplumber
 import io
+import logging
+import pdfplumber
+
+logger = logging.getLogger(__name__)
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
@@ -12,5 +15,6 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
                 if page_text:
                     text += page_text + "\n"
             return text.strip()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"PDF text extraction failed ({type(e).__name__}: {e})")
         return ""

@@ -111,6 +111,20 @@ async def receive_lab_report(
     if len(file_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
+    # A MocDoc session timeout / error page downloads as a valid-looking .pdf.
+    # Without this it is summarised to "", sent to the patient as their report,
+    # and recorded delivered — never retried. Reject so the connector records a
+    # failure and retries next poll.
+    if not file_bytes.startswith(b"%PDF"):
+        logger.error(
+            f"INVALID_PDF for {external_report_id}: missing %PDF header "
+            f"({len(file_bytes)} bytes, starts {file_bytes[:16]!r})"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Downloaded file is not a valid PDF (missing %PDF header)",
+        )
+
     filename = file.filename or f"{external_report_id}.pdf"
     content_type = file.content_type or "application/pdf"
 

@@ -53,8 +53,9 @@ def _parse_patient_cell(cell_text: str) -> dict:
     phone = phone_match.group(1) if phone_match else None
 
     # Normalize to E.164 format
-    if phone and not phone.startswith("+"):
-        phone = "+" + phone
+    if phone:
+        from app.utils.validators import normalize_phone
+        phone = normalize_phone(phone.lstrip("+"))
 
     return {
         "patient_name": patient_name,
@@ -696,95 +697,119 @@ class MocDocConnector(HospitalConnector):
         except Exception as e:
             logger.debug(f"Could not set entries to 100: {e}")
 
-        # Parse table rows (with retry if table hasn't loaded yet)
-        rows = self._page.locator(S.REPORT_ROWS)
-        row_count = await rows.count()
+        # Preload processed IDs from database to eliminate duplicate processing
+        try:
+            from app.database import supabase
+            processed_query = (
+                supabase.table("integration_processed_reports")
+                .select("external_report_id")
+                .eq("clinic_id", self.clinic_id)
+                .eq("connector_type", self.connector_type)
+            )
+            processed_res = processed_query.execute()
+            for r in (processed_res.data or []):
+                if r.get("external_report_id"):
+                    self._processed_ids.add(r["external_report_id"])
+            logger.info(f"Preloaded {len(self._processed_ids)} processed report IDs from database")
+        except Exception as e_p:
+            logger.warning(f"Could not preload processed report IDs: {e_p}")
 
-        if row_count == 0:
-            # Wait and retry — MocDoc may still be loading
-            logger.info("No rows yet — waiting 5s for table to load...")
-            await self._page.wait_for_timeout(5000)
-            await self._dismiss_all_modals()
+        # Parse table rows across pages (with pagination support)
+        max_pages = 5
+        for page_idx in range(max_pages):
+            rows = self._page.locator(S.REPORT_ROWS)
             row_count = await rows.count()
 
-        if row_count == 0:
-            logger.info("No reports found in Pending Print tab")
-            return reports
+            if row_count == 0 and page_idx == 0:
+                # Wait and retry — MocDoc may still be loading
+                logger.info("No rows yet — waiting 5s for table to load...")
+                await self._page.wait_for_timeout(5000)
+                await self._dismiss_all_modals()
+                row_count = await rows.count()
 
-        logger.info(f"Found {row_count} rows in Pending Print table")
+            if row_count == 0:
+                if page_idx == 0:
+                    logger.info("No reports found in Pending Print tab")
+                break
 
-        for i in range(row_count):
-            try:
-                row = rows.nth(i)
-                row_text = await row.inner_text()
+            logger.info(f"Page {page_idx + 1}: Found {row_count} rows in Pending Print table")
 
-                # Debug: log the first 3 row texts to understand table format
-                if i < 3:
-                    # Compact display: replace newlines with | for readability
-                    compact = " | ".join(
-                        part.strip() for part in row_text.split("\n") if part.strip()
+            for i in range(row_count):
+                try:
+                    row = rows.nth(i)
+                    row_text = await row.inner_text()
+
+                    # Debug: log first 3 rows of first page
+                    if i < 3 and page_idx == 0:
+                        compact = " | ".join(
+                            part.strip() for part in row_text.split("\n") if part.strip()
+                        )
+                        logger.info(f"ROW[{i}] raw: {compact[:300]}")
+
+                    # Skip empty or header rows
+                    if not row_text.strip() or S.EMPTY_TABLE_TEXT in row_text:
+                        continue
+
+                    # Parse patient cell (first column)
+                    cells = row.locator("td")
+                    cell_count = await cells.count()
+
+                    if cell_count == 0:
+                        continue
+
+                    first_cell_text = await cells.first.inner_text()
+                    parsed = _parse_patient_cell(first_cell_text)
+
+                    if not parsed["phone"]:
+                        logger.warning(
+                            f"No phone number for {parsed['patient_name']} "
+                            f"(VAM: {parsed['vam_id']}) — skipping"
+                        )
+                        continue
+
+                    if not parsed["vam_id"]:
+                        logger.warning(
+                            f"No VAM ID for {parsed['patient_name']} — skipping"
+                        )
+                        continue
+
+                    meta = ReportMetadata(
+                        patient_name=parsed["patient_name"],
+                        patient_phone=parsed["phone"],
+                        report_name="",       # filled during download
+                        report_type="Laboratory",
+                        external_report_id=parsed["vam_id"],  # preliminary
+                        vam_id=parsed["vam_id"],
                     )
-                    logger.info(f"ROW[{i}] raw: {compact[:300]}")
+                    reports.append(meta)
+                    logger.info(
+                        f"Parsed: {parsed['patient_name']} | "
+                        f"{parsed['vam_id']} | ***{parsed['phone'][-4:]}"
+                    )
 
-                # Skip empty or header rows
-                if not row_text.strip() or S.EMPTY_TABLE_TEXT in row_text:
+                except Exception as e:
+                    logger.warning(f"Failed to parse row {i} on page {page_idx + 1}: {e}")
                     continue
 
-                # Parse patient cell (first column)
-                cells = row.locator("td")
-                cell_count = await cells.count()
+            # Check if there is a next page
+            has_next = await self._page.evaluate("""
+                () => {
+                    const nextBtn = document.querySelector('.paginate_button.next:not(.disabled), a#orders_next:not(.disabled)');
+                    if (nextBtn && nextBtn.offsetParent !== null) {
+                        nextBtn.click();
+                        return true;
+                    }
+                    return false;
+                }
+            """)
+            if has_next:
+                logger.info(f"PAGINATION: Navigating to page {page_idx + 2}...")
+                await self._page.wait_for_timeout(3000)
+                await self._dismiss_all_modals()
+            else:
+                break
 
-                if cell_count == 0:
-                    continue
-
-                first_cell_text = await cells.first.inner_text()
-
-                # Debug: log first cell content for first 3 rows
-                if i < 3:
-                    compact_cell = " | ".join(
-                        part.strip() for part in first_cell_text.split("\n") if part.strip()
-                    )
-                    logger.info(f"ROW[{i}] cell[0]: {compact_cell[:200]}")
-
-                parsed = _parse_patient_cell(first_cell_text)
-
-                if not parsed["phone"]:
-                    logger.warning(
-                        f"No phone number for {parsed['patient_name']} "
-                        f"(VAM: {parsed['vam_id']}) — skipping"
-                    )
-                    continue
-
-                if not parsed["vam_id"]:
-                    logger.warning(
-                        f"No VAM ID for {parsed['patient_name']} — skipping"
-                    )
-                    continue
-
-                # We'll use vam_id as a preliminary check; the full
-                # external_report_id (vam_id + report_no) is built
-                # after expanding the row in download_report()
-                meta = ReportMetadata(
-                    patient_name=parsed["patient_name"],
-                    patient_phone=parsed["phone"],
-                    report_name="",       # filled during download
-                    report_type="Laboratory",
-                    external_report_id=parsed["vam_id"],  # preliminary
-                    vam_id=parsed["vam_id"],
-                )
-                reports.append(meta)
-                logger.info(
-                    f"Parsed: {parsed['patient_name']} | "
-                    f"{parsed['vam_id']} | ***{parsed['phone'][-4:]}"
-                )
-
-            except Exception as e:
-                logger.warning(f"Failed to parse row {i}: {e}")
-                continue
-
-        logger.info(
-            f"Total parseable reports: {len(reports)} out of {row_count} rows"
-        )
+        logger.info(f"Total parseable reports across pages: {len(reports)}")
         return reports
 
     async def download_report(self, meta: ReportMetadata) -> Optional[bytes]:
@@ -859,12 +884,21 @@ class MocDocConnector(HospitalConnector):
         # Wait a moment for the expansion animation
         await self._page.wait_for_timeout(2000)
 
-        # Get the expanded section's text to extract test details
-        # The expanded section should now be visible on the page
-        page_text = await self._page.inner_text("body")
+        # Scope every read to the row we just expanded — see PHI cross-delivery
+        # defect. Never read inner_text("body") here.
+        expanded_row = target_row.locator(
+            "xpath=following-sibling::tr[contains(@class,'showorders')][1]"
+        )
+        try:
+            await expanded_row.wait_for(state="attached", timeout=10000)
+            row_text = await expanded_row.inner_text()
+        except Exception as e:
+            logger.error(f"EXPANDED_ROW_NOT_FOUND for {vam_id}: {e}")
+            await self._click_hide(target_row)
+            return None
 
         # Extract test details from expanded section
-        test_details = _parse_test_details(page_text)
+        test_details = _parse_test_details(row_text)
         report_no = test_details.get("report_no")
 
         if not report_no:
@@ -889,20 +923,16 @@ class MocDocConnector(HospitalConnector):
         # Look for text that appears before the report number
         test_name_match = re.search(
             r"([A-Z][A-Z\s\-\d]+(?:\d+P)?)\s+No:\s*\d+",
-            page_text,
+            row_text,
         )
         if test_name_match:
             meta.report_name = test_name_match.group(1).strip()
         else:
             meta.report_name = "Lab Report"
 
-        # Scope the search to the expanded row (class="showorders")
-        search_text = report_no if report_no else vam_id
-        expanded_row = self._page.locator(f"tr.showorders:has-text('{search_text}')").first
-
-        # Click "Download Result" icon (using JS to bypass hover/visibility restrictions)
+        # Click "Download Result" icon directly from expanded_row (using JS to bypass hover/visibility restrictions)
         try:
-            # Use the specific class 'downloadresult' which is on the <a> tag
+            # Use the specific class 'downloadresult' which is on the <a> tag inside expanded_row
             download_icon = expanded_row.locator("a.downloadresult").first
             
             # Wait for it to be attached to the DOM (it might take a split second after expansion)

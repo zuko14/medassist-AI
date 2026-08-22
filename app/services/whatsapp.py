@@ -98,23 +98,33 @@ class WhatsAppService:
         }
 
         async with httpx.AsyncClient() as client:
-            for attempt in range(2):  # 2 retries
+            for attempt in range(3):
                 try:
                     response = await client.post(
                         url, headers=headers, json=payload, timeout=10.0
                     )
+                    if response.status_code == 429 or response.status_code >= 500:
+                        if attempt == 2:
+                            response.raise_for_status()
+                        delay = float(response.headers.get("Retry-After", 2 ** attempt))
+                        logger.warning(
+                            f"Meta {response.status_code}, retrying in {delay}s "
+                            f"(attempt {attempt + 1}/3)"
+                        )
+                        await asyncio.sleep(min(delay, 30))
+                        continue
                     response.raise_for_status()
                     return response.json()
                 except httpx.HTTPStatusError as e:
                     logger.error(
                         f"WhatsApp API error (attempt {attempt + 1}): {e.response.text}"
                     )
-                    if attempt == 1:
-                        raise
-                except Exception as e:
+                    raise
+                except httpx.RequestError as e:
                     logger.error(f"WhatsApp request error (attempt {attempt + 1}): {e}")
-                    if attempt == 1:
+                    if attempt == 2:
                         raise
+                    await asyncio.sleep(2 ** attempt)
 
         return {}
 
@@ -128,6 +138,7 @@ class WhatsAppService:
     async def send_text(
         self, clinic: dict, phone: str, message: str,
         _source: str = "conversation",
+        _capture: Optional[dict] = None,
     ) -> bool:
         """Send a simple text message."""
         # Check session expiry before sending
@@ -148,6 +159,8 @@ class WhatsAppService:
         try:
             result = await self._make_request(clinic, "messages", payload)
             meta_msg_id = self._extract_meta_message_id(result)
+            if _capture is not None:
+                _capture["meta_message_id"] = meta_msg_id
             logger.info(f"Sent text message to {self._mask_phone(phone)}")
 
             # ── Accounting ──
@@ -171,6 +184,7 @@ class WhatsAppService:
         language: str = "en",
         components: Optional[list] = None,
         _source: str = "conversation",
+        _capture: Optional[dict] = None,
     ) -> bool:
         """Send a pre-approved template message (for 24h+ sessions)."""
         payload = {
@@ -188,6 +202,8 @@ class WhatsAppService:
         try:
             result = await self._make_request(clinic, "messages", payload)
             meta_msg_id = self._extract_meta_message_id(result)
+            if _capture is not None:
+                _capture["meta_message_id"] = meta_msg_id
             logger.info(f"Sent template '{template_name}' to {self._mask_phone(phone)}")
 
             # ── Accounting ──
@@ -415,8 +431,9 @@ class WhatsAppService:
         return ""
 
     async def send_document(
-        self, clinic: dict, phone: str, media_id: str, filename: str, caption: str,
+        self, clinic: dict, phone: str, media_id: str, filename: str, caption: str = "",
         _source: str = "conversation",
+        _capture: Optional[dict] = None,
     ) -> bool:
         """Send a document message."""
         if not await self._can_send_freeform(clinic, phone):
@@ -436,6 +453,8 @@ class WhatsAppService:
         try:
             result = await self._make_request(clinic, "messages", payload)
             meta_msg_id = self._extract_meta_message_id(result)
+            if _capture is not None:
+                _capture["meta_message_id"] = meta_msg_id
             logger.info(f"Sent document to {self._mask_phone(phone)}")
 
             # ── Accounting ──
@@ -476,11 +495,14 @@ class WhatsAppService:
         try:
             conv = await get_conversation(clinic["id"], phone)
             if not conv:
-                return True
+                # Never messaged us => no customer-service window was ever
+                # opened. Meta rejects freeform here (131047). Returning True
+                # is why MocDoc walk-ins never received reports.
+                return False
 
             expires_at = conv.get("session_expires_at")
             if not expires_at:
-                return True
+                return False
 
             if isinstance(expires_at, str):
                 expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))

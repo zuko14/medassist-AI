@@ -3405,6 +3405,98 @@ async def resend_lab_report(
     return {"success": True, "report": res}
 
 
+@router.get("/lab-reports/deliveries")
+@router.get("/reports/deliveries")
+async def get_lab_report_deliveries(
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    days: int = 7,
+    state: str = "all",
+    user: AdminUser = Depends(require_permission("REPORTS_VIEW")),
+):
+    """Retrieve detailed per-report WhatsApp delivery log and receipt status.
+
+    Returns newest first with masked phone numbers for privacy.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    target_branch = user.branch_id if user.role == "staff" and user.branch_id else branch_id
+    if target_branch:
+        enforce_branch_scope(user, target_branch)
+
+    from app.utils.validators import mask_phone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    try:
+        query = supabase.table("lab_reports").select("*")
+        if effective_clinic_id != "default":
+            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.gte("uploaded_at", cutoff).order("uploaded_at", desc=True).limit(200)
+
+        res = query.execute()
+        records = res.data or []
+
+        deliveries = []
+        for r in records:
+            status_col = r.get("status")
+            delivery_status = r.get("delivery_status")
+            sent_at = r.get("sent_at")
+            delivery_updated_at = r.get("delivery_updated_at")
+
+            # Derive single state for UI badge
+            if status_col == "needs_review":
+                derived_state = "needs_review"
+            elif delivery_status in ("read", "delivered"):
+                derived_state = "delivered"
+            elif delivery_status == "failed" or status_col == "failed":
+                derived_state = "failed"
+            elif delivery_status == "sent" or status_col == "sent":
+                is_stale = False
+                if sent_at:
+                    try:
+                        sdt = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
+                        if datetime.now(timezone.utc) - sdt > timedelta(minutes=30):
+                            is_stale = True
+                    except Exception:
+                        pass
+                derived_state = "awaiting_receipt_stale" if is_stale else "pending"
+            else:
+                derived_state = status_col or "pending"
+
+            if state != "all":
+                if state == "delivered" and derived_state != "delivered":
+                    continue
+                elif state == "failed" and derived_state != "failed":
+                    continue
+                elif state == "pending" and derived_state not in ("pending", "awaiting_receipt_stale"):
+                    continue
+                elif state == "needs_review" and derived_state != "needs_review":
+                    continue
+
+            phone = r.get("patient_phone") or ""
+            deliveries.append({
+                "id": r.get("id"),
+                "patient_name": r.get("patient_name") or "Unknown",
+                "patient_phone": mask_phone(phone),
+                "report_name": r.get("report_name") or "Lab Report",
+                "report_type": r.get("report_type") or "Laboratory",
+                "source": r.get("source") or "admin",
+                "external_report_id": r.get("external_report_id"),
+                "status": status_col,
+                "sent_at": sent_at,
+                "delivery_status": delivery_status,
+                "delivery_updated_at": delivery_updated_at,
+                "delivery_error": r.get("delivery_error") or r.get("error_message"),
+                "match_confidence": r.get("match_confidence"),
+                "match_source": r.get("match_source"),
+                "state": derived_state,
+            })
+
+        return {"deliveries": deliveries, "total": len(deliveries)}
+    except Exception as e:
+        logger.error(f"Failed to get lab report deliveries: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get lab report deliveries")
+
+
 @router.get("/diagnostic/stats")
 async def get_diagnostic_stats(
     clinic_id: str = "default",
@@ -3449,23 +3541,47 @@ async def get_diagnostic_stats(
 
         connector_info = None
         if connectors:
-            # Multiple branches can each have their own connector row; without
-            # an explicit branch_id filter, always surface the one most
-            # recently touched rather than an arbitrary/stale row — otherwise
-            # the dashboard can show a dead connector's old error forever.
             c = connectors[0]
             is_enabled = c.get("is_enabled", False)
             last_error = c.get("last_error")
-            health = "healthy" if is_enabled and not last_error else ("warning" if is_enabled and last_error else "disabled")
             poll_minutes = (c.get("config") or {}).get("poll_interval_minutes", 10)
+            stale_after = timedelta(minutes=poll_minutes * 3)
             last_run_at = c.get("last_run_at")
             next_run_at = None
+            age = None
+            seconds_since_last_run = None
+
             if last_run_at:
                 try:
                     dt = datetime.fromisoformat(last_run_at.replace("Z", "+00:00"))
                     next_run_at = (dt + timedelta(minutes=poll_minutes)).isoformat()
+                    age = datetime.now(timezone.utc) - dt
+                    seconds_since_last_run = int(age.total_seconds())
                 except Exception:
                     next_run_at = None
+
+            if not is_enabled:
+                health = "disabled"          # grey  — OFF
+            elif age is None:
+                health = "never_run"         # grey  — NEVER RUN
+            elif age > stale_after:
+                health = "stalled"           # red   — NOT RUNNING (worker dead)
+            elif last_error:
+                health = "warning"           # amber — RUNNING WITH ERRORS
+            else:
+                health = "healthy"           # green — ACTIVE / HEALTHY
+
+            # Check if currently executing (lock held within 15 min)
+            is_running_now = False
+            locked_at = c.get("locked_at")
+            if locked_at:
+                try:
+                    ldt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+                    if datetime.now(timezone.utc) - ldt < timedelta(minutes=15):
+                        is_running_now = True
+                except Exception:
+                    pass
+
             connector_info = {
                 "id": c.get("id"),
                 "branch_id": c.get("branch_id"),
@@ -3477,6 +3593,9 @@ async def get_diagnostic_stats(
                 "health": health,
                 "poll_interval_minutes": poll_minutes,
                 "next_run_at": next_run_at,
+                "seconds_since_last_run": seconds_since_last_run,
+                "is_running_now": is_running_now,
+                "consecutive_failures": c.get("consecutive_failures", 0),
             }
 
         return {
