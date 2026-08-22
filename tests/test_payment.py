@@ -898,16 +898,16 @@ class TestHoldExpiry:
         past_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         mock_stale = {
             "id": "stale-booking-uuid",
-            "razorpay_order_id": "order_stale",
+            "razorpay_payment_link_id": "plink_stale",
             "hold_expires_at": past_time,
             "status": "pending_payment",
         }
 
         with patch("app.services.payment.supabase") as mock_sb, patch.object(
             service,
-            "_check_razorpay_order_status",
+            "_check_payment_link_status",
             new_callable=AsyncMock,
-            return_value="created",
+            return_value={"status": "created", "payment_id": ""},
         ), patch.object(service, "_log_payment_event"):
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
@@ -933,7 +933,7 @@ class TestHoldExpiry:
         past_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         mock_stale = {
             "id": "paid-but-missed-uuid",
-            "razorpay_order_id": "order_paid_missed",
+            "razorpay_payment_link_id": "plink_paid_missed",
             "hold_expires_at": past_time,
             "status": "pending_payment",
             "clinic_id": "test-clinic",
@@ -945,14 +945,9 @@ class TestHoldExpiry:
 
         with patch("app.services.payment.supabase") as mock_sb, patch.object(
             service,
-            "_check_razorpay_order_status",
+            "_check_payment_link_status",
             new_callable=AsyncMock,
-            return_value="paid",
-        ), patch.object(
-            service,
-            "_get_razorpay_order_payments",
-            new_callable=AsyncMock,
-            return_value={"payment_id": "pay_recovered"},
+            return_value={"status": "paid", "payment_id": "pay_recovered"},
         ), patch.object(
             service, "_log_payment_event"
         ), patch.object(

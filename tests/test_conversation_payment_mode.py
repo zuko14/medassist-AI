@@ -82,7 +82,7 @@ async def test_partial_mode_sends_deposit_note_and_scaled_amount():
             "success": True,
             "booking_id": "booking-1",
             "booking_ref": "MC-1",
-            "razorpay_order_id": "order-1",
+            "razorpay_payment_link_id": "link-1",
             "payment_link": "https://razorpay.example/pay",
             "amount_paise": 10000,
             "hold_expires_at": "2026-07-05T10:00:00Z",
@@ -98,6 +98,15 @@ async def test_partial_mode_sends_deposit_note_and_scaled_amount():
     sent_message = manager.whatsapp.send_text.call_args[0][2]
     assert "20%" in sent_message
     assert "80%" in sent_message
+
+    # Regression guard: create_booking_with_payment's real return dict has no
+    # "razorpay_order_id" key (only "razorpay_payment_link_id") — asserting
+    # the state transition ran confirms the handler didn't KeyError before
+    # reaching update_state.
+    manager.update_state.assert_awaited_once()
+    saved_context = manager.update_state.call_args[0][3]
+    assert saved_context["razorpay_payment_link_id"] == "link-1"
+    assert saved_context["booking_id"] == "booking-1"
 
 
 @pytest.mark.asyncio

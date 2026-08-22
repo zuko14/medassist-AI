@@ -2225,7 +2225,7 @@ async def get_bookings(
     try:
         query = supabase.table("appointments").select(
             "id, clinic_id, patient_phone, patient_name, department, doctor_name, "
-            "appointment_date, appointment_time, status, razorpay_order_id, "
+            "appointment_date, appointment_time, status, razorpay_payment_link_id, "
             "payment_id, amount_paise, hold_expires_at, booking_ref, created_at, updated_at"
         )
         if effective_clinic_id != "default":

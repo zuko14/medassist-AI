@@ -126,8 +126,9 @@ class PaymentService:
                     collected at the clinic). Defaults to 100 (full fee).
 
         Returns:
-            dict with keys: success, booking_id, razorpay_order_id,
-            payment_link, amount_paise, hold_expires_at, reason
+            dict with keys: success, booking_id, booking_ref,
+            razorpay_payment_link_id, payment_link, amount_paise,
+            hold_expires_at, reason
         """
         # ── Resolve per-clinic Razorpay credentials ──
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
@@ -609,7 +610,7 @@ class PaymentService:
         count = 0
         for booking in stale.data:
             booking_id = booking["id"]
-            order_id = booking.get("razorpay_order_id")
+            payment_link_id = booking.get("razorpay_payment_link_id")
 
             try:
                 # ── Resolve per-clinic Razorpay creds for this booking ──
@@ -630,24 +631,18 @@ class PaymentService:
                 key_id, key_secret, _ = get_razorpay_creds(clinic_for_booking)
 
                 # ── Recovery path: check Razorpay before expiring ──
-                if order_id:
-                    rz_status = await self._check_razorpay_order_status(
-                        order_id, key_id=key_id, key_secret=key_secret
+                if payment_link_id:
+                    link_status = await self._check_payment_link_status(
+                        payment_link_id, key_id=key_id, key_secret=key_secret
                     )
 
-                    if rz_status == "paid":
+                    if link_status["status"] == "paid":
                         # Webhook was missed — recover by confirming
                         logger.info(
                             f"Recovery: booking {booking_id} was paid on Razorpay but webhook missed. Confirming."
                         )
 
-                        # Fetch payment details from Razorpay
-                        payment_info = await self._get_razorpay_order_payments(
-                            order_id, key_id=key_id, key_secret=key_secret
-                        )
-                        payment_id = payment_info.get(
-                            "payment_id", f"recovery_{order_id}"
-                        )
+                        payment_id = link_status["payment_id"] or f"recovery_{payment_link_id}"
 
                         recovery_update = (
                             supabase.table("appointments")
@@ -1149,6 +1144,38 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Error checking Razorpay order status for {order_id}: {e}")
             return "unknown"
+
+    async def _check_payment_link_status(
+        self,
+        payment_link_id: str,
+        key_id: str = "",
+        key_secret: str = "",
+    ) -> dict:
+        """Check a Razorpay Payment Link's status (for recovery/expiry path).
+
+        Returns {"status": <razorpay status>, "payment_id": <str or "">}.
+        Payment Links (not Orders) are what create_booking_with_payment
+        actually creates, so this is the correct API for the hold-expiry
+        recovery check — _check_razorpay_order_status/_get_razorpay_order_payments
+        below operate on Orders and never match a real booking.
+        """
+        effective_key_id = key_id or settings.razorpay_key_id
+        effective_key_secret = key_secret or settings.razorpay_key_secret
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self._razorpay_base}/payment_links/{payment_link_id}",
+                    auth=(effective_key_id, effective_key_secret),
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+                payments = data.get("payments", [])
+                payment_id = payments[0].get("payment_id", "") if payments else ""
+                return {"status": data.get("status", "unknown"), "payment_id": payment_id}
+        except Exception as e:
+            logger.error(f"Error checking Razorpay payment link status for {payment_link_id}: {e}")
+            return {"status": "unknown", "payment_id": ""}
 
     async def _get_razorpay_order_payments(
         self,

@@ -2620,7 +2620,7 @@ class ConversationManager:
 
                     # Save booking context and transition to awaiting_payment
                     context["booking_id"] = result["booking_id"]
-                    context["razorpay_order_id"] = result["razorpay_order_id"]
+                    context["razorpay_payment_link_id"] = result["razorpay_payment_link_id"]
                     context["booking_ref"] = result["booking_ref"]
                     await self.update_state(clinic, phone, "awaiting_payment", context)
 
