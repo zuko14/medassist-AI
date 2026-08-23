@@ -771,6 +771,8 @@ class ClinicProfileUpdate(BaseModel):
     hospital_address: Optional[str] = None
     hospital_maps_link: Optional[str] = None
     hospital_emergency_number: Optional[str] = None
+    phone_number_id: Optional[str] = None      # Meta WhatsApp phone_number_id for dual-key routing
+    is_sandbox: Optional[bool] = None           # Mark as test/sandbox clinic for demo number routing
 
     @field_validator("name")
     @classmethod
@@ -2538,6 +2540,11 @@ async def update_clinic_profile(
     if "hospital_emergency_number" in updates and updates["hospital_emergency_number"] is not None:
         cfg["emergency_number"] = updates["hospital_emergency_number"].strip()
     row_updates["config"] = cfg
+    # Top-level columns for tenant routing (migration 043)
+    if "phone_number_id" in updates and updates["phone_number_id"] is not None:
+        row_updates["phone_number_id"] = updates["phone_number_id"].strip()
+    if "is_sandbox" in updates and updates["is_sandbox"] is not None:
+        row_updates["is_sandbox"] = updates["is_sandbox"]
 
     target_clinic_id = clinic.get("id")
     if not target_clinic_id or target_clinic_id == "default":

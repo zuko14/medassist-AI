@@ -554,11 +554,18 @@ async def find_next_available_date(
 
 
 async def book_appointment(clinic_id: str, data: dict) -> dict:
-    """Book an appointment with race condition protection."""
+    """Book an appointment with race condition protection.
+
+    Uses a two-layer defense:
+      1. Pre-check SELECT for fast-path rejection (avoids unnecessary writes)
+      2. DB-level partial UNIQUE index (uq_appointment_active_slot) as the
+         authoritative guard — closes the TOCTOU race window between the
+         SELECT and INSERT.
+    """
     try:
         data["clinic_id"] = clinic_id
 
-        # Check for existing booking at same slot
+        # Fast-path: check for existing booking at same slot (non-authoritative)
         conflict = (
             supabase.table("appointments")
             .select("id")
@@ -566,7 +573,7 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
             .eq("doctor_name", data["doctor_name"])
             .eq("appointment_date", data["appointment_date"])
             .eq("appointment_time", data["appointment_time"])
-            .eq("status", "confirmed")
+            .in_("status", ["confirmed", "pending_payment"])
             .execute()
         )
 
@@ -582,7 +589,9 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
         # Include branch_id and branch_name if present in data
         # (These are set by the conversation flow when a branch is selected)
 
-        # Insert appointment
+        # Insert appointment — if a concurrent insert won the race, the
+        # partial UNIQUE index (uq_appointment_active_slot) will fire a
+        # 23505 unique_violation, caught below.
         result = supabase.table("appointments").insert(data).execute()
 
         # Update patient visit count
@@ -598,8 +607,9 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
 
     except Exception as e:
         logger.error(f"Error booking appointment: {e}")
-        # Check if it's a unique constraint violation
-        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+        # Detect unique constraint violation (Postgres error code 23505)
+        err_str = str(e).lower()
+        if "duplicate" in err_str or "unique" in err_str or "23505" in err_str:
             return {"success": False, "reason": "slot_taken"}
         return {"success": False, "reason": "error"}
 

@@ -540,7 +540,8 @@ class ConversationManager:
                 context["department"] = doc["department"]
                 context["selected_doctor_id"] = message
                 lang = await get_lang(clinic, phone)
-                await self._show_combined_slot_picker(clinic, phone, context, lang)
+                await self._show_date_picker(clinic, phone, context, lang)
+                await self.update_state(clinic, phone, "selecting_date", context)
             return
 
         # Process based on state and intent
@@ -2081,27 +2082,31 @@ class ConversationManager:
         context["doctor_name"] = doctor_name
         context["doctor"] = doctor
 
-        # Ask for date & time — show combined slot picker
+        # Ask for date — two-step flow: date picker → slot list
         context["doctor_name"] = doctor_name
         context["doctor"] = doctor
         merged_context = {**context}
 
-        await self._show_combined_slot_picker(clinic, phone, merged_context, lang)
+        await self._show_date_picker(clinic, phone, merged_context, lang)
+        await self.update_state(clinic, phone, "selecting_date", merged_context)
 
     async def _handle_selecting_date(
         self, clinic: dict, phone: str, message: str, context: dict, lang: str
     ) -> None:
         """Handle date selection."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone as tz
+
+        ist = tz(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(ist)
 
         # Parse date from message
         date_str = None
         msg_lower = message.lower().strip()
 
         if msg_lower in ["today", "आज", "ఈరోజు"]:
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            date_str = now_ist.strftime("%Y-%m-%d")
         elif msg_lower in ["tomorrow", "कल", "రేపు"]:
-            date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            date_str = (now_ist + timedelta(days=1)).strftime("%Y-%m-%d")
         else:
             # Try to parse date formats
             for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%B %d", "%d %B"]:
@@ -2124,12 +2129,12 @@ class ConversationManager:
 
         # Validate date is not in past
         selected_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        if selected_date < datetime.now().date():
+        if selected_date < now_ist.date():
             await self.whatsapp.send_text(clinic, phone, "Please choose a future date.")
             return
 
         # Check if date is within 30 days
-        if selected_date > datetime.now().date() + timedelta(days=30):
+        if selected_date > now_ist.date() + timedelta(days=30):
             await self.whatsapp.send_text(
                 clinic, phone, "Please choose a date within the next 30 days."
             )
@@ -2206,11 +2211,17 @@ class ConversationManager:
     async def _show_date_picker(
         self, clinic: dict, phone: str, context: dict, lang: str
     ) -> None:
-        """Show a date picker with the next 7 available days."""
-        from datetime import datetime, timedelta
+        """Show a date picker with up to 7 available dates.
 
-        today = datetime.now().date()
-        date_rows = []
+        Uses parallel availability scanning (asyncio.gather) across 7 days
+        for ~300-500ms wall-clock latency instead of 2-3s serial.
+        Falls back to find_next_available_date() if zero availability in 7 days.
+        """
+        import asyncio
+        from datetime import datetime, timedelta, timezone as tz
+
+        ist = tz(timedelta(hours=5, minutes=30))
+        today = datetime.now(ist).date()
 
         day_labels = {
             "en": ["Today", "Tomorrow"],
@@ -2219,18 +2230,54 @@ class ConversationManager:
         }
         labels = day_labels.get(lang, day_labels["en"])
 
-        for i in range(7):
-            d = today + timedelta(days=i)
+        # Parallel availability scan for 7 days
+        candidates = [today + timedelta(days=i) for i in range(7)]
+        results = await asyncio.gather(*[
+            get_available_slots(
+                clinic["id"], context["doctor_name"], d.strftime("%Y-%m-%d")
+            )
+            for d in candidates
+        ])
+
+        date_rows = []
+        for i, (slots, _reason) in enumerate(results):
+            if not slots:
+                continue
+            d = candidates[i]
             date_str = d.strftime("%Y-%m-%d")
+            slot_count = len(slots)
+
             if i == 0:
                 title = f"{labels[0]} ({d.strftime('%d %b')})"
             elif i == 1:
                 title = f"{labels[1]} ({d.strftime('%d %b')})"
             else:
-                title = f"{d.strftime('%A, %d %b')}"
+                title = d.strftime("%A, %d %b")
+
+            desc = f"{slot_count} {'slot' if slot_count == 1 else 'slots'} available"
             date_rows.append(
-                {"id": f"date_{date_str}", "title": title[:24], "description": ""}
+                {"id": f"date_{date_str}", "title": title[:24], "description": desc[:72]}
             )
+
+        # If no availability in 7 days, try extended search
+        if not date_rows:
+            next_date, next_slots, next_reason = await find_next_available_date(
+                clinic["id"],
+                context["doctor_name"],
+                (today + timedelta(days=7)).strftime("%Y-%m-%d"),
+            )
+            if next_date and next_slots:
+                d = datetime.strptime(next_date, "%Y-%m-%d").date()
+                slot_count = len(next_slots)
+                title = d.strftime("%A, %d %b")
+                desc = f"{slot_count} {'slot' if slot_count == 1 else 'slots'} available"
+                date_rows.append(
+                    {"id": f"date_{next_date}", "title": title[:24], "description": desc[:72]}
+                )
+            else:
+                # No availability at all — suggest other doctors
+                await self._suggest_other_doctors(clinic, phone, context, lang)
+                return
 
         sections = [
             {
@@ -2239,7 +2286,7 @@ class ConversationManager:
                     if lang == "en"
                     else ("तारीख चुनें" if lang == "hi" else "తేదీ ఎంచుకోండి")
                 ),
-                "rows": date_rows,
+                "rows": date_rows[:7],  # WhatsApp max 10 rows; 7 dates is safe
             }
         ]
 

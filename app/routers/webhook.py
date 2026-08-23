@@ -77,6 +77,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 if change.value.messages:
                     metadata = change.value.metadata
                     display_phone = metadata.get("display_phone_number")
+                    phone_number_id = metadata.get("phone_number_id")  # Immutable Meta ID
 
                     if not display_phone:
                         logger.error(
@@ -86,7 +87,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
                     for message in change.value.messages:
                         background_tasks.add_task(
-                            process_message_safe, message, display_phone, body
+                            process_message_safe, message, display_phone, body, phone_number_id
                         )
                         logger.info(f"Queued message {message.id} to BackgroundTasks")
 
@@ -142,7 +143,7 @@ async def record_delivery_status(status: dict) -> None:
         logger.warning(f"Could not record delivery status for {wamid}: {e}")
 
 
-async def process_message_safe(message, display_phone: str, raw_payload: dict):
+async def process_message_safe(message, display_phone: str, raw_payload: dict, phone_number_id: str = None):
     """Wrapper that catches failures and logs them to a dead-letter queue with release for retry.
 
     In a hospital bot, silently dropping a patient message is unacceptable.
@@ -150,7 +151,7 @@ async def process_message_safe(message, display_phone: str, raw_payload: dict):
     to Supabase `failed_messages` table for manual retry or investigation.
     """
     try:
-        await process_message(message, display_phone)
+        await process_message(message, display_phone, phone_number_id)
     except Exception as e:
         logger.error(f"Message processing failed, saving to dead-letter queue: {e}")
         # Release claim from processed_messages to allow DLQ replay
@@ -183,16 +184,16 @@ async def process_message_safe(message, display_phone: str, raw_payload: dict):
             logger.error(f"Dead-letter queue write also failed: {dlq_err}")
 
 
-async def process_message(message, display_phone: str):
+async def process_message(message, display_phone: str, phone_number_id: str = None):
     """Process incoming WhatsApp message."""
     try:
         message_id = message.id
 
         # Resolve tenant clinic first to capture clinic attribution
         try:
-            clinic = await resolve_tenant(display_phone)
+            clinic = await resolve_tenant(display_phone, phone_number_id=phone_number_id)
         except Exception as ten_err:
-            logger.error(f"Could not resolve tenant for display_phone={display_phone}: {ten_err}")
+            logger.error(f"Could not resolve tenant for display_phone={display_phone} phone_number_id={phone_number_id}: {ten_err}")
             raise
 
         if not clinic:

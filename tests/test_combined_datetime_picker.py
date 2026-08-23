@@ -101,7 +101,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 class TestDoctorSelectionCallSites:
     @pytest.mark.asyncio
-    async def test_view_doctor_intent_calls_combined_picker(self):
+    async def test_view_doctor_intent_calls_date_picker(self):
         manager = ConversationManager()
         clinic = {
             "id": "11111111-1111-1111-1111-111111111111",
@@ -150,11 +150,11 @@ class TestDoctorSelectionCallSites:
                 interactive_data={"id": "view_doc_doc-1"},
             )
 
-        mock_combined.assert_called_once()
-        mock_date_picker.assert_not_called()
+        mock_combined.assert_not_called()
+        mock_date_picker.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handle_selecting_doctor_calls_combined_picker(self):
+    async def test_handle_selecting_doctor_calls_date_picker(self):
         manager = ConversationManager()
         clinic = {
             "id": "11111111-1111-1111-1111-111111111111",
@@ -189,8 +189,8 @@ class TestDoctorSelectionCallSites:
                 clinic, phone, "Dr. Test", "select_doctor", context, "en"
             )
 
-        mock_combined.assert_called_once()
-        mock_date_picker.assert_not_called()
+        mock_combined.assert_not_called()
+        mock_date_picker.assert_called_once()
 
 
 class TestHandleSelectingSlotCombined:

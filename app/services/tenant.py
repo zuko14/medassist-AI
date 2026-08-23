@@ -48,61 +48,127 @@ class FeatureNotAvailable(Exception):
     """Raised when a clinic's plan does not include the requested feature."""
 
 
-async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
+def _normalize_e164(raw: str) -> str:
+    """Normalize a phone number to E.164 format for consistent DB lookups.
+
+    Strips spaces, dashes, parentheses and ensures a leading '+'.
+    Meta webhook payloads inconsistently include/omit the '+' prefix.
+    """
+    import re
+    digits = re.sub(r"[^0-9+]", "", raw.strip())
+    if not digits.startswith("+"):
+        digits = f"+{digits}"
+    return digits
+
+
+async def resolve_tenant(
+    display_phone_number: str,
+    phone_number_id: str = None,
+) -> Optional[dict]:
     """
     Resolve clinic from the receiving WhatsApp number.
-    display_phone_number comes from Meta payload metadata.
-    Format: "+919876543210" (E.164, with + prefix)
+
+    Resolution order:
+      1. phone_number_id lookup (immutable Meta ID — preferred)
+      2. Normalized display_phone_number lookup against whatsapp_number
+      3. Sandbox fallback (test/demo numbers → is_sandbox=True clinic)
+      4. Single-tenant fallback (only if exactly 1 active clinic)
+      5. Zero-clinic env-var fallback (initial setup bootstrap)
 
     For single-tenant mode (no clinics table), returns a
     synthetic clinic dict from environment variables.
     """
-    # Normalize: Meta sometimes sends without +
-    phone = (
-        display_phone_number
-        if display_phone_number.startswith("+")
-        else f"+{display_phone_number}"
-    )
+    phone = _normalize_e164(display_phone_number)
 
-    # Check cache first (TTL-enabled)
-    cached_clinic = _get_cached_item(_tenant_cache, phone)
+    # ── Cache check (keyed on phone_number_id if available, else phone) ──
+    cache_key = phone_number_id or phone
+    cached_clinic = _get_cached_item(_tenant_cache, cache_key)
     if cached_clinic is not None:
         if cached_clinic.get("is_active", True) and cached_clinic.get("status") != "DELETED" and not cached_clinic.get("deleted_at"):
             return cached_clinic
         else:
-            raise TenantNotFound(f"Clinic for {phone} is inactive or deleted.")
+            raise TenantNotFound(f"Clinic for {cache_key} is inactive or deleted.")
 
-    # Try DB lookup
+    # ── Strategy 1: Lookup by phone_number_id (immutable Meta ID) ──
     db_failed = False
     db_error = None
-    try:
-        result = (
-            supabase.table("clinics")
-            .select("*")
-            .eq("whatsapp_number", phone)
-            .eq("is_active", True)
-            .execute()
-        )
 
-        if result.data:
-            clinic = result.data[0]
-            if clinic.get("status") == "DELETED" or clinic.get("deleted_at") is not None:
-                raise TenantNotFound(f"Clinic for {phone} has been deleted.")
-            _set_cached_item(_tenant_cache, phone, clinic)
-            return clinic
+    if phone_number_id:
+        try:
+            result = (
+                supabase.table("clinics")
+                .select("*")
+                .eq("phone_number_id", phone_number_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            if result.data:
+                clinic = result.data[0]
+                if clinic.get("status") == "DELETED" or clinic.get("deleted_at") is not None:
+                    raise TenantNotFound(f"Clinic for phone_number_id={phone_number_id} has been deleted.")
+                _set_cached_item(_tenant_cache, phone_number_id, clinic)
+                _set_cached_item(_tenant_cache, phone, clinic)  # Dual-cache
+                return clinic
+        except TenantNotFound:
+            raise
+        except Exception as e:
+            db_failed = True
+            db_error = e
+            logger.error(f"Clinics phone_number_id lookup failed for {phone_number_id}: {e}")
 
-    except TenantNotFound:
-        raise
-    except Exception as e:
-        db_failed = True
-        db_error = e
-        logger.error(f"Clinics table lookup encountered database error for {phone}: {e}")
+    # ── Strategy 2: Lookup by normalized display phone number ──
+    if not db_failed:
+        try:
+            result = (
+                supabase.table("clinics")
+                .select("*")
+                .eq("whatsapp_number", phone)
+                .eq("is_active", True)
+                .execute()
+            )
+
+            if result.data:
+                clinic = result.data[0]
+                if clinic.get("status") == "DELETED" or clinic.get("deleted_at") is not None:
+                    raise TenantNotFound(f"Clinic for {phone} has been deleted.")
+                _set_cached_item(_tenant_cache, phone, clinic)
+                return clinic
+
+        except TenantNotFound:
+            raise
+        except Exception as e:
+            db_failed = True
+            db_error = e
+            logger.error(f"Clinics table lookup encountered database error for {phone}: {e}")
 
     # If DB query failed with an exception, DO NOT silently fall back to default tenant!
     if db_failed:
         raise RuntimeError(f"Database error during tenant resolution for {phone}: {db_error}") from db_error
 
-    # Fallback: single-tenant mode ONLY.
+    # ── Strategy 3: Sandbox fallback for test/demo numbers ──
+    # Route unrecognized numbers to a designated sandbox clinic if one exists.
+    # This prevents DLQ flooding when testing with Meta's test numbers.
+    try:
+        sandbox_res = (
+            supabase.table("clinics")
+            .select("*")
+            .eq("is_sandbox", True)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        if sandbox_res.data:
+            clinic = sandbox_res.data[0]
+            logger.info(
+                f"Routed unrecognized phone {phone} to sandbox clinic "
+                f"'{clinic.get('name')}' (id={clinic.get('id')})"
+            )
+            _set_cached_item(_tenant_cache, cache_key, clinic)
+            return clinic
+    except Exception as e:
+        logger.warning(f"Sandbox clinic lookup failed: {e}")
+
+    # ── Strategy 4: Single-tenant fallback ──
     # If the database contains more than 1 active clinic, routing an unknown
     # phone number to an arbitrary clinic is an active cross-tenant security hazard (C1).
     try:
@@ -134,10 +200,12 @@ async def resolve_tenant(display_phone_number: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"Fallback clinic count lookup failed: {e}")
 
-    # Single-tenant env-var fallback if 0 clinics in DB (e.g. initial setup)
+    # ── Strategy 5: Zero-clinic env-var fallback (initial setup) ──
     clinic = _build_fallback_clinic()
     _set_cached_item(_tenant_cache, clinic.get("whatsapp_number", phone), clinic)
     return clinic
+
+
 
 
 def _build_fallback_clinic() -> dict:
