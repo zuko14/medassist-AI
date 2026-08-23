@@ -226,31 +226,39 @@ def _build_fallback_clinic() -> dict:
     }
 
 
-async def get_clinic_by_id(clinic_id: str) -> dict:
-    """Get clinic by its UUID."""
-    if clinic_id == "default":
+async def get_clinic_by_id(clinic_id: Optional[str]) -> dict:
+    """Get clinic by its UUID or fallback to the primary active clinic."""
+    if not clinic_id or str(clinic_id).strip().lower() in ("default", "none", "null", ""):
         try:
             fallback = (
                 supabase.table("clinics")
                 .select("*")
+                .eq("is_active", True)
+                .neq("status", "DELETED")
                 .order("created_at")
                 .limit(1)
                 .execute()
             )
             if fallback.data:
                 return fallback.data[0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Fallback clinic lookup failed: {e}")
         return _build_fallback_clinic()
 
-    result = supabase.table("clinics").select("*").eq("id", clinic_id).execute()
+    try:
+        result = supabase.table("clinics").select("*").eq("id", str(clinic_id).strip()).execute()
 
-    if not result.data:
-        raise TenantNotFound(f"Clinic {clinic_id} not found")
-    clinic = result.data[0]
-    if clinic.get("status") == "DELETED" or clinic.get("deleted_at") is not None:
-        raise TenantNotFound(f"Clinic {clinic_id} has been deleted")
-    return clinic
+        if not result.data:
+            raise TenantNotFound(f"Clinic {clinic_id} not found")
+        clinic = result.data[0]
+        if clinic.get("status") == "DELETED" or clinic.get("deleted_at") is not None:
+            raise TenantNotFound(f"Clinic {clinic_id} has been deleted")
+        return clinic
+    except TenantNotFound:
+        raise
+    except Exception as e:
+        logger.warning(f"Error looking up clinic {clinic_id} by ID: {e}")
+        raise TenantNotFound(f"Clinic {clinic_id} lookup error: {e}") from e
 
 
 def get_clinic_contact(clinic: dict, key: str, fallback: str) -> str:

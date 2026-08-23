@@ -389,15 +389,27 @@ class PaymentService:
             return {"status": "error", "code": 400, "reason": "missing_fields"}
 
         # ── Step 4: Idempotency check (scoped) ──
-        idemp_query = (
-            supabase.table("appointments")
-            .select("id")
-            .eq("payment_id", payment_id)
-            .eq("status", "confirmed")
-        )
-        if clinic_id:
-            idemp_query = idemp_query.eq("clinic_id", clinic_id)
-        existing_confirmed = idemp_query.execute()
+        use_clinic_scope = clinic_id if (clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", "")) else None
+
+        try:
+            idemp_query = (
+                supabase.table("appointments")
+                .select("id")
+                .eq("payment_id", payment_id)
+                .eq("status", "confirmed")
+            )
+            if use_clinic_scope:
+                idemp_query = idemp_query.eq("clinic_id", use_clinic_scope)
+            existing_confirmed = idemp_query.execute()
+        except Exception as idemp_err:
+            logger.warning(f"Scoped idempotency check failed ({idemp_err}) — retrying global check")
+            existing_confirmed = (
+                supabase.table("appointments")
+                .select("id")
+                .eq("payment_id", payment_id)
+                .eq("status", "confirmed")
+                .execute()
+            )
 
         if existing_confirmed.data:
             logger.info(
@@ -409,32 +421,69 @@ class PaymentService:
         # Match on payment_link_id first, fallback to notes.booking_id and booking_ref
         booking_result = None
 
-        def _scoped():
+        def _scoped_query(scoped_to_clinic: bool = True):
             q = supabase.table("appointments").select("*")
-            if clinic_id:
-                q = q.eq("clinic_id", clinic_id)
+            if scoped_to_clinic and use_clinic_scope:
+                q = q.eq("clinic_id", use_clinic_scope)
             return q
 
-        if payment_link_id:
-            booking_result = _scoped().eq("razorpay_payment_link_id", payment_link_id).execute()
+        # Try scoped query first if a valid clinic_id was provided
+        try:
+            if payment_link_id:
+                booking_result = _scoped_query(True).eq("razorpay_payment_link_id", payment_link_id).execute()
 
-        if not booking_result or not booking_result.data:
-            booking_id_from_notes = notes.get("booking_id")
-            if booking_id_from_notes:
-                booking_result = _scoped().eq("id", booking_id_from_notes).execute()
+            if not booking_result or not booking_result.data:
+                booking_id_from_notes = notes.get("booking_id")
+                if booking_id_from_notes:
+                    booking_result = _scoped_query(True).eq("id", booking_id_from_notes).execute()
 
-        if not booking_result or not booking_result.data:
-            booking_ref = (
-                notes.get("booking_ref")
-                or payment_link_entity.get("reference_id")
-                or (
-                    payment_entity.get("description", "")
-                    .replace("Appointment booking ", "")
-                    .strip()
+            if not booking_result or not booking_result.data:
+                booking_ref = (
+                    notes.get("booking_ref")
+                    or payment_link_entity.get("reference_id")
+                    or (
+                        payment_entity.get("description", "")
+                        .replace("Appointment booking ", "")
+                        .strip()
+                    )
                 )
-            )
-            if booking_ref:
-                booking_result = _scoped().eq("booking_ref", booking_ref).execute()
+                if booking_ref:
+                    booking_result = _scoped_query(True).eq("booking_ref", booking_ref).execute()
+        except Exception as scoped_err:
+            logger.warning(f"Scoped booking lookup failed ({scoped_err}) — falling back to global lookup")
+            booking_result = None
+
+        # Fallback to global search (unscoped) using unique payment_link_id / booking_id / booking_ref
+        if not booking_result or not booking_result.data:
+            if payment_link_id:
+                try:
+                    booking_result = _scoped_query(False).eq("razorpay_payment_link_id", payment_link_id).execute()
+                except Exception as e:
+                    logger.warning(f"Global lookup by payment_link_id failed: {e}")
+
+            if not booking_result or not booking_result.data:
+                booking_id_from_notes = notes.get("booking_id")
+                if booking_id_from_notes:
+                    try:
+                        booking_result = _scoped_query(False).eq("id", booking_id_from_notes).execute()
+                    except Exception as e:
+                        logger.warning(f"Global lookup by booking_id failed: {e}")
+
+            if not booking_result or not booking_result.data:
+                booking_ref = (
+                    notes.get("booking_ref")
+                    or payment_link_entity.get("reference_id")
+                    or (
+                        payment_entity.get("description", "")
+                        .replace("Appointment booking ", "")
+                        .strip()
+                    )
+                )
+                if booking_ref:
+                    try:
+                        booking_result = _scoped_query(False).eq("booking_ref", booking_ref).execute()
+                    except Exception as e:
+                        logger.warning(f"Global lookup by booking_ref failed: {e}")
 
         if not booking_result or not booking_result.data:
             logger.error(
@@ -528,7 +577,7 @@ class PaymentService:
             from app.services.tenant import get_clinic_by_id
             clinic = None
             try:
-                clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+                clinic = await get_clinic_by_id(booking.get("clinic_id") or "default")
             except Exception as e:
                 logger.warning(f"Could not load clinic for late payment refund: {e}")
 
@@ -1062,7 +1111,7 @@ class PaymentService:
         if booking.get("payment_id"):
             from app.services.tenant import get_clinic_by_id
 
-            clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+            clinic = await get_clinic_by_id(booking.get("clinic_id") or "default")
             refund_result = await self.initiate_refund(
                 booking_id, reason=admin_notes or "Cancelled by admin", clinic=clinic
             )
@@ -1140,13 +1189,10 @@ class PaymentService:
     async def _get_doctor_fee_paise(self, clinic_id: str, doctor_name: str) -> int:
         """Get the doctor's consultation fee in paise. Falls back to config default."""
         try:
-            result = (
-                supabase.table("doctors")
-                .select("consultation_fee")
-                .eq("clinic_id", clinic_id)
-                .eq("name", doctor_name)
-                .execute()
-            )
+            query = supabase.table("doctors").select("consultation_fee")
+            if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
+                query = query.eq("clinic_id", clinic_id)
+            result = query.eq("name", doctor_name).execute()
 
             if result.data and result.data[0].get("consultation_fee"):
                 # consultation_fee is stored in rupees, convert to paise
@@ -1160,13 +1206,10 @@ class PaymentService:
     async def _get_lab_test_fee_paise(self, clinic_id: str, lab_test_id: str) -> int:
         """Get a lab test's price in paise directly from the catalog."""
         try:
-            result = (
-                supabase.table("lab_tests")
-                .select("price_paise")
-                .eq("clinic_id", clinic_id)
-                .eq("id", lab_test_id)
-                .execute()
-            )
+            query = supabase.table("lab_tests").select("price_paise")
+            if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
+                query = query.eq("clinic_id", clinic_id)
+            result = query.eq("id", lab_test_id).execute()
             if result.data and result.data[0].get("price_paise"):
                 return int(result.data[0]["price_paise"])
         except Exception as e:
@@ -1459,7 +1502,8 @@ class PaymentService:
             from app.services.whatsapp import whatsapp_service
             from app.services.tenant import get_clinic_by_id
 
-            clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+            clinic_id_val = booking.get("clinic_id") or "default"
+            clinic = await get_clinic_by_id(clinic_id_val)
 
             date_display = booking.get("appointment_date", "")
             try:
@@ -1547,7 +1591,8 @@ class PaymentService:
             from app.services.whatsapp import whatsapp_service
             from app.services.tenant import get_clinic_by_id
 
-            clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+            clinic_id_val = booking.get("clinic_id") or "default"
+            clinic = await get_clinic_by_id(clinic_id_val)
 
             date_display = booking.get("appointment_date", "")
             try:
@@ -1592,7 +1637,8 @@ class PaymentService:
             from app.services.whatsapp import whatsapp_service
             from app.services.tenant import get_clinic_by_id
 
-            clinic = await get_clinic_by_id(booking.get("clinic_id", "default"))
+            clinic_id_val = booking.get("clinic_id") or "default"
+            clinic = await get_clinic_by_id(clinic_id_val)
             amount_rupees = (booking.get("amount_paise") or 0) / 100
             msg = (
                 f"⚠️ *Payment Received After Slot Hold Expired*\n\n"
