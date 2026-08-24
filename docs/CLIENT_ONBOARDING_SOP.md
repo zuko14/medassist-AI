@@ -82,9 +82,11 @@ In Zuko Labs Business Settings $\rightarrow$ **Accounts** $\rightarrow$ **WhatsA
    - **Phone Number ID:** Copy the 15-16 digit ID (e.g., `1296654790197336`).
    - **Display Phone Number:** Copy E.164 number (e.g., `+919281235959`).
 
-### Step 7: Cloud API Cryptographic Activation (`/register`)
-To flip the phone number status from `Pending` to **`Connected`**, execute Meta's `/register` API call:
+### Step 7: Cloud API Activation (`/register` — Automated in Kriya AI)
+> **Automatic Activation:** When you register the clinic in the Kriya AI Platform Panel (Step 8 below), Kriya AI automatically calls Meta's `/register` API in the background using the provided token and phone number ID. The status will flip from `Pending` to **`Connected`** automatically.
 
+**Manual Command Fallback (if needed before platform creation):**
+If you ever want to activate the number before creating the clinic in the panel:
 ```bash
 curl -X POST "https://graph.facebook.com/v21.0/<PHONE_NUMBER_ID>/register" \
   -H "Authorization: Bearer <META_SYSTEM_USER_ACCESS_TOKEN>" \
@@ -108,7 +110,7 @@ curl -X POST "https://graph.facebook.com/v21.0/<PHONE_NUMBER_ID>/register" \
    - **Meta Permanent Access Token:** `EAAG...` *(System User Token)*
 3. Click **Create Hospital / Clinic**.
 
-*(Alternative: Execute SQL insert directly in Supabase `clinics` table).*
+*(Kriya AI backend immediately persists the tenant and executes the Meta `/register` activation in the background).*
 
 ---
 
@@ -132,8 +134,8 @@ curl -X POST "https://graph.facebook.com/v21.0/<PHONE_NUMBER_ID>/register" \
 | Issue / Error | Root Cause | Exact Fix |
 |---|---|---|
 | **Display Name Rejected / Stuck** | Number added directly under Zuko Labs instead of Client WABA. | Client must create WABA in their own portfolio with their brand name, then share asset to Zuko Labs (`1602916427428175`). |
-| **Status Stuck on `Pending`** | Cloud API cryptographic certificate uninitialized. | Execute Step 7 (`POST /{PHONE_NUMBER_ID}/register` with PIN `123456`). |
-| **`Account does not exist in Cloud API`** | 2-step verification attempted before `/register` call. | Run `/register` API first; status flips to Connected. |
+| **Status Stuck on `Pending`** | Cloud API cryptographic certificate uninitialized. | Submitting the clinic in Platform Panel auto-activates it, or execute Step 7 manual curl (`POST /{PHONE_NUMBER_ID}/register`). |
+| **`Account does not exist in Cloud API`** | 2-step verification attempted before `/register` call. | Submitting the clinic in Platform Panel automatically creates and registers the Cloud API account. |
 | **OTP SMS Not Arriving** | Number currently registered on WhatsApp consumer/business mobile app. | In mobile app: `Settings > Account > Delete Account` (or select Voice Call OTP). |
 | **Webhook Not Firing** | Webhook field unsubscribed in Meta Developer portal. | In Meta Developer Portal $\rightarrow$ Step 2 Production Setup $\rightarrow$ Ensure `messages` is toggled Blue (Subscribed). |
 
