@@ -9,6 +9,7 @@ failed INSERT never blocks or delays message delivery.
 import asyncio
 import logging
 import random
+import re
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
