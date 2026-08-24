@@ -262,19 +262,16 @@ class WhatsAppService:
                 except Exception:
                     pass
 
-            # ── Retry without header if template has no document header ──
-            # Meta error 132018: "Template does not contain title component,
-            # no parameters allowed"
+            # ── Retry without header if template with header failed ──
+            # Meta returns error 132018 OR generic Code 1 (500) when template does not
+            # have a document header configured in WhatsApp Manager, or when media CDN fails.
             has_header = any(
                 c.get("type") == "header" for c in (components or [])
             )
-            if has_header and ("132018" in err_text or "does not contain title" in err_text):
-
+            if has_header:
                 logger.warning(
-                    f"Template '{template_name}' has no document header — "
-                    f"retrying body-only so patient at least gets a text notification. "
-                    f"ACTION REQUIRED: Edit the template in Meta WhatsApp Manager "
-                    f"and add a Document header to attach PDFs."
+                    f"Template '{template_name}' with header failed ({e}) — "
+                    f"retrying body-only so patient at least receives notification."
                 )
                 body_only = [
                     c for c in (components or []) if c.get("type") != "header"
@@ -305,6 +302,8 @@ class WhatsAppService:
                         clinic, phone, "template", _source,
                         send_success=False, template_name=template_name,
                     )
+                    if "500" in str(retry_err) or "Server Error" in str(retry_err):
+                        raise
                     return False
 
             logger.error(f"Failed to send template message: {e}")
