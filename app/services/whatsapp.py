@@ -17,7 +17,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-WHATSAPP_API_BASE = "https://graph.facebook.com/v22.0"
+WHATSAPP_API_BASE = "https://graph.facebook.com/v21.0"
 
 
 class WhatsAppService:
@@ -61,18 +61,15 @@ class WhatsAppService:
         meta_message_id: Optional[str] = None,
         template_name: Optional[str] = None,
     ) -> None:
-        """Fire-and-forget ledger write. NEVER raises."""
-        clinic_id = self._extract_clinic_id(clinic)
-        if not clinic_id:
-            return  # Cannot attribute to a tenant — skip ledger
-
+        """Log outbound message send attempt to ledger in background task."""
         try:
+            clinic_id = self._extract_clinic_id(clinic)
+            if not clinic_id:
+                return
+
             from app.services.message_accounting import log_outbound
 
-            from app.utils.async_tasks import spawn_background_task
-
-            # Fire-and-forget: spawn_background_task so caller is not blocked and task is not GC'd
-            spawn_background_task(
+            asyncio.create_task(
                 log_outbound(
                     clinic_id=clinic_id,
                     recipient_phone=phone,
@@ -81,8 +78,7 @@ class WhatsAppService:
                     send_success=send_success,
                     meta_message_id=meta_message_id,
                     template_name=template_name,
-                ),
-                name=f"log_outbound_{clinic_id}",
+                )
             )
         except Exception as e:
             # Absolute safety net — logging must never affect message delivery
@@ -168,16 +164,34 @@ class WhatsAppService:
             return messages[0].get("id")
         return None
 
+    async def _can_send_freeform(self, clinic: dict, phone: str) -> bool:
+        """Check if patient is within 24h customer service window."""
+        try:
+            from app.services.conversation import get_last_patient_message_timestamp
+
+            last_msg_time = await get_last_patient_message_timestamp(phone)
+            if not last_msg_time:
+                return False
+
+            now = datetime.now(timezone.utc)
+            delta = now - last_msg_time
+            return delta.total_seconds() < 24 * 3600
+        except Exception as e:
+            logger.warning(f"Could not check 24h window for {self._mask_phone(phone)}: {e}")
+            return False
+
     async def send_text(
-        self, clinic: dict, phone: str, message: str,
+        self,
+        clinic: dict,
+        phone: str,
+        message: str,
         _source: str = "conversation",
         _capture: Optional[dict] = None,
     ) -> bool:
-        """Send a simple text message."""
-        # Check session expiry before sending
+        """Send a freeform text message (only if within 24h window)."""
         if not await self._can_send_freeform(clinic, phone):
             logger.warning(
-                f"Cannot send freeform message to {self._mask_phone(phone)}: session expired"
+                f"Cannot send freeform text to {self._mask_phone(phone)}: session expired"
             )
             return False
 
@@ -186,7 +200,7 @@ class WhatsAppService:
             "recipient_type": "individual",
             "to": phone,
             "type": "text",
-            "text": {"body": message},
+            "text": {"preview_url": False, "body": message},
         }
 
         try:
@@ -204,9 +218,7 @@ class WhatsAppService:
             return True
         except Exception as e:
             logger.error(f"Failed to send text message: {e}")
-            await self._log_to_ledger(
-                clinic, phone, "text", _source, send_success=False,
-            )
+            await self._log_to_ledger(clinic, phone, "text", _source, send_success=False)
             return False
 
     async def send_template(
@@ -222,15 +234,20 @@ class WhatsAppService:
         """Send a pre-approved template message (for 24h+ sessions).
 
         Resilient delivery matrix:
-        1. Tries primary language code (e.g. 'en') with all components.
-        2. If header fails, tries primary language code body-only.
-        3. If language code fails (Meta en vs en_US mismatch), retries alternate
-           language code (e.g. 'en_US') with both header and body-only.
+        1. Tries configured template name, falling back to registered template aliases.
+        2. Tries candidate language codes (en vs en_US).
+        3. Tries full components (header + body), falling back to body-only.
         """
         clean_template_name = (template_name or "").strip()
         if not clean_template_name:
             logger.error("send_template called with empty template_name")
             return False
+
+        # Candidate template names to check in case of naming variance
+        candidate_templates = [clean_template_name]
+        for alias in ("lab_report_ready", "lab_report_delivery", "lab_report_summary", "callmedex_lab_report_summary"):
+            if alias not in candidate_templates:
+                candidate_templates.append(alias)
 
         # Prepare candidate language codes to handle en vs en_US matching in Meta
         candidate_languages = [language]
@@ -243,64 +260,65 @@ class WhatsAppService:
         body_only = [c for c in (components or []) if c.get("type") != "header"] if has_header else None
 
         last_error = None
-        for lang in candidate_languages:
-            # ── Attempt 1: Full template with all components (including header) ──
-            payload = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": phone,
-                "type": "template",
-                "template": {
-                    "name": clean_template_name,
-                    "language": {"code": lang},
-                    "components": components or [],
-                },
-            }
-            try:
-                result = await self._make_request(clinic, "messages", payload)
-                meta_msg_id = self._extract_meta_message_id(result)
-                if _capture is not None:
-                    _capture["meta_message_id"] = meta_msg_id
-                logger.info(f"Sent template '{clean_template_name}' ({lang}) to {self._mask_phone(phone)}")
-
-                await self._log_to_ledger(
-                    clinic, phone, "template", _source,
-                    send_success=True, meta_message_id=meta_msg_id,
-                    template_name=clean_template_name,
-                )
-                return True
-            except Exception as e:
-                last_error = e
-                logger.warning(
-                    f"Template '{clean_template_name}' ({lang}) with header attempt failed: {e}"
-                )
-
-            # ── Attempt 2: If had header and failed, try body-only with this language ──
-            if has_header and body_only is not None:
-                payload["template"]["components"] = body_only
+        for tmpl in candidate_templates:
+            for lang in candidate_languages:
+                # ── Attempt 1: Full template with all components (including header) ──
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": phone,
+                    "type": "template",
+                    "template": {
+                        "name": tmpl,
+                        "language": {"code": lang},
+                        "components": components or [],
+                    },
+                }
                 try:
                     result = await self._make_request(clinic, "messages", payload)
                     meta_msg_id = self._extract_meta_message_id(result)
                     if _capture is not None:
                         _capture["meta_message_id"] = meta_msg_id
-                        _capture["header_stripped"] = True
-                    logger.info(
-                        f"Sent template '{clean_template_name}' ({lang}, body-only) to "
-                        f"{self._mask_phone(phone)}"
-                    )
+                    logger.info(f"Sent template '{tmpl}' ({lang}) to {self._mask_phone(phone)}")
+
                     await self._log_to_ledger(
                         clinic, phone, "template", _source,
                         send_success=True, meta_message_id=meta_msg_id,
-                        template_name=clean_template_name,
+                        template_name=tmpl,
                     )
                     return True
-                except Exception as body_err:
-                    last_error = body_err
-                    logger.warning(
-                        f"Template '{clean_template_name}' ({lang}, body-only) failed: {body_err}"
+                except Exception as e:
+                    last_error = e
+                    logger.debug(
+                        f"Template '{tmpl}' ({lang}) with header attempt failed: {e}"
                     )
 
-        logger.error(f"Failed to send template '{clean_template_name}' after trying {candidate_languages}: {last_error}")
+                # ── Attempt 2: If had header and failed, try body-only with this language ──
+                if has_header and body_only is not None:
+                    payload["template"]["components"] = body_only
+                    try:
+                        result = await self._make_request(clinic, "messages", payload)
+                        meta_msg_id = self._extract_meta_message_id(result)
+                        if _capture is not None:
+                            _capture["meta_message_id"] = meta_msg_id
+                            _capture["header_stripped"] = True
+                        logger.info(
+                            f"Sent template '{tmpl}' ({lang}, body-only) to "
+                            f"{self._mask_phone(phone)}"
+                        )
+                        await self._log_to_ledger(
+                            clinic, phone, "template", _source,
+                            send_success=True, meta_message_id=meta_msg_id,
+                            template_name=tmpl,
+                        )
+                        return True
+                    except Exception as body_err:
+                        last_error = body_err
+                        logger.debug(
+                            f"Template '{tmpl}' ({lang}, body-only) failed: {body_err}"
+                        )
+
+        logger.error(f"Failed to send template after trying {candidate_templates} across {candidate_languages}: {last_error}")
         await self._log_to_ledger(
             clinic, phone, "template", _source,
             send_success=False, template_name=clean_template_name,
@@ -516,10 +534,10 @@ class WhatsAppService:
                     response = await client.post(
                         url,
                         headers={"Authorization": f"Bearer {token}"},
-                        files={"file": (filename, file_bytes, mime_type)},
-                        data={
-                            "messaging_product": "whatsapp",
-                            "type": mime_type,
+                        files={
+                            "messaging_product": (None, "whatsapp"),
+                            "file": (filename, file_bytes, mime_type),
+                            "type": (None, mime_type),
                         },
                         timeout=30.0,
                     )
