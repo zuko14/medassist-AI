@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
     whatsapp_verify_token: str = ""
+    whatsapp_api_version: str = "v22.0"  # Graph API version; bump here when Meta sunsets a version
     waba_display_name: str = "Kriya AI Hospital"
 
     # OpenRouter AI (Primary MedAssist LLM Provider)

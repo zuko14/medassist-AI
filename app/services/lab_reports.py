@@ -686,7 +686,12 @@ class LabReportService:
 
         Returns the count of reports processed (success + final fail).
         """
-        MAX_RETRIES = 3
+        # Meta outages and operator-fixable faults (expired token, wrong phone id)
+        # routinely last hours. At 3 attempts / 42 min the queue used to give up
+        # long before a human could rotate a token, silently dropping reports that
+        # were already sitting in storage. Cap the backoff instead and keep trying
+        # for ~5h, which covers any realistic response window.
+        MAX_RETRIES = 12
         now_iso = datetime.now(timezone.utc).isoformat()
 
         try:
@@ -923,7 +928,7 @@ class LabReportService:
                         f"Retry worker: report {report_id} permanently failed after {MAX_RETRIES} attempts"
                     )
                 else:
-                    backoff_seconds = 120 * (4 ** (retry_count - 1))
+                    backoff_seconds = min(120 * (4 ** (retry_count - 1)), 1800)
                     next_retry = (datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)).isoformat()
                     supabase.table("lab_reports").update({
                         "status": "pending_retry",

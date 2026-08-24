@@ -18,7 +18,75 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-WHATSAPP_API_BASE = "https://graph.facebook.com/v21.0"
+WHATSAPP_API_BASE = f"https://graph.facebook.com/{settings.whatsapp_api_version}"
+
+
+class MetaAuthError(Exception):
+    """Meta rejected the credentials/permissions. Retrying will never fix this."""
+
+
+def _meta_error(response: httpx.Response) -> dict:
+    """Parse Meta's error envelope. Returns {} if the body isn't Meta JSON."""
+    try:
+        return response.json().get("error", {}) or {}
+    except Exception:
+        return {}
+
+
+_HEALTH_CACHE: dict[str, tuple[float, str]] = {}
+
+
+async def _diagnose_block(token: str, phone_id: str) -> str:
+    """Ask Meta *why* it is refusing, in plain text.
+
+    Meta reports account-state problems (inactive WABA, failed payment method,
+    unregistered number, unverified business) as a generic code-1 OAuthException
+    on every endpoint. The real reason is only in health_status, so fetch it and
+    put it in the log line — otherwise the outage reads as "unknown error" and
+    costs hours to trace. Cached 5 min so a burst of failures asks once.
+    """
+    now = asyncio.get_event_loop().time()
+    hit = _HEALTH_CACHE.get(phone_id)
+    if hit and now - hit[0] < 300:
+        return hit[1]
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{WHATSAPP_API_BASE}/{phone_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"fields": "health_status"},
+            )
+            health = r.json().get("health_status", {})
+            blockers = [
+                f"{e.get('entity_type')}:{err.get('error_code')} {err.get('error_description')}"
+                for e in health.get("entities", [])
+                if e.get("can_send_message") in ("BLOCKED", "LIMITED")
+                for err in (e.get("errors") or [])
+                # SIP/calling errors never block messaging — they are noise here.
+                if err.get("error_code") not in (138024, 138025)
+            ]
+            summary = (
+                f"can_send_message={health.get('can_send_message')}; " + " | ".join(blockers)
+                if blockers
+                else f"can_send_message={health.get('can_send_message')}; no blocking entity errors"
+            )
+    except Exception as e:
+        summary = f"health_status lookup failed: {e}"
+    _HEALTH_CACHE[phone_id] = (now, summary)
+    return summary
+
+
+def _is_auth_error(err: dict) -> bool:
+    """True when Meta's error is credential/permission-class.
+
+    Meta returns these as HTTP 500 with type=OAuthException and the useless
+    message "An unknown error has occurred." (code 1). Because the status is
+    5xx they look transient, so a naive retry loop burns ~15s per message and
+    hides a broken token for hours. They are terminal — surface them instead.
+    """
+    if err.get("type") == "OAuthException":
+        return True
+    return err.get("code") in (0, 3, 10, 190, 200, 803)
 
 
 class WhatsAppService:
@@ -122,6 +190,16 @@ class WhatsAppService:
                         url, headers=headers, json=payload, timeout=timeout
                     )
                     if response.status_code == 429 or response.status_code >= 500:
+                        err = _meta_error(response)
+                        if _is_auth_error(err):
+                            why = await _diagnose_block(token, phone_id)
+                            raise MetaAuthError(
+                                f"Meta refused {endpoint} for phone_id={phone_id} "
+                                f"(code={err.get('code')} type={err.get('type')} "
+                                f"msg={err.get('message')!r} "
+                                f"fbtrace_id={err.get('fbtrace_id')}). "
+                                f"Meta health_status says: {why}"
+                            )
                         if attempt == max_attempts - 1:
                             response.raise_for_status()
                         # Exponential backoff with jitter to avoid thundering herd
@@ -574,11 +652,16 @@ class WhatsAppService:
                     logger.info(f"Media uploaded successfully: {media_id}")
                     return media_id
                 except httpx.HTTPStatusError as e:
-                    fbtrace = ""
-                    try:
-                        fbtrace = e.response.json().get("error", {}).get("fbtrace_id", "")
-                    except Exception:
-                        pass
+                    err = _meta_error(e.response)
+                    fbtrace = err.get("fbtrace_id", "")
+                    if _is_auth_error(err):
+                        why = await _diagnose_block(token, phone_id)
+                        raise MetaAuthError(
+                            f"Meta refused /media for phone_id={phone_id} "
+                            f"(code={err.get('code')} type={err.get('type')} "
+                            f"msg={err.get('message')!r} fbtrace_id={fbtrace}). "
+                            f"Meta health_status says: {why}"
+                        )
                     logger.error(
                         f"WhatsApp Media API error (attempt {attempt + 1}/{max_attempts}): "
                         f"{e.response.text}{f' fbtrace_id={fbtrace}' if fbtrace else ''}"
