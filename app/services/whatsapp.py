@@ -534,11 +534,8 @@ class WhatsAppService:
                     response = await client.post(
                         url,
                         headers={"Authorization": f"Bearer {token}"},
-                        files={
-                            "messaging_product": (None, "whatsapp"),
-                            "file": (filename, file_bytes, mime_type),
-                            "type": (None, mime_type),
-                        },
+                        data={"messaging_product": "whatsapp"},
+                        files={"file": (filename, file_bytes, mime_type)},
                         timeout=30.0,
                     )
                     response.raise_for_status()
