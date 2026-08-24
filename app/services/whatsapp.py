@@ -527,15 +527,25 @@ class WhatsAppService:
 
         url = f"{WHATSAPP_API_BASE}/{phone_id}/media"
         mime_type = content_type or "application/pdf"
+        import re
+        safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename or "report.pdf")
+        if not safe_filename.endswith(".pdf"):
+            safe_filename += ".pdf"
+
         max_attempts = 3
         async with httpx.AsyncClient() as client:
             for attempt in range(max_attempts):
                 try:
+                    # Alternating data payload: with type and without type for maximum Meta API compatibility
+                    post_data = {"messaging_product": "whatsapp"}
+                    if attempt % 2 == 0:
+                        post_data["type"] = mime_type
+
                     response = await client.post(
                         url,
                         headers={"Authorization": f"Bearer {token}"},
-                        data={"messaging_product": "whatsapp"},
-                        files={"file": (filename, file_bytes, mime_type)},
+                        data=post_data,
+                        files={"file": (safe_filename, file_bytes, mime_type)},
                         timeout=30.0,
                     )
                     response.raise_for_status()
