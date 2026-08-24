@@ -84,7 +84,13 @@ class WhatsAppService:
             # Absolute safety net — logging must never affect message delivery
             logger.debug(f"Ledger dispatch failed (non-fatal): {e}")
 
-    async def _make_request(self, clinic: dict, endpoint: str, payload: dict) -> dict:
+    async def _make_request(
+        self,
+        clinic: dict,
+        endpoint: str,
+        payload: dict,
+        max_attempts_override: Optional[int] = None,
+    ) -> dict:
         """Make HTTP request to WhatsApp API with retry + exponential backoff + jitter."""
         try:
             token, phone_id = self._get_credentials(clinic)
@@ -106,7 +112,7 @@ class WhatsAppService:
             )
         )
         timeout = 20.0 if is_document else 10.0
-        max_attempts = 4 if is_document else 3
+        max_attempts = max_attempts_override or (4 if is_document else 3)
 
         async with httpx.AsyncClient() as client:
             for attempt in range(max_attempts):
@@ -240,12 +246,20 @@ class WhatsAppService:
         """
         clean_template_name = (template_name or "").strip()
         if not clean_template_name:
-            logger.error("send_template called with empty template_name")
-            return False
+            clean_template_name = "lab_report_delivery"
+
+        # Format recipient phone to pure digits
+        clean_phone = re.sub(r"[^\d]", "", str(phone or ""))
+        if len(clean_phone) == 10:
+            clean_phone = "91" + clean_phone
 
         # Candidate template names to check in case of naming variance
-        candidate_templates = [clean_template_name]
-        for alias in ("lab_report_ready", "lab_report_delivery", "lab_report_summary", "callmedex_lab_report_summary"):
+        candidate_templates = []
+        if clean_template_name:
+            candidate_templates.append(clean_template_name)
+        if "lab_report_delivery" not in candidate_templates:
+            candidate_templates.append("lab_report_delivery")
+        for alias in ("lab_report_summary", "callmedex_lab_report_summary", "lab_report_ready"):
             if alias not in candidate_templates:
                 candidate_templates.append(alias)
 
@@ -260,13 +274,15 @@ class WhatsAppService:
         body_only = [c for c in (components or []) if c.get("type") != "header"] if has_header else None
 
         last_error = None
-        for tmpl in candidate_templates:
+        for i, tmpl in enumerate(candidate_templates):
+            # Only use multi-retry on primary template; alias probing uses single attempt for speed
+            req_attempts = None if i == 0 else 1
             for lang in candidate_languages:
                 # ── Attempt 1: Full template with all components (including header) ──
                 payload = {
                     "messaging_product": "whatsapp",
                     "recipient_type": "individual",
-                    "to": phone,
+                    "to": clean_phone,
                     "type": "template",
                     "template": {
                         "name": tmpl,
@@ -275,7 +291,9 @@ class WhatsAppService:
                     },
                 }
                 try:
-                    result = await self._make_request(clinic, "messages", payload)
+                    result = await self._make_request(
+                        clinic, "messages", payload, max_attempts_override=req_attempts
+                    )
                     meta_msg_id = self._extract_meta_message_id(result)
                     if _capture is not None:
                         _capture["meta_message_id"] = meta_msg_id
@@ -297,7 +315,9 @@ class WhatsAppService:
                 if has_header and body_only is not None:
                     payload["template"]["components"] = body_only
                     try:
-                        result = await self._make_request(clinic, "messages", payload)
+                        result = await self._make_request(
+                            clinic, "messages", payload, max_attempts_override=req_attempts
+                        )
                         meta_msg_id = self._extract_meta_message_id(result)
                         if _capture is not None:
                             _capture["meta_message_id"] = meta_msg_id
