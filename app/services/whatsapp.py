@@ -544,14 +544,14 @@ class WhatsAppService:
                         f"{e.response.text}{f' fbtrace_id={fbtrace}' if fbtrace else ''}"
                     )
                     if attempt == max_attempts - 1:
-                        raise
+                        return ""
                     await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
                 except Exception as e:
                     logger.error(
                         f"WhatsApp Media request error (attempt {attempt + 1}/{max_attempts}): {e}"
                     )
                     if attempt == max_attempts - 1:
-                        raise
+                        return ""
                     await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
         return ""
 

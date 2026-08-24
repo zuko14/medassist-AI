@@ -175,21 +175,29 @@ class LabReportService:
 
                 if is_template_path:
                     # Upload to Meta first for reliability
-                    media_handle = await whatsapp_service.upload_media(
-                        clinic, file_bytes, filename, content_type
-                    )
+                    try:
+                        media_handle = await whatsapp_service.upload_media(
+                            clinic, file_bytes, filename, content_type
+                        )
+                    except Exception as upload_err:
+                        logger.warning(f"Media upload attempt failed (will try signed URL): {upload_err}")
+                        media_handle = None
+
                     if not media_handle and pdf_signed_url:
                         media_handle = pdf_signed_url  # Fallback to signed URL
                 else:
                     # Freeform: prefer signed URL (send_document handles fallback)
                     media_handle = pdf_signed_url
                     if not media_handle:
-                        media_handle = await whatsapp_service.upload_media(
-                            clinic, file_bytes, filename, content_type
-                        )
+                        try:
+                            media_handle = await whatsapp_service.upload_media(
+                                clinic, file_bytes, filename, content_type
+                            )
+                        except Exception:
+                            media_handle = None
 
                 if not media_handle:
-                    raise ValueError("Failed to obtain media handle (signed URL or WhatsApp upload)")
+                    raise ValueError("Failed to obtain media handle (both upload and signed URL unavailable)")
 
                 doc_header = {"filename": filename}
                 if media_handle.startswith("http://") or media_handle.startswith("https://"):
@@ -204,31 +212,66 @@ class LabReportService:
                             "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
                             "cannot deliver to this patient"
                         )
-                    sent_ok = await whatsapp_service.send_template(
-                        clinic,
-                        patient_phone,
-                        template_name=template,
-                        components=[
-                            {
-                                "type": "header",
-                                "parameters": [
+                    try:
+                        sent_ok = await whatsapp_service.send_template(
+                            clinic,
+                            patient_phone,
+                            template_name=template,
+                            components=[
+                                {
+                                    "type": "header",
+                                    "parameters": [
+                                        {
+                                            "type": "document",
+                                            "document": doc_header,
+                                        }
+                                    ],
+                                },
+                                {
+                                    "type": "body",
+                                    "parameters": [
+                                        {"type": "text", "text": patient_name},
+                                        {"type": "text", "text": report_name},
+                                    ],
+                                },
+                            ],
+                            _source="lab_reports",
+                            _capture=capture,
+                        )
+                    except Exception as template_err:
+                        # If sent with media ID and failed with 500, attempt with signed URL before giving up
+                        if "id" in doc_header and pdf_signed_url and ("500" in str(template_err) or "Server Error" in str(template_err)):
+                            logger.warning(
+                                f"Template send with media ID failed (Meta 500) — retrying with signed URL link for {mask_phone(patient_phone)}"
+                            )
+                            alt_header = {"filename": filename, "link": pdf_signed_url}
+                            sent_ok = await whatsapp_service.send_template(
+                                clinic,
+                                patient_phone,
+                                template_name=template,
+                                components=[
                                     {
-                                        "type": "document",
-                                        "document": doc_header,
-                                    }
+                                        "type": "header",
+                                        "parameters": [
+                                            {
+                                                "type": "document",
+                                                "document": alt_header,
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "type": "body",
+                                        "parameters": [
+                                            {"type": "text", "text": patient_name},
+                                            {"type": "text", "text": report_name},
+                                        ],
+                                    },
                                 ],
-                            },
-                            {
-                                "type": "body",
-                                "parameters": [
-                                    {"type": "text", "text": patient_name},
-                                    {"type": "text", "text": report_name},
-                                ],
-                            },
-                        ],
-                        _source="lab_reports",
-                        _capture=capture,
-                    )
+                                _source="lab_reports",
+                                _capture=capture,
+                            )
+                        else:
+                            raise template_err
                     if not sent_ok:
                         raise ValueError(
                             "WhatsApp rejected the utility template send — "
@@ -744,27 +787,57 @@ class LabReportService:
                         else:
                             doc_header["id"] = media_handle
 
-                        sent_ok = await whatsapp_service.send_template(
-                            clinic,
-                            patient_phone,
-                            template_name=template,
-                            components=[
-                                {
-                                    "type": "header",
-                                    "parameters": [
-                                        {"type": "document", "document": doc_header}
+                        try:
+                            sent_ok = await whatsapp_service.send_template(
+                                clinic,
+                                patient_phone,
+                                template_name=template,
+                                components=[
+                                    {
+                                        "type": "header",
+                                        "parameters": [
+                                            {"type": "document", "document": doc_header}
+                                        ],
+                                    },
+                                    {
+                                        "type": "body",
+                                        "parameters": [
+                                            {"type": "text", "text": report.get("patient_name", "Patient")},
+                                            {"type": "text", "text": report.get("report_name", "Lab Report")},
+                                        ],
+                                    },
+                                ],
+                                _source="lab_reports_retry",
+                            )
+                        except Exception as retry_tpl_err:
+                            if "id" in doc_header and pdf_signed_url and ("500" in str(retry_tpl_err) or "Server Error" in str(retry_tpl_err)):
+                                logger.warning(
+                                    f"Retry worker: template send with media ID failed (Meta 500) — retrying with signed URL link for {mask_phone(patient_phone)}"
+                                )
+                                alt_header = {"filename": filename, "link": pdf_signed_url}
+                                sent_ok = await whatsapp_service.send_template(
+                                    clinic,
+                                    patient_phone,
+                                    template_name=template,
+                                    components=[
+                                        {
+                                            "type": "header",
+                                            "parameters": [
+                                                {"type": "document", "document": alt_header}
+                                            ],
+                                        },
+                                        {
+                                            "type": "body",
+                                            "parameters": [
+                                                {"type": "text", "text": report.get("patient_name", "Patient")},
+                                                {"type": "text", "text": report.get("report_name", "Lab Report")},
+                                            ],
+                                        },
                                     ],
-                                },
-                                {
-                                    "type": "body",
-                                    "parameters": [
-                                        {"type": "text", "text": report.get("patient_name", "Patient")},
-                                        {"type": "text", "text": report.get("report_name", "Lab Report")},
-                                    ],
-                                },
-                            ],
-                            _source="lab_reports_retry",
-                        )
+                                    _source="lab_reports_retry",
+                                )
+                            else:
+                                raise retry_tpl_err
                     else:
                         # Freeform send: summary + document
                         report_name = report.get("report_name", "Lab Report")
