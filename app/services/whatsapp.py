@@ -101,8 +101,14 @@ class WhatsAppService:
             "Content-Type": "application/json",
         }
 
-        # Document sends involve Meta fetching an external URL — give more time
-        is_document = payload.get("type") == "document"
+        # Document sends (or templates with document headers) involve larger payloads or Meta fetching external media — give more time and retries
+        is_document = (
+            payload.get("type") == "document"
+            or any(
+                c.get("type") == "header" and any(p.get("type") == "document" for p in c.get("parameters", []))
+                for c in payload.get("template", {}).get("components", [])
+            )
+        )
         timeout = 20.0 if is_document else 10.0
         max_attempts = 4 if is_document else 3
 
@@ -306,6 +312,19 @@ class WhatsAppService:
                 clinic, phone, "template", _source,
                 send_success=False, template_name=template_name,
             )
+
+            # Server errors (Meta 500) are transient — re-raise so callers
+            # (lab_reports.py) can detect them and queue for retry.
+            # Client errors (bad template, wrong params) are permanent → return False.
+            is_server_error = False
+            if resp is not None:
+                is_server_error = resp.status_code >= 500
+            elif "500" in err_text or "Server Error" in err_text:
+                is_server_error = True
+
+            if is_server_error:
+                raise  # Propagate Meta 500 to caller for transient detection
+
             return False
 
 

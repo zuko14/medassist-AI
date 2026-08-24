@@ -166,12 +166,28 @@ class LabReportService:
                     f"another delivery in progress. Will retry next cycle."
                 )
             try:
-                # Resolve media handle: prefer Supabase Storage signed URL (direct link), fallback to WhatsApp upload
-                media_handle = pdf_signed_url
-                if not media_handle:
+                # Resolve media handle strategy:
+                # - Templates (outside 24h): prefer Meta upload (document.id) — more reliable
+                #   since Meta doesn't need to fetch an external URL
+                # - Freeform (inside 24h): prefer signed URL (document.link) — faster,
+                #   and send_document has automatic link→upload fallback if Meta 500s
+                is_template_path = not await whatsapp_service._can_send_freeform(clinic, patient_phone)
+
+                if is_template_path:
+                    # Upload to Meta first for reliability
                     media_handle = await whatsapp_service.upload_media(
                         clinic, file_bytes, filename, content_type
                     )
+                    if not media_handle and pdf_signed_url:
+                        media_handle = pdf_signed_url  # Fallback to signed URL
+                else:
+                    # Freeform: prefer signed URL (send_document handles fallback)
+                    media_handle = pdf_signed_url
+                    if not media_handle:
+                        media_handle = await whatsapp_service.upload_media(
+                            clinic, file_bytes, filename, content_type
+                        )
+
                 if not media_handle:
                     raise ValueError("Failed to obtain media handle (signed URL or WhatsApp upload)")
 
@@ -181,7 +197,7 @@ class LabReportService:
                 else:
                     doc_header["id"] = media_handle
 
-                if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
+                if is_template_path:
                     template = settings.lab_report_template_name
                     if not template:
                         raise ValueError(
@@ -214,7 +230,10 @@ class LabReportService:
                         _capture=capture,
                     )
                     if not sent_ok:
-                        raise ValueError("WhatsApp rejected the utility template send")
+                        raise ValueError(
+                            "WhatsApp rejected the utility template send — "
+                            "template may not be approved or parameters don't match"
+                        )
                 else:
                     # Step E — Send AI summary message to patient
                     if not ai_result["fallback"]:
@@ -272,12 +291,27 @@ class LabReportService:
         # Determine if this is a transient Meta API error (retryable) vs permanent failure
         is_transient_meta_error = False
         if error_message and not sent_ok:
-            transient_indicators = ["500", "Server Error", "Meta 500", "upload fallback also failed", "OAuthException"]
-            is_transient_meta_error = any(ind.lower() in error_message.lower() for ind in transient_indicators)
-            # NOT transient: session expired, allowlist, template rejected, credentials missing
-            permanent_indicators = ["session expired", "24h window", "allowlist", "credentials", "template"]
-            if any(ind.lower() in error_message.lower() for ind in permanent_indicators):
-                is_transient_meta_error = False
+            # Explicit server error / network / transient indicators from Meta or storage
+            transient_indicators = [
+                "500", "502", "503", "504", "Server Error", "Meta 500",
+                "upload fallback also failed", "OAuthException", "timeout",
+                "Internal Server Error", "An unknown error has occurred",
+            ]
+            has_transient_indicator = any(ind.lower() in error_message.lower() for ind in transient_indicators)
+
+            # Permanent non-retryable client errors or configuration gaps
+            permanent_indicators = [
+                "session expired", "outside 24h window and lab_report_template_name unset",
+                "allowlist", "credentials", "template may not be approved",
+                "template does not exist", "template name is invalid",
+            ]
+            has_permanent_indicator = any(ind.lower() in error_message.lower() for ind in permanent_indicators)
+
+            if has_transient_indicator:
+                is_transient_meta_error = True
+            elif not has_permanent_indicator:
+                # Default unclassified errors to transient to allow retry queue attempts
+                is_transient_meta_error = True
 
         effective_status = "sent" if sent_ok else ("pending_retry" if is_transient_meta_error else "failed")
 
@@ -661,12 +695,24 @@ class LabReportService:
                 except Exception as sign_err:
                     logger.warning(f"Retry worker: signed URL generation failed: {sign_err}")
 
-                # Resolve media handle: prefer signed URL, fallback to upload
-                media_handle = pdf_signed_url
-                if not media_handle:
+                # Resolve media handle strategy:
+                # - Templates (outside 24h): upload to Meta directly (document.id) for highest reliability
+                # - Freeform (inside 24h): prefer signed URL (document.link) with automatic fallback
+                is_template_path = not await whatsapp_service._can_send_freeform(clinic, patient_phone)
+
+                if is_template_path:
                     media_handle = await whatsapp_service.upload_media(
                         clinic, file_bytes, filename, "application/pdf"
                     )
+                    if not media_handle and pdf_signed_url:
+                        media_handle = pdf_signed_url
+                else:
+                    media_handle = pdf_signed_url
+                    if not media_handle:
+                        media_handle = await whatsapp_service.upload_media(
+                            clinic, file_bytes, filename, "application/pdf"
+                        )
+
                 if not media_handle:
                     raise ValueError("Failed to obtain media handle for retry")
 
@@ -685,7 +731,7 @@ class LabReportService:
 
                 try:
                     # Check session window
-                    if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
+                    if is_template_path:
                         # Outside 24h window — need template
                         from app.config import settings as app_settings
                         template = app_settings.lab_report_template_name
