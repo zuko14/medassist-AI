@@ -510,12 +510,20 @@ class WhatsAppService:
             )
             return False
 
+        doc_obj = {"filename": filename}
+        if caption:
+            doc_obj["caption"] = caption
+        if media_id.startswith("http://") or media_id.startswith("https://"):
+            doc_obj["link"] = media_id
+        else:
+            doc_obj["id"] = media_id
+
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": phone,
             "type": "document",
-            "document": {"id": media_id, "filename": filename, "caption": caption},
+            "document": doc_obj,
         }
 
         try:

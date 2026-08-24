@@ -124,6 +124,7 @@ class LabReportService:
         # Step C — Upload to Supabase Storage
         storage_path = f"{patient_phone}/{uuid4()}_{filename}"
         storage_ok = False
+        pdf_signed_url = None
         try:
             upload_result = supabase.storage.from_("lab-reports").upload(
                 storage_path, file_bytes, {"content-type": content_type}
@@ -132,6 +133,13 @@ class LabReportService:
                 f"Uploaded report to storage: {storage_path} -> {upload_result}"
             )
             storage_ok = True
+            try:
+                signed = supabase.storage.from_("lab-reports").create_signed_url(
+                    storage_path, 604800
+                )
+                pdf_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+            except Exception as sign_err:
+                logger.warning(f"Failed to generate signed URL from storage: {sign_err}")
         except Exception as e:
             logger.error(
                 f"Supabase Storage upload FAILED (file will not be retrievable for bot resend): {type(e).__name__}: {e}"
@@ -158,6 +166,21 @@ class LabReportService:
                     f"another delivery in progress. Will retry next cycle."
                 )
             try:
+                # Resolve media handle: prefer Supabase Storage signed URL (direct link), fallback to WhatsApp upload
+                media_handle = pdf_signed_url
+                if not media_handle:
+                    media_handle = await whatsapp_service.upload_media(
+                        clinic, file_bytes, filename, content_type
+                    )
+                if not media_handle:
+                    raise ValueError("Failed to obtain media handle (signed URL or WhatsApp upload)")
+
+                doc_header = {"filename": filename}
+                if media_handle.startswith("http://") or media_handle.startswith("https://"):
+                    doc_header["link"] = media_handle
+                else:
+                    doc_header["id"] = media_handle
+
                 if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
                     template = settings.lab_report_template_name
                     if not template:
@@ -165,11 +188,6 @@ class LabReportService:
                             "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
                             "cannot deliver to this patient"
                         )
-                    media_id = await whatsapp_service.upload_media(
-                        clinic, file_bytes, filename, content_type
-                    )
-                    if not media_id:
-                        raise ValueError("Failed to upload media to WhatsApp")
                     sent_ok = await whatsapp_service.send_template(
                         clinic,
                         patient_phone,
@@ -180,7 +198,7 @@ class LabReportService:
                                 "parameters": [
                                     {
                                         "type": "document",
-                                        "document": {"id": media_id, "filename": filename},
+                                        "document": doc_header,
                                     }
                                 ],
                             },
@@ -198,14 +216,6 @@ class LabReportService:
                     if not sent_ok:
                         raise ValueError("WhatsApp rejected the utility template send")
                 else:
-                    # Step D — Upload PDF to WhatsApp media
-                    media_id = await whatsapp_service.upload_media(
-                        clinic, file_bytes, filename, content_type
-                    )
-
-                    if not media_id:
-                        raise ValueError("Failed to upload media to WhatsApp")
-
                     # Step E — Send AI summary message to patient
                     if not ai_result["fallback"]:
                         summary_message = (
@@ -238,7 +248,7 @@ class LabReportService:
                     # Step F — Send the actual PDF document
                     caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
                     doc_sent = await whatsapp_service.send_document(
-                        clinic, patient_phone, media_id, filename, caption,
+                        clinic, patient_phone, media_handle, filename, caption,
                         _source="lab_reports", _capture=capture,
                     )
 
@@ -426,6 +436,30 @@ class LabReportService:
                     f"another delivery in progress"
                 )
             try:
+                # Resolve media handle: prefer Supabase Storage signed URL (direct link), fallback to WhatsApp upload
+                pdf_signed_url = None
+                try:
+                    signed = supabase.storage.from_("lab-reports").create_signed_url(
+                        file_path, 604800
+                    )
+                    pdf_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                except Exception as sign_err:
+                    logger.warning(f"Failed to generate signed URL for resend: {sign_err}")
+
+                media_handle = pdf_signed_url
+                if not media_handle:
+                    media_handle = await whatsapp_service.upload_media(
+                        clinic, file_bytes, filename, "application/pdf"
+                    )
+                if not media_handle:
+                    raise ValueError("Failed to obtain media handle (signed URL or WhatsApp upload)")
+
+                doc_header = {"filename": filename}
+                if media_handle.startswith("http://") or media_handle.startswith("https://"):
+                    doc_header["link"] = media_handle
+                else:
+                    doc_header["id"] = media_handle
+
                 if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
                     template = settings.lab_report_template_name
                     if not template:
@@ -433,11 +467,6 @@ class LabReportService:
                             "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
                             "cannot deliver to this patient"
                         )
-                    media_id = await whatsapp_service.upload_media(
-                        clinic, file_bytes, filename, "application/pdf"
-                    )
-                    if not media_id:
-                        raise ValueError("Failed to upload media to WhatsApp")
                     sent_ok = await whatsapp_service.send_template(
                         clinic,
                         patient_phone,
@@ -448,7 +477,7 @@ class LabReportService:
                                 "parameters": [
                                     {
                                         "type": "document",
-                                        "document": {"id": media_id, "filename": filename},
+                                        "document": doc_header,
                                     }
                                 ],
                             },
@@ -466,13 +495,6 @@ class LabReportService:
                     if not sent_ok:
                         raise ValueError("WhatsApp rejected the utility template send")
                 else:
-                    media_id = await whatsapp_service.upload_media(
-                        clinic, file_bytes, filename, "application/pdf"
-                    )
-
-                    if not media_id:
-                        raise ValueError("Failed to upload media to WhatsApp")
-
                     # Send summary or fallback text
                     ai_summary = report.get("ai_summary")
 
@@ -506,7 +528,7 @@ class LabReportService:
 
                     caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
                     doc_sent = await whatsapp_service.send_document(
-                        clinic, patient_phone, media_id, filename, caption,
+                        clinic, patient_phone, media_handle, filename, caption,
                         _source="lab_reports", _capture=capture,
                     )
 
