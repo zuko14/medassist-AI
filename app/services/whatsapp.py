@@ -8,6 +8,7 @@ failed INSERT never blocks or delays message delivery.
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
@@ -88,7 +89,7 @@ class WhatsAppService:
             logger.debug(f"Ledger dispatch failed (non-fatal): {e}")
 
     async def _make_request(self, clinic: dict, endpoint: str, payload: dict) -> dict:
-        """Make HTTP request to WhatsApp API with retry."""
+        """Make HTTP request to WhatsApp API with retry + exponential backoff + jitter."""
         try:
             token, phone_id = self._get_credentials(clinic)
         except ValueError:
@@ -100,34 +101,57 @@ class WhatsAppService:
             "Content-Type": "application/json",
         }
 
+        # Document sends involve Meta fetching an external URL — give more time
+        is_document = payload.get("type") == "document"
+        timeout = 20.0 if is_document else 10.0
+        max_attempts = 4 if is_document else 3
+
         async with httpx.AsyncClient() as client:
-            for attempt in range(3):
+            for attempt in range(max_attempts):
                 try:
                     response = await client.post(
-                        url, headers=headers, json=payload, timeout=10.0
+                        url, headers=headers, json=payload, timeout=timeout
                     )
                     if response.status_code == 429 or response.status_code >= 500:
-                        if attempt == 2:
+                        if attempt == max_attempts - 1:
                             response.raise_for_status()
-                        delay = float(response.headers.get("Retry-After", 2 ** attempt))
+                        # Exponential backoff with jitter to avoid thundering herd
+                        base_delay = float(response.headers.get("Retry-After", 2 ** attempt))
+                        jitter = random.uniform(0, base_delay * 0.5)
+                        delay = min(base_delay + jitter, 30)
+                        # Extract fbtrace_id for Meta support escalation
+                        fbtrace = ""
+                        try:
+                            err_body = response.json()
+                            fbtrace = err_body.get("error", {}).get("fbtrace_id", "")
+                        except Exception:
+                            pass
                         logger.warning(
-                            f"Meta {response.status_code}, retrying in {delay}s "
-                            f"(attempt {attempt + 1}/3)"
+                            f"Meta {response.status_code}, retrying in {delay:.1f}s "
+                            f"(attempt {attempt + 1}/{max_attempts})"
+                            f"{f' fbtrace_id={fbtrace}' if fbtrace else ''}"
                         )
-                        await asyncio.sleep(min(delay, 30))
+                        await asyncio.sleep(delay)
                         continue
                     response.raise_for_status()
                     return response.json()
                 except httpx.HTTPStatusError as e:
+                    fbtrace = ""
+                    try:
+                        err_body = e.response.json()
+                        fbtrace = err_body.get("error", {}).get("fbtrace_id", "")
+                    except Exception:
+                        pass
                     logger.error(
                         f"WhatsApp API error (attempt {attempt + 1}): {e.response.text}"
+                        f"{f' fbtrace_id={fbtrace}' if fbtrace else ''}"
                     )
                     raise
                 except httpx.RequestError as e:
                     logger.error(f"WhatsApp request error (attempt {attempt + 1}): {e}")
-                    if attempt == 2:
+                    if attempt == max_attempts - 1:
                         raise
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
 
         return {}
 
@@ -461,7 +485,10 @@ class WhatsAppService:
     async def upload_media(
         self, clinic: dict, file_bytes: bytes, filename: str, content_type: str
     ) -> str:
-        """Upload file to Meta media endpoint and return media_id."""
+        """Upload file to Meta media endpoint and return media_id.
+
+        Uses 3 attempts with exponential backoff + jitter.
+        """
         try:
             token, phone_id = self._get_credentials(clinic)
         except ValueError:
@@ -469,8 +496,9 @@ class WhatsAppService:
 
         url = f"{WHATSAPP_API_BASE}/{phone_id}/media"
         mime_type = content_type or "application/pdf"
+        max_attempts = 3
         async with httpx.AsyncClient() as client:
-            for attempt in range(2):
+            for attempt in range(max_attempts):
                 try:
                     response = await client.post(
                         url,
@@ -483,37 +511,56 @@ class WhatsAppService:
                         timeout=30.0,
                     )
                     response.raise_for_status()
-                    return response.json()["id"]
+                    media_id = response.json()["id"]
+                    logger.info(f"Media uploaded successfully: {media_id}")
+                    return media_id
                 except httpx.HTTPStatusError as e:
+                    fbtrace = ""
+                    try:
+                        fbtrace = e.response.json().get("error", {}).get("fbtrace_id", "")
+                    except Exception:
+                        pass
                     logger.error(
-                        f"WhatsApp Media API error (attempt {attempt + 1}): {e.response.text}"
+                        f"WhatsApp Media API error (attempt {attempt + 1}/{max_attempts}): "
+                        f"{e.response.text}{f' fbtrace_id={fbtrace}' if fbtrace else ''}"
                     )
-                    if attempt == 1:
+                    if attempt == max_attempts - 1:
                         raise
+                    await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
                 except Exception as e:
                     logger.error(
-                        f"WhatsApp Media request error (attempt {attempt + 1}): {e}"
+                        f"WhatsApp Media request error (attempt {attempt + 1}/{max_attempts}): {e}"
                     )
-                    if attempt == 1:
+                    if attempt == max_attempts - 1:
                         raise
+                    await asyncio.sleep(2 ** attempt + random.uniform(0, 1))
         return ""
 
     async def send_document(
         self, clinic: dict, phone: str, media_id: str, filename: str, caption: str = "",
         _source: str = "conversation",
         _capture: Optional[dict] = None,
+        _fallback_file_bytes: Optional[bytes] = None,
+        _fallback_content_type: str = "application/pdf",
     ) -> bool:
-        """Send a document message."""
+        """Send a document message with automatic link→upload fallback.
+
+        If media_id is a URL (link-based delivery) and Meta returns a 500 error,
+        automatically falls back to uploading the file via upload_media and
+        resending with document.id — provided _fallback_file_bytes is supplied.
+        """
         if not await self._can_send_freeform(clinic, phone):
             logger.warning(
                 f"Cannot send document to {self._mask_phone(phone)}: session expired"
             )
             return False
 
+        is_link = media_id.startswith("http://") or media_id.startswith("https://")
+
         doc_obj = {"filename": filename}
         if caption:
             doc_obj["caption"] = caption
-        if media_id.startswith("http://") or media_id.startswith("https://"):
+        if is_link:
             doc_obj["link"] = media_id
         else:
             doc_obj["id"] = media_id
@@ -531,7 +578,7 @@ class WhatsAppService:
             meta_msg_id = self._extract_meta_message_id(result)
             if _capture is not None:
                 _capture["meta_message_id"] = meta_msg_id
-            logger.info(f"Sent document to {self._mask_phone(phone)}")
+            logger.info(f"Sent document to {self._mask_phone(phone)} via {'link' if is_link else 'media_id'}")
 
             # ── Accounting ──
             await self._log_to_ledger(
@@ -540,6 +587,57 @@ class WhatsAppService:
             )
             return True
         except Exception as e:
+            # ── Automatic fallback: link → upload ──
+            # If we sent with document.link and Meta returned a server error,
+            # try uploading the file directly and resend with document.id.
+            if is_link and _fallback_file_bytes:
+                err_text = str(e)
+                resp = getattr(e, "response", None)
+                is_server_error = False
+                if resp is not None:
+                    is_server_error = resp.status_code >= 500
+                elif "500" in err_text or "Server Error" in err_text:
+                    is_server_error = True
+
+                if is_server_error:
+                    logger.warning(
+                        f"Document link delivery failed (Meta 500) — falling back to media upload "
+                        f"for {self._mask_phone(phone)}"
+                    )
+                    try:
+                        uploaded_id = await self.upload_media(
+                            clinic, _fallback_file_bytes, filename, _fallback_content_type
+                        )
+                        if uploaded_id:
+                            # Rebuild payload with media ID instead of link
+                            fallback_doc = {"filename": filename, "id": uploaded_id}
+                            if caption:
+                                fallback_doc["caption"] = caption
+                            fallback_payload = {
+                                "messaging_product": "whatsapp",
+                                "recipient_type": "individual",
+                                "to": phone,
+                                "type": "document",
+                                "document": fallback_doc,
+                            }
+                            result = await self._make_request(clinic, "messages", fallback_payload)
+                            meta_msg_id = self._extract_meta_message_id(result)
+                            if _capture is not None:
+                                _capture["meta_message_id"] = meta_msg_id
+                                _capture["delivery_method"] = "upload_fallback"
+                            logger.info(
+                                f"Sent document to {self._mask_phone(phone)} via upload fallback"
+                            )
+                            await self._log_to_ledger(
+                                clinic, phone, "document", _source,
+                                send_success=True, meta_message_id=meta_msg_id,
+                            )
+                            return True
+                    except Exception as fallback_err:
+                        logger.error(
+                            f"Upload fallback also failed for {self._mask_phone(phone)}: {fallback_err}"
+                        )
+
             logger.error(f"Failed to send document: {e}")
             await self._log_to_ledger(
                 clinic, phone, "document", _source, send_success=False,

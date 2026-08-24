@@ -143,6 +143,15 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Lab Report Retry: Re-attempt pending_retry deliveries (every 5 minutes) ──
+        self.scheduler.add_job(
+            self._retry_pending_lab_reports,
+            "interval",
+            minutes=5,
+            id="lab_report_retry",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         logger.info("Scheduler started")
 
@@ -591,6 +600,23 @@ class SchedulerService:
                 )
         except Exception as e:
             logger.error(f"Payment reconciliation job failed: {e}")
+
+    async def _retry_pending_lab_reports(self):
+        """Re-attempt delivery of lab reports stuck in 'pending_retry' status.
+
+        Runs every 5 minutes. Delegates to LabReportService.retry_pending_deliveries
+        which handles download, re-send, backoff, and permanent failure marking.
+        """
+        try:
+            from app.services.lab_reports import LabReportService
+
+            service = LabReportService()
+            count = await service.retry_pending_deliveries()
+            if count > 0:
+                logger.info(f"Scheduler: processed {count} pending lab report retries")
+        except Exception as e:
+            # Table might not have retry columns yet — don't crash the scheduler
+            logger.debug(f"Lab report retry job skipped: {e}")
 
 
 # Global instance

@@ -1,7 +1,7 @@
 """Lab Report Delivery Service."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -250,6 +250,8 @@ class LabReportService:
                     doc_sent = await whatsapp_service.send_document(
                         clinic, patient_phone, media_handle, filename, caption,
                         _source="lab_reports", _capture=capture,
+                        _fallback_file_bytes=file_bytes,
+                        _fallback_content_type=content_type,
                     )
 
                     if not doc_sent:
@@ -267,6 +269,18 @@ class LabReportService:
             logger.error(f"WhatsApp send failed for {mask_phone(patient_phone)}: {e}")
             error_message = str(e)
 
+        # Determine if this is a transient Meta API error (retryable) vs permanent failure
+        is_transient_meta_error = False
+        if error_message and not sent_ok:
+            transient_indicators = ["500", "Server Error", "Meta 500", "upload fallback also failed", "OAuthException"]
+            is_transient_meta_error = any(ind.lower() in error_message.lower() for ind in transient_indicators)
+            # NOT transient: session expired, allowlist, template rejected, credentials missing
+            permanent_indicators = ["session expired", "24h window", "allowlist", "credentials", "template"]
+            if any(ind.lower() in error_message.lower() for ind in permanent_indicators):
+                is_transient_meta_error = False
+
+        effective_status = "sent" if sent_ok else ("pending_retry" if is_transient_meta_error else "failed")
+
         # Step G — Save to database
         resolved_clinic_id = clinic["id"] if clinic else clinic_id
         row = {
@@ -278,9 +292,9 @@ class LabReportService:
             "file_path": storage_path,
             "ai_summary": ai_result.get("patient_message"),
             "has_abnormal_values": ai_result.get("has_abnormal", False),
-            "status": "sent" if sent_ok else "failed",
+            "status": effective_status,
             "whatsapp_message_id": capture.get("meta_message_id"),
-            "delivery_status": "sent" if sent_ok else "failed",
+            "delivery_status": effective_status,
             "external_report_id": external_report_id,
             "source": source,
             "match_confidence": match_confidence,
@@ -298,6 +312,18 @@ class LabReportService:
         }
         if sent_ok:
             row["sent_at"] = datetime.now(timezone.utc).isoformat()
+        elif is_transient_meta_error:
+            # Schedule retry: exponential backoff — 2 min, 8 min, 32 min
+            retry_count = 1  # This is the first attempt
+            row["retry_count"] = retry_count
+            backoff_seconds = 120 * (4 ** (retry_count - 1))  # 120s, 480s, 1920s
+            row["next_retry_at"] = (
+                datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)
+            ).isoformat()
+            logger.info(
+                f"Report queued for retry (attempt {retry_count}) — "
+                f"next retry in {backoff_seconds}s for {mask_phone(patient_phone)}"
+            )
 
         try:
             if claim_id:
@@ -566,3 +592,217 @@ class LabReportService:
             supabase.table("lab_reports").select("*").eq("id", report_id).execute()
         )
         return updated.data[0]
+
+    async def retry_pending_deliveries(self) -> int:
+        """Retry reports stuck in 'pending_retry' status.
+
+        Called by the scheduler every 5 minutes. Finds reports where
+        next_retry_at <= now and retry_count < 3, re-attempts WhatsApp
+        delivery using the file already in Supabase Storage.
+
+        Returns the count of reports processed (success + final fail).
+        """
+        MAX_RETRIES = 3
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        try:
+            pending = (
+                supabase.table("lab_reports")
+                .select("*")
+                .eq("status", "pending_retry")
+                .lt("next_retry_at", now_iso)
+                .order("next_retry_at")
+                .limit(10)  # Process at most 10 per cycle to avoid overload
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Retry worker: failed to query pending_retry reports: {e}")
+            return 0
+
+        if not pending.data:
+            return 0
+
+        processed = 0
+        for report in pending.data:
+            report_id = report["id"]
+            retry_count = (report.get("retry_count") or 0) + 1
+            patient_phone = report["patient_phone"]
+            file_path = report.get("file_path")
+
+            if not file_path:
+                logger.warning(f"Retry worker: report {report_id} has no file_path — marking failed")
+                supabase.table("lab_reports").update({
+                    "status": "failed",
+                    "delivery_status": "failed",
+                    "error_message": "No file_path available for retry",
+                    "next_retry_at": None,
+                }).eq("id", report_id).execute()
+                processed += 1
+                continue
+
+            logger.info(
+                f"Retry worker: attempting delivery {retry_count}/{MAX_RETRIES} "
+                f"for report {report_id} to {mask_phone(patient_phone)}"
+            )
+
+            try:
+                # Download PDF from Supabase Storage
+                file_bytes = supabase.storage.from_("lab-reports").download(file_path)
+                filename = file_path.split("/")[-1]
+                clinic = await get_clinic_by_id(report.get("clinic_id", "default"))
+
+                # Generate fresh signed URL
+                pdf_signed_url = None
+                try:
+                    signed = supabase.storage.from_("lab-reports").create_signed_url(
+                        file_path, 604800
+                    )
+                    pdf_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                except Exception as sign_err:
+                    logger.warning(f"Retry worker: signed URL generation failed: {sign_err}")
+
+                # Resolve media handle: prefer signed URL, fallback to upload
+                media_handle = pdf_signed_url
+                if not media_handle:
+                    media_handle = await whatsapp_service.upload_media(
+                        clinic, file_bytes, filename, "application/pdf"
+                    )
+                if not media_handle:
+                    raise ValueError("Failed to obtain media handle for retry")
+
+                from app.services.message_queue import (
+                    acquire_phone_lock_with_timeout,
+                    get_phone_lock,
+                    release_phone_lock,
+                )
+
+                acquired = await acquire_phone_lock_with_timeout(patient_phone)
+                if not acquired:
+                    logger.warning(
+                        f"Retry worker: phone lock timeout for {mask_phone(patient_phone)} — will retry next cycle"
+                    )
+                    continue  # Don't increment retry_count — not a real failure
+
+                try:
+                    # Check session window
+                    if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
+                        # Outside 24h window — need template
+                        from app.config import settings as app_settings
+                        template = app_settings.lab_report_template_name
+                        if not template:
+                            raise ValueError("Outside 24h window and no template configured")
+
+                        doc_header = {"filename": filename}
+                        if media_handle.startswith("http://") or media_handle.startswith("https://"):
+                            doc_header["link"] = media_handle
+                        else:
+                            doc_header["id"] = media_handle
+
+                        sent_ok = await whatsapp_service.send_template(
+                            clinic,
+                            patient_phone,
+                            template_name=template,
+                            components=[
+                                {
+                                    "type": "header",
+                                    "parameters": [
+                                        {"type": "document", "document": doc_header}
+                                    ],
+                                },
+                                {
+                                    "type": "body",
+                                    "parameters": [
+                                        {"type": "text", "text": report.get("patient_name", "Patient")},
+                                        {"type": "text", "text": report.get("report_name", "Lab Report")},
+                                    ],
+                                },
+                            ],
+                            _source="lab_reports_retry",
+                        )
+                    else:
+                        # Freeform send: summary + document
+                        report_name = report.get("report_name", "Lab Report")
+                        report_type = report.get("report_type", "General")
+                        patient_name = report.get("patient_name", "Patient")
+
+                        summary = report.get("ai_summary")
+                        if summary:
+                            summary_msg = (
+                                f"🏥 *{clinic['name']} — Lab Report Ready*\n\n"
+                                f"Dear {patient_name},\n\n{summary}"
+                            )
+                            if report.get("has_abnormal_values"):
+                                summary_msg += "\n\n⚠️ *Some values may need attention. Please consult your doctor.*"
+                            summary_msg += "\n\n📄 Your full report is attached below."
+                        else:
+                            summary_msg = (
+                                f"🏥 *{clinic['name']}*\n\n"
+                                f"Dear {patient_name}, your *{report_type}* report is ready. "
+                                f"Please find the full report attached below."
+                            )
+
+                        text_sent = await whatsapp_service.send_text(
+                            clinic, patient_phone, summary_msg, _source="lab_reports_retry"
+                        )
+
+                        caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
+                        sent_ok = await whatsapp_service.send_document(
+                            clinic, patient_phone, media_handle, filename, caption,
+                            _source="lab_reports_retry",
+                            _fallback_file_bytes=file_bytes,
+                            _fallback_content_type="application/pdf",
+                        )
+                finally:
+                    phone_lock = await get_phone_lock(patient_phone)
+                    phone_lock.release()
+                    await release_phone_lock(patient_phone)
+
+                if sent_ok:
+                    supabase.table("lab_reports").update({
+                        "status": "sent",
+                        "delivery_status": "sent",
+                        "sent_at": datetime.now(timezone.utc).isoformat(),
+                        "error_message": None,
+                        "retry_count": retry_count,
+                        "next_retry_at": None,
+                    }).eq("id", report_id).execute()
+                    logger.info(
+                        f"Retry worker: successfully delivered report {report_id} "
+                        f"on attempt {retry_count} to {mask_phone(patient_phone)}"
+                    )
+                else:
+                    raise ValueError("WhatsApp delivery returned False")
+
+            except Exception as e:
+                logger.error(
+                    f"Retry worker: attempt {retry_count}/{MAX_RETRIES} failed "
+                    f"for report {report_id}: {e}"
+                )
+                if retry_count >= MAX_RETRIES:
+                    supabase.table("lab_reports").update({
+                        "status": "failed",
+                        "delivery_status": "failed",
+                        "error_message": f"All {MAX_RETRIES} delivery attempts failed. Last error: {e}",
+                        "retry_count": retry_count,
+                        "next_retry_at": None,
+                    }).eq("id", report_id).execute()
+                    logger.error(
+                        f"Retry worker: report {report_id} permanently failed after {MAX_RETRIES} attempts"
+                    )
+                else:
+                    backoff_seconds = 120 * (4 ** (retry_count - 1))
+                    next_retry = (datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)).isoformat()
+                    supabase.table("lab_reports").update({
+                        "status": "pending_retry",
+                        "retry_count": retry_count,
+                        "next_retry_at": next_retry,
+                        "error_message": str(e),
+                    }).eq("id", report_id).execute()
+                    logger.info(
+                        f"Retry worker: report {report_id} re-queued — "
+                        f"next retry in {backoff_seconds}s (attempt {retry_count + 1}/{MAX_RETRIES})"
+                    )
+
+            processed += 1
+
+        return processed
