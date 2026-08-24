@@ -468,14 +468,18 @@ class WhatsAppService:
             return ""
 
         url = f"{WHATSAPP_API_BASE}/{phone_id}/media"
+        mime_type = content_type or "application/pdf"
         async with httpx.AsyncClient() as client:
             for attempt in range(2):
                 try:
                     response = await client.post(
                         url,
                         headers={"Authorization": f"Bearer {token}"},
-                        files={"file": (filename, file_bytes, content_type)},
-                        data={"messaging_product": "whatsapp"},
+                        files={"file": (filename, file_bytes, mime_type)},
+                        data={
+                            "messaging_product": "whatsapp",
+                            "type": mime_type,
+                        },
                         timeout=30.0,
                     )
                     response.raise_for_status()
