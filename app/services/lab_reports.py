@@ -137,7 +137,14 @@ class LabReportService:
                 signed = supabase.storage.from_("lab-reports").create_signed_url(
                     storage_path, 604800
                 )
-                pdf_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                raw_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                if raw_signed_url:
+                    if "/+" in raw_signed_url:
+                        prefix, sep, suffix = raw_signed_url.partition("?")
+                        prefix = prefix.replace("+", "%2B")
+                        pdf_signed_url = f"{prefix}?{suffix}" if suffix else prefix
+                    else:
+                        pdf_signed_url = raw_signed_url
             except Exception as sign_err:
                 logger.warning(f"Failed to generate signed URL from storage: {sign_err}")
         except Exception as e:
@@ -734,7 +741,14 @@ class LabReportService:
                     signed = supabase.storage.from_("lab-reports").create_signed_url(
                         file_path, 604800
                     )
-                    pdf_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                    raw_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+                    if raw_signed_url:
+                        if "/+" in raw_signed_url:
+                            prefix, sep, suffix = raw_signed_url.partition("?")
+                            prefix = prefix.replace("+", "%2B")
+                            pdf_signed_url = f"{prefix}?{suffix}" if suffix else prefix
+                        else:
+                            pdf_signed_url = raw_signed_url
                 except Exception as sign_err:
                     logger.warning(f"Retry worker: signed URL generation failed: {sign_err}")
 
