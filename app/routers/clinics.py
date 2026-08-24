@@ -110,17 +110,20 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
     if req.razorpay_webhook_secret:
         config["razorpay_webhook_secret"] = req.razorpay_webhook_secret
 
+    # Also persist phone_number_id at root level for dual-key index resolution (Migration 043)
+    clinic_insert_payload = {
+        "name": req.name,
+        "whatsapp_number": req.whatsapp_number,
+        "plan": req.plan,
+        "config": config,
+    }
+    if req.meta_phone_number_id:
+        clinic_insert_payload["phone_number_id"] = str(req.meta_phone_number_id)
+
     try:
         result = (
             supabase.table("clinics")
-            .insert(
-                {
-                    "name": req.name,
-                    "whatsapp_number": req.whatsapp_number,
-                    "plan": req.plan,
-                    "config": config,
-                }
-            )
+            .insert(clinic_insert_payload)
             .execute()
         )
 
@@ -129,6 +132,24 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
 
         clinic = result.data[0]
         clinic_id = clinic["id"]
+
+        # ── Auto-register phone number with Meta Cloud API to transition Pending -> Connected ──
+        if req.meta_phone_number_id:
+            token = req.meta_access_token or settings.whatsapp_token
+            if token:
+                import httpx
+                try:
+                    reg_url = f"https://graph.facebook.com/v21.0/{req.meta_phone_number_id}/register"
+                    reg_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+                    reg_payload = {"messaging_product": "whatsapp", "pin": "123456"}
+                    async with httpx.AsyncClient(timeout=20.0) as http_client:
+                        reg_resp = await http_client.post(reg_url, headers=reg_headers, json=reg_payload)
+                        if reg_resp.status_code == 200:
+                            logger.info(f"Auto-registered phone_number_id {req.meta_phone_number_id} on Meta Cloud API: {reg_resp.text}")
+                        else:
+                            logger.warning(f"Meta auto-register returned status {reg_resp.status_code}: {reg_resp.text}")
+                except Exception as reg_err:
+                    logger.warning(f"Meta auto-register failed for phone_number_id {req.meta_phone_number_id}: {reg_err}")
 
         # ── Seed branches if provided ──
         created_branches = []
