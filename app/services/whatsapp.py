@@ -221,61 +221,62 @@ class WhatsAppService:
     ) -> bool:
         """Send a pre-approved template message (for 24h+ sessions).
 
-        Resilient: if the template lacks a document header and Meta returns
-        error 132018, we automatically retry with body-only components so the
-        patient at least gets a text notification.
+        Resilient delivery matrix:
+        1. Tries primary language code (e.g. 'en') with all components.
+        2. If header fails, tries primary language code body-only.
+        3. If language code fails (Meta en vs en_US mismatch), retries alternate
+           language code (e.g. 'en_US') with both header and body-only.
         """
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": phone,
-            "type": "template",
-            "template": {
-                "name": template_name,
-                "language": {"code": language},
-                "components": components or [],
-            },
-        }
+        clean_template_name = (template_name or "").strip()
+        if not clean_template_name:
+            logger.error("send_template called with empty template_name")
+            return False
 
-        try:
-            result = await self._make_request(clinic, "messages", payload)
-            meta_msg_id = self._extract_meta_message_id(result)
-            if _capture is not None:
-                _capture["meta_message_id"] = meta_msg_id
-            logger.info(f"Sent template '{template_name}' to {self._mask_phone(phone)}")
+        # Prepare candidate language codes to handle en vs en_US matching in Meta
+        candidate_languages = [language]
+        if language in ("en", "en_US"):
+            alt_lang = "en_US" if language == "en" else "en"
+            if alt_lang not in candidate_languages:
+                candidate_languages.append(alt_lang)
 
-            # ── Accounting ──
-            await self._log_to_ledger(
-                clinic, phone, "template", _source,
-                send_success=True, meta_message_id=meta_msg_id,
-                template_name=template_name,
-            )
-            return True
-        except Exception as e:
-            # httpx.HTTPStatusError stores the Meta error JSON in
-            # e.response.text, not in str(e) which is just the HTTP status line
-            err_text = str(e)
-            resp = getattr(e, "response", None)
-            if resp is not None:
-                try:
-                    err_text = f"{err_text} | {resp.text}"
-                except Exception:
-                    pass
+        has_header = any(c.get("type") == "header" for c in (components or []))
+        body_only = [c for c in (components or []) if c.get("type") != "header"] if has_header else None
 
-            # ── Retry without header if template with header failed ──
-            # Meta returns error 132018 OR generic Code 1 (500) when template does not
-            # have a document header configured in WhatsApp Manager, or when media CDN fails.
-            has_header = any(
-                c.get("type") == "header" for c in (components or [])
-            )
-            if has_header:
-                logger.warning(
-                    f"Template '{template_name}' with header failed ({e}) — "
-                    f"retrying body-only so patient at least receives notification."
+        last_error = None
+        for lang in candidate_languages:
+            # ── Attempt 1: Full template with all components (including header) ──
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": phone,
+                "type": "template",
+                "template": {
+                    "name": clean_template_name,
+                    "language": {"code": lang},
+                    "components": components or [],
+                },
+            }
+            try:
+                result = await self._make_request(clinic, "messages", payload)
+                meta_msg_id = self._extract_meta_message_id(result)
+                if _capture is not None:
+                    _capture["meta_message_id"] = meta_msg_id
+                logger.info(f"Sent template '{clean_template_name}' ({lang}) to {self._mask_phone(phone)}")
+
+                await self._log_to_ledger(
+                    clinic, phone, "template", _source,
+                    send_success=True, meta_message_id=meta_msg_id,
+                    template_name=clean_template_name,
                 )
-                body_only = [
-                    c for c in (components or []) if c.get("type") != "header"
-                ]
+                return True
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Template '{clean_template_name}' ({lang}) with header attempt failed: {e}"
+                )
+
+            # ── Attempt 2: If had header and failed, try body-only with this language ──
+            if has_header and body_only is not None:
                 payload["template"]["components"] = body_only
                 try:
                     result = await self._make_request(clinic, "messages", payload)
@@ -284,37 +285,31 @@ class WhatsAppService:
                         _capture["meta_message_id"] = meta_msg_id
                         _capture["header_stripped"] = True
                     logger.info(
-                        f"Sent template '{template_name}' (body-only) to "
+                        f"Sent template '{clean_template_name}' ({lang}, body-only) to "
                         f"{self._mask_phone(phone)}"
                     )
                     await self._log_to_ledger(
                         clinic, phone, "template", _source,
                         send_success=True, meta_message_id=meta_msg_id,
-                        template_name=template_name,
+                        template_name=clean_template_name,
                     )
                     return True
-                except Exception as retry_err:
-                    logger.error(
-                        f"Body-only retry also failed for template "
-                        f"'{template_name}': {retry_err}"
+                except Exception as body_err:
+                    last_error = body_err
+                    logger.warning(
+                        f"Template '{clean_template_name}' ({lang}, body-only) failed: {body_err}"
                     )
-                    await self._log_to_ledger(
-                        clinic, phone, "template", _source,
-                        send_success=False, template_name=template_name,
-                    )
-                    if "500" in str(retry_err) or "Server Error" in str(retry_err):
-                        raise
-                    return False
 
-            logger.error(f"Failed to send template message: {e}")
-            await self._log_to_ledger(
-                clinic, phone, "template", _source,
-                send_success=False, template_name=template_name,
-            )
+        logger.error(f"Failed to send template '{clean_template_name}' after trying {candidate_languages}: {last_error}")
+        await self._log_to_ledger(
+            clinic, phone, "template", _source,
+            send_success=False, template_name=clean_template_name,
+        )
 
-            # Server errors (Meta 500) are transient — re-raise so callers
-            # (lab_reports.py) can detect them and queue for retry.
-            # Client errors (bad template, wrong params) are permanent → return False.
+        # Propagate server errors so caller transient detection can queue retry
+        if last_error:
+            err_text = str(last_error)
+            resp = getattr(last_error, "response", None)
             is_server_error = False
             if resp is not None:
                 is_server_error = resp.status_code >= 500
@@ -322,9 +317,9 @@ class WhatsAppService:
                 is_server_error = True
 
             if is_server_error:
-                raise  # Propagate Meta 500 to caller for transient detection
+                raise last_error
 
-            return False
+        return False
 
 
     async def send_interactive_buttons(
