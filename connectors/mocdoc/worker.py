@@ -932,20 +932,19 @@ class MocDocConnector(HospitalConnector):
 
         # Click "Download Result" icon directly from expanded_row (using JS to bypass hover/visibility restrictions)
         try:
-            # Use the specific class 'downloadresult' which is on the <a> tag inside expanded_row
-            download_icon = expanded_row.locator("a.downloadresult").first
-            
-            # Wait for it to be attached to the DOM (it might take a split second after expansion)
-            await download_icon.wait_for(state="attached", timeout=5000)
-            
-            # Use JS to click it, bypassing any hover-to-show CSS restrictions
+            download_icons = expanded_row.locator("a.downloadresult")
+            if await download_icons.count() == 0:
+                logger.info(f"Report {full_id} has no download result icon yet (test in progress / pending lab entry)")
+                await self._click_hide(target_row)
+                return None
+
+            download_icon = download_icons.first
+            await download_icon.wait_for(state="attached", timeout=3000)
             await download_icon.evaluate("node => node.click()")
             logger.debug(f"Clicked 'Download Result' for {full_id} via JS")
-            
-            # Wait for the modal to appear
             await self._page.wait_for_timeout(2000)
         except Exception as e:
-            logger.error(f"DOWNLOAD_ICON_CLICK_FAILED for {full_id}: {e}")
+            logger.warning(f"Could not open download modal for {full_id} (test may be in progress): {e}")
             await self._click_hide(target_row)
             return None
 

@@ -572,6 +572,10 @@ async def run_connector(
                 # Step 2: Download PDF
                 pdf_bytes = await connector.download_report(meta)
                 if not pdf_bytes:
+                    # If this report was already processed in this run or session, don't count as failure
+                    if meta.external_report_id in getattr(connector, "_processed_ids", set()):
+                        summary["reports_delivered"] += 1
+                        continue
                     summary["reports_failed"] += 1
                     await record_report_failure(
                         clinic_id=clinic_id,
