@@ -401,22 +401,23 @@ class LabReportService:
                     "Please re-upload the report from MocDoc or the admin panel."
                 )
 
+            file_path = report["file_path"]
             # Download file from Supabase Storage
             try:
                 file_bytes = supabase.storage.from_("lab-reports").download(
-                    report["file_path"]
+                    file_path
                 )
             except Exception as storage_err:
                 logger.error(
-                    f"Storage download failed for {report['file_path']}: {storage_err}"
+                    f"Storage download failed for {file_path}: {storage_err}"
                 )
                 raise ValueError(
-                    f"Report file not found in storage. It may have been deleted. "
-                    f"Please re-upload the report from the admin panel."
+                    "Report file not found in storage. It may have been deleted. "
+                    "Please re-upload the report from the admin panel."
                 )
 
             clinic = await get_clinic_by_id(report.get("clinic_id", "default"))
-            filename = report["file_path"].split("/")[-1]
+            filename = file_path.split("/")[-1]
             patient_phone = report["patient_phone"]
             patient_name = report.get("patient_name", "Patient")
             report_name = report.get("report_name", "Lab Report")
