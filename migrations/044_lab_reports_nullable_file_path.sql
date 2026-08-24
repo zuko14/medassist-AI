@@ -1,0 +1,21 @@
+-- Migration 044: Make lab_reports.file_path nullable
+-- ──────────────────────────────────────────────────────────────────────
+-- Context:
+--   The idempotency claim INSERT in LabReportService.upload_and_send()
+--   creates a row with status='processing' BEFORE the PDF is uploaded
+--   to storage (and therefore before file_path is known). The original
+--   NOT NULL constraint on file_path caused these claim inserts to fail
+--   with error 23502, silently breaking the cross-path dedup guard.
+--
+--   Downstream code (data_retention, cleanup_expired_storage, resend)
+--   already handles NULL file_path correctly — it filters with
+--   .not_.is_("file_path", "null") and checks `if file_path:` before
+--   operating on the value.
+--
+-- Change:
+--   DROP NOT NULL from lab_reports.file_path so claim rows can be
+--   inserted before storage upload. The UPDATE at the end of
+--   upload_and_send() fills in file_path once storage succeeds.
+-- ──────────────────────────────────────────────────────────────────────
+
+ALTER TABLE lab_reports ALTER COLUMN file_path DROP NOT NULL;

@@ -73,7 +73,7 @@ class WhatsAppDeliveryService:
             msg_id = f"wmid.callmedex.sim.{uuid.uuid4().hex[:12]}"
             return WhatsAppDeliveryStatus.DELIVERED, msg_id
 
-        url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+        url = f"https://graph.facebook.com/v22.0/{phone_id}/messages"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

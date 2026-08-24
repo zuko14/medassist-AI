@@ -16,7 +16,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-WHATSAPP_API_BASE = "https://graph.facebook.com/v18.0"
+WHATSAPP_API_BASE = "https://graph.facebook.com/v22.0"
 
 
 class WhatsAppService:

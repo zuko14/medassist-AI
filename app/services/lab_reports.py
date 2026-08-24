@@ -51,7 +51,9 @@ class LabReportService:
         claim_id = None
         if external_report_id:
             try:
-                # Atomic INSERT with status='processing' to claim the slot before WhatsApp send
+                # Atomic INSERT with status='processing' to claim the slot before WhatsApp send.
+                # file_path is intentionally omitted here — it is computed after storage upload
+                # and backfilled via UPDATE at the end of this function.
                 claim_row = {
                     "clinic_id": clinic_id,
                     "external_report_id": external_report_id,
@@ -62,6 +64,9 @@ class LabReportService:
                     "status": "processing",
                     "delivery_status": "processing",
                     "source": source,
+                    "match_confidence": match_confidence,
+                    "match_source": match_source,
+                    "matched_patient_id": matched_patient_id,
                 }
                 claim_result = supabase.table("lab_reports").insert(claim_row).execute()
                 if claim_result.data:
@@ -101,7 +106,13 @@ class LabReportService:
                         "already_processed": True,
                         "reason": "duplicate_report_id",
                     }
-                logger.warning(f"Lab report claim insert failed (proceeding): {e}")
+                # Non-unique DB errors (e.g. constraint violations, connection issues)
+                # mean the idempotency guard is NOT active for this report.
+                # Log at ERROR level so this is never silently ignored.
+                logger.error(
+                    f"Lab report claim insert FAILED — idempotency guard inactive "
+                    f"for {external_report_id}: {e}"
+                )
 
         # Step A — Extract text from PDF
         pdf_text = extract_text_from_pdf(file_bytes)
