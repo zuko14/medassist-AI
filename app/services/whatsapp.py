@@ -249,12 +249,12 @@ class WhatsAppService:
             if alias not in candidate_templates:
                 candidate_templates.append(alias)
 
-        # Prepare candidate language codes to handle en vs en_US matching in Meta
+        # Prepare candidate language codes to handle en vs en_US vs en_GB matching in Meta
         candidate_languages = [language]
-        if language in ("en", "en_US"):
-            alt_lang = "en_US" if language == "en" else "en"
-            if alt_lang not in candidate_languages:
-                candidate_languages.append(alt_lang)
+        if language in ("en", "en_US", "en_GB"):
+            for l in ("en", "en_US", "en_GB"):
+                if l not in candidate_languages:
+                    candidate_languages.append(l)
 
         has_header = any(c.get("type") == "header" for c in (components or []))
         body_only = [c for c in (components or []) if c.get("type") != "header"] if has_header else None
