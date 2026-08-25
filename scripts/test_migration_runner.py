@@ -81,7 +81,7 @@ def test_migrations():
     print(f"\nMigration Run Complete: {applied} applied, {failed} failed.")
     conn.close()
     pg.cleanup()
-    return failed == 0
+    assert failed == 0
 
 if __name__ == "__main__":
     test_migrations()

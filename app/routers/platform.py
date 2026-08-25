@@ -61,9 +61,13 @@ async def verify_owner_credentials(
         credentials.username.encode("utf-8"),
         settings.owner_username.encode("utf-8"),
     )
-    password_ok = check_password_hash(
-        credentials.password, settings.owner_password
-    )
+    if settings.owner_password.startswith(("$2b$", "$2a$", "$2y$")):
+        password_ok = check_password_hash(credentials.password, settings.owner_password)
+    else:
+        password_ok = secrets.compare_digest(
+            credentials.password.encode("utf-8"),
+            settings.owner_password.encode("utf-8"),
+        )
 
     if username_ok and password_ok:
         login_rate_limiter.reset(client_ip)
@@ -112,6 +116,7 @@ async def reset_clinic_admin_password(
             headers={"Retry-After": "60"},
         )
 
+    # platform-scoped: reset password by username
     res = (
         supabase.table("clinic_admins")
         .select("id")
@@ -121,6 +126,7 @@ async def reset_clinic_admin_password(
     if not res.data:
         raise HTTPException(status_code=404, detail="Admin account not found")
 
+    # platform-scoped: update admin password hash
     supabase.table("clinic_admins").update(
         {"password_hash": hash_password(body.new_password)}
     ).eq("username", body.username).execute()
@@ -218,6 +224,7 @@ async def create_clinic_admin(
         if not clinic_res.data:
             raise HTTPException(status_code=404, detail="Clinic not found")
 
+    # platform-scoped: check admin username uniqueness
     existing = (
         supabase.table("clinic_admins")
         .select("id")
@@ -264,6 +271,7 @@ async def toggle_clinic_admin(
     without deleting their audit trail."""
     client_ip = request.client.host if request.client else "unknown"
 
+    # platform-scoped: fetch clinic admin status
     res = (
         supabase.table("clinic_admins")
         .select("id, is_active")
@@ -274,6 +282,7 @@ async def toggle_clinic_admin(
         raise HTTPException(status_code=404, detail="Admin account not found")
 
     new_status = not res.data[0]["is_active"]
+    # platform-scoped: toggle clinic admin
     supabase.table("clinic_admins").update({"is_active": new_status}).eq(
         "id", admin_id
     ).execute()
@@ -306,6 +315,7 @@ async def get_platform_overview(
 
     try:
         # 1. Fetch clinics list (explicit columns only — no secrets)
+        # platform-scoped: aggregate platform clinics list
         clinics_res = (
             supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, is_active, created_at")
@@ -337,6 +347,7 @@ async def get_platform_overview(
         )
 
         # 2. Total patients count platform-wide
+        # platform-scoped: platform total patient count
         patients_res = (
             supabase.table("patients")
             .select("id", count="exact")
@@ -345,6 +356,7 @@ async def get_platform_overview(
         total_patients = patients_res.count if patients_res.count is not None else len(patients_res.data or [])
 
         # 3. Total appointments count platform-wide
+        # platform-scoped: platform total appointments count
         appts_res = (
             supabase.table("appointments")
             .select("id", count="exact")
@@ -697,7 +709,8 @@ async def get_platform_activity_analytics(
         daily_messages: dict[str, int] = {}
         try:
             msg_res = (
-                supabase.table("processed_messages")
+                # platform-scoped: platform activity log from processed messages
+        supabase.table("processed_messages")
                 .select("created_at")
                 .gte("created_at", start_date)
                 .execute()
@@ -881,6 +894,7 @@ async def get_callmedex_whatsapp_settings(
         ip_address=client_ip,
     )
 
+    # platform-scoped: fetch callmedex whatsapp settings
     res = (
         supabase.table("callmedex_whatsapp_settings")
         .select("phone_number_id, api_token_encrypted, updated_at, updated_by")
@@ -931,6 +945,7 @@ async def update_callmedex_whatsapp_settings(
         )
 
     existing = (
+        # platform-scoped: read callmedex whatsapp settings
         supabase.table("callmedex_whatsapp_settings")
         .select("*")
         .eq("id", "default")
@@ -955,6 +970,7 @@ async def update_callmedex_whatsapp_settings(
     row["updated_at"] = datetime.now(timezone.utc).isoformat()
     row["updated_by"] = owner.username
 
+    # platform-scoped: upsert callmedex whatsapp settings
     supabase.table("callmedex_whatsapp_settings").upsert(row).execute()
 
     await log_admin_action(
@@ -1114,6 +1130,7 @@ async def get_pricing_config(
     OWNER-ONLY. Returns per-category cost rates in paise and INR.
     """
     try:
+        # platform-scoped: fetch meta pricing config
         result = (
             supabase.table("meta_pricing_config")
             .select("*")
@@ -1175,6 +1192,7 @@ async def update_pricing_config(
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     try:
+        # platform-scoped: update meta pricing config
         supabase.table("meta_pricing_config").update(update_data).eq("id", "default").execute()
 
         # Invalidate the in-memory cache
@@ -1204,6 +1222,7 @@ async def get_plan_tiers(
     OWNER-ONLY. Returns plan names, display names, quotas, and pricing.
     """
     try:
+        # platform-scoped: fetch plan tiers
         result = (
             supabase.table("plan_tiers")
             .select("*")
@@ -1249,6 +1268,7 @@ async def update_plan_tier(
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
     try:
+        # platform-scoped: update plan tier configuration
         result = (
             supabase.table("plan_tiers")
             .update(update_data)

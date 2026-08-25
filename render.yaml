@@ -4,11 +4,12 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeploy: false
+    preDeployCommand: python scripts/migrate.py
 
   - type: worker
     name: mediassist-connector-worker
     env: docker
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m connectors.runner --all
-    autoDeploy: true
+    autoDeploy: false

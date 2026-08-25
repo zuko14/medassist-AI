@@ -755,68 +755,65 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     (migration 021) to reject collisions, and retries with the next number
     on conflict instead of allowing duplicate tokens under concurrent check-ins.
     """
-    try:
-        appt_result = (
-            scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, appointment_date, token_number, queue_status")
-            .eq("id", appointment_id)
+    appt_result = (
+        scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, appointment_date, token_number, queue_status")
+        .eq("id", appointment_id)
+        .execute()
+    )
+    if not appt_result.data:
+        return None
+
+    # Idempotency: if already checked in with a token, return existing record
+    existing_token = appt_result.data[0].get("token_number")
+    if existing_token is not None:
+        logger.info(
+            f"check_in_appointment: appointment {appointment_id} already checked in "
+            f"with token {existing_token}"
+        )
+        return appt_result.data[0]
+
+    doctor_name = appt_result.data[0]["doctor_name"]
+    appointment_date = appt_result.data[0]["appointment_date"]
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        max_result = (
+            scoped_query("appointments", clinic_id, "token_number")
+            .eq("doctor_name", doctor_name)
+            .eq("appointment_date", appointment_date)
+            .order("token_number", desc=True)
+            .limit(1)
             .execute()
         )
-        if not appt_result.data:
-            return None
+        current_max = (
+            max_result.data[0]["token_number"]
+            if max_result.data and max_result.data[0]["token_number"]
+            else 0
+        )
+        next_token = current_max + 1 + attempt
 
-        # Idempotency: if already checked in with a token, return existing record
-        existing_token = appt_result.data[0].get("token_number")
-        if existing_token is not None:
-            logger.info(
-                f"check_in_appointment: appointment {appointment_id} already checked in "
-                f"with token {existing_token}"
-            )
-            return appt_result.data[0]
-
-        doctor_name = appt_result.data[0]["doctor_name"]
-        appointment_date = appt_result.data[0]["appointment_date"]
-
-        max_retries = 5
-        for attempt in range(max_retries):
-            max_result = (
-                scoped_query("appointments", clinic_id, "token_number")
-                .eq("doctor_name", doctor_name)
-                .eq("appointment_date", appointment_date)
-                .order("token_number", desc=True)
-                .limit(1)
+        try:
+            result = (
+                supabase.table("appointments")
+                .update({"token_number": next_token, "queue_status": "waiting"})
+                .eq("clinic_id", clinic_id)
+                .eq("id", appointment_id)
                 .execute()
             )
-            current_max = (
-                max_result.data[0]["token_number"]
-                if max_result.data and max_result.data[0]["token_number"]
-                else 0
-            )
-            next_token = current_max + 1 + attempt
-
-            try:
-                result = (
-                    supabase.table("appointments")
-                    .update({"token_number": next_token, "queue_status": "waiting"})
-                    .eq("clinic_id", clinic_id)
-                    .eq("id", appointment_id)
-                    .execute()
+            if result.data:
+                return result.data[0]
+            raise RuntimeError("Database update returned empty data")
+        except Exception as e:
+            if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                logger.info(
+                    f"check_in_appointment: token {next_token} collision for "
+                    f"{doctor_name}/{appointment_date}, retrying (attempt {attempt + 1})"
                 )
-                return result.data[0] if result.data else None
-            except Exception as e:
-                if "unique" in str(e).lower() or "duplicate" in str(e).lower():
-                    logger.info(
-                        f"check_in_appointment: token {next_token} collision for "
-                        f"{doctor_name}/{appointment_date}, retrying (attempt {attempt + 1})"
-                    )
-                    continue
-                raise
+                continue
+            raise
 
-        logger.error(f"check_in_appointment: exhausted retries for {appointment_id}")
-        return None
-
-    except Exception as e:
-        logger.error(f"Error checking in appointment: {e}")
-        return None
+    logger.error(f"check_in_appointment: exhausted token retries for {appointment_id}")
+    return None
 
 
 async def call_next_patient(clinic_id: str, doctor_name: str, date_str: str) -> Optional[dict]:

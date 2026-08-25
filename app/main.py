@@ -26,6 +26,26 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+from app.utils.correlation import set_correlation_id, get_correlation_id
+from app.services.metrics import metrics
+from fastapi.responses import PlainTextResponse
+
+
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    """Assign and thread request correlation IDs for end-to-end tracing (W5.1)."""
+
+    async def dispatch(self, request: Request, call_next):
+        req_cid = request.headers.get("X-Correlation-ID") or request.headers.get("X-Request-ID")
+        if req_cid:
+            set_correlation_id(req_cid)
+        else:
+            req_cid = get_correlation_id()
+
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = req_cid
+        return response
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to every response.
 
@@ -179,8 +199,14 @@ app.add_middleware(
     ],
 )
 
-# Security headers middleware (replaces old NgrokMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
+
+# Prometheus metrics endpoint (W5.2)
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint():
+    """Prometheus text format metrics export for scraping."""
+    return PlainTextResponse(metrics.export_prometheus(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 # Include routers
 app.include_router(webhook.router)

@@ -63,7 +63,14 @@ def test_enforce_clinic_access_cross_tenant_forbidden():
     assert "Forbidden" in exc.value.detail
 
 
-def test_check_password_hash_plain_comparison():
-    """Verify plain password constant-time comparison."""
-    assert check_password_hash("secret123", "secret123") is True
-    assert check_password_hash("secret123", "wrongpass") is False
+def test_check_password_hash_bcrypt_verification_and_plain_rejection():
+    """Verify bcrypt hash verification and ensure plaintext stored values fail closed."""
+    from app.routers.admin import hash_password
+
+    valid_hash = hash_password("secret123")
+    assert check_password_hash("secret123", valid_hash) is True
+    assert check_password_hash("wrongpass", valid_hash) is False
+
+    # Plaintext comparison must fail closed (W8.1)
+    assert check_password_hash("secret123", "secret123") is False
+    assert check_password_hash("secret123", "plain_password_stored") is False

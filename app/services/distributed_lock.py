@@ -82,9 +82,6 @@ class DistributedJobLock:
 
         except Exception as e:
             logger.warning(f"Error acquiring distributed lock for '{job_name}': {e}")
-            if "PYTEST_CURRENT_TEST" in os.environ:
-                # In unit tests with mock DBs without scheduler_locks mock, permit test to run
-                return True
             # Fail closed: do not run concurrently on DB error in production
             return False
 

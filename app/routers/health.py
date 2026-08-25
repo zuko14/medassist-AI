@@ -31,6 +31,7 @@ async def health_check():
 async def readiness_check():
     """Readiness check with database connectivity."""
     try:
+        # unscoped: database liveness probe connectivity test
         result = (
             supabase.table("patients").select("count", count="exact").limit(1).execute()
         )

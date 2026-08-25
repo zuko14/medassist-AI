@@ -1,12 +1,12 @@
-"""Phase K: Load, Stress, and Concurrency Benchmark Test Suite.
+"""Phase K: Python Framework Concurrency & Dispatch Overhead Test Suite.
 
-Simulates high-throughput production workloads:
-1. 100 concurrent webhook deliveries with deduplication and phone locks.
+Measures in-memory Python dispatch overhead and synchronization semantics:
+1. 100 concurrent webhook deliveries with deduplication logic.
 2. 50 concurrent appointment booking requests on constrained doctor slots.
 3. 20 concurrent admin tenant-scoped queries.
 4. 10 concurrent laboratory PDF validations.
 
-Measures p50, p95, p99 latency baselines and enforces zero error rate under concurrency.
+NOTE: Real database capacity is measured separately via the committed `loadtest/` suite.
 """
 
 import sys

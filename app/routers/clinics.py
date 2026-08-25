@@ -24,13 +24,16 @@ router = APIRouter(prefix="/admin/clinics", tags=["clinics"])
 
 
 def verify_admin_secret(x_admin_secret: str = Header(...)):
-    """Verify admin secret for clinic management endpoints."""
+    """Verify admin secret for clinic management endpoints (W8.5)."""
     if not settings.admin_secret:
         raise HTTPException(
             status_code=503,
             detail="ADMIN_SECRET not configured. Set it in environment variables.",
         )
-    if x_admin_secret != settings.admin_secret:
+    if not secrets.compare_digest(
+        x_admin_secret.encode("utf-8"),
+        settings.admin_secret.encode("utf-8"),
+    ):
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
@@ -121,6 +124,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         clinic_insert_payload["phone_number_id"] = str(req.meta_phone_number_id)
 
     try:
+        # unscoped: creating new tenant clinic record in clinics table
         result = (
             supabase.table("clinics")
             .insert(clinic_insert_payload)
@@ -219,6 +223,7 @@ async def create_clinic(req: CreateClinicRequest):
 async def list_clinics():
     """List all clinics."""
     result = (
+        # platform-scoped: list all clinics
         supabase.table("clinics")
         .select("id,name,whatsapp_number,plan,is_active,created_at")
         .execute()
@@ -226,12 +231,32 @@ async def list_clinics():
     return {"clinics": result.data or []}
 
 
+class UpdateClinicRequest(BaseModel):
+    name: Optional[str] = None
+    plan: Optional[Literal["soloclinic", "diagstream", "essential", "polyclinic", "enterprise"]] = None
+    is_active: Optional[bool] = None
+    config: Optional[dict] = None
+    whatsapp_number: Optional[str] = None
+    meta_phone_number_id: Optional[str] = None
+    meta_access_token: Optional[str] = None
+
+
 @router.patch("/{clinic_id}", dependencies=[Depends(verify_admin_secret)])
-async def update_clinic(clinic_id: str, updates: dict):
-    """Update plan, config, or status. Clears tenant cache."""
-    # Guard the same payment_mode/payment_deposit_percent invariant that
-    # PUT /admin/settings/payment enforces, so this raw owner-only endpoint
-    # can't leave a clinic in a "partial" mode with no deposit percentage set.
+async def update_clinic(clinic_id: str, req: UpdateClinicRequest | dict):
+    """Update plan, config, or status with validated fields (W8.5). Clears tenant cache."""
+    if isinstance(req, dict):
+        updates = req
+    elif hasattr(req, "model_dump"):
+        updates = req.model_dump(exclude_unset=True)
+    elif hasattr(req, "dict"):
+        updates = req.dict(exclude_unset=True)
+    else:
+        updates = dict(req)
+
+    if not updates:
+        raise HTTPException(400, "No fields provided to update")
+
+    # Guard payment_mode/payment_deposit_percent invariant
     incoming_config = updates.get("config")
     if isinstance(incoming_config, dict) and incoming_config.get("payment_mode") == "partial":
         percent = incoming_config.get("payment_deposit_percent")
@@ -241,6 +266,7 @@ async def update_clinic(clinic_id: str, updates: dict):
                 "config.payment_deposit_percent (1-99) is required when config.payment_mode is 'partial'",
             )
 
+    # platform-scoped: update clinic by ID
     result = supabase.table("clinics").update(updates).eq("id", clinic_id).execute()
 
     if not result.data:

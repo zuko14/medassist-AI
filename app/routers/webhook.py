@@ -13,8 +13,9 @@ from app.services.tenant import resolve_tenant
 from app.utils.validators import normalize_phone
 from app.utils.security import verify_webhook_signature
 
-# Supabase-native atomic idempotency + per-phone asyncio lock
 from app.services.message_queue import message_queue
+from app.services.metrics import metrics
+from app.utils.correlation import set_correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -106,11 +107,13 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                         )
 
                         if is_new:
+                            metrics.inc_counter("kriya_inbound_messages_total", 1, {"status": "received"})
                             background_tasks.add_task(
                                 process_message_safe, message, display_phone, body, phone_number_id
                             )
                             logger.info(f"Durable queue: ingested & dispatched {message.id}")
                         else:
+                            metrics.inc_counter("kriya_inbound_messages_total", 1, {"status": "duplicate"})
                             logger.info(f"Durable queue: dropped duplicate {message.id}")
 
         return {"status": "ok"}
@@ -139,6 +142,7 @@ async def record_delivery_status(status: dict) -> None:
     new_rank = _DELIVERY_RANK.get(state, 0)
     try:
         from app.database import supabase
+        # unscoped: global Meta callback lookup by unique whatsapp_message_id
         curr_row = (
             supabase.table("lab_reports")
             .select("delivery_status")
@@ -154,6 +158,7 @@ async def record_delivery_status(status: dict) -> None:
                 )
                 return
 
+        # unscoped: global Meta callback update by unique whatsapp_message_id
         supabase.table("lab_reports").update({
             "delivery_status": state,
             "delivery_error": err.get("title") or err.get("message") if err else None,

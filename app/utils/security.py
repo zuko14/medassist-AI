@@ -251,7 +251,10 @@ class PersistentRateLimiter:
                     },
                 ).execute()
                 attempts = result.data
-                return attempts is not None and attempts > self.max_attempts
+                if isinstance(attempts, (int, float)):
+                    return attempts > self.max_attempts
+                if attempts is not None:
+                    raise ValueError(f"RPC returned non-integer: {type(attempts)}")
             except Exception as e:
                 logger.warning(
                     f"Supabase check_and_record_rate_limit RPC failed, "

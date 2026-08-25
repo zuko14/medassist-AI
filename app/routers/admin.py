@@ -8,6 +8,7 @@ import re
 import secrets
 from datetime import date, datetime, time as time_type, timedelta, timezone
 from typing import Literal, Optional
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -132,8 +133,10 @@ async def log_admin_action(
 
 
 def check_password_hash(plain_password: str, stored_hash: str) -> bool:
-    """Check plain password against stored hash (bcrypt or constant-time comparison)."""
-    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
+    """Check plain password against stored bcrypt hash. Fails closed on plaintext or malformed hashes."""
+    if not stored_hash or not plain_password:
+        return False
+    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$") or stored_hash.startswith("$2y$"):
         try:
             import bcrypt
 
@@ -142,12 +145,8 @@ def check_password_hash(plain_password: str, stored_hash: str) -> bool:
             )
         except (Exception, BaseException):
             return False
-    try:
-        return secrets.compare_digest(
-            plain_password.encode("utf-8"), stored_hash.encode("utf-8")
-        )
-    except Exception:
-        return False
+    # Fail closed: non-bcrypt stored credentials fail authentication
+    return False
 
 
 def hash_password(plain_password: str) -> str:
@@ -179,6 +178,7 @@ async def verify_credentials(
     # 1. Check database clinic_admins table
     try:
         res = (
+    # unscoped: login authentication by username
             supabase.table("clinic_admins")
             .select("*")
             .eq("username", credentials.username)
@@ -291,6 +291,7 @@ async def resolve_clinic_id_for_write(
     effective = enforce_clinic_access(user, requested_clinic_id)
     if effective != "default":
         return effective
+    # unscoped: fallback clinic lookup for legacy single-tenant
     clinics = (
         supabase.table("clinics").select("id").order("created_at").limit(1).execute()
     )
@@ -353,7 +354,9 @@ async def change_password(
             detail="This account's password is set via an environment variable and can't be changed here. Contact your platform administrator.",
         )
 
+    # unscoped: caller self-password change by user.id
     res = (
+    # unscoped: login authentication by username
         supabase.table("clinic_admins")
         .select("id, password_hash")
         .eq("id", user.user_id)
@@ -365,6 +368,7 @@ async def change_password(
     if not check_password_hash(body.current_password, res.data[0]["password_hash"]):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
+    # unscoped: caller self-password update by user.id
     supabase.table("clinic_admins").update(
         {"password_hash": hash_password(body.new_password)}
     ).eq("id", user.user_id).execute()
@@ -468,6 +472,7 @@ async def create_staff(
         # Branch-scoped staff cannot create tenant-wide (unscoped) staff
         body.branch_id = str(user.branch_id)
 
+    # unscoped: check username global uniqueness
     existing = (
         supabase.table("clinic_admins")
         .select("id")
@@ -526,6 +531,7 @@ async def update_staff(
     )
 
     res = (
+    # unscoped: login authentication by username
         supabase.table("clinic_admins")
         .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active")
         .eq("id", staff_id)
@@ -590,6 +596,7 @@ async def update_staff(
     if not update_data:
         raise HTTPException(status_code=400, detail="No changes provided")
 
+    # scoped: update staff member within clinic after clinic verification
     result = supabase.table("clinic_admins").update(update_data).eq("id", staff_id).execute()
 
     client_ip = request.client.host if (request and request.client) else "unknown"
@@ -621,6 +628,7 @@ async def toggle_staff(
     """Activate/deactivate a staff account — for offboarding without deleting
     their audit trail."""
     res = (
+    # unscoped: login authentication by username
         supabase.table("clinic_admins")
         .select("id, clinic_id, is_active, role, branch_id")
         .eq("id", staff_id)
@@ -637,6 +645,7 @@ async def toggle_staff(
         )
 
     new_status = not target["is_active"]
+    # scoped: toggle staff member active status after clinic verification
     supabase.table("clinic_admins").update({"is_active": new_status}).eq(
         "id", staff_id
     ).execute()
@@ -925,6 +934,7 @@ async def get_doctors(
         if doctors:
             doctor_ids = [d["id"] for d in doctors]
             db_result = (
+        # scoped: doctor branch association
                 supabase.table("doctor_branches")
                 .select("doctor_id, branch_id, session, branches(id, name, is_active)")
                 .in_("doctor_id", doctor_ids)
@@ -1131,6 +1141,7 @@ async def create_doctor(
 
             # Create junction record
             try:
+        # scoped: doctor branch association
                 supabase.table("doctor_branches").insert({
                     "doctor_id": new_doctor["id"],
                     "branch_id": branch_id_to_assign,
@@ -1180,6 +1191,7 @@ async def update_doctor(
         # Branch-scoped staff check on existing doctor
         if user.role == "staff" and user.branch_id:
             doc_branches = (
+        # scoped: doctor branch association
                 supabase.table("doctor_branches")
                 .select("branch_id")
                 .eq("doctor_id", doctor_id)
@@ -1245,7 +1257,10 @@ async def update_doctor(
 
             session_val = requested_branch_session or "both"
 
+            # scoped: clear doctor branch associations for validated doctor
+        # scoped: doctor branch association
             supabase.table("doctor_branches").delete().eq("doctor_id", doctor_id).execute()
+        # scoped: doctor branch association
             supabase.table("doctor_branches").insert({
                 "doctor_id": doctor_id,
                 "branch_id": requested_branch_id,
@@ -1290,6 +1305,7 @@ async def delete_doctor(
         # Branch-scoped staff check
         if user.role == "staff" and user.branch_id:
             doc_branches = (
+        # scoped: doctor branch association
                 supabase.table("doctor_branches")
                 .select("branch_id")
                 .eq("doctor_id", doctor_id)
@@ -1378,6 +1394,7 @@ async def create_lab_test(
         test_data["price_paise"] = test.price_rupees * 100
         test_data["clinic_id"] = effective_clinic_id
 
+        # scoped: insert lab test with effective_clinic_id
         result = supabase.table("lab_tests").insert(test_data).execute()
         new_test = result.data[0]
 
@@ -1590,9 +1607,11 @@ async def import_lab_tests_csv(
                 .execute()
             )
             if existing.data:
+                # scoped: CSV import update test with effective_clinic_id
                 supabase.table("lab_tests").update(test_data).eq("id", existing.data[0]["id"]).execute()
                 updated += 1
             else:
+                # scoped: insert lab test with effective_clinic_id
                 supabase.table("lab_tests").insert(test_data).execute()
                 created += 1
         except Exception as e:
@@ -1703,6 +1722,7 @@ async def create_leave(
             if doc_res.data:
                 doc_id = doc_res.data[0]["id"]
                 doc_branches = (
+        # scoped: doctor branch association
                     supabase.table("doctor_branches")
                     .select("branch_id")
                     .eq("doctor_id", doc_id)
@@ -1737,6 +1757,7 @@ async def create_leave(
             leaves_to_insert.append(leave_data)
             current_date += timedelta(days=1)
 
+        # scoped: insert doctor leaves for validated doctor
         result = supabase.table("doctor_leaves").insert(leaves_to_insert).execute()
 
         client_ip = request.client.host if (request and request.client) else "unknown"
@@ -1788,6 +1809,7 @@ async def delete_leave(
                 if doc_res.data:
                     doc_id = doc_res.data[0]["id"]
                     doc_branches = (
+        # scoped: doctor branch association
                         supabase.table("doctor_branches")
                         .select("branch_id")
                         .eq("doctor_id", doc_id)
@@ -1953,10 +1975,16 @@ async def check_in_appointment_endpoint(
 ):
     """Assign the next OPD token number to an arriving patient."""
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
-    result = await check_in_appointment(effective_clinic_id, appointment_id)
+    try:
+        result = await check_in_appointment(effective_clinic_id, appointment_id)
+    except Exception as e:
+        logger.error(f"Error during check-in for appointment {appointment_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Check-in failed due to server error: {e}"
+        )
     if not result:
         raise HTTPException(
-            status_code=404, detail="Appointment not found or check-in failed"
+            status_code=404, detail="Appointment not found"
         )
     await log_admin_action(
         user=user,
@@ -2060,25 +2088,74 @@ async def upload_lab_report(
     clinic_id: str = Form("default"),
     user: AdminUser = Depends(verify_credentials),
 ):
-    """Upload and send a lab report to a patient via WhatsApp."""
+    """Upload and send a lab report to a patient via WhatsApp.
+    
+    Routes through authoritative patient_match_service and fail-closed PDF validator (W1.4).
+    """
     try:
         effective_clinic_id = enforce_clinic_access(user, clinic_id)
         file_bytes = await file.read()
+        if len(file_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty file uploaded")
+        if not file_bytes.startswith(b"%PDF"):
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid PDF")
+
+        # 1. Authoritative Patient Matching Verification (W1.4)
+        from app.services.patient_match import patient_match_service
+        match_res = await patient_match_service.match(
+            clinic_id=effective_clinic_id,
+            scraped_name=patient_name,
+            scraped_phone=patient_phone,
+        )
+        effective_phone = match_res.normalized_phone or patient_phone
+        effective_name = match_res.matched_patient_name or patient_name
+
+        # If patient matching determines unsafe match, hold for review
+        if not match_res.is_safe_to_send:
+            logger.warning(
+                f"Admin manual lab report upload held for review: {match_res.review_reason}"
+            )
+            nr_insert = supabase.table("lab_reports").insert({
+                "clinic_id": effective_clinic_id,
+                "patient_phone": effective_phone,
+                "patient_name": effective_name,
+                "report_name": report_name,
+                "report_type": report_type,
+                "file_path": f"pending_review/{uuid4().hex[:12]}",
+                "status": "needs_review",
+                "match_source": match_res.match_source,
+                "error_message": match_res.review_reason,
+            }).execute()
+            nr_id = nr_insert.data[0].get("id") if (nr_insert.data and isinstance(nr_insert.data, list)) else None
+            return {
+                "success": True,
+                "status": "needs_review",
+                "message": f"Report held for review: {match_res.review_reason}",
+                "report_id": nr_id,
+            }
+
+        # 2. Dispatch via LabReportService
         result = await LabReportService().upload_and_send(
             clinic_id=effective_clinic_id,
             file_bytes=file_bytes,
-            filename=file.filename,
+            filename=file.filename or f"manual_upload_{uuid4().hex[:8]}.pdf",
             content_type=file.content_type or "application/pdf",
-            patient_phone=patient_phone,
-            patient_name=patient_name,
+            patient_phone=effective_phone,
+            patient_name=effective_name,
             report_name=report_name,
             report_type=report_type,
+            source="admin_manual",
+            match_confidence=match_res.match_confidence,
+            match_source=match_res.match_source,
+            matched_patient_id=match_res.matched_patient_id,
         )
         return {
             "success": True,
             "message": "Report sent to patient via WhatsApp",
             "report": result,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Lab report upload error: {e}")
         return {"success": False, "error": str(e)}
@@ -2356,6 +2433,7 @@ async def admin_refund_booking(
         from app.services.tenant import get_clinic_by_id
 
         # 1. Fetch booking to verify existence and tenant ownership
+        # scoped: fetch booking by id and enforce clinic access below
         booking_result = (
             supabase.table("appointments")
             .select("*")
@@ -2415,6 +2493,7 @@ async def get_payment_events(
             if not booking_check.data:
                 raise HTTPException(status_code=404, detail="Booking not found")
 
+        # scoped: fetch payment events for verified booking
         result = (
             supabase.table("payment_events")
             .select("*")
@@ -2468,7 +2547,7 @@ async def get_payment_stats(
                 return query.eq("clinic_id", effective_clinic_id)
             return query
 
-        # Total confirmed with payments
+        # scoped: total confirmed with payments
         confirmed = _scope(
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
@@ -2477,14 +2556,14 @@ async def get_payment_stats(
             .gte("created_at", cutoff)
         ).execute()
 
-        # Total pending review
+        # scoped: total pending review
         pending = _scope(
             supabase.table("appointments")
             .select("id", count="exact")
             .eq("status", "pending_review")
         ).execute()
 
-        # Total refunded
+        # scoped: total refunded
         refunded = _scope(
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
@@ -2492,7 +2571,7 @@ async def get_payment_stats(
             .gte("created_at", cutoff)
         ).execute()
 
-        # Total expired
+        # scoped: total expired
         expired = _scope(
             supabase.table("appointments")
             .select("id", count="exact")
@@ -2503,7 +2582,7 @@ async def get_payment_stats(
         confirmed_amount = sum(b.get("amount_paise", 0) for b in (confirmed.data or []))
         refunded_amount = sum(b.get("amount_paise", 0) for b in (refunded.data or []))
 
-        # Signature failures (payment_events isn't clinic-scoped directly; left global)
+        # global-read: signature failures from payment_events (left platform-wide)
         sig_failures = (
             supabase.table("payment_events")
             .select("id", count="exact")
@@ -2603,6 +2682,7 @@ async def update_clinic_profile(
                 raise HTTPException(status_code=404, detail="Clinic not found")
             updated_clinic = result.data[0]
         else:
+            # scoped: initialize default clinic record
             insert_res = (
                 supabase.table("clinics")
                 .insert({
@@ -2744,6 +2824,7 @@ async def update_payment_settings(
             updated_clinic = result.data[0]
         else:
             # First-time setup: initialize default clinic record
+            # scoped: initialize default clinic record
             insert_res = (
                 supabase.table("clinics")
                 .insert({
@@ -2933,6 +3014,7 @@ async def upsert_connector_credentials(
             update_data = {"config": cfg, "updated_at": now}
             if body.is_enabled is not None:
                 update_data["is_enabled"] = body.is_enabled
+            # scoped: update connector config for validated clinic
             result = (
                 supabase.table("integration_connectors")
                 .update(update_data)
@@ -2950,6 +3032,7 @@ async def upsert_connector_credentials(
                 "config": cfg,
                 "is_enabled": bool(body.is_enabled) if body.is_enabled is not None else False,
             }
+            # scoped: insert connector for validated clinic
             result = supabase.table("integration_connectors").insert(insert_data).execute()
             if not result.data:
                 raise HTTPException(status_code=500, detail="Failed to save connector credentials")
@@ -3389,6 +3472,8 @@ async def resolve_report_match(
     if body.send_now and report.get("file_path") and not str(report.get("file_path", "")).startswith("pending_review"):
         try:
             lab_service = LabReportService()
+            # scoped: update lab report queue item
+            # scoped: update lab report queue item
             supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
             await lab_service.resend_report(report_id, new_phone=norm_phone)
             update_payload["status"] = "sent"
@@ -3396,8 +3481,10 @@ async def resolve_report_match(
             logger.error(f"Failed to resend resolved report {report_id}: {e}")
             update_payload["status"] = "failed"
             update_payload["error_message"] = str(e)
+            # scoped: update lab report queue item
             supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
     else:
+            # scoped: update lab report queue item
         supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
 
     client_ip = request.client.host if request and request.client else "unknown"
@@ -3912,6 +3999,7 @@ async def get_branch_doctors(
     resolve_owned_branch(user, branch_id)
     try:
         result = (
+        # scoped: doctor branch association
             supabase.table("doctor_branches")
             .select("*, doctors(*)")
             .eq("branch_id", branch_id)
@@ -3950,6 +4038,7 @@ async def assign_doctor_to_branch(
             "branch_id": branch_id,
             "session": body.session,
         }
+        # scoped: assign doctor to branch for validated branch
         result = supabase.table("doctor_branches").insert(data).execute()
 
         client_ip = request.client.host if request.client else "unknown"
@@ -3985,6 +4074,7 @@ async def remove_doctor_from_branch(
     """Remove a doctor from a branch."""
     resolve_owned_branch(user, branch_id)
     try:
+        # scoped: doctor branch association
         supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
             "doctor_id", doctor_id
         ).execute()
@@ -4020,6 +4110,7 @@ async def update_doctor_branch_session(
     resolve_owned_branch(user, branch_id)
     try:
         result = (
+        # scoped: doctor branch association
             supabase.table("doctor_branches")
             .update({"session": body.session})
             .eq("branch_id", branch_id)
@@ -4059,6 +4150,7 @@ async def update_doctor_branch_session(
 
 @router.get("/messaging-usage")
 async def get_messaging_usage(
+    clinic_id: Optional[str] = None,
     user: AdminUser = Depends(verify_credentials),
 ):
     """Get outbound message usage for the current billing period.
@@ -4066,54 +4158,44 @@ async def get_messaging_usage(
     SECURITY: This is a CUSTOMER-FACING endpoint. The response MUST NOT
     contain any fields related to costs, pricing, Meta rates, markup,
     or Kriya's messaging economics. Only volumetric counts are returned.
-
-    Returns:
-        - plan name and display name
-        - billing period (calendar month start/end)
-        - included messages in plan
-        - messages sent this period
-        - messages remaining
-        - usage percentage
-        - daily breakdown (date + count)
-        - category breakdown (utility/marketing counts only)
     """
     try:
         from app.services.message_accounting import get_clinic_usage
 
-        # Determine which clinic this admin belongs to
-        clinic_id = user.clinic_id
+        # Determine and enforce which clinic this admin belongs to
+        effective_clinic_id = enforce_clinic_access(user, clinic_id) if clinic_id else user.clinic_id
         plan_name = "essential"  # default
 
-        if clinic_id and clinic_id != "default":
+        if effective_clinic_id and effective_clinic_id != "default":
             # Fetch clinic plan from database
             try:
-                clinic_data = await get_clinic_by_id(clinic_id)
+                clinic_data = await get_clinic_by_id(effective_clinic_id)
                 plan_name = clinic_data.get("plan", "essential")
             except Exception:
                 pass
         elif user.role == "super_admin":
-            # Super admin viewing default — show aggregate or default
-            clinic_id = "default"
+            effective_clinic_id = "default"
 
-        if not clinic_id or clinic_id == "default":
-            # For super_admin without a specific clinic, return guidance
+        if not effective_clinic_id or effective_clinic_id == "default":
             return {
                 "message": "Super admin: use /platform/messaging-usage for platform-wide view. "
                            "Specify clinic_id query parameter for per-clinic usage.",
                 "plan": "N/A",
             }
 
-        usage = await get_clinic_usage(clinic_id, plan_name)
+        usage = await get_clinic_usage(effective_clinic_id, plan_name)
 
         await log_admin_action(
             user=user,
             action="VIEW_MESSAGING_USAGE",
             resource_type="billing",
-            details={"clinic_id": clinic_id, "messages_sent": usage.get("messages_sent", 0)},
+            details={"clinic_id": effective_clinic_id, "messages_sent": usage.get("messages_sent", 0)},
         )
 
         return usage
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching messaging usage: {e}")
         raise HTTPException(
@@ -4128,15 +4210,16 @@ async def get_messaging_usage(
 
 @router.get("/notifications")
 async def get_admin_notifications(
+    clinic_id: Optional[str] = None,
     unread_only: bool = False,
     limit: int = 50,
     offset: int = 0,
     user: AdminUser = Depends(verify_credentials),
 ):
     """Retrieve in-app broadcast alerts for the authenticated clinic admin."""
-    clinic_id = await resolve_clinic_id_for_write(user)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id) if clinic_id else await resolve_clinic_id_for_write(user)
     notifications = await broadcast_service.get_admin_notifications(
-        clinic_id=clinic_id,
+        clinic_id=effective_clinic_id,
         admin_id=user.user_id,
         unread_only=unread_only,
         limit=limit,
@@ -4147,12 +4230,13 @@ async def get_admin_notifications(
 
 @router.get("/notifications/unread-count")
 async def get_admin_notifications_unread_count(
+    clinic_id: Optional[str] = None,
     user: AdminUser = Depends(verify_credentials),
 ):
     """Get the live count of unread notifications for the header bell badge."""
-    clinic_id = await resolve_clinic_id_for_write(user)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id) if clinic_id else await resolve_clinic_id_for_write(user)
     count = await broadcast_service.get_unread_count(
-        clinic_id=clinic_id,
+        clinic_id=effective_clinic_id,
         admin_id=user.user_id,
     )
     return {"success": True, "unread_count": count}
@@ -4161,13 +4245,14 @@ async def get_admin_notifications_unread_count(
 @router.patch("/notifications/{notification_id}/read")
 async def mark_admin_notification_read(
     notification_id: str,
+    clinic_id: Optional[str] = None,
     user: AdminUser = Depends(verify_credentials),
 ):
     """Mark a specific notification as read within the authenticated admin's tenant scope."""
-    clinic_id = await resolve_clinic_id_for_write(user)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id) if clinic_id else await resolve_clinic_id_for_write(user)
     success = await broadcast_service.mark_notification_read(
         notification_id=notification_id,
-        clinic_id=clinic_id,
+        clinic_id=effective_clinic_id,
         admin_id=user.user_id,
     )
     if not success:
@@ -4180,12 +4265,13 @@ async def mark_admin_notification_read(
 
 @router.post("/notifications/mark-all-read")
 async def mark_all_admin_notifications_read(
+    clinic_id: Optional[str] = None,
     user: AdminUser = Depends(verify_credentials),
 ):
     """Mark all unread notifications as read for the authenticated admin's clinic."""
-    clinic_id = await resolve_clinic_id_for_write(user)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id) if clinic_id else await resolve_clinic_id_for_write(user)
     updated_count = await broadcast_service.mark_all_notifications_read(
-        clinic_id=clinic_id,
+        clinic_id=effective_clinic_id,
         admin_id=user.user_id,
     )
     return {

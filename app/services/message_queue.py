@@ -120,14 +120,12 @@ class MessageQueueManager:
             result = supabase.table("inbound_messages").insert(record).execute()
             if result.data:
                 logger.info(f"Durable queue: ingested new message {message_id}")
-                # Also keep processed_messages in sync for platform usage tracking
-                try:
-                    pm_payload = {"message_id": message_id}
-                    if clinic_id:
-                        pm_payload["clinic_id"] = clinic_id
-                    supabase.table("processed_messages").insert(pm_payload).execute()
-                except Exception:
-                    pass
+                # NOTE: do NOT write processed_messages here. acquire() claims a message
+                # by INSERTing that same message_id and treats a unique violation as
+                # "duplicate, drop it". Pre-claiming the row here made acquire() reject
+                # every message as its own duplicate, so process_message() returned at
+                # the guard and no patient ever got a reply — while the inbound row was
+                # still marked 'completed'. acquire() writes the row on success.
                 return True, result.data[0]
             return False, None
         except Exception as e:
@@ -135,22 +133,10 @@ class MessageQueueManager:
                 logger.info(f"Durable queue: duplicate message {message_id} dropped")
                 return False, None
 
-            # Fallback: if inbound_messages table does not exist, use processed_messages
-            logger.warning(f"Durable queue insert fallback for {message_id}: {e}")
-            try:
-                pm_payload = {"message_id": message_id}
-                if clinic_id:
-                    pm_payload["clinic_id"] = clinic_id
-                pm_res = supabase.table("processed_messages").insert(pm_payload).execute()
-                if pm_res.data:
-                    return True, {"message_id": message_id, "phone": phone, "display_phone": display_phone}
-                return False, None
-            except Exception as e2:
-                if _is_duplicate(e2):
-                    return False, None
-                _record_fail_closed()
-                logger.error(f"Durable queue fallback failed for {message_id}: {e2}")
-                return False, None
+            # Fail closed: do not silently swallow durable ingestion errors
+            _record_fail_closed()
+            logger.error(f"Durable queue insert failed for {message_id}: {e}")
+            return False, None
 
     async def claim_message(self, message_id: str) -> bool:
         """Atomically claim a message for processing."""
@@ -325,6 +311,51 @@ class MessageQueueManager:
         except Exception as e:
             logger.error(f"Failed to replay dead letter message {message_id}: {e}")
             return False
+
+    async def recover_pending_inbound_messages(self, lease_timeout_seconds: int = 300) -> int:
+        """Reclaim messages stuck in 'processing' state past their lease timeout (e.g. crashed worker).
+
+        Resets abandoned processing leases back to 'received' so live workers
+        can re-acquire and process them without data loss (W4.4).
+        """
+        from app.database import supabase
+        from datetime import datetime, timezone, timedelta
+
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(seconds=lease_timeout_seconds)).isoformat()
+            res = (
+                supabase.table("inbound_messages")
+                .select("id, message_id, attempt_count")
+                .eq("status", "processing")
+                .lte("updated_at", cutoff)
+                .execute()
+            )
+            stale_rows = res.data or []
+            recovered = 0
+            for row in stale_rows:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                up_res = (
+                    supabase.table("inbound_messages")
+                    .update({
+                        "status": "received",
+                        "last_error": "Lease recovered after worker timeout",
+                        "updated_at": now_iso,
+                    })
+                    .eq("id", row["id"])
+                    .execute()
+                )
+                if up_res.data:
+                    recovered += 1
+            if recovered > 0:
+                logger.info(f"Durable queue: recovered {recovered} abandoned inbound messages from crashed workers")
+            return recovered
+        except Exception as e:
+            logger.error(f"Failed to recover pending inbound messages: {e}")
+            return 0
+
+    async def recover_pending_messages(self, lease_timeout_seconds: int = 300) -> int:
+        """Alias for recover_pending_inbound_messages (W4.4)."""
+        return await self.recover_pending_inbound_messages(lease_timeout_seconds)
 
     async def acquire(
         self, message_id: str, clinic_id: Optional[str] = None

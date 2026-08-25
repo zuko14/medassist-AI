@@ -147,6 +147,7 @@ def main():
     parser.add_argument("--dir", default="migrations", help="Migrations directory")
     parser.add_argument("--status", action="store_true", help="Print migration status only")
     parser.add_argument("--dry-run", action="store_true", help="Simulate applying migrations")
+    parser.add_argument("--backfill", action="store_true", help="Backfill checksums for existing migrations")
 
     args = parser.parse_args()
 
@@ -171,6 +172,32 @@ def main():
                     print(f" [X] {fname} (applied at {applied[fname]['applied_at']})")
                 else:
                     print(f" [ ] {fname} (PENDING)")
+            return
+
+        if getattr(args, "backfill", False):
+            pattern = os.path.join(args.dir, "[0-9]*.sql")
+            all_files = sorted(glob.glob(pattern))
+            backfilled = 0
+            cur = conn.cursor()
+            try:
+                for mf in all_files:
+                    fname = os.path.basename(mf)
+                    with open(mf, "r", encoding="utf-8") as f:
+                        sql = f.read()
+                    checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+                    cur.execute(
+                        """
+                        INSERT INTO schema_migrations (name, checksum)
+                        VALUES (%s, %s)
+                        ON CONFLICT (name) DO UPDATE SET checksum = EXCLUDED.checksum;
+                        """,
+                        (fname, checksum)
+                    )
+                    backfilled += 1
+                conn.commit()
+                print(f"[OK] Successfully backfilled {backfilled} migrations with SHA256 checksums.")
+            finally:
+                cur.close()
             return
 
         applied_count, skipped_count, failed = apply_migrations(conn, migrations_dir=args.dir, dry_run=args.dry_run)

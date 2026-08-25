@@ -69,4 +69,5 @@ app/integrations/callmedex/browser/videos/
 app/integrations/callmedex/browser/traces/
 screenshots_browser_automation_callmedex/
 tmp_pg_pytest_data/
+tmp_pg_migrate_test/
 

@@ -571,3 +571,51 @@ class TestFormatCollectionWindow:
         assert format_collection_window(window) == "07:00 - 21:00"
 
 
+class TestAdminManualLabReportUpload:
+    def test_upload_valid_pdf_with_match_dispatch(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.routers.admin import router, verify_credentials, AdminUser
+
+        app = FastAPI()
+        app.include_router(router)
+
+        async def fake_user():
+            return AdminUser(username="admin", role="super_admin", clinic_id="default")
+
+        app.dependency_overrides[verify_credentials] = fake_user
+        client = TestClient(app)
+
+        pdf_bytes = b"%PDF-1.4 test document content"
+
+        mock_match = MagicMock(
+            is_safe_to_send=True,
+            match_confidence=0.98,
+            match_source="exact_phone",
+            normalized_phone="+919876543210",
+            matched_patient_name="Test Patient",
+            matched_patient_id="pid-101",
+        )
+
+        mock_upload_res = {"id": "rep-101", "status": "sent"}
+
+        with patch("app.services.patient_match.patient_match_service.match", new_callable=AsyncMock, return_value=mock_match), \
+             patch("app.services.lab_reports.LabReportService.upload_and_send", new_callable=AsyncMock, return_value=mock_upload_res):
+            resp = client.post(
+                "/admin/lab-reports/upload",
+                data={
+                    "patient_phone": "+919876543210",
+                    "patient_name": "Test Patient",
+                    "report_name": "Lipid Profile",
+                    "report_type": "Biochemistry",
+                    "clinic_id": "default",
+                },
+                files={"file": ("report.pdf", pdf_bytes, "application/pdf")},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["report"]["id"] == "rep-101"
+
+
