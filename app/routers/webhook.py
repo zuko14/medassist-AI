@@ -86,10 +86,32 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                         continue
 
                     for message in change.value.messages:
-                        background_tasks.add_task(
-                            process_message_safe, message, display_phone, body, phone_number_id
+                        phone = normalize_phone(getattr(message, "from_", ""))
+                        clinic_id = None
+                        try:
+                            clinic = await resolve_tenant(display_phone, phone_number_id=phone_number_id)
+                            if clinic:
+                                clinic_id = clinic.get("id")
+                        except Exception:
+                            pass
+
+                        # ── Durable Ingestion Boundary: Persist BEFORE returning HTTP 200 ──
+                        is_new, _ = await message_queue.ingest(
+                            message_id=message.id,
+                            phone=phone,
+                            display_phone=display_phone,
+                            payload=body,
+                            clinic_id=clinic_id,
+                            phone_number_id=phone_number_id,
                         )
-                        logger.info(f"Queued message {message.id} to BackgroundTasks")
+
+                        if is_new:
+                            background_tasks.add_task(
+                                process_message_safe, message, display_phone, body, phone_number_id
+                            )
+                            logger.info(f"Durable queue: ingested & dispatched {message.id}")
+                        else:
+                            logger.info(f"Durable queue: dropped duplicate {message.id}")
 
         return {"status": "ok"}
 
@@ -144,44 +166,23 @@ async def record_delivery_status(status: dict) -> None:
 
 
 async def process_message_safe(message, display_phone: str, raw_payload: dict, phone_number_id: str = None):
-    """Wrapper that catches failures and logs them to a dead-letter queue with release for retry.
+    """Wrapper that claims, processes, and marks completed or failed in durable queue.
 
     In a hospital bot, silently dropping a patient message is unacceptable.
-    If processing fails (e.g. mid-restart crash), the raw payload is sanitized and saved
-    to Supabase `failed_messages` table for manual retry or investigation.
+    If processing fails, the message is marked failed_retryable with bounded exponential backoff
+    or moved to dead_letter if retries are exhausted.
     """
+    message_id = getattr(message, "id", "unknown")
     try:
         await process_message(message, display_phone, phone_number_id)
+        await message_queue.mark_completed(message_id)
     except Exception as e:
-        logger.error(f"Message processing failed, saving to dead-letter queue: {e}")
-        # Release claim from processed_messages to allow DLQ replay
+        logger.error(f"Message processing failed for {message_id}: {e}")
+        await message_queue.mark_failed(message_id, str(e), max_retries=3)
         try:
-            message_id = getattr(message, "id", None)
-            if message_id:
-                await message_queue.release(message_id)
+            await message_queue.release(message_id)
         except Exception as rel_err:
             logger.warning(f"Failed to release message lock for {message_id}: {rel_err}")
-
-        try:
-            import json
-            from app.database import supabase
-            from app.utils.pii_sanitizer import sanitize_pii
-
-            raw_str = json.dumps(raw_payload) if raw_payload else "{}"
-            masked_payload = sanitize_pii(raw_str)
-
-            supabase.table("failed_messages").insert(
-                {
-                    "phone": getattr(message, "from_", "unknown"),
-                    "display_phone": display_phone,
-                    "payload": masked_payload,
-                    "error": str(e)[:500],
-                    "status": "pending",
-                }
-            ).execute()
-            logger.info("Failed message saved to dead-letter queue for retry")
-        except Exception as dlq_err:
-            logger.error(f"Dead-letter queue write also failed: {dlq_err}")
 
 
 async def process_message(message, display_phone: str, phone_number_id: str = None):

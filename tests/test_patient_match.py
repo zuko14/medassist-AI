@@ -113,3 +113,27 @@ async def test_patient_match_missing_or_invalid_phone():
     result_bad = await service.match(clinic_id="c1", scraped_name="Test", scraped_phone="123")
     assert result_bad.status == "needs_review"
     assert result_bad.is_safe_to_send is False
+
+
+@pytest.mark.asyncio
+async def test_patient_match_db_failure_fails_closed():
+    """P0-4: Database query exception must fail closed into needs_review instead of auto-matching."""
+    service = PatientMatchService(similarity_threshold=0.75)
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.side_effect = RuntimeError(
+        "Database connection dropped"
+    )
+
+    with patch("app.services.patient_match.supabase", mock_sb):
+        result = await service.match(
+            clinic_id="clinic-1",
+            scraped_name="Mrs. Sunita Verma",
+            scraped_phone="+919876543210",
+        )
+
+    assert result.status == "needs_review"
+    assert result.is_safe_to_send is False
+    assert result.match_source == "database_error"
+    assert result.match_confidence == 0.0
+    assert "Database query error" in result.review_reason
+

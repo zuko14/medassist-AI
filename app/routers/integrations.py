@@ -82,7 +82,7 @@ async def receive_lab_report(
     existing LabReportService.
     """
 
-    # Step 1: Idempotency check
+    # Step 1: Idempotency check (connector processed reports + lab_reports cross-path)
     try:
         existing = (
             supabase.table("integration_processed_reports")
@@ -101,6 +101,26 @@ async def receive_lab_report(
             return LabReportResponse(
                 success=True,
                 already_processed=True,
+                message=f"Report {external_report_id} already processed",
+            )
+
+        existing_lr = (
+            supabase.table("lab_reports")
+            .select("id, status, source")
+            .eq("clinic_id", clinic_id)
+            .eq("external_report_id", external_report_id)
+            .execute()
+        )
+        if existing_lr.data:
+            lr_row = existing_lr.data[0]
+            logger.info(
+                f"Report {external_report_id} already delivered via another intake "
+                f"(source={lr_row.get('source')}) — skipped duplicate send"
+            )
+            return LabReportResponse(
+                success=True,
+                already_processed=True,
+                lab_report_id=str(lr_row.get("id")) if lr_row.get("id") else None,
                 message=f"Report {external_report_id} already processed",
             )
     except Exception as e:
@@ -134,10 +154,51 @@ async def receive_lab_report(
         f"{len(file_bytes)} bytes | patient=***{patient_phone[-4:]}"
     )
 
-    # Step 3: Call the SAME LabReportService pipeline as admin panel
-    # external_report_id/source are passed through so upload_and_send() can check
-    # lab_reports for a duplicate delivered by another intake path (e.g. CallMedex)
-    # before sending — this is what actually prevents the double-send.
+    # Step 3: Server-side Patient Matching Verification (P1-2)
+    from app.services.patient_match import patient_match_service
+    match_res = await patient_match_service.match(
+        clinic_id=clinic_id,
+        scraped_name=patient_name,
+        scraped_phone=patient_phone,
+    )
+    effective_match_confidence = match_res.match_confidence
+    effective_match_source = match_res.match_source
+    effective_matched_patient_id = match_res.matched_patient_id
+    if match_res.normalized_phone:
+        patient_phone = match_res.normalized_phone
+
+    # If matching fails safety gate, route to needs_review instead of dispatching
+    if not match_res.is_safe_to_send:
+        logger.warning(
+            f"Intake held for review by patient match gate for {external_report_id}: {match_res.review_reason}"
+        )
+        try:
+            nr_insert = supabase.table("lab_reports").insert({
+                "clinic_id": clinic_id,
+                "patient_phone": patient_phone,
+                "patient_name": patient_name,
+                "report_name": report_name,
+                "report_type": report_type,
+                "file_path": f"pending_review/{external_report_id}",
+                "status": "needs_review",
+                "external_report_id": external_report_id,
+                "match_source": effective_match_source,
+                "error_message": match_res.review_reason,
+            }).execute()
+            raw_id = nr_insert.data[0].get("id") if (nr_insert.data and isinstance(nr_insert.data, list) and isinstance(nr_insert.data[0], dict)) else None
+            nr_id = str(raw_id) if isinstance(raw_id, (str, int)) else None
+        except Exception as e_nr:
+            logger.error(f"Failed to record needs_review row: {e_nr}")
+            nr_id = None
+
+        return LabReportResponse(
+            success=True,
+            already_processed=False,
+            lab_report_id=nr_id,
+            message=f"Report held for review: {match_res.review_reason}",
+        )
+
+    # Step 4: Call the SAME LabReportService pipeline as admin panel
     try:
         lab_service = LabReportService()
         saved_record = await lab_service.upload_and_send(
@@ -151,9 +212,9 @@ async def receive_lab_report(
             report_type=report_type,
             external_report_id=external_report_id,
             source=connector_type,
-            match_confidence=match_confidence,
-            match_source=match_source,
-            matched_patient_id=matched_patient_id,
+            match_confidence=effective_match_confidence,
+            match_source=effective_match_source,
+            matched_patient_id=effective_matched_patient_id,
         )
     except Exception as e:
         logger.error(f"LabReportService failed for {external_report_id}: {e}")

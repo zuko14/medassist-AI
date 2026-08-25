@@ -266,7 +266,18 @@ class DataRetentionService:
             logger.error(f"Prescriptions anonymization error: {e}")
             results["errors"].append(f"prescriptions: {e}")
 
-        # 4. Mark the patient row itself as anonymized (but keep the shell for FK integrity)
+        # 4. Anonymize family members linked to patient
+        try:
+            supabase.table("family_members").update(
+                {
+                    "name": "[REDACTED]",
+                    "relationship": "[REDACTED]",
+                }
+            ).eq("clinic_id", clinic_id).eq("primary_patient_phone", phone).execute()
+        except Exception as e:
+            logger.debug(f"Family members anonymization note: {e}")
+
+        # 5. Mark the patient row itself as anonymized (but keep the shell for FK integrity)
         try:
             supabase.table("patients").update(
                 {
@@ -278,6 +289,28 @@ class DataRetentionService:
         except Exception as e:
             logger.error(f"Patient anonymization error: {e}")
             results["errors"].append(f"patient_row: {e}")
+
+        # 6. Record DPDP compliance audit log
+        try:
+            supabase.table("admin_audit_logs").insert(
+                {
+                    "clinic_id": clinic_id,
+                    "user_id": "dpdp_erasure",
+                    "username": "patient_erasure",
+                    "action": "DATA_ERASURE_REQUEST",
+                    "resource_type": "patient",
+                    "resource_id": phone[:6] + "***",
+                    "details": {
+                        "erasure_type": "DPDP_TIER_ERASURE",
+                        "tier1_clinical": "ANONYMIZED_NMC_COMPLIANT",
+                        "tier2_conversations": "DELETED",
+                        "results": results,
+                    },
+                    "ip_address": "system",
+                }
+            ).execute()
+        except Exception as audit_err:
+            logger.debug(f"Audit log write note: {audit_err}")
 
         logger.info(
             f"Data retention: anonymized records for phone={phone[:6]}*** "

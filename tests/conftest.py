@@ -1,7 +1,7 @@
-"""Shared test fixtures — sets dummy env vars so tests never need a .env file."""
-
 import os
 import pytest
+
+pytest_plugins = ["tests.conftest_db"]
 
 
 @pytest.fixture(scope="session", autouse=True)

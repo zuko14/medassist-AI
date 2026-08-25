@@ -114,8 +114,12 @@ class CloudLIMSConnector(BaseLaboratoryConnector):
         self, file_bytes: bytes, expected_patient: PatientIdentity
     ) -> bool:
         """Validate downloaded CloudLIMS report PDF."""
-        if len(file_bytes) == 0 or not file_bytes.startswith(b"%PDF"):
-            raise ValidationError("Invalid PDF report content")
+        patient_name = expected_patient.patient_name if expected_patient else None
+        from app.utils.pdf_reader import validate_pdf_report, PDFValidationError
+        try:
+            validate_pdf_report(file_bytes, expected_patient_name=patient_name)
+        except PDFValidationError as e:
+            raise ValidationError(str(e)) from e
         self._current_checkpoint = JobCheckpoint.VALIDATED
         return True
 

@@ -492,15 +492,26 @@ class LabReportService:
         result = query.execute()
         return result.data or []
 
-    async def resend_report(self, report_id: str, new_phone: Optional[str] = None) -> dict:
-        """Resend a previously uploaded lab report."""
-        report = supabase.table("lab_reports").select("*").eq("id", report_id).execute()
+    async def resend_report(
+        self,
+        report_id: str,
+        new_phone: Optional[str] = None,
+        clinic_id: Optional[str] = None,
+    ) -> dict:
+        """Resend a previously uploaded lab report, scoped by clinic_id when provided."""
+        query = supabase.table("lab_reports").select("*").eq("id", report_id)
+        if clinic_id and clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+        report = query.execute()
         if not report.data:
             raise ValueError("Report not found")
         report = report.data[0]
         if new_phone:
             report["patient_phone"] = new_phone
-            supabase.table("lab_reports").update({"patient_phone": new_phone}).eq("id", report_id).execute()
+            update_query = supabase.table("lab_reports").update({"patient_phone": new_phone}).eq("id", report_id)
+            if clinic_id and clinic_id != "default":
+                update_query = update_query.eq("clinic_id", clinic_id)
+            update_query.execute()
 
         try:
             # Check if PDF has been cleaned up by storage retention policy

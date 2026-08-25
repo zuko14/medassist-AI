@@ -96,6 +96,21 @@ async def lifespan(app: FastAPI):
             logger.critical(f"FATAL: {error_msg}")
             raise RuntimeError(error_msg)
 
+        # Database schema pre-flight check for critical migrations (046, 047, 048)
+        try:
+            from app.database import supabase
+            # 047: inbound_messages
+            supabase.table("inbound_messages").select("id").limit(1).execute()
+            # 048: scheduler_locks
+            supabase.table("scheduler_locks").select("job_name").limit(1).execute()
+            # 046: appointments.refund_id
+            supabase.table("appointments").select("refund_id").limit(1).execute()
+            logger.info("✅ Database schema pre-flight check passed (migrations 046, 047, 048 verified).")
+        except Exception as e:
+            error_msg = f"Database schema validation failed on production boot: {e}. Required migrations (046, 047, 048) may be missing."
+            logger.critical(f"FATAL: {error_msg}")
+            raise RuntimeError(error_msg) from e
+
     # Storage orphan cleanup and pre-flight directory check
     import os
     if hasattr(callmedex_container.storage_provider, "cleanup_stale_temp_files"):
@@ -228,6 +243,18 @@ async def platform_panel_chartjs():
     """Serve self-hosted Chart.js — CSP script-src is 'self' only, so this
     can't be loaded from a third-party CDN."""
     return FileResponse("admin/vendor/chart.umd.min.js", media_type="application/javascript")
+
+
+@app.get("/ready", include_in_schema=False)
+async def ready_probe():
+    """Root-level readiness probe alias."""
+    return await health.readiness_check()
+
+
+@app.get("/live", include_in_schema=False)
+async def live_probe():
+    """Root-level liveness probe alias."""
+    return await health.liveness_check()
 
 
 from fastapi.responses import HTMLResponse as HTMLResp

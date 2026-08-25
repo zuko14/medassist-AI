@@ -1123,21 +1123,20 @@ class MocDocConnector(BaseLaboratoryConnector):
         except Exception:
             pass
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # VALIDATION, LOGOUT, HEALTH, CLEANUP, RECOVERY
-    # ═══════════════════════════════════════════════════════════════════════
-
     async def validate_report(
         self, file_bytes: bytes, expected_patient: PatientIdentity
     ) -> bool:
         """Validate report content against patient identity contract."""
-        if len(file_bytes) == 0:
-            raise ValidationError("Downloaded report file is empty")
+        if not expected_patient or not expected_patient.patient_name:
+            raise ValidationError("Expected patient identity missing from job specification")
 
-        if not file_bytes.startswith(b"%PDF"):
-            raise ValidationError("Report file signature is invalid (%PDF magic header missing)")
+        from app.utils.pdf_reader import validate_pdf_report, PDFValidationError
+        try:
+            validate_pdf_report(file_bytes, expected_patient_name=expected_patient.patient_name)
+        except PDFValidationError as e:
+            raise ValidationError(str(e)) from e
 
-        logger.info(f"Validating report bytes against patient '{expected_patient.patient_name}'")
+        logger.info(f"Successfully validated report bytes against patient '{expected_patient.patient_name}'")
         self._current_checkpoint = JobCheckpoint.VALIDATED
         logger.info(f"Reached Checkpoint: {self._current_checkpoint.value}")
         return True

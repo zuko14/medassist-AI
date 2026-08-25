@@ -24,12 +24,10 @@ async def test_acquire_fail_closed_increments_counter():
     manager = MessageQueueManager()
     before = get_fail_open_count()
 
-    mock_db_module = MagicMock()
-    mock_db_module.supabase.table.return_value.insert.return_value.execute.side_effect = Exception(
-        "connection refused"
-    )
+    mock_table = MagicMock()
+    mock_table.insert.return_value.execute.side_effect = Exception("connection refused")
 
-    with patch.dict("sys.modules", {"app.database": mock_db_module}):
+    with patch("app.database.supabase.table", return_value=mock_table):
         result = await manager.acquire("msg-1", clinic_id=None)
 
     assert result is False  # C5: fails closed
@@ -45,12 +43,12 @@ async def test_acquire_duplicate_does_not_increment_fail_open_counter():
     manager = MessageQueueManager()
     before = get_fail_open_count()
 
-    mock_db_module = MagicMock()
-    mock_db_module.supabase.table.return_value.insert.return_value.execute.side_effect = Exception(
+    mock_table = MagicMock()
+    mock_table.insert.return_value.execute.side_effect = Exception(
         "duplicate key value violates unique constraint"
     )
 
-    with patch.dict("sys.modules", {"app.database": mock_db_module}):
+    with patch("app.database.supabase.table", return_value=mock_table):
         result = await manager.acquire("msg-1", clinic_id=None)
 
     assert result is False

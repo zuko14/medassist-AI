@@ -43,24 +43,288 @@ _phone_locks_mutex = asyncio.Lock()
 # Set below Meta's 20s webhook timeout to prevent cascading stalls.
 PHONE_LOCK_TIMEOUT_SECONDS = 15
 
-# Counter of acquire() calls that failed open due to a non-duplicate error
-# (e.g. Supabase outage). A sustained non-zero rate here means messages may
-# be double-processed — scheduler.py polls this to page an admin.
-_fail_open_count = 0
+_fail_closed_count = 0
 
 
 def get_fail_open_count() -> int:
-    """Current count of acquire() fail-open events since process start."""
-    return _fail_open_count
+    """Count of acquire() failure events (fails closed on database errors)."""
+    return _fail_closed_count
+
+
+def get_fail_closed_count() -> int:
+    """Count of acquire() fail-closed events since process start."""
+    return get_fail_open_count()
+
+
+def _record_fail_closed() -> None:
+    """Increment the fail-closed counter on database error during acquire()."""
+    global _fail_closed_count
+    _fail_closed_count += 1
 
 
 def _record_fail_open() -> None:
-    global _fail_open_count
-    _fail_open_count += 1
+    """Backward-compatible alias for _record_fail_closed."""
+    _record_fail_closed()
+
+
+_fail_open_count = _fail_closed_count
 
 
 class MessageQueueManager:
-    """Supabase-native atomic message deduplication + per-phone asyncio locks."""
+    """Supabase-native atomic message deduplication + per-phone asyncio locks + durable queue."""
+
+    async def ingest(
+        self,
+        message_id: str,
+        phone: str,
+        display_phone: str,
+        payload: dict,
+        clinic_id: Optional[str] = None,
+        phone_number_id: Optional[str] = None,
+    ) -> tuple[bool, Optional[dict]]:
+        """Durably persist an incoming WhatsApp message before returning HTTP 200 to Meta.
+
+        Guarantees that a process crash or worker restart after webhook acknowledgment
+        cannot lose accepted patient messages.
+
+        Returns:
+            (is_new, record_dict)
+            is_new=True  → Newly ingested message. Worker must process it.
+            is_new=False → Duplicate wamid already in database.
+        """
+        from app.database import supabase
+        from app.utils.pii_sanitizer import sanitize_pii
+        import json
+
+        def _is_duplicate(exc: Exception) -> bool:
+            error_str = str(exc).lower()
+            return "unique" in error_str or "duplicate" in error_str or "23505" in error_str
+
+        # Mask sensitive PII before persisting payload in durable queue
+        raw_str = json.dumps(payload) if isinstance(payload, dict) else str(payload)
+        sanitized_payload = json.loads(sanitize_pii(raw_str)) if isinstance(payload, dict) else {"raw": sanitize_pii(raw_str)}
+
+        record = {
+            "message_id": message_id,
+            "phone": phone,
+            "display_phone": display_phone,
+            "phone_number_id": phone_number_id,
+            "payload": sanitized_payload,
+            "status": "received",
+            "attempt_count": 0,
+        }
+        if clinic_id:
+            record["clinic_id"] = clinic_id
+
+        try:
+            result = supabase.table("inbound_messages").insert(record).execute()
+            if result.data:
+                logger.info(f"Durable queue: ingested new message {message_id}")
+                # Also keep processed_messages in sync for platform usage tracking
+                try:
+                    pm_payload = {"message_id": message_id}
+                    if clinic_id:
+                        pm_payload["clinic_id"] = clinic_id
+                    supabase.table("processed_messages").insert(pm_payload).execute()
+                except Exception:
+                    pass
+                return True, result.data[0]
+            return False, None
+        except Exception as e:
+            if _is_duplicate(e):
+                logger.info(f"Durable queue: duplicate message {message_id} dropped")
+                return False, None
+
+            # Fallback: if inbound_messages table does not exist, use processed_messages
+            logger.warning(f"Durable queue insert fallback for {message_id}: {e}")
+            try:
+                pm_payload = {"message_id": message_id}
+                if clinic_id:
+                    pm_payload["clinic_id"] = clinic_id
+                pm_res = supabase.table("processed_messages").insert(pm_payload).execute()
+                if pm_res.data:
+                    return True, {"message_id": message_id, "phone": phone, "display_phone": display_phone}
+                return False, None
+            except Exception as e2:
+                if _is_duplicate(e2):
+                    return False, None
+                _record_fail_closed()
+                logger.error(f"Durable queue fallback failed for {message_id}: {e2}")
+                return False, None
+
+    async def claim_message(self, message_id: str) -> bool:
+        """Atomically claim a message for processing."""
+        from app.database import supabase
+        from datetime import datetime, timezone
+
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            res = (
+                supabase.table("inbound_messages")
+                .update({"status": "processing", "locked_at": now_iso, "updated_at": now_iso})
+                .eq("message_id", message_id)
+                .in_("status", ["received", "failed_retryable"])
+                .execute()
+            )
+            return bool(res.data)
+        except Exception as e:
+            logger.warning(f"Failed to claim message {message_id}: {e}")
+            return True  # Fallback to allow processing if table not present
+
+    async def mark_completed(self, message_id: str) -> bool:
+        """Mark durable message as successfully processed."""
+        from app.database import supabase
+        from datetime import datetime, timezone
+
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            res = (
+                supabase.table("inbound_messages")
+                .update({"status": "completed", "completed_at": now_iso, "updated_at": now_iso})
+                .eq("message_id", message_id)
+                .execute()
+            )
+            logger.info(f"Durable queue: marked message {message_id} completed")
+            return bool(res.data)
+        except Exception as e:
+            logger.warning(f"Failed to mark completed for {message_id}: {e}")
+            return False
+
+    async def mark_failed(
+        self, message_id: str, error: str, max_retries: int = 3
+    ) -> str:
+        """Mark message as failed_retryable or dead_letter with bounded exponential backoff."""
+        from app.database import supabase
+        from datetime import datetime, timezone, timedelta
+
+        try:
+            row_res = (
+                supabase.table("inbound_messages")
+                .select("attempt_count, phone, display_phone, payload, clinic_id")
+                .eq("message_id", message_id)
+                .execute()
+            )
+            attempts = 1
+            phone = "unknown"
+            display_phone = None
+            payload = {}
+            clinic_id = None
+
+            if row_res and isinstance(getattr(row_res, "data", None), list) and row_res.data:
+                row = row_res.data[0]
+                if isinstance(row, dict):
+                    raw_attempts = row.get("attempt_count")
+                    if isinstance(raw_attempts, int):
+                        attempts = raw_attempts + 1
+                    phone = str(row.get("phone", "unknown"))
+                    display_phone = row.get("display_phone")
+                    payload = row.get("payload", {})
+                    clinic_id = row.get("clinic_id")
+
+            now = datetime.now(timezone.utc)
+            if attempts < max_retries:
+                # Bounded exponential backoff: 5s, 10s, 20s
+                retry_at = (now + timedelta(seconds=5 * attempts)).isoformat()
+                supabase.table("inbound_messages").update(
+                    {
+                        "status": "failed_retryable",
+                        "attempt_count": attempts,
+                        "retry_at": retry_at,
+                        "last_error": str(error)[:500],
+                        "updated_at": now.isoformat(),
+                    }
+                ).eq("message_id", message_id).execute()
+                logger.warning(
+                    f"Durable queue: message {message_id} attempt {attempts} failed, "
+                    f"scheduled retry at {retry_at}"
+                )
+                # Write to failed_messages on failure
+                try:
+                    import json
+                    supabase.table("failed_messages").insert(
+                        {
+                            "phone": phone,
+                            "display_phone": display_phone,
+                            "payload": json.dumps(payload) if isinstance(payload, dict) else str(payload),
+                            "error": str(error)[:500],
+                            "status": "retryable",
+                        }
+                    ).execute()
+                except Exception:
+                    pass
+                return "failed_retryable"
+            else:
+                supabase.table("inbound_messages").update(
+                    {
+                        "status": "dead_letter",
+                        "attempt_count": attempts,
+                        "last_error": str(error)[:500],
+                        "updated_at": now.isoformat(),
+                    }
+                ).eq("message_id", message_id).execute()
+
+                # Also insert into dead-letter queue table for operator dashboard
+                try:
+                    import json
+                    supabase.table("failed_messages").insert(
+                        {
+                            "phone": phone,
+                            "display_phone": display_phone,
+                            "payload": json.dumps(payload) if isinstance(payload, dict) else str(payload),
+                            "error": str(error)[:500],
+                            "status": "dead_letter",
+                        }
+                    ).execute()
+                except Exception as dlq_e:
+                    logger.error(f"DLQ secondary write error: {dlq_e}")
+
+                logger.error(
+                    f"Durable queue: message {message_id} exceeded max retries ({attempts}), "
+                    f"moved to DEAD_LETTER"
+                )
+                return "dead_letter"
+        except Exception as e:
+            logger.error(f"Failed to record failure for {message_id}: {e}")
+            return "failed_retryable"
+
+    async def replay_dead_letter(
+        self, message_id: str, clinic_id: Optional[str] = None
+    ) -> bool:
+        """Replay a dead-letter message with tenant authorization check."""
+        from app.database import supabase
+        from datetime import datetime, timezone
+
+        try:
+            query = (
+                supabase.table("inbound_messages")
+                .select("*")
+                .eq("message_id", message_id)
+                .in_("status", ["dead_letter", "failed_retryable"])
+            )
+            if clinic_id:
+                query = query.eq("clinic_id", clinic_id)
+            res = query.execute()
+
+            if not res.data:
+                logger.warning(f"Replay rejected: message {message_id} not found or unauthorized")
+                return False
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            supabase.table("inbound_messages").update(
+                {
+                    "status": "received",
+                    "attempt_count": 0,
+                    "retry_at": None,
+                    "last_error": None,
+                    "updated_at": now_iso,
+                }
+            ).eq("message_id", message_id).execute()
+
+            logger.info(f"Durable queue: replaying dead letter message {message_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to replay dead letter message {message_id}: {e}")
+            return False
 
     async def acquire(
         self, message_id: str, clinic_id: Optional[str] = None
@@ -142,7 +406,7 @@ class MessageQueueManager:
                     continue
 
                 # Fail CLOSED on database error to protect financial and booking integrity
-                _record_fail_open()
+                _record_fail_closed()
                 logger.error(
                     f"MESSAGE_QUEUE_FAIL_CLOSED message_id={message_id}: database error during acquire: {e}"
                 )

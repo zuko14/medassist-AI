@@ -396,7 +396,16 @@ async def run_connector(
             return summary
 
         connector_row = result.data
-        config = connector_row.get("config", {})
+        raw_config = connector_row.get("config")
+        if isinstance(raw_config, str):
+            try:
+                config = json.loads(raw_config)
+            except Exception:
+                config = {}
+        elif isinstance(raw_config, dict):
+            config = dict(raw_config)
+        else:
+            config = {}
 
         # Check kill switch (bypassed for admin-triggered test runs)
         if not connector_row.get("is_enabled", False) and not ignore_enabled:

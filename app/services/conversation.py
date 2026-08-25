@@ -219,6 +219,16 @@ class ConversationManager:
                 message_id=message_id,
                 interactive_data=interactive_data,
             )
+            # Record last_processed_message_id only upon successful completion
+            if message_id:
+                try:
+                    await update_conversation(
+                        clinic_id, phone, {"last_processed_message_id": message_id}
+                    )
+                except Exception as update_err:
+                    logger.warning(
+                        f"Failed to record last_processed_message_id for {mask_phone(phone)}: {update_err}"
+                    )
         finally:
             # Always release the lock and decrement refcount
             phone_lock.release()
@@ -243,9 +253,6 @@ class ConversationManager:
             return
 
         if message_id:
-            await update_conversation(
-                clinic["id"], phone, {"last_processed_message_id": message_id}
-            )
             await self.whatsapp.mark_as_read(clinic, message_id)
 
         # Get or create patient

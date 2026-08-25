@@ -23,13 +23,34 @@ _sb_key = settings.supabase_service_role_key or "placeholder-key"
 supabase: Client = create_client(_sb_url, _sb_key)
 
 
+def scoped_query(table_name: str, clinic_id: Optional[str] = None, select_fields: str = "*"):
+    """Build a Supabase select query guaranteed to be scoped by clinic_id when provided.
+
+    Args:
+        table_name: Database table name (e.g. 'appointments', 'patients', 'lab_reports')
+        clinic_id: Target tenant clinic ID. If None, empty, or 'default', returns base query.
+        select_fields: SQL fields to select (default: '*')
+
+    Returns:
+        Supabase query builder with .eq('clinic_id', clinic_id) applied if scoped.
+    """
+    q = supabase.table(table_name).select(select_fields)
+    if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
+        q = q.eq("clinic_id", clinic_id)
+    return q
+
+
+def is_valid_clinic_scope(clinic_id: Optional[str]) -> bool:
+    """Return True if clinic_id is a specific tenant ID (not default/none/empty)."""
+    return bool(clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""))
+
+
+
 async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:
     """Get patient by phone number and clinic_id."""
     try:
         result = (
-            supabase.table("patients")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("patients", clinic_id)
             .eq("phone", phone)
             .execute()
         )
@@ -89,9 +110,7 @@ async def get_conversation(clinic_id: str, phone: str) -> Optional[dict]:
     """Get conversation session for phone."""
     try:
         result = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("conversations", clinic_id)
             .eq("phone", phone)
             .execute()
         )
@@ -179,7 +198,7 @@ async def get_doctors(
                 clinic_id, branch_id, department, active_only
             )
 
-        query = supabase.table("doctors").select("*").eq("clinic_id", clinic_id)
+        query = scoped_query("doctors", clinic_id)
 
         if department:
             query = query.eq("department", department)
@@ -202,7 +221,7 @@ async def get_lab_tests(
     the branch_id filter (mirrors the catalog's "unset = all branches" rule).
     """
     try:
-        query = supabase.table("lab_tests").select("*").eq("clinic_id", clinic_id)
+        query = scoped_query("lab_tests", clinic_id)
         if active_only:
             query = query.eq("is_active", True)
         result = query.order("name").execute()
@@ -221,14 +240,15 @@ async def get_lab_test_by_id(clinic_id: str, lab_test_id: str) -> Optional[dict]
     """Get a single active lab test by id, scoped to the clinic."""
     try:
         result = (
-            supabase.table("lab_tests")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("lab_tests", clinic_id)
             .eq("id", lab_test_id)
             .eq("is_active", True)
             .execute()
         )
         return result.data[0] if result.data else None
+    except Exception as e:
+        logger.error(f"Error getting lab test {lab_test_id}: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error getting lab test {lab_test_id}: {e}")
         return None
@@ -339,9 +359,7 @@ async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
 
     try:
         result = (
-            supabase.table("doctors")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("doctors", clinic_id)
             .eq("name", name)
             .execute()
         )
@@ -618,9 +636,7 @@ async def get_appointment_by_ref(clinic_id: str, booking_ref: str) -> Optional[d
     """Get appointment by booking reference."""
     try:
         result = (
-            supabase.table("appointments")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("appointments", clinic_id)
             .eq("booking_ref", booking_ref)
             .execute()
         )
@@ -654,9 +670,7 @@ async def get_patient_appointments(
     """Get appointments for a patient."""
     try:
         query = (
-            supabase.table("appointments")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("appointments", clinic_id)
             .eq("patient_phone", phone)
         )
         if status:
@@ -730,6 +744,10 @@ async def delete_patient_data(clinic_id: str, phone: str) -> bool:
         return False
 
 
+# Alias for backward compatibility
+delete_patient = delete_patient_data
+
+
 async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[dict]:
     """Assign the next sequential token number for this appointment's doctor+date.
 
@@ -739,23 +757,29 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     """
     try:
         appt_result = (
-            supabase.table("appointments")
-            .select("doctor_name, appointment_date")
-            .eq("clinic_id", clinic_id)
+            scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, appointment_date, token_number, queue_status")
             .eq("id", appointment_id)
             .execute()
         )
         if not appt_result.data:
             return None
+
+        # Idempotency: if already checked in with a token, return existing record
+        existing_token = appt_result.data[0].get("token_number")
+        if existing_token is not None:
+            logger.info(
+                f"check_in_appointment: appointment {appointment_id} already checked in "
+                f"with token {existing_token}"
+            )
+            return appt_result.data[0]
+
         doctor_name = appt_result.data[0]["doctor_name"]
         appointment_date = appt_result.data[0]["appointment_date"]
 
         max_retries = 5
         for attempt in range(max_retries):
             max_result = (
-                supabase.table("appointments")
-                .select("token_number")
-                .eq("clinic_id", clinic_id)
+                scoped_query("appointments", clinic_id, "token_number")
                 .eq("doctor_name", doctor_name)
                 .eq("appointment_date", appointment_date)
                 .order("token_number", desc=True)
@@ -810,9 +834,7 @@ async def call_next_patient(clinic_id: str, doctor_name: str, date_str: str) -> 
         max_retries = 5
         for _ in range(max_retries):
             next_result = (
-                supabase.table("appointments")
-                .select("*")
-                .eq("clinic_id", clinic_id)
+                scoped_query("appointments", clinic_id)
                 .eq("doctor_name", doctor_name)
                 .eq("appointment_date", date_str)
                 .eq("queue_status", "waiting")
@@ -845,9 +867,7 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
     """Look up a patient's queue position for today's appointment."""
     try:
         result = (
-            supabase.table("appointments")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("appointments", clinic_id)
             .eq("patient_phone", phone)
             .eq("appointment_date", date_str)
             .eq("status", "confirmed")
@@ -861,9 +881,7 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
             return {"checked_in": False, "doctor_name": appt.get("doctor_name")}
 
         serving_result = (
-            supabase.table("appointments")
-            .select("token_number")
-            .eq("clinic_id", clinic_id)
+            scoped_query("appointments", clinic_id, "token_number")
             .eq("doctor_name", appt["doctor_name"])
             .eq("appointment_date", date_str)
             .in_("queue_status", ["waiting", "in_consultation"])
@@ -892,9 +910,7 @@ async def get_family_members(clinic_id: str, primary_phone: str) -> list:
     """Return all family members registered under a primary phone number."""
     try:
         result = (
-            supabase.table("family_members")
-            .select("*")
-            .eq("clinic_id", clinic_id)
+            scoped_query("family_members", clinic_id)
             .eq("primary_phone", primary_phone)
             .order("created_at")
             .execute()

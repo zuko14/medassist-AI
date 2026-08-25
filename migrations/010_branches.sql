@@ -36,7 +36,7 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$;
 
 -- Trigger for updating timestamp
 CREATE TRIGGER update_branches_updated_at

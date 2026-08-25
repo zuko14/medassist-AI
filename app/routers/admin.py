@@ -2097,12 +2097,21 @@ async def get_lab_reports(
 @router.post("/lab-reports/{report_id}/resend")
 async def resend_lab_report(
     report_id: str,
-    user: str = Depends(verify_credentials),
+    user: AdminUser = Depends(verify_credentials),
 ):
-    """Resend a lab report to the patient."""
+    """Resend a lab report to the patient with strict tenant scoping."""
     try:
-        await LabReportService().resend_report(report_id)
+        effective_clinic_id = user.clinic_id if user.role != "super_admin" else None
+        await LabReportService().resend_report(report_id, clinic_id=effective_clinic_id)
         return {"success": True, "message": "Report resent successfully"}
+    except ValueError as e:
+        logger.warning(f"Lab report resend validation: {e}")
+        raise HTTPException(
+            status_code=404 if "not found" in str(e).lower() else 400,
+            detail=str(e),
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Lab report resend error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2341,12 +2350,39 @@ async def admin_refund_booking(
     body: dict = None,
     user: AdminUser = Depends(require_admin),
 ):
-    """Initiate a refund for a confirmed booking."""
+    """Initiate a refund for a confirmed booking with strict tenant scoping."""
     try:
         from app.services.payment import payment_service
+        from app.services.tenant import get_clinic_by_id
 
-        reason = (body or {}).get("reason", f"Admin refund by {user}")
-        result = await payment_service.initiate_refund(booking_id, reason)
+        # 1. Fetch booking to verify existence and tenant ownership
+        booking_result = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("id", booking_id)
+            .execute()
+        )
+        if not booking_result.data:
+            raise HTTPException(status_code=404, detail="Booking not found")
+
+        booking = booking_result.data[0]
+        booking_clinic_id = booking.get("clinic_id") or "default"
+
+        # 2. Enforce clinic access (raises 403 if user lacks access to this clinic)
+        enforce_clinic_access(user, booking_clinic_id)
+
+        # 3. Resolve the booking's clinic for per-clinic Razorpay credentials
+        clinic = None
+        try:
+            clinic = await get_clinic_by_id(booking_clinic_id)
+        except Exception as ce:
+            logger.warning(f"Could not load clinic {booking_clinic_id} for refund: {ce}")
+
+        reason = (body or {}).get("reason", f"Admin refund by {user.username or user.role}")
+        req_idempotency_key = (body or {}).get("idempotency_key")
+        result = await payment_service.initiate_refund(
+            booking_id, reason, clinic=clinic, idempotency_key=req_idempotency_key
+        )
         if not result["success"]:
             raise HTTPException(
                 status_code=400, detail=result.get("reason", "Refund failed")
@@ -3897,7 +3933,17 @@ async def assign_doctor_to_branch(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Assign a doctor to a branch with session control."""
-    resolve_owned_branch(user, branch_id)
+    branch = resolve_owned_branch(user, branch_id)
+    branch_clinic_id = branch.get("clinic_id")
+
+    # Verify doctor exists and belongs to the branch's clinic
+    doc_query = supabase.table("doctors").select("id").eq("id", body.doctor_id)
+    if branch_clinic_id:
+        doc_query = doc_query.eq("clinic_id", branch_clinic_id)
+    doc_res = doc_query.execute()
+    if not doc_res.data:
+        raise HTTPException(status_code=404, detail="Doctor not found in this clinic")
+
     try:
         data = {
             "doctor_id": body.doctor_id,

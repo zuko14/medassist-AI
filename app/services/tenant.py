@@ -268,10 +268,29 @@ def get_clinic_contact(clinic: dict, key: str, fallback: str) -> str:
     return (clinic.get("config") or {}).get(key) or fallback
 
 
-def invalidate_tenant_cache(whatsapp_number: str = None):
-    """Call after /admin clinic update to clear stale cache."""
-    if whatsapp_number:
-        _tenant_cache.pop(whatsapp_number, None)
+def invalidate_tenant_cache(whatsapp_number: str = None, phone_number_id: str = None):
+    """Call after /admin clinic update to clear stale cache for both phone and phone_number_id."""
+    if whatsapp_number or phone_number_id:
+        if whatsapp_number:
+            _tenant_cache.pop(whatsapp_number, None)
+            try:
+                norm_phone = _normalize_e164(whatsapp_number)
+                _tenant_cache.pop(norm_phone, None)
+            except Exception:
+                pass
+        if phone_number_id:
+            _tenant_cache.pop(phone_number_id, None)
+
+        # Purge any cache entries pointing to the same clinic
+        for k in list(_tenant_cache.keys()):
+            entry = _tenant_cache[k]
+            clinic_data = entry.get("data") if isinstance(entry, dict) else entry
+            if isinstance(clinic_data, dict):
+                c_phone = clinic_data.get("whatsapp_number")
+                c_pid = clinic_data.get("phone_number_id")
+                if (whatsapp_number and (c_phone == whatsapp_number or c_pid == whatsapp_number)) or \
+                   (phone_number_id and (c_pid == phone_number_id or c_phone == phone_number_id)):
+                    _tenant_cache.pop(k, None)
     else:
         _tenant_cache.clear()
 
@@ -399,7 +418,11 @@ def has_feature(clinic: dict, feature: str) -> bool:
 
     # 3. Plan-level membership
     allowed: set = PLAN_FEATURES.get(plan, set())
-    return feature in allowed
+    if feature in allowed:
+        return True
+    if feature.startswith("reminders") and "reminders" in allowed:
+        return True
+    return False
 
 
 def require_feature(clinic: dict, feature: str) -> None:

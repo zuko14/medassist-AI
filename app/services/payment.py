@@ -589,9 +589,11 @@ class PaymentService:
                 clinic=clinic,
             )
             supabase.table("appointments").update({
-                "status": "refunded_late_payment",
+                "status": "refunded",
+                "refund_reason": "late_payment",
                 "payment_id": payment_id,
                 "refund_id": refund.get("refund_id"),
+                "refunded_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", booking_id).eq("status", "expired").execute()
 
             await self._notify_late_payment_refunded(booking, refund)
@@ -771,6 +773,15 @@ class PaymentService:
                         count += 1
                         continue
 
+                    if link_status["status"] == "unknown":
+                        # P1-7: If link status cannot be verified due to Razorpay API error/timeout,
+                        # do not expire the booking. Allow next run to retry to prevent false expiration.
+                        logger.warning(
+                            f"Razorpay status check for booking {booking_id} returned unknown/error. "
+                            f"Skipping expiry to prevent false expiration of potentially paid booking."
+                        )
+                        continue
+
                 # ── Normal expiry path ──
                 supabase.table("appointments").update({"status": "expired"}).eq(
                     "id", booking_id
@@ -798,16 +809,23 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────────────
 
     async def initiate_refund(
-        self, booking_id: str, reason: str = "", clinic: Optional[dict] = None
+        self,
+        booking_id: str,
+        reason: str = "",
+        clinic: Optional[dict] = None,
+        idempotency_key: Optional[str] = None,
     ) -> dict:
         """Initiate a refund for a confirmed booking.
 
         Checks refund eligibility (4+ hours before slot), calls Razorpay
-        Refund API with an idempotency key, and logs all transitions.
+        Refund API with a deterministic idempotency key, and logs all transitions.
 
         Args:
             clinic: Optional clinic dict. Used to resolve per-clinic Razorpay
                     credentials. Falls back to global settings if None.
+            idempotency_key: Optional explicit idempotency key. If omitted,
+                             a canonical key derived from booking_id and payment_id
+                             is used to ensure retries do not trigger duplicate refunds.
 
         Returns: {"success": bool, "refund_id": str, "reason": str}
         """
@@ -845,8 +863,14 @@ class PaymentService:
                     "reason": f"refund_window_closed_need_{settings.refund_window_hours}h_before_slot",
                 }
 
-        # ── Generate idempotency key ──
-        idempotency_key = f"refund_{booking_id}_{uuid.uuid4().hex[:8]}"
+        # ── Deterministic idempotency key (stable across all retries) ──
+        # Canonical identity: ref_<booking_id>_<payment_id>
+        # Guarantees that any retry of the same business refund passes the exact same
+        # key to Razorpay, preventing duplicate refund charges at the payment gateway.
+        payment_id = booking.get("payment_id", "")
+        effective_idempotency_key = (
+            idempotency_key or f"ref_{booking_id}_{payment_id}"
+        )
 
         # ── Log refund_initiated IMMEDIATELY (before gateway call) ──
         self._log_payment_event(
@@ -856,7 +880,7 @@ class PaymentService:
                 "payment_id": booking["payment_id"],
                 "amount_paise": booking["amount_paise"],
                 "reason": reason,
-                "idempotency_key": idempotency_key,
+                "idempotency_key": effective_idempotency_key,
             },
         )
 
@@ -866,7 +890,7 @@ class PaymentService:
                 payment_id=booking["payment_id"],
                 amount_paise=booking["amount_paise"],
                 reason=reason,
-                idempotency_key=idempotency_key,
+                idempotency_key=effective_idempotency_key,
                 key_id=key_id,
                 key_secret=key_secret,
             )
@@ -874,9 +898,12 @@ class PaymentService:
             refund_id = refund_result.get("id", "")
 
             # Update booking status
-            supabase.table("appointments").update({"status": "refunded"}).eq(
-                "id", booking_id
-            ).execute()
+            supabase.table("appointments").update({
+                "status": "refunded",
+                "refund_id": refund_id,
+                "refund_reason": reason,
+                "refunded_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", booking_id).execute()
 
             # Log refund_completed only after gateway confirms
             self._log_payment_event(

@@ -141,8 +141,18 @@ class PatientMatchService:
             res = query.execute()
             records = res.data if isinstance(res.data, list) else []
         except Exception as e:
-            logger.error(f"Failed to query patients for match: {e}")
-            records = []
+            logger.error(f"Failed to query patients for match (failing closed): {e}")
+            return MatchResult(
+                status="needs_review",
+                is_safe_to_send=False,
+                match_source="database_error",
+                match_confidence=0.0,
+                matched_patient_id=None,
+                normalized_phone=norm_phone,
+                patient_name=scraped_name or "",
+                review_reason=f"Database query error during patient lookup: {e}",
+                existing_records=[],
+            )
 
         # Step 3: Evaluate matching rules
         if not records:

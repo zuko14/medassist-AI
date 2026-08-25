@@ -1,7 +1,7 @@
 """Scheduler service for reminders and follow-ups."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -152,6 +152,15 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Durable Inbound Queue Recovery: Recover pending / retryable messages (every minute) ──
+        self.scheduler.add_job(
+            self.recover_pending_inbound_messages,
+            "interval",
+            minutes=1,
+            id="recover_pending_inbound_messages",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         logger.info("Scheduler started")
 
@@ -160,344 +169,413 @@ class SchedulerService:
         self.scheduler.shutdown()
         logger.info("Scheduler shutdown")
 
+    async def recover_pending_inbound_messages(self):
+        """Durable Inbound Queue Recovery sweep.
+
+        Reclaims any message in 'received', 'failed_retryable' (with retry_at <= now),
+        or 'processing' with expired lease (> 2 mins).
+        Dispatches safe processing so no accepted webhook is ever dropped on crash.
+        """
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("recover_pending_inbound_messages", lease_seconds=60) as acquired:
+            if not acquired:
+                return
+
+            try:
+                from app.services.message_queue import message_queue
+                from app.routers.webhook import process_message_safe
+                from app.database import supabase
+
+                now_iso = datetime.now(timezone.utc).isoformat()
+                stale_lock_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+
+                res = (
+                    supabase.table("inbound_messages")
+                    .select("*")
+                    .in_("status", ["received", "failed_retryable", "processing"])
+                    .limit(20)
+                    .execute()
+                )
+
+                if not res.data:
+                    return
+
+                for msg_row in res.data:
+                    status = msg_row.get("status")
+                    locked_at = msg_row.get("locked_at")
+                    retry_at = msg_row.get("retry_at")
+
+                    if status == "processing" and locked_at and locked_at > stale_lock_cutoff:
+                        continue
+
+                    if status == "failed_retryable" and retry_at and retry_at > now_iso:
+                        continue
+
+                    msg_id = msg_row.get("message_id")
+                    claimed = await message_queue.claim_message(msg_id)
+                    if not claimed:
+                        continue
+
+                    logger.info(f"Durable queue recovery: processing recovered message {msg_id}")
+
+                    class SimpleMessage:
+                        def __init__(self, mid, phone):
+                            self.id = mid
+                            self.from_ = phone
+                            self.type = "text"
+                            self.text = type("obj", (object,), {"body": ""})
+                            self.button = None
+                            self.interactive = None
+
+                    fake_msg = SimpleMessage(msg_id, msg_row.get("phone"))
+                    await process_message_safe(
+                        fake_msg,
+                        msg_row.get("display_phone") or msg_row.get("phone"),
+                        msg_row.get("payload", {}),
+                        msg_row.get("phone_number_id"),
+                    )
+            except Exception as e:
+                logger.warning(f"Error in recover_pending_inbound_messages: {e}")
+
     async def send_24h_reminders(self):
         """Send 24-hour appointment reminders."""
-        try:
-            from app.services.tenant import has_feature
-
-            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-
-            appointments = (
-                supabase.table("appointments")
-                .select("*")
-                .eq("appointment_date", tomorrow)
-                .eq("status", "confirmed")
-                .eq("reminder_24h_sent", False)
-                .execute()
-            )
-
-            for appt in appointments.data:
-                try:
-                    clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
-                    if not has_feature(clinic, "reminders_basic"):
-                        continue
-
-                    components = TEMPLATES["reminder_24h"]["components_builder"](
-                        appt["doctor_name"], appt["appointment_time"]
-                    )
-
-                    await whatsapp_service.send_template(
-                        clinic,
-                        appt["patient_phone"],
-                        "appointment_reminder_24h",
-                        components=components,
-                        _source="scheduler",
-                    )
-
-                    # Mark as sent
-                    supabase.table("appointments").update(
-                        {"reminder_24h_sent": True}
-                    ).eq("id", appt["id"]).execute()
-
-                    logger.info(f"Sent 24h reminder for appointment {appt['id']}")
-                except Exception as e:
-                    logger.error(f"Error sending 24h reminder: {e}")
-
-        except Exception as e:
-            logger.error(f"Error in 24h reminders job: {e}")
-
-    async def send_2h_reminders(self):
-        """Send 2-hour appointment reminders."""
-        try:
-            from app.services.tenant import has_feature
-
-            now = datetime.now()
-            in_2h = (now + timedelta(hours=2)).strftime("%H:%M")
-            today = now.strftime("%Y-%m-%d")
-
-            appointments = (
-                supabase.table("appointments")
-                .select("*")
-                .eq("appointment_date", today)
-                .eq("status", "confirmed")
-                .eq("reminder_2h_sent", False)
-                .execute()
-            )
-
-            for appt in appointments.data:
-                appt_time = appt["appointment_time"]
-                # Check if appointment is in ~2 hours
-                if appt_time[:5] <= in_2h[:5]:
-                    try:
-                        clinic = await get_clinic_by_id(
-                            appt.get("clinic_id", "default")
-                        )
-                        if not has_feature(clinic, "reminders_basic"):
-                            continue
-
-                        # Use branch name if available (multi-branch), else clinic name
-                        location_name = appt.get("branch_name") or clinic["name"]
-
-                        components = TEMPLATES["reminder_2h"]["components_builder"](
-                            location_name, appt["doctor_name"]
-                        )
-
-                        await whatsapp_service.send_template(
-                            clinic,
-                            appt["patient_phone"],
-                            "appointment_reminder_2h",
-                            components=components,
-                            _source="scheduler",
-                        )
-
-                        # Mark as sent
-                        supabase.table("appointments").update(
-                            {"reminder_2h_sent": True}
-                        ).eq("id", appt["id"]).execute()
-
-                        logger.info(f"Sent 2h reminder for appointment {appt['id']}")
-                    except Exception as e:
-                        logger.error(f"Error sending 2h reminder: {e}")
-
-        except Exception as e:
-            logger.error(f"Error in 2h reminders job: {e}")
-
-    async def send_followups(self):
-        """Send post-appointment follow-up messages."""
-        try:
-            from app.services.tenant import has_feature
-
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-
-            appointments = (
-                supabase.table("appointments")
-                .select("*")
-                .eq("appointment_date", yesterday)
-                .eq("status", "completed")
-                .eq("followup_sent", False)
-                .execute()
-            )
-
-            for appt in appointments.data:
-                try:
-                    clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
-                    if not has_feature(
-                        clinic, "reminders_post_visit"
-                    ) or not has_feature(clinic, "feedback"):
-                        # Mark as sent so we don't keep polling
-                        supabase.table("appointments").update(
-                            {"followup_sent": True}
-                        ).eq("id", appt["id"]).execute()
-                        continue
-
-                    components = TEMPLATES["followup_message"]["components_builder"](
-                        appt["patient_name"].split()[0], settings.hospital_phone
-                    )
-
-                    await whatsapp_service.send_template(
-                        clinic,
-                        appt["patient_phone"],
-                        "post_appointment_followup",
-                        components=components,
-                        _source="scheduler",
-                    )
-
-                    # Mark as sent
-                    supabase.table("appointments").update({"followup_sent": True}).eq(
-                        "id", appt["id"]
-                    ).execute()
-
-                    logger.info(f"Sent followup for appointment {appt['id']}")
-                except Exception as e:
-                    logger.error(f"Error sending followup: {e}")
-
-        except Exception as e:
-            logger.error(f"Error in followup job: {e}")
-
-    async def send_health_checkins(self):
-        """Send day+3 and day+7 post-discharge health check-ins.
-
-        Distinct from send_followups (same-day satisfaction survey) —
-        this is a clinical safety check, tracked via separate flags
-        (health_checkin_3d_sent / health_checkin_7d_sent). Uses interactive
-        buttons ("Feeling fine" / "Still have symptoms") so replies route
-        through the intent system rather than free text.
-        """
-        for offset_days, flag_field in [(3, "health_checkin_3d_sent"), (7, "health_checkin_7d_sent")]:
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("24h_reminders", lease_seconds=300) as acquired:
+            if not acquired:
+                return
             try:
-                target_date = (datetime.now() - timedelta(days=offset_days)).strftime("%Y-%m-%d")
+                from app.services.tenant import has_feature
+
+                tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
                 appointments = (
                     supabase.table("appointments")
                     .select("*")
-                    .eq("appointment_date", target_date)
+                    .eq("appointment_date", tomorrow)
                     .eq("status", "confirmed")
-                    .eq(flag_field, False)
+                    .eq("reminder_24h_sent", False)
                     .execute()
                 )
 
                 for appt in appointments.data:
                     try:
                         clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
-                        lang = "en"  # patient language isn't stored on appointments; default to English
+                        if not has_feature(clinic, "reminders_basic"):
+                            continue
 
-                        from app.templates.whatsapp_templates import get_message
-
-                        first_name = (appt.get("patient_name") or "there").split()[0]
-                        text = get_message(
-                            "health_checkin",
-                            lang,
-                            name=first_name,
-                            doctor=appt.get("doctor_name", ""),
+                        components = TEMPLATES["reminder_24h"]["components_builder"](
+                            appt["doctor_name"], appt["appointment_time"]
                         )
-
-                        await whatsapp_service.send_interactive_buttons(
-                            clinic,
-                            appt["patient_phone"],
-                            body=text,
-                            buttons=[
-                                {"id": "checkin_ok", "title": "Feeling fine"},
-                                {"id": "checkin_concern", "title": "Still have symptoms"},
-                            ],
-                            _source="scheduler",
-                        )
-
-                        supabase.table("appointments").update({flag_field: True}).eq(
-                            "id", appt["id"]
-                        ).execute()
-
-                        logger.info(
-                            f"Sent day+{offset_days} health check-in for appointment {appt['id']}"
-                        )
-                    except Exception as e:
-                        logger.error(f"Error sending day+{offset_days} health check-in: {e}")
-
-            except Exception as e:
-                logger.error(f"Error in health check-in job (day+{offset_days}): {e}")
-
-    async def check_doctor_leaves(self):
-        """Check for doctor leaves and notify affected patients."""
-        try:
-            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-            next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-
-            leaves = (
-                supabase.table("doctor_leaves")
-                .select("*")
-                .gte("leave_date", tomorrow)
-                .lte("leave_date", next_week)
-                .eq("leave_type", "full")
-                .execute()
-            )
-
-            for leave in leaves.data:
-                # Find affected appointments
-                affected = (
-                    supabase.table("appointments")
-                    .select("*")
-                    .eq("clinic_id", leave.get("clinic_id", "default"))
-                    .eq("doctor_name", leave["doctor_name"])
-                    .eq("appointment_date", leave["leave_date"])
-                    .eq("status", "confirmed")
-                    .execute()
-                )
-
-                for appt in affected.data:
-                    try:
-                        clinic = await get_clinic_by_id(
-                            appt.get("clinic_id", "default")
-                        )
-                        # Cancel appointment
-                        supabase.table("appointments").update(
-                            {"status": "cancelled"}
-                        ).eq("id", appt["id"]).execute()
-
-                        # Send notification
-                        components = TEMPLATES["appointment_cancelled_doctor_leave"][
-                            "components_builder"
-                        ](appt["doctor_name"], appt["appointment_date"])
 
                         await whatsapp_service.send_template(
                             clinic,
                             appt["patient_phone"],
-                            "appointment_cancelled_doctor_leave",
+                            "appointment_reminder_24h",
                             components=components,
                             _source="scheduler",
                         )
 
-                        logger.info(
-                            f"Cancelled appointment {appt['id']} due to doctor leave"
-                        )
+                        # Mark as sent
+                        supabase.table("appointments").update(
+                            {"reminder_24h_sent": True}
+                        ).eq("id", appt["id"]).execute()
+
+                        logger.info(f"Sent 24h reminder for appointment {appt['id']}")
                     except Exception as e:
-                        logger.error(f"Error handling doctor leave: {e}")
+                        logger.error(f"Error sending 24h reminder: {e}")
 
-        except Exception as e:
-            logger.error(f"Error in doctor leaves job: {e}")
+            except Exception as e:
+                logger.error(f"Error in 24h reminders job: {e}")
 
-    async def alert_failed_messages(self):
-        """Check for unprocessed failed messages and alert admin.
+    async def send_2h_reminders(self):
+        """Send 2-hour appointment reminders."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("2h_reminders", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.tenant import has_feature
 
-        Runs every Monday at 9 AM. If any messages are sitting in the
-        dead-letter queue with status='pending', sends a WhatsApp alert
-        to the admin so they know to investigate.
-        """
-        try:
-            result = (
-                supabase.table("failed_messages")
-                .select("id", count="exact")
-                .eq("status", "pending")
-                .execute()
-            )
+                now = datetime.now()
+                in_2h = (now + timedelta(hours=2)).strftime("%H:%M")
+                today = now.strftime("%Y-%m-%d")
 
-            pending_count = len(result.data) if result.data else 0
-
-            if pending_count > 0:
-                admin_phone = settings.hospital_phone
-                alert_msg = (
-                    f"⚠️ Kriya AI Security Alert\n\n"
-                    f"{pending_count} failed message(s) pending review.\n"
-                    f"These are patient messages that failed to process.\n\n"
-                    f"Check the failed_messages table in Supabase."
+                appointments = (
+                    supabase.table("appointments")
+                    .select("*")
+                    .eq("appointment_date", today)
+                    .eq("status", "confirmed")
+                    .eq("reminder_2h_sent", False)
+                    .execute()
                 )
 
-                # Try to send via the default clinic, or log if we can't
-                try:
-                    from app.services.tenant import resolve_tenant
+                for appt in appointments.data:
+                    appt_time = appt["appointment_time"]
+                    # Check if appointment is in ~2 hours
+                    if appt_time[:5] <= in_2h[:5]:
+                        try:
+                            clinic = await get_clinic_by_id(
+                                appt.get("clinic_id", "default")
+                            )
+                            if not has_feature(clinic, "reminders_basic"):
+                                continue
 
-                    clinic = await resolve_tenant(admin_phone)
-                    await whatsapp_service.send_text(clinic, admin_phone, alert_msg, _source="scheduler")
-                    logger.info(f"Sent failed messages alert: {pending_count} pending")
-                except Exception:
-                    # If we can't resolve a clinic for the admin phone, just log it
-                    logger.warning(
-                        f"ALERT: {pending_count} failed messages pending in dead-letter queue. "
-                        f"Could not send WhatsApp alert — check Supabase manually."
+                            # Use branch name if available (multi-branch), else clinic name
+                            location_name = appt.get("branch_name") or clinic["name"]
+
+                            components = TEMPLATES["reminder_2h"]["components_builder"](
+                                location_name, appt["doctor_name"]
+                            )
+
+                            await whatsapp_service.send_template(
+                                clinic,
+                                appt["patient_phone"],
+                                "appointment_reminder_2h",
+                                components=components,
+                                _source="scheduler",
+                            )
+
+                            # Mark as sent
+                            supabase.table("appointments").update(
+                                {"reminder_2h_sent": True}
+                            ).eq("id", appt["id"]).execute()
+
+                            logger.info(f"Sent 2h reminder for appointment {appt['id']}")
+                        except Exception as e:
+                            logger.error(f"Error sending 2h reminder: {e}")
+
+            except Exception as e:
+                logger.error(f"Error in 2h reminders job: {e}")
+
+    async def send_followups(self):
+        """Send post-appointment follow-up messages."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("followups", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.tenant import has_feature
+
+                yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+                appointments = (
+                    supabase.table("appointments")
+                    .select("*")
+                    .eq("appointment_date", yesterday)
+                    .eq("status", "completed")
+                    .eq("followup_sent", False)
+                    .execute()
+                )
+
+                for appt in appointments.data:
+                    try:
+                        clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                        if not has_feature(
+                            clinic, "reminders_post_visit"
+                        ) or not has_feature(clinic, "feedback"):
+                            # Mark as sent so we don't keep polling
+                            supabase.table("appointments").update(
+                                {"followup_sent": True}
+                            ).eq("id", appt["id"]).execute()
+                            continue
+
+                        components = TEMPLATES["followup_message"]["components_builder"](
+                            appt["patient_name"].split()[0], settings.hospital_phone
+                        )
+
+                        await whatsapp_service.send_template(
+                            clinic,
+                            appt["patient_phone"],
+                            "post_appointment_followup",
+                            components=components,
+                            _source="scheduler",
+                        )
+
+                        # Mark as sent
+                        supabase.table("appointments").update({"followup_sent": True}).eq(
+                            "id", appt["id"]
+                        ).execute()
+
+                        logger.info(f"Sent followup for appointment {appt['id']}")
+                    except Exception as e:
+                        logger.error(f"Error sending followup: {e}")
+
+            except Exception as e:
+                logger.error(f"Error in followup job: {e}")
+
+    async def send_health_checkins(self):
+        """Send day+3 and day+7 post-discharge health check-ins."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("health_checkins", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            for offset_days, flag_field in [(3, "health_checkin_3d_sent"), (7, "health_checkin_7d_sent")]:
+                try:
+                    target_date = (datetime.now() - timedelta(days=offset_days)).strftime("%Y-%m-%d")
+
+                    appointments = (
+                        supabase.table("appointments")
+                        .select("*")
+                        .eq("appointment_date", target_date)
+                        .eq("status", "confirmed")
+                        .eq(flag_field, False)
+                        .execute()
                     )
 
-        except Exception as e:
-            # Table might not exist yet — don't crash the scheduler
-            logger.debug(f"Failed messages check skipped: {e}")
+                    for appt in appointments.data:
+                        try:
+                            clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                            lang = "en"
 
-    async def alert_message_queue_fail_open(self):
-        """Alert admin if the message queue fail-open rate is elevated.
+                            from app.templates.whatsapp_templates import get_message
 
-        A sustained fail-open rate means messages are being processed without
-        the atomic uniqueness guarantee (e.g. Supabase connection issues),
-        which risks double-processing patient messages.
-        """
+                            first_name = (appt.get("patient_name") or "there").split()[0]
+                            text = get_message(
+                                "health_checkin",
+                                lang,
+                                name=first_name,
+                                doctor=appt.get("doctor_name", ""),
+                            )
+
+                            await whatsapp_service.send_interactive_buttons(
+                                clinic,
+                                appt["patient_phone"],
+                                body=text,
+                                buttons=[
+                                    {"id": "checkin_ok", "title": "Feeling fine"},
+                                    {"id": "checkin_concern", "title": "Still have symptoms"},
+                                ],
+                                _source="scheduler",
+                            )
+
+                            supabase.table("appointments").update({flag_field: True}).eq(
+                                "id", appt["id"]
+                            ).execute()
+
+                            logger.info(
+                                f"Sent day+{offset_days} health check-in for appointment {appt['id']}"
+                            )
+                        except Exception as e:
+                            logger.error(f"Error sending day+{offset_days} health check-in: {e}")
+
+                except Exception as e:
+                    logger.error(f"Error in health check-in job (day+{offset_days}): {e}")
+
+    async def check_doctor_leaves(self):
+        """Check for doctor leaves and notify affected patients."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("doctor_leaves", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+                next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+
+                leaves = (
+                    supabase.table("doctor_leaves")
+                    .select("*")
+                    .gte("leave_date", tomorrow)
+                    .lte("leave_date", next_week)
+                    .eq("leave_type", "full")
+                    .execute()
+                )
+
+                for leave in leaves.data:
+                    affected = (
+                        supabase.table("appointments")
+                        .select("*")
+                        .eq("clinic_id", leave.get("clinic_id", "default"))
+                        .eq("doctor_name", leave["doctor_name"])
+                        .eq("appointment_date", leave["leave_date"])
+                        .eq("status", "confirmed")
+                        .execute()
+                    )
+
+                    for appt in affected.data:
+                        try:
+                            clinic = await get_clinic_by_id(
+                                appt.get("clinic_id", "default")
+                            )
+                            supabase.table("appointments").update(
+                                {"status": "cancelled"}
+                            ).eq("id", appt["id"]).execute()
+
+                            components = TEMPLATES["appointment_cancelled_doctor_leave"][
+                                "components_builder"
+                            ](appt["doctor_name"], appt["appointment_date"])
+
+                            await whatsapp_service.send_template(
+                                clinic,
+                                appt["patient_phone"],
+                                "appointment_cancelled_doctor_leave",
+                                components=components,
+                                _source="scheduler",
+                            )
+
+                            logger.info(
+                                f"Cancelled appointment {appt['id']} due to doctor leave"
+                            )
+                        except Exception as e:
+                            logger.error(f"Error handling doctor leave: {e}")
+
+            except Exception as e:
+                logger.error(f"Error in doctor leaves job: {e}")
+
+    async def alert_failed_messages(self):
+        """Check for unprocessed failed messages and alert admin."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("alert_failed_messages", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                result = (
+                    supabase.table("failed_messages")
+                    .select("id", count="exact")
+                    .eq("status", "pending")
+                    .execute()
+                )
+
+                pending_count = len(result.data) if result.data else 0
+
+                if pending_count > 0:
+                    admin_phone = settings.hospital_phone
+                    alert_msg = (
+                        f"⚠️ Kriya AI Security Alert\n\n"
+                        f"{pending_count} failed message(s) pending review.\n"
+                        f"These are patient messages that failed to process.\n\n"
+                        f"Check the failed_messages table in Supabase."
+                    )
+
+                    try:
+                        from app.services.tenant import resolve_tenant
+
+                        clinic = await resolve_tenant(admin_phone)
+                        await whatsapp_service.send_text(clinic, admin_phone, alert_msg, _source="scheduler")
+                        logger.info(f"Sent failed messages alert: {pending_count} pending")
+                    except Exception:
+                        logger.warning(
+                            f"ALERT: {pending_count} failed messages pending in dead-letter queue. "
+                            f"Could not send WhatsApp alert — check Supabase manually."
+                        )
+
+            except Exception as e:
+                logger.debug(f"Failed messages check skipped: {e}")
+
+    async def alert_message_queue_fail_closed(self):
+        """Alert admin if the message queue fail-closed rate is elevated."""
         global _last_fail_open_count
         try:
-            from app.services.message_queue import get_fail_open_count
+            from app.services.message_queue import get_fail_closed_count
 
-            current = get_fail_open_count()
+            current = get_fail_closed_count()
             delta = current - _last_fail_open_count
             _last_fail_open_count = current
 
             if delta > 5:
                 admin_phone = settings.hospital_phone
                 alert_msg = (
-                    f"⚠️ Message queue fail-open rate elevated: "
-                    f"{delta} messages processed without idempotency guarantee since last check."
+                    f"⚠️ Message queue fail-closed / fail-open rate elevated: "
+                    f"{delta} messages could not acquire idempotency lock due to database error since last check."
                 )
                 try:
                     from app.services.tenant import resolve_tenant
@@ -505,118 +583,119 @@ class SchedulerService:
                     clinic = await resolve_tenant(admin_phone)
                     await whatsapp_service.send_text(clinic, admin_phone, alert_msg, _source="scheduler")
                     logger.warning(
-                        f"Sent message queue fail-open alert: {delta} fail-open events"
+                        f"Sent message queue fail-closed alert: {delta} fail-closed events"
                     )
                 except Exception:
                     logger.warning(
-                        f"ALERT: {delta} message queue fail-open events occurred. "
+                        f"ALERT: {delta} message queue fail-closed events occurred. "
                         f"Could not send WhatsApp alert."
                     )
         except Exception as e:
-            logger.debug(f"Message queue fail-open check skipped: {e}")
+            logger.debug(f"Message queue fail-closed check skipped: {e}")
+
+    # Backward-compatible alias
+    alert_message_queue_fail_open = alert_message_queue_fail_closed
 
     async def cleanup_rate_limits(self):
-        """Delete stale rate limit entries older than 1 hour.
-
-        Runs daily at midnight. Prevents the rate_limits table from
-        growing indefinitely with old IP entries.
-        """
-        try:
-            cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
-            supabase.table("rate_limits").delete().lt("window_start", cutoff).execute()
-            logger.info("Cleaned up stale rate limit entries")
-        except Exception as e:
-            # Table might not exist yet — don't crash the scheduler
-            logger.debug(f"Rate limits cleanup skipped: {e}")
+        """Delete stale rate limit entries older than 1 hour."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("cleanup_rate_limits", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
+                supabase.table("rate_limits").delete().lt("window_start", cutoff).execute()
+                logger.info("Cleaned up stale rate limit entries")
+            except Exception as e:
+                logger.debug(f"Rate limits cleanup skipped: {e}")
 
     async def purge_expired_conversations(self):
-        """Purge conversation sessions older than the configured purge window.
+        """Purge conversation sessions older than the configured purge window."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("purge_expired_conversations", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.data_retention import data_retention_service
 
-        Runs daily at 2 AM. Deletes Tier 2 session data only.
-        Clinical records are NOT touched by this job.
-        """
-        try:
-            from app.services.data_retention import data_retention_service
-
-            count = await data_retention_service.purge_expired_conversations()
-            if count > 0:
-                logger.info(f"Scheduler: purged {count} expired conversation sessions")
-        except Exception as e:
-            logger.error(f"Conversation purge job failed: {e}")
+                count = await data_retention_service.purge_expired_conversations()
+                if count > 0:
+                    logger.info(f"Scheduler: purged {count} expired conversation sessions")
+            except Exception as e:
+                logger.error(f"Conversation purge job failed: {e}")
 
     async def purge_expired_session_data(self):
-        """Purge analytics events older than 12 months.
+        """Purge analytics events older than 12 months."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("purge_expired_session_data", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.data_retention import data_retention_service
 
-        Runs daily at 3 AM. Removes operational analytics data only.
-        """
-        try:
-            from app.services.data_retention import data_retention_service
-
-            count = await data_retention_service.purge_expired_session_data()
-            if count > 0:
-                logger.info(f"Scheduler: purged {count} expired analytics events")
-        except Exception as e:
-            logger.error(f"Analytics purge job failed: {e}")
+                count = await data_retention_service.purge_expired_session_data()
+                if count > 0:
+                    logger.info(f"Scheduler: purged {count} expired analytics events")
+            except Exception as e:
+                logger.error(f"Analytics purge job failed: {e}")
 
     async def expire_stale_bookings(self):
-        """Expire pending_payment bookings past their hold window.
+        """Expire pending_payment bookings past their hold window."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("expire_stale_bookings", lease_seconds=60) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.payment import payment_service
 
-        Runs every minute. Before expiring, checks Razorpay order status.
-        If Razorpay shows paid but the webhook never arrived, confirms
-        the booking instead (recovery path).
-        """
-        try:
-            from app.services.payment import payment_service
-
-            count = await payment_service.expire_stale_bookings()
-            if count > 0:
-                logger.info(f"Scheduler: processed {count} stale bookings")
-        except Exception as e:
-            logger.error(f"Stale bookings job failed: {e}")
+                count = await payment_service.expire_stale_bookings()
+                if count > 0:
+                    logger.info(f"Scheduler: processed {count} stale bookings")
+            except Exception as e:
+                logger.error(f"Stale bookings job failed: {e}")
 
     async def daily_payment_reconciliation(self):
-        """Compare confirmed bookings against Razorpay settlements.
+        """Compare confirmed bookings against Razorpay settlements."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("daily_payment_reconciliation", lease_seconds=600) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.payment import payment_service
 
-        Runs daily at 11 PM. Logs a reconciliation summary.
-        Any discrepancy → alert admin, never auto-correct.
-        """
-        try:
-            from app.services.payment import payment_service
-
-            summary = await payment_service.get_daily_reconciliation()
-            logger.info(
-                f"Payment reconciliation: {summary['confirmed_count']} confirmed, "
-                f"₹{summary['confirmed_total_rupees']:.2f} total, "
-                f"{summary['pending_review_count']} pending review"
-            )
-            if summary["pending_review_count"] > 0:
-                await payment_service._alert_admin(
-                    f"⚠️ Daily Reconciliation Alert\n\n"
-                    f"Date: {summary['date']}\n"
-                    f"Confirmed bookings: {summary['confirmed_count']}\n"
-                    f"Total: ₹{summary['confirmed_total_rupees']:.2f}\n"
-                    f"⚠️ Pending review: {summary['pending_review_count']}\n\n"
-                    f"Please check the admin panel and compare against Razorpay dashboard."
+                summary = await payment_service.get_daily_reconciliation()
+                logger.info(
+                    f"Payment reconciliation: {summary['confirmed_count']} confirmed, "
+                    f"₹{summary['confirmed_total_rupees']:.2f} total, "
+                    f"{summary['pending_review_count']} pending review"
                 )
-        except Exception as e:
-            logger.error(f"Payment reconciliation job failed: {e}")
+                if summary["pending_review_count"] > 0:
+                    await payment_service._alert_admin(
+                        f"⚠️ Daily Reconciliation Alert\n\n"
+                        f"Date: {summary['date']}\n"
+                        f"Confirmed bookings: {summary['confirmed_count']}\n"
+                        f"Total: ₹{summary['confirmed_total_rupees']:.2f}\n"
+                        f"⚠️ Pending review: {summary['pending_review_count']}\n\n"
+                        f"Please check the admin panel and compare against Razorpay dashboard."
+                    )
+            except Exception as e:
+                logger.error(f"Payment reconciliation job failed: {e}")
 
     async def _retry_pending_lab_reports(self):
-        """Re-attempt delivery of lab reports stuck in 'pending_retry' status.
+        """Re-attempt delivery of lab reports stuck in 'pending_retry' status."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("lab_report_retry", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.lab_reports import LabReportService
 
-        Runs every 5 minutes. Delegates to LabReportService.retry_pending_deliveries
-        which handles download, re-send, backoff, and permanent failure marking.
-        """
-        try:
-            from app.services.lab_reports import LabReportService
-
-            service = LabReportService()
-            count = await service.retry_pending_deliveries()
-            if count > 0:
-                logger.info(f"Scheduler: processed {count} pending lab report retries")
-        except Exception as e:
-            # Table might not have retry columns yet — don't crash the scheduler
-            logger.debug(f"Lab report retry job skipped: {e}")
+                service = LabReportService()
+                count = await service.retry_pending_deliveries()
+                if count > 0:
+                    logger.info(f"Scheduler: processed {count} pending lab report retries")
+            except Exception as e:
+                logger.debug(f"Lab report retry job skipped: {e}")
 
 
 # Global instance

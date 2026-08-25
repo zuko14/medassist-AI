@@ -77,6 +77,6 @@ async def razorpay_webhook(request: Request, clinic_id: Optional[str] = "default
     except Exception as exc:
         logger.exception(f"Unhandled exception in razorpay_webhook for clinic={effective_clinic_id}: {exc}")
         return JSONResponse(
-            status_code=200,
+            status_code=500,
             content={"status": "error", "reason": "internal_error"},
         )
