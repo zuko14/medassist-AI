@@ -13,6 +13,7 @@ from app.services.tenant import resolve_tenant
 from app.utils.validators import normalize_phone
 from app.utils.security import verify_webhook_signature
 
+from app.database import supabase
 from app.services.message_queue import message_queue
 from app.services.metrics import metrics
 from app.utils.correlation import set_correlation_id
@@ -143,13 +144,8 @@ async def record_delivery_status(status: dict) -> None:
     try:
         from app.database import supabase
         # unscoped: global Meta callback lookup by unique whatsapp_message_id
-        curr_row = (
-            supabase.table("lab_reports")
-            .select("delivery_status")
-            .eq("whatsapp_message_id", wamid)
-            .execute()
-        )
-        if curr_row.data:
+        curr_row = supabase.table("lab_reports").select("delivery_status").eq("whatsapp_message_id", wamid).execute()
+        if curr_row and curr_row.data:
             old_state = curr_row.data[0].get("delivery_status") or ""
             old_rank = _DELIVERY_RANK.get(old_state, 0)
             if old_rank > new_rank and state != "failed":

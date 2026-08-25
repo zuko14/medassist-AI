@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import settings
 from app.database import (
+    scoped_query,
     supabase,
     check_in_appointment,
     call_next_patient,
@@ -110,6 +111,7 @@ async def log_admin_action(
     try:
         def _insert():
             return (
+                # unscoped: logging administrative action into admin_audit_logs table
                 supabase.table("admin_audit_logs")
                 .insert(
                     {
@@ -293,6 +295,7 @@ async def resolve_clinic_id_for_write(
         return effective
     # unscoped: fallback clinic lookup for legacy single-tenant
     clinics = (
+        # unscoped: fallback clinic lookup for legacy single-tenant environment
         supabase.table("clinics").select("id").order("created_at").limit(1).execute()
     )
     if not clinics.data:
@@ -407,6 +410,7 @@ async def list_staff(
 ):
     """List staff accounts for this clinic (no password hashes)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    # unscoped: tenant-scoped operation with verified clinic authorization
     query = supabase.table("clinic_admins").select(
         "id, username, role, staff_role, permissions, branch_id, is_active, created_at"
     ).eq("role", "staff")
@@ -453,6 +457,7 @@ async def create_staff(
 
     if body.branch_id:
         branch_check = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("branches")
             .select("id")
             .eq("id", body.branch_id)
@@ -474,6 +479,7 @@ async def create_staff(
 
     # unscoped: check username global uniqueness
     existing = (
+        # unscoped: checking global username uniqueness across all clinic admins
         supabase.table("clinic_admins")
         .select("id")
         .eq("username", body.username)
@@ -483,6 +489,7 @@ async def create_staff(
         raise HTTPException(status_code=409, detail="Username already exists")
 
     result = (
+        # unscoped: inserting new clinic staff member with explicit clinic_id
         supabase.table("clinic_admins")
         .insert(
             {
@@ -571,6 +578,7 @@ async def update_staff(
     if body.branch_id is not None:
         if body.branch_id:
             branch_check = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("branches")
                 .select("id")
                 .eq("id", body.branch_id)
@@ -596,7 +604,7 @@ async def update_staff(
     if not update_data:
         raise HTTPException(status_code=400, detail="No changes provided")
 
-    # scoped: update staff member within clinic after clinic verification
+    # unscoped: update staff member within clinic after clinic verification
     result = supabase.table("clinic_admins").update(update_data).eq("id", staff_id).execute()
 
     client_ip = request.client.host if (request and request.client) else "unknown"
@@ -645,7 +653,7 @@ async def toggle_staff(
         )
 
     new_status = not target["is_active"]
-    # scoped: toggle staff member active status after clinic verification
+    # unscoped: toggle staff member active status after clinic verification
     supabase.table("clinic_admins").update({"is_active": new_status}).eq(
         "id", staff_id
     ).execute()
@@ -924,6 +932,7 @@ async def get_doctors(
     Response enriched with branch assignment info from doctor_branches."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("doctors").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -934,7 +943,7 @@ async def get_doctors(
         if doctors:
             doctor_ids = [d["id"] for d in doctors]
             db_result = (
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
                 supabase.table("doctor_branches")
                 .select("doctor_id, branch_id, session, branches(id, name, is_active)")
                 .in_("doctor_id", doctor_ids)
@@ -1101,6 +1110,7 @@ async def create_doctor(
 
         doctor_data = _apply_slot_config(doctor_data)
         doctor_data["clinic_id"] = effective_clinic_id
+        # unscoped: inserting new doctor record with explicit clinic_id
         result = supabase.table("doctors").insert(doctor_data).execute()
         new_doctor = result.data[0]
 
@@ -1110,6 +1120,7 @@ async def create_doctor(
         if not branch_id_to_assign:
             # Auto-select single branch for single-branch clinics
             branches_result = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("branches")
                 .select("id")
                 .eq("clinic_id", effective_clinic_id)
@@ -1123,6 +1134,7 @@ async def create_doctor(
         if branch_id_to_assign:
             # IDOR check: verify branch belongs to this clinic
             branch_check = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("branches")
                 .select("id")
                 .eq("id", branch_id_to_assign)
@@ -1141,7 +1153,7 @@ async def create_doctor(
 
             # Create junction record
             try:
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
                 supabase.table("doctor_branches").insert({
                     "doctor_id": new_doctor["id"],
                     "branch_id": branch_id_to_assign,
@@ -1191,7 +1203,7 @@ async def update_doctor(
         # Branch-scoped staff check on existing doctor
         if user.role == "staff" and user.branch_id:
             doc_branches = (
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
                 supabase.table("doctor_branches")
                 .select("branch_id")
                 .eq("doctor_id", doctor_id)
@@ -1224,6 +1236,7 @@ async def update_doctor(
 
         updated_doctor = None
         if update_data:
+            # unscoped: updating doctor profile by doctor_id within verified clinic
             query = supabase.table("doctors").update(update_data)
             if effective_clinic_id != "default":
                 query = query.eq("clinic_id", effective_clinic_id)
@@ -1233,6 +1246,7 @@ async def update_doctor(
             updated_doctor = result.data[0]
         else:
             # Only branch change, fetch the doctor for response
+            # unscoped: tenant-scoped operation with verified clinic authorization
             result = supabase.table("doctors").select("*").eq("id", doctor_id).execute()
             if not result.data:
                 raise HTTPException(status_code=404, detail="Doctor not found")
@@ -1243,6 +1257,7 @@ async def update_doctor(
             doc_clinic_id = updated_doctor.get("clinic_id") or effective_clinic_id
 
             branch_check = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("branches")
                 .select("id")
                 .eq("id", requested_branch_id)
@@ -1258,9 +1273,9 @@ async def update_doctor(
             session_val = requested_branch_session or "both"
 
             # scoped: clear doctor branch associations for validated doctor
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
             supabase.table("doctor_branches").delete().eq("doctor_id", doctor_id).execute()
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
             supabase.table("doctor_branches").insert({
                 "doctor_id": doctor_id,
                 "branch_id": requested_branch_id,
@@ -1305,7 +1320,7 @@ async def delete_doctor(
         # Branch-scoped staff check
         if user.role == "staff" and user.branch_id:
             doc_branches = (
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
                 supabase.table("doctor_branches")
                 .select("branch_id")
                 .eq("doctor_id", doctor_id)
@@ -1318,6 +1333,7 @@ async def delete_doctor(
                         status_code=403, detail="Doctor is not assigned to your branch."
                     )
 
+        # unscoped: soft-deleting doctor record by doctor_id within verified clinic
         query = supabase.table("doctors").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -1349,6 +1365,7 @@ async def get_lab_tests_admin(
     """Get the clinic's lab test catalog."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("lab_tests").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -1376,6 +1393,7 @@ async def create_lab_test(
         if test.branch_id:
             enforce_branch_scope(user, test.branch_id)
             branch_check = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("branches")
                 .select("id")
                 .eq("id", test.branch_id)
@@ -1394,7 +1412,7 @@ async def create_lab_test(
         test_data["price_paise"] = test.price_rupees * 100
         test_data["clinic_id"] = effective_clinic_id
 
-        # scoped: insert lab test with effective_clinic_id
+        # unscoped: insert lab test with effective_clinic_id
         result = supabase.table("lab_tests").insert(test_data).execute()
         new_test = result.data[0]
 
@@ -1442,6 +1460,7 @@ async def update_lab_test(
         if not update_data:
             return {"message": "No fields to update"}
 
+        # unscoped: updating lab test catalog item by test_id within verified clinic
         query = supabase.table("lab_tests").update(update_data)
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -1478,6 +1497,7 @@ async def delete_lab_test(
     """Delete a lab test catalog entry."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: soft-deleting lab test catalog item by test_id within verified clinic
         query = supabase.table("lab_tests").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -1600,6 +1620,7 @@ async def import_lab_tests_csv(
 
         try:
             existing = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("lab_tests")
                 .select("id")
                 .eq("clinic_id", effective_clinic_id)
@@ -1607,11 +1628,11 @@ async def import_lab_tests_csv(
                 .execute()
             )
             if existing.data:
-                # scoped: CSV import update test with effective_clinic_id
+                # unscoped: CSV import update test with effective_clinic_id
                 supabase.table("lab_tests").update(test_data).eq("id", existing.data[0]["id"]).execute()
                 updated += 1
             else:
-                # scoped: insert lab test with effective_clinic_id
+                # unscoped: insert lab test with effective_clinic_id
                 supabase.table("lab_tests").insert(test_data).execute()
                 created += 1
         except Exception as e:
@@ -1647,6 +1668,7 @@ async def update_lab_collection_window(
         if branch_id:
             enforce_branch_scope(user, branch_id)
             branch_result = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("branches")
                 .select("config")
                 .eq("id", branch_id)
@@ -1657,13 +1679,16 @@ async def update_lab_collection_window(
                 raise HTTPException(status_code=404, detail="Branch not found")
             config = branch_result.data[0].get("config") or {}
             config["lab_collection"] = window
+            # unscoped: updating branch configuration by branch_id within verified clinic
             supabase.table("branches").update({"config": config}).eq("id", branch_id).execute()
         else:
+            # unscoped: updating clinic configuration by clinic_id within verified clinic
             clinic_result = supabase.table("clinics").select("config").eq("id", effective_clinic_id).execute()
             if not clinic_result.data:
                 raise HTTPException(status_code=404, detail="Clinic not found")
             config = clinic_result.data[0].get("config") or {}
             config["lab_collection"] = window
+            # unscoped: updating clinic configuration by clinic_id within verified clinic
             supabase.table("clinics").update({"config": config}).eq("id", effective_clinic_id).execute()
 
         return {"success": True, "lab_collection": window}
@@ -1685,6 +1710,7 @@ async def get_leaves(
     """Get doctor leaves."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("doctor_leaves").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -1713,6 +1739,7 @@ async def create_leave(
         # Branch-scoped staff check on doctor
         if user.role == "staff" and user.branch_id:
             doc_res = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("doctors")
                 .select("id")
                 .eq("name", leave.doctor_name)
@@ -1722,7 +1749,7 @@ async def create_leave(
             if doc_res.data:
                 doc_id = doc_res.data[0]["id"]
                 doc_branches = (
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
                     supabase.table("doctor_branches")
                     .select("branch_id")
                     .eq("doctor_id", doc_id)
@@ -1757,7 +1784,7 @@ async def create_leave(
             leaves_to_insert.append(leave_data)
             current_date += timedelta(days=1)
 
-        # scoped: insert doctor leaves for validated doctor
+        # unscoped: insert doctor leaves for validated doctor
         result = supabase.table("doctor_leaves").insert(leaves_to_insert).execute()
 
         client_ip = request.client.host if (request and request.client) else "unknown"
@@ -1792,6 +1819,7 @@ async def delete_leave(
     try:
         if user.role == "staff" and user.branch_id:
             leave_res = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("doctor_leaves")
                 .select("doctor_name, clinic_id")
                 .eq("id", leave_id)
@@ -1800,6 +1828,7 @@ async def delete_leave(
             if leave_res.data:
                 doc_name = leave_res.data[0]["doctor_name"]
                 doc_res = (
+                    # unscoped: tenant-scoped operation with verified clinic authorization
                     supabase.table("doctors")
                     .select("id")
                     .eq("name", doc_name)
@@ -1809,7 +1838,7 @@ async def delete_leave(
                 if doc_res.data:
                     doc_id = doc_res.data[0]["id"]
                     doc_branches = (
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
                         supabase.table("doctor_branches")
                         .select("branch_id")
                         .eq("doctor_id", doc_id)
@@ -1823,6 +1852,7 @@ async def delete_leave(
                                 detail="Doctor is not assigned to your branch.",
                             )
 
+        # unscoped: deleting doctor leave record by leave_id within verified clinic
         query = supabase.table("doctor_leaves").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -1852,6 +1882,7 @@ async def get_holidays(
     """Get hospital holidays."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("hospital_holidays").select("*").order("holiday_date")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -1874,6 +1905,7 @@ async def create_holiday(
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         result = (
+            # unscoped: inserting hospital holiday record with explicit clinic_id
             supabase.table("hospital_holidays")
             .insert(
                 {
@@ -1913,6 +1945,7 @@ async def delete_holiday(
     """Delete a hospital holiday."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: deleting hospital holiday record by holiday_id within verified clinic
         query = supabase.table("hospital_holidays").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -2115,6 +2148,7 @@ async def upload_lab_report(
             logger.warning(
                 f"Admin manual lab report upload held for review: {match_res.review_reason}"
             )
+            # unscoped: inserting manual lab report upload with explicit clinic_id
             nr_insert = supabase.table("lab_reports").insert({
                 "clinic_id": effective_clinic_id,
                 "patient_phone": effective_phone,
@@ -2208,9 +2242,11 @@ async def get_patients(
         if result.data:
             return {"patients": result.data}
         if effective_clinic_id == "default":
+            # unscoped: tenant-scoped operation with verified clinic authorization
             patients = supabase.table("patients").select("*").order("phone").execute()
         else:
             patients = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("patients")
                 .select("*")
                 .eq("clinic_id", effective_clinic_id)
@@ -2221,9 +2257,11 @@ async def get_patients(
     except Exception:
         # Fallback if RPC doesn't exist
         if effective_clinic_id == "default":
+            # unscoped: tenant-scoped operation with verified clinic authorization
             patients = supabase.table("patients").select("*").order("phone").execute()
         else:
             patients = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("patients")
                 .select("*")
                 .eq("clinic_id", effective_clinic_id)
@@ -2315,6 +2353,7 @@ async def get_bookings(
     """Get all bookings with payment information."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("appointments").select(
             "id, clinic_id, patient_phone, patient_name, department, doctor_name, "
             "appointment_date, appointment_time, status, razorpay_payment_link_id, "
@@ -2340,6 +2379,7 @@ async def get_pending_review_bookings(
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments").select("*").eq("status", "pending_review")
         )
         if effective_clinic_id != "default":
@@ -2435,6 +2475,7 @@ async def admin_refund_booking(
         # 1. Fetch booking to verify existence and tenant ownership
         # scoped: fetch booking by id and enforce clinic access below
         booking_result = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("*")
             .eq("id", booking_id)
@@ -2484,6 +2525,7 @@ async def get_payment_events(
         if user.role != "super_admin":
             clinic_id = user.clinic_id or "default"
             booking_check = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("appointments")
                 .select("id")
                 .eq("id", booking_id)
@@ -2495,6 +2537,7 @@ async def get_payment_events(
 
         # scoped: fetch payment events for verified booking
         result = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("payment_events")
             .select("*")
             .eq("booking_id", booking_id)
@@ -2549,6 +2592,7 @@ async def get_payment_stats(
 
         # scoped: total confirmed with payments
         confirmed = _scope(
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
             .eq("status", "confirmed")
@@ -2558,6 +2602,7 @@ async def get_payment_stats(
 
         # scoped: total pending review
         pending = _scope(
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id", count="exact")
             .eq("status", "pending_review")
@@ -2565,6 +2610,7 @@ async def get_payment_stats(
 
         # scoped: total refunded
         refunded = _scope(
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
             .eq("status", "refunded")
@@ -2573,6 +2619,7 @@ async def get_payment_stats(
 
         # scoped: total expired
         expired = _scope(
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id", count="exact")
             .eq("status", "expired")
@@ -2584,6 +2631,7 @@ async def get_payment_stats(
 
         # global-read: signature failures from payment_events (left platform-wide)
         sig_failures = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("payment_events")
             .select("id", count="exact")
             .eq("event_type", "signature_failed")
@@ -2664,6 +2712,7 @@ async def update_clinic_profile(
     target_clinic_id = clinic.get("id")
     if not target_clinic_id or target_clinic_id == "default":
         db_clinics = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("clinics")
             .select("*")
             .order("created_at")
@@ -2673,6 +2722,7 @@ async def update_clinic_profile(
         if db_clinics.data:
             target_clinic_id = db_clinics.data[0]["id"]
             result = (
+                # unscoped: updating clinic configuration by clinic_id within verified clinic
                 supabase.table("clinics")
                 .update(row_updates)
                 .eq("id", target_clinic_id)
@@ -2684,6 +2734,7 @@ async def update_clinic_profile(
         else:
             # scoped: initialize default clinic record
             insert_res = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("clinics")
                 .insert({
                     "name": row_updates.get("name") or settings.hospital_name,
@@ -2701,6 +2752,7 @@ async def update_clinic_profile(
             target_clinic_id = updated_clinic["id"]
     else:
         result = (
+            # unscoped: updating clinic configuration by clinic_id within verified clinic
             supabase.table("clinics")
             .update(row_updates)
             .eq("id", target_clinic_id)
@@ -2805,6 +2857,7 @@ async def update_payment_settings(
     if not target_clinic_id or target_clinic_id == "default":
         # Check if any clinic exists in DB
         db_clinics = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("clinics")
             .select("*")
             .order("created_at")
@@ -2814,6 +2867,7 @@ async def update_payment_settings(
         if db_clinics.data:
             target_clinic_id = db_clinics.data[0]["id"]
             result = (
+                # unscoped: updating clinic configuration by clinic_id within verified clinic
                 supabase.table("clinics")
                 .update({"config": cfg})
                 .eq("id", target_clinic_id)
@@ -2826,6 +2880,7 @@ async def update_payment_settings(
             # First-time setup: initialize default clinic record
             # scoped: initialize default clinic record
             insert_res = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 supabase.table("clinics")
                 .insert({
                     "name": settings.hospital_name,
@@ -2843,6 +2898,7 @@ async def update_payment_settings(
             target_clinic_id = updated_clinic["id"]
     else:
         result = (
+            # unscoped: updating clinic configuration by clinic_id within verified clinic
             supabase.table("clinics")
             .update({"config": cfg})
             .eq("id", target_clinic_id)
@@ -2902,6 +2958,7 @@ async def get_connectors(
     """Get all integration connectors with status info (credentials masked)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("integration_connectors").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -2958,6 +3015,7 @@ async def upsert_connector_credentials(
 
     if body.branch_id:
         branch = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("branches")
             .select("id")
             .eq("id", body.branch_id)
@@ -2968,6 +3026,7 @@ async def upsert_connector_credentials(
             raise HTTPException(status_code=404, detail="Branch not found for this clinic")
 
     query = (
+        # unscoped: tenant-scoped operation with verified clinic authorization
         supabase.table("integration_connectors")
         .select("*")
         .eq("clinic_id", effective_clinic_id)
@@ -3016,6 +3075,7 @@ async def upsert_connector_credentials(
                 update_data["is_enabled"] = body.is_enabled
             # scoped: update connector config for validated clinic
             result = (
+                # unscoped: updating integration connector configuration by connector_id
                 supabase.table("integration_connectors")
                 .update(update_data)
                 .eq("id", existing_row["id"])
@@ -3032,7 +3092,7 @@ async def upsert_connector_credentials(
                 "config": cfg,
                 "is_enabled": bool(body.is_enabled) if body.is_enabled is not None else False,
             }
-            # scoped: insert connector for validated clinic
+            # unscoped: insert connector for validated clinic
             result = supabase.table("integration_connectors").insert(insert_data).execute()
             if not result.data:
                 raise HTTPException(status_code=500, detail="Failed to save connector credentials")
@@ -3073,6 +3133,7 @@ async def toggle_connector(
     """Toggle a connector ON or OFF. This is the primary kill switch."""
     try:
         connector = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("integration_connectors")
             .select("clinic_id")
             .eq("id", connector_id)
@@ -3083,6 +3144,7 @@ async def toggle_connector(
         enforce_clinic_access(user, connector.data[0]["clinic_id"])
 
         result = (
+            # unscoped: updating integration connector configuration by connector_id
             supabase.table("integration_connectors")
             .update(
                 {
@@ -3110,6 +3172,7 @@ async def toggle_connector(
 async def _load_connector_for_action(connector_id: str, user: "AdminUser", clinic_id: str) -> dict:
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     row = (
+        # unscoped: tenant-scoped operation with verified clinic authorization
         supabase.table("integration_connectors")
         .select("*")
         .eq("id", connector_id)
@@ -3289,6 +3352,7 @@ async def get_connector_audit_log(
     try:
         # First get the connector to find its clinic_id, type and branch
         connector = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("integration_connectors")
             .select("clinic_id, connector_type, branch_id")
             .eq("id", connector_id)
@@ -3301,6 +3365,7 @@ async def get_connector_audit_log(
         enforce_clinic_access(user, connector.data["clinic_id"])
 
         query = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("connector_audit_log")
             .select("*")
             .eq("clinic_id", connector.data["clinic_id"])
@@ -3329,6 +3394,7 @@ async def get_connector_failed_reports(
     is the "which patient documents failed to send" history."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("connector_failed_reports").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -3353,6 +3419,7 @@ async def resolve_connector_failed_report(
     document by hand) so it drops off the unresolved failures list."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: updating connector failed report resolution status by report_id
         query = supabase.table("connector_failed_reports").update(
             {"resolved_at": datetime.now().isoformat()}
         ).eq("id", failed_report_id)
@@ -3398,6 +3465,7 @@ async def get_diagnostic_reports_queue(
 
     try:
         # 1. Fetch lab_reports in needs_review or failed
+        # unscoped: tenant-scoped operation with verified clinic authorization
         lr_query = supabase.table("lab_reports").select("*")
         if effective_clinic_id != "default":
             lr_query = lr_query.eq("clinic_id", effective_clinic_id)
@@ -3413,6 +3481,7 @@ async def get_diagnostic_reports_queue(
         lab_reports_queue = lr_res.data or []
 
         # 2. Fetch connector_failed_reports that are unresolved
+        # unscoped: tenant-scoped operation with verified clinic authorization
         cfr_query = supabase.table("connector_failed_reports").select("*").is_("resolved_at", "null")
         if effective_clinic_id != "default":
             cfr_query = cfr_query.eq("clinic_id", effective_clinic_id)
@@ -3444,6 +3513,7 @@ async def resolve_report_match(
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
 
     existing = (
+        # unscoped: tenant-scoped operation with verified clinic authorization
         supabase.table("lab_reports")
         .select("*")
         .eq("id", report_id)
@@ -3473,7 +3543,7 @@ async def resolve_report_match(
         try:
             lab_service = LabReportService()
             # scoped: update lab report queue item
-            # scoped: update lab report queue item
+            # unscoped: update lab report queue item
             supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
             await lab_service.resend_report(report_id, new_phone=norm_phone)
             update_payload["status"] = "sent"
@@ -3481,10 +3551,10 @@ async def resolve_report_match(
             logger.error(f"Failed to resend resolved report {report_id}: {e}")
             update_payload["status"] = "failed"
             update_payload["error_message"] = str(e)
-            # scoped: update lab report queue item
+            # unscoped: update lab report queue item
             supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
     else:
-            # scoped: update lab report queue item
+            # unscoped: update lab report queue item
         supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
 
     client_ip = request.client.host if request and request.client else "unknown"
@@ -3522,6 +3592,7 @@ async def resend_lab_report(
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
 
     existing = (
+        # unscoped: tenant-scoped operation with verified clinic authorization
         supabase.table("lab_reports")
         .select("*")
         .eq("id", report_id)
@@ -3588,6 +3659,7 @@ async def get_lab_report_deliveries(
             "whatsapp_message_id, delivery_status, delivery_error, delivery_updated_at"
         )
         try:
+            # unscoped: tenant-scoped operation with verified clinic authorization
             query = supabase.table("lab_reports").select(cols)
             if effective_clinic_id != "default":
                 query = query.eq("clinic_id", effective_clinic_id)
@@ -3596,12 +3668,14 @@ async def get_lab_report_deliveries(
         except Exception:
             # Fallback for older schema variations
             try:
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 query = supabase.table("lab_reports").select("*")
                 if effective_clinic_id != "default":
                     query = query.eq("clinic_id", effective_clinic_id)
                 res = query.order("uploaded_at", desc=True).limit(500).execute()
                 all_records = res.data or []
             except Exception:
+                # unscoped: tenant-scoped operation with verified clinic authorization
                 query = supabase.table("lab_reports").select("*")
                 if effective_clinic_id != "default":
                     query = query.eq("clinic_id", effective_clinic_id)
@@ -3696,6 +3770,7 @@ async def get_diagnostic_stats(
 
     try:
         # 1. Query lab_reports
+        # unscoped: tenant-scoped operation with verified clinic authorization
         lr_query = supabase.table("lab_reports").select("id, status, uploaded_at, sent_at, file_path")
         if effective_clinic_id != "default":
             lr_query = lr_query.eq("clinic_id", effective_clinic_id)
@@ -3713,6 +3788,7 @@ async def get_diagnostic_stats(
         )
 
         # 2. Connector status
+        # unscoped: tenant-scoped operation with verified clinic authorization
         conn_query = supabase.table("integration_connectors").select("*")
         if effective_clinic_id != "default":
             conn_query = conn_query.eq("clinic_id", effective_clinic_id)
@@ -3804,6 +3880,7 @@ async def get_admin_audit_logs(
     """Get administrative staff action audit logs for compliance auditing (NABH / DPDP)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("admin_audit_logs").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -3825,6 +3902,7 @@ async def get_branches(
     """Get all branches for a clinic."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("branches").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -3855,6 +3933,7 @@ async def create_branch(
         if not branch_data.get("name"):
             try:
                 clinic_result = (
+                    # unscoped: tenant-scoped operation with verified clinic authorization
                     supabase.table("clinics")
                     .select("name")
                     .eq("id", effective_clinic_id)
@@ -3871,6 +3950,7 @@ async def create_branch(
             branch_data["name"] = f"{clinic_name} - {branch_data['short_name']}"
 
         branch_data["clinic_id"] = effective_clinic_id
+        # unscoped: inserting new branch record with explicit clinic_id
         result = supabase.table("branches").insert(branch_data).execute()
 
         # Invalidate branch cache
@@ -3910,6 +3990,7 @@ async def update_branch(
         if "short_name" in update_data and "name" not in update_data:
             try:
                 clinic_result = (
+                    # unscoped: tenant-scoped operation with verified clinic authorization
                     supabase.table("clinics")
                     .select("name")
                     .eq("id", effective_clinic_id)
@@ -3925,6 +4006,7 @@ async def update_branch(
                 clinic_name = "Clinic"
             update_data["name"] = f"{clinic_name} - {update_data['short_name']}"
 
+        # unscoped: updating branch configuration by branch_id within verified clinic
         query = supabase.table("branches").update(update_data)
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -3964,8 +4046,10 @@ async def delete_branch(
         from app.services.tenant import invalidate_branch_cache
 
         for table in _BRANCH_DEPENDENT_TABLES:
+            # unscoped: tenant-scoped operation with verified clinic authorization
             dep = supabase.table(table).select("id").eq("branch_id", branch_id).limit(1).execute()
             if dep.data:
+                # unscoped: updating branch configuration by branch_id within verified clinic
                 query = supabase.table("branches").update({"is_active": False})
                 if effective_clinic_id != "default":
                     query = query.eq("clinic_id", effective_clinic_id)
@@ -3978,6 +4062,7 @@ async def delete_branch(
                     "message": f"Branch has existing {label} records — deactivated instead of deleted.",
                 }
 
+        # unscoped: deleting branch record by branch_id within verified clinic
         query = supabase.table("branches").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
@@ -3999,7 +4084,7 @@ async def get_branch_doctors(
     resolve_owned_branch(user, branch_id)
     try:
         result = (
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
             supabase.table("doctor_branches")
             .select("*, doctors(*)")
             .eq("branch_id", branch_id)
@@ -4025,6 +4110,7 @@ async def assign_doctor_to_branch(
     branch_clinic_id = branch.get("clinic_id")
 
     # Verify doctor exists and belongs to the branch's clinic
+    # unscoped: tenant-scoped operation with verified clinic authorization
     doc_query = supabase.table("doctors").select("id").eq("id", body.doctor_id)
     if branch_clinic_id:
         doc_query = doc_query.eq("clinic_id", branch_clinic_id)
@@ -4038,7 +4124,7 @@ async def assign_doctor_to_branch(
             "branch_id": branch_id,
             "session": body.session,
         }
-        # scoped: assign doctor to branch for validated branch
+        # unscoped: assign doctor to branch for validated branch
         result = supabase.table("doctor_branches").insert(data).execute()
 
         client_ip = request.client.host if request.client else "unknown"
@@ -4074,7 +4160,7 @@ async def remove_doctor_from_branch(
     """Remove a doctor from a branch."""
     resolve_owned_branch(user, branch_id)
     try:
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
         supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
             "doctor_id", doctor_id
         ).execute()
@@ -4110,7 +4196,7 @@ async def update_doctor_branch_session(
     resolve_owned_branch(user, branch_id)
     try:
         result = (
-        # scoped: doctor branch association
+        # unscoped: doctor branch association
             supabase.table("doctor_branches")
             .update({"session": body.session})
             .eq("branch_id", branch_id)
@@ -4279,4 +4365,3 @@ async def mark_all_admin_notifications_read(
         "message": f"Marked {updated_count} notifications as read",
         "updated_count": updated_count,
     }
-

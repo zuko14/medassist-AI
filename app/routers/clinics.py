@@ -124,12 +124,8 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         clinic_insert_payload["phone_number_id"] = str(req.meta_phone_number_id)
 
     try:
-        # unscoped: creating new tenant clinic record in clinics table
-        result = (
-            supabase.table("clinics")
-            .insert(clinic_insert_payload)
-            .execute()
-        )
+        # unscoped: creating new tenant clinic record in clinics table during onboarding
+        result = supabase.table("clinics").insert(clinic_insert_payload).execute()
 
         if not result.data:
             raise HTTPException(500, "Failed to create clinic")
@@ -162,6 +158,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
                 try:
                     branch_data = branch.dict()
                     branch_data["clinic_id"] = clinic_id
+                    # unscoped: seeding branch for newly created clinic with explicit clinic_id
                     br_result = supabase.table("branches").insert(branch_data).execute()
                     if br_result.data:
                         created_branches.append(br_result.data[0])
@@ -180,19 +177,16 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         username = f"{slug}{secrets.token_hex(3)}"
         password = secrets.token_urlsafe(16)
         try:
-            admin_result = (
-                supabase.table("clinic_admins")
-                .insert(
-                    {
-                        "clinic_id": clinic_id,
-                        "username": username,
-                        "password_hash": hash_password(password),
-                        "role": "clinic_admin",
-                        "is_active": True,
-                    }
-                )
-                .execute()
-            )
+            # unscoped: auto-provisioning initial clinic admin credentials for new clinic
+            admin_result = supabase.table("clinic_admins").insert(
+                {
+                    "clinic_id": clinic_id,
+                    "username": username,
+                    "password_hash": hash_password(password),
+                    "role": "clinic_admin",
+                    "is_active": True,
+                }
+            ).execute()
             if admin_result.data:
                 clinic_admin = {"username": username, "password": password}
         except Exception as ae:
@@ -223,7 +217,7 @@ async def create_clinic(req: CreateClinicRequest):
 async def list_clinics():
     """List all clinics."""
     result = (
-        # platform-scoped: list all clinics
+        # unscoped: platform super-admin listing all clinics
         supabase.table("clinics")
         .select("id,name,whatsapp_number,plan,is_active,created_at")
         .execute()
@@ -266,7 +260,7 @@ async def update_clinic(clinic_id: str, req: UpdateClinicRequest | dict):
                 "config.payment_deposit_percent (1-99) is required when config.payment_mode is 'partial'",
             )
 
-    # platform-scoped: update clinic by ID
+    # unscoped: platform super-admin updating clinic configuration by clinic_id
     result = supabase.table("clinics").update(updates).eq("id", clinic_id).execute()
 
     if not result.data:
@@ -297,6 +291,7 @@ async def test_clinic(clinic_id: str, to: str):
 async def deactivate_clinic(clinic_id: str):
     """Soft-delete: sets is_active=false. Data preserved."""
     result = (
+        # unscoped: platform super-admin soft-deleting clinic by clinic_id
         supabase.table("clinics")
         .update({"is_active": False})
         .eq("id", clinic_id)

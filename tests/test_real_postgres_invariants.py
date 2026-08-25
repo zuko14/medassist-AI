@@ -486,3 +486,124 @@ def test_16_scheduler_locks_mutual_exclusion_and_takeover(real_pg_conn, clean_db
         INSERT INTO scheduler_locks (job_name, locked_by, locked_at, expires_at)
         VALUES ('24h_reminders', 'replica-2', NOW(), NOW() + interval '2 minutes');
         """)
+
+
+def test_17_force_row_level_security_tenant_isolation(real_pg_conn, clean_db):
+    """Invariant 17 (W2 / Option B): Database-level tenant backstop with FORCE ROW LEVEL SECURITY.
+
+    Proves that when running as the application role ('kriya_app'), queries deliberately
+    omitting 'clinic_id' cannot leak data across tenants — PostgreSQL storage engine
+    enforces isolation at the database level even when Python application code forgets.
+    """
+    import uuid
+    cur = real_pg_conn.cursor()
+
+    uid_suffix = uuid.uuid4().hex[:6]
+    clinic_a_phone = f"+9191{uid_suffix}"
+    clinic_b_phone = f"+9192{uid_suffix}"
+    patient_a_phone = f"+9193{uid_suffix}"
+    patient_b_phone = f"+9194{uid_suffix}"
+
+    # 1. Provision two distinct tenant clinics
+    cur.execute("""
+    INSERT INTO clinics (name, whatsapp_number, plan, is_active)
+    VALUES ('Tenant Alpha Hospital', %s, 'essential', true)
+    RETURNING id;
+    """, (clinic_a_phone,))
+    clinic_a_id = str(cur.fetchone()[0])
+
+    cur.execute("""
+    INSERT INTO clinics (name, whatsapp_number, plan, is_active)
+    VALUES ('Tenant Beta Hospital', %s, 'essential', true)
+    RETURNING id;
+    """, (clinic_b_phone,))
+    clinic_b_id = str(cur.fetchone()[0])
+
+    # 2. Insert records for both clinics as superuser / service_role
+    cur.execute("""
+    INSERT INTO patients (clinic_id, phone, name)
+    VALUES (%s, %s, 'Alpha Patient Secret Data')
+    RETURNING id;
+    """, (clinic_a_id, patient_a_phone))
+    patient_a_id = str(cur.fetchone()[0])
+
+    cur.execute("""
+    INSERT INTO patients (clinic_id, phone, name)
+    VALUES (%s, %s, 'Beta Patient Secret Data')
+    RETURNING id;
+    """, (clinic_b_id, patient_b_phone))
+    patient_b_id = str(cur.fetchone()[0])
+
+    cur.execute("""
+    INSERT INTO appointments (
+        clinic_id, patient_phone, patient_name, department, doctor_name,
+        appointment_date, appointment_time, status
+    ) VALUES (
+        %s, %s, 'Alpha Patient', 'Cardiology', 'Dr. Alpha',
+        '2026-09-10', '10:00:00', 'confirmed'
+    ) RETURNING id;
+    """, (clinic_a_id, patient_a_phone))
+    appt_a_id = str(cur.fetchone()[0])
+
+    cur.execute("""
+    INSERT INTO appointments (
+        clinic_id, patient_phone, patient_name, department, doctor_name,
+        appointment_date, appointment_time, status
+    ) VALUES (
+        %s, %s, 'Beta Patient', 'Neurology', 'Dr. Beta',
+        '2026-09-10', '11:00:00', 'confirmed'
+    ) RETURNING id;
+    """, (clinic_b_id, patient_b_phone))
+    appt_b_id = str(cur.fetchone()[0])
+
+    # 3. Switch session to non-superuser application role 'kriya_app'
+    cur.execute("SET ROLE kriya_app;")
+
+    try:
+        # Scenario A: Request context scoped to Tenant Alpha
+        cur.execute("SET app.clinic_id = %s;", (clinic_a_id,))
+
+        # Query deliberately omitting WHERE clinic_id = ...
+        cur.execute("SELECT id, name FROM patients;")
+        alpha_patients = cur.fetchall()
+        assert len(alpha_patients) == 1
+        assert str(alpha_patients[0][0]) == patient_a_id
+        assert alpha_patients[0][1] == 'Alpha Patient Secret Data'
+
+        # Appointments query deliberately omitting WHERE clinic_id = ...
+        cur.execute("SELECT id, doctor_name FROM appointments;")
+        alpha_appts = cur.fetchall()
+        assert len(alpha_appts) == 1
+        assert str(alpha_appts[0][0]) == appt_a_id
+        assert alpha_appts[0][1] == 'Dr. Alpha'
+
+        # Scenario B: Request context scoped to Tenant Beta
+        cur.execute("SET app.clinic_id = %s;", (clinic_b_id,))
+
+        # Query deliberately omitting WHERE clinic_id = ...
+        cur.execute("SELECT id, name FROM patients;")
+        beta_patients = cur.fetchall()
+        assert len(beta_patients) == 1
+        assert str(beta_patients[0][0]) == patient_b_id
+        assert beta_patients[0][1] == 'Beta Patient Secret Data'
+
+        cur.execute("SELECT id, doctor_name FROM appointments;")
+        beta_appts = cur.fetchall()
+        assert len(beta_appts) == 1
+        assert str(beta_appts[0][0]) == appt_b_id
+        assert beta_appts[0][1] == 'Dr. Beta'
+
+        # Scenario C: Request context with NO clinic_id set -> 0 rows returned
+        cur.execute("SET app.clinic_id = '';")
+        cur.execute("SELECT id, name FROM patients;")
+        unscoped_patients = cur.fetchall()
+        assert len(unscoped_patients) == 0, "Unscoped session must not see any tenant rows"
+
+        cur.execute("SELECT id, doctor_name FROM appointments;")
+        unscoped_appts = cur.fetchall()
+        assert len(unscoped_appts) == 0, "Unscoped session must not see any tenant appointments"
+
+    finally:
+        # Reset role to superuser for teardown
+        cur.execute("RESET ROLE;")
+

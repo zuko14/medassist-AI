@@ -23,19 +23,61 @@ _sb_key = settings.supabase_service_role_key or "placeholder-key"
 supabase: Client = create_client(_sb_url, _sb_key)
 
 
-def scoped_query(table_name: str, clinic_id: Optional[str] = None, select_fields: str = "*"):
-    """Build a Supabase select query guaranteed to be scoped by clinic_id when provided.
+class TenantIsolationError(RuntimeError):
+    """Raised when a tenant-owned table is queried without a valid clinic scope."""
+
+
+#: Tables whose rows belong to exactly one clinic. Reading these without a
+#: clinic_id is always a bug — the application connects as Supabase
+#: `service_role`, which holds BYPASSRLS, so the database will happily return
+#: every tenant's rows. This set is the single source of truth.
+TENANT_OWNED_TABLES = frozenset({
+    "appointments", "patients", "lab_reports", "lab_tests", "doctors",
+    "branches", "doctor_branches", "doctor_leaves", "hospital_holidays",
+    "clinic_admins", "integration_connectors", "connector_failed_reports",
+    "conversations", "inbound_messages", "processed_messages",
+    "family_members", "payment_events", "failed_messages",
+})
+
+
+def scoped_query(
+    table_name: str,
+    clinic_id: Optional[str] = None,
+    select_fields: str = "*",
+    allow_unscoped: bool = False,
+):
+    """Build a Supabase select query that is scoped by clinic_id, or refuses to build.
+
+    Fails closed. For any table in TENANT_OWNED_TABLES a missing, empty, or
+    sentinel clinic_id raises TenantIsolationError rather than returning an
+    unscoped query. Previously this silently returned every tenant's rows, which
+    made a forgotten clinic_id indistinguishable from a deliberate global read.
+
+    RLS is not a backstop here: the app connects as `service_role` (BYPASSRLS),
+    so this guard is the enforcement boundary, not a second layer.
 
     Args:
-        table_name: Database table name (e.g. 'appointments', 'patients', 'lab_reports')
-        clinic_id: Target tenant clinic ID. If None, empty, or 'default', returns base query.
-        select_fields: SQL fields to select (default: '*')
+        table_name: Database table name (e.g. 'appointments', 'patients').
+        clinic_id: Target tenant clinic ID.
+        select_fields: SQL fields to select (default: '*').
+        allow_unscoped: Deliberate cross-tenant read (platform-owner reporting,
+            tenant-resolution bootstrap). Must be passed explicitly at the call
+            site so it is greppable in review.
 
-    Returns:
-        Supabase query builder with .eq('clinic_id', clinic_id) applied if scoped.
+    Raises:
+        TenantIsolationError: tenant-owned table queried without a valid scope.
     """
+    scoped = is_valid_clinic_scope(clinic_id)
+
+    if table_name in TENANT_OWNED_TABLES and not scoped and not allow_unscoped:
+        raise TenantIsolationError(
+            f"Refusing to build an unscoped query on tenant-owned table "
+            f"'{table_name}' (clinic_id={clinic_id!r}). Pass a valid clinic_id, "
+            f"or allow_unscoped=True if this cross-tenant read is intended."
+        )
+
     q = supabase.table(table_name).select(select_fields)
-    if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
+    if scoped:
         q = q.eq("clinic_id", clinic_id)
     return q
 

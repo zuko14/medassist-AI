@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File,
 from pydantic import BaseModel
 
 from app.config import settings
-from app.database import supabase
+from app.database import supabase, scoped_query
 from app.services.lab_reports import LabReportService
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,7 @@ async def receive_lab_report(
     # Step 1: Idempotency check (connector processed reports + lab_reports cross-path)
     try:
         existing = (
+            # unscoped: checking connector idempotency by external_report_id with clinic scope
             supabase.table("integration_processed_reports")
             .select("id")
             .eq("clinic_id", clinic_id)
@@ -105,6 +106,7 @@ async def receive_lab_report(
             )
 
         existing_lr = (
+            # unscoped: cross-path duplicate check for existing delivered lab report with clinic scope
             supabase.table("lab_reports")
             .select("id, status, source")
             .eq("clinic_id", clinic_id)
@@ -173,6 +175,7 @@ async def receive_lab_report(
             f"Intake held for review by patient match gate for {external_report_id}: {match_res.review_reason}"
         )
         try:
+            # unscoped: recording held lab_report in needs_review state with explicit clinic_id
             nr_insert = supabase.table("lab_reports").insert({
                 "clinic_id": clinic_id,
                 "patient_phone": patient_phone,
@@ -238,6 +241,7 @@ async def receive_lab_report(
     # Step 4: Record the processed report (idempotency)
     lab_report_id = saved_record.get("id")
     try:
+        # unscoped: recording processed report in idempotency tracking log with explicit clinic_id
         supabase.table("integration_processed_reports").insert(
             {
                 "clinic_id": clinic_id,

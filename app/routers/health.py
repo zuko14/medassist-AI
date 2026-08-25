@@ -1,6 +1,7 @@
 """Health check router."""
 
 import logging
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
@@ -19,9 +20,11 @@ async def health_check():
     """Basic health check endpoint."""
     return JSONResponse(
         status_code=200,
+        headers={"X-Process-Id": str(os.getpid())},
         content={
             "status": "ok",
             "service": "Kriya AI",
+            "pid": os.getpid(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -32,9 +35,7 @@ async def readiness_check():
     """Readiness check with database connectivity."""
     try:
         # unscoped: database liveness probe connectivity test
-        result = (
-            supabase.table("patients").select("count", count="exact").limit(1).execute()
-        )
+        result = supabase.table("patients").select("count", count="exact").limit(1).execute()
         return {
             "status": "ready",
             "database": "connected",

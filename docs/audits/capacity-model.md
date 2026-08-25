@@ -1,18 +1,27 @@
-# Kriya AI — Production Capacity Model & Sizing Guidelines (W3.3)
+# Kriya AI — Production Capacity Model & Sizing Guidelines (W3.1–W3.4)
 
 **Document Date:** 2026-08-25  
-**Version:** 1.0.0 (Production Benchmark Baseline)
+**Version:** 1.0.0 (Capacity Model & Theoretical Sizing Framework)  
+**CAPACITY STATUS:** Modeled based on single-worker benchmarks; live staging load test pending execution.  
+**STATUS CLASSIFICATION:** UNVERIFIED / MODEL ONLY (W3.1–W3.4 pending staging run).  
+**Capacity Domain Score Cap:** 3/5 (Strictly bounded per authoritative audit completion plan).  
 
 ---
 
-## 1. Measured Performance Baselines (Locust / Staging Benchmark)
+## 1. Capacity Modeling Methodology & Mathematical Framework
 
-| Workload Scenario | Concurrency | Measured Throughput (RPS) | Latency p50 (ms) | Latency p95 (ms) | Latency p99 (ms) | Error Rate |
-|---|---|---|---|---|---|---|
-| **Webhook Ingest Ramp** | 50 concurrent | 142.8 req/sec | 18.4 ms | 48.2 ms | 92.6 ms | 0.00% |
-| **Slot Contention Race** | 20 workers | 86.5 req/sec | 24.1 ms | 62.0 ms | 114.5 ms | 0.00% (1 win, 19 409) |
-| **Admin Stats & Queue Lookups** | 25 concurrent | 118.0 req/sec | 32.5 ms | 84.7 ms | 148.2 ms | 0.00% |
-| **Connector Intake Stream** | 10 concurrent | 42.0 req/sec | 68.0 ms | 185.0 ms | 310.0 ms | 0.00% |
+### 1.1 Methodology & Assumptions
+The projections in this model are derived from single-node in-process asynchronous dispatch benchmarks and real PostgreSQL transaction isolation measurements:
+- **FastAPI/Uvicorn Async Concurrency:** Non-blocking I/O loop handling concurrent HTTP socket connections with Python asyncio.
+- **PostgreSQL Transaction Baseline:** Measured row-level conflict resolution under 50-thread concurrent slot contention resolving in ~25 ms.
+- **Meta Webhook 20-Second SLA:** Inbound webhook payloads write a durable row to `inbound_messages` / `processed_messages` and immediately return HTTP 200 within <50 ms, preventing Meta retry cascades.
+- **Assumed Deployment Topology:** 2 worker processes per container (`--workers 2`), 2 container instances (`numInstances: 2`) behind standard load balancing.
+
+### 1.2 Invalidation Conditions
+This model is invalidated and must be recalculated if:
+1. Database connection latency exceeds 80 ms (e.g. non-pooled direct SSL connections to cross-region PostgreSQL).
+2. Groq LLM API response time exceeds 4,000 ms during high-concurrency conversational turns.
+3. Node memory consumption exceeds 512 MB per worker process under prolonged high-concurrency PDF OCR processing.
 
 ---
 

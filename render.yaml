@@ -5,6 +5,7 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: false
+    numInstances: 2
     preDeployCommand: python scripts/migrate.py
 
   - type: worker
@@ -13,3 +14,14 @@ services:
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m connectors.runner --all
     autoDeploy: false
+
+  # Staging environment (W6.5)
+  - type: web
+    name: mediassist-ai-staging
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    branch: staging
+    numInstances: 1
+    preDeployCommand: python scripts/migrate.py

@@ -123,10 +123,13 @@ def test_02_real_postgres_scheduler_locks_concurrency(real_postgres_uri, clean_d
 
 
 @pytest.mark.asyncio
-async def test_03_http_spike_test_200_requests():
-    """Phase G Spike Test: 200 concurrent webhook deliveries across 20 simulated patient lines."""
+async def test_03_mocked_in_memory_dispatch_burst_200_requests():
+    """Verify in-memory event dispatch and deduplication logic across 200 concurrent burst requests.
+
+    NOTE: This test validates Python async queue dispatch logic against a mock database.
+    It does not measure production network latency or database capacity.
+    """
     manager = MessageQueueManager()
-    latencies = []
 
     mock_db = MagicMock()
     inserted_ids = set()
@@ -144,7 +147,6 @@ async def test_03_http_spike_test_200_requests():
 
     async def send_burst_message(patient_id: int, seq: int):
         msg_id = f"wamid.BURST_{patient_id}_{seq}"
-        t0 = time.perf_counter()
         is_new, _ = await manager.ingest(
             message_id=msg_id,
             phone=f"+91987654{patient_id:04d}",
@@ -152,7 +154,6 @@ async def test_03_http_spike_test_200_requests():
             payload={},
             clinic_id="clinic_spike",
         )
-        latencies.append((time.perf_counter() - t0) * 1000)
         return is_new
 
     with patch("app.database.supabase.table", return_value=mock_db):
@@ -160,24 +161,18 @@ async def test_03_http_spike_test_200_requests():
         results = await asyncio.gather(*tasks)
 
         assert results.count(True) == 200
-        p50 = statistics.median(latencies)
-        p95 = sorted(latencies)[int(len(latencies) * 0.95)]
-        p99 = sorted(latencies)[int(len(latencies) * 0.99)]
-        print(f"\n[HTTP Spike 200 Burst] p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms, Success Rate=100%")
 
 
 @pytest.mark.asyncio
-async def test_04_soak_test_10_consecutive_cycles():
-    """Phase G Soak Test: 10 consecutive cycles of 20 concurrent operations without degradation."""
+async def test_04_mocked_in_memory_dispatch_cycles():
+    """Verify Python event loop dispatch stability across 10 consecutive batches of 20 concurrent operations."""
     manager = MessageQueueManager()
-    cycle_averages = []
 
     mock_db = MagicMock()
     mock_db.insert.return_value.execute.return_value.data = [{"id": "uuid-soak"}]
 
     with patch("app.database.supabase.table", return_value=mock_db):
         for cycle in range(10):
-            t0 = time.perf_counter()
             tasks = [
                 manager.ingest(
                     message_id=f"wamid.SOAK_C{cycle}_M{i}",
@@ -187,15 +182,8 @@ async def test_04_soak_test_10_consecutive_cycles():
                 )
                 for i in range(20)
             ]
-            await asyncio.gather(*tasks)
-            cycle_time = (time.perf_counter() - t0) * 1000
-            cycle_averages.append(cycle_time)
-
-        # Ensure performance did not degrade across soak cycles
-        first_half_avg = statistics.mean(cycle_averages[:5])
-        second_half_avg = statistics.mean(cycle_averages[5:])
-        print(f"\n[Soak Test 10 Cycles] Cycle 1-5 mean={first_half_avg:.2f}ms, Cycle 6-10 mean={second_half_avg:.2f}ms")
-        assert second_half_avg < first_half_avg * 2.5  # No memory leak / degradation
+            results = await asyncio.gather(*tasks)
+            assert len(results) == 20
 
 
 def test_05_failure_injection_malformed_webhook_payload(client):

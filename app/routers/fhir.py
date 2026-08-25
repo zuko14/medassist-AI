@@ -19,7 +19,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import JSONResponse
 
-from app.database import supabase
+from app.database import supabase, scoped_query
 from app.routers.admin import verify_credentials, enforce_clinic_access, AdminUser
 from app.services.fhir_schemas import (
     patient_to_fhir,
@@ -55,9 +55,7 @@ async def get_patient_fhir(
     clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         # Fetch patient
-        query = supabase.table("patients").select("*").eq("phone", phone)
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        query = scoped_query("patients", clinic_id).eq("phone", phone)
         result = query.execute()
 
         if not result.data:
@@ -80,12 +78,8 @@ async def get_patient_fhir(
         # Fetch clinic for Organization reference
         clinic = None
         if patient.get("clinic_id"):
-            clinic_res = (
-                supabase.table("clinics")
-                .select("*")
-                .eq("id", patient["clinic_id"])
-                .execute()
-            )
+            # unscoped: global clinic lookup by ID for FHIR Organization reference
+            clinic_res = supabase.table("clinics").select("*").eq("id", patient["clinic_id"]).execute()
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_patient = patient_to_fhir(patient, clinic)
@@ -114,11 +108,7 @@ async def get_appointment_fhir(
     """
     clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        query = (
-            supabase.table("appointments").select("*").eq("booking_ref", booking_ref)
-        )
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        query = scoped_query("appointments", clinic_id).eq("booking_ref", booking_ref)
         result = query.execute()
 
         if not result.data:
@@ -141,12 +131,8 @@ async def get_appointment_fhir(
         # Fetch clinic
         clinic = None
         if appointment.get("clinic_id"):
-            clinic_res = (
-                supabase.table("clinics")
-                .select("*")
-                .eq("id", appointment["clinic_id"])
-                .execute()
-            )
+            # unscoped: global clinic lookup by ID for FHIR Organization reference
+            clinic_res = supabase.table("clinics").select("*").eq("id", appointment["clinic_id"]).execute()
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_appt = appointment_to_fhir(appointment, clinic)
@@ -168,9 +154,7 @@ async def get_diagnostic_report_fhir(
     """Return a lab report as a FHIR R4 DiagnosticReport resource."""
     clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        query = supabase.table("lab_reports").select("*").eq("id", report_id)
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        query = scoped_query("lab_reports", clinic_id).eq("id", report_id)
         result = query.execute()
 
         if not result.data:
@@ -180,12 +164,8 @@ async def get_diagnostic_report_fhir(
 
         clinic = None
         if report.get("clinic_id"):
-            clinic_res = (
-                supabase.table("clinics")
-                .select("*")
-                .eq("id", report["clinic_id"])
-                .execute()
-            )
+            # unscoped: global clinic lookup by ID for FHIR Organization reference
+            clinic_res = supabase.table("clinics").select("*").eq("id", report["clinic_id"]).execute()
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_report = lab_report_to_fhir(report, clinic)
@@ -214,9 +194,7 @@ async def get_patient_everything(
         resources = []
 
         # Patient
-        q = supabase.table("patients").select("*").eq("phone", phone)
-        if clinic_id != "default":
-            q = q.eq("clinic_id", clinic_id)
+        q = scoped_query("patients", clinic_id).eq("phone", phone)
         p_res = q.execute()
         if not p_res.data:
             raise HTTPException(status_code=404, detail="Patient not found")
@@ -224,28 +202,20 @@ async def get_patient_everything(
 
         clinic = None
         if patient.get("clinic_id"):
-            c_res = (
-                supabase.table("clinics")
-                .select("*")
-                .eq("id", patient["clinic_id"])
-                .execute()
-            )
+            # unscoped: global clinic lookup by ID for FHIR Organization reference
+            c_res = supabase.table("clinics").select("*").eq("id", patient["clinic_id"]).execute()
             clinic = c_res.data[0] if c_res.data else None
 
         resources.append(patient_to_fhir(patient, clinic))
 
         # Appointments
-        a_q = supabase.table("appointments").select("*").eq("patient_phone", phone)
-        if clinic_id != "default":
-            a_q = a_q.eq("clinic_id", clinic_id)
+        a_q = scoped_query("appointments", clinic_id).eq("patient_phone", phone)
         a_res = a_q.execute()
         for appt in a_res.data or []:
             resources.append(appointment_to_fhir(appt, clinic))
 
         # Lab Reports
-        lr_q = supabase.table("lab_reports").select("*").eq("patient_phone", phone)
-        if clinic_id != "default":
-            lr_q = lr_q.eq("clinic_id", clinic_id)
+        lr_q = scoped_query("lab_reports", clinic_id).eq("patient_phone", phone)
         lr_res = lr_q.execute()
         for report in lr_res.data or []:
             resources.append(lab_report_to_fhir(report, clinic))

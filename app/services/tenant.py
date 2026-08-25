@@ -442,14 +442,17 @@ def require_feature(clinic: dict, feature: str) -> None:
 
 
 # ─── Branch Resolution ───────────────────────────────────────────────────────
-
-# In-memory cache: {clinic_id: [branch_dict, ...]}
-_branch_cache: dict[str, list[dict]] = {}
+# Multi-instance cache semantics:
+# In a multi-worker deployment (e.g. 2 uvicorn worker processes or 2 Render instances),
+# each process maintains a local in-memory _branch_cache with a 300s TTL.
+# When an admin updates a branch via API, invalidate_branch_cache() clears the local worker's
+# cache, while other workers will naturally refresh from the database upon TTL expiry or
+# inter-process message bus notification. Database is always authoritative.
 
 
 async def get_clinic_branches(clinic_id: str) -> list[dict]:
-    """
-    Get active branches for a clinic, ordered by display_order.
+    """Get active branches for a clinic, ordered by display_order.
+
     Returns [] for single-branch / legacy clinics.
     Results are cached in-memory with TTL; call invalidate_branch_cache() on admin update.
     """
