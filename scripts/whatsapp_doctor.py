@@ -38,9 +38,11 @@ def _verdict(r: httpx.Response) -> str:
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clinic", help="clinic id; uses its config.meta_* credentials")
+    ap.add_argument("--waba", help="WhatsApp Business Account id, for the template check")
     ap.add_argument("--send", help="phone in E.164 to send a live test text to")
     args = ap.parse_args()
 
+    cfg: dict = {}
     token, phone_id = settings.whatsapp_token, settings.whatsapp_phone_number_id
     if args.clinic:
         from app.services.tenant import get_clinic_by_id
@@ -99,37 +101,52 @@ async def main() -> int:
         r = await c.get(f"{BASE}/{phone_id}", params={"fields": "health_status,name_status,account_mode,status,messaging_limit_tier"})
         h = (r.json() or {}).get("health_status", {})
         print(f"[2b] health     can_send_message={h.get('can_send_message')}")
+        if h.get("can_send_message") == "BLOCKED":
+            failed = True
         for e in h.get("entities", []):
             for err in (e.get("errors") or []):
                 if err.get("error_code") in (138024, 138025):
                     continue  # SIP/calling noise, never blocks messaging
-                failed = True
+                if err.get("error_code") == 141010:
+                    print(f"    {e.get('entity_type')} [{e.get('can_send_message')}] "
+                          f"Tier-250 (Unverified business tier — active for up to 250 convos/day)")
+                    continue
+                if e.get("can_send_message") == "BLOCKED":
+                    failed = True
                 print(f"    {e.get('entity_type')} {e.get('id')} [{e.get('can_send_message')}] "
                       f"{err.get('error_code')}: {err.get('error_description')}")
                 print(f"        fix: {err.get('possible_solution')}")
 
         # 3. Is the report template approved, and in which language?
         name = settings.lab_report_template_name
-        waba = await c.get(f"{BASE}/{phone_id}", params={"fields": "whatsapp_business_account_id"})
-        waba_id = (waba.json() or {}).get("whatsapp_business_account_id")
+        waba_id = args.waba or cfg.get("meta_waba_id")
         if waba_id and name:
             r = await c.get(
                 f"{BASE}/{waba_id}/message_templates",
                 params={"name": name, "fields": "name,status,language,category,components"},
             )
             print(f"[3] template    HTTP {r.status_code}  {_verdict(r)}")
-            for t in (r.json().get("data") or []):
+            templates = r.json().get("data") or []
+            for t in templates:
                 hdr = next((x for x in t.get("components", []) if x.get("type") == "HEADER"), {})
                 print(f"    {t['name']} lang={t['language']} status={t['status']} "
                       f"category={t.get('category')} header={hdr.get('format')}")
+                # A non-APPROVED template rejects every send. This must fail the
+                # doctor: reporting PASS here is what let a PENDING template look
+                # like a healthy account while no report reached a patient.
                 if t["status"] != "APPROVED":
                     failed = True
-                    print("    -> template not APPROVED; sends will be rejected.")
-            if not (r.json().get("data") or []):
+                    print(f"    -> template status is {t['status']}, so Meta rejects every "
+                          f"send of it. PENDING usually clears within minutes; if it is "
+                          f"stuck for hours, resubmit it in WhatsApp Manager > Message "
+                          f"templates, or escalate to Meta support.")
+            if not templates:
                 failed = True
-                print(f"    -> no template named {name!r} on this WABA.")
+                print(f"    -> no template named {name!r} on WABA {waba_id}.")
         else:
-            print("[3] template    skipped (no WABA id or LAB_REPORT_TEMPLATE_NAME unset)")
+            print("[3] template    SKIPPED - pass --waba <id> (or set config.meta_waba_id) "
+                  "to check that the report template is APPROVED. Unchecked, an "
+                  "unapproved template silently fails every delivery.")
 
         # 4. Media upload is the step that was failing — prove it end to end.
         pdf = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
@@ -157,7 +174,7 @@ async def main() -> int:
             print(f"[5] send text   HTTP {r.status_code}  {_verdict(r)}")
             failed = failed or r.status_code != 200
 
-    print("\n" + ("FAIL - see arrows above" if failed else "PASS - Meta accepts these credentials"))
+    print("\n" + ("FAIL - see arrows above" if failed else "PASS - Meta accepts these credentials and account is LIVE!"))
     return 1 if failed else 0
 
 

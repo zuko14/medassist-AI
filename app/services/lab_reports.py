@@ -281,8 +281,8 @@ class LabReportService:
                             raise template_err
                     if not sent_ok:
                         raise ValueError(
-                            "WhatsApp rejected the utility template send — "
-                            "template may not be approved or parameters don't match"
+                            f"WhatsApp rejected template '{template}': "
+                            f"{capture.get('error') or 'no detail returned by Meta'}"
                         )
                 else:
                     # Step E — Send AI summary message to patient
@@ -349,11 +349,16 @@ class LabReportService:
             ]
             has_transient_indicator = any(ind.lower() in error_message.lower() for ind in transient_indicators)
 
-            # Permanent non-retryable client errors or configuration gaps
+            # Permanent non-retryable client errors or configuration gaps.
+            # Template-state errors are deliberately NOT listed: Meta returns the
+            # same code for "template awaiting approval" as for "no such template",
+            # and approval flips to APPROVED on its own. Burning the report as
+            # permanently failed means it never delivers once approval lands.
+            # Unclassified errors default to transient below and are capped by
+            # MAX_RETRIES, so the worst case is a bounded set of retries.
             permanent_indicators = [
                 "session expired", "outside 24h window and lab_report_template_name unset",
-                "allowlist", "credentials", "template may not be approved",
-                "template does not exist", "template name is invalid",
+                "allowlist", "credentials",
             ]
             has_permanent_indicator = any(ind.lower() in error_message.lower() for ind in permanent_indicators)
 
@@ -615,7 +620,10 @@ class LabReportService:
                         _capture=capture,
                     )
                     if not sent_ok:
-                        raise ValueError("WhatsApp rejected the utility template send")
+                        raise ValueError(
+                            f"WhatsApp rejected template '{template}': "
+                            f"{capture.get('error') or 'no detail returned by Meta'}"
+                        )
                 else:
                     # Send summary or fallback text
                     ai_summary = report.get("ai_summary")
@@ -745,6 +753,7 @@ class LabReportService:
                 f"for report {report_id} to {mask_phone(patient_phone)}"
             )
 
+            retry_capture: dict = {}
             try:
                 # Download PDF from Supabase Storage
                 file_bytes = supabase.storage.from_("lab-reports").download(file_path)
@@ -838,6 +847,7 @@ class LabReportService:
                                     },
                                 ],
                                 _source="lab_reports_retry",
+                                _capture=retry_capture,
                             )
                         except Exception as retry_tpl_err:
                             if "id" in doc_header and pdf_signed_url and ("500" in str(retry_tpl_err) or "Server Error" in str(retry_tpl_err)):
@@ -865,6 +875,7 @@ class LabReportService:
                                         },
                                     ],
                                     _source="lab_reports_retry",
+                                    _capture=retry_capture,
                                 )
                             else:
                                 raise retry_tpl_err
@@ -920,7 +931,10 @@ class LabReportService:
                         f"on attempt {retry_count} to {mask_phone(patient_phone)}"
                     )
                 else:
-                    raise ValueError("WhatsApp delivery returned False")
+                    raise ValueError(
+                        "WhatsApp delivery returned False: "
+                        f"{retry_capture.get('error') or 'no detail returned by Meta'}"
+                    )
 
             except Exception as e:
                 logger.error(

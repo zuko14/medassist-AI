@@ -33,6 +33,33 @@ def _meta_error(response: httpx.Response) -> dict:
         return {}
 
 
+def _describe_meta_error(err: Optional[BaseException]) -> str:
+    """Meta's own reason for a rejection, in one line fit for an ops dashboard.
+
+    Without this the caller can only guess why a send failed, and a guess in the
+    failure queue ("template may not be approved or parameters don't match")
+    sends whoever is on call chasing the wrong thing.
+    """
+    if err is None:
+        return "no error detail captured"
+    response = getattr(err, "response", None)
+    if response is None:
+        return str(err)
+    meta = _meta_error(response)
+    if not meta:
+        return f"HTTP {response.status_code}: {response.text[:200]}"
+    parts = [f"Meta error {meta.get('code')}"]
+    if meta.get("error_subcode"):
+        parts.append(f"(subcode {meta['error_subcode']})")
+    parts.append(f"{meta.get('message')}")
+    details = (meta.get("error_data") or {}).get("details")
+    if details:
+        parts.append(f"- {details}")
+    if meta.get("fbtrace_id"):
+        parts.append(f"[fbtrace_id={meta['fbtrace_id']}]")
+    return " ".join(str(p) for p in parts)
+
+
 _HEALTH_CACHE: dict[str, tuple[float, str]] = {}
 
 
@@ -164,7 +191,9 @@ class WhatsAppService:
         try:
             token, phone_id = self._get_credentials(clinic)
         except ValueError:
-            return {}
+            # Must not return {}: callers read an empty dict as "sent, no wamid"
+            # and would mark an undelivered report as delivered.
+            raise
 
         url = f"{WHATSAPP_API_BASE}/{phone_id}/{endpoint}"
         headers = {
@@ -249,22 +278,6 @@ class WhatsAppService:
             return messages[0].get("id")
         return None
 
-    async def _can_send_freeform(self, clinic: dict, phone: str) -> bool:
-        """Check if patient is within 24h customer service window."""
-        try:
-            from app.services.conversation import get_last_patient_message_timestamp
-
-            last_msg_time = await get_last_patient_message_timestamp(phone)
-            if not last_msg_time:
-                return False
-
-            now = datetime.now(timezone.utc)
-            delta = now - last_msg_time
-            return delta.total_seconds() < 24 * 3600
-        except Exception as e:
-            logger.warning(f"Could not check 24h window for {self._mask_phone(phone)}: {e}")
-            return False
-
     async def send_text(
         self,
         clinic: dict,
@@ -319,28 +332,25 @@ class WhatsAppService:
         """Send a pre-approved template message (for 24h+ sessions).
 
         Resilient delivery matrix:
-        1. Tries configured template name, falling back to registered template aliases.
-        2. Tries candidate language codes (en vs en_US).
-        3. Tries full components (header + body), falling back to body-only.
+        1. Tries candidate language codes (en vs en_US).
+        2. Tries full components (header + body), falling back to body-only.
+
+        Only the template the caller asked for is ever sent. An earlier version
+        probed a hardcoded alias list, which meant an appointment reminder whose
+        own template was rejected would silently fall through to
+        `lab_report_delivery` — the wrong message to the wrong patient — and it
+        buried the real Meta error behind "not found" for a name nobody had
+        registered.
         """
         clean_template_name = (template_name or "").strip()
         if not clean_template_name:
-            clean_template_name = "lab_report_delivery"
+            logger.error("send_template called with no template name")
+            return False
 
         # Format recipient phone to pure digits
         clean_phone = re.sub(r"[^\d]", "", str(phone or ""))
         if len(clean_phone) == 10:
             clean_phone = "91" + clean_phone
-
-        # Candidate template names to check in case of naming variance
-        candidate_templates = []
-        if clean_template_name:
-            candidate_templates.append(clean_template_name)
-        if "lab_report_delivery" not in candidate_templates:
-            candidate_templates.append("lab_report_delivery")
-        for alias in ("lab_report_summary", "callmedex_lab_report_summary", "lab_report_ready"):
-            if alias not in candidate_templates:
-                candidate_templates.append(alias)
 
         # Prepare candidate language codes to handle en vs en_US vs en_GB matching in Meta
         candidate_languages = [language]
@@ -352,72 +362,83 @@ class WhatsAppService:
         has_header = any(c.get("type") == "header" for c in (components or []))
         body_only = [c for c in (components or []) if c.get("type") != "header"] if has_header else None
 
+        # The first failure is the diagnostic one — it used the caller's exact
+        # template, language and components. Later ones are fallback noise.
+        primary_error = None
         last_error = None
-        for i, tmpl in enumerate(candidate_templates):
-            # Only use multi-retry on primary template; alias probing uses single attempt for speed
-            req_attempts = None if i == 0 else 1
-            for lang in candidate_languages:
-                # ── Attempt 1: Full template with all components (including header) ──
-                payload = {
-                    "messaging_product": "whatsapp",
-                    "recipient_type": "individual",
-                    "to": clean_phone,
-                    "type": "template",
-                    "template": {
-                        "name": tmpl,
-                        "language": {"code": lang},
-                        "components": components or [],
-                    },
-                }
+
+        def _remember(err: BaseException) -> None:
+            nonlocal primary_error, last_error
+            if primary_error is None:
+                primary_error = err
+            last_error = err
+
+        for lang in candidate_languages:
+            # ── Attempt 1: Full template with all components (including header) ──
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": clean_phone,
+                "type": "template",
+                "template": {
+                    "name": clean_template_name,
+                    "language": {"code": lang},
+                    "components": components or [],
+                },
+            }
+            try:
+                result = await self._make_request(clinic, "messages", payload)
+                meta_msg_id = self._extract_meta_message_id(result)
+                if _capture is not None:
+                    _capture["meta_message_id"] = meta_msg_id
+                logger.info(
+                    f"Sent template '{clean_template_name}' ({lang}) to {self._mask_phone(phone)}"
+                )
+
+                await self._log_to_ledger(
+                    clinic, phone, "template", _source,
+                    send_success=True, meta_message_id=meta_msg_id,
+                    template_name=clean_template_name,
+                )
+                return True
+            except Exception as e:
+                _remember(e)
+                logger.debug(
+                    f"Template '{clean_template_name}' ({lang}) with header attempt failed: {e}"
+                )
+
+            # ── Attempt 2: If had header and failed, try body-only with this language ──
+            if has_header and body_only is not None:
+                payload["template"]["components"] = body_only
                 try:
-                    result = await self._make_request(
-                        clinic, "messages", payload, max_attempts_override=req_attempts
-                    )
+                    result = await self._make_request(clinic, "messages", payload)
                     meta_msg_id = self._extract_meta_message_id(result)
                     if _capture is not None:
                         _capture["meta_message_id"] = meta_msg_id
-                    logger.info(f"Sent template '{tmpl}' ({lang}) to {self._mask_phone(phone)}")
-
+                        _capture["header_stripped"] = True
+                    logger.info(
+                        f"Sent template '{clean_template_name}' ({lang}, body-only) to "
+                        f"{self._mask_phone(phone)}"
+                    )
                     await self._log_to_ledger(
                         clinic, phone, "template", _source,
                         send_success=True, meta_message_id=meta_msg_id,
-                        template_name=tmpl,
+                        template_name=clean_template_name,
                     )
                     return True
-                except Exception as e:
-                    last_error = e
+                except Exception as body_err:
+                    _remember(body_err)
                     logger.debug(
-                        f"Template '{tmpl}' ({lang}) with header attempt failed: {e}"
+                        f"Template '{clean_template_name}' ({lang}, body-only) failed: {body_err}"
                     )
 
-                # ── Attempt 2: If had header and failed, try body-only with this language ──
-                if has_header and body_only is not None:
-                    payload["template"]["components"] = body_only
-                    try:
-                        result = await self._make_request(
-                            clinic, "messages", payload, max_attempts_override=req_attempts
-                        )
-                        meta_msg_id = self._extract_meta_message_id(result)
-                        if _capture is not None:
-                            _capture["meta_message_id"] = meta_msg_id
-                            _capture["header_stripped"] = True
-                        logger.info(
-                            f"Sent template '{tmpl}' ({lang}, body-only) to "
-                            f"{self._mask_phone(phone)}"
-                        )
-                        await self._log_to_ledger(
-                            clinic, phone, "template", _source,
-                            send_success=True, meta_message_id=meta_msg_id,
-                            template_name=tmpl,
-                        )
-                        return True
-                    except Exception as body_err:
-                        last_error = body_err
-                        logger.debug(
-                            f"Template '{tmpl}' ({lang}, body-only) failed: {body_err}"
-                        )
-
-        logger.error(f"Failed to send template after trying {candidate_templates} across {candidate_languages}: {last_error}")
+        detail = _describe_meta_error(primary_error)
+        if _capture is not None:
+            _capture["error"] = detail
+        logger.error(
+            f"Failed to send template '{clean_template_name}' to {self._mask_phone(phone)} "
+            f"across {candidate_languages}: {detail}"
+        )
         await self._log_to_ledger(
             clinic, phone, "template", _source,
             send_success=False, template_name=clean_template_name,
