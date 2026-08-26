@@ -17,6 +17,18 @@ from app.utils.validators import mask_phone
 logger = logging.getLogger(__name__)
 
 
+def template_name_for(clinic: Optional[dict]) -> str:
+    """The report template to send for this clinic.
+
+    Templates live on a WABA, not globally, so two clinics can be approved under
+    different names — Accumx's WABA has no approved `lab_report_delivery`, while
+    TestHospital's does. A per-clinic override lets one clinic move to its own
+    approved name without breaking delivery for every other tenant.
+    """
+    cfg = (clinic or {}).get("config") or {}
+    return cfg.get("lab_report_template_name") or settings.lab_report_template_name
+
+
 class LabReportService:
     """Service for uploading and sending lab reports to patients via WhatsApp."""
 
@@ -213,7 +225,7 @@ class LabReportService:
                     doc_header["id"] = media_handle
 
                 if is_template_path:
-                    template = settings.lab_report_template_name
+                    template = template_name_for(clinic)
                     if not template:
                         raise ValueError(
                             "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
@@ -588,7 +600,7 @@ class LabReportService:
                     doc_header["id"] = media_handle
 
                 if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
-                    template = settings.lab_report_template_name
+                    template = template_name_for(clinic)
                     if not template:
                         raise ValueError(
                             "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
@@ -815,8 +827,7 @@ class LabReportService:
                     # Check session window
                     if is_template_path:
                         # Outside 24h window — need template
-                        from app.config import settings as app_settings
-                        template = app_settings.lab_report_template_name
+                        template = template_name_for(clinic)
                         if not template:
                             raise ValueError("Outside 24h window and no template configured")
 

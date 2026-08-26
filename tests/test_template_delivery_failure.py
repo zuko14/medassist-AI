@@ -131,3 +131,16 @@ def test_unapproved_template_is_retryable_not_permanent():
         )
     # The one template case that IS permanent: none configured at all.
     assert "lab_report_template_name unset" in permanent
+
+
+def test_template_name_is_per_clinic():
+    """Templates live on a WABA — a clinic override must beat the global default."""
+    from app.services.lab_reports import template_name_for
+    from app.config import settings
+
+    assert template_name_for(None) == settings.lab_report_template_name
+    assert template_name_for({"config": {}}) == settings.lab_report_template_name
+    assert (
+        template_name_for({"config": {"lab_report_template_name": "lab_report_delivery_v2"}})
+        == "lab_report_delivery_v2"
+    )

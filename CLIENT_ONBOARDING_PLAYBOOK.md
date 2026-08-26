@@ -298,6 +298,7 @@ curl -X POST https://medassist-ai.onrender.com/admin/clinics \
     "plan": "<soloclinic|diagstream|essential|polyclinic|enterprise>",
     "meta_phone_number_id": "<Phone Number ID from Step 2.3>",
     "meta_access_token": "<Permanent Token from Step 2.4>",
+    "meta_waba_id": "<WABA ID from WhatsApp Manager > Account tools>",
     "clinic_name": "<Short Display Name>",
     "doctor_name": "<Primary Doctor Name or Multiple Doctors>",
     "language": "en",

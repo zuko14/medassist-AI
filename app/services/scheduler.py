@@ -91,6 +91,24 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Reliability: Replay lock-timeout messages from the DLQ (every 5 min) ──
+        self.scheduler.add_job(
+            self.drain_pending_retry_messages,
+            "interval",
+            minutes=5,
+            id="dlq_pending_retry_drain",
+            replace_existing=True,
+        )
+
+        # ── Reliability: Monitor failed lab report deliveries (hourly) ──
+        self.scheduler.add_job(
+            self.alert_failed_lab_reports,
+            "interval",
+            hours=1,
+            id="failed_lab_reports_alert",
+            replace_existing=True,
+        )
+
         # ── Reliability: Monitor message queue fail-open rate (every 10 minutes) ──
         self.scheduler.add_job(
             self.alert_message_queue_fail_open,
@@ -520,6 +538,165 @@ class SchedulerService:
 
             except Exception as e:
                 logger.error(f"Error in doctor leaves job: {e}")
+
+    async def drain_pending_retry_messages(self):
+        """Replay patient messages that were deferred by a phone-lock timeout.
+
+        conversation.handle_message() parks these with status='pending_retry'
+        and a comment promising "automatic retry" — but nothing ever read them
+        back, so every timed-out patient message was silently lost until the
+        30-day purge removed the evidence. This is that missing reader.
+
+        Only 'pending_retry' is drained: it is written by exactly one call site
+        with a known compact payload. The 'retryable' rows from message_queue
+        are an audit copy of a queue that already retries itself, and the older
+        'pending' rows are crash reports with no replayable shape.
+
+        Bounded by age rather than an attempt counter, so it needs no new
+        column: each cycle retries, and anything still stuck past the window is
+        marked 'failed' and logged.
+
+        ponytail: a replay that times out again lands as a fresh row with a new
+        window, so pathological lock contention can churn. Bounded per-row, not
+        globally — add a retry_count column if that ever shows up in the data.
+        """
+        import json
+
+        from app.services.distributed_lock import distributed_job_lock
+
+        GIVE_UP_AFTER_MINUTES = 30
+
+        async with distributed_job_lock("dlq_pending_retry_drain", lease_seconds=240) as acquired:
+            if not acquired:
+                return
+            try:
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(minutes=GIVE_UP_AFTER_MINUTES)
+                ).isoformat()
+                rows = (
+                    # unscoped: platform-wide DLQ sweep; clinic comes from each payload
+                    supabase.table("failed_messages")
+                    .select("id,phone,payload,created_at")
+                    .eq("status", "pending_retry")
+                    .execute()
+                ).data or []
+                if not rows:
+                    return
+
+                from app.services.conversation import conversation_manager
+                from app.services.tenant import get_clinic_by_id
+                from app.utils.validators import mask_phone
+
+                for row in rows:
+                    row_id = row["id"]
+                    if str(row.get("created_at") or "") < cutoff:
+                        supabase.table("failed_messages").update(
+                            {"status": "failed", "resolved_at": datetime.now(timezone.utc).isoformat()}
+                        ).eq("id", row_id).execute()
+                        logger.error(
+                            f"ALERT dlq_drain: giving up on message {row_id} from "
+                            f"{mask_phone(row.get('phone') or '')} after "
+                            f"{GIVE_UP_AFTER_MINUTES}m of lock contention — patient got no reply"
+                        )
+                        continue
+
+                    try:
+                        payload = row.get("payload")
+                        payload = json.loads(payload) if isinstance(payload, str) else (payload or {})
+                        clinic = await get_clinic_by_id(payload.get("clinic_id"))
+                        if not clinic:
+                            raise ValueError(f"clinic {payload.get('clinic_id')} not found")
+
+                        await conversation_manager.handle_message(
+                            clinic=clinic,
+                            phone=row.get("phone"),
+                            message=payload.get("message") or "",
+                            message_type=payload.get("message_type") or "text",
+                            message_id=payload.get("message_id"),
+                        )
+                        supabase.table("failed_messages").update(
+                            {"status": "resolved", "resolved_at": datetime.now(timezone.utc).isoformat()}
+                        ).eq("id", row_id).execute()
+                        logger.info(f"dlq_drain: replayed message {row_id}")
+                    except Exception as replay_err:
+                        # Left as pending_retry so the next cycle tries again
+                        # until the age window closes it out.
+                        logger.warning(f"dlq_drain: replay of {row_id} failed: {replay_err}")
+
+            except Exception as e:
+                logger.error(f"dlq_pending_retry_drain job errored: {e}")
+
+    async def alert_failed_lab_reports(self):
+        """Alert on lab reports that gave up delivering.
+
+        The 2026-08-25 outage sat undetected because nothing watched this table:
+        50 reports reached status='failed' and no human was told. The log line
+        is emitted unconditionally and *before* any WhatsApp attempt on purpose
+        — the incidents most worth alerting on are the ones where WhatsApp is
+        itself the broken channel, so an alert that only rides WhatsApp goes
+        silent exactly when it matters.
+        """
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("failed_lab_reports_alert", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+                result = (
+                    # unscoped: platform-wide reliability sweep across all tenants
+                    supabase.table("lab_reports")
+                    .select("clinic_id,report_name,error_message,delivery_updated_at")
+                    .eq("status", "failed")
+                    .gte("delivery_updated_at", since)
+                    .execute()
+                )
+                rows = result.data or []
+                if not rows:
+                    return
+
+                by_clinic: dict = {}
+                for row in rows:
+                    by_clinic.setdefault(row.get("clinic_id"), []).append(row)
+
+                # Always on the log stream, whatever WhatsApp does next.
+                logger.error(
+                    f"ALERT failed_lab_reports: {len(rows)} report(s) permanently failed "
+                    f"in the last hour across {len(by_clinic)} clinic(s). "
+                    f"Sample error: {(rows[0].get('error_message') or '')[:200]}"
+                )
+
+                for clinic_id, clinic_rows in by_clinic.items():
+                    try:
+                        from app.services.tenant import get_clinic_by_id, get_clinic_contact
+
+                        clinic = await get_clinic_by_id(clinic_id) if clinic_id else None
+                        if not clinic:
+                            continue
+                        admin_phone = get_clinic_contact(clinic, "admin_phone", "") or get_clinic_contact(
+                            clinic, "phone", settings.hospital_phone
+                        )
+                        if not admin_phone:
+                            continue
+                        alert = "\n".join([
+                            "⚠️ Kriya AI delivery alert",
+                            "",
+                            f"{len(clinic_rows)} lab report(s) could not be delivered and have stopped retrying.",
+                            "",
+                            f"Reason: {(clinic_rows[0].get('error_message') or 'unknown')[:300]}",
+                            "",
+                            "Open Failed Deliveries in the admin panel to review and requeue.",
+                        ])
+                        await whatsapp_service.send_text(
+                            clinic, admin_phone, alert, _source="scheduler",
+                        )
+                    except Exception as send_err:
+                        logger.warning(
+                            f"failed_lab_reports alert: could not notify clinic {clinic_id}: {send_err}"
+                        )
+
+            except Exception as e:
+                logger.error(f"failed_lab_reports alert job errored: {e}")
 
     async def alert_failed_messages(self):
         """Check for unprocessed failed messages and alert admin."""

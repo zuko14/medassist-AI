@@ -6,9 +6,10 @@ This guide provides dummy-proof, copy-pasteable setup recipes for onboarding any
 
 ## 🛑 COMMON PRE-FLIGHT STEP (Do This For ALL Client Types First)
 
-Before setting up any clinic type, you **must** get their WhatsApp number registered in Meta and get two values:
+Before setting up any clinic type, you **must** get their WhatsApp number registered in Meta and get three values:
 1. `meta_phone_number_id`
 2. `meta_access_token`
+3. `meta_waba_id` — the WhatsApp Business Account id
 
 ### How to get Meta credentials in 3 minutes:
 1. Go to [developers.facebook.com](https://developers.facebook.com) → Open your App → **WhatsApp → API Setup**.
@@ -16,6 +17,9 @@ Before setting up any clinic type, you **must** get their WhatsApp number regist
 3. Select the number → Copy **Phone Number ID** (e.g. `971342239407011`).
 4. Go to [business.facebook.com](https://business.facebook.com) → **Settings → System Users**.
 5. Click **Generate New Token** → Tick `whatsapp_business_messaging` & `whatsapp_business_management` → Expiration: **Never** → Copy Permanent Token (`EAAG...`).
+6. Open [WhatsApp Manager](https://business.facebook.com/wa/manage/) → **Account tools → WhatsApp Manager ID** → copy the **WABA ID** (e.g. `1702889104159864`).
+
+> Skipping the WABA ID is what caused the 2026-08-25 outage: template approval can only be read from the WABA, so `whatsapp_doctor` silently skips that check and a PENDING template fails every lab report delivery while the account looks healthy.
 
 ---
 
@@ -36,6 +40,7 @@ curl -X POST https://medassist-ai.onrender.com/admin/clinics \
     "plan": "soloclinic",
     "meta_phone_number_id": "<META_PHONE_NUMBER_ID>",
     "meta_access_token": "<META_PERMANENT_TOKEN>",
+    "meta_waba_id": "<META_WABA_ID>",
     "doctor_name": "Dr. Rahul Sharma",
     "language": "en",
     "timezone": "Asia/Kolkata",
@@ -93,6 +98,7 @@ curl -X POST https://medassist-ai.onrender.com/admin/clinics \
     "plan": "diagstream",
     "meta_phone_number_id": "<META_PHONE_NUMBER_ID>",
     "meta_access_token": "<META_PERMANENT_TOKEN>",
+    "meta_waba_id": "<META_WABA_ID>",
     "doctor_name": "Laboratory Services",
     "language": "en",
     "timezone": "Asia/Kolkata",
@@ -159,6 +165,7 @@ curl -X POST https://medassist-ai.onrender.com/admin/clinics \
     "plan": "polyclinic",
     "meta_phone_number_id": "<META_PHONE_NUMBER_ID>",
     "meta_access_token": "<META_PERMANENT_TOKEN>",
+    "meta_waba_id": "<META_WABA_ID>",
     "doctor_name": "Multiple Specialists",
     "language": "en",
     "timezone": "Asia/Kolkata"
@@ -261,6 +268,7 @@ curl -X POST https://medassist-ai.onrender.com/admin/clinics \
     "plan": "enterprise",
     "meta_phone_number_id": "<META_PHONE_NUMBER_ID>",
     "meta_access_token": "<META_PERMANENT_TOKEN>",
+    "meta_waba_id": "<META_WABA_ID>",
     "doctor_name": "Multi-Speciality Medical Board",
     "language": "en",
     "timezone": "Asia/Kolkata",

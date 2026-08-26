@@ -118,7 +118,9 @@ async def main() -> int:
                 print(f"        fix: {err.get('possible_solution')}")
 
         # 3. Is the report template approved, and in which language?
-        name = settings.lab_report_template_name
+        from app.services.lab_reports import template_name_for
+
+        name = template_name_for({"config": cfg})
         waba_id = args.waba or cfg.get("meta_waba_id")
         if waba_id and name:
             r = await c.get(

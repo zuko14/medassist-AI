@@ -1214,6 +1214,11 @@
                     <label>Meta Permanent Access Token *</label>
                     <input type="text" class="form-control" id="ccMetaToken" placeholder="EAAG...">
                 </div>
+                <div class="form-group">
+                    <label>Meta WhatsApp Business Account (WABA) ID</label>
+                    <input type="text" class="form-control" id="ccMetaWabaId" placeholder="e.g. 1702889104159864">
+                    <small style="color:var(--text2); font-size:0.78rem;">WhatsApp Manager &rarr; Account tools &rarr; WhatsApp Manager ID. Needed to verify message templates are approved.</small>
+                </div>
 
                 <details style="margin:16px 0;">
                     <summary style="cursor:pointer; color:var(--text2); font-size:0.85rem; margin-bottom:12px;">Advanced settings (optional)</summary>
@@ -2258,7 +2263,7 @@
         // ═══ Create Hospital / Clinic ═══
 
         function openCreateClinicModal() {
-            ['ccName', 'ccWhatsapp', 'ccMetaPhoneId', 'ccMetaToken', 'ccClinicName', 'ccDoctorName',
+            ['ccName', 'ccWhatsapp', 'ccMetaPhoneId', 'ccMetaToken', 'ccMetaWabaId', 'ccClinicName', 'ccDoctorName',
              'ccHospitalPhone', 'ccHospitalAddress', 'ccHospitalMapsLink', 'ccEmergencyNumber',
              'ccRazorpayKeyId', 'ccRazorpayKeySecret', 'ccRazorpayWebhookSecret'].forEach(id => {
                 document.getElementById(id).value = '';
@@ -2303,6 +2308,7 @@
             const body = { name, whatsapp_number, plan, meta_phone_number_id, meta_access_token };
 
             const optionalFields = {
+                meta_waba_id: 'ccMetaWabaId',
                 clinic_name: 'ccClinicName',
                 doctor_name: 'ccDoctorName',
                 language: 'ccLanguage',

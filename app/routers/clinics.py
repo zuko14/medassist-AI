@@ -58,6 +58,10 @@ class CreateClinicRequest(BaseModel):
     ] = "soloclinic"
     meta_phone_number_id: str
     meta_access_token: str
+    # WhatsApp Business Account id — the parent of the phone number. Only the
+    # WABA exposes /message_templates, so without it nothing can check that the
+    # lab-report template is APPROVED (a PENDING one fails every delivery).
+    meta_waba_id: Optional[str] = None
     clinic_name: Optional[str] = None
     doctor_name: Optional[str] = "Medical Team"
     language: str = "en"
@@ -92,6 +96,8 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         "language": req.language or "en",
         "timezone": req.timezone or "Asia/Kolkata",
     }
+    if req.meta_waba_id:
+        config["meta_waba_id"] = str(req.meta_waba_id)
     if req.system_prompt:
         config["system_prompt"] = req.system_prompt
     if req.logo_url:
@@ -233,6 +239,7 @@ class UpdateClinicRequest(BaseModel):
     whatsapp_number: Optional[str] = None
     meta_phone_number_id: Optional[str] = None
     meta_access_token: Optional[str] = None
+    meta_waba_id: Optional[str] = None
 
 
 @router.patch("/{clinic_id}", dependencies=[Depends(verify_admin_secret)])
@@ -259,6 +266,30 @@ async def update_clinic(clinic_id: str, req: UpdateClinicRequest | dict):
                 422,
                 "config.payment_deposit_percent (1-99) is required when config.payment_mode is 'partial'",
             )
+
+    # meta_* are config JSON keys, not columns — folding them in here is what
+    # lets an already-onboarded clinic get a meta_waba_id without hand-editing
+    # the whole config blob (and stops PostgREST 400-ing on unknown columns).
+    popped = {
+        k: updates.pop(k)
+        for k in ("meta_phone_number_id", "meta_access_token", "meta_waba_id")
+        if k in updates
+    }
+    meta_updates = {k: str(v) for k, v in popped.items() if v}
+    if meta_updates:
+        current = await get_clinic_by_id(clinic_id)
+        if not current:
+            raise HTTPException(404, "Clinic not found")
+        merged = dict(current.get("config") or {})
+        merged.update(incoming_config or {})
+        merged.update(meta_updates)
+        updates["config"] = merged
+        if meta_updates.get("meta_phone_number_id"):
+            # Migration 043 dual-key routing reads the root column too.
+            updates["phone_number_id"] = meta_updates["meta_phone_number_id"]
+
+    if not updates:
+        raise HTTPException(400, "No fields provided to update")
 
     # unscoped: platform super-admin updating clinic configuration by clinic_id
     result = supabase.table("clinics").update(updates).eq("id", clinic_id).execute()

@@ -177,7 +177,8 @@ class ConversationManager:
         acquired = await acquire_phone_lock_with_timeout(phone, timeout=15)
         if not acquired:
             # Lock timed out — the previous message is still processing.
-            # Save to dead-letter queue for automatic retry rather than dropping.
+            # Parked for replay by SchedulerService.drain_pending_retry_messages
+            # (every 5 min, gives up after 30 min) rather than dropped.
             logger.warning(
                 f"Phone lock timeout for {phone[:6]}*** — deferring message "
                 f"{message_id} to dead-letter queue"
