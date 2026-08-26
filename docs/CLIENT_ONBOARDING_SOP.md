@@ -111,8 +111,56 @@ In Zuko Labs Business Settings $\rightarrow$ **Accounts** $\rightarrow$ **WhatsA
    - **Phone Number ID:** Copy the 15-16 digit ID (e.g., `1296654790197336`).
    - **Display Phone Number:** Copy E.164 number (e.g., `+919281235959`).
 
-### Step 10: Cloud API Activation (`/register` — Automated in Kriya AI)
-> **Automatic Activation:** When you register the clinic in the Kriya AI Platform Panel (Step 12 below), Kriya AI automatically calls Meta's `/register` API in the background using the provided token and phone number ID. The status flips to **`Connected`** automatically.
+### Step 10: Diagnostic Center Message Template Setup (Crucial for Outbound Reports)
+Every diagnostic center requires an approved **`UTILITY`** template with a **`DOCUMENT`** header to deliver PDF lab reports to patients outside the 24-hour window.
+
+> [!TIP]
+> Always submit the template in **`en_US`** (English US). Meta's automated classifier evaluates `en_US` utility templates much faster than generic `en`.
+
+#### Standard Production Template Specification:
+* **Template Name:** `lab_report_ready_v1`
+* **Category:** `UTILITY`
+* **Language:** `en_US`
+* **Header Format:** `DOCUMENT` (PDF file sample)
+* **Body Text:**
+  ```text
+  Dear {{1}}, your medical lab report for {{2}} is ready and attached above. Please consult your physician for interpretation.
+  ```
+* **Variables:**
+  - `{{1}}` $\rightarrow$ Patient Full Name (e.g., `Mrs. P. Kalyani`)
+  - `{{2}}` $\rightarrow$ Lab Test Name (e.g., `Complete Blood Picture / Lipid Profile`)
+
+#### 1-Click Automated Creation Script (Terminal):
+Run this script to upload the document sample and register the template on the client's WABA automatically:
+```bash
+python -c "
+import httpx
+token = '<META_ADMIN_SYSTEM_USER_TOKEN>'
+app_id = '946290901317238'
+waba_id = '<CLIENT_WABA_ID>'
+
+# 1. Resumable session upload
+pdf_bytes = b'%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n'
+r1 = httpx.post(f'https://graph.facebook.com/v22.0/{app_id}/uploads', headers={'Authorization': f'Bearer {token}'}, params={'file_length': len(pdf_bytes), 'file_type': 'application/pdf'}).json()
+r2 = httpx.post(f'https://graph.facebook.com/v22.0/{r1[\"id\"]}', headers={'Authorization': f'OAuth {token}', 'file_offset': '0'}, content=pdf_bytes).json()
+
+# 2. Create template
+payload = {
+    'name': 'lab_report_ready_v1',
+    'category': 'UTILITY',
+    'language': 'en_US',
+    'components': [
+        {'type': 'HEADER', 'format': 'DOCUMENT', 'example': {'header_handle': [r2['h']]}},
+        {'type': 'BODY', 'text': 'Dear {{1}}, your medical lab report for {{2}} is ready and attached above. Please consult your physician for interpretation.', 'example': {'body_text': [['Mrs. P. Kalyani', 'Lipid Profile']]}}
+    ]
+}
+r3 = httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=payload)
+print('Template Created:', r3.json())
+"
+```
+
+### Step 11: Cloud API Activation (`/register` — Automated in Kriya AI)
+> **Automatic Activation:** When you register the clinic in the Kriya AI Platform Panel (Step 13 below), Kriya AI automatically calls Meta's `/register` API in the background using the provided token and phone number ID. The status flips to **`Connected`** automatically.
 
 **Manual Command Fallback (if needed before platform creation):**
 ```bash
@@ -122,19 +170,21 @@ curl -X POST "https://graph.facebook.com/v22.0/<PHONE_NUMBER_ID>/register" \
   -d '{"messaging_product": "whatsapp", "pin": "123456"}'
 ```
 
-### Step 11: Verify Global Webhook Subscription
+### Step 12: Verify Global Webhook Subscription
 1. Open Meta Developer Dashboard: **[developers.facebook.com/apps/946290901317238](https://developers.facebook.com/apps/946290901317238)**.
 2. Go to **Use Cases** $\rightarrow$ **Connect on WhatsApp** $\rightarrow$ **Step 2. Production setup** (or **WhatsApp $\rightarrow$ Configuration**).
 3. Confirm that **`messages`** is toggled to **Subscribed (Blue ON)**.
 
-### Step 12: Register Tenant in Kriya AI Platform Panel
+### Step 13: Register Tenant in Kriya AI Platform Panel
 1. Open Kriya AI Platform Panel: `https://medassist-ai-docker.onrender.com/platform-panel`
 2. Click **Create Hospital / Clinic**:
    - **Hospital / Clinic Name:** `Accumax Diagnostics`
    - **WhatsApp Number (E.164):** `+919281235959`
    - **Plan:** `Diagnostic center` or `Polyclinic`
    - **Meta Phone Number ID:** `1296654790197336`
+   - **Meta WABA ID:** `1702889104159864`
    - **Meta Permanent Access Token:** `EAAN...` *(From Step 8)*
+   - **Lab Report Template Name:** `lab_report_ready_v1`
 3. Click **Create Hospital / Clinic**.
 
 ---
