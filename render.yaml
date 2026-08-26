@@ -8,12 +8,15 @@ services:
     numInstances: 2
     preDeployCommand: python scripts/migrate.py
 
-  - type: worker
-    name: mediassist-connector-worker
-    env: docker
-    dockerfilePath: ./Dockerfile
-    dockerCommand: python -m connectors.runner --all
-    autoDeploy: true
+  # NOTE: Connector polling is now embedded in the main web process scheduler
+  # (app/services/scheduler.py → connector_polling job). No separate worker needed.
+  # The standalone worker definition is kept commented for reference / rollback.
+  # - type: worker
+  #   name: mediassist-connector-worker
+  #   env: docker
+  #   dockerfilePath: ./Dockerfile
+  #   dockerCommand: python -m connectors.runner --all
+  #   autoDeploy: true
 
   # Staging environment (W6.5)
   - type: web

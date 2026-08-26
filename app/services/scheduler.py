@@ -180,8 +180,29 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Connector Polling: Poll all enabled integration connectors (every 1 minute) ──
+        # Each connector internally respects its own poll_interval_minutes before re-running,
+        # so the 1-minute tick is just the evaluation frequency, not the actual poll rate.
+        # This replaces the need for a separate Render background worker process.
+        from connectors.runner import run_all_connectors, cleanup_expired_storage
+        self.scheduler.add_job(
+            run_all_connectors,
+            "interval",
+            minutes=1,
+            id="connector_polling",
+            replace_existing=True,
+        )
+
+        # ── Connector Storage Cleanup: Delete PDFs older than 90 days (daily 2 AM IST) ──
+        self.scheduler.add_job(
+            cleanup_expired_storage,
+            CronTrigger(hour=2, minute=0),
+            id="connector_storage_cleanup",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
-        logger.info("Scheduler started")
+        logger.info("Scheduler started (with integrated connector polling)")
 
     def shutdown(self):
         """Shutdown the scheduler."""
