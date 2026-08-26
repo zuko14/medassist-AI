@@ -126,10 +126,23 @@ class WhatsAppService:
         return "XXXX"
 
     def _get_credentials(self, clinic: dict) -> tuple[str, str]:
-        """Extract Meta API credentials from clinic config with global settings fallback."""
+        """Extract Meta API credentials from clinic config with global settings fallback.
+
+        Checks multiple key names to handle clinics onboarded via different
+        code paths (admin API uses ``meta_phone_number_id``, manual inserts
+        may use ``phone_number_id``).  The top-level ``clinic["phone_number_id"]``
+        column is the final clinic-scoped fallback before global env vars.
+        """
         config = clinic.get("config", {}) if isinstance(clinic, dict) else {}
         token = config.get("meta_access_token") or settings.whatsapp_token
-        phone_id = config.get("meta_phone_number_id") or settings.whatsapp_phone_number_id
+        # Resolve phone_id: config.meta_phone_number_id → config.phone_number_id
+        #   → clinic.phone_number_id (top-level column) → global env var
+        phone_id = (
+            config.get("meta_phone_number_id")
+            or config.get("phone_number_id")
+            or (clinic.get("phone_number_id") if isinstance(clinic, dict) else None)
+            or settings.whatsapp_phone_number_id
+        )
 
         if not token or not phone_id:
             logger.error(
