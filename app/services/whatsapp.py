@@ -353,11 +353,15 @@ class WhatsAppService:
             clean_phone = "91" + clean_phone
 
         # Prepare candidate language codes to handle en vs en_US vs en_GB matching in Meta
-        candidate_languages = [language]
-        if language in ("en", "en_US", "en_GB"):
-            for l in ("en", "en_US", "en_GB"):
-                if l not in candidate_languages:
-                    candidate_languages.append(l)
+        candidate_languages = []
+        clinic_cfg_lang = (clinic.get("config") or {}).get("language") if isinstance(clinic, dict) else None
+        if clinic_cfg_lang and clinic_cfg_lang not in candidate_languages:
+            candidate_languages.append(clinic_cfg_lang)
+        if language and language not in candidate_languages:
+            candidate_languages.append(language)
+        for l in ("en_US", "en", "en_GB"):
+            if l not in candidate_languages:
+                candidate_languages.append(l)
 
         has_header = any(c.get("type") == "header" for c in (components or []))
         body_only = [c for c in (components or []) if c.get("type") != "header"] if has_header else None
