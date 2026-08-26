@@ -220,11 +220,19 @@ async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) 
         # Freeform was refused — almost always the admin's 24h customer-service
         # window has expired. Alerts matter most exactly when nobody has been
         # chatting with the bot, so fall back to the approved utility template.
-        template = settings.admin_alert_template_name
+        # Per-clinic template > connector config > global env var
+        connector_cfg = connector.data.get("config", {})
+        clinic_cfg = clinic.get("config", {}) if isinstance(clinic, dict) else {}
+        template = (
+            connector_cfg.get("admin_alert_template_name")
+            or clinic_cfg.get("admin_alert_template_name")
+            or settings.admin_alert_template_name
+        )
         if not template:
             logger.error(
                 f"ADMIN_ALERT_UNDELIVERED to ***{admin_phone[-4:]} — outside the "
-                f"24h window and ADMIN_ALERT_TEMPLATE_NAME is not configured. "
+                f"24h window and ADMIN_ALERT_TEMPLATE_NAME is not configured "
+                f"(checked connector config, clinic config, and global env). "
                 f"Undelivered alert: {message[:200]}"
             )
             return False
