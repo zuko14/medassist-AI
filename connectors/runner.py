@@ -341,6 +341,24 @@ async def record_report_success(
         logger.error(f"Failed to resolve report failure tracking: {e}")
 
 
+PLACEHOLDER_CREDENTIAL_MARKERS = (
+    "your_",
+    "changeme",
+    "change_me",
+    "placeholder",
+    "example.com",
+)
+
+
+def _placeholder_credential(config: dict) -> str | None:
+    """Return the field name holding a template value, if any."""
+    for field in ("username", "password"):
+        value = str(config.get(field) or "").strip().lower()
+        if value and any(m in value for m in PLACEHOLDER_CREDENTIAL_MARKERS):
+            return field
+    return None
+
+
 async def run_connector(
     clinic_id: str,
     connector_type: str = "mocdoc",
@@ -417,6 +435,17 @@ async def run_connector(
         if not config.get("username"):
             msg = "No username in connector config"
             logger.error(msg)
+            summary["error_message"] = msg
+            return summary
+
+        # Seed/demo rows ship with template credentials. Authenticating with
+        # them fails on every poll and pages the admin each time, so treat them
+        # as "not configured yet" and stay quiet.
+        placeholder = _placeholder_credential(config)
+        if placeholder:
+            msg = f"Placeholder credentials in connector config ({placeholder}) — configure real credentials to enable polling"
+            logger.warning(f"Skipping clinic {clinic_id}: {msg}")
+            summary["run_status"] = "skipped"
             summary["error_message"] = msg
             return summary
 

@@ -13,7 +13,7 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m connectors.runner --all
-    autoDeploy: false
+    autoDeploy: true
 
   # Staging environment (W6.5)
   - type: web

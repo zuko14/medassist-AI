@@ -248,3 +248,55 @@ async def test_real_run_still_stamps_last_run_at():
     assert result["run_status"] == "success"
     payload = tables["integration_connectors"].update.call_args[0][0]
     assert "last_run_at" in payload and "last_success_at" in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"username": "your_mocdoc_username", "password": "your_password"},
+        {"username": "CHANGEME", "password": "real-looking-secret"},
+        {"username": "labadmin", "password": "changeme"},
+    ],
+)
+async def test_placeholder_credentials_are_skipped_not_alerted(config):
+    """Seed rows with template credentials must not page anyone.
+
+    A left-over demo connector would otherwise fail authentication and fire an
+    admin WhatsApp alert on every single poll.
+    """
+    from connectors.runner import run_connector, CONNECTOR_REGISTRY
+
+    class _NeverReached:
+        def __init__(self, **kwargs):
+            raise AssertionError("connector was constructed with placeholder credentials")
+
+    sb, tables = _dry_run_tables()
+    tables_row = {
+        "id": "conn-seed",
+        "clinic_id": "clinic-seed",
+        "is_enabled": True,
+        "config": config,
+    }
+    sb.table("integration_connectors").select.return_value.eq.return_value.eq.return_value.is_.return_value.single.return_value.execute.return_value = MagicMock(
+        data=tables_row
+    )
+
+    alert = AsyncMock()
+    with patch("connectors.runner.supabase", sb), \
+         patch.dict(CONNECTOR_REGISTRY, {"mocdoc": _NeverReached}), \
+         patch("connectors.runner.send_admin_alert", alert), \
+         patch("connectors.runner.acquire_connector_lock", new_callable=AsyncMock, return_value=(True, 0)), \
+         patch("connectors.runner.release_connector_lock", new_callable=AsyncMock):
+        result = await run_connector(clinic_id="clinic-seed")
+
+    assert result["run_status"] == "skipped"
+    assert "placeholder" in (result["error_message"] or "").lower()
+    assert alert.call_count == 0
+    assert tables["integration_connectors"].update.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_real_credentials_are_not_mistaken_for_placeholders():
+    result, _ = await _run(dry_run=False)
+    assert result["run_status"] == "success"
