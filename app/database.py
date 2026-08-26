@@ -564,7 +564,14 @@ async def get_available_slots(
         now_ist = datetime.now(ist)
         today_ist = now_ist.date()
 
-        booked_times = {row["appointment_time"] for row in booked_data if "appointment_time" in row}
+        # Postgres returns a TIME column as "HH:MM:SS" while slots are "HH:MM",
+        # so comparing them raw matched nothing and every booked slot stayed on
+        # offer until the patient tapped it and hit the DB uniqueness guard.
+        booked_times = {
+            str(row["appointment_time"])[:5]
+            for row in booked_data
+            if row.get("appointment_time")
+        }
         available = [s for s in all_slots if s not in booked_times]
 
         if check_date == today_ist:

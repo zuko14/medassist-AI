@@ -680,25 +680,29 @@ async def run_connector(
         except Exception as e:
             logger.error(f"Failed to save audit log: {e}")
 
-        # Update connector's last_run timestamps
-        try:
-            update_data = {
-                "last_run_at": datetime.now(timezone.utc).isoformat(),
-                "last_error": summary.get("error_message"),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            if summary["run_status"] == "success":
-                update_data["last_success_at"] = datetime.now(timezone.utc).isoformat()
+        # A dry run is a "Test Connection" and a skipped run did nothing at
+        # all — neither is a poll. Stamping them made the dashboard show a
+        # disabled connector with a fresh "Last run", and pushed the next real
+        # poll a whole interval into the future.
+        if summary["run_status"] not in ("dry_run", "skipped"):
+            try:
+                update_data = {
+                    "last_run_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": summary.get("error_message"),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if summary["run_status"] == "success":
+                    update_data["last_success_at"] = datetime.now(timezone.utc).isoformat()
 
-            update_query = (
-                supabase.table("integration_connectors")
-                .update(update_data)
-                .eq("clinic_id", clinic_id)
-                .eq("connector_type", connector_type)
-            )
-            _scope_by_branch(update_query, branch_id).execute()
-        except Exception as e:
-            logger.error(f"Failed to update connector timestamps: {e}")
+                update_query = (
+                    supabase.table("integration_connectors")
+                    .update(update_data)
+                    .eq("clinic_id", clinic_id)
+                    .eq("connector_type", connector_type)
+                )
+                _scope_by_branch(update_query, branch_id).execute()
+            except Exception as e:
+                logger.error(f"Failed to update connector timestamps: {e}")
 
         # Release advisory lock
         if connector_id:

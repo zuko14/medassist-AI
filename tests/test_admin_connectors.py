@@ -520,3 +520,47 @@ async def test_get_connector_types_returns_mocdoc_schema():
 
 
 
+
+
+@pytest.mark.asyncio
+async def test_upsert_connector_audits_the_enabled_flag():
+    """Nobody could tell when polling was switched off, or by whom.
+
+    The save endpoint sends is_enabled on every submit, so the audit trail has
+    to carry it — the toggle endpoint is not the only way it changes.
+    """
+    admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
+    fake_clinic = {"id": "clinic-2", "plan": "diagstream", "whatsapp_number": "+912222222222"}
+    existing_row = {
+        "id": "conn-1",
+        "clinic_id": "clinic-2",
+        "branch_id": None,
+        "connector_type": "mocdoc",
+        "config": {"username": "labadmin", "password_encrypted": "blob"},
+        "is_enabled": True,
+    }
+
+    mock_sb = MagicMock()
+    mock_table = MagicMock()
+    mock_sb.table.return_value = mock_table
+    mock_table.select.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(
+        data=[existing_row]
+    )
+    mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{**existing_row, "is_enabled": False}]
+    )
+
+    body = ConnectorCredentialsUpdate(is_enabled=False)
+
+    with patch(
+        "app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=fake_clinic
+    ), patch("app.routers.admin.supabase", mock_sb), patch(
+        "app.routers.admin.log_admin_action", new_callable=AsyncMock
+    ) as log:
+        await upsert_connector_credentials(
+            body=body, request=_mock_request(), clinic_id="default", user=admin
+        )
+
+    details = log.call_args.kwargs["details"]
+    assert details["is_enabled"] is False
+    assert details["enabled_changed"] is True

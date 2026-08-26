@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import supabase
 from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import TEMPLATES
+from app.utils.helpers import format_slot_time
 from app.services.tenant import get_clinic_by_id
 
 logger = logging.getLogger(__name__)
@@ -282,7 +283,8 @@ class SchedulerService:
                             continue
 
                         components = TEMPLATES["reminder_24h"]["components_builder"](
-                            appt["doctor_name"], appt["appointment_time"]
+                            appt["doctor_name"],
+                            format_slot_time(appt["appointment_time"]),
                         )
 
                         await whatsapp_service.send_template(

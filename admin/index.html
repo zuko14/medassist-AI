@@ -4267,7 +4267,8 @@ async function loadConnectorCredentials() {
         if (conn) {
             const lastRun = conn.last_run_at ? new Date(conn.last_run_at).toLocaleString() : 'never';
             const lastOk = conn.last_success_at ? new Date(conn.last_success_at).toLocaleString() : 'never';
-            statusEl.textContent = `Last run: ${lastRun} · Last success: ${lastOk}` +
+            statusEl.textContent = (conn.is_enabled ? '' : 'Automatic polling OFF · ') +
+                `Last run: ${lastRun} · Last success: ${lastOk}` +
                 (conn.last_error ? ` · Last error: ${conn.last_error}` : '');
         } else {
             statusEl.textContent = 'No connector configured yet';
@@ -4550,11 +4551,22 @@ async function loadDiagnosticDashboard() {
                 statusTitle.style.color = 'var(--text2)';
             }
             const lastRunStr = conn.last_run_at ? new Date(conn.last_run_at).toLocaleTimeString() : 'Never';
-            statusSub.textContent = `Last run: ${lastRunStr}` + (conn.last_error ? ` · Error: ${conn.last_error}` : '');
-            if (conn.next_run_at && conn.health !== 'disabled') {
-                const nextRun = new Date(conn.next_run_at);
-                const mins = Math.max(0, Math.round((nextRun - new Date()) / 60000));
-                statusSub.textContent += ` · Next run in ~${mins}m`;
+            if (conn.health === 'disabled') {
+                // A timestamp here only ever means a manual Run Now — saying
+                // "Last run" alone reads as if it is still polling.
+                statusSub.textContent = `Automatic polling is OFF — turn on "Connector Enabled" in Connector Settings · Last manual run: ${lastRunStr}`;
+            } else {
+                statusSub.textContent = `Last run: ${lastRunStr}` + (conn.last_error ? ` · Error: ${conn.last_error}` : '');
+                if (conn.next_run_at) {
+                    const nextRun = new Date(conn.next_run_at);
+                    const mins = Math.max(0, Math.round((nextRun - new Date()) / 60000));
+                    statusSub.textContent += ` · Next run in ~${mins}m`;
+                }
+            }
+            if (conn.connector_count > 1) {
+                statusSub.textContent += conn.unhealthy_count
+                    ? ` · ${conn.unhealthy_count} of ${conn.connector_count} connectors need attention`
+                    : ` · all ${conn.connector_count} connectors healthy`;
             }
         } else {
             statusDot.style.background = 'var(--text3)';

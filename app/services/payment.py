@@ -36,6 +36,7 @@ import httpx
 
 from app.config import settings
 from app.database import supabase
+from app.utils.helpers import format_slot_time
 
 logger = logging.getLogger(__name__)
 
@@ -1561,7 +1562,7 @@ class PaymentService:
                     f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
                     f"🏥 *Department:* {booking.get('department', 'N/A')}\n"
                     f"📅 *Date:* {date_display}\n"
-                    f"🕐 *Time:* {booking.get('appointment_time', 'N/A')}\n"
+                    f"🕐 *Time:* {format_slot_time(booking.get('appointment_time')) or 'N/A'}\n"
                     f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
                     f"📌 Please arrive 15 minutes early with any relevant medical records.\n\n"
                     f"_Cancellation with full refund available up to {settings.refund_window_hours} hours before your appointment. "
@@ -1644,7 +1645,7 @@ class PaymentService:
                 f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
                 f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
                 f"📅 *Date:* {date_display}\n"
-                f"🕐 *Time:* {booking.get('appointment_time', 'N/A')}\n\n"
+                f"🕐 *Time:* {format_slot_time(booking.get('appointment_time')) or 'N/A'}\n\n"
                 f"{refund_line}"
                 f"Please contact us at {clinic.get('whatsapp_number', '')} if you have "
                 f"any questions or would like to book a new appointment."

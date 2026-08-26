@@ -29,6 +29,7 @@ from app.services.ai_engine import (
 from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import get_message
 from app.utils.validators import mask_phone
+from app.utils.helpers import format_slot_time
 
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
@@ -2387,49 +2388,57 @@ class ConversationManager:
 
     def _to_ampm(self, time_24: str) -> str:
         """Convert a 24h 'HH:MM' time string to 12h AM/PM display format."""
-        from datetime import datetime
+        return format_slot_time(time_24)
 
-        try:
-            t = datetime.strptime(time_24.strip(), "%H:%M")
-            return t.strftime("%I:%M %p").lstrip("0")
-        except ValueError:
-            return time_24
+    # A 14:00 slot filed under "Evening" reads as a mistake to the patient.
+    # (name, hour_start, hour_end, labels) — kept in clock order.
+    SLOT_SESSIONS = (
+        ("morning", 0, 12, {"en": "🌅 Morning", "hi": "🌅 सुबह", "te": "🌅 ఉదయం"}),
+        ("afternoon", 12, 17, {"en": "☀️ Afternoon", "hi": "☀️ दोपहर", "te": "☀️ మధ్యాహ్నం"}),
+        ("evening", 17, 24, {"en": "🌆 Evening", "hi": "🌆 शाम", "te": "🌆 సాయంత్రం"}),
+    )
 
     async def _show_slot_list(
         self, clinic: dict, phone: str, slots: list, context: dict, lang: str
     ) -> None:
-        """Show available time slots in 12-hour AM/PM format."""
-        morning_slots_list = []
-        evening_slots_list = []
-        for s in slots:
+        """Show available time slots in 12-hour AM/PM format, grouped by session."""
+        grouped: dict[str, list] = {name: [] for name, *_ in self.SLOT_SESSIONS}
+        for slot in slots:
             try:
-                hour = int(s.split(":")[0])
-                if hour < 12:
-                    morning_slots_list.append(s)
-                else:
-                    evening_slots_list.append(s)
-            except Exception:
-                morning_slots_list.append(s)
+                hour = int(str(slot).split(":")[0])
+            except ValueError:
+                hour = 0  # unparseable: still offer it rather than silently drop it
+            for name, hour_from, hour_to, _labels in self.SLOT_SESSIONS:
+                if hour_from <= hour < hour_to:
+                    grouped[name].append(slot)
+                    break
+            else:
+                grouped[self.SLOT_SESSIONS[0][0]].append(slot)
 
+        filled = [
+            (labels.get(lang, labels["en"]), grouped[name])
+            for name, _from, _to, labels in self.SLOT_SESSIONS
+            if grouped[name]
+        ]
+
+        # WhatsApp hard-caps a list at 10 rows, so share the budget across the
+        # sessions that actually have slots — otherwise a busy morning buries
+        # the evening entirely. Counts are of everything free that day, so "(8)"
+        # beside 4 rows still tells the patient more exist.
         sections = []
-        if morning_slots_list and evening_slots_list:
-            morn_title = {"en": "🌅 Morning", "hi": "🌅 सुबह", "te": "🌅 ఉదయం"}.get(lang, "🌅 Morning")
-            eve_title = {"en": "🌆 Evening", "hi": "🌆 शाम", "te": "🌆 సాయంత్రం"}.get(lang, "🌆 Evening")
-
-            morn_rows = [{"id": f"slot_{slot}", "title": self._to_ampm(slot), "description": ""} for slot in morning_slots_list[:5]]
-            eve_rows = [{"id": f"slot_{slot}", "title": self._to_ampm(slot), "description": ""} for slot in evening_slots_list[:5]]
-
-            sections.append({"title": morn_title, "rows": morn_rows})
-            sections.append({"title": eve_title, "rows": eve_rows})
-        else:
-            title_text = "Select Time" if lang == "en" else ("समय चुनें" if lang == "hi" else "సమయం ఎంచుకోండి")
-            sections.append({
-                "title": title_text,
-                "rows": [
-                    {"id": f"slot_{slot}", "title": self._to_ampm(slot), "description": ""}
-                    for slot in slots[:10]
-                ],
-            })
+        budget = 10
+        for i, (title, group) in enumerate(filled):
+            take = min(len(group), -(-budget // (len(filled) - i)))
+            sections.append(
+                {
+                    "title": f"{title} ({len(group)})",
+                    "rows": [
+                        {"id": f"slot_{slot}", "title": self._to_ampm(slot), "description": ""}
+                        for slot in group[:take]
+                    ],
+                }
+            )
+            budget -= take
 
         await self.whatsapp.send_interactive_list(
             clinic,
@@ -2694,7 +2703,7 @@ class ConversationManager:
                     )
                     if slots:
                         await self._show_slot_list(
-                            clinic, phone, slots[:3], context, lang
+                            clinic, phone, slots, context, lang
                         )
                     else:
                         await self._suggest_other_doctors(clinic, phone, context, lang)
@@ -2848,7 +2857,7 @@ class ConversationManager:
                         )
                         if slots:
                             await self._show_slot_list(
-                                clinic, phone, slots[:3], context, lang
+                                clinic, phone, slots, context, lang
                             )
                         else:
                             await self._suggest_other_doctors(
@@ -2974,34 +2983,45 @@ class ConversationManager:
         department = context.get("department", "General Medicine")
         exclude_doctor = context["doctor_name"]
 
-        doctors = await get_doctors(clinic["id"], department)
-        available = []
-
+        import asyncio
         from datetime import datetime, timedelta
 
-        for doc in doctors:
-            if doc["name"] == exclude_doctor:
-                continue
-            for i in range(7):
-                check_date = (datetime.now() + timedelta(days=i + 1)).strftime(
-                    "%Y-%m-%d"
-                )
-                slots, _ = await get_available_slots(
-                    clinic["id"], doc["name"], check_date
-                )
+        doctors = [
+            d
+            for d in await get_doctors(clinic["id"], department)
+            if d["name"] != exclude_doctor
+        ]
+
+        # One round per day across every doctor still needing one, instead of
+        # doctors x 7 serial round-trips — this runs inside the patient's turn,
+        # and the old scan cost whole seconds on a busy department.
+        found: dict[str, dict] = {}
+        for offset in range(7):
+            pending = [d for d in doctors if d["name"] not in found]
+            if not pending:
+                break
+            check_date = (datetime.now() + timedelta(days=offset + 1)).strftime(
+                "%Y-%m-%d"
+            )
+            results = await asyncio.gather(
+                *[
+                    get_available_slots(clinic["id"], d["name"], check_date)
+                    for d in pending
+                ]
+            )
+            for doc, (slots, _reason) in zip(pending, results):
                 if slots:
-                    date_display = datetime.strptime(check_date, "%Y-%m-%d").strftime(
-                        "%d %b"
-                    )
-                    available.append(
-                        {
-                            "name": doc["name"],
-                            "specialization": doc["specialization"],
-                            "next_date": date_display,
-                            "next_slot": slots[0],
-                        }
-                    )
-                    break
+                    found[doc["name"]] = {
+                        "name": doc["name"],
+                        "specialization": doc.get("specialization", ""),
+                        "next_date": datetime.strptime(
+                            check_date, "%Y-%m-%d"
+                        ).strftime("%d %b"),
+                        "next_slot": slots[0],
+                    }
+
+        # Keep the department's own doctor ordering, not first-found order.
+        available = [found[d["name"]] for d in doctors if d["name"] in found]
 
         if available:
             await self.whatsapp.send_text(
@@ -3344,7 +3364,7 @@ class ConversationManager:
                     {
                         "id": f"cancel_{appt['id']}",
                         "title": f"{appt['doctor_name'][:20]}",
-                        "description": f"{appt['appointment_date']} {appt['appointment_time']}"[
+                        "description": f"{appt['appointment_date']} {format_slot_time(appt['appointment_time'])}"[
                             :72
                         ],
                     }

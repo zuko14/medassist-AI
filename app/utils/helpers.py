@@ -118,6 +118,23 @@ def calculate_age(dob: date) -> int:
     return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
+def format_slot_time(value) -> str:
+    """Render an appointment time as '9:30 AM' for anything patient-facing.
+
+    Accepts both shapes in circulation: 'HH:MM' from the slot pickers and
+    'HH:MM:SS' as Postgres returns a TIME column. Anything unparseable is
+    passed through unchanged so a bad row degrades to ugly, not to a crash
+    in the middle of a reminder send.
+    """
+    text = str(value or "").strip()
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%I:%M %p").lstrip("0")
+        except ValueError:
+            continue
+    return text
+
+
 def generate_slots(start: time_type, end: time_type, duration_minutes: int) -> list[str]:
     """Generate a list of "HH:MM" slot strings from start to end in fixed steps.
 

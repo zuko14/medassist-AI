@@ -3115,6 +3115,10 @@ async def upsert_connector_credentials(
                 "branch_id": body.branch_id,
                 "username_changed": bool(body.username),
                 "password_changed": bool(body.password),
+                # This endpoint is the other way polling gets switched off, so
+                # the toggle endpoint's audit row is not the whole story.
+                "is_enabled": saved.get("is_enabled"),
+                "enabled_changed": bool(existing_row) and bool(existing_row.get("is_enabled")) != bool(saved.get("is_enabled")),
             },
             ip_address=client_ip,
         )
@@ -3797,9 +3801,8 @@ async def get_diagnostic_stats(
         conn_res = conn_query.execute()
         connectors = sorted(conn_res.data or [], key=lambda c: c.get("updated_at") or "", reverse=True)
 
-        connector_info = None
-        if connectors:
-            c = connectors[0]
+        evaluated = []
+        for c in connectors:
             is_enabled = c.get("is_enabled", False)
             last_error = c.get("last_error")
             poll_minutes = (c.get("config") or {}).get("poll_interval_minutes", 10)
@@ -3820,6 +3823,7 @@ async def get_diagnostic_stats(
 
             if not is_enabled:
                 health = "disabled"          # grey  — OFF
+                next_run_at = None           # nothing polls a disabled connector
             elif age is None:
                 health = "never_run"         # grey  — NEVER RUN
             elif age > stale_after:
@@ -3840,7 +3844,7 @@ async def get_diagnostic_stats(
                 except Exception:
                     pass
 
-            connector_info = {
+            evaluated.append({
                 "id": c.get("id"),
                 "branch_id": c.get("branch_id"),
                 "connector_type": c.get("connector_type"),
@@ -3853,8 +3857,18 @@ async def get_diagnostic_stats(
                 "next_run_at": next_run_at,
                 "seconds_since_last_run": seconds_since_last_run,
                 "is_running_now": is_running_now,
-                "consecutive_failures": c.get("consecutive_failures", 0),
-            }
+            })
+
+        connector_info = None
+        if evaluated:
+            # Headline stays the most recently updated row (a decommissioned
+            # branch must not pin the dashboard to its old error), but the
+            # counts make sure a sibling that stopped polling is never hidden.
+            connector_info = evaluated[0]
+            connector_info["connector_count"] = len(evaluated)
+            connector_info["unhealthy_count"] = sum(
+                1 for e in evaluated if e["health"] != "healthy"
+            )
 
         return {
             "reports_today": {

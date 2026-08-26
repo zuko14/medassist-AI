@@ -179,3 +179,72 @@ def test_renew_lock_only_touches_locks_this_process_holds():
             assert mock_sb.table.call_count == 1
         finally:
             _locks_held_by_this_process.discard("ours")
+
+
+def _dry_run_tables():
+    """supabase mock that keeps each table's calls separate."""
+    tables = {}
+
+    def table(name):
+        if name not in tables:
+            t = MagicMock()
+            t.select.return_value.eq.return_value.eq.return_value.is_.return_value.single.return_value.execute.return_value = MagicMock(
+                data={
+                    "id": "conn-1",
+                    "clinic_id": "clinic-2",
+                    "is_enabled": True,
+                    "config": {"username": "labadmin", "password": "plaintext-dev-only"},
+                }
+            )
+            tables[name] = t
+        return tables[name]
+
+    sb = MagicMock()
+    sb.table.side_effect = table
+    return sb, tables
+
+
+async def _run(dry_run):
+    from connectors.runner import run_connector, CONNECTOR_REGISTRY
+
+    class _FakeConnector:
+        def __init__(self, **kwargs):
+            pass
+
+        async def authenticate(self):
+            return True
+
+        async def fetch_new_reports(self):
+            return []
+
+        async def cleanup(self):
+            pass
+
+    sb, tables = _dry_run_tables()
+    with patch("connectors.runner.supabase", sb), \
+         patch.dict(CONNECTOR_REGISTRY, {"mocdoc": _FakeConnector}), \
+         patch("connectors.runner.acquire_connector_lock", new_callable=AsyncMock, return_value=(True, 0)), \
+         patch("connectors.runner.release_connector_lock", new_callable=AsyncMock):
+        result = await run_connector(clinic_id="clinic-2", dry_run=dry_run)
+    return result, tables
+
+
+@pytest.mark.asyncio
+async def test_dry_run_does_not_stamp_last_run_at():
+    """A Test Connection is not a poll.
+
+    Stamping last_run_at made the dashboard show "Disabled - Last run: 13:02"
+    and pushed the next real poll a full interval into the future.
+    """
+    result, tables = await _run(dry_run=True)
+    assert result["run_status"] == "dry_run"
+    assert tables["integration_connectors"].update.call_count == 0
+    assert tables["connector_audit_log"].insert.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_real_run_still_stamps_last_run_at():
+    result, tables = await _run(dry_run=False)
+    assert result["run_status"] == "success"
+    payload = tables["integration_connectors"].update.call_args[0][0]
+    assert "last_run_at" in payload and "last_success_at" in payload
