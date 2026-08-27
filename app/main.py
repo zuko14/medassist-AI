@@ -3,7 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -91,15 +91,17 @@ async def lifespan(app: FastAPI):
             "⚠️  OWNER_PASSWORD is using a default/weak value — change it immediately! "
             "This dashboard exposes cross-hospital revenue and patient data."
         )
-    if settings.app_env != "production":
+    if settings.app_env == "development":
         logger.info(
-            "🔓 Running in DEVELOPMENT mode — /webhook/test endpoint is ENABLED"
+            "🔓 Running in DEVELOPMENT mode"
         )
     else:
         logger.info(
-            "🔒 Running in PRODUCTION mode — /webhook/test endpoint is DISABLED"
+            f"🔒 Running in {settings.app_env.upper()} mode — enforcing production security controls"
         )
         placeholder_secrets = []
+        if settings.admin_username in ("admin", "administrator", "root", ""):
+            placeholder_secrets.append("ADMIN_USERNAME")
         if not settings.meta_app_secret or settings.meta_app_secret in ("change_me_in_production", "dev_secret"):
             placeholder_secrets.append("META_APP_SECRET")
         if settings.admin_password in ("admin", "admin123", "password", ""):
@@ -112,7 +114,7 @@ async def lifespan(app: FastAPI):
             placeholder_secrets.append("CALLMEDEX_BEARER_TOKEN")
 
         if placeholder_secrets:
-            error_msg = f"Refusing to boot in production mode with default/placeholder secrets: {', '.join(placeholder_secrets)}"
+            error_msg = f"Refusing to boot in {settings.app_env} mode with default/placeholder secrets: {', '.join(placeholder_secrets)}"
             logger.critical(f"FATAL: {error_msg}")
             raise RuntimeError(error_msg)
 
@@ -127,7 +129,7 @@ async def lifespan(app: FastAPI):
             supabase.table("appointments").select("refund_id").limit(1).execute()
             logger.info("✅ Database schema pre-flight check passed (migrations 046, 047, 048 verified).")
         except Exception as e:
-            error_msg = f"Database schema validation failed on production boot: {e}. Required migrations (046, 047, 048) may be missing."
+            error_msg = f"Database schema validation failed on {settings.app_env} boot: {e}. Required migrations (046, 047, 048) may be missing."
             logger.critical(f"FATAL: {error_msg}")
             raise RuntimeError(error_msg) from e
 
@@ -158,8 +160,8 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app
-# In production, disable interactive API docs to reduce attack surface
-is_production = settings.app_env == "production"
+# In non-development environments, disable interactive API docs to reduce attack surface
+is_production = settings.app_env != "development"
 app = FastAPI(
     title="Kriya AI",
     description="Hospital WhatsApp Assistant for appointment scheduling",
@@ -202,8 +204,35 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
 
-# Prometheus metrics endpoint (W5.2)
-@app.get("/metrics", include_in_schema=False)
+
+async def verify_metrics_auth(request: Request):
+    """Authenticate /metrics scraping endpoint (T3.1 / KRIYA-009).
+
+    Unauthenticated GET /metrics -> 401; authenticated -> 200.
+    In development mode without metrics_token set, permits access for local diagnostics.
+    In staging/production or when metrics_token is set, requires Bearer token or X-Metrics-Token header.
+    """
+    token = settings.metrics_token or settings.admin_secret or settings.meta_app_secret
+    if settings.app_env == "development" and not settings.metrics_token:
+        return True
+
+    auth_header = request.headers.get("Authorization", "")
+    x_token = request.headers.get("X-Metrics-Token", "")
+
+    provided = ""
+    if auth_header.startswith("Bearer "):
+        provided = auth_header[7:].strip()
+    elif x_token:
+        provided = x_token.strip()
+
+    import secrets
+    if not provided or not token or not secrets.compare_digest(provided, token):
+        raise HTTPException(status_code=401, detail="Unauthorized metrics access")
+    return True
+
+
+# Prometheus metrics endpoint (W5.2 / T3.1)
+@app.get("/metrics", include_in_schema=False, dependencies=[Depends(verify_metrics_auth)])
 async def metrics_endpoint():
     """Prometheus text format metrics export for scraping."""
     return PlainTextResponse(metrics.export_prometheus(), media_type="text/plain; version=0.0.4; charset=utf-8")
@@ -247,6 +276,12 @@ async def admin_panel():
             "Expires": "0",
         },
     )
+
+
+@app.get("/admin-panel/admin.js")
+async def admin_panel_js():
+    """Serve admin panel JavaScript (T3.3 CSP hardening)."""
+    return FileResponse("admin/admin.js", media_type="application/javascript")
 
 
 @app.get("/platform-panel")

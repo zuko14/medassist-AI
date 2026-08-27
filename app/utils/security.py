@@ -185,7 +185,17 @@ class PersistentRateLimiter:
         self.window_seconds = window_seconds
         # In-memory fallback in case Supabase is down
         self._fallback: dict[str, list[float]] = defaultdict(list)
-        self._use_fallback = False
+        self._fallback_until: float = 0.0
+
+    def _should_use_fallback(self) -> bool:
+        return time.time() < self._fallback_until
+
+    def _trigger_fallback(self, error: Exception) -> None:
+        self._fallback_until = time.time() + 60.0  # Time-box fallback to 60s (T3.2c)
+        logger.warning(
+            f"RATE_LIMITER_DEGRADED: Supabase rate_limits operation failed, "
+            f"using in-memory fallback for 60s: {error}"
+        )
 
     def _get_supabase(self):
         """Lazy import to avoid circular imports."""
@@ -200,7 +210,7 @@ class PersistentRateLimiter:
         """Check if a key (e.g. IP address) has exceeded the rate limit."""
         supabase = self._get_supabase()
 
-        if supabase and not self._use_fallback:
+        if supabase and not self._should_use_fallback():
             try:
                 cutoff = (
                     datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)
@@ -219,10 +229,7 @@ class PersistentRateLimiter:
                 return False
 
             except Exception as e:
-                logger.warning(
-                    f"Supabase rate_limits query failed, using in-memory fallback: {e}"
-                )
-                self._use_fallback = True
+                self._trigger_fallback(e)
 
         # In-memory fallback
         return self._fallback_is_limited(key)
@@ -240,7 +247,7 @@ class PersistentRateLimiter:
         """
         supabase = self._get_supabase()
 
-        if supabase and not self._use_fallback:
+        if supabase and not self._should_use_fallback():
             try:
                 result = supabase.rpc(
                     "check_and_record_rate_limit",
@@ -256,11 +263,7 @@ class PersistentRateLimiter:
                 if attempts is not None:
                     raise ValueError(f"RPC returned non-integer: {type(attempts)}")
             except Exception as e:
-                logger.warning(
-                    f"Supabase check_and_record_rate_limit RPC failed, "
-                    f"using in-memory fallback: {e}"
-                )
-                self._use_fallback = True
+                self._trigger_fallback(e)
 
         was_limited = self._fallback_is_limited(key)
         self._fallback[key].append(time.time())
@@ -270,7 +273,7 @@ class PersistentRateLimiter:
         """Record a login attempt."""
         supabase = self._get_supabase()
 
-        if supabase and not self._use_fallback:
+        if supabase and not self._should_use_fallback():
             try:
                 cutoff = (
                     datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)
@@ -314,10 +317,7 @@ class PersistentRateLimiter:
                 return
 
             except Exception as e:
-                logger.warning(
-                    f"Supabase rate_limits write failed, using in-memory fallback: {e}"
-                )
-                self._use_fallback = True
+                self._trigger_fallback(e)
 
         # In-memory fallback
         self._fallback[key].append(time.time())
@@ -326,7 +326,7 @@ class PersistentRateLimiter:
         """How many attempts remain before rate limiting kicks in."""
         supabase = self._get_supabase()
 
-        if supabase and not self._use_fallback:
+        if supabase and not self._should_use_fallback():
             try:
                 cutoff = (
                     datetime.now(timezone.utc) - timedelta(seconds=self.window_seconds)
@@ -344,8 +344,8 @@ class PersistentRateLimiter:
                     return max(0, self.max_attempts - result.data[0]["attempts"])
                 return self.max_attempts
 
-            except Exception:
-                pass
+            except Exception as e:
+                self._trigger_fallback(e)
 
         # In-memory fallback
         now = time.time()
@@ -357,12 +357,12 @@ class PersistentRateLimiter:
         """Reset attempts for a key (e.g. after successful login)."""
         supabase = self._get_supabase()
 
-        if supabase and not self._use_fallback:
+        if supabase and not self._should_use_fallback():
             try:
                 supabase.table("rate_limits").delete().eq("key", key).execute()
                 return
             except Exception as e:
-                logger.warning(f"Supabase rate_limits delete failed: {e}")
+                self._trigger_fallback(e)
 
         # In-memory fallback
         self._fallback.pop(key, None)
@@ -393,12 +393,7 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     "Content-Security-Policy": (
         "default-src 'self'; "
-        # 'unsafe-inline' required: admin/index.html is a single static file
-        # with inline <script>/onclick handlers, not templated — extracting
-        # to external JS is a larger refactor than this fix warrants. CSP
-        # still blocks all THIRD-PARTY script sources, which is the main
-        # protection this header provides.
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data:; "

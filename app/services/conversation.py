@@ -3196,10 +3196,15 @@ class ConversationManager:
         self, clinic: dict, phone: str, lang: str
     ) -> None:
         """Handle human escalation request."""
+        contact_phone = (
+            clinic.get("whatsapp_number")
+            or clinic.get("phone")
+            or settings.hospital_phone
+        )
         await self.whatsapp.send_text(
             clinic,
             phone,
-            get_message("human_escalation", lang, phone=clinic["whatsapp_number"]),
+            get_message("human_escalation", lang, phone=contact_phone),
         )
         await self.update_state(clinic, phone, "escalated_to_human")
         await log_analytics_event(clinic["id"], phone, "human_escalation")

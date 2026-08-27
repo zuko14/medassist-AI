@@ -36,7 +36,7 @@ def client():
 
 
 def test_01_real_postgres_slot_concurrency_50_threads(real_postgres_uri, clean_db):
-    """Phase F Load Test: 50 concurrent threads race to book the exact same doctor slot."""
+    """Phase F / T6.4 Load Test: 50 concurrent threads race to book the exact same doctor slot."""
     main_conn = psycopg2.connect(real_postgres_uri)
     main_conn.autocommit = True
     cur = main_conn.cursor()
@@ -56,15 +56,17 @@ def test_01_real_postgres_slot_concurrency_50_threads(real_postgres_uri, clean_d
         conn.autocommit = True
         t_cur = conn.cursor()
         try:
+            from app.utils.helpers import generate_booking_reference
+            b_ref = generate_booking_reference("LT")
             t_cur.execute("""
             INSERT INTO appointments (
                 clinic_id, patient_phone, patient_name, department, doctor_name,
-                appointment_date, appointment_time, status
+                appointment_date, appointment_time, status, booking_ref
             ) VALUES (
                 %s, %s, 'Patient Load', 'Cardiology', %s,
-                %s, %s, 'pending_payment'
+                %s, %s, 'pending_payment', %s
             ) RETURNING id;
-            """, (clinic_id, f"+919876543{thread_idx:03d}", target_doctor, target_date, target_slot))
+            """, (clinic_id, f"+919876543{thread_idx:03d}", target_doctor, target_date, target_slot, b_ref))
             appt_id = t_cur.fetchone()[0]
             successful_bookings.append(appt_id)
         except psycopg2.errors.UniqueViolation:
@@ -89,7 +91,7 @@ def test_01_real_postgres_slot_concurrency_50_threads(real_postgres_uri, clean_d
 
 
 def test_02_real_postgres_scheduler_locks_concurrency(real_postgres_uri, clean_db):
-    """Phase F Load Test: 20 concurrent worker processes compete for 1 distributed scheduler job lock."""
+    """Phase F / T6.6 Load Test: 20 concurrent workers compete for 1 distributed scheduler job lock via RPC, plus lease expiry/takeover."""
     job_name = "24h_reminders_load_test"
 
     acquired_instances = []
@@ -102,12 +104,13 @@ def test_02_real_postgres_scheduler_locks_concurrency(real_postgres_uri, clean_d
         t_cur = conn.cursor()
         try:
             t_cur.execute("""
-            INSERT INTO scheduler_locks (job_name, locked_by, locked_at, expires_at)
-            VALUES (%s, %s, NOW(), NOW() + interval '2 minutes');
-            """, (job_name, f"worker_{worker_idx}"))
-            acquired_instances.append(worker_idx)
-        except psycopg2.errors.UniqueViolation:
-            skipped_instances.append(worker_idx)
+            SELECT acquire_scheduler_lock(%s, %s, %s);
+            """, (job_name, f"worker_{worker_idx}", 120))
+            res = t_cur.fetchone()[0]
+            if res:
+                acquired_instances.append(worker_idx)
+            else:
+                skipped_instances.append(worker_idx)
         except Exception as e:
             other_errors.append((worker_idx, str(e)))
         finally:
@@ -117,9 +120,28 @@ def test_02_real_postgres_scheduler_locks_concurrency(real_postgres_uri, clean_d
         futures = [executor.submit(worker_attempt_lock, i) for i in range(20)]
         concurrent.futures.wait(futures)
 
+    assert len(other_errors) == 0, f"Errors: {other_errors}"
     assert len(acquired_instances) == 1
     assert len(skipped_instances) == 19
-    print(f"\n[Real PostgreSQL Scheduler Locks 20 Workers] Exactly 1 winner: worker_{acquired_instances[0]}")
+    winner = acquired_instances[0]
+    print(f"\n[Real PostgreSQL Scheduler Locks 20 Workers] Exactly 1 winner: worker_{winner}")
+
+    # Verify lease expiry and takeover
+    conn = psycopg2.connect(real_postgres_uri)
+    conn.autocommit = True
+    cur = conn.cursor()
+    # Force the lock to have expired 5 seconds ago
+    cur.execute("UPDATE scheduler_locks SET expires_at = NOW() - interval '5 seconds' WHERE job_name = %s;", (job_name,))
+    # A new worker should now successfully take over the expired lock
+    cur.execute("SELECT acquire_scheduler_lock(%s, %s, %s);", (job_name, "worker_takeover", 120))
+    takeover_acquired = cur.fetchone()[0]
+    assert takeover_acquired is True, "Expected worker_takeover to acquire expired lock"
+
+    # Verify release RPC
+    cur.execute("SELECT release_scheduler_lock(%s, %s);", (job_name, "worker_takeover"))
+    cur.execute("SELECT COUNT(*) FROM scheduler_locks WHERE job_name = %s;", (job_name,))
+    assert cur.fetchone()[0] == 0, "Expected lock to be deleted after release"
+    conn.close()
 
 
 @pytest.mark.asyncio

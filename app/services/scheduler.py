@@ -27,6 +27,38 @@ async def send_due_reminders_job():
     await PrescriptionService().send_due_reminders()
 
 
+def _reconstruct_message(row: dict):
+    """Rebuild the original inbound message from the durable payload.
+
+    The previous implementation synthesized a text message with body="" —
+    recovery discarded the very content it existed to preserve (KRIYA-004).
+
+    Returns None if the payload cannot yield a message. The caller MUST
+    dead-letter and alert rather than replay a blank.
+    """
+    from app.models.message import WhatsAppMessage
+
+    payload = row.get("payload") or {}
+
+    # Full Meta envelope
+    try:
+        entry = payload["entry"][0]["changes"][0]["value"]["messages"][0]
+    except (KeyError, IndexError, TypeError):
+        # Already-unwrapped message dict
+        entry = payload if payload.get("type") else None
+
+    if not entry:
+        return None
+
+    try:
+        return WhatsAppMessage(**entry)
+    except Exception as e:
+        logger.warning(
+            f"Reconstruction failed for {row.get('message_id')}: {e}"
+        )
+        return None
+
+
 class SchedulerService:
     """Service for scheduled tasks."""
 
@@ -180,6 +212,17 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Abandoned Message Claims: Reap stuck worker claims (every minute) ──
+        self.scheduler.add_job(
+            self.reap_abandoned_message_claims,
+            "interval",
+            seconds=60,
+            id="reap_abandoned_message_claims",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # ── Connector Polling: Poll all enabled integration connectors (every 1 minute) ──
         # Each connector internally respects its own poll_interval_minutes before re-running,
         # so the 1-minute tick is just the evaluation frequency, not the actual poll rate.
@@ -209,14 +252,33 @@ class SchedulerService:
         self.scheduler.shutdown()
         logger.info("Scheduler shutdown")
 
-    async def recover_pending_inbound_messages(self):
-        """Durable Inbound Queue Recovery sweep.
+    async def reap_abandoned_message_claims(self):
+        """Release message claims abandoned by a worker that died mid-processing.
 
-        Reclaims any message in 'received', 'failed_retryable' (with retry_at <= now),
-        or 'processing' with expired lease (> 2 mins).
-        Dispatches safe processing so no accepted webhook is ever dropped on crash.
+        Lease 45s < interval 60s so a stuck reaper cannot block the next tick.
+        Reap threshold 120s > the 15s phone-lock timeout plus typical handler
+        time, so a merely slow handler is never reaped out from under itself.
         """
         from app.services.distributed_lock import distributed_job_lock
+        from app.services.message_queue import message_queue
+
+        async with distributed_job_lock(
+            "reap_abandoned_claims", lease_seconds=45
+        ) as acquired:
+            if not acquired:
+                return
+            await message_queue.reap_abandoned_claims(lease_seconds=120)
+
+    async def recover_pending_inbound_messages(self, lease_timeout_seconds: int = 300):
+        """Durable Inbound Queue Recovery sweep.
+
+        Reclaims messages in 'received' or 'failed_retryable' older than lease_timeout_seconds.
+        'processing' is handled exclusively by the reaper (T0.3b) to prevent dual-reclamation.
+        Dispatches safe processing with full payload reconstruction so no message content is lost.
+        """
+        from app.services.distributed_lock import distributed_job_lock
+        from datetime import datetime, timezone, timedelta
+
         async with distributed_job_lock("recover_pending_inbound_messages", lease_seconds=60) as acquired:
             if not acquired:
                 return
@@ -226,50 +288,54 @@ class SchedulerService:
                 from app.routers.webhook import process_message_safe
                 from app.database import supabase
 
-                now_iso = datetime.now(timezone.utc).isoformat()
-                stale_lock_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(seconds=lease_timeout_seconds)
+                ).isoformat()
 
-                res = (
+                rows = (
                     supabase.table("inbound_messages")
-                    .select("*")
-                    .in_("status", ["received", "failed_retryable", "processing"])
+                    .select(
+                        "message_id, phone, display_phone, phone_number_id, "
+                        "payload, attempt_count"
+                    )
+                    # 'processing' is deliberately EXCLUDED — that is the job of the
+                    # reaper (T0.3b). Two subsystems competing for the same rows is how
+                    # double replies happen.
+                    .in_("status", ["received", "failed_retryable"])
+                    # Never race the live hot path. Before T0.4 there was no age filter
+                    # and 'received' is the status of in-flight messages (KRIYA-004).
+                    .lt("created_at", cutoff)
+                    .order("created_at")
                     .limit(20)
                     .execute()
                 )
 
-                if not res.data:
+                if not rows.data:
                     return
 
-                for msg_row in res.data:
-                    status = msg_row.get("status")
-                    locked_at = msg_row.get("locked_at")
-                    retry_at = msg_row.get("retry_at")
-
-                    if status == "processing" and locked_at and locked_at > stale_lock_cutoff:
-                        continue
-
-                    if status == "failed_retryable" and retry_at and retry_at > now_iso:
-                        continue
-
+                for msg_row in rows.data:
                     msg_id = msg_row.get("message_id")
                     claimed = await message_queue.claim_message(msg_id)
                     if not claimed:
                         continue
 
+                    msg = _reconstruct_message(msg_row)
+                    if msg is None:
+                        logger.error(
+                            f"RECOVERY_UNRECONSTRUCTABLE message_id={msg_id} "
+                            f"— dead-lettering rather than replaying a blank message"
+                        )
+                        await message_queue.mark_failed(
+                            msg_id,
+                            "payload unreconstructable",
+                            max_retries=0,
+                        )
+                        continue
+
                     logger.info(f"Durable queue recovery: processing recovered message {msg_id}")
 
-                    class SimpleMessage:
-                        def __init__(self, mid, phone):
-                            self.id = mid
-                            self.from_ = phone
-                            self.type = "text"
-                            self.text = type("obj", (object,), {"body": ""})
-                            self.button = None
-                            self.interactive = None
-
-                    fake_msg = SimpleMessage(msg_id, msg_row.get("phone"))
                     await process_message_safe(
-                        fake_msg,
+                        msg,
                         msg_row.get("display_phone") or msg_row.get("phone"),
                         msg_row.get("payload", {}),
                         msg_row.get("phone_number_id"),

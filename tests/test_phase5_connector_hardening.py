@@ -166,3 +166,46 @@ async def test_run_connector_handles_json_string_config():
         summary = await run_connector("clinic_1", "mocdoc")
         assert summary["run_status"] == "skipped"
 
+
+@pytest.mark.asyncio
+async def test_storage_cleanup_holds_lock():
+    """T1.2 / KRIYA-013: cleanup_expired_storage skips execution if lock held by another process."""
+    from connectors.runner import cleanup_expired_storage
+
+    with patch("connectors.runner.distributed_job_lock") as mock_lock, \
+         patch("connectors.runner.supabase.table") as mock_table:
+        # Simulate lock held by another process (yields False)
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = False
+        mock_ctx.__aexit__.return_value = None
+        mock_lock.return_value = mock_ctx
+
+        await cleanup_expired_storage()
+
+        # Database should not be queried when lock was not acquired
+        mock_table.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_storage_cleanup_is_bounded():
+    """T1.2 / KRIYA-013: cleanup_expired_storage enforces limit(500) on report queries."""
+    from connectors.runner import cleanup_expired_storage
+
+    with patch("connectors.runner.distributed_job_lock") as mock_lock, \
+         patch("connectors.runner.supabase.table") as mock_table:
+        # Simulate lock acquired
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = True
+        mock_ctx.__aexit__.return_value = None
+        mock_lock.return_value = mock_ctx
+
+        mock_query = MagicMock()
+        mock_query.select.return_value.lt.return_value.not_.is_.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+        mock_query.delete.return_value.lt.return_value.execute.return_value = MagicMock(data=[])
+        mock_table.return_value = mock_query
+
+        await cleanup_expired_storage()
+
+        # Assert .limit(500) was called on select query
+        mock_query.select.return_value.lt.return_value.not_.is_.return_value.limit.assert_called_with(500)
+

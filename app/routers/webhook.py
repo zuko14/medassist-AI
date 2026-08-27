@@ -211,6 +211,21 @@ async def process_message(message, display_phone: str, phone_number_id: str = No
                 f"Webhook: duplicate message {message_id} dropped by atomic queue"
             )
             return
+
+        # Move the durable row to 'processing' so that a crash between here and
+        # mark_completed() is DETECTABLE. Without this the row stays 'received'
+        # forever, the processed_messages claim blocks the retry from Meta, and
+        # the message of the patient is lost silently while later being marked
+        # 'completed' (KRIYA-003).
+        #
+        # claim_message() is an atomic CAS on status IN ('received',
+        # 'failed_retryable') and is already indexed for the reaper by
+        # idx_inbound_messages_locked_at (migration 047).
+        #
+        # The return value is deliberately NOT used as a gate: acquire() above is
+        # the authoritative anti-duplicate check. Treating a claim_message() miss
+        # as a drop would introduce a NEW message-loss path.
+        await message_queue.claim_message(message_id)
         # ── End Idempotency Gate ────────────────────────────────────────────────
 
         phone = normalize_phone(message.from_)
@@ -263,40 +278,3 @@ async def process_message(message, display_phone: str, phone_number_id: str = No
     except Exception as e:
         logger.error(f"Error processing message: {e}")
         raise  # Re-raise so process_message_safe can catch and log to DLQ
-
-
-@router.post("/test")
-async def test_webhook(phone: str, message: str, display_phone: str = None):
-    """Test endpoint for simulating incoming messages.
-
-    SECURITY: Only available in development/local environments.
-    """
-    # Block in production — this endpoint bypasses signature verification
-    if settings.app_env == "production":
-        raise HTTPException(
-            status_code=403,
-            detail="Test endpoint is disabled in production. Set APP_ENV=development to use.",
-        )
-
-    try:
-        if not display_phone:
-            # Fallback for testing backward compat
-            display_phone = settings.hospital_phone
-
-        clinic = await resolve_tenant(display_phone)
-        phone = normalize_phone(phone)
-
-        await conversation_manager.handle_message(
-            clinic=clinic,
-            phone=phone,
-            message=message,
-            message_type="text",
-            message_id="test_" + str(hash(message + phone)),
-        )
-        return {
-            "status": "ok",
-            "message": f"Processed test message from {phone} to {clinic['name']}",
-        }
-    except Exception as e:
-        logger.error(f"Error in test webhook: {e}")
-        raise HTTPException(status_code=500, detail="Test failed")

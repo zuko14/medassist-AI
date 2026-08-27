@@ -58,9 +58,13 @@ async def test_create_staff_inserts_hashed_password_scoped_to_own_clinic():
 @pytest.mark.asyncio
 async def test_list_staff_scoped_to_own_clinic():
     mock_sb = MagicMock()
-    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.execute.return_value = MagicMock(
-        data=[{"id": "s1", "username": "frontdesk1", "role": "staff", "is_active": True, "created_at": "2026-01-01"}]
-    )
+    mock_data = MagicMock(data=[{"id": "s1", "username": "frontdesk1", "role": "staff", "is_active": True, "created_at": "2026-01-01"}])
+    mock_query = MagicMock()
+    mock_query.execute.return_value = mock_data
+    mock_query.eq.return_value = mock_query
+    mock_query.order.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_sb.table.return_value.select.return_value = mock_query
 
     with patch("app.routers.admin.supabase", mock_sb):
         result = await list_staff(clinic_id="default", user=_clinic_admin("clinic-1"))

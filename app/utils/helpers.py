@@ -4,14 +4,65 @@ from datetime import date, datetime, timedelta, time as time_type
 from typing import Optional
 
 
-def generate_booking_reference() -> str:
-    """Generate a unique booking reference."""
-    import random
+from app.config import settings
+
+
+def generate_booking_reference(prefix: Optional[str] = None) -> str:
+    """Collision-resistant, per-tenant booking reference.
+
+    Was MC-{year}-{4 random digits}: 9,000 values/year against a GLOBALLY unique
+    column with no retry — ~50% collision probability at 112 platform-wide
+    bookings, and the resulting 23505 was reported to the patient as
+    "slot_taken" (KRIYA-001).
+
+    32^8 = 1.1e12 values per prefix per year. Ambiguous glyphs (O/0, I/1) are
+    excluded so the reference is safe to read aloud over the phone at reception.
+    """
+    import secrets
     from datetime import datetime
 
-    year = datetime.now().year
-    number = str(random.randint(1000, 9999)).zfill(4)
-    return f"MC-{year}-{number}"
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 32 chars, no O I 0 1
+    p = (prefix or settings.booking_ref_prefix or "MC").strip().upper()[:6]
+    body = "".join(secrets.choice(alphabet) for _ in range(8))
+    return f"{p}-{datetime.now().year}-{body}"
+
+
+def _pg_error_text(exc: Exception) -> str:
+    """Best-effort lowercase error text from a PostgREST or psycopg exception."""
+    parts = [str(exc)]
+    for attr in ("message", "details", "hint", "code", "pgcode", "pgerror"):
+        val = getattr(exc, attr, None)
+        if val:
+            parts.append(str(val))
+    raw = getattr(exc, "_raw_error", None)
+    if isinstance(raw, dict):
+        parts.extend(str(v) for v in raw.values() if v)
+    return " ".join(parts).lower()
+
+
+def is_booking_ref_conflict(exc: Exception) -> bool:
+    """True only for a booking_ref uniqueness violation."""
+    s = _pg_error_text(exc)
+    return ("23505" in s or "unique" in s or "duplicate" in s) and (
+        "booking_ref" in s or "uq_appointment_booking_ref" in s or "appointments_booking_ref_key" in s
+    )
+
+
+def is_slot_conflict(exc: Exception) -> bool:
+    """True only for the partial slot unique indexes.
+
+    Both index names are matched because migrations 008 and 043 define
+    functionally identical indexes and either may fire until T4.2 drops one.
+
+    Do NOT match on the bare word "violates". app/services/payment.py:100
+    currently does, which swallows foreign-key, NOT NULL and CHECK failures and
+    reports them to the patient as slot conflicts, hiding real data-integrity
+    errors from operators.
+    """
+    s = _pg_error_text(exc)
+    return ("23505" in s or "unique" in s or "duplicate" in s) and (
+        "idx_unique_active_slot" in s or "uq_appointment_active_slot" in s
+    )
 
 
 def format_date(date_str: str, format: str = "%d %b %Y") -> str:

@@ -72,6 +72,63 @@ async def test_record_delivery_status_failed_captures_error():
 
 
 @pytest.mark.asyncio
+async def test_record_delivery_status_ignores_out_of_order_delivered_after_read():
+    """Monotonic rank enforcement: 'delivered' arriving after 'read' is dropped (T0.5)."""
+    mock_supabase = MagicMock()
+    mock_table = MagicMock()
+    mock_select = MagicMock()
+    mock_eq_select = MagicMock()
+
+    mock_supabase.table.return_value = mock_table
+    mock_table.select.return_value = mock_select
+    mock_select.eq.return_value = mock_eq_select
+    # Current status in DB is already 'read' (rank 3)
+    mock_eq_select.execute.return_value = MagicMock(data=[{"delivery_status": "read"}])
+
+    with patch("app.database.supabase", mock_supabase):
+        status_payload = {
+            "id": "wamid.HBgLMTIzNDU2",
+            "status": "delivered",  # rank 2 < rank 3
+            "timestamp": "1724300000",
+        }
+        await record_delivery_status(status_payload)
+        # Should not update because rank 2 < rank 3
+        mock_table.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_record_delivery_status_failed_overrides_read():
+    """Terminal state: 'failed' callback is accepted even if current status is 'read' (T0.5)."""
+    mock_supabase = MagicMock()
+    mock_table = MagicMock()
+    mock_select = MagicMock()
+    mock_eq_select = MagicMock()
+    mock_update = MagicMock()
+    mock_eq_update = MagicMock()
+
+    mock_supabase.table.return_value = mock_table
+    mock_table.select.return_value = mock_select
+    mock_select.eq.return_value = mock_eq_select
+    mock_eq_select.execute.return_value = MagicMock(data=[{"delivery_status": "read"}])
+
+    mock_table.update.return_value = mock_update
+    mock_update.eq.return_value = mock_eq_update
+    mock_eq_update.execute.return_value = MagicMock(data=[{"id": "rep-1"}])
+
+    with patch("app.database.supabase", mock_supabase):
+        status_payload = {
+            "id": "wamid.HBgLMTIzNDU2",
+            "status": "failed",
+            "errors": [{"title": "Delivery expired"}],
+        }
+        await record_delivery_status(status_payload)
+        mock_table.update.assert_called_once()
+        update_args = mock_table.update.call_args[0][0]
+        assert update_args["delivery_status"] == "failed"
+        assert update_args["delivery_error"] == "Delivery expired"
+
+
+@pytest.mark.asyncio
 async def test_get_lab_report_deliveries_filters():
     """Verify GET /admin/lab-reports/deliveries state filtering and phone masking."""
     admin_user = AdminUser("admin")

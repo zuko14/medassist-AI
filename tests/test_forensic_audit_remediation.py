@@ -139,7 +139,7 @@ async def test_c2_razorpay_webhook_clinic_scoping():
         mock_settings.razorpay_webhook_secret = "secret"
         res = await service.process_payment_webhook(payload, "valid_sig", clinic_id="clinic-legit")
         # Booking not found under clinic-legit scope
-        assert res["status"] == "error"
+        assert res["status"] == "unmatched"
         assert res["reason"] == "booking_not_found"
 
 

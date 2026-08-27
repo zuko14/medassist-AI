@@ -142,6 +142,7 @@ class MessageQueueManager:
         """Atomically claim a message for processing."""
         from app.database import supabase
         from datetime import datetime, timezone
+        from app.config import settings
 
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -154,8 +155,17 @@ class MessageQueueManager:
             )
             return bool(res.data)
         except Exception as e:
-            logger.warning(f"Failed to claim message {message_id}: {e}")
-            return True  # Fallback to allow processing if table not present
+            if getattr(settings, "queue_fail_closed_enforce", False):
+                logger.error(
+                    f"MESSAGE_QUEUE_FAIL_CLOSED message_id={message_id} during claim: {e}"
+                )
+                return False
+            else:
+                logger.warning(
+                    f"MESSAGE_QUEUE_FAIL_OPEN message_id={message_id} during claim: {e} "
+                    f"(fail-open allowed by queue_fail_closed_enforce=False)"
+                )
+                return True
 
     async def mark_completed(self, message_id: str) -> bool:
         """Mark durable message as successfully processed."""
@@ -236,8 +246,10 @@ class MessageQueueManager:
                             "status": "retryable",
                         }
                     ).execute()
-                except Exception:
-                    pass
+                except Exception as dlq_err:
+                    logger.error(
+                        f"DLQ_WRITE_FAILED message_id={message_id}: failed to record failed_messages on retryable error: {dlq_err}"
+                    )
                 return "failed_retryable"
             else:
                 supabase.table("inbound_messages").update(
@@ -458,6 +470,71 @@ class MessageQueueManager:
         except Exception as e:
             logger.warning(f"Message queue: failed to delete processed_messages row for {message_id}: {e}")
 
+    async def reap_abandoned_claims(
+        self, lease_seconds: int = 120, limit: int = 50
+    ) -> int:
+        """Release claims whose worker died mid-processing.
+
+        A row stuck in 'processing' past the lease means the process that claimed
+        it is gone. Deleting the processed_messages row makes the message
+        eligible for replay; setting failed_retryable + retry_at hands it to the
+        existing drain_pending_retry_messages job, which knows how to reconstruct
+        and replay from `payload` (after T0.4).
+
+        Uses idx_inbound_messages_locked_at (migration 047). No migration needed.
+        """
+        from app.database import supabase
+        from datetime import datetime, timezone, timedelta
+
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=lease_seconds)
+        ).isoformat()
+
+        try:
+            stale = (
+                supabase.table("inbound_messages")
+                .select("message_id, attempt_count")
+                .eq("status", "processing")
+                .lt("locked_at", cutoff)
+                .limit(limit)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Reaper: failed to query abandoned claims: {e}")
+            return 0
+
+        reaped = 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        for row in (stale.data or []):
+            mid = row["message_id"]
+            try:
+                # 1. Drop the processed_messages claim so a replay can proceed.
+                await self.release(mid)
+
+                # 2. Hand to the retry drain. The .eq("status", "processing")
+                #    predicate is a CAS: if another process reaped this row
+                #    first, the update matches nothing and no double-handling
+                #    occurs.
+                supabase.table("inbound_messages").update(
+                    {
+                        "status": "failed_retryable",
+                        "retry_at": now_iso,
+                        "last_error": "abandoned: worker died mid-processing",
+                        "updated_at": now_iso,
+                    }
+                ).eq("message_id", mid).eq("status", "processing").execute()
+
+                reaped += 1
+                logger.warning(f"Reaper: released abandoned claim for {mid}")
+            except Exception as e:
+                logger.error(f"Reaper: failed to release {mid}: {e}")
+
+        if reaped:
+            logger.warning(f"Reaper: released {reaped} abandoned claim(s)")
+
+        return reaped
+
     async def is_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed.
 
@@ -470,6 +547,7 @@ class MessageQueueManager:
             True if already processed, False if new.
         """
         from app.database import supabase
+        from app.config import settings
 
         try:
             result = (
@@ -480,12 +558,29 @@ class MessageQueueManager:
             )
             return bool(result.data)
         except Exception as e:
-            logger.warning(f"Message queue: is_processed check error: {e}")
-            return False  # Fail open
+            if getattr(settings, "queue_fail_closed_enforce", False):
+                logger.error(
+                    f"MESSAGE_QUEUE_FAIL_CLOSED message_id={message_id} during is_processed: {e}"
+                )
+                return True  # Fail CLOSED: assume processed to prevent double execution
+            else:
+                logger.warning(
+                    f"MESSAGE_QUEUE_FAIL_OPEN message_id={message_id} during is_processed: {e} "
+                    f"(fail-open allowed by queue_fail_closed_enforce=False)"
+                )
+                return False
 
 
 async def get_phone_lock(phone: str) -> asyncio.Lock:
     """Get (or create) a per-phone asyncio lock for concurrent state protection.
+
+    NOTE ON CEILING (T2.3 / KRIYA-015 — Decision Recorded):
+    This is an in-process asyncio lock that serializes rapid concurrent messages from
+    the same phone within a single worker process. Across multi-instance deployments
+    (e.g., 4 processes), cross-process message deduplication is already strictly
+    guaranteed by acquire() on processed_messages.
+    Upgrade path: If fsm_interleave_suspected metric indicates high cross-process
+    interleaving under load, upgrade to Postgres pg_advisory_xact_lock(hashtext(phone)).
 
     Uses reference counting instead of WeakValueDictionary to prevent GC
     from collecting a lock while a coroutine still references it.

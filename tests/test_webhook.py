@@ -143,11 +143,12 @@ class TestHelpers:
 
     def test_booking_reference_generation(self):
         """Test booking reference generation."""
+        import re
         from app.utils.helpers import generate_booking_reference
 
         ref = generate_booking_reference()
-        assert ref.startswith("MC-")
-        assert len(ref) == 12  # MC-YYYY-NNNN format
+        assert re.fullmatch(r"[A-Z]{2,6}-\d{4}-[A-HJ-NP-Z2-9]{8}", ref), ref
+        assert 15 <= len(ref) <= 20
 
     def test_date_formatting(self):
         """Test date formatting."""

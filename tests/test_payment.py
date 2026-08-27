@@ -443,7 +443,7 @@ class TestBookingCreation:
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
             mock_table.insert.return_value.execute.side_effect = Exception(
-                "duplicate key value violates unique constraint"
+                'duplicate key value violates unique constraint "idx_unique_active_slot"'
             )
 
             result = await service.create_booking_with_payment(
@@ -911,6 +911,9 @@ class TestHoldExpiry:
         ), patch.object(service, "_log_payment_event"):
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
+            mock_table.select.return_value.eq.return_value.lt.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[mock_stale]
+            )
             mock_table.select.return_value.eq.return_value.lt.return_value.execute.return_value = MagicMock(
                 data=[mock_stale]
             )
@@ -921,6 +924,24 @@ class TestHoldExpiry:
             count = await service.expire_stale_bookings()
 
         assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_expire_stale_bookings_is_bounded(self):
+        """T1.3 / KRIYA-014: expire_stale_bookings applies limit(200) on query."""
+        from app.services.payment import PaymentService
+
+        service = PaymentService()
+
+        with patch("app.services.payment.supabase") as mock_sb:
+            mock_table = MagicMock()
+            mock_sb.table.return_value = mock_table
+            mock_table.select.return_value.eq.return_value.lt.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
+
+            count = await service.expire_stale_bookings()
+            assert count == 0
+            mock_table.select.return_value.eq.return_value.lt.return_value.limit.assert_called_with(200)
 
     @pytest.mark.asyncio
     async def test_recovery_path_confirms_paid_booking(self):
@@ -955,6 +976,9 @@ class TestHoldExpiry:
         ):
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
+            mock_table.select.return_value.eq.return_value.lt.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[mock_stale]
+            )
             mock_table.select.return_value.eq.return_value.lt.return_value.execute.return_value = MagicMock(
                 data=[mock_stale]
             )
@@ -1038,6 +1062,57 @@ class TestAmountIntegrity:
                     assert annotation in (int,) or (
                         hasattr(annotation, "__args__") and int in annotation.__args__
                     ), f"{model.__name__}.{name} should be int, not {annotation}"
+
+
+@pytest.mark.asyncio
+async def test_cross_tenant_payment_forgery():
+    """T6.5 / T0.5: Webhook from Clinic A cannot confirm or access Clinic B's booking."""
+    from app.services.payment import PaymentService
+
+    service = PaymentService()
+    secret = "clinic_a_webhook_secret"
+
+    payload_dict = {
+        "event": "payment.captured",
+        "payload": {
+            "payment": {
+                "entity": {
+                    "id": "pay_CROSS_TENANT_999",
+                    "order_id": "order_CROSS_999",
+                    "amount": 50000,
+                    "currency": "INR",
+                    "status": "captured",
+                    "notes": {
+                        "booking_id": "uuid-clinic-b-booking",
+                        "clinic_id": "clinic_a",  # Claimed clinic in notes
+                    },
+                }
+            }
+        },
+    }
+    raw_payload = json.dumps(payload_dict).encode("utf-8")
+    signature = hmac.new(secret.encode("utf-8"), raw_payload, hashlib.sha256).hexdigest()
+
+    mock_supabase = MagicMock()
+    mock_table = MagicMock()
+    mock_supabase.table.return_value = mock_table
+
+    mock_empty = MagicMock(data=[])
+    # Any depth of .eq() should resolve to mock_empty on execute()
+    mock_query = MagicMock()
+    mock_query.execute.return_value = mock_empty
+    mock_query.eq.return_value = mock_query
+    mock_table.select.return_value = mock_query
+    mock_table.insert.return_value.execute.return_value = mock_empty
+    mock_table.update.return_value.execute.return_value = mock_empty
+
+    with patch("app.services.payment.supabase", mock_supabase), \
+         patch.object(service, "verify_webhook_signature", return_value=True):
+        res = await service.process_payment_webhook(
+            raw_payload, signature, webhook_secret=secret, clinic_id="clinic_a"
+        )
+        assert res["status"] == "unmatched"
+        assert res["reason"] == "booking_not_found"
 
 
 if __name__ == "__main__":

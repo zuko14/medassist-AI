@@ -10,7 +10,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL_SECONDS = 300  # 5 minutes TTL for horizontally scaled workers
+CACHE_TTL_SECONDS = 30  # 30 seconds TTL (T2.2 / KRIYA-011) so clinic deactivation/plan changes propagate fast across horizontal workers
 
 # In-memory caches with TTL support
 _tenant_cache: dict[str, dict] = {}
@@ -145,28 +145,31 @@ async def resolve_tenant(
     if db_failed:
         raise RuntimeError(f"Database error during tenant resolution for {phone}: {db_error}") from db_error
 
-    # ── Strategy 3: Sandbox fallback for test/demo numbers ──
-    # Route unrecognized numbers to a designated sandbox clinic if one exists.
-    # This prevents DLQ flooding when testing with Meta's test numbers.
-    try:
-        sandbox_res = (
-            supabase.table("clinics")
-            .select("*")
-            .eq("is_sandbox", True)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
-        )
-        if sandbox_res.data:
-            clinic = sandbox_res.data[0]
-            logger.info(
-                f"Routed unrecognized phone {phone} to sandbox clinic "
-                f"'{clinic.get('name')}' (id={clinic.get('id')})"
+    # ── Strategy 3: Sandbox fallback for test/demo numbers (DEV/STAGING ONLY) ──
+    # Sandbox fallback: dev/staging convenience ONLY. In production this
+    # routed the patients of a misconfigured tenant — names, symptoms,
+    # bookings — into the sandbox clinic where sandbox admins could read
+    # them (KRIYA-012 / T2.1).
+    if settings.app_env != "production":
+        try:
+            sandbox_res = (
+                supabase.table("clinics")
+                .select("*")
+                .eq("is_sandbox", True)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
             )
-            _set_cached_item(_tenant_cache, cache_key, clinic)
-            return clinic
-    except Exception as e:
-        logger.warning(f"Sandbox clinic lookup failed: {e}")
+            if sandbox_res.data:
+                clinic = sandbox_res.data[0]
+                logger.info(
+                    f"Routed unrecognized phone {phone} to sandbox clinic "
+                    f"'{clinic.get('name')}' (id={clinic.get('id')})"
+                )
+                _set_cached_item(_tenant_cache, cache_key, clinic)
+                return clinic
+        except Exception as e:
+            logger.warning(f"Sandbox clinic lookup failed: {e}")
 
     # ── Strategy 4: Single-tenant fallback ──
     # If the database contains more than 1 active clinic, routing an unknown

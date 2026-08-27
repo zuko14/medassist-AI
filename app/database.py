@@ -417,21 +417,16 @@ async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
 
 async def get_available_slots(
     clinic_id: str,
-    doctor_name: Optional[str] = None,
-    date_str: Optional[str] = None,
+    doctor_name: str,
+    date_str: str,
     branch_id: Optional[str] = None,
     branch_session: Optional[str] = None,
 ) -> tuple[list, Optional[str]]:
-    """Get available slots for a doctor on a specific date using parallel queries & metadata caching.
-
-    Supports 2-arg (doctor_name, date_str) and 3-arg (clinic_id, doctor_name, date_str) calls.
-    """
+    """Get available slots for a doctor on a specific date using parallel queries & metadata caching."""
     from datetime import datetime, date as dt_date, timedelta
 
-    if date_str is None:
-        date_str = doctor_name
-        doctor_name = clinic_id
-        clinic_id = "default"
+    if not clinic_id:
+        raise ValueError("clinic_id is required to query available slots")
 
     try:
         check_date = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -648,18 +643,36 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
             return {"success": False, "reason": "slot_taken"}
 
         # Generate booking reference
-        from app.utils.helpers import generate_booking_reference
+        from app.utils.helpers import (
+            generate_booking_reference,
+            is_booking_ref_conflict,
+            is_slot_conflict,
+        )
 
-        ref = generate_booking_reference()
-        data["booking_ref"] = ref
+        # Bounded retry: a booking_ref collision must NOT be reported to the
+        # patient as "slot_taken" (KRIYA-001). Only the partial slot unique
+        # indexes mean the slot is genuinely gone.
+        result = None
+        for attempt in range(3):
+            data["booking_ref"] = generate_booking_reference()
+            try:
+                result = supabase.table("appointments").insert(data).execute()
+                break
+            except Exception as e:
+                if is_booking_ref_conflict(e) and attempt < 2:
+                    logger.warning(
+                        f"booking_ref collision (attempt {attempt + 1}/3), regenerating"
+                    )
+                    continue
+                if is_slot_conflict(e):
+                    return {"success": False, "reason": "slot_taken"}
+                raise
 
-        # Include branch_id and branch_name if present in data
-        # (These are set by the conversation flow when a branch is selected)
-
-        # Insert appointment — if a concurrent insert won the race, the
-        # partial UNIQUE index (uq_appointment_active_slot) will fire a
-        # 23505 unique_violation, caught below.
-        result = supabase.table("appointments").insert(data).execute()
+        if result is None or not result.data:
+            logger.error(
+                "booking_ref generation exhausted 3 attempts — entropy source suspect"
+            )
+            return {"success": False, "reason": "internal_error"}
 
         # Update patient visit count
         if data.get("patient_phone"):
@@ -674,9 +687,7 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
 
     except Exception as e:
         logger.error(f"Error booking appointment: {e}")
-        # Detect unique constraint violation (Postgres error code 23505)
-        err_str = str(e).lower()
-        if "duplicate" in err_str or "unique" in err_str or "23505" in err_str:
+        if is_slot_conflict(e):
             return {"success": False, "reason": "slot_taken"}
         return {"success": False, "reason": "error"}
 

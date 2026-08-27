@@ -153,25 +153,45 @@ async def test_dlq_replay_with_tenant_authorization(queue_manager):
 
 @pytest.mark.asyncio
 async def test_scheduler_recovers_expired_lease_messages():
-    """Phase A: Scheduler sweep recovers messages stuck in processing with expired lease (>2 min)."""
+    """Phase A: Scheduler sweep recovers messages stuck in received/failed_retryable past lease cutoff."""
     scheduler_service = SchedulerService()
 
-    expired_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    expired_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     stuck_message = {
         "id": "uuid-stuck",
         "message_id": "wamid.STUCK_001",
         "phone": "+919876543210",
         "display_phone": "+919876543210",
-        "status": "processing",
-        "locked_at": expired_time,
-        "payload": {},
+        "status": "received",
+        "created_at": expired_time,
+        "payload": {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "id": "wamid.STUCK_001",
+                                        "from": "+919876543210",
+                                        "type": "text",
+                                        "timestamp": "1724300000",
+                                        "text": {"body": "hello doctor"},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
     }
 
     mock_select = MagicMock()
     mock_select.execute.return_value.data = [stuck_message]
 
     mock_table = MagicMock()
-    mock_table.select.return_value.in_.return_value.limit.return_value = mock_select
+    mock_table.select.return_value.in_.return_value.lt.return_value.order.return_value.limit.return_value = mock_select
 
     with patch("app.database.supabase.table", return_value=mock_table), \
          patch("app.services.message_queue.message_queue.claim_message", new_callable=AsyncMock, return_value=True) as mock_claim, \
@@ -181,3 +201,45 @@ async def test_scheduler_recovers_expired_lease_messages():
 
         mock_claim.assert_called_once_with("wamid.STUCK_001")
         mock_process.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_claim_message_fails_closed_when_enforced(queue_manager):
+    """T1.4 / KRIYA-016: claim_message returns False when DB raises error and queue_fail_closed_enforce=True."""
+    with patch("app.database.supabase.table") as mock_table, \
+         patch("app.config.settings.queue_fail_closed_enforce", True):
+        mock_table.side_effect = Exception("DB Connection Refused")
+        result = await queue_manager.claim_message("wamid.FAIL_001")
+        assert result is False
+
+
+@pytest.mark.asyncio
+async def test_claim_message_shadow_logs_when_not_enforced(queue_manager, caplog):
+    """T1.4 / KRIYA-016: claim_message logs MESSAGE_QUEUE_FAIL_OPEN and returns True when queue_fail_closed_enforce=False."""
+    with patch("app.database.supabase.table") as mock_table, \
+         patch("app.config.settings.queue_fail_closed_enforce", False):
+        mock_table.side_effect = Exception("DB Connection Refused")
+        result = await queue_manager.claim_message("wamid.FAIL_002")
+        assert result is True
+        assert "MESSAGE_QUEUE_FAIL_OPEN" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_is_processed_fails_closed_when_enforced(queue_manager):
+    """T1.4 / KRIYA-016: is_processed returns True (fail closed to prevent double processing) when enforced."""
+    with patch("app.database.supabase.table") as mock_table, \
+         patch("app.config.settings.queue_fail_closed_enforce", True):
+        mock_table.side_effect = Exception("DB Connection Refused")
+        result = await queue_manager.is_processed("wamid.FAIL_003")
+        assert result is True
+
+
+@pytest.mark.asyncio
+async def test_is_processed_shadow_logs_when_not_enforced(queue_manager, caplog):
+    """T1.4 / KRIYA-016: is_processed logs MESSAGE_QUEUE_FAIL_OPEN and returns False when not enforced."""
+    with patch("app.database.supabase.table") as mock_table, \
+         patch("app.config.settings.queue_fail_closed_enforce", False):
+        mock_table.side_effect = Exception("DB Connection Refused")
+        result = await queue_manager.is_processed("wamid.FAIL_004")
+        assert result is False
+        assert "MESSAGE_QUEUE_FAIL_OPEN" in caplog.text

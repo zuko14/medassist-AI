@@ -34,7 +34,7 @@ async def test_get_connectors_masks_credentials():
     mock_sb = MagicMock()
     mock_table = MagicMock()
     mock_sb.table.return_value = mock_table
-    mock_table.select.return_value.eq.return_value.order.return_value.execute.return_value = MagicMock(
+    mock_data = MagicMock(
         data=[
             {
                 "id": "conn-1",
@@ -44,6 +44,12 @@ async def test_get_connectors_masks_credentials():
             }
         ]
     )
+    mock_query = MagicMock()
+    mock_query.execute.return_value = mock_data
+    mock_query.eq.return_value = mock_query
+    mock_query.order.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_table.select.return_value = mock_query
 
     with patch("app.routers.admin.supabase", mock_sb):
         result = await get_connectors(clinic_id="default", user=admin)
@@ -275,9 +281,16 @@ async def test_get_failed_reports_scoped_to_own_clinic():
     mock_sb = MagicMock()
     mock_table = MagicMock()
     mock_sb.table.return_value = mock_table
-    mock_table.select.return_value.eq.return_value.is_.return_value.order.return_value.execute.return_value = MagicMock(
+    mock_data = MagicMock(
         data=[{"id": "fail-1", "clinic_id": "clinic-2", "patient_name": "Alice", "last_error": "timeout"}]
     )
+    mock_query = MagicMock()
+    mock_query.execute.return_value = mock_data
+    mock_query.eq.return_value = mock_query
+    mock_query.is_.return_value = mock_query
+    mock_query.order.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_table.select.return_value = mock_query
 
     with patch("app.routers.admin.supabase", mock_sb):
         result = await get_connector_failed_reports(clinic_id="default", user=admin)

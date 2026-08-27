@@ -46,6 +46,7 @@ from app.config import settings
 from app.database import supabase
 from app.utils.connector_crypto import decrypt_password, encrypt_password
 from app.services.patient_match import patient_match_service
+from app.services.distributed_lock import distributed_job_lock
 from connectors.mocdoc.worker import MocDocConnector
 
 logger = logging.getLogger("connectors")
@@ -401,6 +402,7 @@ async def run_connector(
         "reports_needs_review": 0,
         "reports_uploaded": 0,
         "reports_delivered": 0,
+        "reports_skipped_already_processed": 0,
         "reports_failed": 0,
         "duration_ms": 0,
         "error_message": None,
@@ -618,9 +620,9 @@ async def run_connector(
                 # Step 2: Download PDF
                 pdf_bytes = await connector.download_report(meta)
                 if not pdf_bytes:
-                    # If this report was already processed in this run or session, don't count as failure
+                    # If this report was already processed in this run or session, don't count as failure or delivered (T5.2)
                     if meta.external_report_id in getattr(connector, "_processed_ids", set()):
-                        summary["reports_delivered"] += 1
+                        summary["reports_skipped_already_processed"] += 1
                         continue
                     summary["reports_failed"] += 1
                     await record_report_failure(
@@ -816,61 +818,77 @@ async def cleanup_expired_storage() -> None:
 
     Metadata + AI summary are preserved in the database for 7 years
     (NMC compliance). Only the PDF file in storage is deleted.
+    Guarded by distributed lock (T1.2 / KRIYA-013) with bounded batches (limit=500).
     """
-    logger.info("=== Running storage cleanup (90-day retention) ===")
-    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-
-    try:
-        old_reports = supabase.table("lab_reports") \
-            .select("id, file_path") \
-            .lt("uploaded_at", cutoff.isoformat()) \
-            .not_.is_("file_path", "null") \
-            .execute()
-
-        if not old_reports.data:
-            logger.info("No expired PDFs to clean up")
+    async with distributed_job_lock("cleanup_expired_storage", lease_seconds=600) as acquired:
+        if not acquired:
+            logger.info("Storage cleanup skipped: lock currently held by another worker instance")
             return
 
-        deleted = 0
-        for report in old_reports.data:
-            try:
-                file_path = report.get("file_path")
-                if file_path:
-                    supabase.storage.from_("lab-reports").remove([file_path])
-                    supabase.table("lab_reports").update({
-                        "file_path": None,
-                    }).eq("id", report["id"]).execute()
-                    deleted += 1
-            except Exception as e:
-                logger.warning(f"Failed to delete {report.get('file_path')}: {e}")
+        logger.info("=== Running storage cleanup (90-day retention) ===")
+        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+        start_time = time.time()
+        max_duration_seconds = 300  # 5 minute budget per execution
 
-        logger.info(f"Storage cleanup complete: {deleted} PDFs deleted")
+        total_deleted = 0
+        try:
+            while time.time() - start_time < max_duration_seconds:
+                old_reports = (
+                    supabase.table("lab_reports")
+                    .select("id, file_path")
+                    .lt("uploaded_at", cutoff.isoformat())
+                    .not_.is_("file_path", "null")
+                    .limit(500)
+                    .execute()
+                )
 
-    except Exception as e:
-        logger.error(f"Storage cleanup failed: {e}")
+                if not old_reports.data:
+                    break
 
-    # Also clean old audit logs (90 days)
-    try:
-        supabase.table("connector_audit_log") \
-            .delete() \
-            .lt("created_at", cutoff.isoformat()) \
-            .execute()
-        logger.info("Cleaned up old audit log entries")
-    except Exception as e:
-        logger.warning(f"Audit log cleanup failed: {e}")
+                batch_deleted = 0
+                for report in old_reports.data:
+                    try:
+                        file_path = report.get("file_path")
+                        if file_path:
+                            supabase.storage.from_("lab-reports").remove([file_path])
+                            supabase.table("lab_reports").update({
+                                "file_path": None,
+                            }).eq("id", report["id"]).execute()
+                            batch_deleted += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to delete {report.get('file_path')}: {e}")
 
-    # Clean stale session files and debug artifacts (24 hours)
-    session_dir = os.path.join(PROJECT_ROOT, ".connector_sessions")
-    if os.path.exists(session_dir):
-        cutoff_ts = time.time() - (24 * 3600)
-        for f in os.listdir(session_dir):
-            fpath = os.path.join(session_dir, f)
-            try:
-                if os.path.getmtime(fpath) < cutoff_ts:
-                    os.remove(fpath)
-                    logger.debug(f"Deleted stale session/debug file: {f}")
-            except Exception:
-                pass
+                total_deleted += batch_deleted
+                if len(old_reports.data) < 500:
+                    break
+
+            logger.info(f"Storage cleanup complete: {total_deleted} PDFs deleted")
+
+        except Exception as e:
+            logger.error(f"Storage cleanup failed: {e}")
+
+        # Also clean old audit logs (90 days)
+        try:
+            supabase.table("connector_audit_log") \
+                .delete() \
+                .lt("created_at", cutoff.isoformat()) \
+                .execute()
+            logger.info("Cleaned up old audit log entries")
+        except Exception as e:
+            logger.warning(f"Audit log cleanup failed: {e}")
+
+        # Clean stale session files and debug artifacts (24 hours)
+        session_dir = os.path.join(PROJECT_ROOT, ".connector_sessions")
+        if os.path.exists(session_dir):
+            cutoff_ts = time.time() - (24 * 3600)
+            for f in os.listdir(session_dir):
+                fpath = os.path.join(session_dir, f)
+                try:
+                    if os.path.getmtime(fpath) < cutoff_ts:
+                        os.remove(fpath)
+                        logger.debug(f"Deleted stale session/debug file: {f}")
+                except Exception:
+                    pass
 
 
 def start_scheduled_mode():

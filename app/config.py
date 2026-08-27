@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     meta_app_secret: str = ""  # Meta App Secret for X-Hub-Signature-256 verification
     rate_limit_login: str = "5/minute"  # Rate limit for admin login attempts
     allow_unsigned_webhooks_dev: bool = False  # NEVER set true outside local dev — explicit opt-in only
+    metrics_token: str = ""  # Bearer token for /metrics scraping endpoint (T3.1 / KRIYA-009)
+
+    # T0.1 (KRIYA-002): when False, an unscoped non-super-admin is ALLOWED but
+    # logged as TENANT_SCOPE_WOULD_DENY. Flip to True after 48h of clean logs in
+    # both staging and production. See
+    # docs/audits/2026-08-27-forensic-remediation-execution-plan.md Rule 4.
+    tenant_scope_enforce: bool = False
+
+    # T1.4 (KRIYA-016): when False, message_queue errors log MESSAGE_QUEUE_FAIL_OPEN
+    # in shadow mode. Flip to True to enforce fail-closed across all queue methods.
+    queue_fail_closed_enforce: bool = False
 
     # ABDM / ABHA Integration (optional — leave empty to skip live verification)
     abdm_client_id: str = ""

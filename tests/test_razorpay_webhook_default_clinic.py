@@ -81,10 +81,10 @@ async def test_razorpay_webhook_with_default_path():
 
         # Mock appointment lookup & update in payment service
         mock_appt_table = MagicMock()
-        # Idempotency query -> not yet confirmed
-        mock_appt_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        # Idempotency query (3 .eq calls: payment_id, status, clinic_id) -> not yet confirmed
         mock_appt_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
-        # Scoped & global booking lookup -> returns mock_booking
+        # Scoped booking lookup (2 .eq calls: clinic_id, razorpay_payment_link_id) -> returns mock_booking
+        mock_appt_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[mock_booking])
         mock_appt_table.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[mock_booking])
         mock_appt_table.select.return_value.execute.return_value = MagicMock(data=[mock_booking])
         # Update -> successful confirmation

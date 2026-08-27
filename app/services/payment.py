@@ -149,9 +149,15 @@ class PaymentService:
         ).isoformat()
 
         # Generate booking ref
-        from app.utils.helpers import generate_booking_reference
+        from app.utils.helpers import (
+            generate_booking_reference,
+            is_booking_ref_conflict,
+            is_slot_conflict,
+        )
 
-        booking_ref = generate_booking_reference()
+        booking_ref = generate_booking_reference(
+            clinic.get("booking_ref_prefix") if isinstance(clinic, dict) else None
+        )
 
         # ── INSERT with status='pending_payment' ──
         # If the partial UNIQUE constraint (clinic_id, doctor_name, appointment_date,
@@ -182,25 +188,37 @@ class PaymentService:
             booking_data["branch_id"] = branch_id
             booking_data["branch_name"] = branch_name or ""
 
-        try:
-            result = supabase.table("appointments").insert(booking_data).execute()
-            if not result.data:
-                return {"success": False, "reason": "insert_failed"}
-            booking = result.data[0]
-            booking_id = booking["id"]
-        except Exception as e:
-            error_msg = str(e).lower()
-            if (
-                "duplicate" in error_msg
-                or "unique" in error_msg
-                or "violates" in error_msg
-            ):
-                logger.info(
-                    f"Slot taken (DB constraint): {doctor_name} {appointment_date} {appointment_time}"
-                )
-                return {"success": False, "reason": "slot_taken"}
-            logger.error(f"Booking insert failed: {e}")
-            return {"success": False, "reason": "error"}
+        booking = None
+        for attempt in range(3):
+            booking_ref = generate_booking_reference(
+                clinic.get("booking_ref_prefix") if isinstance(clinic, dict) else None
+            )
+            booking_data["booking_ref"] = booking_ref
+            try:
+                result = supabase.table("appointments").insert(booking_data).execute()
+                if result.data:
+                    booking = result.data[0]
+                    booking_id = booking["id"]
+                    break
+            except Exception as e:
+                if is_booking_ref_conflict(e) and attempt < 2:
+                    logger.warning(
+                        f"booking_ref collision (attempt {attempt + 1}/3), regenerating"
+                    )
+                    continue
+                if is_slot_conflict(e):
+                    logger.info(
+                        f"Slot taken (DB constraint): {doctor_name} {appointment_date} {appointment_time}"
+                    )
+                    return {"success": False, "reason": "slot_taken"}
+                logger.error(f"Booking insert failed: {e}")
+                return {"success": False, "reason": "error"}
+
+        if not booking:
+            logger.error(
+                "booking_ref generation exhausted 3 attempts or insert failed"
+            )
+            return {"success": False, "reason": "insert_failed"}
 
         # ── Create Razorpay Payment Link ──
         # (Payment Links attach captured payments to a payment_link_id, not
@@ -420,75 +438,69 @@ class PaymentService:
 
         # ── Step 5: Look up booking (CLINIC SCOPED) ──
         # Match on payment_link_id first, fallback to notes.booking_id and booking_ref
+        # Every candidate query is scoped to use_clinic_scope when available.
+        # Never fall back to an unscoped global query (KRIYA-005).
         booking_result = None
 
-        def _scoped_query(scoped_to_clinic: bool = True):
+        def _build_booking_query():
             q = supabase.table("appointments").select("*")
-            if scoped_to_clinic and use_clinic_scope:
+            if use_clinic_scope:
                 q = q.eq("clinic_id", use_clinic_scope)
             return q
 
-        # Try scoped query first if a valid clinic_id was provided
-        try:
-            if payment_link_id:
-                booking_result = _scoped_query(True).eq("razorpay_payment_link_id", payment_link_id).execute()
-
-            if not booking_result or not booking_result.data:
-                booking_id_from_notes = notes.get("booking_id")
-                if booking_id_from_notes:
-                    booking_result = _scoped_query(True).eq("id", booking_id_from_notes).execute()
-
-            if not booking_result or not booking_result.data:
-                booking_ref = (
-                    notes.get("booking_ref")
-                    or payment_link_entity.get("reference_id")
-                    or (
-                        payment_entity.get("description", "")
-                        .replace("Appointment booking ", "")
-                        .strip()
-                    )
+        if payment_link_id:
+            try:
+                booking_result = (
+                    _build_booking_query()
+                    .eq("razorpay_payment_link_id", payment_link_id)
+                    .execute()
                 )
-                if booking_ref:
-                    booking_result = _scoped_query(True).eq("booking_ref", booking_ref).execute()
-        except Exception as scoped_err:
-            logger.warning(f"Scoped booking lookup failed ({scoped_err}) — falling back to global lookup")
-            booking_result = None
+            except Exception as e:
+                logger.warning(f"Lookup by payment_link_id failed: {e}")
 
-        # Fallback to global search (unscoped) using unique payment_link_id / booking_id / booking_ref
         if not booking_result or not booking_result.data:
-            if payment_link_id:
+            booking_id_from_notes = notes.get("booking_id")
+            if booking_id_from_notes:
                 try:
-                    booking_result = _scoped_query(False).eq("razorpay_payment_link_id", payment_link_id).execute()
-                except Exception as e:
-                    logger.warning(f"Global lookup by payment_link_id failed: {e}")
-
-            if not booking_result or not booking_result.data:
-                booking_id_from_notes = notes.get("booking_id")
-                if booking_id_from_notes:
-                    try:
-                        booking_result = _scoped_query(False).eq("id", booking_id_from_notes).execute()
-                    except Exception as e:
-                        logger.warning(f"Global lookup by booking_id failed: {e}")
-
-            if not booking_result or not booking_result.data:
-                booking_ref = (
-                    notes.get("booking_ref")
-                    or payment_link_entity.get("reference_id")
-                    or (
-                        payment_entity.get("description", "")
-                        .replace("Appointment booking ", "")
-                        .strip()
+                    booking_result = (
+                        _build_booking_query()
+                        .eq("id", booking_id_from_notes)
+                        .execute()
                     )
-                )
-                if booking_ref:
-                    try:
-                        booking_result = _scoped_query(False).eq("booking_ref", booking_ref).execute()
-                    except Exception as e:
-                        logger.warning(f"Global lookup by booking_ref failed: {e}")
+                except Exception as e:
+                    logger.warning(f"Lookup by booking_id failed: {e}")
 
         if not booking_result or not booking_result.data:
+            booking_ref = (
+                notes.get("booking_ref")
+                or payment_link_entity.get("reference_id")
+                or (
+                    payment_entity.get("description", "")
+                    .replace("Appointment booking ", "")
+                    .strip()
+                )
+            )
+            if booking_ref:
+                try:
+                    booking_result = (
+                        _build_booking_query()
+                        .eq("booking_ref", booking_ref)
+                        .execute()
+                    )
+                except Exception as e:
+                    logger.warning(f"Lookup by booking_ref failed: {e}")
+
+        if not booking_result or not booking_result.data:
+            # Do NOT widen the search (Rule 5). A tenant holding its own valid
+            # webhook secret could previously confirm the booking of ANOTHER
+            # tenant by supplying notes.booking_id or a guessable booking_ref
+            # (KRIYA-005, amplified by the pre-T0.2 9,000-value reference space).
+            #
+            # Every candidate lookup must carry the clinic_id resolved from THIS
+            # webhook's own routing / secret.
             logger.error(
-                f"Razorpay webhook: no booking found for clinic={clinic_id} payment_link={payment_link_id}"
+                f"UNMATCHED_PAYMENT clinic_id={clinic_id} payment_id={payment_id} "
+                f"link_id={payment_link_id} — no clinic-scoped booking found"
             )
             self._log_payment_event_raw(
                 None,
@@ -501,7 +513,21 @@ class PaymentService:
                     "raw": payload,
                 },
             )
-            return {"status": "error", "code": 200, "reason": "booking_not_found"}
+            try:
+                from connectors.runner import send_admin_alert
+
+                await send_admin_alert(
+                    clinic_id,
+                    f"Payment received with no matching booking\n\n"
+                    f"Payment ID: {payment_id}\n"
+                    f"Requires manual reconciliation.",
+                )
+            except Exception as alert_err:
+                logger.error(f"Failed to alert on unmatched payment: {alert_err}")
+
+            # Return 200. Razorpay retries non-2xx, and retrying will never make
+            # an unmatched payment match. The alert is the recovery path.
+            return {"status": "unmatched", "code": 200, "reason": "booking_not_found"}
 
         booking = booking_result.data[0]
         booking_id = booking["id"]
@@ -692,9 +718,10 @@ class PaymentService:
 
         stale = (
             supabase.table("appointments")
-            .select("*")
+            .select("id, clinic_id, booking_ref, patient_phone, hold_expires_at, razorpay_payment_link_id, amount_paise, doctor_name, department, appointment_date, appointment_time")
             .eq("status", "pending_payment")
             .lt("hold_expires_at", now)
+            .limit(200)
             .execute()
         )
 
@@ -704,7 +731,7 @@ class PaymentService:
         count = 0
         for booking in stale.data:
             booking_id = booking["id"]
-            payment_link_id = booking.get("razorpay_payment_link_id")
+            payment_link_id = booking.get("razorpay_payment_link_id") or booking.get("payment_link_id")
 
             try:
                 # ── Resolve per-clinic Razorpay creds for this booking ──
@@ -1447,17 +1474,25 @@ class PaymentService:
             return response.json()
 
     def _log_payment_event(
-        self, booking_id: str, event_type: str, payload: dict
+        self,
+        booking_id: str,
+        event_type: str,
+        payload: dict,
+        clinic_id: Optional[str] = None,
+        provider_event_id: Optional[str] = None,
     ) -> None:
-        """Log to payment_events audit table. NEVER skip this."""
+        """Log to payment_events audit table. NEVER skip this (T4.1)."""
         try:
-            supabase.table("payment_events").insert(
-                {
-                    "booking_id": booking_id,
-                    "event_type": event_type,
-                    "raw_payload": json.dumps(payload, default=str),
-                }
-            ).execute()
+            event_row = {
+                "booking_id": booking_id,
+                "event_type": event_type,
+                "raw_payload": json.dumps(payload, default=str),
+            }
+            if clinic_id:
+                event_row["clinic_id"] = clinic_id
+            if provider_event_id:
+                event_row["provider_event_id"] = provider_event_id
+            supabase.table("payment_events").insert(event_row).execute()
         except Exception as e:
             # If audit logging fails, that is itself a bug — log loudly
             logger.error(f"CRITICAL: Failed to write payment_event ({event_type}): {e}")
@@ -1490,7 +1525,12 @@ class PaymentService:
             logger.error(f"Failed to increment patient visit_count: {e}")
 
     def _log_payment_event_raw(
-        self, booking_id: Optional[str], event_type: str, payload: dict
+        self,
+        booking_id: Optional[str],
+        event_type: str,
+        payload: dict,
+        clinic_id: Optional[str] = None,
+        provider_event_id: Optional[str] = None,
     ) -> None:
         """Log payment event even when booking_id might be None (e.g. signature failures).
 
@@ -1501,13 +1541,16 @@ class PaymentService:
         """
         try:
             if booking_id:
-                supabase.table("payment_events").insert(
-                    {
-                        "booking_id": booking_id,
-                        "event_type": event_type,
-                        "raw_payload": json.dumps(payload, default=str),
-                    }
-                ).execute()
+                event_row = {
+                    "booking_id": booking_id,
+                    "event_type": event_type,
+                    "raw_payload": json.dumps(payload, default=str),
+                }
+                if clinic_id:
+                    event_row["clinic_id"] = clinic_id
+                if provider_event_id:
+                    event_row["provider_event_id"] = provider_event_id
+                supabase.table("payment_events").insert(event_row).execute()
             else:
                 supabase.table("webhook_security_events").insert(
                     {
@@ -1521,7 +1564,7 @@ class PaymentService:
             )
             logger.warning(
                 f"Payment event without persisted record: {event_type} — "
-                f"{json.dumps(payload, default=str)}"
+                f"payload={json.dumps(payload, default=str)}"
             )
 
     async def _notify_payment_confirmed(self, booking: dict) -> None:

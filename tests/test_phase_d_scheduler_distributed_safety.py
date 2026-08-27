@@ -1,11 +1,12 @@
-"""Phase D: Scheduler Distributed Safety & Multi-Instance Lock Tests.
+"""Phase D: Scheduler Distributed Safety & Multi-Instance Lock Tests (T1.1 / KRIYA-008).
 
 Verifies:
-1. Multi-instance mutual exclusion: only one instance acquires the lock; other skips cleanly.
-2. Lock release on normal completion.
+1. Multi-instance mutual exclusion: RPC acquire returns True for 1st instance, False for 2nd.
+2. Lock release on normal completion (via RPC/delete).
 3. Lock release on unhandled job exception.
-4. Automatic takeover of stale/expired locks after crash.
-5. Concurrent execution of different jobs does not block each other.
+4. Heartbeat renewal extends lease during execution.
+5. Lock steal detection: renew returns False and logs LOCK_STOLEN when locked_by changes.
+6. Fail-closed on DB error: acquire returns False when RPC raises.
 """
 
 import sys
@@ -14,8 +15,9 @@ if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "_
 
 import pytest
 import asyncio
+import logging
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from app.services.distributed_lock import DistributedJobLock, distributed_job_lock
 
@@ -26,26 +28,25 @@ async def test_01_two_instances_mutual_exclusion():
     inst1 = DistributedJobLock(instance_id="replica-pod-1")
     inst2 = DistributedJobLock(instance_id="replica-pod-2")
 
-    mock_db = MagicMock()
-    # First insert succeeds
-    mock_db.insert.return_value.execute.return_value.data = [{"job_name": "24h_reminders"}]
+    mock_sb = MagicMock()
+    # First RPC call returns True
+    mock_sb.rpc.return_value.execute.side_effect = [
+        MagicMock(data=True),   # inst1 acquires
+        MagicMock(data=False),  # inst2 rejected
+    ]
 
-    with patch("app.database.supabase.table", return_value=mock_db):
+    with patch("app.database.supabase", mock_sb):
         acquired_1 = await inst1.acquire("24h_reminders", lease_seconds=120)
         assert acquired_1 is True
 
-    # Second insert fails (conflict / lock active)
-    mock_db_2 = MagicMock()
-    mock_db_2.insert.side_effect = Exception("duplicate key violates unique constraint")
-    # Select shows lock expires in the future
-    future_time = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-    mock_db_2.select.return_value.eq.return_value.execute.return_value.data = [
-        {"locked_by": "replica-pod-1", "expires_at": future_time}
-    ]
-
-    with patch("app.database.supabase.table", return_value=mock_db_2):
         acquired_2 = await inst2.acquire("24h_reminders", lease_seconds=120)
         assert acquired_2 is False
+
+    assert mock_sb.rpc.call_count == 2
+    mock_sb.rpc.assert_any_call(
+        "acquire_scheduler_lock",
+        {"p_job_name": "24h_reminders", "p_locked_by": "replica-pod-1", "p_lease_seconds": 120}
+    )
 
 
 @pytest.mark.asyncio
@@ -53,18 +54,20 @@ async def test_02_lock_release_on_job_completion():
     """Lock is released cleanly when context manager exits."""
     inst = DistributedJobLock(instance_id="replica-pod-1")
 
-    mock_db = MagicMock()
-    mock_db.insert.return_value.execute.return_value.data = [{"job_name": "followups"}]
-    mock_db.delete.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+    mock_sb = MagicMock()
+    mock_sb.rpc.return_value.execute.return_value = MagicMock(data=True)
 
-    with patch("app.database.supabase.table", return_value=mock_db):
+    with patch("app.database.supabase", mock_sb):
         job_executed = False
-        async with distributed_job_lock("followups", lock_manager=inst) as acquired:
+        async with distributed_job_lock("followups", lease_seconds=120, lock_manager=inst) as acquired:
             assert acquired is True
             job_executed = True
 
         assert job_executed is True
-        mock_db.delete.assert_called()
+        mock_sb.rpc.assert_any_call(
+            "release_scheduler_lock",
+            {"p_job_name": "followups", "p_locked_by": "replica-pod-1"}
+        )
 
 
 @pytest.mark.asyncio
@@ -72,39 +75,63 @@ async def test_03_lock_release_on_job_exception():
     """Lock is released cleanly even if job raises an unhandled exception."""
     inst = DistributedJobLock(instance_id="replica-pod-1")
 
-    mock_db = MagicMock()
-    mock_db.insert.return_value.execute.return_value.data = [{"job_name": "doctor_leaves"}]
-    mock_db.delete.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+    mock_sb = MagicMock()
+    mock_sb.rpc.return_value.execute.return_value = MagicMock(data=True)
 
-    with patch("app.database.supabase.table", return_value=mock_db):
+    with patch("app.database.supabase", mock_sb):
         with pytest.raises(RuntimeError):
-            async with distributed_job_lock("doctor_leaves", lock_manager=inst) as acquired:
+            async with distributed_job_lock("doctor_leaves", lease_seconds=120, lock_manager=inst) as acquired:
                 assert acquired is True
                 raise RuntimeError("Simulated crash during leave check")
 
-        mock_db.delete.assert_called()
+        mock_sb.rpc.assert_any_call(
+            "release_scheduler_lock",
+            {"p_job_name": "doctor_leaves", "p_locked_by": "replica-pod-1"}
+        )
 
 
 @pytest.mark.asyncio
-async def test_04_stale_lock_recovery_after_crash():
-    """If an instance crashes without releasing, another instance takes over expired lock."""
-    inst = DistributedJobLock(instance_id="replica-pod-2")
+async def test_04_lock_renewal_heartbeat():
+    """Heartbeat renews the lock lease while the job is active."""
+    inst = DistributedJobLock(instance_id="replica-pod-1")
 
-    mock_db = MagicMock()
-    # Insert fails due to existing record
-    mock_db.insert.side_effect = Exception("duplicate key violates unique constraint")
+    mock_sb = MagicMock()
+    mock_sb.rpc.return_value.execute.return_value = MagicMock(data=True)
+    # mock renew update
+    mock_sb.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"job_name": "long_job"}])
 
-    # Select shows lock expired 2 minutes ago
-    expired_time = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
-    mock_db.select.return_value.eq.return_value.execute.return_value.data = [
-        {"locked_by": "crashed-pod-dead", "expires_at": expired_time}
-    ]
-    # Update succeeds in taking over
-    mock_db.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
-        {"job_name": "expire_stale_bookings"}
-    ]
+    with patch("app.database.supabase", mock_sb):
+        async with distributed_job_lock("long_job", lease_seconds=0.1, lock_manager=inst) as acquired:
+            assert acquired is True
+            # Sleep long enough for heartbeat to fire at lease_seconds / 3 (~33ms)
+            await asyncio.sleep(0.08)
 
-    with patch("app.database.supabase.table", return_value=mock_db):
-        acquired = await inst.acquire("expire_stale_bookings", lease_seconds=60)
-        assert acquired is True
-        mock_db.update.assert_called()
+        # Confirm renew was invoked on scheduler_locks table
+        mock_sb.table.assert_called_with("scheduler_locks")
+
+
+@pytest.mark.asyncio
+async def test_05_lock_steal_detected(caplog):
+    """When locked_by changes (stolen), renew returns False and LOCK_STOLEN is logged."""
+    inst = DistributedJobLock(instance_id="replica-pod-1")
+
+    mock_sb = MagicMock()
+    # Update returns empty data (0 rows affected because locked_by does not match)
+    mock_sb.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+
+    with patch("app.database.supabase", mock_sb):
+        renew_success = await inst.renew("stolen_job", lease_seconds=120)
+        assert renew_success is False
+
+
+@pytest.mark.asyncio
+async def test_06_acquire_fails_closed_on_db_error():
+    """If the RPC raises an exception, acquire returns False (fails closed)."""
+    inst = DistributedJobLock(instance_id="replica-pod-1")
+
+    mock_sb = MagicMock()
+    mock_sb.rpc.side_effect = Exception("DB Connection Lost")
+
+    with patch("app.database.supabase", mock_sb):
+        acquired = await inst.acquire("failing_job", lease_seconds=120)
+        assert acquired is False

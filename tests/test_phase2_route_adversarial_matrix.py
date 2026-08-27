@@ -23,6 +23,7 @@ EXEMPT_ROUTES = {
     ("PUT", "/admin/change-password"),   # Self-password update for authenticated user_id
     ("GET", "/admin/connectors/types"),  # Global static catalog of supported connector integrations
     ("GET", "/admin-panel"),             # Static HTML UI page (all clinical data is loaded via protected API routes)
+    ("GET", "/admin-panel/admin.js"),    # Static JS UI bundle (all clinical data is loaded via protected API routes)
 }
 
 

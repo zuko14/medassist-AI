@@ -240,23 +240,12 @@ class TestEndpointSecurity:
     """Tests for endpoint access control."""
 
     def test_test_endpoint_blocked_in_production(self):
-        """Test endpoint should be 403 when APP_ENV=production."""
-        import os
-
-        original = os.environ.get("APP_ENV", "testing")
-        try:
-            os.environ["APP_ENV"] = "production"
-            # Note: settings is cached, so we patch it directly
-            with patch("app.routers.webhook.settings") as mock_settings:
-                mock_settings.app_env = "production"
-                mock_settings.hospital_phone = "+919876543210"
-                response = client.post(
-                    "/webhook/test",
-                    params={"phone": "+919876543210", "message": "test"},
-                )
-                assert response.status_code == 403
-        finally:
-            os.environ["APP_ENV"] = original
+        """Test endpoint is removed from the application (returns 404) (T0.6)."""
+        response = client.post(
+            "/webhook/test",
+            params={"phone": "+919876543210", "message": "test"},
+        )
+        assert response.status_code == 404
 
     def test_health_endpoint_accessible(self):
         """Health check should always be public."""
@@ -390,6 +379,30 @@ class TestTenantFeatureGating:
 
         clinic = {"plan": "basic", "features": {"lab_reports": True}}
         assert has_feature(clinic, "lab_reports") is True  # overridden
+
+
+class TestSecurityGuardsAndMetricsAuth:
+    """T0.6 / T3.1: Verify metrics auth and staging security guardrails."""
+
+    def test_metrics_endpoint_unauthenticated_fails_when_token_set(self):
+        """GET /metrics should return 401 when unauthenticated and token configured."""
+        with patch("app.main.settings") as mock_settings:
+            mock_settings.metrics_token = "secret_metrics_token_123"
+            mock_settings.app_env = "production"
+            response = client.get("/metrics")
+            assert response.status_code == 401
+
+    def test_metrics_endpoint_authenticated_success(self):
+        """GET /metrics should return 200 when valid bearer token is provided."""
+        with patch("app.main.settings") as mock_settings:
+            mock_settings.metrics_token = "secret_metrics_token_123"
+            mock_settings.app_env = "production"
+            response = client.get(
+                "/metrics",
+                headers={"Authorization": "Bearer secret_metrics_token_123"},
+            )
+            assert response.status_code == 200
+            assert "kriya_" in response.text or "process_" in response.text or "python_" in response.text or len(response.text) > 0
 
 
 if __name__ == "__main__":
