@@ -706,10 +706,15 @@ async def run_connector(
     finally:
         summary["duration_ms"] = int((time.time() - start_time) * 1000)
 
-        # Save audit log. "sample" is excluded — connector_audit_log has no
-        # such column, and sending it would make every dry-run insert fail.
+        # Save audit log. Exclude in-memory metrics not in the DB schema
+        # (e.g. "sample", "reports_skipped_already_processed").
         try:
-            audit_row = {k: v for k, v in summary.items() if k != "sample"}
+            allowed_audit_cols = {
+                "run_status", "reports_found", "reports_new", "reports_matched",
+                "reports_needs_review", "reports_uploaded", "reports_delivered",
+                "reports_failed", "duration_ms", "error_message"
+            }
+            audit_row = {k: v for k, v in summary.items() if k in allowed_audit_cols}
             supabase.table("connector_audit_log").insert({
                 "clinic_id": clinic_id,
                 "connector_type": connector_type,
@@ -718,6 +723,7 @@ async def run_connector(
             }).execute()
         except Exception as e:
             logger.error(f"Failed to save audit log: {e}")
+
 
         # A dry run is a "Test Connection" and a skipped run did nothing at
         # all — neither is a poll. Stamping them made the dashboard show a
