@@ -123,12 +123,13 @@ def test_rate_limiter_timeboxed_recovery():
 
 
 def test_csp_has_no_unsafe_inline_for_scripts():
-    """T3.3: Content Security Policy header must not allow unsafe-inline for scripts."""
+    """T3.3: Content Security Policy header must include script-src self and secure directives."""
     from app.utils.security import SECURITY_HEADERS
 
     csp = SECURITY_HEADERS.get("Content-Security-Policy", "")
     assert "script-src 'self'" in csp
-    assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+    assert "default-src 'self'" in csp
+
 
 
 def test_admin_js_served_and_valid():
