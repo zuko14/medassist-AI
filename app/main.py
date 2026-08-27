@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+
 
 from app.config import settings
 from app.routers import webhook, health, admin, clinics, platform
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 from app.utils.correlation import set_correlation_id, get_correlation_id
 from app.services.metrics import metrics
-from fastapi.responses import PlainTextResponse
+
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
@@ -264,8 +265,15 @@ async def root():
     }
 
 
+@app.get("/admin", include_in_schema=False)
+async def admin_shortcut_redirect():
+    """Redirect /admin to /admin-panel for user convenience."""
+    return RedirectResponse(url="/admin-panel", status_code=307)
+
+
 @app.get("/admin-panel")
 async def admin_panel():
+
     """Serve admin panel HTML."""
     return FileResponse(
         "admin/index.html",
