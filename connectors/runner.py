@@ -102,44 +102,58 @@ _locks_held_by_this_process: set[str] = set()
 async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1") -> tuple[bool, int]:
     """Acquire distributed advisory lock on connector record (5 min lease).
 
+    KA-10: Uses CAS-style atomic UPDATE to prevent TOCTOU race.
+    Fails CLOSED on any exception (returns False, not True).
+
     Returns (acquired, remaining_minutes). remaining_minutes is 0 when
     acquired; otherwise it's the lock's remaining TTL rounded up to the
     nearest minute (minimum 1), for surfacing "retry in ~Nm" to the admin UI.
     """
     try:
-        res = (
+        now_str = datetime.now(timezone.utc).isoformat()
+        lease_cutoff = (datetime.now(timezone.utc) - LOCK_LEASE).isoformat()
+
+        # CAS: atomically update only if unlocked or lease expired
+        # This eliminates the TOCTOU race where two workers could both
+        # read "unlocked" and then both write their lock.
+        update_result = (
             supabase.table("integration_connectors")
-            .select("id, locked_at")
+            .update({
+                "locked_at": now_str,
+                "locked_by": worker_id,
+            })
             .eq("id", connector_id)
+            .or_(f"locked_at.is.null,locked_at.lt.{lease_cutoff}")
             .execute()
         )
-        if not res.data:
-            return False, 0
-        row = res.data[0]
-        locked_at = row.get("locked_at")
-        if locked_at:
-            try:
-                dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
-                elapsed = datetime.now(timezone.utc) - dt
-                if elapsed < LOCK_LEASE:
-                    remaining = max(1, math.ceil((LOCK_LEASE - elapsed).total_seconds() / 60))
-                    logger.warning(
-                        f"Connector {connector_id} is locked by another process (locked_at={locked_at})"
-                    )
-                    return False, remaining
-            except Exception:
-                pass
 
-        now_str = datetime.now(timezone.utc).isoformat()
-        supabase.table("integration_connectors").update({
-            "locked_at": now_str,
-            "locked_by": worker_id,
-        }).eq("id", connector_id).execute()
-        _locks_held_by_this_process.add(connector_id)
-        return True, 0
+        if update_result.data:
+            _locks_held_by_this_process.add(connector_id)
+            return True, 0
+
+        # Lock is held by another process — compute remaining TTL
+        try:
+            res = (
+                supabase.table("integration_connectors")
+                .select("locked_at")
+                .eq("id", connector_id)
+                .execute()
+            )
+            if res.data and res.data[0].get("locked_at"):
+                dt = datetime.fromisoformat(res.data[0]["locked_at"].replace("Z", "+00:00"))
+                elapsed = datetime.now(timezone.utc) - dt
+                remaining = max(1, math.ceil((LOCK_LEASE - elapsed).total_seconds() / 60))
+                return False, remaining
+        except Exception:
+            pass
+
+        return False, 1
+
     except Exception as e:
-        logger.warning(f"Could not acquire lock for connector {connector_id} (proceeding): {e}")
-        return True, 0
+        # KA-10: Fail CLOSED — do NOT proceed on lock acquisition failure.
+        # The previous code returned (True, 0) here, allowing concurrent runs.
+        logger.error(f"LOCK_ACQUIRE_FAILED connector={connector_id}: {e}")
+        return False, 0
 
 
 async def renew_connector_lock(connector_id: str) -> None:

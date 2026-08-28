@@ -11,11 +11,24 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# TTL Caches for static metadata (5 minutes)
+# TTL Caches for static metadata (doctor cache reduced to 60s for fast admin->bot sync)
 _doctor_cache: dict[str, dict] = {}
 _holiday_cache: dict[str, dict] = {}
-DOCTOR_CACHE_TTL_SECONDS = 300
+DOCTOR_CACHE_TTL_SECONDS = 60
 HOLIDAY_CACHE_TTL_SECONDS = 300
+
+
+def invalidate_doctor_cache(clinic_id: Optional[str] = None, doctor_name: Optional[str] = None) -> None:
+    """Evict doctor cache entries. Called immediately upon admin mutations."""
+    if doctor_name and clinic_id:
+        _doctor_cache.pop(f"{clinic_id}:{doctor_name}", None)
+    elif clinic_id:
+        keys_to_remove = [k for k in _doctor_cache if k.startswith(f"{clinic_id}:")]
+        for k in keys_to_remove:
+            _doctor_cache.pop(k, None)
+    else:
+        _doctor_cache.clear()
+
 
 # Initialize Supabase client with fallback for zero-downtime boots
 _sb_url = settings.supabase_url if (settings.supabase_url and settings.supabase_url.startswith("http")) else "https://placeholder.supabase.co"
@@ -288,9 +301,6 @@ async def get_lab_test_by_id(clinic_id: str, lab_test_id: str) -> Optional[dict]
             .execute()
         )
         return result.data[0] if result.data else None
-    except Exception as e:
-        logger.error(f"Error getting lab test {lab_test_id}: {e}")
-        return None
     except Exception as e:
         logger.error(f"Error getting lab test {lab_test_id}: {e}")
         return None
@@ -709,13 +719,53 @@ async def get_appointment_by_ref(clinic_id: str, booking_ref: str) -> Optional[d
 
 
 async def cancel_appointment(clinic_id: str, appointment_id: str) -> bool:
-    """Cancel an appointment."""
+    """Cancel an appointment.
+
+    KA-21: Only allows cancellation from non-terminal states.
+    Terminal states (completed, refunded, expired, no_show) cannot be
+    cancelled — they require explicit admin action.
+    """
+    # Allowed source states for cancellation
+    CANCELLABLE_STATES = ("confirmed", "pending_payment", "pending_review")
+
     try:
+        # First, check if the appointment has a payment_id (needs refund coupling)
+        check = (
+            supabase.table("appointments")
+            .select("id, status, payment_id")
+            .eq("clinic_id", clinic_id)
+            .eq("id", appointment_id)
+            .execute()
+        )
+        if not check.data:
+            logger.warning(f"Cancel: appointment {appointment_id} not found in clinic {clinic_id}")
+            return False
+
+        current = check.data[0]
+        current_status = current.get("status")
+        payment_id = current.get("payment_id")
+
+        if current_status not in CANCELLABLE_STATES:
+            logger.warning(
+                f"Cancel rejected: appointment {appointment_id} is in terminal "
+                f"state '{current_status}' — cannot cancel"
+            )
+            return False
+
+        if payment_id:
+            # KA-21: Log that a refund may be needed — payment was captured
+            logger.warning(
+                f"Cancelling paid appointment {appointment_id} "
+                f"(payment_id={payment_id}). Refund coordination required."
+            )
+
+        # CAS update: only cancel if still in the expected state
         result = (
             supabase.table("appointments")
             .update({"status": "cancelled"})
             .eq("clinic_id", clinic_id)
             .eq("id", appointment_id)
+            .in_("status", list(CANCELLABLE_STATES))
             .execute()
         )
         return bool(result.data)

@@ -369,6 +369,10 @@ class PaymentService:
 
         event_type = payload.get("event", "")
 
+        # KA-04: Extract Razorpay's own event ID for ledger idempotency.
+        # This is distinct from payment_id — it identifies the webhook delivery itself.
+        rz_event_id = payload.get("event_id") or payload.get("id")
+
         # We care about payment.captured and payment_link.paid events
         if event_type not in ("payment.captured", "payment_link.paid"):
             logger.info(f"Razorpay webhook: ignoring event type '{event_type}'")
@@ -512,6 +516,8 @@ class PaymentService:
                     "error": "no_booking_found_in_clinic",
                     "raw": payload,
                 },
+                clinic_id=use_clinic_scope,
+                provider_event_id=rz_event_id,
             )
             try:
                 from connectors.runner import send_admin_alert
@@ -541,6 +547,8 @@ class PaymentService:
                 "payment_link_id": payment_link_id,
                 "amount_paid": amount_paid,
             },
+            clinic_id=use_clinic_scope,
+            provider_event_id=rz_event_id,
         )
 
         self._log_payment_event(
@@ -549,6 +557,8 @@ class PaymentService:
             {
                 "payment_id": payment_id,
             },
+            clinic_id=use_clinic_scope,
+            provider_event_id=rz_event_id,
         )
 
         # ── Step 6: Amount mismatch check ──
@@ -566,6 +576,8 @@ class PaymentService:
                     "received_paise": amount_paid,
                     "payment_id": payment_id,
                 },
+                clinic_id=use_clinic_scope,
+                provider_event_id=rz_event_id,
             )
             # Route to pending_review — NEVER auto-confirm on mismatch
             supabase.table("appointments").update(
@@ -600,6 +612,8 @@ class PaymentService:
                 booking_id,
                 "late_payment_after_expiry",
                 {"payment_id": payment_id, "amount_paise": amount_paid},
+                clinic_id=use_clinic_scope,
+                provider_event_id=rz_event_id,
             )
             from app.services.tenant import get_clinic_by_id
             clinic = None
@@ -637,7 +651,29 @@ class PaymentService:
             }
 
         if current_status != "pending_payment":
-            # Booking is in an unexpected state
+            # KA-06: NEVER overwrite terminal states with pending_review.
+            # Terminal states (completed, refunded, cancelled) represent
+            # concluded business transactions — clobbering them is data loss.
+            terminal_states = ("completed", "refunded", "cancelled")
+            if current_status in terminal_states:
+                logger.warning(
+                    f"TERMINAL_STATE_GUARD booking={booking_id} status={current_status} "
+                    f"payment_id={payment_id} — refusing to overwrite terminal state"
+                )
+                self._log_payment_event(
+                    booking_id,
+                    "terminal_state_blocked",
+                    {
+                        "current_status": current_status,
+                        "payment_id": payment_id,
+                        "action": "blocked_overwrite",
+                    },
+                    clinic_id=use_clinic_scope,
+                    provider_event_id=rz_event_id,
+                )
+                return {"status": "ok", "code": 200, "reason": f"terminal_state_{current_status}"}
+
+            # Non-terminal, non-pending_payment state — route to review
             logger.warning(
                 f"Booking {booking_id} in unexpected state '{current_status}' during webhook"
             )
@@ -648,13 +684,16 @@ class PaymentService:
                     "reason": f"unexpected_status_{current_status}",
                     "payment_id": payment_id,
                 },
+                clinic_id=use_clinic_scope,
+                provider_event_id=rz_event_id,
             )
+            # Use CAS: only update if status hasn't changed since we read it
             supabase.table("appointments").update(
                 {
                     "status": "pending_review",
                     "payment_id": payment_id,
                 }
-            ).eq("id", booking_id).execute()
+            ).eq("id", booking_id).eq("status", current_status).execute()
             return {"status": "ok", "code": 200, "reason": "unexpected_state"}
 
         # ── Step 8: CONFIRM the booking (Atomic Update) ──
@@ -686,6 +725,8 @@ class PaymentService:
                 "amount_paise": amount_paid,
                 "payment_link_id": payment_link_id,
             },
+            clinic_id=use_clinic_scope,
+            provider_event_id=rz_event_id,
         )
 
         logger.info(f"✅ Booking {booking_id} CONFIRMED via payment {payment_id}")
@@ -1006,12 +1047,15 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────────────
 
     async def admin_confirm_booking(
-        self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
+        self, booking_id: str, clinic_id: str = "", admin_notes: str = ""
     ) -> dict:
         """Manually confirm a pending_review booking (admin override), scoped to clinic_id."""
         query = supabase.table("appointments").select("*").eq("id", booking_id)
-        if clinic_id and clinic_id != "default":
+        # KA-14: Always scope — 'default' sentinel removed
+        if clinic_id and clinic_id not in ("default", "none", "null"):
             query = query.eq("clinic_id", clinic_id)
+        else:
+            logger.warning(f"admin_confirm_booking called without valid clinic_id for {booking_id}")
         booking_result = query.execute()
 
         if not booking_result.data:
@@ -1046,7 +1090,7 @@ class PaymentService:
         return {"success": True}
 
     async def admin_reject_booking(
-        self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
+        self, booking_id: str, clinic_id: str = "", admin_notes: str = ""
     ) -> dict:
         """Manually reject a pending_review booking + initiate refund, scoped to clinic_id.
 
@@ -1054,8 +1098,11 @@ class PaymentService:
         BEFORE cancelling ensures the refund is processed rather than blocked.
         """
         query = supabase.table("appointments").select("*").eq("id", booking_id)
-        if clinic_id and clinic_id != "default":
+        # KA-14: Always scope — 'default' sentinel removed
+        if clinic_id and clinic_id not in ("default", "none", "null"):
             query = query.eq("clinic_id", clinic_id)
+        else:
+            logger.warning(f"admin_reject_booking called without valid clinic_id for {booking_id}")
         booking_result = query.execute()
 
         if not booking_result.data:
@@ -1133,7 +1180,7 @@ class PaymentService:
         return {"success": True, "refund": refund_result}
 
     async def admin_cancel_confirmed_booking(
-        self, booking_id: str, clinic_id: str = "default", admin_notes: str = ""
+        self, booking_id: str, clinic_id: str = "", admin_notes: str = ""
     ) -> dict:
         """Cancel a CONFIRMED appointment from the admin panel.
 
@@ -1148,8 +1195,11 @@ class PaymentService:
         what the admin just did.
         """
         query = supabase.table("appointments").select("*").eq("id", booking_id)
-        if clinic_id and clinic_id != "default":
+        # KA-14: Always scope — 'default' sentinel removed
+        if clinic_id and clinic_id not in ("default", "none", "null"):
             query = query.eq("clinic_id", clinic_id)
+        else:
+            logger.warning(f"admin_cancel_confirmed_booking called without valid clinic_id for {booking_id}")
         booking_result = query.execute()
 
         if not booking_result.data:

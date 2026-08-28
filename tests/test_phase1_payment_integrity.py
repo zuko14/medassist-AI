@@ -177,9 +177,10 @@ def test_webhook_returns_500_on_unhandled_exception():
     """P1-8: Webhook router returns HTTP 500 on unexpected exception so Razorpay retries."""
     client = TestClient(app)
 
-    with patch("app.routers.razorpay_webhook.payment_service.process_payment_webhook", side_effect=RuntimeError("DB crashed")):
+    with patch("app.services.tenant.get_clinic_by_id", new_callable=AsyncMock, return_value={"id": "test-clinic"}), \
+         patch("app.routers.razorpay_webhook.payment_service.process_payment_webhook", side_effect=RuntimeError("DB crashed")):
         response = client.post(
-            "/webhooks/razorpay",
+            "/webhooks/razorpay/test-clinic",
             content=b'{"test": true}',
             headers={"X-Razorpay-Signature": "some_sig"},
         )

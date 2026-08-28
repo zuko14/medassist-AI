@@ -7,8 +7,11 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Run Test Suite
+  # ─────────────────────────────────────────────────────────────
+  # Job 1: Unit tests (no external services)
+  # ─────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
 
     env:
@@ -35,22 +38,115 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Smoke test requirements.txt specifiers
-        run: |
-          python -m pip install --upgrade pip
-          python -c "import urllib.parse; from pip._internal.req import parse_requirements; list(parse_requirements('requirements.txt', session='hack'))"
-
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run test suite
+      - name: Run unit tests
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ \
+            --ignore=tests/test_real_postgres_invariants.py \
+            -v --tb=short --junitxml=test-results-unit.xml
 
-      - name: Test summary
+      - name: Upload unit test results
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: test-results-unit.xml
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Real PostgreSQL integration tests (KA-07)
+  # ─────────────────────────────────────────────────────────────
+  integration-tests:
+    name: Real PostgreSQL Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kriya_test
+          POSTGRES_PASSWORD: kriya_test_pass
+          POSTGRES_DB: kriya_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: "postgresql://kriya_test:kriya_test_pass@localhost:5432/kriya_test"
+      WHATSAPP_TOKEN: "ci_test_token"
+      WHATSAPP_PHONE_NUMBER_ID: "000000000000"
+      WHATSAPP_VERIFY_TOKEN: "ci_verify_token"
+      GROQ_API_KEY: "ci_groq_key"
+      SUPABASE_URL: "https://ci-test.supabase.co"
+      SUPABASE_SERVICE_ROLE_KEY: "ci_service_role_key"
+      APP_ENV: "testing"
+      META_APP_SECRET: ""
+      META_VERIFY_TOKEN: "ci_verify_token"
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: "ci_admin_password"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dev dependencies
         run: |
-          echo "✅ MediAssist AI test suite completed"
-          echo "Python version: $(python --version)"
-          echo "Pytest version: $(python -m pytest --version)"
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run migration chain (fresh DB)
+        run: |
+          python scripts/migrate.py
+        env:
+          DATABASE_URL: "postgresql://kriya_test:kriya_test_pass@localhost:5432/kriya_test"
+
+      - name: Run real PostgreSQL integration tests
+        run: |
+          python -m pytest tests/test_real_postgres_invariants.py \
+            -v --tb=short --junitxml=test-results-integration.xml
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: test-results-integration.xml
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 3: Docker build verification (KA-01)
+  # ─────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build & Migration Path
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t kriya:ci-test .
+
+      - name: Verify scripts/migrate.py exists in image
+        run: |
+          docker run --rm kriya:ci-test ls -la scripts/migrate.py
+
+      - name: Verify psycopg2 importable in image
+        run: |
+          docker run --rm kriya:ci-test python -c "import psycopg2; print('psycopg2 OK')"
+
+      - name: Verify migrations directory exists in image
+        run: |
+          docker run --rm kriya:ci-test ls migrations/ | head -5

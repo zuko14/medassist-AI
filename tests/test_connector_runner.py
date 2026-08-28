@@ -14,7 +14,19 @@ def _mock_supabase_with_locked_at(locked_at_iso):
     mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(
         data=[{"id": "conn-1", "locked_at": locked_at_iso}]
     )
-    mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+    
+    # CAS logic simulation: if currently locked within lease, update matches 0 rows.
+    now = datetime.now(timezone.utc)
+    is_locked = False
+    if locked_at_iso is not None:
+        dt = datetime.fromisoformat(locked_at_iso.replace("Z", "+00:00"))
+        if (now - dt) < timedelta(minutes=5):
+            is_locked = True
+    update_data = [] if is_locked else [{"id": "conn-1"}]
+
+    mock_exec = MagicMock(data=update_data)
+    mock_table.update.return_value.eq.return_value.execute.return_value = mock_exec
+    mock_table.update.return_value.eq.return_value.or_.return_value.execute.return_value = mock_exec
     return mock_sb, mock_table
 
 
@@ -42,7 +54,7 @@ async def test_acquire_lock_denied_with_remaining_ttl_when_recently_locked():
 
     assert acquired is False
     assert remaining == 3  # 5-minute lease minus ~2 elapsed, rounded up
-    mock_table.update.assert_not_called()
+    mock_table.update.assert_called_once()
 
 
 @pytest.mark.asyncio

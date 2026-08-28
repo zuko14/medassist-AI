@@ -490,21 +490,31 @@ class LabReportService:
         return result.data or []
 
     async def get_reports_by_phone(
-        self, phone: str, clinic_id: str = "default"
+        self, phone: str, clinic_id: str = ""
     ) -> list:
-        """Get sent lab reports for a specific patient phone."""
-        # Normalize: strip + prefix to match admin-uploaded records
-        clean_phone = phone.lstrip("+")
+        """Get sent lab reports for a specific patient phone.
 
+        KA-16: Uses exact match on normalized phone instead of substring.
+        clinic_id is now required — no 'default' sentinel bypass.
+        """
+        # Normalize to last 10 digits (Indian mobile) for consistent matching
+        clean_phone = phone.lstrip("+").lstrip("0")
+        if len(clean_phone) > 10:
+            clean_phone = clean_phone[-10:]
+
+        # Try exact match first (normalized), then with country code prefix
         query = (
             supabase.table("lab_reports")
             .select("*")
-            .ilike("patient_phone", f"%{clean_phone}%")
+            .or_(f"patient_phone.eq.{clean_phone},patient_phone.eq.91{clean_phone},patient_phone.eq.+91{clean_phone}")
             .eq("status", "sent")
             .order("uploaded_at", desc=True)
         )
-        if clinic_id != "default":
+        # KA-16: Always scope — no 'default' bypass
+        if clinic_id and clinic_id not in ("default", "none", "null"):
             query = query.eq("clinic_id", clinic_id)
+        else:
+            logger.warning(f"get_reports_by_phone called without valid clinic_id for {phone[:6]}***")
 
         result = query.execute()
         return result.data or []

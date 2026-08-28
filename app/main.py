@@ -119,18 +119,54 @@ async def lifespan(app: FastAPI):
             logger.critical(f"FATAL: {error_msg}")
             raise RuntimeError(error_msg)
 
-        # Database schema pre-flight check for critical migrations (046, 047, 048)
+        # Database schema pre-flight: fail-closed schema-drift detection (KA-01)
+        # Compares highest applied migration in DB against highest .sql on disk.
+        # Refuses to start if migrations are missing — prevents serving on stale schema.
         try:
+            import os as _os
+            import re as _re
             from app.database import supabase
-            # 047: inbound_messages
+
+            # 1. Determine highest migration file on disk
+            migrations_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "migrations")
+            migration_files = [
+                f for f in _os.listdir(migrations_dir)
+                if _re.match(r"^\d{3}_", f) and f.endswith(".sql")
+            ]
+            if not migration_files:
+                raise RuntimeError("No migration files found in migrations/ directory")
+            highest_file = sorted(migration_files)[-1]
+            highest_file_num = int(highest_file[:3])
+
+            # 2. Query highest applied migration from DB
+            result = supabase.table("schema_migrations").select("name").order("name", desc=True).limit(1).execute()
+            if not result.data:
+                raise RuntimeError("schema_migrations table is empty — no migrations applied")
+            highest_applied = result.data[0]["name"]
+            match = _re.match(r"^(\d{3})_", highest_applied)
+            highest_applied_num = int(match.group(1)) if match else 0
+
+            # 3. Fail-closed: applied must be >= disk
+            if highest_applied_num < highest_file_num:
+                raise RuntimeError(
+                    f"Schema drift detected: DB has migration {highest_applied} "
+                    f"(#{highest_applied_num}) but disk has {highest_file} "
+                    f"(#{highest_file_num}). Run migrations before starting."
+                )
+
+            # 4. Verify critical tables still exist (regression guard)
             supabase.table("inbound_messages").select("id").limit(1).execute()
-            # 048: scheduler_locks
             supabase.table("scheduler_locks").select("job_name").limit(1).execute()
-            # 046: appointments.refund_id
             supabase.table("appointments").select("refund_id").limit(1).execute()
-            logger.info("✅ Database schema pre-flight check passed (migrations 046, 047, 048 verified).")
+
+            logger.info(
+                f"✅ Schema pre-flight passed: DB at {highest_applied} "
+                f"(disk highest: {highest_file})"
+            )
+        except RuntimeError:
+            raise
         except Exception as e:
-            error_msg = f"Database schema validation failed on {settings.app_env} boot: {e}. Required migrations (046, 047, 048) may be missing."
+            error_msg = f"Database schema validation failed on {settings.app_env} boot: {e}"
             logger.critical(f"FATAL: {error_msg}")
             raise RuntimeError(error_msg) from e
 

@@ -93,29 +93,35 @@ async def test_razorpay_webhook_with_default_path():
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            # 1. Test POST /webhooks/razorpay/default
+            # 1. Test POST /webhooks/razorpay/default (KA-05: rejected sentinel -> 400)
             resp_default = await ac.post(
                 "/webhooks/razorpay/default",
                 content=payload,
                 headers={"X-Razorpay-Signature": sig, "Content-Type": "application/json"},
             )
-            assert resp_default.status_code == 200
-            assert resp_default.json() == {"status": "ok"}
-            mock_send_text.assert_called_once()
-            assert "Payment Confirmed" in mock_send_text.call_args[0][2]
-            assert "Dr. T Rajsekhar" in mock_send_text.call_args[0][2]
+            assert resp_default.status_code == 400
+            assert resp_default.json() == {"status": "invalid_clinic_id"}
+            mock_send_text.assert_not_called()
 
-            mock_send_text.reset_mock()
-
-            # 2. Test POST /webhooks/razorpay (no path param)
+            # 2. Test POST /webhooks/razorpay (no path param -> 404 removed)
             resp_global = await ac.post(
                 "/webhooks/razorpay",
                 content=payload,
                 headers={"X-Razorpay-Signature": sig, "Content-Type": "application/json"},
             )
-            assert resp_global.status_code == 200
-            assert resp_global.json() == {"status": "ok"}
+            assert resp_global.status_code == 404
+
+            # 3. Test POST /webhooks/razorpay/{clinic_id} (valid UUID -> 200 OK)
+            resp_valid = await ac.post(
+                "/webhooks/razorpay/11111111-1111-1111-1111-111111111111",
+                content=payload,
+                headers={"X-Razorpay-Signature": sig, "Content-Type": "application/json"},
+            )
+            assert resp_valid.status_code == 200
+            assert resp_valid.json() == {"status": "ok"}
             mock_send_text.assert_called_once()
+            assert "Payment Confirmed" in mock_send_text.call_args[0][2]
+            assert "Dr. T Rajsekhar" in mock_send_text.call_args[0][2]
 
 
 @pytest.mark.asyncio

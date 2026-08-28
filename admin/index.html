@@ -1880,14 +1880,28 @@
 
 <!-- ═══ LAB CSV IMPORT MODAL ═══ -->
 <div class="modal-overlay" id="labCsvModal">
-    <div class="modal">
-        <h3>📥 Bulk Import Lab Tests</h3>
-        <p style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;">Upload a CSV with columns: <code>name, sample_type, price_rupees, turnaround_hours, fasting_required, prep_instructions</code></p>
+    <div class="modal" style="max-width:540px;">
+        <h3>📥 Bulk Import Diagnostic Catalog</h3>
+        <p style="color:var(--text3); font-size:0.85rem; margin-bottom:10px;">
+            Upload a CSV file to create or update diagnostic tests and pricing.
+        </p>
+        <div style="background:var(--bg2, #1e293b); border:1px solid var(--border, #334155); border-radius:6px; padding:10px 12px; margin-bottom:14px; font-size:0.8rem; line-height:1.4;">
+            <div style="font-weight:600; margin-bottom:4px; color:var(--text1);">Specifications & Policy:</div>
+            <div>• <b>Required Columns:</b> <code>name</code>, <code>price_rupees</code></div>
+            <div>• <b>Optional Columns:</b> <code>sample_type</code>, <code>turnaround_hours</code>, <code>fasting_required</code>, <code>prep_instructions</code></div>
+            <div>• <b>Limits:</b> Max 5 MB file size & 25,000 data rows.</div>
+            <div style="color:var(--accent, #38bdf8); margin-top:4px;">• <b>Atomic Guarantee:</b> If any row fails validation, zero changes are saved to the database.</div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <button class="btn btn-ghost btn-sm" onclick="downloadLabCsvTemplate()" style="font-size:0.8rem;">
+                📄 Download CSV Template
+            </button>
+        </div>
         <div class="field">
             <label>Select CSV File</label>
             <input type="file" id="f-labCsvFile" accept=".csv">
         </div>
-        <div id="labCsvResults" style="display:none; margin-top:10px; font-size:0.85rem;"></div>
+        <div id="labCsvResults" style="display:none; margin-top:12px; font-size:0.85rem; max-height:180px; overflow-y:auto;"></div>
         <div class="modal-actions" style="margin-top:16px;">
             <button class="btn btn-ghost" onclick="closeLabCsvModal()">Close</button>
             <button class="btn btn-accent" id="btnUploadLabCsv" onclick="submitLabTestCsv()">Upload & Import</button>
@@ -3312,6 +3326,26 @@ function closeLabCsvModal() {
     if (modal) modal.classList.remove('open');
 }
 
+async function downloadLabCsvTemplate() {
+    try {
+        const resp = await fetch(API + '/admin/lab-tests/csv-template', {
+            headers: { Authorization: auth },
+        });
+        if (!resp.ok) throw new Error('Failed to download template');
+        const blob = await resp.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'lab_tests_template.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (e) {
+        toast(e.message || 'Download failed', true);
+    }
+}
+
 async function submitLabTestCsv() {
     const fileInput = document.getElementById('f-labCsvFile');
     if (!fileInput || !fileInput.files || !fileInput.files.length) {
@@ -3319,6 +3353,13 @@ async function submitLabTestCsv() {
         return;
     }
     const file = fileInput.files[0];
+
+    // Client-side 5 MB file size guard
+    if (file.size > 5 * 1024 * 1024) {
+        toast('File exceeds maximum size limit of 5 MB', true);
+        return;
+    }
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -3333,17 +3374,41 @@ async function submitLabTestCsv() {
             body: formData,
         });
         const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || 'Import failed');
+
+        if (resp.status === 422) {
+            // Validation errors occurred (zero changes made)
+            if (resEl) {
+                resEl.style.display = 'block';
+                let html = `<div style="color:var(--red, #f87171); font-weight:600; margin-bottom:6px;">❌ ${esc(data.message || 'Import Rejected')}</div>`;
+                if (data.errors && data.errors.length) {
+                    html += `<table style="width:100%; border-collapse:collapse; font-size:0.75rem; text-align:left;">`;
+                    html += `<tr style="border-bottom:1px solid var(--border);"><th>Row</th><th>Column</th><th>Problem</th><th>Expected</th></tr>`;
+                    for (const err of data.errors.slice(0, 50)) {
+                        html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">`;
+                        html += `<td>${err.row}</td><td><code>${esc(err.column)}</code></td><td>${esc(err.problem)}</td><td>${esc(err.expected)}</td>`;
+                        html += `</tr>`;
+                    }
+                    if (data.errors.length > 50) {
+                        html += `<tr><td colspan="4" style="color:var(--text3); font-style:italic;">...and ${data.errors.length - 50} more errors</td></tr>`;
+                    }
+                    html += `</table>`;
+                }
+                resEl.innerHTML = html;
+            }
+            toast('Import rejected due to validation errors. Zero records modified.', true);
+            return;
+        }
+
+        if (!resp.ok) {
+            throw new Error(data.detail || 'Import failed');
+        }
 
         if (resEl) {
             resEl.style.display = 'block';
-            let html = `<div style="color:var(--green); font-weight:600;">✅ Created: ${data.created}, Updated: ${data.updated}</div>`;
-            if (data.errors && data.errors.length) {
-                html += `<div style="color:var(--red); margin-top:6px;">⚠️ Errors (${data.errors.length}):<br>${data.errors.map(e => esc(e)).join('<br>')}</div>`;
-            }
+            let html = `<div style="color:var(--green, #4ade80); font-weight:600;">✅ Success: ${data.created} created, ${data.updated} updated (Total: ${data.total_imported})</div>`;
             resEl.innerHTML = html;
         }
-        toast(`Import finished: ${data.created} created, ${data.updated} updated`);
+        toast(`Import successful: ${data.created} created, ${data.updated} updated`);
         loadLabTests();
     } catch (e) {
         toast(e.message || 'Import failed', true);

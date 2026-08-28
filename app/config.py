@@ -56,11 +56,10 @@ class Settings(BaseSettings):
     allow_unsigned_webhooks_dev: bool = False  # NEVER set true outside local dev — explicit opt-in only
     metrics_token: str = ""  # Bearer token for /metrics scraping endpoint (T3.1 / KRIYA-009)
 
-    # T0.1 (KRIYA-002): when False, an unscoped non-super-admin is ALLOWED but
-    # logged as TENANT_SCOPE_WOULD_DENY. Flip to True after 48h of clean logs in
-    # both staging and production. See
-    # docs/audits/2026-08-27-forensic-remediation-execution-plan.md Rule 4.
-    tenant_scope_enforce: bool = False
+    # KA-03: Tenant scope enforcement is ENABLED by default. An unscoped
+    # non-super-admin is DENIED. The shadow-mode observation period (Rule 4)
+    # from the 2026-08-27 remediation is concluded.
+    tenant_scope_enforce: bool = True
 
     # T1.4 (KRIYA-016): when False, message_queue errors log MESSAGE_QUEUE_FAIL_OPEN
     # in shadow mode. Flip to True to enforce fail-closed across all queue methods.

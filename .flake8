@@ -1,3 +1,7 @@
 [flake8]
 max-line-length = 88
 extend-ignore = E203
+# KA-22: B110 catches try-except-pass (silent failure surface)
+# B001 catches bare except without exception type
+extend-select = B110,B001
+exclude = venv,__pycache__,.git,migrations,tmp_*

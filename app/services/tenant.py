@@ -10,7 +10,16 @@ import time
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL_SECONDS = 30  # 30 seconds TTL (T2.2 / KRIYA-011) so clinic deactivation/plan changes propagate fast across horizontal workers
+
+# KA-19: DOCUMENTED PROPAGATION WINDOW
+# The tenant cache is process-local with a 30s TTL. With 4 production processes
+# (2 instances × 2 workers), invalidate_tenant_cache() only clears the calling
+# process's copy. After an admin suspends a clinic, the other 3 workers continue
+# serving it for up to 30 seconds. This is a bounded, documented trade-off:
+# - Lowering TTL to 0 would cause a DB query on every inbound message (unacceptable load)
+# - A shared cache (Redis/Memcached) adds infrastructure complexity disproportionate to risk
+# - For DPDP deletion requests: coordinate via a separate flag checked pre-message-process
+CACHE_TTL_SECONDS = 30  # 30s — max propagation delay for clinic state changes
 
 # In-memory caches with TTL support
 _tenant_cache: dict[str, dict] = {}

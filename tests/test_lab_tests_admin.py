@@ -247,11 +247,12 @@ class TestLabTestsCsvImport:
                 files={"file": ("tests.csv", io.BytesIO(csv_content.encode()), "text/csv")},
             )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 422
         body = resp.json()
-        assert body["created"] == 1
+        assert body["created"] == 0
         assert len(body["errors"]) == 1
-        assert "Row 2" in body["errors"][0]
+        assert body["errors"][0]["row"] == 2
+        assert "Price must be a positive number" in body["errors"][0]["problem"]
 
     def test_accepts_real_world_aliased_headers(self):
         """Matches the actual ACCUMAX CHATBOT.csv export format: 'TEST NAME,PRICE IN RUPEES'."""

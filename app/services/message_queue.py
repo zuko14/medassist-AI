@@ -620,16 +620,16 @@ async def acquire_phone_lock_with_timeout(
     phone: str,
     timeout: float = PHONE_LOCK_TIMEOUT_SECONDS,
 ) -> bool:
-    """Acquire the per-phone asyncio lock with a timeout.
+    """Acquire the per-phone lock with a timeout — distributed + local.
 
-    If the lock cannot be acquired within `timeout` seconds (e.g., because
-    a previous message for the same phone is still being processed by Groq),
-    this returns False instead of blocking indefinitely.
+    KA-12: With 4 production processes (2 instances × 2 workers), the
+    per-phone asyncio.Lock only serializes within one process. Two messages
+    from the same patient landing on different workers can execute
+    handle_message() concurrently, corrupting FSM state.
 
-    This prevents cascading delays when:
-      - A patient sends rapid consecutive messages
-      - Groq API has a latency spike
-      - Meta retries cause lock contention
+    Fix: Add a distributed lock layer using the scheduler_locks table
+    (same infrastructure as distributed_job_lock). The local asyncio.Lock
+    remains as a cheap first-level filter within each process.
 
     Args:
         phone: Patient phone number.
@@ -640,6 +640,25 @@ async def acquire_phone_lock_with_timeout(
         True  → Lock acquired. Caller MUST release it via the lock's context.
         False → Timed out. Caller should defer or queue the message.
     """
+    # Layer 1: Distributed lock (cross-process)
+    try:
+        from app.services.distributed_lock import distributed_lock_manager
+        dist_job_name = f"phone_{phone[-10:]}"  # Normalize to last 10 digits
+        dist_acquired = await distributed_lock_manager.acquire(
+            dist_job_name, lease_seconds=20
+        )
+        if not dist_acquired:
+            logger.info(
+                f"Distributed phone lock held by another process for {phone[:6]}*** — deferring"
+            )
+            return False
+    except Exception as e:
+        # KA-12: Fail open on distributed lock failure — the local lock
+        # still provides intra-process safety, and the DB-level message
+        # idempotency (processed_messages UNIQUE) catches true duplicates.
+        logger.warning(f"Distributed phone lock acquisition error (proceeding with local): {e}")
+
+    # Layer 2: Local asyncio.Lock (intra-process)
     lock = await get_phone_lock(phone)
     try:
         await asyncio.wait_for(lock.acquire(), timeout=timeout)
@@ -649,6 +668,13 @@ async def acquire_phone_lock_with_timeout(
             f"Phone lock timeout ({timeout}s) for {phone[:6]}*** — "
             f"previous message still processing. Deferring."
         )
+        # Release distributed lock since we won't be using it
+        try:
+            from app.services.distributed_lock import distributed_lock_manager
+            dist_job_name = f"phone_{phone[-10:]}"
+            await distributed_lock_manager.release(dist_job_name)
+        except Exception:
+            pass
         # Release our refcount since we won't be using the lock
         await release_phone_lock(phone)
         return False

@@ -15,11 +15,13 @@ from fastapi import (
     Depends,
     HTTPException,
     Request,
+    Response,
     status,
     UploadFile,
     File,
     Form,
 )
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -30,6 +32,7 @@ from app.database import (
     check_in_appointment,
     call_next_patient,
     get_patient_queue_status,
+    invalidate_doctor_cache,
 )
 from app.services.tenant import (
     ALL_FEATURES,
@@ -102,13 +105,13 @@ class AdminUser(str):
         if self.role == "super_admin":
             return True
         if not self.clinic_id:
-            if not settings.tenant_scope_enforce:
-                logger.error(
-                    f"TENANT_SCOPE_WOULD_DENY user='{self.username}' "
-                    f"role={self.role} target='{target_clinic_id}' "
-                    f"— unscoped non-super-admin account"
-                )
-                return True          # shadow mode, ONE release only (Rule 4)
+            # KA-03: Unscoped non-super-admin is ALWAYS denied.
+            # Shadow mode has been removed — fail closed.
+            logger.error(
+                f"TENANT_SCOPE_DENIED user='{self.username}' "
+                f"role={self.role} target='{target_clinic_id}' "
+                f"— unscoped non-super-admin account"
+            )
             return False
         if target_clinic_id == "default":
             return True              # caller resolves 'default' -> self.clinic_id
@@ -1203,6 +1206,7 @@ async def create_doctor(
             details={"name": new_doctor.get("name"), "branch_id": branch_id_to_assign},
             ip_address=client_ip,
         )
+        invalidate_doctor_cache(clinic_id=effective_clinic_id)
 
         return new_doctor
     except HTTPException:
@@ -1321,6 +1325,7 @@ async def update_doctor(
             details={"updated_fields": list(update_data.keys()), "branch_id": requested_branch_id},
             ip_address=client_ip,
         )
+        invalidate_doctor_cache(clinic_id=effective_clinic_id)
 
         return updated_doctor
     except HTTPException:
@@ -1375,6 +1380,7 @@ async def delete_doctor(
             resource_id=doctor_id,
             ip_address=client_ip,
         )
+        invalidate_doctor_cache(clinic_id=effective_clinic_id)
 
         return {"success": True}
     except HTTPException:
@@ -1552,6 +1558,18 @@ async def delete_lab_test(
         )
 
 
+CSV_MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
+CSV_MAX_DATA_ROWS = 25_000
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_csv_cell(value: str) -> str:
+    """Neutralize spreadsheet formula injection."""
+    if value and (value.startswith(_CSV_FORMULA_PREFIXES) or value.lstrip().startswith(_CSV_FORMULA_PREFIXES)):
+        return "'" + value
+    return value
+
+
 _CSV_HEADER_ALIASES: dict[str, set[str]] = {
     "name": {"name", "test name", "testname", "test_name"},
     "price_rupees": {
@@ -1590,20 +1608,33 @@ async def import_lab_tests_csv(
     clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
 ):
-    """Bulk-import lab tests from a CSV file.
+    """Atomic bulk-import lab tests from a CSV file.
 
-    Expected columns: name,sample_type,price_rupees,turnaround_hours,
-    fasting_required,prep_instructions (aliases accepted, case-insensitive).
-    Each row is upserted by (clinic_id, name). Malformed rows are reported
-    individually — a single bad row never aborts the whole import.
+    Pipeline:
+      1. File size check (max 5MB)
+      2. UTF-8 decoding
+      3. Header presence & canonical column resolution (name, price_rupees required)
+      4. Complete in-memory pre-flight row validation (max 25k rows, ranges, types, intra-file duplicates)
+      5. Rejection gate: if any validation error, return 422 with structured error list and mutate 0 records
+      6. Database upsert phase for validated rows
     """
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
     raw = await file.read()
+
+    # 1. File size guard
+    if len(raw) > CSV_MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File exceeds maximum size limit of {CSV_MAX_FILE_BYTES // (1024 * 1024)} MB.",
+        )
+
+    # 2. UTF-8 decoding
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded CSV")
 
+    # 3. Header check
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
         raise HTTPException(status_code=400, detail="CSV file has no header row")
@@ -1619,62 +1650,210 @@ async def import_lab_tests_csv(
             ),
         )
 
-    created, updated, errors = 0, 0, []
+    # 4. In-memory pre-flight row validation (zero DB writes)
+    validated_rows = []
+    errors = []
+    seen_names: dict[str, int] = {}
+
     for i, raw_row in enumerate(reader, start=2):  # header is row 1
-        row = {header_map.get(k, k): v for k, v in raw_row.items() if k is not None}
-        name = (row.get("name") or "").strip()
-        price_raw = (row.get("price_rupees") or "").strip().replace(",", "").replace("₹", "")
+        if i - 1 > CSV_MAX_DATA_ROWS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"CSV exceeds maximum allowed limit of {CSV_MAX_DATA_ROWS:,} data rows.",
+            )
+
+        row = {
+            header_map.get(k, k): _sanitize_csv_cell(v or "")
+            for k, v in raw_row.items()
+            if k is not None
+        }
+        name = row.get("name", "").strip()
+        price_raw = (
+            row.get("price_rupees", "").strip().replace(",", "").replace("₹", "")
+        )
+
+        # Validate name
         if not name:
-            errors.append(f"Row {i}: missing name")
+            errors.append(
+                {
+                    "row": i,
+                    "column": "name",
+                    "value": "",
+                    "problem": "Missing test name.",
+                    "expected": "Non-empty text",
+                }
+            )
             continue
+        if len(name) > 200:
+            errors.append(
+                {
+                    "row": i,
+                    "column": "name",
+                    "value": name[:50] + "...",
+                    "problem": "Name exceeds 200 characters.",
+                    "expected": "≤ 200 characters",
+                }
+            )
+            continue
+
+        # Validate price
         try:
             price_rupees_val = float(price_raw)
             if price_rupees_val <= 0:
-                raise ValueError
+                raise ValueError("Price must be positive")
         except ValueError:
-            errors.append(f"Row {i} ('{name}'): price_rupees must be a positive number")
+            errors.append(
+                {
+                    "row": i,
+                    "column": "price_rupees",
+                    "value": price_raw,
+                    "problem": "Price must be a positive number.",
+                    "expected": "Positive number (e.g. 500)",
+                }
+            )
             continue
 
-        turnaround_raw = (row.get("turnaround_hours") or "").strip()
-        test_data = {
-            "clinic_id": effective_clinic_id,
-            "name": name,
-            "price_paise": int(round(price_rupees_val * 100)),
-            "sample_type": (row.get("sample_type") or "").strip() or None,
-            "turnaround_hours": int(turnaround_raw) if turnaround_raw.isdigit() else None,
-            "fasting_required": (row.get("fasting_required") or "").strip().lower() in ("true", "1", "yes"),
-            "prep_instructions": (row.get("prep_instructions") or "").strip() or None,
-        }
-
-        try:
-            existing = (
-                # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("lab_tests")
-                .select("id")
-                .eq("clinic_id", effective_clinic_id)
-                .eq("name", name)
-                .execute()
+        # Duplicate check within the CSV file
+        name_lower = name.lower()
+        if name_lower in seen_names:
+            errors.append(
+                {
+                    "row": i,
+                    "column": "name",
+                    "value": name,
+                    "problem": f"Duplicate test name in CSV (first defined at row {seen_names[name_lower]}).",
+                    "expected": "Unique test names within file",
+                }
             )
-            if existing.data:
-                # unscoped: CSV import update test with effective_clinic_id
-                supabase.table("lab_tests").update(test_data).eq("id", existing.data[0]["id"]).execute()
-                updated += 1
+            continue
+        seen_names[name_lower] = i
+
+        # Optional turnaround_hours
+        turnaround_raw = row.get("turnaround_hours", "").strip()
+        turnaround = None
+        if turnaround_raw:
+            if turnaround_raw.isdigit() and int(turnaround_raw) > 0:
+                turnaround = int(turnaround_raw)
             else:
-                # unscoped: insert lab test with effective_clinic_id
-                supabase.table("lab_tests").insert(test_data).execute()
-                created += 1
-        except Exception as e:
-            errors.append(f"Row {i} ('{name}'): {_friendly_db_error(e, 'save failed')}")
+                errors.append(
+                    {
+                        "row": i,
+                        "column": "turnaround_hours",
+                        "value": turnaround_raw,
+                        "problem": "Turnaround hours must be a positive integer.",
+                        "expected": "Positive integer (e.g. 24)",
+                    }
+                )
+                continue
+
+        # Optional sample_type and prep_instructions lengths
+        sample_type = row.get("sample_type", "").strip() or None
+        if sample_type and len(sample_type) > 100:
+            errors.append(
+                {
+                    "row": i,
+                    "column": "sample_type",
+                    "value": sample_type[:50],
+                    "problem": "Sample type exceeds 100 characters.",
+                    "expected": "≤ 100 characters",
+                }
+            )
+            continue
+
+        prep_instructions = row.get("prep_instructions", "").strip() or None
+        if prep_instructions and len(prep_instructions) > 500:
+            errors.append(
+                {
+                    "row": i,
+                    "column": "prep_instructions",
+                    "value": prep_instructions[:50],
+                    "problem": "Prep instructions exceed 500 characters.",
+                    "expected": "≤ 500 characters",
+                }
+            )
+            continue
+
+        fasting = row.get("fasting_required", "").strip().lower() in ("true", "1", "yes")
+
+        validated_rows.append(
+            {
+                "clinic_id": effective_clinic_id,
+                "name": name,
+                "price_paise": int(round(price_rupees_val * 100)),
+                "sample_type": sample_type,
+                "turnaround_hours": turnaround,
+                "fasting_required": fasting,
+                "prep_instructions": prep_instructions,
+            }
+        )
+
+    # 5. Rejection gate: if any validation error occurred, abort entire import
+    if errors:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "created": 0,
+                "updated": 0,
+                "errors": errors,
+                "message": f"Import rejected: {len(errors)} validation error(s). Zero records were modified.",
+            },
+        )
+
+    if not validated_rows:
+        raise HTTPException(status_code=400, detail="CSV contains no valid data rows.")
+
+    # unscoped: fetching existing lab test names within verified clinic scope for upsert matching
+    existing_result = supabase.table("lab_tests").select("id, name").eq("clinic_id", effective_clinic_id).execute()
+    existing_map = {r["name"].lower(): r["id"] for r in (existing_result.data or [])}
+
+    created, updated = 0, 0
+    for test_data in validated_rows:
+        name_lower = test_data["name"].lower()
+        if name_lower in existing_map:
+            # unscoped: updating existing lab test within verified clinic
+            supabase.table("lab_tests").update(test_data).eq("id", existing_map[name_lower]).execute()
+            updated += 1
+        else:
+            # unscoped: inserting new lab test within verified clinic
+            supabase.table("lab_tests").insert(test_data).execute()
+            created += 1
 
     await log_admin_action(
         user=user,
         action="import_lab_tests_csv",
         resource_type="lab_test",
         resource_id=None,
-        details={"created": created, "updated": updated, "errors": len(errors)},
+        details={"created": created, "updated": updated, "total": len(validated_rows)},
         ip_address="unknown",
     )
-    return {"created": created, "updated": updated, "errors": errors}
+    return {
+        "created": created,
+        "updated": updated,
+        "total_imported": len(validated_rows),
+        "errors": [],
+    }
+
+
+@router.get("/lab-tests/csv-template")
+async def download_lab_test_csv_template(
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Download a canonical CSV template for lab tests / diagnostic services catalog import."""
+    template_content = (
+        "name,price_rupees,sample_type,turnaround_hours,fasting_required,prep_instructions\n"
+        "Complete Blood Count (CBC),350,Blood,24,false,No special preparation needed\n"
+        "Fasting Blood Sugar (FBS),150,Blood,12,true,Fast for 8-10 hours prior to sample collection\n"
+        "Thyroid Profile (T3 T4 TSH),750,Blood,24,false,Can be taken at any time of day\n"
+        "Lipid Profile,600,Blood,24,true,12 hours overnight fasting mandatory\n"
+        "Urine Routine & Microscopy,180,Urine,12,false,Collect clean catch midstream sample\n"
+    )
+    return Response(
+        content=template_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="lab_tests_template.csv"'
+        },
+    )
 
 
 @router.put("/lab-collection-window")
@@ -4191,6 +4370,7 @@ async def assign_doctor_to_branch(
             details={"session": body.session},
             ip_address=client_ip,
         )
+        invalidate_doctor_cache(clinic_id=branch_clinic_id)
 
         return result.data[0]
     except HTTPException:
@@ -4213,7 +4393,7 @@ async def remove_doctor_from_branch(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Remove a doctor from a branch."""
-    resolve_owned_branch(user, branch_id)
+    branch = resolve_owned_branch(user, branch_id)
     try:
         # unscoped: doctor branch association
         supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
@@ -4228,6 +4408,7 @@ async def remove_doctor_from_branch(
             resource_id=f"{branch_id}:{doctor_id}",
             ip_address=client_ip,
         )
+        invalidate_doctor_cache(clinic_id=branch.get("clinic_id"))
 
         return {"success": True}
     except HTTPException:
@@ -4248,7 +4429,7 @@ async def update_doctor_branch_session(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Update a doctor's session assignment at a branch."""
-    resolve_owned_branch(user, branch_id)
+    branch = resolve_owned_branch(user, branch_id)
     try:
         result = (
         # unscoped: doctor branch association
@@ -4272,6 +4453,7 @@ async def update_doctor_branch_session(
             details={"session": body.session},
             ip_address=client_ip,
         )
+        invalidate_doctor_cache(clinic_id=branch.get("clinic_id"))
 
         return result.data[0]
     except HTTPException:

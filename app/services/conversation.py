@@ -103,16 +103,26 @@ class ConversationManager:
     ) -> None:
         if new_context is None:
             new_context = {}
-        from app.database import get_conversation
         from app.database import supabase
 
-        session = await get_conversation(clinic["id"], phone)
-        if not session:
-            return
-        existing = session.get("context", {}) or {}
+        existing = {}
+        session_state = None
+        try:
+            conv_res = (
+                supabase.table("conversations")
+                .select("context, state")
+                .eq("clinic_id", clinic["id"])
+                .eq("phone", phone)
+                .execute()
+            )
+            if conv_res and conv_res.data and isinstance(conv_res.data, list) and len(conv_res.data) > 0 and isinstance(conv_res.data[0], dict):
+                existing = conv_res.data[0].get("context", {}) or {}
+                session_state = conv_res.data[0].get("state")
+        except Exception:
+            pass
 
         # Reset menu_shown to False if transitioning BACK to main_menu from another state
-        if new_state == "main_menu" and session.get("state") != "main_menu":
+        if new_state == "main_menu" and session_state != "main_menu":
             new_context["menu_shown"] = False
 
         merged = {**existing, **new_context}
@@ -127,9 +137,12 @@ class ConversationManager:
         if new_state == "main_menu":
             update_payload["booking_context_expires_at"] = None
 
-        supabase.table("conversations").update(update_payload).eq(
-            "clinic_id", clinic["id"]
-        ).eq("phone", phone).execute()
+        try:
+            supabase.table("conversations").update(update_payload).eq(
+                "clinic_id", clinic["id"]
+            ).eq("phone", phone).execute()
+        except Exception as e:
+            logger.warning(f"Error updating conversation state: {e}")
 
     async def get_patient_language(self, clinic: dict, phone: str) -> str:
         from app.database import supabase
@@ -192,6 +205,7 @@ class ConversationManager:
                     {
                         "phone": phone,
                         "display_phone": clinic.get("phone", ""),
+                        "clinic_id": clinic_id,  # KA-20: Promote to column for per-tenant DLQ triage
                         "payload": json.dumps(
                             {
                                 "message": message[:500],
@@ -235,6 +249,12 @@ class ConversationManager:
             # Always release the lock and decrement refcount
             phone_lock.release()
             await release_phone_lock(phone)
+            # KA-12: Release distributed lock
+            try:
+                from app.services.distributed_lock import distributed_lock_manager
+                await distributed_lock_manager.release(f"phone_{phone[-10:]}")
+            except Exception:
+                pass
 
     async def _handle_message_locked(
         self,
@@ -539,18 +559,80 @@ class ConversationManager:
                 .select("*")
                 .eq("clinic_id", clinic["id"])
                 .eq("id", message)
+                .eq("is_active", True)
                 .execute()
             )
-            if res.data:
-                doc = res.data[0]
-                context = session.get("context", {})
-                context["doctor"] = doc
-                context["doctor_name"] = doc["name"]
-                context["department"] = doc["department"]
-                context["selected_doctor_id"] = message
+            if not res.data:
                 lang = await get_lang(clinic, phone)
-                await self._show_date_picker(clinic, phone, context, lang)
-                await self.update_state(clinic, phone, "selecting_date", context)
+                no_doc_msg = {
+                    "en": "This doctor is no longer available for online booking. Please choose another doctor.",
+                    "hi": "यह डॉक्टर अब ऑनलाइन बुकिंग के लिए उपलब्ध नहीं हैं। कृपया अन्य डॉक्टर चुनें।",
+                    "te": "ఈ డాక్టర్ ఇప్పుడు ఆన్‌లైన్ బుకింగ్ కోసం అందుబాటులో లేరు. దయచేసి మరొక డాక్టర్‌ను ఎంచుకోండి.",
+                }.get(lang, "This doctor is no longer available. Please choose another doctor.")
+                await self.whatsapp.send_text(clinic, phone, no_doc_msg)
+                await self._show_doctors(clinic, phone, lang)
+                return
+
+            doc = res.data[0]
+            lang = await get_lang(clinic, phone)
+
+            # Fetch branch assignments for hierarchical display
+            branch_res = (
+                supabase.table("doctor_branches")
+                .select("branch_id, session, branches(name, short_name, address)")
+                .eq("doctor_id", doc["id"])
+                .execute()
+            )
+            branches = branch_res.data or []
+
+            session_label = {
+                "morning": "🌅 Morning",
+                "evening": "🌆 Evening",
+                "both": "🌅 Morning & 🌆 Evening",
+            }
+            spec = doc.get("specialization")
+            dept = doc.get("department", "")
+            sub_title = f"🩺 {spec} | {dept}" if spec else (f"🩺 {dept}" if dept else "")
+            detail_lines = [f"👨‍⚕️ *{doc.get('name', 'Doctor')}*"]
+            if sub_title:
+                detail_lines.append(sub_title)
+            if doc.get("consultation_fee") is not None:
+                detail_lines.append(f"💰 Consultation Fee: ₹{doc['consultation_fee']}")
+            if doc.get("rating"):
+                detail_lines.append(f"⭐ Rating: {doc['rating']}")
+            detail_lines.append("")
+
+            if branches:
+                detail_lines.append("📍 *Available Locations & Sessions:*")
+                for b in branches:
+                    binfo = b.get("branches") or {}
+                    bname = binfo.get("short_name") or binfo.get("name", "Branch")
+                    sess = session_label.get(b.get("session", "both"), "All sessions")
+                    detail_lines.append(f"• *{bname}*: {sess}")
+                detail_lines.append("")
+
+            await self.whatsapp.send_text(clinic, phone, "\n".join(detail_lines))
+
+            context = session.get("context", {})
+            context["doctor"] = doc
+            context["doctor_name"] = doc["name"]
+            context["department"] = doc["department"]
+            context["selected_doctor_id"] = message
+
+            # If multi-branch doctor and no branch pre-selected, ask patient to pick branch
+            if len(branches) > 1 and not context.get("branch_id"):
+                await self._send_doctor_branch_selection(clinic, phone, doc, branches, lang)
+                await self.update_state(clinic, phone, "selecting_branch", context)
+                return
+            elif len(branches) == 1 and branches[0].get("branch_id"):
+                # Single branch assigned — auto-attach
+                binfo = branches[0].get("branches") or {}
+                context["branch_id"] = branches[0]["branch_id"]
+                context["branch_name"] = binfo.get("short_name") or binfo.get("name", "")
+                context["branch_session"] = branches[0].get("session", "both")
+
+            await self._show_date_picker(clinic, phone, context, lang)
+            await self.update_state(clinic, phone, "selecting_date", context)
             return
 
         # Process based on state and intent
@@ -1244,6 +1326,55 @@ class ConversationManager:
                 {**context, "for_self": True},
             )
 
+    async def _send_doctor_branch_selection(
+        self, clinic: dict, phone: str, doctor: dict, branches: list, lang: str
+    ) -> None:
+        """Send branch selection for a doctor who works at multiple branches."""
+        msg = {
+            "en": f"Dr. {doctor['name']} is available at multiple locations. Please select your preferred branch:",
+            "hi": f"डॉ. {doctor['name']} कई स्थानों पर उपलब्ध हैं। कृपया अपनी पसंदीदा शाखा चुनें:",
+            "te": f"డాక్టర్ {doctor['name']} అనేక స్థానాల్లో అందుబాటులో ఉన్నారు. దయచేసి మీ శాఖను ఎంచుకోండి:",
+        }.get(lang, f"Dr. {doctor['name']} is available at multiple branches. Select one:")
+
+        if len(branches) <= 3:
+            buttons = []
+            for b in branches[:3]:  # WhatsApp buttons max 3
+                binfo = b.get("branches") or {}
+                bname = binfo.get("short_name") or binfo.get("name", "Branch")
+                sess = b.get("session", "both")
+                sess_tag = " (AM)" if sess == "morning" else (" (PM)" if sess == "evening" else "")
+                buttons.append(
+                    {
+                        "id": f"branch_{b['branch_id']}",
+                        "title": f"{bname}{sess_tag}"[:20],
+                    }
+                )
+            await self.whatsapp.send_interactive_buttons(
+                clinic, phone, body=msg, buttons=buttons
+            )
+        else:
+            rows = []
+            for b in branches[:10]:
+                binfo = b.get("branches") or {}
+                bname = binfo.get("short_name") or binfo.get("name", "Branch")
+                sess = b.get("session", "both")
+                sess_label = "Morning" if sess == "morning" else ("Evening" if sess == "evening" else "Both Sessions")
+                rows.append(
+                    {
+                        "id": f"branch_{b['branch_id']}",
+                        "title": bname[:24],
+                        "description": f"Hours: {sess_label}"[:72],
+                    }
+                )
+            await self.whatsapp.send_interactive_list(
+                clinic,
+                phone=phone,
+                header="Select Branch",
+                body=msg,
+                button_text="Select",
+                sections=[{"title": "Branches", "rows": rows}],
+            )
+
     async def _send_branch_selection(
         self, clinic: dict, phone: str, branches: list, lang: str
     ) -> None:
@@ -1277,24 +1408,24 @@ class ConversationManager:
         header_text = {
             "en": "Select Location",
             "hi": "स्थान चुनें",
-            "te": "స్థానం ఎంచుకోండి",
+            "te": "స్థానాన్ని ఎంచుకోండి",
         }.get(lang, "Select Location")
 
         body_text = {
-            "en": "🏥 Please select your preferred branch:",
-            "hi": "🏥 कृपया अपनी पसंदीदा शाखा चुनें:",
-            "te": "🏥 దయచేసి మీకు ఇష్టమైన శాఖను ఎంచుకోండి:",
-        }.get(lang, "🏥 Please select your preferred branch:")
+            "en": "Please choose your preferred clinic location:",
+            "hi": "कृपया अपना पसंदीदा क्लिनिक स्थान चुनें:",
+            "te": "దయచేసి మీ ప్రాధాన్యత గల క్లినిక్ స్థానాన్ని ఎంచుకోండి:",
+        }.get(lang, "Please choose your preferred clinic location:")
 
         button_text = {
-            "en": "Select Branch",
-            "hi": "शाखा चुनें",
-            "te": "శాఖ ఎంచుకోండి",
-        }.get(lang, "Select Branch")
+            "en": "Choose Location",
+            "hi": "स्थान चुनें",
+            "te": "స్థానాన్ని ఎంచుకోండి",
+        }.get(lang, "Choose Location")
 
         await self.whatsapp.send_interactive_list(
             clinic,
-            phone,
+            phone=phone,
             header=header_text,
             body=body_text,
             button_text=button_text,
@@ -1345,6 +1476,12 @@ class ConversationManager:
                     )
                     await self.update_state(clinic, phone, "main_menu", new_context)
                     await self._send_main_menu(clinic, phone, lang)
+                    return
+
+                # If doctor was pre-selected from Our Doctors, jump straight to date selection
+                if new_context.get("doctor") or new_context.get("selected_doctor_id"):
+                    await self._show_date_picker(clinic, phone, new_context, lang)
+                    await self.update_state(clinic, phone, "selecting_date", new_context)
                     return
 
                 # Continue with booking flow
@@ -1762,26 +1899,18 @@ class ConversationManager:
     async def _show_department_list(
         self, clinic: dict, phone: str, context: dict, lang: str
     ) -> None:
-        """Show list of departments (branch-filtered when branch_id in context)."""
+        """Show list of departments dynamically derived from active doctors."""
         from app.services.tenant import has_feature
 
-        if not has_feature(clinic, "multi_department"):
-            dept = clinic.get("config", {}).get(
-                "default_department", "General Medicine"
-            )
-            await self._show_doctor_list(clinic, phone, dept, context, lang)
-            return
-
         branch_id = context.get("branch_id")
-
         from app.database import supabase
 
         if branch_id:
-            # Get departments from doctors assigned to this branch
+            # Get departments from active doctors assigned to this branch
             from app.database import get_doctors_at_branch
 
             branch_doctors = await get_doctors_at_branch(clinic["id"], branch_id)
-            dept_names = list(set([d["department"] for d in branch_doctors]))
+            dept_names = sorted(list(set(d["department"] for d in branch_doctors if d.get("is_active", True) and d.get("department"))))
         else:
             result = (
                 supabase.table("doctors")
@@ -1790,14 +1919,22 @@ class ConversationManager:
                 .eq("is_active", True)
                 .execute()
             )
-            dept_names = list(set([r["department"] for r in (result.data or [])]))
+            dept_names = sorted(list(set(r["department"] for r in (result.data or []) if r.get("department"))))
 
+        # Q1: If no active doctors exist, do NOT fall back to General Medicine. Show clear message.
         if not dept_names:
-            dept_names = ["General Medicine"]
+            no_svc_msg = {
+                "en": "No medical services or doctors are currently available for booking at this clinic. Please call us directly.",
+                "hi": "इस क्लिनिक में अभी बुकिंग के लिए कोई सेवा या डॉक्टर उपलब्ध नहीं है। कृपया सीधे हमें कॉल करें।",
+                "te": "ఈ క్లినిక్‌లో ప్రస్తుతం బుకింగ్ కోసం సేవలు లేదా డాక్టర్లు అందుబాటులో లేరు. దయచేసి నేరుగా కాల్ చేయండి.",
+            }.get(lang, "No medical services or doctors are currently available for booking.")
+            await self.whatsapp.send_text(clinic, phone, no_svc_msg)
+            await self._send_main_menu(clinic, phone, lang)
+            return
 
         rows = []
         dept_options = {}
-        for d in dept_names[:10]:  # limit to 10 for interactive list
+        for d in dept_names[:10]:  # limit to 10 for WhatsApp interactive list
             dept_id = f"dept_{d.lower().replace(' ', '_')}"
             rows.append({"id": dept_id, "title": d[:24], "description": ""})
             dept_options[dept_id] = d
@@ -1805,23 +1942,20 @@ class ConversationManager:
         sections = [{"title": "Departments", "rows": rows}]
 
         msg = {
-            "en": "No problem! Please choose a department:",
-            "hi": "कोई बात नहीं! कृपया विभाग चुनें:",
-            "te": "సరే! దయచేసి విభాగం ఎంచుకోండి:",
+            "en": "Please choose a department / service:",
+            "hi": "कृपया विभाग / सेवा चुनें:",
+            "te": "దయచేసి విభాగం / సేవను ఎంచుకోండి:",
         }.get(lang, "Choose Department")
 
         await self.whatsapp.send_interactive_list(
             clinic,
             phone=phone,
-            header="Choose Department",
+            header={"en": "Our Services", "hi": "हमारी सेवाएँ", "te": "మా సేవలు"}.get(lang, "Our Services"),
             body=msg,
-            button_text="Select",
+            button_text={"en": "Select", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(lang, "Select"),
             sections=sections,
         )
 
-        # Store the actual dept_id -> department name mapping used for this
-        # list, since department names vary per clinic (up to 37 specialties)
-        # and can't all fit in a fixed lookup table.
         merged_context = {**context, "dept_options": dept_options}
         await self.update_state(clinic, phone, "selecting_department", merged_context)
 
@@ -1835,63 +1969,76 @@ class ConversationManager:
         lang: str,
         interactive_data: Optional[dict] = None,
     ) -> None:
-        """Handle manual department selection."""
+        """Handle department selection with support for dynamic options and legacy svc_* fallback."""
         button_id = interactive_data.get("id", "") if interactive_data else ""
 
-        # When patient selects from list
-        if button_id.startswith("dept_") or button_id.startswith("svc_"):
-            DEPT_MAP = {
-                "dept_general_medicine": "General Medicine",
-                "dept_cardiology": "Cardiology",
-                "dept_dental": "Dental",
-                "dept_orthopedics": "Orthopedics",
-                "dept_gynecology": "Gynecology",
-                "dept_pediatrics": "Pediatrics",
-                "dept_ent": "ENT",
-                "dept_dermatology": "Dermatology",
-                "svc_general": "General Medicine",
-                "svc_cardiology": "Cardiology",
-                "svc_dental": "Dental",
-                "svc_ortho": "Orthopedics",
-                "svc_gynec": "Gynecology",
-                "svc_pediatrics": "Pediatrics",
-                "svc_ent": "ENT",
-                "svc_derma": "Dermatology",
-            }
-            # Dynamically-listed departments (dept_*) are resolved from the
-            # mapping stored when the list was shown, since a clinic can have
-            # up to 37 specialties — far more than DEPT_MAP's fixed entries
-            # cover. svc_* ids come from the fixed quick-service menu, which
-            # DEPT_MAP does cover exhaustively.
-            dept_options = context.get("dept_options") or {}
-            department = dept_options.get(button_id) or DEPT_MAP.get(
-                button_id, "General Medicine"
-            )
+        # Legacy mapping retained for backward compatibility (OQ-2)
+        LEGACY_SVC_MAP = {
+            "svc_general": "General Medicine",
+            "svc_cardiology": "Cardiology",
+            "svc_dental": "Dental",
+            "svc_ortho": "Orthopedics",
+            "svc_gynec": "Gynecology",
+            "svc_pediatrics": "Pediatrics",
+            "svc_ent": "ENT",
+            "svc_derma": "Dermatology",
+        }
 
-            # Fetch doctors for selected department
+        department = None
+        if button_id.startswith("dept_"):
+            dept_options = context.get("dept_options") or {}
+            department = dept_options.get(button_id)
+        elif button_id.startswith("svc_"):
+            department = LEGACY_SVC_MAP.get(button_id)
+
+        if not department:
+            # Check text match against active clinic departments
             from app.database import supabase
 
-            response = (
+            result = (
                 supabase.table("doctors")
-                .select("*")
+                .select("department")
                 .eq("clinic_id", clinic["id"])
-                .eq("department", department)
                 .eq("is_active", True)
-                .order("rating", desc=True)
                 .execute()
             )
-            doctors = response.data
+            clinic_depts = list(set(r["department"] for r in (result.data or []) if r.get("department")))
+            msg_clean = message.strip().lower()
+            for dept in clinic_depts:
+                if dept.lower() in msg_clean or msg_clean in dept.lower():
+                    department = dept
+                    break
+
+        if department:
+            # Fetch active doctors for selected department
+            from app.database import supabase
+
+            branch_id = context.get("branch_id")
+            if branch_id:
+                from app.database import get_doctors_at_branch
+
+                doctors = await get_doctors_at_branch(clinic["id"], branch_id, department=department, active_only=True)
+            else:
+                response = (
+                    supabase.table("doctors")
+                    .select("*")
+                    .eq("clinic_id", clinic["id"])
+                    .eq("department", department)
+                    .eq("is_active", True)
+                    .order("rating", desc=True)
+                    .execute()
+                )
+                doctors = response.data or []
 
             if doctors:
                 await self._show_doctor_list(clinic, phone, department, context, lang)
-                # Note: _show_doctor_list automatically updates state to selecting_doctor
             else:
                 await self.whatsapp.send_text(
                     clinic, phone, f"No doctors available in {department} right now."
                 )
                 await self._show_department_list(clinic, phone, context, lang)
         else:
-            # Re-show department list if they typed something invalid
+            # Re-show department list if invalid
             await self._show_department_list(clinic, phone, context, lang)
 
     async def _show_doctor_list(
@@ -1913,10 +2060,6 @@ class ConversationManager:
                 no_doc_msg = f"Sorry, no doctors are currently available in {department}. Please try another department."
             await self.whatsapp.send_text(clinic, phone, no_doc_msg)
 
-            # Only retry department selection if there's an alternative
-            # department to pick — otherwise (single-department clinics,
-            # e.g. diagnostics-only centers with zero doctors) retrying
-            # calls straight back into this same no-doctors branch forever.
             from app.services.tenant import has_feature
 
             if has_feature(clinic, "multi_department"):
@@ -1993,37 +2136,26 @@ class ConversationManager:
         else:
             msg = message.lower().strip()
 
-            # Check if it matches a department name
-            DEPT_KEYWORDS = {
-                "dental": "Dental",
-                "teeth": "Dental",
-                "tooth": "Dental",
-                "cardiology": "Cardiology",
-                "heart": "Cardiology",
-                "general": "General Medicine",
-                "medicine": "General Medicine",
-                "ortho": "Orthopedics",
-                "bone": "Orthopedics",
-                "gynec": "Gynecology",
-                "women": "Gynecology",
-                "pediatric": "Pediatrics",
-                "child": "Pediatrics",
-                "ent": "ENT",
-                "ear": "ENT",
-                "skin": "Dermatology",
-                "derma": "Dermatology",
-            }
+            # Dynamic check if input matches an active clinic department
+            from app.database import supabase
+
+            dept_res = (
+                supabase.table("doctors")
+                .select("department")
+                .eq("clinic_id", clinic["id"])
+                .eq("is_active", True)
+                .execute()
+            )
+            active_depts = list(set(r["department"] for r in (dept_res.data or []) if r.get("department")))
 
             matched_dept = None
-            for keyword, dept in DEPT_KEYWORDS.items():
-                if keyword in msg:
+            for dept in active_depts:
+                if dept.lower() in msg or msg in dept.lower():
                     matched_dept = dept
                     break
 
             if matched_dept:
                 # Patient is telling us which department they want
-                from app.database import supabase
-
                 response = (
                     supabase.table("doctors")
                     .select("*")
@@ -2048,8 +2180,6 @@ class ConversationManager:
                 return
 
             # If no department match, try to match doctor name
-            from app.database import supabase
-
             response = (
                 supabase.table("doctors")
                 .select("*")
@@ -2057,7 +2187,7 @@ class ConversationManager:
                 .eq("is_active", True)
                 .execute()
             )
-            all_doctors = response.data
+            all_doctors = response.data or []
             matched_doc = None
             for doc in all_doctors:
                 if doc["name"].lower() in msg or msg in doc["name"].lower():
@@ -2565,6 +2695,25 @@ class ConversationManager:
 
         if intent in ["confirm_booking", "yes"]:
             from datetime import datetime
+            from app.database import get_doctor_by_name
+
+            # Pre-booking server-side re-validation: verify doctor is still active
+            doc_name = context.get("doctor_name")
+            if doc_name:
+                try:
+                    doc_check = await get_doctor_by_name(clinic["id"], doc_name)
+                    if doc_check is not None and not doc_check.get("is_active"):
+                        no_doc_err = {
+                            "en": f"Sorry, Dr. {doc_name} is no longer available for online bookings. Please select another doctor.",
+                            "hi": f"क्षमा करें, डॉ. {doc_name} अब ऑनलाइन बुकिंग के लिए उपलब्ध नहीं हैं। कृपया अन्य डॉक्टर चुनें।",
+                            "te": f"క్షమించండి, డాక్టర్ {doc_name} ఇకపై ఆన్‌లైన్ బుకింగ్‌ల కోసం అందుబాటులో లేరు. దయచేసి మరొక డాక్టర్‌ను ఎంచుకోండి.",
+                        }.get(lang, f"Sorry, Dr. {doc_name} is no longer available. Please select another doctor.")
+                        await self.whatsapp.send_text(clinic, phone, no_doc_err)
+                        await self.update_state(clinic, phone, "main_menu")
+                        await self._send_main_menu(clinic, phone, lang)
+                        return
+                except Exception as doc_err:
+                    logger.warning(f"Failed to check doctor active status: {doc_err}")
 
             # ── Resolve this clinic's payment mode: full / partial / none ──
             from app.services.payment import resolve_payment_mode
@@ -3210,70 +3359,11 @@ class ConversationManager:
         await log_analytics_event(clinic["id"], phone, "human_escalation")
 
     async def _show_services(self, clinic: dict, phone: str, lang: str) -> None:
-        """Show hospital services."""
-        await self.whatsapp.send_interactive_list(
-            clinic,
-            phone=phone,
-            header={"en": "Our Services", "hi": "हमारी सेवाएँ", "te": "మా సేవలు"}.get(
-                lang, "Our Services"
-            ),
-            body=get_message(
-                "our_services_body", lang, hospital_name=clinic.get("name", settings.hospital_name)
-            ),
-            button_text={"en": "Select", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(
-                lang, "Select"
-            ),
-            sections=[
-                {
-                    "title": "Available Services"[:24],
-                    "rows": [
-                        {
-                            "id": "svc_general",
-                            "title": "General Medicine"[:24],
-                            "description": "Fever, cold, general checkups"[:72],
-                        },
-                        {
-                            "id": "svc_cardiology",
-                            "title": "Cardiology"[:24],
-                            "description": "Heart-related concerns"[:72],
-                        },
-                        {
-                            "id": "svc_dental",
-                            "title": "Dental"[:24],
-                            "description": "Teeth and oral care"[:72],
-                        },
-                        {
-                            "id": "svc_ortho",
-                            "title": "Orthopedics"[:24],
-                            "description": "Bones, joints, fractures"[:72],
-                        },
-                        {
-                            "id": "svc_gynec",
-                            "title": "Gynecology"[:24],
-                            "description": "Women's health"[:72],
-                        },
-                        {
-                            "id": "svc_pediatrics",
-                            "title": "Pediatrics"[:24],
-                            "description": "Child healthcare"[:72],
-                        },
-                        {
-                            "id": "svc_ent",
-                            "title": "ENT"[:24],
-                            "description": "Ear, nose, throat"[:72],
-                        },
-                        {
-                            "id": "svc_derma",
-                            "title": "Dermatology"[:24],
-                            "description": "Skin concerns"[:72],
-                        },
-                    ],
-                }
-            ],
-        )
+        """Show bookable services by delegating to dynamic department list (OQ-3 Unification)."""
+        await self._show_department_list(clinic, phone, context={}, lang=lang)
 
     async def _show_doctors(self, clinic: dict, phone: str, lang: str) -> None:
-        """Show available doctors."""
+        """Show available doctors grouped by canonical identity with branch annotations."""
         from app.database import supabase
 
         response = (
@@ -3284,7 +3374,7 @@ class ConversationManager:
             .order("department")
             .execute()
         )
-        doctors = response.data
+        doctors = response.data or []
 
         if not doctors:
             no_doctors_msg = {
@@ -3297,6 +3387,28 @@ class ConversationManager:
             )
             await self.whatsapp.send_text(clinic, phone, no_doctors_msg)
             return
+
+        # Fetch branch assignments for all doctors
+        doctor_ids = [d["id"] for d in doctors]
+        branch_result = (
+            supabase.table("doctor_branches")
+            .select("doctor_id, branch_id, session, branches(name, short_name)")
+            .in_("doctor_id", doctor_ids)
+            .execute()
+        )
+
+        doc_branches = {}
+        for row in (branch_result.data or []):
+            did = row["doctor_id"]
+            if did not in doc_branches:
+                doc_branches[did] = []
+            b_info = row.get("branches") or {}
+            doc_branches[did].append(
+                {
+                    "name": b_info.get("short_name") or b_info.get("name", ""),
+                    "session": row.get("session", "both"),
+                }
+            )
 
         sections = []
         dept_groups = {}
@@ -3311,23 +3423,33 @@ class ConversationManager:
         for dept, docs in dept_groups.items():
             if remaining_rows <= 0:
                 break
-            docs = docs[:remaining_rows]
-            remaining_rows -= len(docs)
-            sections.append(
-                {
-                    "title": dept[:24],
-                    "rows": [
-                        {
-                            "id": f"view_doc_{doc['id']}",
-                            "title": doc["name"][:24],
-                            "description": f"{doc['specialization']} | Rs.{doc['consultation_fee']}"[
-                                :72
-                            ],
-                        }
-                        for doc in docs
-                    ],
-                }
-            )
+            rows = []
+            for doc in docs[:remaining_rows]:
+                branches = doc_branches.get(doc["id"], [])
+                if branches:
+                    branch_label = ", ".join(
+                        f"{b['name']}({b['session'][:3]})" if b["session"] != "both" else b["name"]
+                        for b in branches if b["name"]
+                    )
+                else:
+                    branch_label = ""
+
+                desc_parts = [doc["specialization"]]
+                if branch_label:
+                    desc_parts.append(branch_label)
+                desc_parts.append(f"₹{doc['consultation_fee']}")
+
+                rows.append(
+                    {
+                        "id": f"view_doc_{doc['id']}",
+                        "title": doc["name"][:24],
+                        "description": " · ".join(desc_parts)[:72],
+                    }
+                )
+                remaining_rows -= 1
+
+            if rows:
+                sections.append({"title": dept[:24], "rows": rows})
 
         await self.whatsapp.send_interactive_list(
             clinic,
@@ -3601,7 +3723,7 @@ class ConversationManager:
             await self._show_lab_test_list(clinic, phone, context, lang)
             return
 
-        test = await get_lab_test_by_id(selected_id)
+        test = await get_lab_test_by_id(clinic["id"], selected_id)
         if not test or not test.get("is_active"):
             msg = {
                 "en": "That test is no longer available. Please pick another.",
@@ -3621,7 +3743,7 @@ class ConversationManager:
         context["lab_test_turnaround_hours"] = test.get("turnaround_hours")
 
         # Fetch collection window for branch or clinic
-        window = await get_lab_collection_window(clinic["id"], branch_id=context.get("branch_id"))
+        window = await get_lab_collection_window(clinic, branch_id=context.get("branch_id"))
         dates = self._next_collection_dates(window.get("days", "Mon,Tue,Wed,Thu,Fri,Sat,Sun"), count=3)
 
         # Build date selection buttons

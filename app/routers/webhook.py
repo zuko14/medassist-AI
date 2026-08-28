@@ -94,8 +94,13 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                             clinic = await resolve_tenant(display_phone, phone_number_id=phone_number_id)
                             if clinic:
                                 clinic_id = clinic.get("id")
-                        except Exception:
-                            pass
+                        except Exception as tenant_err:
+                            # KA-17: Log tenant resolution failures — silent swallowing
+                            # makes dashboard-invisible outages
+                            logger.error(
+                                f"Tenant resolution failed for display_phone={display_phone}, "
+                                f"phone_number_id={phone_number_id}, patient={phone[:6]}***: {tenant_err}"
+                            )
 
                         # ── Durable Ingestion Boundary: Persist BEFORE returning HTTP 200 ──
                         is_new, _ = await message_queue.ingest(

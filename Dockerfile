@@ -35,6 +35,7 @@ COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY admin/ ./admin/
 COPY connectors/ ./connectors/
+COPY scripts/ ./scripts/
 COPY tests/ ./tests/
 
 # Create non-root user
