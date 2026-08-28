@@ -3618,36 +3618,52 @@ class ConversationManager:
     async def _handle_cancel_request(
         self, clinic: dict, phone: str, patient: dict, lang: str
     ) -> None:
-        """Handle appointment cancellation request."""
-        from app.database import get_patient_appointments
+        """Handle appointment cancellation request.
 
-        appointments = await get_patient_appointments(
-            clinic["id"], phone, status="confirmed"
+        Only shows today's and future appointments — past-date bookings are
+        excluded even if they still carry 'confirmed' status in the DB.
+        Includes both confirmed and pending_payment bookings.
+        """
+        from app.database import get_patient_appointments
+        from datetime import date as date_mod
+
+        today = date_mod.today().isoformat()  # YYYY-MM-DD
+
+        confirmed = await get_patient_appointments(
+            clinic["id"], phone, status="confirmed", from_date=today
         )
+        pending = await get_patient_appointments(
+            clinic["id"], phone, status="pending_payment", from_date=today
+        )
+        appointments = confirmed + pending
 
         if not appointments:
-            await self.whatsapp.send_text(
-                clinic, phone, "You don't have any confirmed appointments to cancel."
-            )
+            no_appt_msg = {
+                "en": "You don't have any upcoming appointments to cancel.",
+                "hi": "रद्द करने के लिए कोई आगामी अपॉइंटमेंट नहीं है।",
+                "te": "రద్దు చేయడానికి రాబోయే అపాయింట్‌మెంట్‌లు లేవు.",
+            }.get(lang, "You don't have any upcoming appointments to cancel.")
+            await self.whatsapp.send_text(clinic, phone, no_appt_msg)
             await self._send_main_menu(clinic, phone, lang)
             return
 
-        # Show appointments to cancel
-        sections = [
-            {
-                "title": "Select to Cancel",
-                "rows": [
-                    {
-                        "id": f"cancel_{appt['id']}",
-                        "title": f"{appt['doctor_name'][:20]}",
-                        "description": f"{appt['appointment_date']} {format_slot_time(appt['appointment_time'])}"[
-                            :72
-                        ],
-                    }
-                    for appt in appointments[:10]
-                ],
-            }
-        ]
+        # Build interactive list with improved date labels
+        rows = []
+        for appt in appointments[:10]:
+            appt_date = appt.get("appointment_date", "")
+            date_label = "Today" if appt_date == today else appt_date
+            status_label = (appt.get("status") or "").replace("_", " ").title()
+            rows.append(
+                {
+                    "id": f"cancel_{appt['id']}",
+                    "title": f"{appt.get('doctor_name', 'Doctor')[:20]}",
+                    "description": f"{date_label} {format_slot_time(appt.get('appointment_time', ''))} · {status_label}"[
+                        :72
+                    ],
+                }
+            )
+
+        sections = [{"title": "Select to Cancel", "rows": rows}]
 
         await self.whatsapp.send_interactive_list(
             clinic,

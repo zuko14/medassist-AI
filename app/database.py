@@ -799,9 +799,18 @@ async def cancel_appointment(clinic_id: str, appointment_id: str) -> bool:
 
 
 async def get_patient_appointments(
-    clinic_id: str, phone: str, status: Optional[str] = None
+    clinic_id: str, phone: str, status: Optional[str] = None,
+    from_date: Optional[str] = None,
 ) -> list:
-    """Get appointments for a patient."""
+    """Get appointments for a patient.
+
+    Args:
+        clinic_id: Tenant clinic ID.
+        phone: Patient phone number.
+        status: Optional status filter (e.g. 'confirmed', 'pending_payment').
+        from_date: Optional YYYY-MM-DD lower bound (inclusive) on appointment_date.
+                   When set, only appointments on or after this date are returned.
+    """
     try:
         query = (
             scoped_query("appointments", clinic_id)
@@ -809,6 +818,8 @@ async def get_patient_appointments(
         )
         if status:
             query = query.eq("status", status)
+        if from_date:
+            query = query.gte("appointment_date", from_date)
         result = query.order("appointment_date", desc=False).execute()
         return result.data or []
     except Exception as e:
