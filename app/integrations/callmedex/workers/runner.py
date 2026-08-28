@@ -285,10 +285,16 @@ class CallMedexWorkerRunner:
                     except Exception as ai_err:
                         logger.warning(f"AI Summary generation warning for {report_job_id}: {ai_err}")
 
-                # WhatsApp Delivery — CallMedex's own shared Meta identity (not the processing center's own number),
-                # via a short-lived signed link to the report PDF buffered in the shared "lab-reports" bucket.
+                # WhatsApp Delivery — Two strategies:
+                # Strategy 1 (primary): CallMedex's own AI pipeline produced a summary_report →
+                #   send via WhatsAppDeliveryService with the structured multi-audience summary.
+                # Strategy 2 (fallback): OCR or AI failed (summary_report is None) →
+                #   fall back to LabReportService.upload_and_send() which has its own independent
+                #   ReportSummarizer pipeline (PDF text extraction → OpenRouter). This ensures
+                #   patients ALWAYS receive the report + best-effort AI summary, never silence.
                 whatsapp_sent = False
                 storage_path = None
+                used_fallback_path = False
                 if patient_phone:
                     try:
                         from app.database import supabase as _supabase
@@ -300,6 +306,7 @@ class CallMedexWorkerRunner:
                         pdf_url = signed.get("signedURL") or signed.get("signedUrl")
 
                         if summary_report is not None and pdf_url:
+                            # Strategy 1: CallMedex AI summary available → send via template
                             delivery_service = WhatsAppDeliveryService(callback_handler=self.container.callback_handler)
                             delivery_result = await delivery_service.deliver_report_and_summary(
                                 phone_number=patient_phone,
@@ -309,39 +316,74 @@ class CallMedexWorkerRunner:
                                 correlation_id=corr_id,
                             )
                             whatsapp_sent = delivery_result.status == WhatsAppDeliveryStatus.DELIVERED
+                        else:
+                            # Strategy 2: OCR/AI failed → fall back to LabReportService
+                            # which runs its own ReportSummarizer (PDF text → OpenRouter)
+                            logger.warning(
+                                f"CallMedex OCR/AI pipeline returned no summary for {report_job_id} "
+                                f"— falling back to LabReportService.upload_and_send() for delivery"
+                            )
+                            try:
+                                from app.services.lab_reports import LabReportService
+                                fallback_result = await LabReportService().upload_and_send(
+                                    clinic_id=request.clinic_id,
+                                    file_bytes=pdf_bytes,
+                                    filename=f"{request.external_report_id}.pdf",
+                                    content_type="application/pdf",
+                                    patient_phone=patient_phone,
+                                    patient_name=patient_name,
+                                    report_name=request.report_name,
+                                    report_type=request.report_type.value,
+                                    external_report_id=request.external_report_id,
+                                    source="callmedex",
+                                )
+                                whatsapp_sent = fallback_result.get("status") == "sent"
+                                used_fallback_path = True
+                                self._emit_event(
+                                    "FallbackDelivery", report_job_id, corr_id,
+                                    {"sent": whatsapp_sent, "fallback_result_status": fallback_result.get("status")},
+                                )
+                            except Exception as fallback_err:
+                                logger.error(
+                                    f"Fallback LabReportService delivery also failed for {report_job_id}: {fallback_err}"
+                                )
+
                         self._emit_event(
                             "WhatsAppDelivered", report_job_id, corr_id,
-                            {"phone": patient_phone[-4:], "sent": whatsapp_sent},
+                            {"phone": patient_phone[-4:], "sent": whatsapp_sent, "fallback": used_fallback_path},
                         )
                     except Exception as wa_err:
                         logger.warning(f"WhatsApp dispatch warning for {report_job_id}: {wa_err}")
 
                 # Persist the processed report — gives the processing center's own dashboard/analytics
                 # a record, and backs the /process-report idempotency check in api/router.py.
-                try:
-                    from app.database import supabase as _supabase
-                    _supabase.table("lab_reports").insert(
-                        {
-                            "clinic_id": request.clinic_id,
-                            "patient_phone": patient_phone or "",
-                            "patient_name": patient_name,
-                            "report_name": request.report_name,
-                            "report_type": request.report_type.value,
-                            "file_path": storage_path or "",
-                            "ai_summary": (
-                                " ".join(s.statement for s in summary_report.patient_summary)
-                                if summary_report else None
-                            ),
-                            "has_abnormal_values": bool(summary_report and summary_report.status.value != "success"),
-                            "status": "sent" if whatsapp_sent else "failed",
-                            "error_message": None if whatsapp_sent else "CallMedex WhatsApp delivery did not complete",
-                            "external_report_id": request.external_report_id,
-                            "source": "callmedex",
-                            "sent_at": datetime.now(timezone.utc).isoformat() if whatsapp_sent else None,
-                        }
-                    ).execute()
-                except Exception as db_err:
-                    logger.warning(f"Failed to persist lab_reports row for {report_job_id}: {db_err}")
+                # Skip DB insert if fallback path already persisted via LabReportService.upload_and_send()
+                if not used_fallback_path:
+                    try:
+                        from app.database import supabase as _supabase
+                        _supabase.table("lab_reports").insert(
+                            {
+                                "clinic_id": request.clinic_id,
+                                "patient_phone": patient_phone or "",
+                                "patient_name": patient_name,
+                                "report_name": request.report_name,
+                                "report_type": request.report_type.value,
+                                "file_path": storage_path or "",
+                                "ai_summary": (
+                                    " ".join(s.statement for s in summary_report.patient_summary)
+                                    if summary_report else None
+                                ),
+                                "has_abnormal_values": bool(summary_report and summary_report.status.value != "success"),
+                                "status": "sent" if whatsapp_sent else "failed",
+                                "error_message": None if whatsapp_sent else "CallMedex WhatsApp delivery did not complete",
+                                "external_report_id": request.external_report_id,
+                                "source": "callmedex",
+                                "sent_at": datetime.now(timezone.utc).isoformat() if whatsapp_sent else None,
+                            }
+                        ).execute()
+                    except Exception as db_err:
+                        logger.warning(f"Failed to persist lab_reports row for {report_job_id}: {db_err}")
+
 
 
             # Step 9: Send Signed HMAC Callback

@@ -133,6 +133,14 @@ class LabReportService:
         summarizer = ReportSummarizer()
         ai_result = await summarizer.summarize(pdf_text, patient_name, report_type)
 
+        if ai_result.get("fallback"):
+            logger.warning(
+                f"AI summarizer returned fallback for report '{report_name}' "
+                f"(type={report_type}, patient={patient_name[:3]}***, "
+                f"text_len={len(pdf_text) if pdf_text else 0}, "
+                f"external_id={external_report_id}, source={source})"
+            )
+
         # Step C — Upload to Supabase Storage
         storage_path = f"{clinic_id}/{patient_phone}/{uuid4()}_{filename}"
         storage_ok = False
