@@ -2220,10 +2220,11 @@ class ConversationManager:
 
         context["doctor_name"] = doctor_name
         context["doctor"] = doctor
+        if isinstance(doctor, dict) and doctor.get("id"):
+            context["doctor_id"] = doctor["id"]
+            context["selected_doctor_id"] = doctor["id"]
 
         # Ask for date — two-step flow: date picker → slot list
-        context["doctor_name"] = doctor_name
-        context["doctor"] = doctor
         merged_context = {**context}
 
         await self._show_date_picker(clinic, phone, merged_context, lang)
@@ -2738,6 +2739,7 @@ class ConversationManager:
                     branch_id=context.get("branch_id"),
                     branch_name=context.get("branch_name"),
                     deposit_percent=deposit_percent,
+                    doctor_id=context.get("doctor_id") or context.get("selected_doctor_id"),
                 )
 
                 if result["success"]:
@@ -2881,6 +2883,10 @@ class ConversationManager:
                     "symptoms": context.get("symptoms", ""),
                     "status": "confirmed",
                 }
+
+                doctor_id_val = context.get("doctor_id") or context.get("selected_doctor_id")
+                if doctor_id_val:
+                    appointment_data["doctor_id"] = doctor_id_val
 
                 # Include branch info when booking at a specific branch
                 if context.get("branch_id"):

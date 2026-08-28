@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     tzdata \
     tesseract-ocr \
     poppler-utils \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 # The hospital and all its patients are in India — every naive datetime.now()
@@ -44,6 +45,9 @@ USER appuser
 
 # Expose port
 EXPOSE 8000
+
+# Use tini as PID 1 to reap zombie processes from Playwright headless browser workers
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Run the application (binds to $PORT on Render/Railway, defaults to 8000 locally with 2 worker processes)
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-2} --proxy-headers --forwarded-allow-ips='${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}'"]

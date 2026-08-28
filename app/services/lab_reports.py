@@ -134,7 +134,7 @@ class LabReportService:
         ai_result = await summarizer.summarize(pdf_text, patient_name, report_type)
 
         # Step C — Upload to Supabase Storage
-        storage_path = f"{patient_phone}/{uuid4()}_{filename}"
+        storage_path = f"{clinic_id}/{patient_phone}/{uuid4()}_{filename}"
         storage_ok = False
         pdf_signed_url = None
         try:

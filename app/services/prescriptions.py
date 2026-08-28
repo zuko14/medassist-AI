@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, date, timezone
 
 
-from app.database import supabase
+from app.database import scoped_query, supabase
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
 
@@ -125,10 +125,9 @@ class PrescriptionService:
             if not acquired:
                 return {"sent": 0, "errors": 0, "skipped": "lock_held_by_another_instance"}
 
-            # Get all active prescriptions where today is within range
+            # Get all active prescriptions where today is within range (cross-clinic background scan)
             result = (
-                supabase.table("prescriptions")
-                .select("*")
+                scoped_query("prescriptions", allow_unscoped=True)
                 .eq("is_active", True)
                 .lte("start_date", today_str)
                 .gte("end_date", today_str)
@@ -143,8 +142,7 @@ class PrescriptionService:
                         # KA-09: Deduplication — check if already sent today for this time
                         try:
                             dedup_check = (
-                                supabase.table("prescription_reminder_sends")
-                                .select("id")
+                                scoped_query("prescription_reminder_sends", allow_unscoped=True)
                                 .eq("prescription_id", rx["id"])
                                 .eq("reminder_time", rt)
                                 .eq("sent_date", today_str)

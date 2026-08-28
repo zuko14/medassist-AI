@@ -115,6 +115,7 @@ class PaymentService:
         booking_type: str = "consultation",
         lab_test_id: Optional[str] = None,
         lab_test_name: Optional[str] = None,
+        doctor_id: Optional[str] = None,
     ) -> dict:
         """Create a pending_payment booking and a Razorpay order.
 
@@ -126,6 +127,7 @@ class PaymentService:
             deposit_percent: 1-100. When < 100, only this fraction of the
                     doctor's full consultation_fee is charged now (the rest is
                     collected at the clinic). Defaults to 100 (full fee).
+            doctor_id: Optional doctor UUID. If omitted, resolved from doctor_name.
 
         Returns:
             dict with keys: success, booking_id, booking_ref,
@@ -147,6 +149,13 @@ class PaymentService:
             datetime.now(timezone.utc)
             + timedelta(minutes=settings.booking_hold_minutes)
         ).isoformat()
+
+        # Resolve doctor_id if missing to guarantee index compatibility with migration 060
+        if not doctor_id and doctor_name and booking_type != "lab_test":
+            from app.database import get_doctor_by_name
+            doc = await get_doctor_by_name(clinic_id, doctor_name)
+            if doc and doc.get("id"):
+                doctor_id = doc["id"]
 
         # Generate booking ref
         from app.utils.helpers import (
@@ -179,6 +188,8 @@ class PaymentService:
             "booking_ref": booking_ref,
             "booking_type": booking_type,
         }
+        if doctor_id:
+            booking_data["doctor_id"] = doctor_id
         if booking_type == "lab_test":
             booking_data["lab_test_id"] = lab_test_id
             booking_data["lab_test_name"] = lab_test_name

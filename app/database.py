@@ -50,6 +50,9 @@ TENANT_OWNED_TABLES = frozenset({
     "clinic_admins", "integration_connectors", "connector_failed_reports",
     "conversations", "inbound_messages", "processed_messages",
     "family_members", "payment_events", "failed_messages",
+    "prescriptions", "prescription_reminder_sends", "broadcasts",
+    "admin_notifications", "outbound_message_ledger", "connector_audit_log",
+    "integration_processed_reports", "analytics_events",
 })
 
 
@@ -634,30 +637,51 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
          authoritative guard — closes the TOCTOU race window between the
          SELECT and INSERT.
     """
+    from app.utils.helpers import (
+        generate_booking_reference,
+        is_booking_ref_conflict,
+        is_slot_conflict,
+    )
+
     try:
         data["clinic_id"] = clinic_id
 
+        # Resolve doctor_id and department if missing to guarantee index and schema compatibility
+        if not data.get("doctor_id") and data.get("doctor_name"):
+            doc = await get_doctor_by_name(clinic_id, data["doctor_name"])
+            if doc:
+                if doc.get("id"):
+                    data["doctor_id"] = doc["id"]
+                if not data.get("department") and doc.get("department"):
+                    data["department"] = doc["department"]
+
+        if not data.get("department"):
+            data["department"] = "General Medicine"
+
         # Fast-path: check for existing booking at same slot (non-authoritative)
-        conflict = (
+        conflict_query = (
             supabase.table("appointments")
             .select("id")
             .eq("clinic_id", clinic_id)
-            .eq("doctor_name", data["doctor_name"])
             .eq("appointment_date", data["appointment_date"])
             .eq("appointment_time", data["appointment_time"])
-            .in_("status", ["confirmed", "pending_payment"])
+        )
+        if data.get("doctor_id"):
+            conflict_query = conflict_query.eq("doctor_id", data["doctor_id"])
+        elif data.get("doctor_name"):
+            conflict_query = conflict_query.eq("doctor_name", data["doctor_name"])
+
+        if data.get("branch_id"):
+            conflict_query = conflict_query.eq("branch_id", data["branch_id"])
+
+        conflict = (
+            conflict_query
+            .in_("status", ["confirmed", "pending_payment", "pending_review"])
             .execute()
         )
 
         if conflict.data:
             return {"success": False, "reason": "slot_taken"}
-
-        # Generate booking reference
-        from app.utils.helpers import (
-            generate_booking_reference,
-            is_booking_ref_conflict,
-            is_slot_conflict,
-        )
 
         # Bounded retry: a booking_ref collision must NOT be reported to the
         # patient as "slot_taken" (KRIYA-001). Only the partial slot unique
