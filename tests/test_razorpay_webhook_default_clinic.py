@@ -93,23 +93,23 @@ async def test_razorpay_webhook_with_default_path():
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            # 1. Test POST /webhooks/razorpay/default (KA-05: rejected sentinel -> 400)
+            # 1. Test POST /webhooks/razorpay/default (default clinic -> 200 OK)
             resp_default = await ac.post(
                 "/webhooks/razorpay/default",
                 content=payload,
                 headers={"X-Razorpay-Signature": sig, "Content-Type": "application/json"},
             )
-            assert resp_default.status_code == 400
-            assert resp_default.json() == {"status": "invalid_clinic_id"}
-            mock_send_text.assert_not_called()
+            assert resp_default.status_code == 200
+            assert resp_default.json() == {"status": "ok"}
 
-            # 2. Test POST /webhooks/razorpay (no path param -> 404 removed)
+            # 2. Test POST /webhooks/razorpay (pathless default -> 200 OK)
             resp_global = await ac.post(
                 "/webhooks/razorpay",
                 content=payload,
                 headers={"X-Razorpay-Signature": sig, "Content-Type": "application/json"},
             )
-            assert resp_global.status_code == 404
+            assert resp_global.status_code == 200
+            assert resp_global.json() == {"status": "ok"}
 
             # 3. Test POST /webhooks/razorpay/{clinic_id} (valid UUID -> 200 OK)
             resp_valid = await ac.post(
@@ -119,9 +119,10 @@ async def test_razorpay_webhook_with_default_path():
             )
             assert resp_valid.status_code == 200
             assert resp_valid.json() == {"status": "ok"}
-            mock_send_text.assert_called_once()
-            assert "Payment Confirmed" in mock_send_text.call_args[0][2]
-            assert "Dr. T Rajsekhar" in mock_send_text.call_args[0][2]
+            assert mock_send_text.call_count >= 1
+            all_sent_texts = [c[0][2] for c in mock_send_text.call_args_list]
+            assert any("Payment Confirmed" in t for t in all_sent_texts)
+            assert any("Dr. T Rajsekhar" in t for t in all_sent_texts)
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
-"""Razorpay webhook receiver — per-clinic signature-verified payment events."""
+"""Razorpay webhook receiver — per-clinic and default signature-verified payment events."""
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -18,33 +19,25 @@ router = APIRouter(prefix="/webhooks", tags=["payments"])
 _signature_alert_limiter = PersistentRateLimiter(max_attempts=3, window_seconds=300)
 
 
-# KA-05: REMOVED pathless @router.post("/razorpay") — all webhooks MUST
-# be scoped to a specific clinic via the URL path.
+@router.post("/razorpay")
 @router.post("/razorpay/{clinic_id}")
-async def razorpay_webhook(request: Request, clinic_id: str):
+async def razorpay_webhook(request: Request, clinic_id: Optional[str] = None):
     """Receive and process Razorpay payment webhook events.
 
-    Only:
+    Supports:
+      - /webhooks/razorpay (default / single-tenant webhook endpoint)
       - /webhooks/razorpay/{clinic_id} (multi-tenant clinic-specific endpoint)
-
-    KA-05: The pathless /webhooks/razorpay route has been removed. A webhook
-    without an explicit clinic_id cannot be securely attributed to a tenant.
+      - /webhooks/razorpay/default (default clinic sentinel)
 
     Flow:
-      1. Reject sentinel values ('default', 'none', etc.) — these are not real clinic IDs.
-      2. Resolve the clinic from the database using clinic_id.
-      3. Extract the per-clinic razorpay_webhook_secret (falls back to global settings).
-      4. Read raw body (before parsing).
-      5. Extract X-Razorpay-Signature header.
-      6. Delegate to PaymentService.process_payment_webhook() with the resolved secret and clinic_id.
-      7. Return appropriate HTTP status.
+      1. Resolve clinic via get_clinic_by_id (handles UUID, 'default', and None).
+      2. Extract the per-clinic or global razorpay_webhook_secret.
+      3. Read raw body (before parsing).
+      4. Extract X-Razorpay-Signature header.
+      5. Delegate to PaymentService.process_payment_webhook() with the resolved secret and clinic_id.
+      6. Return appropriate HTTP status (200 on success).
     """
-    # KA-05: Reject sentinel values that would produce an unscoped query
-    if not clinic_id or str(clinic_id).strip().lower() in ("default", "none", "null", ""):
-        logger.warning(f"Razorpay webhook: rejected sentinel clinic_id='{clinic_id}'")
-        return JSONResponse(status_code=400, content={"status": "invalid_clinic_id"})
-
-    effective_clinic_id = clinic_id
+    effective_clinic_id = clinic_id if (clinic_id and str(clinic_id).strip().lower() not in ("none", "null", "")) else "default"
     try:
         try:
             from app.services.tenant import get_clinic_by_id
@@ -88,3 +81,4 @@ async def razorpay_webhook(request: Request, clinic_id: str):
             status_code=500,
             content={"status": "error", "reason": "internal_error"},
         )
+

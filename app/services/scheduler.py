@@ -16,7 +16,10 @@ from app.services.tenant import get_clinic_by_id
 
 logger = logging.getLogger(__name__)
 
-scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Kolkata"))
+scheduler = AsyncIOScheduler(
+    timezone=ZoneInfo("Asia/Kolkata"),
+    job_defaults={"misfire_grace_time": 60, "coalesce": True},
+)
 _last_fail_open_count = 0
 
 

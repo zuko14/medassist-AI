@@ -1613,12 +1613,16 @@ class PaymentService:
         try:
             from app.database import get_patient_by_phone, update_patient
 
-            patient = await get_patient_by_phone(clinic_id, patient_phone)
-            if patient:
+            patient = get_patient_by_phone(clinic_id, patient_phone)
+            if hasattr(patient, "__await__"):
+                patient = await patient
+            if patient and isinstance(patient, dict):
                 new_count = (patient.get("visit_count") or 0) + 1
-                await update_patient(
+                res = update_patient(
                     clinic_id, patient_phone, {"visit_count": new_count}
                 )
+                if hasattr(res, "__await__"):
+                    await res
         except Exception as e:
             logger.error(f"Failed to increment patient visit_count: {e}")
 
@@ -1930,12 +1934,14 @@ class PaymentService:
             # Log analytics event for clinic dashboard
             try:
                 from app.database import log_analytics_event
-                await log_analytics_event(
+                analytics_res = log_analytics_event(
                     clinic_id_val,
                     patient_phone,
                     "appointment_booked",
                     department=booking.get("department"),
                 )
+                if hasattr(analytics_res, "__await__"):
+                    await analytics_res
             except Exception as analytics_err:
                 logger.warning(f"Could not log analytics event: {analytics_err}")
 
