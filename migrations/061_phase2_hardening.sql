@@ -33,4 +33,6 @@ CREATE INDEX IF NOT EXISTS idx_failed_messages_clinic_id
     ON failed_messages(clinic_id)
     WHERE clinic_id IS NOT NULL;
 
+INSERT INTO schema_migrations (name) VALUES ('061_phase2_hardening.sql') ON CONFLICT (name) DO NOTHING;
+
 SELECT 'migration_061_complete' AS status;

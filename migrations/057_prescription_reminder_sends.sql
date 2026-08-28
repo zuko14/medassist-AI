@@ -46,3 +46,7 @@ CREATE POLICY "tenant_isolation_prescription_reminder_sends"
         clinic_id IS NOT NULL
         AND clinic_id = NULLIF(current_setting('app.clinic_id', true), '')::uuid
     );
+
+INSERT INTO schema_migrations (name) VALUES ('057_prescription_reminder_sends.sql') ON CONFLICT (name) DO NOTHING;
+
+SELECT 'migration_057_complete' AS status;

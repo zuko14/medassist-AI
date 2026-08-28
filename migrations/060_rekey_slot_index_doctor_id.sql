@@ -86,4 +86,6 @@ BEGIN
     END IF;
 END $$;
 
+INSERT INTO schema_migrations (name) VALUES ('060_rekey_slot_index_doctor_id.sql') ON CONFLICT (name) DO NOTHING;
+
 SELECT 'migration_060_complete' AS status;

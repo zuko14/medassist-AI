@@ -22,5 +22,7 @@ CREATE INDEX idx_appointments_slot_lookup
     ON appointments(clinic_id, doctor_name, appointment_date, status)
     WHERE status IN ('confirmed', 'pending_payment', 'pending_review');
 
+INSERT INTO schema_migrations (name) VALUES ('058_pending_review_slot_hold.sql') ON CONFLICT (name) DO NOTHING;
+
 -- Verify
 SELECT 'migration_058_complete' AS status;
