@@ -188,6 +188,17 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Payment: Fast-poll recently-created pending payments (every 30s) ──
+        # Catches cases where Razorpay webhook is delayed or missed.
+        # Only checks bookings created in the last 5 minutes to minimize API calls.
+        self.scheduler.add_job(
+            self.poll_recent_pending_payments,
+            "interval",
+            seconds=30,
+            id="poll_recent_pending_payments",
+            replace_existing=True,
+        )
+
         # ── Payment: Daily reconciliation (11 PM) ──
         # Compares confirmed bookings against Razorpay — discrepancies → alert
         self.scheduler.add_job(
@@ -922,6 +933,21 @@ class SchedulerService:
                     logger.info(f"Scheduler: processed {count} stale bookings")
             except Exception as e:
                 logger.error(f"Stale bookings job failed: {e}")
+
+    async def poll_recent_pending_payments(self):
+        """Fast-poll Razorpay for recently-created pending_payment bookings."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("poll_recent_pending_payments", lease_seconds=25) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.payment import payment_service
+
+                count = await payment_service.poll_recent_pending_payments()
+                if count > 0:
+                    logger.info(f"Scheduler: fast-poll confirmed {count} booking(s)")
+            except Exception as e:
+                logger.error(f"Fast payment poll job failed: {e}")
 
     async def daily_payment_reconciliation(self):
         """Compare confirmed bookings against Razorpay settlements."""

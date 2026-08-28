@@ -912,6 +912,165 @@ class PaymentService:
         return count
 
     # ─────────────────────────────────────────────────────────────────────
+    # 4b. FAST-POLL RECENTLY-CREATED PENDING PAYMENTS
+    # ─────────────────────────────────────────────────────────────────────
+
+    async def poll_recent_pending_payments(self) -> int:
+        """Fast-poll Razorpay for recently-created pending_payment bookings.
+
+        Checks bookings created within the last 5 minutes that have not yet
+        been confirmed via webhook. If Razorpay shows 'paid', confirms the
+        booking immediately and sends the patient WhatsApp confirmation.
+
+        This ensures near-instant confirmation (~30-60 seconds) even when
+        the webhook is delayed, rate-limited, or missed entirely.
+
+        Constraints:
+          - Only queries bookings from the last 5 minutes → minimal API load.
+          - Atomic CAS update prevents duplicate confirmations.
+          - Max 20 bookings per cycle to bound Razorpay API calls.
+
+        Returns: number of bookings confirmed via polling.
+        """
+        five_min_ago = (
+            datetime.now(timezone.utc) - timedelta(minutes=5)
+        ).isoformat()
+
+        try:
+            recent_pending = (
+                supabase.table("appointments")
+                .select(
+                    "id, clinic_id, booking_ref, patient_phone, "
+                    "razorpay_payment_link_id, amount_paise, doctor_name, "
+                    "department, appointment_date, appointment_time, "
+                    "patient_name, branch_id"
+                )
+                .eq("status", "pending_payment")
+                .gte("created_at", five_min_ago)
+                .order("created_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"poll_recent_pending_payments: query failed: {e}")
+            return 0
+
+        if not recent_pending.data:
+            return 0
+
+        confirmed = 0
+        for booking in recent_pending.data:
+            payment_link_id = booking.get("razorpay_payment_link_id")
+            if not payment_link_id:
+                continue
+
+            booking_id = booking["id"]
+
+            try:
+                # Resolve per-clinic Razorpay creds
+                clinic_for_booking: dict = {}
+                clinic_id_for_booking = booking.get("clinic_id")
+                if clinic_id_for_booking:
+                    try:
+                        from app.services.tenant import get_clinic_by_id
+
+                        clinic_for_booking = await get_clinic_by_id(
+                            clinic_id_for_booking
+                        )
+                    except Exception as ce:
+                        logger.warning(
+                            f"poll_recent: could not fetch clinic {clinic_id_for_booking}: {ce}"
+                        )
+
+                key_id, key_secret, _ = get_razorpay_creds(clinic_for_booking)
+
+                link_status = await self._check_payment_link_status(
+                    payment_link_id, key_id=key_id, key_secret=key_secret
+                )
+
+                if link_status["status"] != "paid":
+                    continue
+
+                # ── Confirm immediately via atomic CAS update ──
+                payment_id = (
+                    link_status["payment_id"]
+                    or f"poll_{payment_link_id}"
+                )
+
+                update_result = (
+                    supabase.table("appointments")
+                    .update(
+                        {
+                            "status": "confirmed",
+                            "payment_id": payment_id,
+                        }
+                    )
+                    .eq("id", booking_id)
+                    .eq("status", "pending_payment")
+                    .execute()
+                )
+
+                if not update_result.data:
+                    # Another process (webhook / expire recovery) already confirmed
+                    logger.info(
+                        f"poll_recent: booking {booking_id} already confirmed "
+                        f"by concurrent process (idempotent)"
+                    )
+                    continue
+
+                # Update in-memory copy for notification
+                booking["status"] = "confirmed"
+                booking["payment_id"] = payment_id
+
+                logger.info(
+                    f"⚡ FAST_POLL_CONFIRMED booking={booking_id} "
+                    f"ref={booking.get('booking_ref')} via payment_link polling"
+                )
+
+                self._log_payment_event(
+                    booking_id,
+                    "confirmed",
+                    {
+                        "payment_id": payment_id,
+                        "amount_paise": booking.get("amount_paise"),
+                        "confirmation_source": "fast_poll",
+                    },
+                    clinic_id=clinic_id_for_booking,
+                )
+
+                # Increment visit count
+                try:
+                    await self._increment_patient_visit_count(
+                        clinic_id_for_booking, booking.get("patient_phone")
+                    )
+                except Exception as visit_err:
+                    logger.error(
+                        f"poll_recent: visit count increment failed for {booking_id}: {visit_err}"
+                    )
+
+                # Send patient & admin notifications immediately
+                try:
+                    await self._notify_payment_confirmed(booking)
+                except Exception as notif_err:
+                    logger.error(
+                        f"poll_recent: notification failed for {booking_id}: {notif_err}"
+                    )
+
+                confirmed += 1
+
+            except Exception as e:
+                logger.error(
+                    f"poll_recent: error processing booking {booking_id}: {e}"
+                )
+
+        if confirmed > 0:
+            logger.info(
+                f"poll_recent_pending_payments: confirmed {confirmed} booking(s) via fast polling"
+            )
+
+        return confirmed
+
+    # ─────────────────────────────────────────────────────────────────────
     # 5. REFUNDS
     # ─────────────────────────────────────────────────────────────────────
 
