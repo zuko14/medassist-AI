@@ -152,10 +152,15 @@ class PaymentService:
 
         # Resolve doctor_id if missing to guarantee index compatibility with migration 060
         if not doctor_id and doctor_name and booking_type != "lab_test":
-            from app.database import get_doctor_by_name
-            doc = await get_doctor_by_name(clinic_id, doctor_name)
-            if doc and doc.get("id"):
-                doctor_id = doc["id"]
+            try:
+                from app.database import get_doctor_by_name
+                doc_res = get_doctor_by_name(clinic_id, doctor_name)
+                if hasattr(doc_res, "__await__"):
+                    doc_res = await doc_res
+                if doc_res and isinstance(doc_res, dict) and doc_res.get("id"):
+                    doctor_id = doc_res["id"]
+            except Exception as doc_err:
+                logger.warning(f"Could not resolve doctor_id for {doctor_name}: {doc_err}")
 
         # Generate booking ref
         from app.utils.helpers import (
@@ -742,11 +747,22 @@ class PaymentService:
 
         logger.info(f"✅ Booking {booking_id} CONFIRMED via payment {payment_id}")
 
+        # Update in-memory booking dictionary before notifications
+        booking["status"] = "confirmed"
+        booking["payment_id"] = payment_id
+
         # ── Step 9: Notify patient + admin ──
-        await self._increment_patient_visit_count(
-            booking.get("clinic_id"), booking.get("patient_phone")
-        )
-        await self._notify_payment_confirmed(booking)
+        try:
+            await self._increment_patient_visit_count(
+                booking.get("clinic_id"), booking.get("patient_phone")
+            )
+        except Exception as visit_err:
+            logger.error(f"Failed to increment visit count for booking {booking_id}: {visit_err}")
+
+        try:
+            await self._notify_payment_confirmed(booking)
+        except Exception as notif_err:
+            logger.error(f"Failed to notify payment confirmed for booking {booking_id}: {notif_err}")
 
         return {"status": "ok", "code": 200}
 
@@ -846,10 +862,21 @@ class PaymentService:
                             },
                         )
 
-                        await self._increment_patient_visit_count(
-                            booking.get("clinic_id"), booking.get("patient_phone")
-                        )
-                        await self._notify_payment_confirmed(booking)
+                        booking["status"] = "confirmed"
+                        booking["payment_id"] = payment_id
+
+                        try:
+                            await self._increment_patient_visit_count(
+                                booking.get("clinic_id"), booking.get("patient_phone")
+                            )
+                        except Exception as visit_err:
+                            logger.error(f"Failed to increment visit count in recovery for {booking_id}: {visit_err}")
+
+                        try:
+                            await self._notify_payment_confirmed(booking)
+                        except Exception as notif_err:
+                            logger.error(f"Failed to notify payment confirmed in recovery for {booking_id}: {notif_err}")
+
                         count += 1
                         continue
 
@@ -1094,10 +1121,20 @@ class PaymentService:
         )
 
         logger.info(f"Admin manually confirmed booking {booking_id}")
-        await self._increment_patient_visit_count(
-            booking.get("clinic_id"), booking.get("patient_phone")
-        )
-        await self._notify_payment_confirmed(booking)
+        booking["status"] = "confirmed"
+
+        try:
+            await self._increment_patient_visit_count(
+                booking.get("clinic_id"), booking.get("patient_phone")
+            )
+        except Exception as visit_err:
+            logger.error(f"Failed to increment visit count in manual confirm for {booking_id}: {visit_err}")
+
+        try:
+            await self._notify_payment_confirmed(booking)
+        except Exception as notif_err:
+            logger.error(f"Failed to notify payment confirmed in manual confirm for {booking_id}: {notif_err}")
+
         return {"success": True}
 
     async def admin_reject_booking(
@@ -1629,13 +1666,27 @@ class PaymentService:
             )
 
     async def _notify_payment_confirmed(self, booking: dict) -> None:
-        """Send WhatsApp confirmation message to the patient after payment is verified."""
+        """Send WhatsApp confirmation message to the patient and admin alerts after payment is verified."""
+        clinic_id_val = booking.get("clinic_id") or "default"
         try:
             from app.services.whatsapp import whatsapp_service
-            from app.services.tenant import get_clinic_by_id
+            from app.services.tenant import get_clinic_by_id, get_clinic_contact, get_branch_by_id
 
-            clinic_id_val = booking.get("clinic_id") or "default"
             clinic = await get_clinic_by_id(clinic_id_val)
+
+            # Resolve patient language
+            lang = "en"
+            try:
+                from app.database import get_patient_by_phone
+                patient_phone = booking.get("patient_phone")
+                if patient_phone:
+                    patient_res = get_patient_by_phone(clinic_id_val, patient_phone)
+                    if hasattr(patient_res, "__await__"):
+                        patient_res = await patient_res
+                    if patient_res and isinstance(patient_res, dict) and patient_res.get("language"):
+                        lang = patient_res["language"]
+            except Exception as lang_err:
+                logger.warning(f"Could not resolve patient language for confirmation: {lang_err}")
 
             date_display = booking.get("appointment_date", "")
             try:
@@ -1647,37 +1698,106 @@ class PaymentService:
             except Exception:
                 pass
 
-            amount_rupees = booking.get("amount_paise", 0) / 100
+            amount_rupees = (booking.get("amount_paise") or 0) / 100
+            slot_time_display = format_slot_time(booking.get("appointment_time")) or "N/A"
+            ref_code = booking.get("booking_ref", "N/A")
+            refund_window = getattr(settings, "refund_window_hours", 4)
 
             if booking.get("booking_type") == "lab_test":
-                msg = (
-                    f"✅ *Payment Confirmed — Test Booked!*\n\n"
-                    f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
-                    f"🧪 *Test:* {booking.get('lab_test_name', 'N/A')}\n"
-                    f"📅 *Collection Date:* {date_display}\n"
-                    f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
-                    f"📌 Please arrive during our sample collection hours with a valid ID.\n\n"
-                    f"_Cancellation with full refund available up to {settings.refund_window_hours} hours before your collection date._"
-                )
+                test_name = booking.get("lab_test_name", "N/A")
+                if lang == "hi":
+                    msg = (
+                        f"✅ *भुगतान सफल — टेस्ट बुक हो गया!*\n\n"
+                        f"📋 *बुकिंग संदर्भ:* {ref_code}\n"
+                        f"🧪 *टेस्ट:* {test_name}\n"
+                        f"📅 *सैंपल संग्रह तिथि:* {date_display}\n"
+                        f"💰 *भुगतान राशि:* ₹{amount_rupees:.0f}\n\n"
+                        f"📌 कृपया वैध पहचान पत्र के साथ हमारे सैंपल संग्रह समय के दौरान पहुंचें।\n\n"
+                        f"_सैंपल संग्रह तिथि से {refund_window} घंटे पहले तक पूर्ण रिफंड के साथ रद्दीकरण उपलब्ध है।_"
+                    )
+                elif lang == "te":
+                    msg = (
+                        f"✅ *చెల్లింపు నిర్ధారించబడింది — టెస్ట్ బుక్ చేయబడింది!*\n\n"
+                        f"📋 *బుకింగ్ రిఫరెన్స్:* {ref_code}\n"
+                        f"🧪 *టెస్ట్:* {test_name}\n"
+                        f"📅 *సేకరణ తేదీ:* {date_display}\n"
+                        f"💰 *చెల్లించిన మొత్తం:* ₹{amount_rupees:.0f}\n\n"
+                        f"📌 దయచేసి చెల్లుబాటు అయ్యే ఐడీతో మా శాంపిల్ సేకరణ వేళల్లో రండి.\n\n"
+                        f"_సేకరణ తేదీకి {refund_window} గంటల ముందు వరకు పూర్తి రీఫండ్‌తో రద్దు చేసుకునే అవకాశం ఉంది._"
+                    )
+                else:
+                    msg = (
+                        f"✅ *Payment Confirmed — Test Booked!*\n\n"
+                        f"📋 *Booking Ref:* {ref_code}\n"
+                        f"🧪 *Test:* {test_name}\n"
+                        f"📅 *Collection Date:* {date_display}\n"
+                        f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
+                        f"📌 Please arrive during our sample collection hours with a valid ID.\n\n"
+                        f"_Cancellation with full refund available up to {refund_window} hours before your collection date._"
+                    )
             else:
-                msg = (
-                    f"✅ *Payment Confirmed — Appointment Booked!*\n\n"
-                    f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
-                    f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
-                    f"🏥 *Department:* {booking.get('department', 'N/A')}\n"
-                    f"📅 *Date:* {date_display}\n"
-                    f"🕐 *Time:* {format_slot_time(booking.get('appointment_time')) or 'N/A'}\n"
-                    f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
-                    f"📌 Please arrive 15 minutes early with any relevant medical records.\n\n"
-                    f"_Cancellation with full refund available up to {settings.refund_window_hours} hours before your appointment. "
-                    f"No-show bookings are non-refundable._"
-                )
+                doc_name = booking.get("doctor_name", "N/A")
+                dept_name = booking.get("department", "N/A")
+                if lang == "hi":
+                    msg = (
+                        f"✅ *भुगतान सफल — अपॉइंटमेंट बुक हो गई!*\n\n"
+                        f"📋 *बुकिंग संदर्भ:* {ref_code}\n"
+                        f"👨‍⚕️ *डॉक्टर:* {doc_name}\n"
+                        f"🏥 *विभाग:* {dept_name}\n"
+                        f"📅 *दिनांक:* {date_display}\n"
+                        f"🕐 *समय:* {slot_time_display}\n"
+                        f"💰 *भुगतान राशि:* ₹{amount_rupees:.0f}\n\n"
+                        f"📌 कृपया प्रासंगिक मेडिकल रिकॉर्ड के साथ 15 मिनट पहले पहुंचें।\n\n"
+                        f"_अपॉइंटमेंट से {refund_window} घंटे पहले तक पूर्ण रिफंड के साथ रद्दीकरण उपलब्ध है। "
+                        f"नो-शो बुकिंग गैर-वापसी योग्य हैं।_"
+                    )
+                elif lang == "te":
+                    msg = (
+                        f"✅ *చెల్లింపు నిర్ధారించబడింది — అపాయింట్‌మెంట్ బుక్ అయింది!*\n\n"
+                        f"📋 *బుకింగ్ రిఫరెన్స్:* {ref_code}\n"
+                        f"👨‍⚕️ *డాక్టర్:* {doc_name}\n"
+                        f"🏥 *విభాగం:* {dept_name}\n"
+                        f"📅 *తేదీ:* {date_display}\n"
+                        f"🕐 *సమయం:* {slot_time_display}\n"
+                        f"💰 *చెల్లించిన మొత్తం:* ₹{amount_rupees:.0f}\n\n"
+                        f"📌 దయచేసి సంబంధిత మెడికల్ రికార్డులతో 15 నిమిషాల ముందుగా రండి.\n\n"
+                        f"_అపాయింట్‌మెంట్‌కు {refund_window} గంటల ముందు వరకు పూర్తి రీఫండ్‌తో రద్దు చేసుకునే అవకాశం ఉంది. "
+                        f"నో-షో బుకింగ్‌లకు రీఫండ్ ఉండదు._"
+                    )
+                else:
+                    msg = (
+                        f"✅ *Payment Confirmed — Appointment Booked!*\n\n"
+                        f"📋 *Booking Ref:* {ref_code}\n"
+                        f"👨‍⚕️ *Doctor:* {doc_name}\n"
+                        f"🏥 *Department:* {dept_name}\n"
+                        f"📅 *Date:* {date_display}\n"
+                        f"🕐 *Time:* {slot_time_display}\n"
+                        f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
+                        f"📌 Please arrive 15 minutes early with any relevant medical records.\n\n"
+                        f"_Cancellation with full refund available up to {refund_window} hours before your appointment. "
+                        f"No-show bookings are non-refundable._"
+                    )
 
-            # Append clinic location — skip for branch bookings, which already
-            # have their own branch-specific address shown during booking
-            if not booking.get("branch_id"):
-                from app.services.tenant import get_clinic_contact
-
+            # Append location details
+            if booking.get("branch_id"):
+                try:
+                    branch = await get_branch_by_id(booking["branch_id"])
+                    if branch:
+                        branch_name = branch.get("name") or booking.get("branch_name", "")
+                        branch_address = branch.get("address", "")
+                        branch_landmark = branch.get("landmark", "")
+                        branch_maps = branch.get("maps_link", "")
+                        location_line = f"\n\n📍 Location: {branch_name}"
+                        if branch_address:
+                            location_line += f", {branch_address}"
+                        if branch_landmark:
+                            location_line += f"\nNear {branch_landmark}"
+                        if branch_maps:
+                            location_line += f"\n🗺️ Google Maps: {branch_maps}"
+                        msg += location_line
+                except Exception as branch_err:
+                    logger.warning(f"Failed to append branch location: {branch_err}")
+            else:
                 clinic_address = get_clinic_contact(
                     clinic, "address", settings.hospital_address
                 )
@@ -1692,30 +1812,151 @@ class PaymentService:
                         location_line += f"\nGoogle Maps: {clinic_maps_link}"
                     msg += location_line
 
-            await whatsapp_service.send_text(clinic, booking["patient_phone"], msg, _source="payment")
-            logger.info(
-                f"Sent payment confirmation to {booking['patient_phone'][:6]}***"
-            )
+            # Deliver WhatsApp text to patient with 2-attempt retry loop
+            patient_phone = booking.get("patient_phone")
+            patient_notified = False
+            for attempt in range(2):
+                try:
+                    await whatsapp_service.send_text(
+                        clinic, patient_phone, msg, _source="payment"
+                    )
+                    patient_notified = True
+                    logger.info(
+                        f"Sent payment confirmation to {patient_phone[:6]}*** (attempt {attempt + 1})"
+                    )
+                    break
+                except Exception as send_err:
+                    logger.warning(
+                        f"Failed to send payment confirmation to patient {patient_phone[:6]}*** (attempt {attempt + 1}/2): {send_err}"
+                    )
+                    if attempt == 0:
+                        import asyncio
+                        await asyncio.sleep(2)
 
+            if not patient_notified:
+                logger.error(
+                    f"CRITICAL: Failed to deliver payment confirmation WhatsApp message to patient {patient_phone} for booking {ref_code}"
+                )
+                # Escalate to clinic admin via alert
+                try:
+                    alert_msg = (
+                        f"⚠️ *Payment Confirmation WhatsApp Delivery Failed*\n\n"
+                        f"Patient: {booking.get('patient_name', 'Patient')} ({patient_phone})\n"
+                        f"Booking Ref: {ref_code}\n"
+                        f"Doctor: {booking.get('doctor_name', 'N/A')}\n"
+                        f"Date: {date_display} at {slot_time_display}\n"
+                        f"Paid: ₹{amount_rupees:.0f}\n\n"
+                        f"Please contact the patient manually to confirm their appointment."
+                    )
+                    await self._alert_admin(clinic, alert_msg)
+                except Exception as alert_err:
+                    logger.error(f"Failed to send admin alert on delivery failure: {alert_err}")
+
+            # Send interactive buttons for Main Menu
             follow_up_msg = {
                 "en": "What would you like to do next?",
-            }.get("en", "What would you like to do next?")
-            await whatsapp_service.send_interactive_buttons(
-                clinic,
-                booking["patient_phone"],
-                body=follow_up_msg,
-                buttons=[{"id": "main_menu", "title": "Main Menu"}],
-                _source="payment",
-            )
+                "hi": "आप आगे क्या करना चाहेंगे?",
+                "te": "మీరు ఇంకా ఏమి చేయాలనుకుంటున్నారు?",
+            }.get(lang, "What would you like to do next?")
 
-            from app.services.conversation import conversation_manager
+            btn_title = {
+                "en": "Main Menu",
+                "hi": "मुख्य मेनू",
+                "te": "ప్రధాన మెనూ",
+            }.get(lang, "Main Menu")
 
-            await conversation_manager.update_state(
-                clinic, booking["patient_phone"], "main_menu"
-            )
+            try:
+                await whatsapp_service.send_interactive_buttons(
+                    clinic,
+                    patient_phone,
+                    body=follow_up_msg,
+                    buttons=[{"id": "main_menu", "title": btn_title}],
+                    _source="payment",
+                )
+            except Exception as btn_err:
+                logger.warning(f"Failed to send interactive buttons after payment confirmation: {btn_err}")
+                try:
+                    await whatsapp_service.send_text(
+                        clinic, patient_phone, follow_up_msg, _source="payment"
+                    )
+                except Exception:
+                    pass
+
+            # Update conversation state to main_menu
+            try:
+                from app.services.conversation import conversation_manager
+                await conversation_manager.update_state(
+                    clinic, patient_phone, "main_menu"
+                )
+            except Exception as state_err:
+                logger.warning(f"Failed to update conversation state: {state_err}")
+
+            # Send real-time WhatsApp alert to Clinic Admin Phone
+            try:
+                admin_notif_msg = (
+                    f"✅ *New Payment & Booking Confirmed!*\n\n"
+                    f"📋 *Booking Ref:* {ref_code}\n"
+                    f"👤 *Patient:* {booking.get('patient_name', 'Patient')} ({patient_phone})\n"
+                    f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
+                    f"🏥 *Department:* {booking.get('department', 'N/A')}\n"
+                    f"📅 *Date:* {date_display}\n"
+                    f"🕐 *Time:* {slot_time_display}\n"
+                    f"💰 *Paid:* ₹{amount_rupees:.0f}\n"
+                    f"🆔 *Payment ID:* {booking.get('payment_id', 'N/A')}"
+                )
+                await self._alert_admin(clinic, admin_notif_msg)
+            except Exception as admin_alert_err:
+                logger.warning(f"Failed to send admin WhatsApp alert: {admin_alert_err}")
+
+            # In-App Admin Notification creation (for staff & admin web dashboard)
+            try:
+                if clinic_id_val and str(clinic_id_val).strip().lower() not in ("default", "none", "null", ""):
+                    notif_row = {
+                        "clinic_id": clinic_id_val,
+                        "admin_id": None,
+                        "title": f"New Booking Confirmed ({ref_code})",
+                        "message": (
+                            f"Patient {booking.get('patient_name', 'Patient')} ({patient_phone}) booked "
+                            f"{booking.get('doctor_name', 'N/A')} ({booking.get('department', 'N/A')}) on "
+                            f"{date_display} at {slot_time_display}. Paid ₹{amount_rupees:.0f} (Payment ID: {booking.get('payment_id', 'N/A')})."
+                        ),
+                        "is_read": False,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    supabase.table("admin_notifications").insert(notif_row).execute()
+            except Exception as in_app_err:
+                logger.warning(f"Could not create in-app admin notification: {in_app_err}")
+
+            # Log analytics event for clinic dashboard
+            try:
+                from app.database import log_analytics_event
+                await log_analytics_event(
+                    clinic_id_val,
+                    patient_phone,
+                    "appointment_booked",
+                    department=booking.get("department"),
+                )
+            except Exception as analytics_err:
+                logger.warning(f"Could not log analytics event: {analytics_err}")
+
+            # Log confirmation dispatched event
+            if booking.get("id"):
+                try:
+                    self._log_payment_event(
+                        booking["id"],
+                        "confirmation_dispatched",
+                        {
+                            "patient_phone": patient_phone,
+                            "patient_notified": patient_notified,
+                            "payment_id": booking.get("payment_id"),
+                        },
+                        clinic_id=clinic_id_val,
+                    )
+                except Exception:
+                    pass
 
         except Exception as e:
-            logger.error(f"Failed to send payment confirmation notification: {e}")
+            logger.error(f"Failed in _notify_payment_confirmed: {e}")
 
     async def _notify_booking_cancelled(self, booking: dict, refunded: bool) -> None:
         """Send WhatsApp notice to the patient after an admin cancels their booking."""
