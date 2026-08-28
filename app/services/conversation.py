@@ -91,6 +91,67 @@ class ConversationState(str, Enum):
     CONFIRMING_COLLECTION_DATE = "confirming_collection_date"
 
 
+MID_BOOKING_STATES = {
+    "selecting_branch",
+    "selecting_family_member",
+    "collecting_name",
+    "confirming_save_family_member",
+    "collecting_symptoms",
+    "asking_symptoms",
+    "suggesting_department",
+    "selecting_department",
+    "selecting_doctor",
+    "selecting_date",
+    "selecting_slot",
+    "confirming_booking",
+    "booking_lab_test",
+    "selecting_lab_date",
+    "confirming_lab_booking",
+}
+
+
+def extract_clean_message_content(message: str) -> str:
+    """Extract user selection from multi-line messages that include WhatsApp quoted prompt headers."""
+    if not message or "\n" not in message:
+        return message
+
+    lines = [line.strip() for line in message.strip().split("\n") if line.strip()]
+    if len(lines) <= 1:
+        return message
+
+    HEADER_PATTERNS = [
+        "what would you like to do",
+        "our services",
+        "please choose a department",
+        "choose department",
+        "choose your doctor",
+        "available doctors in",
+        "select branch",
+        "select location",
+        "who is this appointment for",
+        "select date",
+        "select time",
+        "select a time slot",
+        "please select from the list below",
+        "how can we help",
+        "हमारी सेवाएं",
+        "మా సేవలు",
+        "कृपया विभाग",
+        "దయచేసి విభాగం",
+    ]
+
+    # Iteratively remove leading lines that match prompt header patterns,
+    # as long as there is still remaining user selection content.
+    while len(lines) > 1:
+        first_line_lower = lines[0].lower()
+        if any(h in first_line_lower for h in HEADER_PATTERNS):
+            lines.pop(0)
+        else:
+            break
+
+    return lines[0] if len(lines) == 1 else "\n".join(lines)
+
+
 class ConversationManager:
     """Manages conversation state and flow."""
 
@@ -131,10 +192,15 @@ class ConversationManager:
             "context": merged,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        # Any return to main_menu must clear a stale mid-booking expiry timestamp —
-        # otherwise a leftover value from an old abandoned booking falsely times out
-        # the next booking attempt on its very first message.
-        if new_state == "main_menu":
+        # If entering/advancing in a booking state, refresh the 30-minute booking expiry
+        if new_state in MID_BOOKING_STATES:
+            update_payload["booking_context_expires_at"] = (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat()
+        elif new_state in ["main_menu", "idle", "selecting_language", "awaiting_consent"]:
+            # Any return to main menu or idle clears stale mid-booking expiry timestamp —
+            # otherwise a leftover value from an old abandoned booking falsely times out
+            # the next booking attempt on its very first message.
             update_payload["booking_context_expires_at"] = None
 
         try:
@@ -283,22 +349,17 @@ class ConversationManager:
             patient = await create_patient(clinic["id"], phone)
             logger.info(f"Created new patient for {mask_phone(phone)}")
 
+        # Extract clean text from multi-line messages that include WhatsApp quoted prompt headers
+        if message_type == "text":
+            message = extract_clean_message_content(message)
+
         # Determine language - use None if not set (don't default here)
         lang = patient.get("language") or "en"
 
         # Guard 2: Session timeout mid-booking
-        mid_booking_states = [
-            "collecting_name",
-            "collecting_symptoms",
-            "suggesting_department",
-            "selecting_doctor",
-            "selecting_date",
-            "selecting_slot",
-            "confirming_booking",
-        ]
         booking_expires = session.get("booking_context_expires_at")
 
-        if booking_expires and session["state"] in mid_booking_states:
+        if booking_expires and session.get("state") in MID_BOOKING_STATES:
             expires_dt = datetime.fromisoformat(booking_expires.replace("Z", "+00:00"))
             if datetime.now(timezone.utc) > expires_dt:
                 await update_conversation(
@@ -317,7 +378,7 @@ class ConversationManager:
                 return
 
         # Reset booking timer on every message while mid-booking
-        if session["state"] in mid_booking_states:
+        if session.get("state") in MID_BOOKING_STATES:
             expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
             await update_conversation(
                 clinic["id"], phone, {"booking_context_expires_at": expires}
@@ -348,8 +409,11 @@ class ConversationManager:
                 return
         # ── End Clinical Firewall ──────────────────────────────────────────────
 
-        # Detect intent
-        intent = await detect_intent(message, clinic)
+        # Detect intent (skip LLM inference for controlled interactive button clicks)
+        if message_type == "interactive" and interactive_data:
+            intent = "button_click"
+        else:
+            intent = await detect_intent(message, clinic)
 
         # Handle interactive button responses FIRST (before guards)
         if message_type == "interactive" and interactive_data:
@@ -485,23 +549,42 @@ class ConversationManager:
                 await self._send_main_menu(clinic, phone, lang)
                 return
 
-            elif button_id in [
-                "menu_book",
-                "menu_services",
-                "menu_doctors",
-                "menu_emergency",
-                "menu_human",
-                "menu_reports",
-            ]:
-                intent_map = {
-                    "menu_book": "book_appointment",
-                    "menu_services": "view_services",
-                    "menu_doctors": "doctor_availability",
-                    "menu_emergency": "emergency",
-                    "menu_human": "human_escalation",
-                    "menu_reports": "view_reports",
-                }
-                intent = intent_map.get(button_id, intent)
+            elif button_id == "menu_doctors":
+                lang = await get_lang(clinic, phone)
+                if await self._is_diagnostics_only(clinic):
+                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                else:
+                    await self._show_doctors(clinic, phone, lang)
+                return
+
+            elif button_id == "menu_services":
+                lang = await get_lang(clinic, phone)
+                if await self._is_diagnostics_only(clinic):
+                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                else:
+                    await self._show_services(clinic, phone, lang)
+                return
+
+            elif button_id == "menu_reports":
+                lang = await get_lang(clinic, phone)
+                await self._handle_view_reports(clinic, phone, lang)
+                return
+
+            elif button_id == "menu_book":
+                lang = await get_lang(clinic, phone)
+                patient_obj = await get_patient_by_phone(clinic["id"], phone)
+                await self._start_booking(clinic, phone, patient_obj, lang)
+                return
+
+            elif button_id == "menu_emergency":
+                lang = await get_lang(clinic, phone)
+                await self._handle_emergency(clinic, phone, lang)
+                return
+
+            elif button_id == "menu_human":
+                lang = await get_lang(clinic, phone)
+                await self._handle_human_escalation(clinic, phone, lang)
+                return
 
             elif button_id.startswith("branch_"):
                 intent = "select_branch"
@@ -517,8 +600,8 @@ class ConversationManager:
         ]
         if (
             intent == "book_appointment"
-            and session["state"] in mid_booking_states
-            and session["state"] not in SAFE_STATES
+            and session.get("state") in MID_BOOKING_STATES
+            and session.get("state") not in SAFE_STATES
             and message_type != "interactive"
         ):
             context = session.get("context", {})
@@ -703,6 +786,59 @@ class ConversationManager:
             await self._send_language_selection(clinic, phone)
             await self.update_state(clinic, phone, "selecting_language")
             return
+
+        # Global handlers for top-level menu intents (escape hatches from selection states)
+        if state not in ["selecting_language", "awaiting_consent"]:
+            if intent == "doctor_availability":
+                if await self._is_diagnostics_only(clinic):
+                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                else:
+                    await self._show_doctors(clinic, phone, lang)
+                return
+
+            if intent == "view_services":
+                if await self._is_diagnostics_only(clinic):
+                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                else:
+                    await self._show_services(clinic, phone, lang)
+                return
+
+            if intent == "view_reports":
+                await self._handle_view_reports(clinic, phone, lang)
+                return
+
+            # Explicit navigation / reset to main menu
+            CHOICE_STATES = {
+                "main_menu",
+                "selecting_department",
+                "selecting_doctor",
+                "selecting_branch",
+                "selecting_date",
+                "selecting_slot",
+            }
+            msg_lower = message.strip().lower()
+            if (
+                msg_lower in ["menu", "main menu", "home", "start over", "reset", "मेनू", "మెనూ"]
+                or (intent == "greeting" and state in CHOICE_STATES and state != "main_menu")
+            ):
+                await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+                await self._send_main_menu(clinic, phone, lang)
+                return
+
+            if (
+                intent == "book_appointment"
+                and state in {"selecting_department", "selecting_doctor", "selecting_branch"}
+            ):
+                await self._start_booking(clinic, phone, patient, lang)
+                return
+
+            if intent == "cancel_appointment" and state not in ["cancelling_select_appointment"]:
+                await self._handle_cancel_request(clinic, phone, patient, lang)
+                return
+
+            if intent == "reschedule_appointment" and not state.startswith("rescheduling_"):
+                await self._handle_reschedule_request(clinic, phone, patient, lang)
+                return
 
         # State machine
         if state == "idle":
@@ -1782,16 +1918,23 @@ class ConversationManager:
         context["symptoms"] = message
         context["suggestion_reasoning"] = symptom_result["reasoning"]
 
-        # Show suggestion (removed suggestion_reasoning from message template)
+        # Show suggestion
+        dept_name = symptom_result["suggested_department"]
+        suggestion_body = {
+            "en": f"Based on your concern, our *{dept_name}* team may be able to help. Shall I book an appointment there?",
+            "hi": f"आपकी चिंता के आधार पर, हमारी *{dept_name}* टीम मदद कर सकती है। क्या मैं वहां अपॉइंटमेंट बुक करूं?",
+            "te": f"మీ ఆందోళన ఆధారంగా, మా *{dept_name}* బృందం సహాయం చేయగలదు. అక్కడ అపాయింట్‌మెంట్ బుక్ చేయమంటారా?",
+        }.get(lang, f"Based on your concern, our *{dept_name}* team may be able to help. Shall I book an appointment there?")
+
         await self.whatsapp.send_interactive_buttons(
             clinic,
             phone,
-            body=f"Based on your concern, our {symptom_result['suggested_department']} team may be able to help. Shall I book there?",
+            body=suggestion_body,
             buttons=[
                 {
                     "id": "suggest_yes",
                     "title": (
-                        "Yes" if lang == "en" else ("हां" if lang == "hi" else "అవును")
+                        "Yes" if lang == "en" else ("हाँ" if lang == "hi" else "అవును")
                     ),
                 },
                 {

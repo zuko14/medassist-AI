@@ -72,18 +72,20 @@ class TestAIEngine:
     @pytest.mark.asyncio
     async def test_map_symptom_to_department(self):
         """Test symptom to department mapping."""
-        # Test fallback mapping
-        result = await ai_engine.map_symptom_to_department("chest pain", MOCK_CLINIC)
-        assert result["suggested_department"] == "Cardiology"
-        assert result["is_emergency"] is True
+        # Test fallback mapping with mocked Groq client
+        with patch.object(ai_engine, "groq_client") as mock_client:
+            mock_client.chat.completions.create.side_effect = Exception("Fallback to rule map")
+            result = await ai_engine.map_symptom_to_department("chest pain", MOCK_CLINIC)
+            assert result["suggested_department"] == "Cardiology"
+            assert result["is_emergency"] is True
 
-        result = await ai_engine.map_symptom_to_department("toothache", MOCK_CLINIC)
-        assert result["suggested_department"] == "Dental"
+            result = await ai_engine.map_symptom_to_department("toothache", MOCK_CLINIC)
+            assert result["suggested_department"] == "Dental"
 
-        result = await ai_engine.map_symptom_to_department(
-            "fever and cold", MOCK_CLINIC
-        )
-        assert result["suggested_department"] == "General Medicine"
+            result = await ai_engine.map_symptom_to_department(
+                "fever and cold", MOCK_CLINIC
+            )
+            assert result["suggested_department"] == "General Medicine"
 
     def test_language_detection(self):
         """Test language detection."""
