@@ -378,6 +378,7 @@ BEGIN
             ('inbound_messages', 'retry_at',          '047'),
             ('lab_reports',  'file_path',             '002'),
             ('lab_reports',  'external_report_id',    '026'),
+            ('lab_reports',  'ai_summary_sent',       '062'),
             ('lab_reports',  'matched_booking_id',    '040'),
             ('clinic_admins', 'role',                 '011'),
             ('clinic_admins', 'branch_id',            '036'),

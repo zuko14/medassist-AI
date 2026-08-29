@@ -9,6 +9,7 @@ import secrets
 from datetime import date, datetime, time as time_type, timedelta, timezone
 from typing import Literal, Optional
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import (
     APIRouter,
@@ -54,6 +55,10 @@ from app.utils.security import login_rate_limiter
 from app.utils.validators import normalize_phone, validate_phone
 
 logger = logging.getLogger(__name__)
+
+# Every clinic on this platform operates in India; the scheduler already
+# pins Asia/Kolkata. Dashboard "today" must use the same day boundary.
+CLINIC_TZ = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 security = HTTPBasic()
@@ -3989,26 +3994,80 @@ async def get_diagnostic_stats(
     if target_branch:
         enforce_branch_scope(user, target_branch)
 
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    # The clinic's day, not UTC's. At UTC midnight it is already 05:30 in IST,
+    # so a UTC-based "today" silently attributed every report delivered between
+    # 00:00 and 05:30 IST to the previous day.
+    now_local = datetime.now(CLINIC_TZ)
+    today_start = (
+        now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
     retention_cutoff = (datetime.now(timezone.utc) - timedelta(days=80)).isoformat()
 
     try:
-        # 1. Query lab_reports
-        # unscoped: tenant-scoped operation with verified clinic authorization
-        lr_query = supabase.table("lab_reports").select("id, status, uploaded_at, sent_at, file_path")
+        # 1. Query lab_reports for TODAY only.
+        #
+        # This used to select every lab_reports row for the clinic with no
+        # date filter, no ordering and no limit, then filter "today" in Python.
+        # PostgREST caps a response at 1000 rows, so once a busy diagnostic
+        # center passed 1000 lifetime reports (about two weeks at ~100/day)
+        # the tiles were computed from an arbitrary 1000-row slice and stopped
+        # matching reality. Filter in SQL so the counts are exact.
+        lr_query = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            supabase.table("lab_reports")
+            .select("id, status, uploaded_at, sent_at, ai_summary, ai_summary_sent")
+            .gte("uploaded_at", today_start)
+        )
         if effective_clinic_id != "default":
             lr_query = lr_query.eq("clinic_id", effective_clinic_id)
 
-        lr_res = lr_query.execute()
-        all_reports = lr_res.data or []
+        lr_res = lr_query.order("uploaded_at", desc=True).limit(5000).execute()
+        today_reports = lr_res.data or []
 
-        today_reports = [r for r in all_reports if (r.get("uploaded_at") or "") >= today_start]
         sent_today = sum(1 for r in today_reports if r.get("status") == "sent")
         failed_today = sum(1 for r in today_reports if r.get("status") == "failed")
-        needs_review_total = sum(1 for r in all_reports if r.get("status") == "needs_review")
-        expiring_soon = sum(
-            1 for r in all_reports
-            if (r.get("uploaded_at") or "") <= retention_cutoff and r.get("file_path")
+
+        # Of the reports actually delivered today, how many carried their AI
+        # summary to the patient? A stored ai_summary only proves it was
+        # generated — outside the 24h window the document template carries no
+        # summary text, so the patient receives the PDF with no explanation.
+        summary_delivered_today = sum(
+            1 for r in today_reports
+            if r.get("status") == "sent" and r.get("ai_summary_sent")
+        )
+        summary_missing_today = sent_today - summary_delivered_today
+
+        # Open triage queues are deliberately all-time, not today-only: a report
+        # stuck since yesterday still needs a human. Counted server-side so they
+        # are not truncated by the row cap above.
+        def _count(table: str, apply) -> int:
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            q = supabase.table(table).select("id", count="exact")
+            if effective_clinic_id != "default":
+                q = q.eq("clinic_id", effective_clinic_id)
+            return apply(q).limit(1).execute().count or 0
+
+        needs_review_total = _count(
+            "lab_reports", lambda q: q.eq("status", "needs_review")
+        )
+        # "Delivery Failures" must agree with the Failed Deliveries Queue below
+        # it. The queue counts unresolved connector_failed_reports (PDF download
+        # failed, name conflict, WhatsApp send rejected); the tile counted only
+        # lab_reports.status == 'failed', which those never produce — so the
+        # dashboard showed "0 failures" directly above a list of 51 of them.
+        connector_failures_open = _count(
+            "connector_failed_reports",
+            lambda q: q.is_("resolved_at", "null") if not target_branch
+            else q.is_("resolved_at", "null").eq("branch_id", target_branch),
+        )
+        lab_failures_open = _count("lab_reports", lambda q: q.eq("status", "failed"))
+        delivery_failures_open = connector_failures_open + lab_failures_open
+
+        expiring_soon = _count(
+            "lab_reports",
+            lambda q: q.lte("uploaded_at", retention_cutoff).not_.is_("file_path", "null"),
         )
 
         # 2. Connector status
@@ -4094,8 +4153,12 @@ async def get_diagnostic_stats(
             "reports_today": {
                 "total": len(today_reports),
                 "sent": sent_today,
-                "failed": failed_today,
+                "failed": delivery_failures_open,
+                "failed_today": failed_today,
+                "connector_failures_open": connector_failures_open,
                 "needs_review": needs_review_total,
+                "ai_summary_delivered": summary_delivered_today,
+                "ai_summary_missing": summary_missing_today,
             },
             "expiring_retention_count": expiring_soon,
             "connector": connector_info,

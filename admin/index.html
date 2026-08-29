@@ -979,10 +979,11 @@
 
                 <!-- Today's Operations Stats -->
                 <div class="stats stagger-in">
-                    <div class="stat"><div class="glow"></div><div class="label">Discovered Today</div><div class="num" id="s-diag-found" style="color:var(--accent2)">0</div></div>
+                    <div class="stat" title="Distinct reports pulled from the portal since midnight IST. This is a running daily total, NOT the portal's current Pending Print count — reports leave Pending Print once printed, so the two numbers are expected to differ."><div class="glow"></div><div class="label">Discovered Today</div><div class="num" id="s-diag-found" style="color:var(--accent2)">0</div></div>
                     <div class="stat"><div class="glow"></div><div class="label">Delivered Today</div><div class="num" id="s-diag-sent" style="color:var(--green)">0</div></div>
                     <div class="stat" style="border-color:rgba(255,200,87,0.3)"><div class="glow" style="background:var(--amber)"></div><div class="label">⚠️ Needs Review</div><div class="num" id="s-diag-review" style="color:var(--amber)">0</div></div>
-                    <div class="stat" style="border-color:rgba(255,107,107,0.3)"><div class="glow" style="background:var(--red)"></div><div class="label">Delivery Failures</div><div class="num" id="s-diag-failed" style="color:var(--red)">0</div></div>
+                    <div class="stat" style="border-color:rgba(255,107,107,0.3)" title="All unresolved failures — connector-stage (PDF download, name conflict) plus WhatsApp send failures. Matches the Failed Deliveries Queue below."><div class="glow" style="background:var(--red)"></div><div class="label">Delivery Failures</div><div class="num" id="s-diag-failed" style="color:var(--red)">0</div></div>
+                    <div class="stat" style="border-color:rgba(255,200,87,0.3)" title="Reports delivered today whose AI summary did NOT reach the patient. Outside WhatsApp's 24h window the delivery template carries no summary text — configure an approved 3-variable summary template to include it."><div class="glow" style="background:var(--amber)"></div><div class="label">Sent Without Summary</div><div class="num" id="s-diag-nosummary" style="color:var(--amber)">0</div></div>
                 </div>
 
                 <!-- ⚠️ Needs Review Triage Table -->
@@ -3025,6 +3026,29 @@ async function loadLabReports() {
     } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load lab reports'); }
 }
 
+// The AI Summary column used to read the stored ai_summary text as proof the
+// patient received it. Outside WhatsApp's 24h window a report goes out as a
+// document template that carries no summary text, so the summary was generated,
+// stored, and never delivered — while this column showed a confident tick.
+// ai_summary_sent (migration 062) is the delivery signal; ai_summary is only
+// the generation signal. The icon reports the clinical reading (abnormal vs
+// normal); the tag next to it reports whether the patient actually got it.
+function aiSummaryCell(r) {
+    if (!r.ai_summary) {
+        return `<span class="muted" title="No AI summary was generated for this report (unreadable PDF or the summarizer failed).">—</span>`;
+    }
+    const abnormal = !!r.has_abnormal_values;
+    const icon = abnormal ? '⚠️' : '✅';
+    const color = abnormal ? 'var(--amber)' : 'var(--green)';
+    const reading = abnormal
+        ? 'Abnormal values flagged — this icon is a clinical reading, not an error.'
+        : 'All values read as normal.';
+    const tip = esc(reading + ' — ' + r.ai_summary);
+    const icons = `<span title="${tip}" style="cursor:help;font-size:1.2rem;color:${color}">${icon}</span>`;
+    if (r.ai_summary_sent) return icons;
+    return icons + ` <small style="color:var(--text3)" title="The patient received the report document but NOT this summary. Outside the 24h window the delivery template carries no summary text — configure an approved 3-variable summary template to include it.">not sent</small>`;
+}
+
 function renderLabTable(list) {
     const el = document.getElementById('labList');
     if (!list.length) { el.innerHTML = emptyState('flask', 'No lab reports yet'); return; }
@@ -3036,7 +3060,7 @@ function renderLabTable(list) {
             <td>${esc(r.report_name)}</td>
             <td>${esc(r.report_type) || 'General'}</td>
             <td>${r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : '—'}</td>
-            <td>${r.ai_summary ? (r.has_abnormal_values ? `<span title="${r.ai_summary.replace(/"/g,'&quot;')}" style="cursor:help;font-size:1.2rem;color:var(--amber)">⚠️</span>` : `<span title="${r.ai_summary.replace(/"/g,'&quot;')}" style="cursor:help;font-size:1.2rem;color:var(--green)">✅</span>`) : '—'}</td>
+            <td>${aiSummaryCell(r)}</td>
             <td>${badge(r.status)}</td>
             <td><button class="btn btn-ghost btn-sm" onclick="resendReport('${r.id}')">🔁 Resend</button></td>
         </tr>`).join('')}</tbody>
@@ -4579,6 +4603,7 @@ async function loadDiagnosticDashboard() {
         document.getElementById('s-diag-sent').textContent = rep.sent || 0;
         document.getElementById('s-diag-review').textContent = rep.needs_review || 0;
         document.getElementById('s-diag-failed').textContent = rep.failed || 0;
+        document.getElementById('s-diag-nosummary').textContent = rep.ai_summary_missing || 0;
 
         // Render Connector Status
         const conn = stats.connector;

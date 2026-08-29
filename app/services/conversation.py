@@ -37,8 +37,7 @@ from app.services.clinical_firewall import screen_message
 # Per-phone asyncio lock with Meta timeout protection
 from app.services.message_queue import (
     acquire_phone_lock_with_timeout,
-    get_phone_lock,
-    release_phone_lock,
+    release_phone_lock_acquired,
 )
 
 logger = logging.getLogger(__name__)
@@ -289,7 +288,6 @@ class ConversationManager:
             return
 
         # Lock acquired — process the message with guaranteed cleanup
-        phone_lock = await get_phone_lock(phone)
         try:
             # We already hold the lock from acquire_phone_lock_with_timeout(),
             # so _handle_message_locked runs exclusively for this phone.
@@ -312,15 +310,8 @@ class ConversationManager:
                         f"Failed to record last_processed_message_id for {mask_phone(phone)}: {update_err}"
                     )
         finally:
-            # Always release the lock and decrement refcount
-            phone_lock.release()
-            await release_phone_lock(phone)
-            # KA-12: Release distributed lock
-            try:
-                from app.services.distributed_lock import distributed_lock_manager
-                await distributed_lock_manager.release(f"phone_{phone[-10:]}")
-            except Exception:
-                pass
+            # Releases the local lock, its refcount, and the distributed lease.
+            await release_phone_lock_acquired(phone)
 
     async def _handle_message_locked(
         self,

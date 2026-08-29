@@ -2056,17 +2056,28 @@ class PaymentService:
 
             # Send real-time WhatsApp alert to Clinic Admin Phone
             try:
-                admin_notif_msg = (
-                    f"✅ *New Payment & Booking Confirmed!*\n\n"
-                    f"📋 *Booking Ref:* {ref_code}\n"
-                    f"👤 *Patient:* {booking.get('patient_name', 'Patient')} ({patient_phone})\n"
-                    f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
-                    f"🏥 *Department:* {booking.get('department', 'N/A')}\n"
-                    f"📅 *Date:* {date_display}\n"
-                    f"🕐 *Time:* {slot_time_display}\n"
-                    f"💰 *Paid:* ₹{amount_rupees:.0f}\n"
-                    f"🆔 *Payment ID:* {booking.get('payment_id', 'N/A')}"
-                )
+                if booking.get("booking_type") == "lab_test":
+                    admin_notif_msg = (
+                        f"✅ *New Lab Test Booking & Payment Confirmed!*\n\n"
+                        f"📋 *Booking Ref:* {ref_code}\n"
+                        f"👤 *Patient:* {booking.get('patient_name', 'Patient')} ({patient_phone})\n"
+                        f"🧪 *Test:* {booking.get('lab_test_name', 'N/A')}\n"
+                        f"📅 *Collection Date:* {date_display}\n"
+                        f"💰 *Paid:* ₹{amount_rupees:.0f}\n"
+                        f"🆔 *Payment ID:* {booking.get('payment_id', 'N/A')}"
+                    )
+                else:
+                    admin_notif_msg = (
+                        f"✅ *New Payment & Booking Confirmed!*\n\n"
+                        f"📋 *Booking Ref:* {ref_code}\n"
+                        f"👤 *Patient:* {booking.get('patient_name', 'Patient')} ({patient_phone})\n"
+                        f"👨‍⚕️ *Doctor:* {booking.get('doctor_name', 'N/A')}\n"
+                        f"🏥 *Department:* {booking.get('department', 'N/A')}\n"
+                        f"📅 *Date:* {date_display}\n"
+                        f"🕐 *Time:* {slot_time_display}\n"
+                        f"💰 *Paid:* ₹{amount_rupees:.0f}\n"
+                        f"🆔 *Payment ID:* {booking.get('payment_id', 'N/A')}"
+                    )
                 await self._alert_admin(clinic, admin_notif_msg)
             except Exception as admin_alert_err:
                 logger.warning(f"Failed to send admin WhatsApp alert: {admin_alert_err}")
@@ -2074,15 +2085,27 @@ class PaymentService:
             # In-App Admin Notification creation (for staff & admin web dashboard)
             try:
                 if clinic_id_val and str(clinic_id_val).strip().lower() not in ("default", "none", "null", ""):
-                    notif_row = {
-                        "clinic_id": clinic_id_val,
-                        "admin_id": None,
-                        "title": f"New Booking Confirmed ({ref_code})",
-                        "message": (
+                    if booking.get("booking_type") == "lab_test":
+                        in_app_msg = (
+                            f"Patient {booking.get('patient_name', 'Patient')} ({patient_phone}) booked lab test "
+                            f"{booking.get('lab_test_name', 'N/A')} on "
+                            f"{date_display}. Paid ₹{amount_rupees:.0f} (Payment ID: {booking.get('payment_id', 'N/A')})."
+                        )
+                    else:
+                        in_app_msg = (
                             f"Patient {booking.get('patient_name', 'Patient')} ({patient_phone}) booked "
                             f"{booking.get('doctor_name', 'N/A')} ({booking.get('department', 'N/A')}) on "
                             f"{date_display} at {slot_time_display}. Paid ₹{amount_rupees:.0f} (Payment ID: {booking.get('payment_id', 'N/A')})."
+                        )
+                    notif_row = {
+                        "clinic_id": clinic_id_val,
+                        "admin_id": None,
+                        "title": (
+                            f"New Lab Test Booking Confirmed ({ref_code})"
+                            if booking.get("booking_type") == "lab_test"
+                            else f"New Booking Confirmed ({ref_code})"
                         ),
+                        "message": in_app_msg,
                         "is_read": False,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     }

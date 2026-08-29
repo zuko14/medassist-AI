@@ -1,6 +1,7 @@
 """Lab Report Delivery Service."""
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import uuid4
@@ -27,6 +28,52 @@ def template_name_for(clinic: Optional[dict]) -> str:
     """
     cfg = (clinic or {}).get("config") or {}
     return cfg.get("lab_report_template_name") or settings.lab_report_template_name
+
+
+def summary_template_name_for(clinic: Optional[dict]) -> Optional[str]:
+    """The report template that also carries the AI summary, if this clinic has one.
+
+    A business-initiated template does NOT open the 24h customer-service
+    window, so outside that window the summary cannot be sent as a follow-up
+    text — it has to travel inside the template itself. That needs a Meta
+    template with a third body variable, which is per-WABA and must be
+    approved before it exists. Until a clinic sets this, delivery falls back
+    to the 2-variable template and the summary is recorded as NOT delivered
+    rather than silently claimed.
+
+    Expected body variables: {{1}} patient name, {{2}} report name, {{3}} summary.
+    """
+    cfg = (clinic or {}).get("config") or {}
+    return cfg.get("lab_report_summary_template_name") or settings.lab_report_summary_template_name or None
+
+
+def flatten_for_template_param(text: str, limit: int = 700) -> str:
+    """Meta rejects newlines, tabs and 4+ consecutive spaces inside a template
+    parameter (error 132000), and caps each at 1024 chars."""
+    return re.sub(r"\s+", " ", text or "").strip()[:limit]
+
+
+def report_template_and_params(
+    clinic: Optional[dict],
+    patient_name: str,
+    report_name: str,
+    summary_text: Optional[str],
+) -> tuple[Optional[str], list, bool]:
+    """Pick the document template and its body parameters for one report send.
+
+    Returns (template_name, body_params, carries_summary). Shared by the first
+    send, the admin resend, and the retry worker so all three agree on how many
+    body variables the chosen template takes — a mismatch is rejected by Meta.
+    """
+    summary_text = flatten_for_template_param(summary_text or "")
+    summary_template = summary_template_name_for(clinic)
+    params = [
+        {"type": "text", "text": patient_name},
+        {"type": "text", "text": report_name},
+    ]
+    if summary_template and summary_text:
+        return summary_template, params + [{"type": "text", "text": summary_text}], True
+    return template_name_for(clinic), params, False
 
 
 class LabReportService:
@@ -175,6 +222,7 @@ class LabReportService:
 
         # Steps D, E, F — WhatsApp delivery
         sent_ok = False
+        summary_sent_ok = False   # did the AI summary text actually reach the patient?
         error_message = None
         capture = {}
         clinic = None
@@ -182,8 +230,7 @@ class LabReportService:
             clinic = await get_clinic_by_id(clinic_id)
             from app.services.message_queue import (
                 acquire_phone_lock_with_timeout,
-                get_phone_lock,
-                release_phone_lock,
+                release_phone_lock_acquired,
             )
 
             acquired = await acquire_phone_lock_with_timeout(patient_phone)
@@ -233,12 +280,33 @@ class LabReportService:
                     doc_header["id"] = media_handle
 
                 if is_template_path:
-                    template = template_name_for(clinic)
+                    # A template send does not open the 24h window, so the summary
+                    # cannot follow as a freeform text — it must ride inside the
+                    # template. Use the 3-variable summary template when the clinic
+                    # has one approved and we actually produced a summary; otherwise
+                    # fall back to the 2-variable document template and record
+                    # honestly that the patient received no summary.
+                    template, body_params, use_summary_template = report_template_and_params(
+                        clinic,
+                        patient_name,
+                        report_name,
+                        None if ai_result.get("fallback") else ai_result.get("patient_message"),
+                    )
                     if not template:
                         raise ValueError(
                             "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
                             "cannot deliver to this patient"
                         )
+
+                    if not use_summary_template:
+                        logger.info(
+                            f"Report {external_report_id or report_name} delivered outside the 24h "
+                            f"window without its AI summary — set "
+                            f"LAB_REPORT_SUMMARY_TEMPLATE_NAME (or the clinic's "
+                            f"lab_report_summary_template_name) to an approved "
+                            f"3-variable template to include it"
+                        )
+
                     try:
                         sent_ok = await whatsapp_service.send_template(
                             clinic,
@@ -256,15 +324,14 @@ class LabReportService:
                                 },
                                 {
                                     "type": "body",
-                                    "parameters": [
-                                        {"type": "text", "text": patient_name},
-                                        {"type": "text", "text": report_name},
-                                    ],
+                                    "parameters": body_params,
                                 },
                             ],
                             _source="lab_reports",
                             _capture=capture,
                         )
+                        if sent_ok and use_summary_template:
+                            summary_sent_ok = True
                     except Exception as template_err:
                         # If sent with media ID and failed with 500, attempt with signed URL before giving up
                         if "id" in doc_header and pdf_signed_url and ("500" in str(template_err) or "Server Error" in str(template_err)):
@@ -288,15 +355,14 @@ class LabReportService:
                                     },
                                     {
                                         "type": "body",
-                                        "parameters": [
-                                            {"type": "text", "text": patient_name},
-                                            {"type": "text", "text": report_name},
-                                        ],
+                                        "parameters": body_params,
                                     },
                                 ],
                                 _source="lab_reports",
                                 _capture=capture,
                             )
+                            if sent_ok and use_summary_template:
+                                summary_sent_ok = True
                         else:
                             raise template_err
                     if not sent_ok:
@@ -318,6 +384,7 @@ class LabReportService:
                         text_sent = await whatsapp_service.send_text(
                             clinic, patient_phone, summary_message, _source="lab_reports"
                         )
+                        summary_sent_ok = bool(text_sent)
                     else:
                         fallback_text = (
                             f"🏥 *{clinic['name']}*\n\n"
@@ -350,9 +417,7 @@ class LabReportService:
 
                     sent_ok = True
             finally:
-                phone_lock = await get_phone_lock(patient_phone)
-                phone_lock.release()
-                await release_phone_lock(patient_phone)
+                await release_phone_lock_acquired(patient_phone)
             logger.info(f"Report sent successfully to {mask_phone(patient_phone)}")
         except Exception as e:
             logger.error(f"WhatsApp send failed for {mask_phone(patient_phone)}: {e}")
@@ -400,6 +465,7 @@ class LabReportService:
             "report_type": report_type,
             "file_path": storage_path,
             "ai_summary": ai_result.get("patient_message"),
+            "ai_summary_sent": bool(summary_sent_ok and sent_ok),
             "has_abnormal_values": ai_result.get("has_abnormal", False),
             "status": effective_status,
             "whatsapp_message_id": capture.get("meta_message_id"),
@@ -558,6 +624,7 @@ class LabReportService:
                 )
 
             file_path = report["file_path"]
+            summary_sent_ok = False  # did the AI summary text actually reach the patient?
             # Download file from Supabase Storage
             try:
                 file_bytes = supabase.storage.from_("lab-reports").download(
@@ -582,8 +649,7 @@ class LabReportService:
 
             from app.services.message_queue import (
                 acquire_phone_lock_with_timeout,
-                get_phone_lock,
-                release_phone_lock,
+                release_phone_lock_acquired,
             )
 
             acquired = await acquire_phone_lock_with_timeout(patient_phone)
@@ -618,7 +684,9 @@ class LabReportService:
                     doc_header["id"] = media_handle
 
                 if not await whatsapp_service._can_send_freeform(clinic, patient_phone):
-                    template = template_name_for(clinic)
+                    template, body_params, use_summary_template = report_template_and_params(
+                        clinic, patient_name, report_name, report.get("ai_summary")
+                    )
                     if not template:
                         raise ValueError(
                             "Outside 24h window and LAB_REPORT_TEMPLATE_NAME unset — "
@@ -640,15 +708,14 @@ class LabReportService:
                             },
                             {
                                 "type": "body",
-                                "parameters": [
-                                    {"type": "text", "text": patient_name},
-                                    {"type": "text", "text": report_name},
-                                ],
+                                "parameters": body_params,
                             },
                         ],
                         _source="lab_reports",
                         _capture=capture,
                     )
+                    if sent_ok and use_summary_template:
+                        summary_sent_ok = True
                     if not sent_ok:
                         raise ValueError(
                             f"WhatsApp rejected template '{template}': "
@@ -670,6 +737,7 @@ class LabReportService:
                         text_sent = await whatsapp_service.send_text(
                             clinic, patient_phone, summary_message, _source="lab_reports"
                         )
+                        summary_sent_ok = bool(text_sent)
                     else:
                         fallback_text = (
                             f"🏥 *{clinic['name']}*\n\n"
@@ -697,13 +765,12 @@ class LabReportService:
                             "WhatsApp API rejected the document send — check recipient allowlist and 24h session window"
                         )
             finally:
-                phone_lock = await get_phone_lock(patient_phone)
-                phone_lock.release()
-                await release_phone_lock(patient_phone)
+                await release_phone_lock_acquired(patient_phone)
 
             supabase.table("lab_reports").update(
                 {
                     "status": "sent",
+                    "ai_summary_sent": summary_sent_ok,
                     "sent_at": datetime.now(timezone.utc).isoformat(),
                     "whatsapp_message_id": capture.get("meta_message_id"),
                     "delivery_status": "sent",
@@ -811,6 +878,7 @@ class LabReportService:
                 # - Templates (outside 24h): upload to Meta directly (document.id) for highest reliability
                 # - Freeform (inside 24h): prefer signed URL (document.link) with automatic fallback
                 is_template_path = not await whatsapp_service._can_send_freeform(clinic, patient_phone)
+                summary_sent_ok = False  # did the AI summary text actually reach the patient?
 
                 if is_template_path:
                     media_handle = await whatsapp_service.upload_media(
@@ -830,8 +898,7 @@ class LabReportService:
 
                 from app.services.message_queue import (
                     acquire_phone_lock_with_timeout,
-                    get_phone_lock,
-                    release_phone_lock,
+                    release_phone_lock_acquired,
                 )
 
                 acquired = await acquire_phone_lock_with_timeout(patient_phone)
@@ -845,7 +912,12 @@ class LabReportService:
                     # Check session window
                     if is_template_path:
                         # Outside 24h window — need template
-                        template = template_name_for(clinic)
+                        template, body_params, use_summary_template = report_template_and_params(
+                            clinic,
+                            report.get("patient_name", "Patient"),
+                            report.get("report_name", "Lab Report"),
+                            report.get("ai_summary"),
+                        )
                         if not template:
                             raise ValueError("Outside 24h window and no template configured")
 
@@ -869,15 +941,14 @@ class LabReportService:
                                     },
                                     {
                                         "type": "body",
-                                        "parameters": [
-                                            {"type": "text", "text": report.get("patient_name", "Patient")},
-                                            {"type": "text", "text": report.get("report_name", "Lab Report")},
-                                        ],
+                                        "parameters": body_params,
                                     },
                                 ],
                                 _source="lab_reports_retry",
                                 _capture=retry_capture,
                             )
+                            if sent_ok and use_summary_template:
+                                summary_sent_ok = True
                         except Exception as retry_tpl_err:
                             if "id" in doc_header and pdf_signed_url and ("500" in str(retry_tpl_err) or "Server Error" in str(retry_tpl_err)):
                                 logger.warning(
@@ -897,15 +968,14 @@ class LabReportService:
                                         },
                                         {
                                             "type": "body",
-                                            "parameters": [
-                                                {"type": "text", "text": report.get("patient_name", "Patient")},
-                                                {"type": "text", "text": report.get("report_name", "Lab Report")},
-                                            ],
+                                            "parameters": body_params,
                                         },
                                     ],
                                     _source="lab_reports_retry",
                                     _capture=retry_capture,
                                 )
+                                if sent_ok and use_summary_template:
+                                    summary_sent_ok = True
                             else:
                                 raise retry_tpl_err
                     else:
@@ -933,6 +1003,7 @@ class LabReportService:
                         text_sent = await whatsapp_service.send_text(
                             clinic, patient_phone, summary_msg, _source="lab_reports_retry"
                         )
+                        summary_sent_ok = bool(text_sent and summary)
 
                         caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
                         sent_ok = await whatsapp_service.send_document(
@@ -942,13 +1013,12 @@ class LabReportService:
                             _fallback_content_type="application/pdf",
                         )
                 finally:
-                    phone_lock = await get_phone_lock(patient_phone)
-                    phone_lock.release()
-                    await release_phone_lock(patient_phone)
+                    await release_phone_lock_acquired(patient_phone)
 
                 if sent_ok:
                     supabase.table("lab_reports").update({
                         "status": "sent",
+                        "ai_summary_sent": summary_sent_ok,
                         "delivery_status": "sent",
                         "sent_at": datetime.now(timezone.utc).isoformat(),
                         "error_message": None,

@@ -616,6 +616,40 @@ async def release_phone_lock(phone: str) -> None:
                 _phone_refcounts.pop(phone, None)
 
 
+async def release_phone_lock_acquired(phone: str) -> None:
+    """Release everything acquire_phone_lock_with_timeout() took.
+
+    That call takes TWO layers — the distributed lease (`phone_<last10>`,
+    20s) and the local asyncio.Lock — so releasing only the local one leaves
+    the lease held until it expires. Two reports for the same patient in one
+    connector run then fail the second with "another delivery in progress",
+    and that patient silently never receives it.
+
+    Callers must NOT call get_phone_lock() again just to obtain the object to
+    release: that bumps the refcount a second time against a single decrement,
+    so the entry for that phone is never evicted from _phone_locks.
+    """
+    async with _phone_locks_mutex:
+        lock = _phone_locks.get(phone)
+
+    # Guard against double-release: an asyncio.Lock raises RuntimeError when
+    # released while unlocked, which would mask the caller's real exception.
+    if lock is not None and lock.locked():
+        lock.release()
+
+    await release_phone_lock(phone)
+
+    try:
+        from app.services.distributed_lock import distributed_lock_manager
+        await distributed_lock_manager.release(f"phone_{phone[-10:]}")
+    except Exception as e:
+        # Worst case the 20s lease expires on its own; never mask the caller's error.
+        logger.warning(
+            f"Distributed phone lock release failed for {phone[:6]}*** "
+            f"(lease will expire): {e}"
+        )
+
+
 async def acquire_phone_lock_with_timeout(
     phone: str,
     timeout: float = PHONE_LOCK_TIMEOUT_SECONDS,

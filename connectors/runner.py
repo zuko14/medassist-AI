@@ -720,30 +720,38 @@ async def run_connector(
     finally:
         summary["duration_ms"] = int((time.time() - start_time) * 1000)
 
+        # A "locked" run never touched the portal — another process was already
+        # polling this connector. Recording it as a run polluted Run History with
+        # phantom rows and, worse, stamped last_run_at + last_error below, which
+        # pushed the next REAL poll a full interval out and flipped the connector
+        # health badge to "running with errors".
+        run_was_real = summary["run_status"] not in ("dry_run", "skipped", "locked")
+
         # Save audit log. Exclude in-memory metrics not in the DB schema
         # (e.g. "sample", "reports_skipped_already_processed").
-        try:
-            allowed_audit_cols = {
-                "run_status", "reports_found", "reports_new", "reports_matched",
-                "reports_needs_review", "reports_uploaded", "reports_delivered",
-                "reports_failed", "duration_ms", "error_message"
-            }
-            audit_row = {k: v for k, v in summary.items() if k in allowed_audit_cols}
-            supabase.table("connector_audit_log").insert({
-                "clinic_id": clinic_id,
-                "connector_type": connector_type,
-                "branch_id": branch_id,
-                **audit_row,
-            }).execute()
-        except Exception as e:
-            logger.error(f"Failed to save audit log: {e}")
+        if summary["run_status"] != "locked":
+            try:
+                allowed_audit_cols = {
+                    "run_status", "reports_found", "reports_new", "reports_matched",
+                    "reports_needs_review", "reports_uploaded", "reports_delivered",
+                    "reports_failed", "duration_ms", "error_message"
+                }
+                audit_row = {k: v for k, v in summary.items() if k in allowed_audit_cols}
+                supabase.table("connector_audit_log").insert({
+                    "clinic_id": clinic_id,
+                    "connector_type": connector_type,
+                    "branch_id": branch_id,
+                    **audit_row,
+                }).execute()
+            except Exception as e:
+                logger.error(f"Failed to save audit log: {e}")
 
 
         # A dry run is a "Test Connection" and a skipped run did nothing at
         # all — neither is a poll. Stamping them made the dashboard show a
         # disabled connector with a fresh "Last run", and pushed the next real
         # poll a whole interval into the future.
-        if summary["run_status"] not in ("dry_run", "skipped"):
+        if run_was_real:
             try:
                 update_data = {
                     "last_run_at": datetime.now(timezone.utc).isoformat(),

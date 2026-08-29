@@ -69,7 +69,7 @@ def compute_name_similarity(name1: str, name2: str) -> float:
 class MatchResult:
     status: str  # "matched" | "needs_review"
     is_safe_to_send: bool
-    match_source: str  # "patients_table" | "moc_doc_only" | "conflict" | "missing_phone" | "manual"
+    match_source: str  # "patients_table" | "moc_doc_only" | "unnamed_record" | "conflict" | "missing_phone" | "manual"
     match_confidence: float
     matched_patient_id: Optional[str] = None
     normalized_phone: Optional[str] = None
@@ -169,9 +169,31 @@ class PatientMatchService:
                 existing_records=[],
             )
 
+        # A record whose name is NULL/blank (created by the bot before the
+        # patient ever gave a name) carries no identity to compare against.
+        # Scoring it yields 0.00 and blocks the report forever — while a phone
+        # with NO record at all sends on confidence 1.0 above. Treat a nameless
+        # record as what it is: less information than no record, not more risk.
+        named_records = [r for r in records if normalize_name(r.get("name") or "")]
+
+        if not named_records:
+            return MatchResult(
+                status="matched",
+                is_safe_to_send=True,
+                match_source="unnamed_record",
+                match_confidence=1.0,
+                matched_patient_id=records[0].get("id") if len(records) == 1 else None,
+                normalized_phone=norm_phone,
+                patient_name=scraped_name,
+                review_reason=None,
+                existing_records=records,
+            )
+
+        records = named_records
+
         if len(records) == 1:
             db_patient = records[0]
-            db_name = db_patient.get("name", "")
+            db_name = db_patient.get("name") or ""
             score = compute_name_similarity(scraped_name, db_name)
 
             if score >= self.similarity_threshold:
@@ -208,7 +230,7 @@ class PatientMatchService:
         best_score = 0.0
         best_match = None
         for rec in records:
-            s = compute_name_similarity(scraped_name, rec.get("name", ""))
+            s = compute_name_similarity(scraped_name, rec.get("name") or "")
             if s > best_score:
                 best_score = s
                 best_match = rec

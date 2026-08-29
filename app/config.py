@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     )
     medassist_url: str = "http://localhost:8000"  # Base URL where FastAPI is running
     lab_report_template_name: str = "lab_report_delivery"  # Meta pre-approved utility template for reports outside 24h window
+    # Optional 3-variable variant ({{1}} name, {{2}} report, {{3}} AI summary).
+    # A template send does not open the 24h window, so outside it the summary
+    # can only reach the patient inside the template itself. Unset = summary is
+    # generated and stored but NOT delivered (recorded as ai_summary_sent=False).
+    lab_report_summary_template_name: str = ""
     admin_alert_template_name: str = ""  # Meta utility template (1 body var) for connector alerts outside 24h window
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

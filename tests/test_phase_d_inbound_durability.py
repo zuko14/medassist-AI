@@ -35,15 +35,11 @@ async def test_last_processed_message_id_persisted_after_success(conversation_se
     fake_session = {"state": "main_menu", "context": {}, "last_processed_message_id": None}
 
     with patch("app.services.conversation.acquire_phone_lock_with_timeout", new_callable=AsyncMock, return_value=True), \
-         patch("app.services.conversation.get_phone_lock", new_callable=AsyncMock) as mock_get_lock, \
-         patch("app.services.conversation.release_phone_lock", new_callable=AsyncMock), \
+         patch("app.services.conversation.release_phone_lock_acquired", new_callable=AsyncMock), \
          patch("app.services.conversation.get_or_create_conversation", new_callable=AsyncMock, return_value=fake_session), \
          patch("app.services.conversation.update_conversation", new_callable=AsyncMock) as mock_update_conv, \
          patch("app.services.conversation.get_patient_by_phone", new_callable=AsyncMock, return_value={"id": "pat_1", "language": "en"}), \
          patch.object(conversation_service, "_handle_message_locked", new_callable=AsyncMock) as mock_inner:
-
-        mock_lock = MagicMock()
-        mock_get_lock.return_value = mock_lock
 
         await conversation_service.handle_message(
             clinic=clinic,
@@ -67,13 +63,9 @@ async def test_last_processed_message_id_not_persisted_on_failure(conversation_s
     msg_id = "wamid.FAIL123"
 
     with patch("app.services.conversation.acquire_phone_lock_with_timeout", new_callable=AsyncMock, return_value=True), \
-         patch("app.services.conversation.get_phone_lock", new_callable=AsyncMock) as mock_get_lock, \
-         patch("app.services.conversation.release_phone_lock", new_callable=AsyncMock), \
+         patch("app.services.conversation.release_phone_lock_acquired", new_callable=AsyncMock), \
          patch("app.services.conversation.update_conversation", new_callable=AsyncMock) as mock_update_conv, \
          patch.object(conversation_service, "_handle_message_locked", new_callable=AsyncMock, side_effect=RuntimeError("Database timeout")):
-
-        mock_lock = MagicMock()
-        mock_get_lock.return_value = mock_lock
 
         with pytest.raises(RuntimeError, match="Database timeout"):
             await conversation_service.handle_message(
