@@ -3319,9 +3319,25 @@ async def upsert_connector_credentials(
                 status_code=500,
                 detail="Connector encryption is not configured on this server — contact support before saving credentials",
             )
-        from app.utils.connector_crypto import encrypt_password
+        from app.utils.connector_crypto import encrypt_password, fernet_key_problem
 
-        cfg["password_encrypted"] = encrypt_password(body.password.strip(), key)
+        key_issue = fernet_key_problem(key)
+        if key_issue:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"CONNECTOR_ENCRYPTION_KEY on this server is invalid: {key_issue}. "
+                    "Generate a valid key with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\" "
+                    "and set it in the CONNECTOR_ENCRYPTION_KEY environment variable before saving credentials."
+                ),
+            )
+        try:
+            cfg["password_encrypted"] = encrypt_password(body.password.strip(), key)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Password encryption failed ({type(e).__name__}): {e}. Check CONNECTOR_ENCRYPTION_KEY.",
+            )
         cfg.pop("password", None)
     if body.base_url is not None and body.base_url.strip():
         val = body.base_url.strip()
