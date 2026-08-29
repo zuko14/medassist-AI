@@ -61,9 +61,11 @@ class Settings(BaseSettings):
     # from the 2026-08-27 remediation is concluded.
     tenant_scope_enforce: bool = True
 
-    # T1.4 (KRIYA-016): when False, message_queue errors log MESSAGE_QUEUE_FAIL_OPEN
-    # in shadow mode. Flip to True to enforce fail-closed across all queue methods.
-    queue_fail_closed_enforce: bool = False
+    # T1.4 (KRIYA-016): Queue fail-closed is ENABLED by default. Message queue
+    # failures fail closed to prevent duplicate processing. The 48h shadow-mode
+    # observation period from the 2026-08-27 remediation is concluded.
+    queue_fail_closed_enforce: bool = True
+
 
     # ABDM / ABHA Integration (optional — leave empty to skip live verification)
     abdm_client_id: str = ""
