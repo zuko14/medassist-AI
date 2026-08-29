@@ -17,6 +17,26 @@ logger = logging.getLogger(__name__)
 class ConsentService:
     """Service for managing patient consent (multi-tenant aware)."""
 
+    async def accepts_engagement(self, clinic_id: str, phone: str) -> bool:
+        """May we send this patient a marketing / engagement message?
+
+        Opt-out ("STOP") suppresses engagement only — post-visit follow-ups,
+        health check-ins, feedback requests. It deliberately does NOT suppress
+        transactional messages the patient set in motion themselves:
+        appointment reminders, lab reports and payment messages still go out.
+        Silencing those would mean an opted-out patient missing their
+        appointment or never learning a report was ready.
+
+        Only an explicit opted_in=False suppresses. A missing patient row or a
+        NULL flag means "never opted out", so a data gap can never mute a whole
+        clinic's follow-ups. Database errors propagate: callers retry rather
+        than burn the send flag on an answer they never got.
+        """
+        patient = await get_patient_by_phone(clinic_id, phone)
+        if not patient:
+            return True
+        return patient.get("opted_in") is not False
+
     async def has_consent(self, clinic_id: str, phone: str) -> bool:
         """Check if patient has given data consent.
 

@@ -398,6 +398,34 @@ ALL_FEATURES: list[str] = sorted(
     {feature for features in PLAN_FEATURES.values() for feature in features if feature != "*"}
 )
 
+# Human-readable label for every feature in ALL_FEATURES. Lives here — next to
+# PLAN_FEATURES — so the plan registry and its display names can never drift
+# apart. Consumed by GET /platform/plan-tiers for the owner dashboard's plan
+# feature-matrix widget. Any new feature added to PLAN_FEATURES must get a
+# label here; test_plan_feature_labels_cover_all_features guards that.
+FEATURE_LABELS: dict[str, str] = {
+    "admin_dashboard": "Admin Dashboard",
+    "ai_report_summary": "AI Report Summaries",
+    "analytics": "Analytics & Insights",
+    "booking": "Appointment Booking",
+    "clinical_firewall": "Clinical Safety Firewall",
+    "compliance_dpdp": "DPDP Consent & Compliance",
+    "compliance_nmc": "NMC Telemedicine Compliance",
+    "diagnostic_reports": "Diagnostic Report Delivery",
+    "emergency_escalation": "Emergency Escalation",
+    "feedback": "Patient Feedback Collection",
+    "lab_reports": "Lab Report Delivery",
+    "lab_test_booking": "Lab Test Booking",
+    "multi_branch": "Multi-Branch Support",
+    "multi_department": "Multi-Department Routing",
+    "multilingual": "Multilingual Replies",
+    "payments_razorpay": "Razorpay Payments",
+    "pii_sanitization": "PII Sanitization",
+    "reminders": "Automated Reminders",
+    "roster_management": "Doctor Roster & Leave",
+    "staff_training": "Staff Training & Onboarding",
+}
+
 
 def has_feature(clinic: dict, feature: str) -> bool:
     """

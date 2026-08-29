@@ -90,6 +90,19 @@ class ConversationState(str, Enum):
     CONFIRMING_COLLECTION_DATE = "confirming_collection_date"
 
 
+# ── Inbound WhatsApp message types ───────────────────────────────────────────
+# Meta delivers far more than text. Anything not listed as READABLE arrives with
+# an empty body, and without this split it used to fall through the whole state
+# machine as if the patient had sent a blank text — a voice note describing
+# symptoms mid-booking came back as "Name is too short", and every photo burned
+# a paid LLM intent call on an empty string.
+READABLE_MESSAGE_TYPES = frozenset({"text", "interactive", "button"})
+
+# Types that carry no patient request. Replying to these is noise: a thumbs-up
+# reaction on a booking confirmation must not re-open a conversation.
+IGNORED_MESSAGE_TYPES = frozenset({"reaction", "system", "order", "ephemeral"})
+
+
 MID_BOOKING_STATES = {
     "selecting_branch",
     "selecting_family_member",
@@ -277,6 +290,11 @@ class ConversationManager:
                                 "message_type": message_type,
                                 "message_id": message_id,
                                 "clinic_id": clinic_id,
+                                # Without this the replay loses the button/list
+                                # reply ID and only keeps its title. A doctor
+                                # pick whose ID is a UUID then replays as the
+                                # doctor's display name and resolves to nothing.
+                                "interactive_data": interactive_data,
                             }
                         ),
                         "error": "Phone lock timeout (15s) — previous message still processing",
@@ -331,8 +349,10 @@ class ConversationManager:
             logger.info(f"Duplicate dropped at conversation layer: {message_id}")
             return
 
-        if message_id:
-            await self.whatsapp.mark_as_read(clinic, message_id)
+        # No mark_as_read here: app/routers/webhook.py already fires it as a
+        # background task the moment the message is dispatched. Awaiting a
+        # second one put an extra Meta API round-trip on the critical path of
+        # every single patient message, before any reply could be composed.
 
         # Get or create patient
         patient = await get_patient_by_phone(clinic["id"], phone)
@@ -380,6 +400,29 @@ class ConversationManager:
         await update_conversation(
             clinic["id"], phone, {"session_expires_at": session_expires}
         )
+
+        # ── Unreadable message types (voice notes, photos, PDFs, location) ────
+        # Placed after the session/booking timers above — a patient who sends a
+        # voice note IS engaged, so their booking window should still refresh —
+        # but before intent detection, so we never pay for an LLM call on an
+        # empty body or answer a media message with a state-machine error.
+        # State is deliberately left untouched: they can retype and carry on
+        # exactly where they left off.
+        if message_type not in READABLE_MESSAGE_TYPES:
+            if message_type in IGNORED_MESSAGE_TYPES:
+                logger.info(
+                    f"Ignoring non-request message type '{message_type}' from {mask_phone(phone)}"
+                )
+                return
+            await self.whatsapp.send_text(
+                clinic, phone, get_message("unsupported_media", lang)
+            )
+            logger.info(
+                f"Unreadable message type '{message_type}' from {mask_phone(phone)} "
+                f"in state '{session.get('state')}' — asked patient to type instead"
+            )
+            return
+        # ── End unreadable message types ──────────────────────────────────────
 
         # ── Clinical Firewall: Screen for medical advice requests ──────────────
         # This runs BEFORE the LLM is called. If a patient asks for medication

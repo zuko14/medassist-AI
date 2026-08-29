@@ -391,6 +391,57 @@ async def get_platform_overview(
         raise HTTPException(status_code=500, detail=f"Failed to fetch overview: {e}")
 
 
+async def _fetch_clinic_roster_counts() -> dict[str, dict]:
+    """Active-doctor count and distinct department set, keyed by clinic_id.
+
+    Pages through `doctors` because PostgREST caps an unbounded select at
+    1000 rows — a silent truncation here would understate the roster of the
+    largest hospitals, which are exactly the ones plan pricing depends on.
+
+    Returns {} on any failure: roster counts are a sizing aid, not a reason
+    to fail the whole fleet leaderboard.
+    """
+    page_size = 1000
+    max_pages = 100  # ponytail: 100k-doctor ceiling; server-side aggregate if ever hit
+    roster: dict[str, dict] = {}
+
+    try:
+        for page in range(max_pages):
+            offset = page * page_size
+            docs_res = (
+                # unscoped: platform super-admin fleet operation
+                supabase.table("doctors")
+                .select("clinic_id, department, is_active")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = docs_res.data
+            if not isinstance(rows, list):
+                logger.warning("Roster counts skipped — unexpected doctors payload type")
+                return {}
+            for d in rows:
+                clinic_id = d.get("clinic_id")
+                # is_active defaults to true in schema; only an explicit False excludes.
+                if not clinic_id or d.get("is_active") is False:
+                    continue
+                entry = roster.setdefault(clinic_id, {"doctors": 0, "departments": set()})
+                entry["doctors"] += 1
+                dept = (d.get("department") or "").strip()
+                if dept:
+                    entry["departments"].add(dept)
+            if len(rows) < page_size:
+                break
+        else:
+            logger.warning(
+                f"Roster scan hit the {max_pages}-page cap — counts may be incomplete"
+            )
+    except Exception as e:
+        logger.warning(f"Roster counts unavailable for leaderboard: {e}")
+        return {}
+
+    return roster
+
+
 @router.get("/clinics")
 async def get_platform_clinics_leaderboard(
     request: Request,
@@ -415,6 +466,13 @@ async def get_platform_clinics_leaderboard(
         )
         clinics = clinics_res.data or []
         start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+        # Roster snapshot: active doctors + distinct departments per clinic.
+        # One paginated scan of `doctors` rather than two extra queries per
+        # clinic — this is the sizing signal the owner prices plans off, so it
+        # must be exact, not truncated at PostgREST's default 1000-row cap.
+        # Informational only: if it fails, the leaderboard still renders.
+        roster = await _fetch_clinic_roster_counts()
 
         async def fetch_clinic_metrics(c: dict) -> dict:
             clinic_id = c["id"]
@@ -456,6 +514,9 @@ async def get_platform_clinics_leaderboard(
                 if latest_appt_time and latest_appt_time > last_activity:
                     last_activity = latest_appt_time
 
+            clinic_roster = roster.get(clinic_id) or {}
+            clinic_departments = sorted(clinic_roster.get("departments") or ())
+
             return {
                 "id": clinic_id,
                 "name": c.get("name"),
@@ -463,6 +524,9 @@ async def get_platform_clinics_leaderboard(
                 "plan": c.get("plan"),
                 "is_active": c.get("is_active", True),
                 "created_at": c.get("created_at"),
+                "doctors_count": clinic_roster.get("doctors", 0),
+                "departments_count": len(clinic_departments),
+                "departments": clinic_departments,
                 "appointments_count_30d": appointments_count_30d,
                 "patients_count": patients_count,
                 "revenue_inr_30d": confirmed_revenue_inr,
@@ -1247,10 +1311,16 @@ async def update_pricing_config(
 async def get_plan_tiers(
     owner: AdminUser = Depends(verify_owner_credentials),
 ):
-    """Get all plan tier configurations with message quotas.
+    """Get all plan tier configurations with quotas, bundled features, and adoption.
 
-    OWNER-ONLY. Returns plan names, display names, quotas, and pricing.
+    OWNER-ONLY. `features` per plan is read straight from PLAN_FEATURES
+    (app/services/tenant.py) — the same registry has_feature() gates the bot
+    on — so the dashboard's "what's in this plan" widget can never drift from
+    what a clinic on that plan actually gets. `clinics_count` is live adoption
+    per tier, for pricing decisions.
     """
+    from app.services.tenant import ALL_FEATURES, FEATURE_LABELS, PLAN_FEATURES
+
     try:
         # platform-scoped: fetch plan tiers
         result = (
@@ -1260,7 +1330,38 @@ async def get_plan_tiers(
             .order("included_messages_month")
             .execute()
         )
-        return {"plan_tiers": result.data or []}
+        tiers = result.data or []
+
+        # Live adoption per plan. Best-effort — a failure here must not hide
+        # the plan/feature matrix itself.
+        adoption: dict[str, int] = {}
+        try:
+            clinics_res = (
+                # unscoped: platform super-admin fleet operation
+                supabase.table("clinics").select("plan, is_active").execute()
+            )
+            for c in clinics_res.data or []:
+                if c.get("is_active") is False:
+                    continue
+                adoption[c.get("plan") or "soloclinic"] = (
+                    adoption.get(c.get("plan") or "soloclinic", 0) + 1
+                )
+        except Exception as e:
+            logger.warning(f"Plan adoption counts unavailable: {e}")
+
+        for t in tiers:
+            plan_name = t.get("plan_name")
+            plan_features = PLAN_FEATURES.get(plan_name, set())
+            includes_all = "*" in plan_features
+            t["includes_all_features"] = includes_all
+            t["features"] = list(ALL_FEATURES) if includes_all else sorted(plan_features)
+            t["clinics_count"] = adoption.get(plan_name, 0)
+
+        return {
+            "plan_tiers": tiers,
+            "all_features": ALL_FEATURES,
+            "feature_labels": FEATURE_LABELS,
+        }
     except Exception as e:
         logger.error(f"Error fetching plan tiers: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch plan tiers")

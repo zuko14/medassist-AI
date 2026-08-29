@@ -18,6 +18,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# WhatsApp Cloud API interactive-list limits. Exceeding either makes Meta
+# reject the entire message, so the patient sees nothing at all.
+MAX_LIST_ROWS = 10
+MAX_LIST_SECTIONS = 10
+
 WHATSAPP_API_BASE = f"https://graph.facebook.com/{settings.whatsapp_api_version}"
 
 
@@ -557,10 +562,24 @@ class WhatsAppService:
             )
             return False
 
+        # Meta hard-caps a list at 10 rows TOTAL across all sections, and 10
+        # sections. Over either limit the API rejects the whole message (131009)
+        # and the patient receives NOTHING — a dead end mid-booking that only
+        # shows up at the busiest clinics, since it is triggered by having more
+        # doctors. Enforced here rather than at each of the 14 call sites so a
+        # new list builder cannot reintroduce it.
         formatted_sections = []
-        for section in sections:
+        rows_budget = MAX_LIST_ROWS
+        rows_offered = 0
+
+        for section in sections[:MAX_LIST_SECTIONS]:
+            section_rows = section.get("rows", []) or []
+            rows_offered += len(section_rows)
+            if rows_budget <= 0:
+                continue
+
             rows = []
-            for row in section.get("rows", []):
+            for row in section_rows[:rows_budget]:
                 rows.append(
                     {
                         "id": row.get("id", "row_0"),
@@ -568,9 +587,28 @@ class WhatsAppService:
                         "description": row.get("description", "")[:72],
                     }
                 )
+            rows_budget -= len(rows)
 
-            formatted_sections.append(
-                {"title": section.get("title", "Options")[:24], "rows": rows}
+            # A section with zero rows is itself a rejection; drop it.
+            if rows:
+                formatted_sections.append(
+                    {"title": section.get("title", "Options")[:24], "rows": rows}
+                )
+
+        if not formatted_sections:
+            logger.error(
+                f"Refusing to send an empty interactive list to "
+                f"{self._mask_phone(phone)} for clinic {clinic.get('id')} — "
+                f"caller supplied {len(sections)} section(s) with no rows"
+            )
+            return False
+
+        if rows_offered > MAX_LIST_ROWS:
+            logger.error(
+                f"ALERT list_truncated: clinic {clinic.get('id')} tried to show "
+                f"{rows_offered} options to {self._mask_phone(phone)}; WhatsApp "
+                f"allows {MAX_LIST_ROWS}. Showed the first {MAX_LIST_ROWS} — the "
+                f"rest are unreachable in this flow and need pagination."
             )
 
         interactive = {

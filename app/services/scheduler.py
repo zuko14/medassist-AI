@@ -653,6 +653,23 @@ class SchedulerService:
                             self._burn_followup(appt["id"])
                             continue
 
+                        # Opt-out suppresses engagement. Burn the flag so an
+                        # opted-out patient is not rescanned every day until
+                        # the lookback window closes. A DB error here raises
+                        # instead, and the per-appointment handler retries
+                        # tomorrow with the flag left unset.
+                        from app.services.consent import consent_service
+
+                        if not await consent_service.accepts_engagement(
+                            clinic["id"], appt["patient_phone"]
+                        ):
+                            logger.info(
+                                f"Skipping follow-up for appointment {appt['id']} — "
+                                f"patient has opted out of engagement messages"
+                            )
+                            self._burn_followup(appt["id"])
+                            continue
+
                         first_name = (appt.get("patient_name") or "there").split()[0]
                         template, components = self._followup_template_and_components(
                             cfg, first_name
@@ -763,6 +780,21 @@ class SchedulerService:
                         try:
                             clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                             lang = "en"
+
+                            from app.services.consent import consent_service
+
+                            if not await consent_service.accepts_engagement(
+                                clinic["id"], appt["patient_phone"]
+                            ):
+                                logger.info(
+                                    f"Skipping day+{offset_days} health check-in for "
+                                    f"appointment {appt['id']} — patient has opted out "
+                                    f"of engagement messages"
+                                )
+                                supabase.table("appointments").update(
+                                    {flag_field: True}
+                                ).eq("id", appt["id"]).execute()
+                                continue
 
                             from app.templates.whatsapp_templates import get_message
 
@@ -948,6 +980,7 @@ class SchedulerService:
                             message=payload.get("message") or "",
                             message_type=payload.get("message_type") or "text",
                             message_id=payload.get("message_id"),
+                            interactive_data=payload.get("interactive_data"),
                         )
                         supabase.table("failed_messages").update(
                             {"status": "resolved", "resolved_at": datetime.now(timezone.utc).isoformat()}

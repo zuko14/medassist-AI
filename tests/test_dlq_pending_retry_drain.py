@@ -89,3 +89,64 @@ async def test_failed_replay_stays_queued_for_the_next_cycle():
 
     statuses = [u.get("status") for u in _updates(table)]
     assert "resolved" not in statuses and "failed" not in statuses
+
+
+# ── Button/list selections must survive the park-and-replay round trip ───────
+# The park stored only the reply's *title*, never its ID. A doctor pick whose
+# ID is a UUID replayed as the doctor's display name and resolved to nothing —
+# the patient's tap was silently dropped after the 15s lock timeout.
+
+
+@pytest.mark.asyncio
+async def test_park_preserves_the_interactive_reply_id():
+    from app.services.conversation import conversation_manager
+
+    db = MagicMock()
+    interactive = {"id": "8f14e45f-ceea-467a-9d2b-1c1f2c3d4e5f", "type": "list_reply"}
+
+    with patch("app.services.conversation.acquire_phone_lock_with_timeout",
+               AsyncMock(return_value=False)),          patch("app.database.supabase", db):
+        await conversation_manager.handle_message(
+            clinic={"id": "clinic-1", "phone": "+919999999999"},
+            phone="+919876543210",
+            message="Dr. Anand Rao",           # the list_reply title
+            message_type="interactive",
+            message_id="wamid.park1",
+            interactive_data=interactive,
+        )
+
+    parked = db.table.return_value.insert.call_args.args[0]
+    assert json.loads(parked["payload"])["interactive_data"] == interactive
+
+
+@pytest.mark.asyncio
+async def test_replay_hands_the_interactive_reply_id_back_to_the_state_machine():
+    now = datetime.now(timezone.utc).isoformat()
+    interactive = {"id": "8f14e45f-ceea-467a-9d2b-1c1f2c3d4e5f", "type": "list_reply"}
+    db, _table = _supabase([{
+        "id": "row-i", "phone": "+919876543210", "created_at": now,
+        "payload": _payload(message="Dr. Anand Rao", message_type="interactive",
+                            interactive_data=interactive),
+    }])
+    handle = AsyncMock()
+
+    with patch("app.services.distributed_lock.distributed_job_lock", _lock_granted),          patch("app.services.scheduler.supabase", db),          patch("app.services.conversation.conversation_manager.handle_message", handle),          patch("app.services.tenant.get_clinic_by_id", AsyncMock(return_value={"id": "clinic-1"})):
+        await SchedulerService().drain_pending_retry_messages()
+
+    assert handle.await_args.kwargs["interactive_data"] == interactive
+
+
+@pytest.mark.asyncio
+async def test_replay_of_a_plain_text_park_passes_no_interactive_data():
+    """Older rows parked before interactive_data was stored must still replay."""
+    now = datetime.now(timezone.utc).isoformat()
+    db, _table = _supabase([{
+        "id": "row-legacy", "phone": "+919876543210", "created_at": now,
+        "payload": _payload(),  # no interactive_data key at all
+    }])
+    handle = AsyncMock()
+
+    with patch("app.services.distributed_lock.distributed_job_lock", _lock_granted),          patch("app.services.scheduler.supabase", db),          patch("app.services.conversation.conversation_manager.handle_message", handle),          patch("app.services.tenant.get_clinic_by_id", AsyncMock(return_value={"id": "clinic-1"})):
+        await SchedulerService().drain_pending_retry_messages()
+
+    assert handle.await_args.kwargs["interactive_data"] is None

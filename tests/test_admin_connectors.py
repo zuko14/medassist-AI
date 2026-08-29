@@ -6,6 +6,7 @@ GET /connectors/{id}/audit-log, GET/POST /connectors/failed-reports*."""
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from cryptography.fernet import Fernet
 from fastapi import HTTPException, Request
 from app.services.permissions import require_permission
 
@@ -113,7 +114,7 @@ async def test_upsert_connector_creates_new_encrypts_password_never_returns_raw(
     ), patch(
         "app.utils.connector_crypto.encrypt_password", return_value="gAAAA-encrypted-blob"
     ):
-        mock_settings.connector_encryption_key = "test-fernet-key"
+        mock_settings.connector_encryption_key = Fernet.generate_key().decode()
         result = await upsert_connector_credentials(
             body=body, request=_mock_request(), clinic_id="default", user=admin
         )
