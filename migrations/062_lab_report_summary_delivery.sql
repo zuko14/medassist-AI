@@ -21,3 +21,7 @@ ALTER TABLE lab_reports
 CREATE INDEX IF NOT EXISTS idx_lab_reports_summary_not_sent
     ON lab_reports(clinic_id, uploaded_at DESC)
     WHERE ai_summary_sent = FALSE;
+
+-- ── Record migration ──
+INSERT INTO schema_migrations (name) VALUES ('062_lab_report_summary_delivery.sql') ON CONFLICT (name) DO NOTHING;
+
