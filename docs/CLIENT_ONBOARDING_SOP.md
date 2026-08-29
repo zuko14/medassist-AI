@@ -117,7 +117,7 @@ Every diagnostic center requires an approved **`UTILITY`** template with a **`DO
 > [!TIP]
 > Always submit the template in **`en_US`** (English US). Meta's automated classifier evaluates `en_US` utility templates much faster than generic `en`.
 
-#### Standard Production Template Specification:
+#### Option A: Standard 2-Variable Report Template
 * **Template Name:** `lab_report_ready_v1`
 * **Category:** `UTILITY`
 * **Language:** `en_US`
@@ -130,8 +130,26 @@ Every diagnostic center requires an approved **`UTILITY`** template with a **`DO
   - `{{1}}` $\rightarrow$ Patient Full Name (e.g., `Mrs. P. Kalyani`)
   - `{{2}}` $\rightarrow$ Lab Test Name (e.g., `Complete Blood Picture / Lipid Profile`)
 
+#### Option B: AI Summary 3-Variable Report Template (Carries Clinical Summary)
+* **Template Name:** `lab_report_summary_v1`
+* **Category:** `UTILITY`
+* **Language:** `en_US`
+* **Header Format:** `DOCUMENT` (PDF file sample)
+* **Body Text:**
+  ```text
+  Dear {{1}}, your medical lab report for {{2}} is ready and attached above.
+
+  Summary: {{3}}
+
+  Please consult your physician for interpretation.
+  ```
+* **Variables:**
+  - `{{1}}` $\rightarrow$ Patient Full Name (e.g., `Mrs. P. Kalyani`)
+  - `{{2}}` $\rightarrow$ Lab Test Name (e.g., `Complete Blood Picture / Lipid Profile`)
+  - `{{3}}` $\rightarrow$ Clean flattened AI Summary text (e.g., `All tested parameters are within normal reference ranges.`)
+
 #### 1-Click Automated Creation Script (Terminal):
-Run this script to upload the document sample and register the template on the client's WABA automatically:
+Run this script to upload the document sample and register both templates on the client's WABA automatically:
 ```bash
 python -c "
 import httpx
@@ -143,19 +161,32 @@ waba_id = '<CLIENT_WABA_ID>'
 pdf_bytes = b'%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n'
 r1 = httpx.post(f'https://graph.facebook.com/v22.0/{app_id}/uploads', headers={'Authorization': f'Bearer {token}'}, params={'file_length': len(pdf_bytes), 'file_type': 'application/pdf'}).json()
 r2 = httpx.post(f'https://graph.facebook.com/v22.0/{r1[\"id\"]}', headers={'Authorization': f'OAuth {token}', 'file_offset': '0'}, content=pdf_bytes).json()
+h = r2['h']
 
-# 2. Create template
-payload = {
+# 2. Create standard template (lab_report_ready_v1)
+p1 = {
     'name': 'lab_report_ready_v1',
     'category': 'UTILITY',
     'language': 'en_US',
     'components': [
-        {'type': 'HEADER', 'format': 'DOCUMENT', 'example': {'header_handle': [r2['h']]}},
+        {'type': 'HEADER', 'format': 'DOCUMENT', 'example': {'header_handle': [h]}},
         {'type': 'BODY', 'text': 'Dear {{1}}, your medical lab report for {{2}} is ready and attached above. Please consult your physician for interpretation.', 'example': {'body_text': [['Mrs. P. Kalyani', 'Lipid Profile']]}}
     ]
 }
-r3 = httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=payload)
-print('Template Created:', r3.json())
+httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=p1)
+
+# 3. Create 3-variable AI summary template (lab_report_summary_v1)
+p2 = {
+    'name': 'lab_report_summary_v1',
+    'category': 'UTILITY',
+    'language': 'en_US',
+    'components': [
+        {'type': 'HEADER', 'format': 'DOCUMENT', 'example': {'header_handle': [h]}},
+        {'type': 'BODY', 'text': 'Dear {{1}}, your medical lab report for {{2}} is ready and attached above.\n\nSummary: {{3}}\n\nPlease consult your physician for interpretation.', 'example': {'body_text': [['Mrs. P. Kalyani', 'Lipid Profile', 'All tested parameters are within normal reference ranges.']]}}
+    ]
+}
+httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=p2)
+print('Templates Created Successfully!')
 "
 ```
 
