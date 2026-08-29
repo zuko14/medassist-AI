@@ -190,6 +190,92 @@ print('Templates Created Successfully!')
 "
 ```
 
+### Step 10B: Post-Visit Follow-up Message Template Setup (Required for Patient Follow-ups)
+Every clinic that enables **Patient Follow-ups** (via Hospital Profile → Patient Follow-ups in Admin Panel) requires approved `UTILITY` templates on their WABA. Follow-ups always land **outside the 24h customer-service window**, so only templates can deliver them.
+
+> [!TIP]
+> Two templates are needed — one is the **built-in default** (always used as fallback) and the other **carries the admin's custom message** (from the Admin Panel textarea). Both must be approved before follow-ups can actually reach patients.
+
+#### Template A: Built-in Default Follow-up (`post_appointment_followup`)
+* **Template Name:** `post_appointment_followup`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Dear patient {{1}}, we hope you are feeling better after your recent visit to <CLINIC_NAME>. Your health and recovery are important to us. If you need a follow-up appointment, please reply YES or call us at {{2}} to schedule. Wishing you good health!
+  ```
+* **Variables:**
+  - `{{1}}` → Patient Full Name (e.g., `Ravi Kumar`)
+  - `{{2}}` → Hospital Phone Number (e.g., `+919490386668`)
+
+#### Template B: Custom Message Follow-up (`followup_custom_message_v1`)
+* **Template Name:** `followup_custom_message_v1`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Dear patient {{1}}, this is a follow-up message from <CLINIC_NAME> regarding your recent visit.
+
+  {{2}}
+
+  If you have any concerns, please do not hesitate to reach out. We wish you good health and a speedy recovery.
+  ```
+* **Variables:**
+  - `{{1}}` → Patient First Name (e.g., `Ravi Kumar`)
+  - `{{2}}` → Custom message text entered by admin in the Admin Panel (e.g., `We hope your recovery is going well. Please continue the prescribed medication and attend your next check-up as scheduled.`)
+
+> [!IMPORTANT]
+> Replace `<CLINIC_NAME>` in the body text with the actual clinic name before submitting. Meta rejects template modifications after approval, so get the name right the first time.
+
+#### Clinic Config Keys (set automatically via Admin Panel or manually in DB):
+| Config Key | Purpose | Example Value |
+|---|---|---|
+| `followup_enabled` | Enable/disable follow-ups | `true` |
+| `followup_days` | Days after visit to send (1–30) | `1` |
+| `followup_template_name` | Built-in template name | `post_appointment_followup` |
+| `followup_message_template_name` | Custom-message template name | `followup_custom_message_v1` |
+| `followup_message` | Admin's custom message text | *(set via Admin Panel textarea)* |
+
+#### 1-Click Automated Creation Script (Terminal):
+```bash
+python -c "
+import httpx
+token = '<META_ADMIN_SYSTEM_USER_TOKEN>'
+waba_id = '<CLIENT_WABA_ID>'
+clinic_name = '<CLINIC_NAME>'
+
+# Template A: Built-in default follow-up
+t1 = {
+    'name': 'post_appointment_followup',
+    'category': 'UTILITY',
+    'language': 'en',
+    'components': [{
+        'type': 'BODY',
+        'text': f'Dear patient {{{{1}}}}, we hope you are feeling better after your recent visit to {clinic_name}. Your health and recovery are important to us. If you need a follow-up appointment, please reply YES or call us at {{{{2}}}} to schedule. Wishing you good health!',
+        'example': {'body_text': [['Ravi Kumar', '+919490386668']]}
+    }]
+}
+r1 = httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=t1)
+print(f'post_appointment_followup: {r1.status_code} -> {r1.json()}')
+
+# Template B: Custom message follow-up
+t2 = {
+    'name': 'followup_custom_message_v1',
+    'category': 'UTILITY',
+    'language': 'en',
+    'components': [{
+        'type': 'BODY',
+        'text': f'Dear patient {{{{1}}}}, this is a follow-up message from {clinic_name} regarding your recent visit.\n\n{{{{2}}}}\n\nIf you have any concerns, please do not hesitate to reach out. We wish you good health and a speedy recovery.',
+        'example': {'body_text': [['Ravi Kumar', 'We hope your recovery is going well. Please continue the prescribed medication and attend your next check-up as scheduled.']]}
+    }]
+}
+r2 = httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=t2)
+print(f'followup_custom_message_v1: {r2.status_code} -> {r2.json()}')
+print('Follow-up Templates Submitted for Review!')
+"
+```
+
+
 ### Step 11: Cloud API Activation (`/register` — Automated in Kriya AI)
 > **Automatic Activation:** When you register the clinic in the Kriya AI Platform Panel (Step 13 below), Kriya AI automatically calls Meta's `/register` API in the background using the provided token and phone number ID. The status flips to **`Connected`** automatically.
 
