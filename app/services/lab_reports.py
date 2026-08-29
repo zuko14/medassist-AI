@@ -53,6 +53,25 @@ def flatten_for_template_param(text: str, limit: int = 700) -> str:
     return re.sub(r"\s+", " ", text or "").strip()[:limit]
 
 
+def lab_booking_cta(clinic) -> str:
+    """A one-line "you can book tests here too" note for a report caption.
+
+    Patients who only ever receive automated reports never learn the bot can
+    also book their next test — the menu that offers it is only reachable if
+    they message in first. Riding along on the document caption costs no extra
+    WhatsApp message and cannot become spam; the report template's quick-reply
+    button (payload "book_lab_test") is what carries this outside the 24h
+    window, where no caption is possible.
+
+    Returns "" for clinics that do not sell lab tests.
+    """
+    from app.services.tenant import has_feature
+
+    if not clinic or not has_feature(clinic, "lab_test_booking"):
+        return ""
+    return "\n\n🧪 Need another test? Just reply *BOOK TEST* here — no calls, no queue."
+
+
 def report_template_and_params(
     clinic: Optional[dict],
     patient_name: str,
@@ -402,7 +421,10 @@ class LabReportService:
                         )
 
                     # Step F — Send the actual PDF document
-                    caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
+                    caption = (
+                        f"📋 {report_name} | {report_type} | {clinic['name']}"
+                        + lab_booking_cta(clinic)
+                    )
                     doc_sent = await whatsapp_service.send_document(
                         clinic, patient_phone, media_handle, filename, caption,
                         _source="lab_reports", _capture=capture,
@@ -754,7 +776,10 @@ class LabReportService:
                             "WhatsApp API rejected the summary message — check recipient allowlist and 24h session window"
                         )
 
-                    caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
+                    caption = (
+                        f"📋 {report_name} | {report_type} | {clinic['name']}"
+                        + lab_booking_cta(clinic)
+                    )
                     doc_sent = await whatsapp_service.send_document(
                         clinic, patient_phone, media_handle, filename, caption,
                         _source="lab_reports", _capture=capture,
@@ -1005,7 +1030,10 @@ class LabReportService:
                         )
                         summary_sent_ok = bool(text_sent and summary)
 
-                        caption = f"📋 {report_name} | {report_type} | {clinic['name']}"
+                        caption = (
+                            f"📋 {report_name} | {report_type} | {clinic['name']}"
+                            + lab_booking_cta(clinic)
+                        )
                         sent_ok = await whatsapp_service.send_document(
                             clinic, patient_phone, media_handle, filename, caption,
                             _source="lab_reports_retry",

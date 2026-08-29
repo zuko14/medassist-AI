@@ -826,11 +826,27 @@ class ClinicProfileUpdate(BaseModel):
     phone_number_id: Optional[str] = None      # Meta WhatsApp phone_number_id for dual-key routing
     is_sandbox: Optional[bool] = None           # Mark as test/sandbox clinic for demo number routing
 
+    # ── Patient follow-ups (Hospital Profile -> Patient Follow-ups) ──────────
+    followup_enabled: Optional[bool] = None
+    followup_days: Optional[int] = Field(default=None, ge=1, le=30)
+    followup_message: Optional[str] = None
+    followup_message_template_name: Optional[str] = None
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not v.strip():
             raise ValueError("name cannot be blank")
+        return v.strip() if v else v
+
+    @field_validator("followup_message")
+    @classmethod
+    def validate_followup_message(cls, v: Optional[str]) -> Optional[str]:
+        # 700 chars matches flatten_for_template_param()'s cap, which is what
+        # actually goes into the Meta template parameter. Rejecting here beats
+        # silently truncating the clinic's wording at send time.
+        if v is not None and len(v.strip()) > 700:
+            raise ValueError("followup_message must be 700 characters or fewer")
         return v.strip() if v else v
 
 
@@ -2897,6 +2913,21 @@ async def get_clinic_profile(
         "hospital_address": cfg.get("address") or settings.hospital_address,
         "hospital_maps_link": cfg.get("maps_link") or settings.hospital_maps_link,
         "hospital_emergency_number": cfg.get("emergency_number") or settings.hospital_emergency_number,
+        # Patient follow-ups. Resolved the same way followup_config() resolves
+        # them at send time, so the panel shows what will actually happen
+        # rather than a blank field that reads as "off".
+        "followup_enabled": (
+            cfg["followup_enabled"]
+            if isinstance(cfg.get("followup_enabled"), bool)
+            else settings.followup_enabled_default
+        ),
+        "followup_days": cfg.get("followup_days") or settings.followup_days_after_visit,
+        "followup_message": cfg.get("followup_message") or "",
+        "followup_message_template_name": (
+            cfg.get("followup_message_template_name")
+            or settings.followup_message_template_name
+            or ""
+        ),
     }
 
 
@@ -2929,6 +2960,22 @@ async def update_clinic_profile(
         cfg["maps_link"] = updates["hospital_maps_link"].strip()
     if "hospital_emergency_number" in updates and updates["hospital_emergency_number"] is not None:
         cfg["emergency_number"] = updates["hospital_emergency_number"].strip()
+    # Patient follow-up settings. Read back by followup_config() in
+    # app/services/scheduler.py; stored in clinics.config like every other
+    # per-clinic override (e.g. lab_report_template_name).
+    if "followup_enabled" in updates and updates["followup_enabled"] is not None:
+        cfg["followup_enabled"] = bool(updates["followup_enabled"])
+    if "followup_days" in updates and updates["followup_days"] is not None:
+        cfg["followup_days"] = int(updates["followup_days"])
+    if "followup_message" in updates and updates["followup_message"] is not None:
+        cfg["followup_message"] = updates["followup_message"].strip()
+    if (
+        "followup_message_template_name" in updates
+        and updates["followup_message_template_name"] is not None
+    ):
+        cfg["followup_message_template_name"] = updates[
+            "followup_message_template_name"
+        ].strip()
     row_updates["config"] = cfg
     # Top-level columns for tenant routing (migration 043)
     if "phone_number_id" in updates and updates["phone_number_id"] is not None:

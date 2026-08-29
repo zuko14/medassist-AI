@@ -903,6 +903,37 @@
                 </div>
                 <button class="btn btn-accent" onclick="saveProfile()">Save Profile</button>
             </div>
+
+            <div class="form-card" data-feature="reminders">
+                <h3>💬 Patient Follow-ups</h3>
+                <p class="muted" style="margin:-4px 0 14px">A message sent automatically after a patient's visit — the thing that makes this more than a booking bot. Visits are closed out automatically each night, so nobody has to mark anything.</p>
+                <div id="followupMsg"></div>
+                <div class="form-row">
+                    <div class="field">
+                        <label><input type="checkbox" id="f-followupEnabled"> Send a follow-up after each visit</label>
+                    </div>
+                    <div class="field">
+                        <label>Days after the visit</label>
+                        <input type="number" id="f-followupDays" min="1" max="30" step="1" placeholder="1">
+                        <small class="muted">1 = the next day. Retried for 3 days if WhatsApp refuses the first attempt.</small>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="field" style="flex:1 1 100%">
+                        <label>Follow-up message</label>
+                        <textarea id="f-followupMessage" rows="4" maxlength="700" placeholder="e.g. We hope you are feeling better after your visit. Reply here to book a follow-up or a lab test."></textarea>
+                        <small class="muted"><span id="followupCharCount">0</span>/700 characters</small>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="field" style="flex:1 1 100%">
+                        <label>Message template name (required to send your own wording)</label>
+                        <input type="text" id="f-followupTemplate" placeholder="e.g. patient_followup_message">
+                        <small class="muted">A follow-up always arrives outside WhatsApp's 24-hour reply window, so Meta only allows an approved template. To send the wording above, get a template approved with two variables — <code>{{1}}</code> the patient's first name and <code>{{2}}</code> your message — and put its name here. Leave this empty and the built-in follow-up is sent instead; your custom wording will not be delivered.</small>
+                    </div>
+                </div>
+                <button class="btn btn-accent" onclick="saveFollowupSettings()">Save Follow-up Settings</button>
+            </div>
         </div>
 
         <div id="pg-dashboard" class="sec on">
@@ -4185,8 +4216,50 @@ async function loadProfile() {
         document.getElementById('f-profileAddress').value = data.hospital_address || '';
         document.getElementById('f-profileMaps').value = data.hospital_maps_link || '';
         document.getElementById('f-profileEmergency').value = data.hospital_emergency_number || '';
+
+        document.getElementById('f-followupEnabled').checked = !!data.followup_enabled;
+        document.getElementById('f-followupDays').value = data.followup_days || 1;
+        document.getElementById('f-followupMessage').value = data.followup_message || '';
+        document.getElementById('f-followupTemplate').value = data.followup_message_template_name || '';
+        updateFollowupCharCount();
     } catch (e) {
         msg('profileMsg', 'Error loading profile: ' + e.message, true);
+    }
+}
+
+function updateFollowupCharCount() {
+    const el = document.getElementById('f-followupMessage');
+    const out = document.getElementById('followupCharCount');
+    if (el && out) out.textContent = el.value.length;
+}
+
+document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'f-followupMessage') updateFollowupCharCount();
+});
+
+async function saveFollowupSettings() {
+    const days = parseInt(document.getElementById('f-followupDays').value, 10);
+    if (!Number.isInteger(days) || days < 1 || days > 30) {
+        msg('followupMsg', 'Days after the visit must be a whole number between 1 and 30', true);
+        return;
+    }
+    const message = document.getElementById('f-followupMessage').value.trim();
+    const template = document.getElementById('f-followupTemplate').value.trim();
+
+    try {
+        await apiPut('/admin/profile', {
+            followup_enabled: document.getElementById('f-followupEnabled').checked,
+            followup_days: days,
+            followup_message: message,
+            followup_message_template_name: template,
+        });
+        // Say plainly when the wording cannot actually be delivered, rather
+        // than showing a tick for a setting Meta will ignore.
+        msg('followupMsg', (message && !template)
+            ? '✅ Saved — but with no template name set, the built-in follow-up is sent and your wording above is NOT delivered.'
+            : '✅ Follow-up settings saved!');
+    } catch (e) {
+        msg('followupMsg', 'Error: ' + e.message, true);
     }
 }
 

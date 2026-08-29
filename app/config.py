@@ -96,6 +96,18 @@ class Settings(BaseSettings):
     # can only reach the patient inside the template itself. Unset = summary is
     # generated and stored but NOT delivered (recorded as ai_summary_sent=False).
     lab_report_summary_template_name: str = ""
+
+    # ── Post-visit patient follow-up ──────────────────────────────────────────
+    # Platform-wide defaults; each clinic overrides these from the admin panel
+    # (Hospital Profile -> Patient Follow-ups), stored in clinics.config.
+    followup_enabled_default: bool = True
+    followup_days_after_visit: int = 1
+    # Optional template whose {{2}} carries the clinic's own follow-up message
+    # ({{1}} is the patient's first name). A business-initiated message must be
+    # a template, so without this the admin's custom wording cannot be
+    # delivered and the built-in post_appointment_followup is used instead.
+    followup_template_name: str = "post_appointment_followup"
+    followup_message_template_name: str = ""
     admin_alert_template_name: str = ""  # Meta utility template (1 body var) for connector alerts outside 24h window
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

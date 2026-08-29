@@ -368,6 +368,7 @@ BEGIN
             ('appointments', 'hold_expires_at',       '008'),
             ('appointments', 'booking_type',          '039'),
             ('appointments', 'refund_id',             '046'),
+            ('appointments', 'completed_at',          '063'),
             ('clinics',      'plan',                  '006'),
             ('clinics',      'phone_number_id',       '043'),
             ('clinics',      'config',                '003'),

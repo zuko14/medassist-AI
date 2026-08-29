@@ -119,6 +119,23 @@ async def lifespan(app: FastAPI):
             logger.critical(f"FATAL: {error_msg}")
             raise RuntimeError(error_msg)
 
+        # Connector credential key: a pure local check, so a malformed key is
+        # knowable at boot instead of being rediscovered on every poll as a
+        # bare "ValueError". Deliberately NOT fatal — connectors are optional,
+        # and taking down booking and reminders for a clinic that does not use
+        # them would be a far bigger outage than the one being reported.
+        if settings.connector_encryption_key:
+            from app.utils.connector_crypto import fernet_key_problem
+
+            key_problem = fernet_key_problem(settings.connector_encryption_key)
+            if key_problem:
+                logger.critical(
+                    f"CONNECTOR CREDENTIALS UNUSABLE: {key_problem} "
+                    f"Report connectors will fail every poll until this is fixed. "
+                    f"Stored passwords are NOT lost — restore the original key. "
+                    f"Generating a new key makes them permanently undecryptable."
+                )
+
         # Database schema pre-flight: fail-closed schema-drift detection (KA-01)
         # Compares highest applied migration in DB against highest .sql on disk.
         # Refuses to start if migrations are missing — prevents serving on stale schema.

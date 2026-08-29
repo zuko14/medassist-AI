@@ -556,6 +556,15 @@ class ConversationManager:
                     await self._show_services(clinic, phone, lang)
                 return
 
+            elif button_id in ("book_lab_test", "menu_lab_tests"):
+                # Quick-reply payload on the lab report delivery template, and
+                # the standing "Book Lab Test" menu row. Tapping a template
+                # button is an inbound message, so it legitimately opens the
+                # 24h window and the full catalogue can be shown here.
+                lang = await get_lang(clinic, phone)
+                await self._show_lab_test_list(clinic, phone, {}, lang)
+                return
+
             elif button_id == "menu_reports":
                 lang = await get_lang(clinic, phone)
                 await self._handle_view_reports(clinic, phone, lang)
@@ -815,6 +824,17 @@ class ConversationManager:
                 await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
                 await self._send_main_menu(clinic, phone, lang)
                 return
+
+            # The lab report caption tells patients to reply "BOOK TEST", and the
+            # report template's quick-reply button carries the same words. Handled
+            # here, beside the other from-any-state navigation words, because a
+            # patient who just received a report is rarely sitting in main_menu.
+            if msg_lower in ("book test", "book lab test", "booktest"):
+                from app.services.tenant import has_feature
+
+                if has_feature(clinic, "lab_test_booking"):
+                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                    return
 
             if (
                 intent == "book_appointment"
@@ -1178,6 +1198,8 @@ class ConversationManager:
 
     async def _send_main_menu(self, clinic: dict, phone: str, lang: str) -> None:
         """Send main menu with buttons."""
+        from app.services.tenant import has_feature
+
         diagnostics_only = await self._is_diagnostics_only(clinic)
 
         book_title = {
@@ -1198,6 +1220,11 @@ class ConversationManager:
             services_title = {"en": "Our Services", "hi": "Our Services", "te": "Our Services"}.get(lang, "Our Services")
             rows.append({"id": "menu_services", "title": services_title[:24], "description": ""})
             rows.append({"id": "menu_doctors", "title": t[0][:24], "description": ""})
+            # A clinic that does consultations AND lab tests had no lab row at
+            # all — "Book Appointment" reads as doctors-only, so patients never
+            # discovered they could book a test here.
+            if has_feature(clinic, "lab_test_booking"):
+                rows.append({"id": "menu_lab_tests", "title": "🧪 Book Lab Test"[:24], "description": ""})
         rows.append({"id": "menu_reports", "title": "📋 My Reports"[:24], "description": ""})
         rows.append({"id": "menu_emergency", "title": t[1][:24], "description": ""})
         rows.append({"id": "menu_human", "title": t[2][:24], "description": ""})

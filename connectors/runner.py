@@ -44,7 +44,11 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from app.config import settings
 from app.database import supabase
-from app.utils.connector_crypto import decrypt_password, encrypt_password
+from app.utils.connector_crypto import (
+    decrypt_password,
+    describe_decrypt_failure,
+    encrypt_password,
+)
 from app.services.patient_match import patient_match_service
 from app.services.distributed_lock import distributed_job_lock
 from connectors.mocdoc.worker import MocDocConnector
@@ -481,10 +485,22 @@ async def run_connector(
             try:
                 config["password"] = decrypt_password(password_encrypted, encryption_key)
             except Exception as e:
-                msg = f"Password decryption failed: {type(e).__name__}"
+                # The exception class alone ("ValueError") does not tell the
+                # admin whether to fix the server key or re-enter the password,
+                # and those remedies are mutually exclusive — one of them
+                # destroys the stored credential. Say which.
+                msg = f"Password decryption failed: {describe_decrypt_failure(encryption_key, e)}"
                 logger.error(msg)
                 summary["error_message"] = msg
-                await send_admin_alert(clinic_id, f"⚠️ MocDoc Connector: {msg}", branch_id=branch_id)
+
+                # A bad key is a static server misconfiguration: it cannot fix
+                # itself, and every poll would page the admin again (12x/hour
+                # at a 5 minute interval). Alert once per distinct error, then
+                # stay quiet until the error changes or clears.
+                if connector_row.get("last_error") != msg:
+                    await send_admin_alert(
+                        clinic_id, f"⚠️ MocDoc Connector: {msg}", branch_id=branch_id
+                    )
                 return summary
         elif config.get("password"):
             # Plain text password (for development only)
