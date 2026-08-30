@@ -832,10 +832,18 @@ async def _run_connector(
                 tb = tb.tb_next
             if deepest is not None:
                 frame = deepest.tb_frame
+                # Name the event loop too: a message-less NotImplementedError
+                # out of _make_subprocess_transport means the loop cannot spawn
+                # Playwright, and the loop class is the only thing that says why.
+                try:
+                    loop_name = type(asyncio.get_running_loop()).__name__
+                except RuntimeError:
+                    loop_name = "no-running-loop"
                 detail = (
                     f"(no message) raised at "
                     f"{os.path.basename(frame.f_code.co_filename)}:"
-                    f"{deepest.tb_lineno} in {frame.f_code.co_name}()"
+                    f"{deepest.tb_lineno} in {frame.f_code.co_name}() "
+                    f"[loop={loop_name}]"
                 )
             else:
                 detail = "(no message, no traceback)"

@@ -26,6 +26,12 @@ async def health_check():
             "status": "ok",
             "service": "Kriya AI",
             "pid": os.getpid(),
+            # Which commit is ACTUALLY serving. Both main-branch services in
+            # render.yaml are autoDeploy:false, so a push does not change what
+            # runs; without this, "is my fix live?" is unanswerable and fixes
+            # get re-attempted against code that never deployed.
+            # Render injects RENDER_GIT_COMMIT automatically.
+            "commit": os.getenv("RENDER_GIT_COMMIT", "unknown")[:12],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
