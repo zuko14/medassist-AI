@@ -958,7 +958,20 @@ async def cleanup_expired_storage() -> None:
 
 
 def start_scheduled_mode():
-    """Start APScheduler with polling and cleanup jobs."""
+    """Start APScheduler with polling and cleanup jobs.
+
+    IMPORTANT: uses asyncio.run() instead of the deprecated
+    asyncio.get_event_loop() / loop.run_forever() pattern.
+
+    On Python 3.10+, get_event_loop() in the main thread may create a bare
+    asyncio.BaseEventLoop whose _make_subprocess_transport() raises
+    NotImplementedError.  Playwright async_playwright().start() spawns a
+    Node.js driver subprocess via asyncio.create_subprocess_exec which
+    needs a SelectorEventLoop (Linux) that implements that method.
+
+    asyncio.run() always creates the correct platform event loop with full
+    subprocess support, eliminating the NotImplementedError entirely.
+    """
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
@@ -970,40 +983,55 @@ def start_scheduled_mode():
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Kolkata"))
+    async def _run_forever():
+        """Async entry point that runs inside asyncio.run() proper loop."""
+        scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Kolkata"))
 
-    # Check connectors every 1 minute (each evaluates its own poll_interval_minutes)
-    scheduler.add_job(
-        run_all_connectors,
-        IntervalTrigger(minutes=1),
-        id="poll_connectors",
-        replace_existing=True,
-    )
+        # Check connectors every 1 minute (each evaluates its own poll_interval_minutes)
+        scheduler.add_job(
+            run_all_connectors,
+            IntervalTrigger(minutes=1),
+            id="poll_connectors",
+            replace_existing=True,
+        )
 
-    # Storage cleanup daily at 2 AM IST
-    scheduler.add_job(
-        cleanup_expired_storage,
-        CronTrigger(hour=2, minute=0, timezone=ZoneInfo("Asia/Kolkata")),
-        id="cleanup_storage",
-        replace_existing=True,
-    )
+        # Storage cleanup daily at 2 AM IST
+        scheduler.add_job(
+            cleanup_expired_storage,
+            CronTrigger(hour=2, minute=0, timezone=ZoneInfo("Asia/Kolkata")),
+            id="cleanup_storage",
+            replace_existing=True,
+        )
 
-    scheduler.start()
-    logger.info(
-        "Connector runner started in scheduled mode. "
-        "Dynamic per-connector interval (evaluated every 1m). Storage cleanup daily at 2 AM IST."
-    )
+        scheduler.start()
+        logger.info(
+            "Connector runner started in scheduled mode. "
+            "Dynamic per-connector interval (evaluated every 1m). Storage cleanup daily at 2 AM IST."
+        )
 
-    # Run immediately on startup
-    loop = asyncio.get_event_loop()
-    loop.create_task(run_all_connectors())
+        # Run immediately on startup, then keep alive until terminated
+        await run_all_connectors()
+
+        stop_event = asyncio.Event()
+        try:
+            await stop_event.wait()  # blocks until cancelled by SystemExit
+        except (KeyboardInterrupt, SystemExit):
+            pass
+        finally:
+            logger.info("Shutting down connector runner...")
+            scheduler.shutdown()
+            await release_all_locks_held()
 
     try:
-        loop.run_forever()
+        asyncio.run(_run_forever())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Shutting down connector runner...")
-        scheduler.shutdown()
-        loop.run_until_complete(release_all_locks_held())
+        # asyncio.run() propagates the SystemExit from _handle_sigterm.
+        # Locks are already released inside _run_forever finally block,
+        # but if something goes very wrong we attempt cleanup one more time.
+        try:
+            asyncio.run(release_all_locks_held())
+        except Exception:
+            pass
 
 
 def main():
