@@ -153,36 +153,15 @@ class MocDocConnector(HospitalConnector):
         If Chromium is not installed (common on Render's native Python
         buildpack), attempts a one-time runtime install before retrying.
 
-        On Python 3.11 in Docker, the child watcher that SelectorEventLoop
-        uses for subprocess transport can become stale after a Playwright
-        instance is stopped.  If async_playwright().start() raises
-        NotImplementedError, we reinstall the watcher and retry once.
+        NOTE: The child watcher needed by asyncio subprocess transport is
+        reinstalled by the runner before each connector invocation (see
+        runner.py _ensure_subprocess_support).  This prevents the
+        NotImplementedError that occurs when a previous Playwright stop()
+        leaves the watcher in a stale state.
         """
         from playwright.async_api import async_playwright
 
-        # ── Helper: attempt to start playwright, reinstall child watcher on failure ──
-        async def _start_playwright_safe():
-            try:
-                return await async_playwright().start()
-            except NotImplementedError:
-                # Subprocess transport failed — reinstall child watcher and retry
-                import sys as _sys
-                if _sys.platform != "win32":
-                    import warnings
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", DeprecationWarning)
-                        import asyncio as _aio
-                        policy = _aio.get_event_loop_policy()
-                        watcher = _aio.ThreadedChildWatcher()
-                        policy.set_child_watcher(watcher)
-                        loop = _aio.get_running_loop()
-                        watcher.attach_loop(loop)
-                        logger.warning(
-                            "Reinstalled ThreadedChildWatcher after NotImplementedError — retrying Playwright start"
-                        )
-                return await async_playwright().start()
-
-        self._playwright = await _start_playwright_safe()
+        self._playwright = await async_playwright().start()
         try:
             self._browser = await self._playwright.chromium.launch(
                 headless=True,

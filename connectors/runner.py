@@ -867,6 +867,10 @@ async def run_all_connectors() -> None:
                 pass
 
         try:
+            # Reinstall child watcher before EACH connector to prevent stale
+            # watcher after the previous connector's Playwright cleanup.
+            _ensure_subprocess_support()
+
             await run_connector(
                 clinic_id=conn["clinic_id"],
                 connector_type=conn["connector_type"],
@@ -958,17 +962,17 @@ async def cleanup_expired_storage() -> None:
 
 
 def _ensure_subprocess_support():
-    """Ensure the asyncio event loop can spawn subprocesses.
+    """Install a fresh asyncio child watcher for subprocess support.
 
-    On Python 3.11 in Docker, SelectorEventLoop._make_subprocess_transport()
-    relies on a child watcher.  If no watcher is installed, the call falls
-    through to BaseEventLoop._make_subprocess_transport() which raises
-    NotImplementedError.
+    On Python 3.11 in Docker, the SelectorEventLoop uses a child watcher
+    to manage subprocess lifecycle (SIGCHLD handling).  When Playwright's
+    cleanup() kills its Node.js driver subprocess, the child watcher can
+    become stale — subsequent calls to _make_subprocess_transport() then
+    fall through to BaseEventLoop's stub which raises NotImplementedError.
 
-    This function explicitly installs a ThreadedChildWatcher (the safest
-    option on 3.8-3.11) or PidfdChildWatcher (3.9+, Linux 5.3+), ensuring
-    subprocess spawning (used by Playwright to launch its Node.js driver)
-    works reliably on every poll cycle.
+    This function ALWAYS installs a fresh ThreadedChildWatcher, ensuring
+    the next Playwright launch works regardless of what happened before.
+    It is designed to be called before EACH connector run, not just once.
     """
     if sys.platform == "win32":
         return  # Windows uses ProactorEventLoop, no child watcher needed
@@ -977,20 +981,23 @@ def _ensure_subprocess_support():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         policy = asyncio.get_event_loop_policy()
+
+        # Always install a fresh watcher — the previous one may be stale
+        # after a Playwright stop() killed its subprocess and the SIGCHLD
+        # handler ran.
         try:
-            watcher = policy.get_child_watcher()
-            if watcher is not None and watcher.is_active():
-                return  # Already has an active watcher
+            old_watcher = policy.get_child_watcher()
+            if old_watcher is not None:
+                try:
+                    old_watcher.close()
+                except Exception:
+                    pass
         except Exception:
             pass
 
-        # Install a fresh ThreadedChildWatcher — compatible with all Unix
-        # platforms and does not require the loop to run in the main thread.
         watcher = asyncio.ThreadedChildWatcher()
         policy.set_child_watcher(watcher)
-        logger.info(
-            f"Installed {type(watcher).__name__} for asyncio subprocess support"
-        )
+        logger.debug("Installed fresh ThreadedChildWatcher for subprocess support")
 
 
 def start_scheduled_mode():
