@@ -4188,10 +4188,26 @@ async def get_diagnostic_stats(
 
         connector_info = None
         if evaluated:
-            # Headline stays the most recently updated row (a decommissioned
-            # branch must not pin the dashboard to its old error), but the
-            # counts make sure a sibling that stopped polling is never hidden.
-            connector_info = evaluated[0]
+            # Headline selection.
+            #
+            # Previously always evaluated[0] — the most recently UPDATED row.
+            # With two connectors that produced a genuinely confusing screen:
+            # the banner showed branch B's error while the Run History panel
+            # below it (which queries ONE connector by id) showed branch A's
+            # successful run. Same screen, two different connectors, nothing
+            # saying so — it reads as "the run succeeded AND errored".
+            #
+            # Prefer an ENABLED connector that needs attention, so the headline
+            # agrees with the "N of M connectors need attention" line beneath
+            # it. Disabled rows stay excluded, which preserves the original
+            # intent: a decommissioned branch must not pin the dashboard to its
+            # old error. Falls back to most-recently-updated when everything
+            # enabled is healthy.
+            attention = [
+                e for e in evaluated
+                if e["is_enabled"] and e["health"] not in ("healthy", "disabled")
+            ]
+            connector_info = attention[0] if attention else evaluated[0]
             connector_info["connector_count"] = len(evaluated)
             connector_info["unhealthy_count"] = sum(
                 1 for e in evaluated if e["health"] != "healthy"

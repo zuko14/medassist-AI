@@ -718,7 +718,33 @@ async def run_connector(
             )
 
     except Exception as e:
-        summary["error_message"] = f"{type(e).__name__}: {str(e)[:200]}"
+        # Some exceptions carry no message at all — a bare `raise SomeError`
+        # inside a dependency is the common case. Formatting only
+        # "{type}: {str(e)}" then stores the literally useless
+        # "NotImplementedError: " on the connector row, which is exactly what
+        # an operator sees on the dashboard: an error with no message, no
+        # location, and nothing to act on.
+        #
+        # When there is no message, fall back to the deepest traceback frame so
+        # last_error at least names the file, line and function that failed.
+        detail = str(e).strip()
+        if not detail:
+            tb = e.__traceback__
+            deepest = None
+            while tb is not None:
+                deepest = tb
+                tb = tb.tb_next
+            if deepest is not None:
+                frame = deepest.tb_frame
+                detail = (
+                    f"(no message) raised at "
+                    f"{os.path.basename(frame.f_code.co_filename)}:"
+                    f"{deepest.tb_lineno} in {frame.f_code.co_name}()"
+                )
+            else:
+                detail = "(no message, no traceback)"
+
+        summary["error_message"] = f"{type(e).__name__}: {detail[:200]}"
         logger.exception(f"Connector run failed for clinic {clinic_id}")
 
         try:
