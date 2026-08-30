@@ -34,6 +34,20 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
+# ── CRITICAL: Force stdlib event loop policy BEFORE any library imports ──
+# uvicorn[standard] installs uvloop as a transitive dependency.  If uvloop's
+# EventLoopPolicy gets activated (by import side-effects from app modules,
+# APScheduler, or httptools), asyncio.get_event_loop() returns a uvloop.Loop
+# whose _make_subprocess_transport() does NOT support the same child-watcher
+# protocol as CPython's _UnixSelectorEventLoop — Playwright's subprocess
+# spawning then raises NotImplementedError at base_events.py:528.
+#
+# Forcing DefaultEventLoopPolicy guarantees we get a _UnixSelectorEventLoop
+# with full subprocess transport support.  This MUST happen before we import
+# app modules (which pull in uvicorn, httptools, etc. as transitive deps).
+if sys.platform != "win32":
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
 # Add project root to path so we can import app modules
 PROJECT_ROOT = str(Path(__file__).parent.parent)
 if PROJECT_ROOT not in sys.path:
