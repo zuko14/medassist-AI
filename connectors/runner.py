@@ -957,21 +957,44 @@ async def cleanup_expired_storage() -> None:
                     pass
 
 
-def start_scheduled_mode():
-    """Start APScheduler with polling and cleanup jobs.
+def _ensure_subprocess_support():
+    """Ensure the asyncio event loop can spawn subprocesses.
 
-    IMPORTANT: uses asyncio.run() instead of the deprecated
-    asyncio.get_event_loop() / loop.run_forever() pattern.
+    On Python 3.11 in Docker, SelectorEventLoop._make_subprocess_transport()
+    relies on a child watcher.  If no watcher is installed, the call falls
+    through to BaseEventLoop._make_subprocess_transport() which raises
+    NotImplementedError.
 
-    On Python 3.10+, get_event_loop() in the main thread may create a bare
-    asyncio.BaseEventLoop whose _make_subprocess_transport() raises
-    NotImplementedError.  Playwright async_playwright().start() spawns a
-    Node.js driver subprocess via asyncio.create_subprocess_exec which
-    needs a SelectorEventLoop (Linux) that implements that method.
-
-    asyncio.run() always creates the correct platform event loop with full
-    subprocess support, eliminating the NotImplementedError entirely.
+    This function explicitly installs a ThreadedChildWatcher (the safest
+    option on 3.8-3.11) or PidfdChildWatcher (3.9+, Linux 5.3+), ensuring
+    subprocess spawning (used by Playwright to launch its Node.js driver)
+    works reliably on every poll cycle.
     """
+    if sys.platform == "win32":
+        return  # Windows uses ProactorEventLoop, no child watcher needed
+
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        policy = asyncio.get_event_loop_policy()
+        try:
+            watcher = policy.get_child_watcher()
+            if watcher is not None and watcher.is_active():
+                return  # Already has an active watcher
+        except Exception:
+            pass
+
+        # Install a fresh ThreadedChildWatcher — compatible with all Unix
+        # platforms and does not require the loop to run in the main thread.
+        watcher = asyncio.ThreadedChildWatcher()
+        policy.set_child_watcher(watcher)
+        logger.info(
+            f"Installed {type(watcher).__name__} for asyncio subprocess support"
+        )
+
+
+def start_scheduled_mode():
+    """Start APScheduler with polling and cleanup jobs."""
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
@@ -983,55 +1006,45 @@ def start_scheduled_mode():
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    async def _run_forever():
-        """Async entry point that runs inside asyncio.run() proper loop."""
-        scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Kolkata"))
+    # ── Critical: install a child watcher BEFORE creating the event loop ──
+    # Without this, _make_subprocess_transport() raises NotImplementedError
+    # when Playwright tries to spawn its Chromium/Node.js driver subprocess.
+    _ensure_subprocess_support()
 
-        # Check connectors every 1 minute (each evaluates its own poll_interval_minutes)
-        scheduler.add_job(
-            run_all_connectors,
-            IntervalTrigger(minutes=1),
-            id="poll_connectors",
-            replace_existing=True,
-        )
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Kolkata"))
 
-        # Storage cleanup daily at 2 AM IST
-        scheduler.add_job(
-            cleanup_expired_storage,
-            CronTrigger(hour=2, minute=0, timezone=ZoneInfo("Asia/Kolkata")),
-            id="cleanup_storage",
-            replace_existing=True,
-        )
+    # Check connectors every 1 minute (each evaluates its own poll_interval_minutes)
+    scheduler.add_job(
+        run_all_connectors,
+        IntervalTrigger(minutes=1),
+        id="poll_connectors",
+        replace_existing=True,
+    )
 
-        scheduler.start()
-        logger.info(
-            "Connector runner started in scheduled mode. "
-            "Dynamic per-connector interval (evaluated every 1m). Storage cleanup daily at 2 AM IST."
-        )
+    # Storage cleanup daily at 2 AM IST
+    scheduler.add_job(
+        cleanup_expired_storage,
+        CronTrigger(hour=2, minute=0, timezone=ZoneInfo("Asia/Kolkata")),
+        id="cleanup_storage",
+        replace_existing=True,
+    )
 
-        # Run immediately on startup, then keep alive until terminated
-        await run_all_connectors()
+    scheduler.start()
+    logger.info(
+        "Connector runner started in scheduled mode. "
+        "Dynamic per-connector interval (evaluated every 1m). Storage cleanup daily at 2 AM IST."
+    )
 
-        stop_event = asyncio.Event()
-        try:
-            await stop_event.wait()  # blocks until cancelled by SystemExit
-        except (KeyboardInterrupt, SystemExit):
-            pass
-        finally:
-            logger.info("Shutting down connector runner...")
-            scheduler.shutdown()
-            await release_all_locks_held()
+    # Run immediately on startup
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_all_connectors())
 
     try:
-        asyncio.run(_run_forever())
+        loop.run_forever()
     except (KeyboardInterrupt, SystemExit):
-        # asyncio.run() propagates the SystemExit from _handle_sigterm.
-        # Locks are already released inside _run_forever finally block,
-        # but if something goes very wrong we attempt cleanup one more time.
-        try:
-            asyncio.run(release_all_locks_held())
-        except Exception:
-            pass
+        logger.info("Shutting down connector runner...")
+        scheduler.shutdown()
+        loop.run_until_complete(release_all_locks_held())
 
 
 def main():
