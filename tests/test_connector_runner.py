@@ -367,19 +367,51 @@ def test_run_connector_spawns_subprocesses_from_a_selector_loop():
     assert result["returncode"] == 0
 
 
-def test_run_connector_stays_inline_on_a_capable_loop():
-    """Production (Linux/uvloop) must keep awaiting the run directly rather
-    than paying for a thread hop."""
+def test_loop_probe_survives_uvloop_shaped_loops():
+    """uvloop.Loop does not subclass BaseEventLoop and has no
+    _make_subprocess_transport. Probing it directly raised
+    "type object 'Loop' has no attribute '_make_subprocess_transport'"."""
+    from connectors.runner import _loop_supports_subprocess
+
+    class Loop:  # same shape as uvloop.Loop: no such attribute at all
+        pass
+
+    assert _loop_supports_subprocess(Loop()) is False
+
+
+def test_new_subprocess_loop_ignores_the_global_policy():
+    """asyncio.new_event_loop() honours the policy, which may be uvloop's —
+    the exact loop we are trying to get away from. The loop must be built
+    directly."""
+    import asyncio
+
+    from connectors.runner import _loop_supports_subprocess, _new_subprocess_loop
+
+    loop = _new_subprocess_loop()
+    try:
+        assert _loop_supports_subprocess(loop), (
+            f"{type(loop).__name__} cannot spawn subprocesses"
+        )
+    finally:
+        loop.close()
+
+
+def test_run_connector_always_owns_its_loop():
+    """Even on a loop that looks capable, the run moves to a connector thread.
+    Capability detection guessed wrong three times; owning the loop is
+    deterministic."""
     import asyncio
     import threading
 
     from connectors import runner
 
     async def _record(**kwargs):
-        return {"thread": threading.current_thread().name}
+        return {
+            "thread": threading.current_thread().name,
+            "loop_ok": runner._loop_supports_subprocess(asyncio.get_running_loop()),
+        }
 
     async def _drive():
-        assert runner._loop_supports_subprocess(asyncio.get_running_loop())
         with patch.object(runner, "_run_connector", _record):
             return await runner.run_connector(clinic_id="c1")
 
@@ -389,4 +421,27 @@ def test_run_connector_stays_inline_on_a_capable_loop():
     finally:
         loop.close()
 
-    assert not result["thread"].startswith("connector-loop")
+    assert result["thread"].startswith("connector-loop")
+    assert result["loop_ok"] is True
+
+
+def test_ensure_child_watcher_never_raises():
+    """A refusing policy (uvloop's raises NotImplementedError) must not become
+    the connector's error."""
+    import asyncio
+
+    from connectors.runner import _ensure_child_watcher
+
+    class RefusingPolicy(asyncio.DefaultEventLoopPolicy):
+        def get_child_watcher(self):
+            raise NotImplementedError
+
+        def set_child_watcher(self, watcher):
+            raise NotImplementedError
+
+    original = asyncio.get_event_loop_policy()
+    try:
+        asyncio.set_event_loop_policy(RefusingPolicy())
+        _ensure_child_watcher()  # must not raise
+    finally:
+        asyncio.set_event_loop_policy(original)

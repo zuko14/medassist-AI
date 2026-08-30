@@ -431,41 +431,85 @@ def _loop_supports_subprocess(loop) -> bool:
     platform or loop class, so uvloop, ProactorEventLoop and the Unix selector
     loop are all recognised without hardcoding a list.
     """
+    # uvloop.Loop does not subclass BaseEventLoop and has no such attribute at
+    # all, so this must be getattr-safe — probing it directly raised
+    # "type object 'Loop' has no attribute '_make_subprocess_transport'".
+    impl = getattr(type(loop), "_make_subprocess_transport", None)
     return (
-        type(loop)._make_subprocess_transport
-        is not asyncio.BaseEventLoop._make_subprocess_transport
+        impl is not None
+        and impl is not asyncio.BaseEventLoop._make_subprocess_transport
     )
 
 
 def _new_subprocess_loop() -> asyncio.AbstractEventLoop:
-    """A fresh event loop guaranteed to support subprocess spawning."""
+    """A fresh event loop that can spawn subprocesses, independent of policy.
+
+    Deliberately constructs the stdlib loop class directly rather than calling
+    asyncio.new_event_loop(): that goes through the global policy, which may be
+    uvloop's, and would hand back exactly the loop we are trying to avoid.
+    """
     if sys.platform == "win32":
-        # Windows SelectorEventLoop has no subprocess support at all.
+        # Windows SelectorEventLoop cannot spawn subprocesses at all.
         return asyncio.ProactorEventLoop()
-    return asyncio.new_event_loop()
+    # POSIX: asyncio.SelectorEventLoop is _UnixSelectorEventLoop, which does
+    # implement _make_subprocess_transport.
+    return asyncio.SelectorEventLoop()
+
+
+def _ensure_child_watcher() -> None:
+    """Guarantee a usable child watcher for the loop we are about to run.
+
+    On POSIX, _UnixSelectorEventLoop._make_subprocess_transport asks the GLOBAL
+    policy for a child watcher. If that policy is uvloop's, the call can raise a
+    message-less NotImplementedError — which surfaces on the dashboard as the
+    bare "NotImplementedError:" with no location.
+
+    Never raises: a failure here must not become the connector's error.
+    """
+    if sys.platform == "win32":
+        return  # Windows has no child watchers; ProactorEventLoop needs none.
+
+    import warnings
+
+    with warnings.catch_warnings():
+        # get_child_watcher is deprecated in 3.12 and removed in 3.14.
+        warnings.simplefilter("ignore", DeprecationWarning)
+        if not hasattr(asyncio, "get_child_watcher"):
+            return  # 3.14+: loops handle child reaping themselves.
+        try:
+            watcher = asyncio.get_child_watcher()
+            if watcher is not None and watcher.is_active():
+                return
+        except Exception:
+            pass
+        # The policy refused or gave an inactive watcher. Fall back to the
+        # stdlib policy plus a ThreadedChildWatcher, which works off the main
+        # thread. This does not disturb any already-running loop.
+        try:
+            asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+            asyncio.get_event_loop_policy().set_child_watcher(
+                asyncio.ThreadedChildWatcher()
+            )
+        except Exception as exc:
+            logger.warning("Could not install a child watcher: %r", exc)
 
 
 async def run_connector(*args, **kwargs) -> dict:
-    """Execute one connector run on a loop that can spawn Playwright.
+    """Execute one connector run on a loop that is known to spawn Playwright.
 
-    Thin dispatcher around `_run_connector`. When the caller's loop already
-    supports subprocesses (Linux/uvloop production, the standalone worker) the
-    coroutine is awaited inline and nothing changes. Otherwise it is run on a
-    dedicated thread that owns a subprocess-capable loop.
+    The run ALWAYS moves to a dedicated thread owning a freshly built stdlib
+    loop. Earlier versions tried to detect whether the caller's loop was
+    capable and ran inline when it looked fine; that guessed wrong repeatedly
+    (uvicorn's uvloop.Loop in the web service, uvicorn's SelectorEventLoop
+    under --reload on Windows, and whatever the worker's policy produced), and
+    each wrong guess cost a deploy to disprove. Owning the loop outright is
+    both smaller and deterministic: Playwright never touches the host loop.
+
+    _run_connector holds no loop-bound state and app/database.sb() runs
+    PostgREST calls on its own executor, so it is safe on any loop.
     """
-    try:
-        caller_loop = asyncio.get_running_loop()
-    except RuntimeError:  # pragma: no cover - run_connector is always awaited
-        caller_loop = None
-
-    if caller_loop is not None and _loop_supports_subprocess(caller_loop):
-        return await _run_connector(*args, **kwargs)
-
-    logger.warning(
-        "Event loop %s cannot spawn subprocesses; running connector on a "
-        "dedicated ProactorEventLoop/selector thread so Playwright can start.",
-        type(caller_loop).__name__,
-    )
+    caller_loop = asyncio.get_running_loop()
+    _ensure_child_watcher()
 
     def _in_own_loop() -> dict:
         with asyncio.Runner(loop_factory=_new_subprocess_loop) as runner:
@@ -1104,9 +1148,19 @@ def _ensure_subprocess_support():
         except Exception:
             pass
 
-        watcher = asyncio.ThreadedChildWatcher()
-        policy.set_child_watcher(watcher)
-        logger.debug("Installed fresh ThreadedChildWatcher for subprocess support")
+        # set_child_watcher was UNGUARDED here. uvloop's policy raises a
+        # message-less NotImplementedError from it, and this runs before every
+        # connector poll — so a failure here aborted the run and produced the
+        # locationless "NotImplementedError:" banner. Diagnostics must never be
+        # the thing that breaks the run.
+        try:
+            policy.set_child_watcher(asyncio.ThreadedChildWatcher())
+            logger.debug("Installed fresh ThreadedChildWatcher for subprocess support")
+        except Exception as exc:
+            logger.warning(
+                "Could not install ThreadedChildWatcher (%r); run_connector owns "
+                "its own loop, so this is not fatal.", exc
+            )
 
 
 def start_scheduled_mode():
