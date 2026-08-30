@@ -6,6 +6,8 @@ from datetime import datetime, date as dt_date, timedelta, timezone
 import logging
 import time
 from typing import Optional
+
+import httpx
 from supabase import create_client, Client
 
 from app.config import settings
@@ -84,6 +86,14 @@ _DB_EXECUTOR = ThreadPoolExecutor(
 )
 
 
+#: Methods safe to replay after "Server disconnected". PostgREST PATCH and
+#: DELETE assign literal values to rows selected by filter, so replaying one
+#: reaches the same end state. POST is excluded: an insert cannot distinguish
+#: "never sent" from "committed, then the connection dropped", and replaying it
+#: would duplicate a row.
+_RETRYABLE_METHODS = frozenset({"GET", "HEAD", "PATCH", "DELETE"})
+
+
 async def sb(builder):
     """Execute a PostgREST query off the event loop (KA-P1-03).
 
@@ -124,10 +134,27 @@ async def sb(builder):
        (sync endpoints, `UploadFile` reads). Database work having its own
        bounded pool means a burst of queries cannot starve request handling,
        and the size is a knob that means something.
+
+    Retries once on a stale pooled connection — see _RETRYABLE_METHODS.
     """
-    return await asyncio.get_running_loop().run_in_executor(
-        _DB_EXECUTOR, builder.execute
-    )
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(_DB_EXECUTOR, builder.execute)
+    except httpx.RemoteProtocolError as exc:
+        # "Server disconnected without sending a response". httpx keeps pooled
+        # keep-alive connections; PostgREST closes idle ones on its side, so a
+        # connection can already be dead when we pick it up and the request
+        # fails before reaching the server. One retry gets a fresh connection.
+        method = getattr(
+            getattr(builder, "request", None), "http_method", None
+        )
+        method = str(getattr(method, "value", method) or "").upper()
+        if method not in _RETRYABLE_METHODS:
+            raise
+        logger.warning(
+            "Supabase connection was stale on %s (%s); retrying once", method, exc
+        )
+        return await loop.run_in_executor(_DB_EXECUTOR, builder.execute)
 
 
 class TenantIsolationError(RuntimeError):
