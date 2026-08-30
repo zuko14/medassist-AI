@@ -27,6 +27,7 @@ from app.services.fhir_schemas import (
     lab_report_to_fhir,
     create_fhir_bundle,
 )
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ async def get_patient_fhir(
     try:
         # Fetch patient
         query = scoped_query("patients", clinic_id).eq("phone", phone)
-        result = query.execute()
+        result = await sb(query)
 
         if not result.data:
             raise HTTPException(
@@ -79,7 +80,7 @@ async def get_patient_fhir(
         clinic = None
         if patient.get("clinic_id"):
             # unscoped: global clinic lookup by ID for FHIR Organization reference
-            clinic_res = supabase.table("clinics").select("*").eq("id", patient["clinic_id"]).execute()
+            clinic_res = await sb(supabase.table("clinics").select("*").eq("id", patient["clinic_id"]))
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_patient = patient_to_fhir(patient, clinic)
@@ -109,7 +110,7 @@ async def get_appointment_fhir(
     clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = scoped_query("appointments", clinic_id).eq("booking_ref", booking_ref)
-        result = query.execute()
+        result = await sb(query)
 
         if not result.data:
             raise HTTPException(
@@ -132,7 +133,7 @@ async def get_appointment_fhir(
         clinic = None
         if appointment.get("clinic_id"):
             # unscoped: global clinic lookup by ID for FHIR Organization reference
-            clinic_res = supabase.table("clinics").select("*").eq("id", appointment["clinic_id"]).execute()
+            clinic_res = await sb(supabase.table("clinics").select("*").eq("id", appointment["clinic_id"]))
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_appt = appointment_to_fhir(appointment, clinic)
@@ -155,7 +156,7 @@ async def get_diagnostic_report_fhir(
     clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         query = scoped_query("lab_reports", clinic_id).eq("id", report_id)
-        result = query.execute()
+        result = await sb(query)
 
         if not result.data:
             raise HTTPException(status_code=404, detail="Report not found")
@@ -165,7 +166,7 @@ async def get_diagnostic_report_fhir(
         clinic = None
         if report.get("clinic_id"):
             # unscoped: global clinic lookup by ID for FHIR Organization reference
-            clinic_res = supabase.table("clinics").select("*").eq("id", report["clinic_id"]).execute()
+            clinic_res = await sb(supabase.table("clinics").select("*").eq("id", report["clinic_id"]))
             clinic = clinic_res.data[0] if clinic_res.data else None
 
         fhir_report = lab_report_to_fhir(report, clinic)
@@ -195,7 +196,7 @@ async def get_patient_everything(
 
         # Patient
         q = scoped_query("patients", clinic_id).eq("phone", phone)
-        p_res = q.execute()
+        p_res = await sb(q)
         if not p_res.data:
             raise HTTPException(status_code=404, detail="Patient not found")
         patient = p_res.data[0]
@@ -203,20 +204,20 @@ async def get_patient_everything(
         clinic = None
         if patient.get("clinic_id"):
             # unscoped: global clinic lookup by ID for FHIR Organization reference
-            c_res = supabase.table("clinics").select("*").eq("id", patient["clinic_id"]).execute()
+            c_res = await sb(supabase.table("clinics").select("*").eq("id", patient["clinic_id"]))
             clinic = c_res.data[0] if c_res.data else None
 
         resources.append(patient_to_fhir(patient, clinic))
 
         # Appointments
         a_q = scoped_query("appointments", clinic_id).eq("patient_phone", phone)
-        a_res = a_q.execute()
+        a_res = await sb(a_q)
         for appt in a_res.data or []:
             resources.append(appointment_to_fhir(appt, clinic))
 
         # Lab Reports
         lr_q = scoped_query("lab_reports", clinic_id).eq("patient_phone", phone)
-        lr_res = lr_q.execute()
+        lr_res = await sb(lr_q)
         for report in lr_res.data or []:
             resources.append(lab_report_to_fhir(report, clinic))
 

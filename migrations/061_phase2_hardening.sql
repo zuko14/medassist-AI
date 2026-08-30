@@ -33,6 +33,9 @@ CREATE INDEX IF NOT EXISTS idx_failed_messages_clinic_id
     ON failed_messages(clinic_id)
     WHERE clinic_id IS NOT NULL;
 
-INSERT INTO schema_migrations (name) VALUES ('061_phase2_hardening.sql') ON CONFLICT (name) DO NOTHING;
+-- NOTE: schema_migrations is written by scripts/migrate.py:124 with the
+-- file's SHA256. checksum is NOT NULL (scripts/migrate.py:60), so a
+-- self-INSERT here omits it and aborts the migration on any fresh
+-- database. Migrations must not record themselves.
 
 SELECT 'migration_061_complete' AS status;

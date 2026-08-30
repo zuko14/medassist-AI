@@ -39,6 +39,7 @@ from app.services.message_queue import (
     acquire_phone_lock_with_timeout,
     release_phone_lock_acquired,
 )
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,11 @@ async def get_lang(clinic: dict, phone: str) -> str:
         from app.database import supabase
 
         result = (
-            supabase.table("patients")
+            await sb(supabase.table("patients")
             .select("language")
             .eq("clinic_id", clinic["id"])
             .eq("phone", phone)
-            .single()
-            .execute()
+            .single())
         )
         lang = result.data.get("language")
         return lang if lang in ["en", "hi", "te"] else "en"
@@ -182,11 +182,10 @@ class ConversationManager:
         session_state = None
         try:
             conv_res = (
-                supabase.table("conversations")
+                await sb(supabase.table("conversations")
                 .select("context, state")
                 .eq("clinic_id", clinic["id"])
-                .eq("phone", phone)
-                .execute()
+                .eq("phone", phone))
             )
             if conv_res and conv_res.data and isinstance(conv_res.data, list) and len(conv_res.data) > 0 and isinstance(conv_res.data[0], dict):
                 existing = conv_res.data[0].get("context", {}) or {}
@@ -216,9 +215,9 @@ class ConversationManager:
             update_payload["booking_context_expires_at"] = None
 
         try:
-            supabase.table("conversations").update(update_payload).eq(
+            await sb(supabase.table("conversations").update(update_payload).eq(
                 "clinic_id", clinic["id"]
-            ).eq("phone", phone).execute()
+            ).eq("phone", phone))
         except Exception as e:
             logger.warning(f"Error updating conversation state: {e}")
 
@@ -226,11 +225,10 @@ class ConversationManager:
         from app.database import supabase
 
         patient = (
-            supabase.table("patients")
+            await sb(supabase.table("patients")
             .select("language")
             .eq("clinic_id", clinic["id"])
-            .eq("phone", phone)
-            .execute()
+            .eq("phone", phone))
         )
         if patient.data and patient.data[0].get("language"):
             return patient.data[0]["language"]
@@ -279,7 +277,7 @@ class ConversationManager:
                 from app.database import supabase
                 import json
 
-                supabase.table("failed_messages").insert(
+                await sb(supabase.table("failed_messages").insert(
                     {
                         "phone": phone,
                         "display_phone": clinic.get("phone", ""),
@@ -300,7 +298,7 @@ class ConversationManager:
                         "error": "Phone lock timeout (15s) — previous message still processing",
                         "status": "pending_retry",
                     }
-                ).execute()
+                ))
             except Exception as dlq_err:
                 logger.error(f"Failed to save timed-out message to DLQ: {dlq_err}")
             return
@@ -681,12 +679,11 @@ class ConversationManager:
             from app.database import supabase
 
             res = (
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("*")
                 .eq("clinic_id", clinic["id"])
                 .eq("id", message)
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             if not res.data:
                 lang = await get_lang(clinic, phone)
@@ -704,10 +701,9 @@ class ConversationManager:
 
             # Fetch branch assignments for hierarchical display
             branch_res = (
-                supabase.table("doctor_branches")
+                await sb(supabase.table("doctor_branches")
                 .select("branch_id, session, branches(name, short_name, address)")
-                .eq("doctor_id", doc["id"])
-                .execute()
+                .eq("doctor_id", doc["id"]))
             )
             branches = branch_res.data or []
 
@@ -2035,13 +2031,12 @@ class ConversationManager:
             from app.database import supabase
 
             response = (
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("*")
                 .eq("clinic_id", clinic["id"])
                 .eq("department", department)
                 .eq("is_active", True)
-                .order("rating", desc=True)
-                .execute()
+                .order("rating", desc=True))
             )
             doctors = response.data
 
@@ -2117,11 +2112,10 @@ class ConversationManager:
             dept_names = sorted(list(set(d["department"] for d in branch_doctors if d.get("is_active", True) and d.get("department"))))
         else:
             result = (
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("department")
                 .eq("clinic_id", clinic["id"])
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             dept_names = sorted(list(set(r["department"] for r in (result.data or []) if r.get("department"))))
 
@@ -2200,11 +2194,10 @@ class ConversationManager:
             from app.database import supabase
 
             result = (
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("department")
                 .eq("clinic_id", clinic["id"])
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             clinic_depts = list(set(r["department"] for r in (result.data or []) if r.get("department")))
             msg_clean = message.strip().lower()
@@ -2224,13 +2217,12 @@ class ConversationManager:
                 doctors = await get_doctors_at_branch(clinic["id"], branch_id, department=department, active_only=True)
             else:
                 response = (
-                    supabase.table("doctors")
+                    await sb(supabase.table("doctors")
                     .select("*")
                     .eq("clinic_id", clinic["id"])
                     .eq("department", department)
                     .eq("is_active", True)
-                    .order("rating", desc=True)
-                    .execute()
+                    .order("rating", desc=True))
                 )
                 doctors = response.data or []
 
@@ -2329,11 +2321,10 @@ class ConversationManager:
             from app.database import supabase
 
             res = (
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("*")
                 .eq("clinic_id", clinic["id"])
-                .eq("id", doctor_id)
-                .execute()
+                .eq("id", doctor_id))
             )
             doctor = res.data[0] if res.data else None
             doctor_name = doctor["name"] if doctor else message.strip()
@@ -2344,11 +2335,10 @@ class ConversationManager:
             from app.database import supabase
 
             dept_res = (
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("department")
                 .eq("clinic_id", clinic["id"])
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             active_depts = list(set(r["department"] for r in (dept_res.data or []) if r.get("department")))
 
@@ -2361,13 +2351,12 @@ class ConversationManager:
             if matched_dept:
                 # Patient is telling us which department they want
                 response = (
-                    supabase.table("doctors")
+                    await sb(supabase.table("doctors")
                     .select("*")
                     .eq("clinic_id", clinic["id"])
                     .eq("department", matched_dept)
                     .eq("is_active", True)
-                    .order("rating", desc=True)
-                    .execute()
+                    .order("rating", desc=True))
                 )
                 doctors = response.data
                 if doctors:
@@ -2385,11 +2374,10 @@ class ConversationManager:
 
             # If no department match, try to match doctor name
             response = (
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("*")
                 .eq("clinic_id", clinic["id"])
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             all_doctors = response.data or []
             matched_doc = None
@@ -3267,7 +3255,7 @@ class ConversationManager:
                 query = supabase.table("appointments").update({"status": "cancelled"}).eq("id", booking_id)
                 if clinic and clinic.get("id"):
                     query = query.eq("clinic_id", clinic["id"])
-                query.eq("status", "pending_payment").execute()
+                await sb(query.eq("status", "pending_payment"))
 
             cancel_msg = {
                 "en": "Booking cancelled. The slot has been released.",
@@ -3288,7 +3276,7 @@ class ConversationManager:
                 query = supabase.table("appointments").select("status, booking_ref").eq("id", booking_id)
                 if clinic and clinic.get("id"):
                     query = query.eq("clinic_id", clinic["id"])
-                result = query.execute()
+                result = await sb(query)
                 if result.data:
                     status = result.data[0]["status"]
                     if status == "confirmed":
@@ -3577,12 +3565,11 @@ class ConversationManager:
         from app.database import supabase
 
         response = (
-            supabase.table("doctors")
+            await sb(supabase.table("doctors")
             .select("*")
             .eq("clinic_id", clinic["id"])
             .eq("is_active", True)
-            .order("department")
-            .execute()
+            .order("department"))
         )
         doctors = response.data or []
 
@@ -3601,10 +3588,9 @@ class ConversationManager:
         # Fetch branch assignments for all doctors
         doctor_ids = [d["id"] for d in doctors]
         branch_result = (
-            supabase.table("doctor_branches")
+            await sb(supabase.table("doctor_branches")
             .select("doctor_id, branch_id, session, branches(name, short_name)")
-            .in_("doctor_id", doctor_ids)
-            .execute()
+            .in_("doctor_id", doctor_ids))
         )
 
         doc_branches = {}

@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.database import supabase
 from app.config import settings
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,9 @@ class DataRetentionService:
 
         try:
             result = (
-                supabase.table("conversations")
+                await sb(supabase.table("conversations")
                 .delete()
-                .lt("updated_at", cutoff)
-                .execute()
+                .lt("updated_at", cutoff))
             )
             count = len(result.data) if result.data else 0
             if count > 0:
@@ -85,10 +85,9 @@ class DataRetentionService:
 
         try:
             result = (
-                supabase.table("analytics_events")
+                await sb(supabase.table("analytics_events")
                 .delete()
-                .lt("created_at", cutoff)
-                .execute()
+                .lt("created_at", cutoff))
             )
             count = len(result.data) if result.data else 0
             if count > 0:
@@ -99,6 +98,45 @@ class DataRetentionService:
             return count
         except Exception as e:
             logger.error(f"Analytics purge error: {e}")
+            return 0
+
+    async def purge_inbound_messages(self, days: int = 30) -> int:
+        """Purge completed inbound_messages older than `days` (KA-P2-10).
+
+        inbound_messages grows one row per patient message, forever. There was
+        no purge job for it at all — at 10k messages/day that is ~3.6M rows a
+        year on the hot deduplication path, holding a raw phone number each.
+
+        Only 'completed' rows are removed. Anything in received / processing /
+        failed_retryable / dead_letter is still live work or an operator's
+        triage queue.
+
+        30 days is deliberately generous: it must exceed both Meta's webhook
+        retry window and the 30-minute DLQ give-up window, or purging would
+        reopen the duplicate-delivery hole that message_id closes.
+
+        Returns:
+            Number of inbound queue records purged.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        try:
+            result = (
+                # unscoped: platform_sweep
+                await sb(supabase.table("inbound_messages")
+                .delete()
+                .eq("status", "completed")
+                .lt("completed_at", cutoff))
+            )
+            count = len(result.data) if result.data else 0
+            if count > 0:
+                logger.info(
+                    f"Data retention: purged {count} completed inbound_messages "
+                    f"(older than {days} days)"
+                )
+            return count
+        except Exception as e:
+            logger.error(f"Inbound messages purge error: {e}")
             return 0
 
     async def purge_failed_messages_dlq(self, days: int = 30) -> int:
@@ -113,10 +151,9 @@ class DataRetentionService:
 
         try:
             result = (
-                supabase.table("failed_messages")
+                await sb(supabase.table("failed_messages")
                 .delete()
-                .lt("created_at", cutoff)
-                .execute()
+                .lt("created_at", cutoff))
             )
             count = len(result.data) if result.data else 0
             if count > 0:
@@ -159,11 +196,10 @@ class DataRetentionService:
         # Get patient record first
         try:
             patient_res = (
-                supabase.table("patients")
+                await sb(supabase.table("patients")
                 .select("id, name")
                 .eq("clinic_id", clinic_id)
-                .eq("phone", phone)
-                .execute()
+                .eq("phone", phone))
             )
             patient = patient_res.data[0] if patient_res.data else None
         except Exception as e:
@@ -180,7 +216,7 @@ class DataRetentionService:
         # 1. Anonymize appointments — preserve department, doctor, date, status
         try:
             appt_res = (
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .update(
                     {
                         "patient_name": "[REDACTED]",
@@ -190,8 +226,7 @@ class DataRetentionService:
                     }
                 )
                 .eq("clinic_id", clinic_id)
-                .eq("patient_phone", phone)
-                .execute()
+                .eq("patient_phone", phone))
             )
             results["appointments_anonymized"] = len(appt_res.data or [])
         except Exception as e:
@@ -202,11 +237,10 @@ class DataRetentionService:
         try:
             # Fetch lab report file_path(s) before redacting DB row
             reports_res = (
-                supabase.table("lab_reports")
+                await sb(supabase.table("lab_reports")
                 .select("id, file_path")
                 .eq("clinic_id", clinic_id)
-                .eq("patient_phone", phone)
-                .execute()
+                .eq("patient_phone", phone))
             )
             file_paths_to_delete = [
                 r["file_path"]
@@ -229,7 +263,7 @@ class DataRetentionService:
 
             # Update database row (use correct column name: file_path)
             lr_res = (
-                supabase.table("lab_reports")
+                await sb(supabase.table("lab_reports")
                 .update(
                     {
                         "patient_name": "[REDACTED]",
@@ -238,8 +272,7 @@ class DataRetentionService:
                     }
                 )
                 .eq("clinic_id", clinic_id)
-                .eq("patient_phone", phone)
-                .execute()
+                .eq("patient_phone", phone))
             )
             results["lab_reports_anonymized"] = len(lr_res.data or [])
         except Exception as e:
@@ -249,7 +282,7 @@ class DataRetentionService:
         # 3. Anonymize prescriptions — preserve medicine class, frequency (not name)
         try:
             rx_res = (
-                supabase.table("prescriptions")
+                await sb(supabase.table("prescriptions")
                 .update(
                     {
                         "patient_name": "[REDACTED]",
@@ -258,8 +291,7 @@ class DataRetentionService:
                     }
                 )
                 .eq("clinic_id", clinic_id)
-                .eq("patient_phone", phone)
-                .execute()
+                .eq("patient_phone", phone))
             )
             results["prescriptions_anonymized"] = len(rx_res.data or [])
         except Exception as e:
@@ -268,31 +300,57 @@ class DataRetentionService:
 
         # 4. Anonymize family members linked to patient
         try:
-            supabase.table("family_members").update(
+            await sb(supabase.table("family_members").update(
                 {
                     "name": "[REDACTED]",
                     "relationship": "[REDACTED]",
                 }
-            ).eq("clinic_id", clinic_id).eq("primary_patient_phone", phone).execute()
+            ).eq("clinic_id", clinic_id).eq("primary_patient_phone", phone))
         except Exception as e:
             logger.debug(f"Family members anonymization note: {e}")
 
         # 5. Mark the patient row itself as anonymized (but keep the shell for FK integrity)
         try:
-            supabase.table("patients").update(
+            await sb(supabase.table("patients").update(
                 {
                     "name": "[REDACTED]",
                     "opted_in": False,
                     "data_consent": False,
                 }
-            ).eq("clinic_id", clinic_id).eq("phone", phone).execute()
+            ).eq("clinic_id", clinic_id).eq("phone", phone))
         except Exception as e:
             logger.error(f"Patient anonymization error: {e}")
             results["errors"].append(f"patient_row: {e}")
 
+        # 5b. Pseudonymize the durable inbound queue (KA-P2-10).
+        #
+        # inbound_messages stores `phone` as a NOT NULL column plus the full
+        # webhook body as JSONB. It was not touched by erasure and has no purge
+        # job, so after a patient exercised deletion their phone number and the
+        # body of every message they ever sent remained indefinitely.
+        #
+        # Pseudonymize rather than DELETE: message_id carries a UNIQUE
+        # constraint and is the anti-duplicate claim for Meta redelivery.
+        # Removing the row would let an old wamid be reprocessed as new. The
+        # row is kept as a tombstone; the identifying content is not.
+        #
+        # processed_messages is deliberately NOT touched — it holds only
+        # (message_id, clinic_id) and carries no patient identifier.
+        try:
+            inbound_res = (
+                await sb(supabase.table("inbound_messages")
+                .update({"phone": "[REDACTED]", "payload": {}})
+                .eq("clinic_id", clinic_id)
+                .eq("phone", phone))
+            )
+            results["inbound_messages_pseudonymized"] = len(inbound_res.data or [])
+        except Exception as e:
+            logger.error(f"Inbound queue pseudonymization error: {e}")
+            results["errors"].append(f"inbound_messages: {e}")
+
         # 6. Record DPDP compliance audit log
         try:
-            supabase.table("admin_audit_logs").insert(
+            await sb(supabase.table("admin_audit_logs").insert(
                 {
                     "clinic_id": clinic_id,
                     "user_id": "dpdp_erasure",
@@ -308,7 +366,7 @@ class DataRetentionService:
                     },
                     "ip_address": "system",
                 }
-            ).execute()
+            ))
         except Exception as audit_err:
             logger.debug(f"Audit log write note: {audit_err}")
 
@@ -325,11 +383,10 @@ class DataRetentionService:
         """
         try:
             appt_res = (
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .select("id, appointment_date, status")
                 .eq("clinic_id", clinic_id)
-                .eq("patient_phone", phone)
-                .execute()
+                .eq("patient_phone", phone))
             )
             appointments = appt_res.data or []
 

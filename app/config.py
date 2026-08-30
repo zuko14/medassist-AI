@@ -66,6 +66,54 @@ class Settings(BaseSettings):
     # observation period from the 2026-08-27 remediation is concluded.
     queue_fail_closed_enforce: bool = True
 
+    # How many application processes serve this deployment.
+    # render.yaml sets numInstances: 2 and the Dockerfile CMD uses
+    # --workers ${WEB_CONCURRENCY:-2}, so the default is 2 x 2 = 4.
+    # Used only to make per-process alerts self-describing, so an operator
+    # reading one alert knows how many other processes to check
+    # (app/services/scheduler.py:alert_message_queue_fail_closed).
+    expected_process_count: int = 4
+
+    # Worker threads available to app.database.sb() for off-loop PostgREST
+    # execution (T5.1 / KA-P1-03). This is the per-process concurrency ceiling
+    # for database work: 40 is AnyIO's default, raised here because every query
+    # now takes a token.
+    #
+    # Do NOT raise this above the connection budget Supabase/PostgREST will
+    # accept for this deployment — that only moves the queue from the limiter
+    # to the connection pool, turning a bounded wait into a timeout.
+    db_thread_pool_size: int = 64
+
+    # Hard ceiling on a single PostgREST/storage call, in seconds.
+    # sb() runs queries on a bounded worker pool, so a call that never returns
+    # permanently retires a worker thread. Without this, a degraded Supabase
+    # does not slow the service — it consumes the pool one thread at a time
+    # until nothing can run, and presents as a hang rather than an error.
+    # 5s — deliberately postgrest-py's own default, so making the timeout
+    # explicit never makes any call slower than it was before it was set. The
+    # value of stating it is that it now also covers the storage client and is
+    # tunable per deployment; raising it above the library default would just
+    # hold a worker thread out of the pool for longer on a call that is not
+    # going to answer usefully anyway. Well under Meta's 20s webhook budget.
+    db_query_timeout_seconds: int = 5
+
+    # Whether THIS process runs connector polling (Playwright/Chromium).
+    #
+    # KA-P2-20: polling was folded into the web service, so a headless Chromium
+    # launches inside the container that must acknowledge Meta webhooks within
+    # 20s. Chromium's memory profile is spiky; an OOM kill takes the web process
+    # down and every in-flight BackgroundTask with it.
+    #
+    # Default True preserves existing behaviour exactly — a deployment that has
+    # not provisioned the dedicated worker keeps polling rather than silently
+    # stopping. render.yaml sets this to false on the web services and runs
+    # `python -m connectors.runner --all` in its own worker instead.
+    #
+    # Safe either way: run_connector() takes a per-connector CAS advisory lock
+    # with a 5-minute lease (connectors/runner.py), so a worker and a stale web
+    # tick cannot poll the same connector concurrently.
+    run_connectors_in_web: bool = True
+
 
     # ABDM / ABHA Integration (optional — leave empty to skip live verification)
     abdm_client_id: str = ""

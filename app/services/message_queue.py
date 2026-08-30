@@ -28,6 +28,7 @@ Meta Webhook Timeout Protection:
 import asyncio
 import logging
 from typing import Optional
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ class MessageQueueManager:
             record["clinic_id"] = clinic_id
 
         try:
-            result = supabase.table("inbound_messages").insert(record).execute()
+            result = await sb(supabase.table("inbound_messages").insert(record))
             if result.data:
                 logger.info(f"Durable queue: ingested new message {message_id}")
                 # NOTE: do NOT write processed_messages here. acquire() claims a message
@@ -147,11 +148,10 @@ class MessageQueueManager:
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
             res = (
-                supabase.table("inbound_messages")
+                await sb(supabase.table("inbound_messages")
                 .update({"status": "processing", "locked_at": now_iso, "updated_at": now_iso})
                 .eq("message_id", message_id)
-                .in_("status", ["received", "failed_retryable"])
-                .execute()
+                .in_("status", ["received", "failed_retryable"]))
             )
             return bool(res.data)
         except Exception as e:
@@ -175,10 +175,9 @@ class MessageQueueManager:
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
             res = (
-                supabase.table("inbound_messages")
+                await sb(supabase.table("inbound_messages")
                 .update({"status": "completed", "completed_at": now_iso, "updated_at": now_iso})
-                .eq("message_id", message_id)
-                .execute()
+                .eq("message_id", message_id))
             )
             logger.info(f"Durable queue: marked message {message_id} completed")
             return bool(res.data)
@@ -195,10 +194,9 @@ class MessageQueueManager:
 
         try:
             row_res = (
-                supabase.table("inbound_messages")
+                await sb(supabase.table("inbound_messages")
                 .select("attempt_count, phone, display_phone, payload, clinic_id")
-                .eq("message_id", message_id)
-                .execute()
+                .eq("message_id", message_id))
             )
             attempts = 1
             phone = "unknown"
@@ -221,7 +219,7 @@ class MessageQueueManager:
             if attempts < max_retries:
                 # Bounded exponential backoff: 5s, 10s, 20s
                 retry_at = (now + timedelta(seconds=5 * attempts)).isoformat()
-                supabase.table("inbound_messages").update(
+                await sb(supabase.table("inbound_messages").update(
                     {
                         "status": "failed_retryable",
                         "attempt_count": attempts,
@@ -229,7 +227,7 @@ class MessageQueueManager:
                         "last_error": str(error)[:500],
                         "updated_at": now.isoformat(),
                     }
-                ).eq("message_id", message_id).execute()
+                ).eq("message_id", message_id))
                 logger.warning(
                     f"Durable queue: message {message_id} attempt {attempts} failed, "
                     f"scheduled retry at {retry_at}"
@@ -237,7 +235,7 @@ class MessageQueueManager:
                 # Write to failed_messages on failure
                 try:
                     import json
-                    supabase.table("failed_messages").insert(
+                    await sb(supabase.table("failed_messages").insert(
                         {
                             "phone": phone,
                             "display_phone": display_phone,
@@ -245,26 +243,26 @@ class MessageQueueManager:
                             "error": str(error)[:500],
                             "status": "retryable",
                         }
-                    ).execute()
+                    ))
                 except Exception as dlq_err:
                     logger.error(
                         f"DLQ_WRITE_FAILED message_id={message_id}: failed to record failed_messages on retryable error: {dlq_err}"
                     )
                 return "failed_retryable"
             else:
-                supabase.table("inbound_messages").update(
+                await sb(supabase.table("inbound_messages").update(
                     {
                         "status": "dead_letter",
                         "attempt_count": attempts,
                         "last_error": str(error)[:500],
                         "updated_at": now.isoformat(),
                     }
-                ).eq("message_id", message_id).execute()
+                ).eq("message_id", message_id))
 
                 # Also insert into dead-letter queue table for operator dashboard
                 try:
                     import json
-                    supabase.table("failed_messages").insert(
+                    await sb(supabase.table("failed_messages").insert(
                         {
                             "phone": phone,
                             "display_phone": display_phone,
@@ -272,7 +270,7 @@ class MessageQueueManager:
                             "error": str(error)[:500],
                             "status": "dead_letter",
                         }
-                    ).execute()
+                    ))
                 except Exception as dlq_e:
                     logger.error(f"DLQ secondary write error: {dlq_e}")
 
@@ -301,14 +299,14 @@ class MessageQueueManager:
             )
             if clinic_id:
                 query = query.eq("clinic_id", clinic_id)
-            res = query.execute()
+            res = await sb(query)
 
             if not res.data:
                 logger.warning(f"Replay rejected: message {message_id} not found or unauthorized")
                 return False
 
             now_iso = datetime.now(timezone.utc).isoformat()
-            supabase.table("inbound_messages").update(
+            await sb(supabase.table("inbound_messages").update(
                 {
                     "status": "received",
                     "attempt_count": 0,
@@ -316,7 +314,7 @@ class MessageQueueManager:
                     "last_error": None,
                     "updated_at": now_iso,
                 }
-            ).eq("message_id", message_id).execute()
+            ).eq("message_id", message_id))
 
             logger.info(f"Durable queue: replaying dead letter message {message_id}")
             return True
@@ -336,25 +334,23 @@ class MessageQueueManager:
         try:
             cutoff = (datetime.now(timezone.utc) - timedelta(seconds=lease_timeout_seconds)).isoformat()
             res = (
-                supabase.table("inbound_messages")
+                await sb(supabase.table("inbound_messages")
                 .select("id, message_id, attempt_count")
                 .eq("status", "processing")
-                .lte("updated_at", cutoff)
-                .execute()
+                .lte("updated_at", cutoff))
             )
             stale_rows = res.data or []
             recovered = 0
             for row in stale_rows:
                 now_iso = datetime.now(timezone.utc).isoformat()
                 up_res = (
-                    supabase.table("inbound_messages")
+                    await sb(supabase.table("inbound_messages")
                     .update({
                         "status": "received",
                         "last_error": "Lease recovered after worker timeout",
                         "updated_at": now_iso,
                     })
-                    .eq("id", row["id"])
-                    .execute()
+                    .eq("id", row["id"]))
                 )
                 if up_res.data:
                     recovered += 1
@@ -403,7 +399,7 @@ class MessageQueueManager:
         for attempt in range(2):
             try:
                 # Atomic INSERT ON CONFLICT DO NOTHING
-                result = supabase.table("processed_messages").insert(payload).execute()
+                result = await sb(supabase.table("processed_messages").insert(payload))
 
                 # If insert succeeded, result.data will have the new row
                 if result.data:
@@ -425,9 +421,8 @@ class MessageQueueManager:
                 if clinic_id:
                     try:
                         result = (
-                            supabase.table("processed_messages")
-                            .insert({"message_id": message_id})
-                            .execute()
+                            await sb(supabase.table("processed_messages")
+                            .insert({"message_id": message_id}))
                         )
                         if result.data:
                             logger.warning(
@@ -465,7 +460,7 @@ class MessageQueueManager:
         from app.database import supabase
 
         try:
-            supabase.table("processed_messages").delete().eq("message_id", message_id).execute()
+            await sb(supabase.table("processed_messages").delete().eq("message_id", message_id))
             logger.info(f"Message queue: released claim for message_id={message_id}")
         except Exception as e:
             logger.warning(f"Message queue: failed to delete processed_messages row for {message_id}: {e}")
@@ -492,12 +487,11 @@ class MessageQueueManager:
 
         try:
             stale = (
-                supabase.table("inbound_messages")
+                await sb(supabase.table("inbound_messages")
                 .select("message_id, attempt_count")
                 .eq("status", "processing")
                 .lt("locked_at", cutoff)
-                .limit(limit)
-                .execute()
+                .limit(limit))
             )
         except Exception as e:
             logger.error(f"Reaper: failed to query abandoned claims: {e}")
@@ -516,14 +510,14 @@ class MessageQueueManager:
                 #    predicate is a CAS: if another process reaped this row
                 #    first, the update matches nothing and no double-handling
                 #    occurs.
-                supabase.table("inbound_messages").update(
+                await sb(supabase.table("inbound_messages").update(
                     {
                         "status": "failed_retryable",
                         "retry_at": now_iso,
                         "last_error": "abandoned: worker died mid-processing",
                         "updated_at": now_iso,
                     }
-                ).eq("message_id", mid).eq("status", "processing").execute()
+                ).eq("message_id", mid).eq("status", "processing"))
 
                 reaped += 1
                 logger.warning(f"Reaper: released abandoned claim for {mid}")
@@ -551,10 +545,9 @@ class MessageQueueManager:
 
         try:
             result = (
-                supabase.table("processed_messages")
+                await sb(supabase.table("processed_messages")
                 .select("id")
-                .eq("message_id", message_id)
-                .execute()
+                .eq("message_id", message_id))
             )
             return bool(result.data)
         except Exception as e:

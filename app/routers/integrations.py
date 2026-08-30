@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.database import supabase, scoped_query
 from app.services.lab_reports import LabReportService
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +87,11 @@ async def receive_lab_report(
     try:
         existing = (
             # unscoped: checking connector idempotency by external_report_id with clinic scope
-            supabase.table("integration_processed_reports")
+            await sb(supabase.table("integration_processed_reports")
             .select("id")
             .eq("clinic_id", clinic_id)
             .eq("connector_type", connector_type)
-            .eq("external_report_id", external_report_id)
-            .execute()
+            .eq("external_report_id", external_report_id))
         )
 
         if existing.data:
@@ -107,11 +107,10 @@ async def receive_lab_report(
 
         existing_lr = (
             # unscoped: cross-path duplicate check for existing delivered lab report with clinic scope
-            supabase.table("lab_reports")
+            await sb(supabase.table("lab_reports")
             .select("id, status, source")
             .eq("clinic_id", clinic_id)
-            .eq("external_report_id", external_report_id)
-            .execute()
+            .eq("external_report_id", external_report_id))
         )
         if existing_lr.data:
             lr_row = existing_lr.data[0]
@@ -176,7 +175,7 @@ async def receive_lab_report(
         )
         try:
             # unscoped: recording held lab_report in needs_review state with explicit clinic_id
-            nr_insert = supabase.table("lab_reports").insert({
+            nr_insert = await sb(supabase.table("lab_reports").insert({
                 "clinic_id": clinic_id,
                 "patient_phone": patient_phone,
                 "patient_name": patient_name,
@@ -187,7 +186,7 @@ async def receive_lab_report(
                 "external_report_id": external_report_id,
                 "match_source": effective_match_source,
                 "error_message": match_res.review_reason,
-            }).execute()
+            }))
             raw_id = nr_insert.data[0].get("id") if (nr_insert.data and isinstance(nr_insert.data, list) and isinstance(nr_insert.data[0], dict)) else None
             nr_id = str(raw_id) if isinstance(raw_id, (str, int)) else None
         except Exception as e_nr:
@@ -242,7 +241,7 @@ async def receive_lab_report(
     lab_report_id = saved_record.get("id")
     try:
         # unscoped: recording processed report in idempotency tracking log with explicit clinic_id
-        supabase.table("integration_processed_reports").insert(
+        await sb(supabase.table("integration_processed_reports").insert(
             {
                 "clinic_id": clinic_id,
                 "connector_type": connector_type,
@@ -252,7 +251,7 @@ async def receive_lab_report(
                 "report_name": report_name,
                 "lab_report_id": lab_report_id,
             }
-        ).execute()
+        ))
     except Exception as e:
         # Don't fail the whole request — the report is already sent
         logger.error(f"Failed to record processed report: {e}")

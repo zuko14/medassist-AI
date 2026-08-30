@@ -23,5 +23,8 @@ CREATE INDEX IF NOT EXISTS idx_lab_reports_summary_not_sent
     WHERE ai_summary_sent = FALSE;
 
 -- ── Record migration ──
-INSERT INTO schema_migrations (name) VALUES ('062_lab_report_summary_delivery.sql') ON CONFLICT (name) DO NOTHING;
+-- NOTE: schema_migrations is written by scripts/migrate.py:124 with the
+-- file's SHA256. checksum is NOT NULL (scripts/migrate.py:60), so a
+-- self-INSERT here omits it and aborts the migration on any fresh
+-- database. Migrations must not record themselves.
 

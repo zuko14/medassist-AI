@@ -429,6 +429,31 @@ class TestOrphanWebhookEventPersistence:
 class TestBookingCreation:
     """Test booking creation with payment gating."""
 
+    @pytest.fixture(autouse=True)
+    def _resolved_doctor(self):
+        """Give these tests a resolvable doctor.
+
+        create_booking_with_payment() now refuses to insert a consultation
+        without a doctor_id, because migration 064 keys the slot uniqueness
+        index on doctor_id and a NULL there is an unguarded slot (KA-P0-01).
+        These tests exercise payment-link generation and slot-conflict
+        handling, not doctor lookup — previously they reached the INSERT with
+        doctor_id=None (an unresolvable network call), which is exactly the
+        row shape the fix forbids. Doctor resolution itself is covered by
+        test_forensic_hardening_suite.py::test_payment_booking_resolves_and_persists_doctor_id.
+        """
+        with patch(
+            "app.database.get_doctor_by_name",
+            new_callable=AsyncMock,
+            return_value={
+                "id": "33333333-4444-5555-6666-777777777777",
+                "name": "Dr. Test",
+                "department": "General Medicine",
+                "consultation_fee": 500,
+            },
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_slot_taken_returns_failure(self):
         """If the unique constraint rejects the insert, return slot_taken."""
@@ -591,6 +616,25 @@ class TestBookingCreation:
 
 class TestPaymentLinkGeneration:
     """Regression tests for the broken checkout-URL fix (Finding #5)."""
+
+    @pytest.fixture(autouse=True)
+    def _resolved_doctor(self):
+        """See TestBookingCreation._resolved_doctor — same precondition.
+
+        A consultation booking now requires a resolved doctor_id before the
+        INSERT (KA-P0-01 / migration 064).
+        """
+        with patch(
+            "app.database.get_doctor_by_name",
+            new_callable=AsyncMock,
+            return_value={
+                "id": "33333333-4444-5555-6666-777777777777",
+                "name": "Dr. Test",
+                "department": "General Medicine",
+                "consultation_fee": 500,
+            },
+        ):
+            yield
 
     @pytest.mark.asyncio
     async def test_create_payment_link_returns_hosted_short_url(self):

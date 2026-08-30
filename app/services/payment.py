@@ -20,6 +20,7 @@ MULTI-TENANT RAZORPAY:
   transparent fallback — so single-clinic deployments need zero changes.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -37,6 +38,7 @@ import httpx
 from app.config import settings
 from app.database import supabase
 from app.utils.helpers import format_slot_time
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +164,20 @@ class PaymentService:
             except Exception as doc_err:
                 logger.warning(f"Could not resolve doctor_id for {doctor_name}: {doc_err}")
 
+        # A consultation with no resolvable doctor_id must NOT be written.
+        # Migration 064 keys uq_appointment_active_slot on doctor_id directly
+        # (branch_id removed, COALESCE sentinel removed), so a NULL doctor_id
+        # is an unguarded slot that any number of patients could book.
+        # Mirrors the identical guard in app/database.py:book_appointment()
+        # so both writers into `appointments` behave the same (KA-P0-01).
+        if booking_type != "lab_test" and not doctor_id:
+            logger.error(
+                f"Refusing consultation booking with unresolved doctor: "
+                f"clinic={clinic_id} doctor_name={doctor_name!r} — "
+                f"the slot uniqueness index cannot guard a NULL doctor_id"
+            )
+            return {"success": False, "reason": "doctor_unavailable"}
+
         # Generate booking ref
         from app.utils.helpers import (
             generate_booking_reference,
@@ -211,7 +227,7 @@ class PaymentService:
             )
             booking_data["booking_ref"] = booking_ref
             try:
-                result = supabase.table("appointments").insert(booking_data).execute()
+                result = await sb(supabase.table("appointments").insert(booking_data))
                 if result.data:
                     booking = result.data[0]
                     booking_id = booking["id"]
@@ -253,9 +269,9 @@ class PaymentService:
             payment_link_id = link["id"]
             payment_link = link["short_url"]
 
-            supabase.table("appointments").update(
+            await sb(supabase.table("appointments").update(
                 {"razorpay_payment_link_id": payment_link_id}
-            ).eq("id", booking_id).execute()
+            ).eq("id", booking_id))
 
             self._log_payment_event(
                 booking_id,
@@ -280,9 +296,9 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Razorpay payment link creation failed: {e}")
             try:
-                supabase.table("appointments").update({"status": "cancelled"}).eq(
+                await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
                     "id", booking_id
-                ).execute()
+                ))
                 self._log_payment_event(
                     booking_id, "payment_link_creation_failed", {"error": str(e)[:500]}
                 )
@@ -369,7 +385,10 @@ class PaymentService:
             should_alert = True
             if alert_limiter is not None:
                 key = alert_key or "global"
-                should_alert = not alert_limiter.check_and_record(key)
+                # T5.1: synchronous limiter, hits the rate_limits table.
+                should_alert = not await asyncio.to_thread(
+                    alert_limiter.check_and_record, key
+                )
             if should_alert:
                 await self._alert_admin(
                     "🚨 Payment webhook signature verification FAILED. Possible spoofing attempt."
@@ -430,6 +449,58 @@ class PaymentService:
         # ── Step 4: Idempotency check (scoped) ──
         use_clinic_scope = clinic_id if (clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", "")) else None
 
+        # KA-P2-08: when the webhook arrives on the unsuffixed endpoint
+        # (POST /webhooks/razorpay, no {clinic_id}), use_clinic_scope is None
+        # and every booking lookup below runs WITHOUT a clinic predicate —
+        # the exact scoping that KRIYA-005 added to the per-clinic route.
+        # Because get_razorpay_creds() falls back to the global secret when a
+        # clinic has none configured, any clinic sharing that fallback could
+        # reach another tenant's booking via notes.booking_id or a guessed
+        # booking_ref.
+        #
+        # Mirrors resolve_tenant()'s "refuse to guess the tenant" rule
+        # (app/services/tenant.py:186-192). Single-tenant deployments are
+        # unaffected: the guard only fires when >1 active clinic exists.
+        if use_clinic_scope is None:
+            try:
+                active = (
+                    await sb(supabase.table("clinics")
+                    .select("id")
+                    .eq("is_active", True)
+                    .neq("status", "DELETED")
+                    .limit(2))
+                )
+                if active.data and len(active.data) > 1:
+                    logger.error(
+                        "UNSCOPED_WEBHOOK_REFUSED: payment webhook arrived on the "
+                        "unsuffixed /webhooks/razorpay endpoint in a multi-tenant "
+                        "deployment. Refusing to match a booking without a clinic "
+                        "predicate. Configure the per-clinic endpoint "
+                        "/webhooks/razorpay/{clinic_id} in the Razorpay dashboard."
+                    )
+                    await self._alert_admin(
+                        "Payment webhook refused: it was delivered to the shared "
+                        "/webhooks/razorpay endpoint, but this deployment serves "
+                        "multiple clinics. Set the per-clinic webhook URL in "
+                        "Razorpay. The payment was NOT applied to any booking."
+                    )
+                    return {
+                        "status": "refused",
+                        "code": 200,
+                        "reason": "unscoped_webhook_multi_tenant",
+                    }
+            except Exception as scope_err:
+                # Fail closed on the security check itself.
+                logger.error(
+                    f"UNSCOPED_WEBHOOK_CHECK_FAILED: could not determine tenant "
+                    f"count: {scope_err} — refusing unscoped webhook"
+                )
+                return {
+                    "status": "refused",
+                    "code": 200,
+                    "reason": "unscoped_webhook_check_failed",
+                }
+
         try:
             idemp_query = (
                 supabase.table("appointments")
@@ -439,15 +510,14 @@ class PaymentService:
             )
             if use_clinic_scope:
                 idemp_query = idemp_query.eq("clinic_id", use_clinic_scope)
-            existing_confirmed = idemp_query.execute()
+            existing_confirmed = await sb(idemp_query)
         except Exception as idemp_err:
             logger.warning(f"Scoped idempotency check failed ({idemp_err}) — retrying global check")
             existing_confirmed = (
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .select("id")
                 .eq("payment_id", payment_id)
-                .eq("status", "confirmed")
-                .execute()
+                .eq("status", "confirmed"))
             )
 
         if existing_confirmed.data:
@@ -471,9 +541,8 @@ class PaymentService:
         if payment_link_id:
             try:
                 booking_result = (
-                    _build_booking_query()
-                    .eq("razorpay_payment_link_id", payment_link_id)
-                    .execute()
+                    await sb(_build_booking_query()
+                    .eq("razorpay_payment_link_id", payment_link_id))
                 )
             except Exception as e:
                 logger.warning(f"Lookup by payment_link_id failed: {e}")
@@ -483,9 +552,8 @@ class PaymentService:
             if booking_id_from_notes:
                 try:
                     booking_result = (
-                        _build_booking_query()
-                        .eq("id", booking_id_from_notes)
-                        .execute()
+                        await sb(_build_booking_query()
+                        .eq("id", booking_id_from_notes))
                     )
                 except Exception as e:
                     logger.warning(f"Lookup by booking_id failed: {e}")
@@ -503,9 +571,8 @@ class PaymentService:
             if booking_ref:
                 try:
                     booking_result = (
-                        _build_booking_query()
-                        .eq("booking_ref", booking_ref)
-                        .execute()
+                        await sb(_build_booking_query()
+                        .eq("booking_ref", booking_ref))
                     )
                 except Exception as e:
                     logger.warning(f"Lookup by booking_ref failed: {e}")
@@ -595,13 +662,59 @@ class PaymentService:
                 clinic_id=use_clinic_scope,
                 provider_event_id=rz_event_id,
             )
-            # Route to pending_review — NEVER auto-confirm on mismatch
-            supabase.table("appointments").update(
-                {
-                    "status": "pending_review",
-                    "payment_id": payment_id,
-                }
-            ).eq("id", booking_id).execute()
+            # Route to pending_review — NEVER auto-confirm on mismatch.
+            #
+            # KA-P2-07: this was the one status write in this file without a
+            # CAS predicate. The step-4 idempotency check only suppresses a
+            # REPEAT of the same payment_id, so a second, different payment
+            # against an already-confirmed booking reached here and demoted a
+            # confirmed appointment to pending_review while overwriting
+            # payment_id — orphaning the payment that actually confirmed it.
+            mismatch_from_status = booking.get("status")
+            protected_states = ("confirmed", "completed", "refunded", "cancelled")
+            if mismatch_from_status in protected_states:
+                logger.error(
+                    f"MISMATCH_ON_SETTLED_BOOKING booking={booking_id} "
+                    f"status={mismatch_from_status} payment_id={payment_id} "
+                    f"expected={expected_amount} received={amount_paid} — refusing "
+                    f"to overwrite a settled booking; manual reconciliation required"
+                )
+                await self._alert_admin(
+                    f"Payment AMOUNT MISMATCH on an already-{mismatch_from_status} booking "
+                    f"{booking.get('booking_ref', booking_id)}\n"
+                    f"Expected: Rs.{expected_amount / 100:.2f}\n"
+                    f"Received: Rs.{amount_paid / 100:.2f}\n"
+                    f"Payment ID: {payment_id}\n"
+                    f"The booking was NOT modified. This payment is unmatched and "
+                    f"likely needs a refund."
+                )
+                return {"status": "ok", "code": 200, "reason": "mismatch_on_settled_booking"}
+
+            mismatch_update = (
+                await sb(supabase.table("appointments")
+                .update(
+                    {
+                        "status": "pending_review",
+                        "payment_id": payment_id,
+                    }
+                )
+                .eq("id", booking_id)
+                .eq("status", mismatch_from_status))
+            )
+            if not mismatch_update.data:
+                # A concurrent process moved this booking between our read and
+                # this write. Do not retry — a human must look at it.
+                logger.error(
+                    f"MISMATCH_CAS_LOST booking={booking_id} "
+                    f"expected_status={mismatch_from_status} payment_id={payment_id} "
+                    f"— booking changed concurrently, not modified"
+                )
+                await self._alert_admin(
+                    f"Payment amount mismatch could not be recorded for booking "
+                    f"{booking.get('booking_ref', booking_id)} — its status changed "
+                    f"concurrently. Payment ID: {payment_id}. Needs manual review."
+                )
+                return {"status": "ok", "code": 200, "reason": "mismatch_cas_lost"}
 
             await self._alert_admin(
                 f"🚨 Payment AMOUNT MISMATCH for booking {booking.get('booking_ref', booking_id)}\n"
@@ -645,13 +758,13 @@ class PaymentService:
                 reason="Payment received after slot hold expired",
                 clinic=clinic,
             )
-            supabase.table("appointments").update({
+            await sb(supabase.table("appointments").update({
                 "status": "refunded",
                 "refund_reason": "late_payment",
                 "payment_id": payment_id,
                 "refund_id": refund.get("refund_id"),
                 "refunded_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", booking_id).eq("status", "expired").execute()
+            }).eq("id", booking_id).eq("status", "expired"))
 
             await self._notify_late_payment_refunded(booking, refund)
             await self._alert_admin(
@@ -704,17 +817,17 @@ class PaymentService:
                 provider_event_id=rz_event_id,
             )
             # Use CAS: only update if status hasn't changed since we read it
-            supabase.table("appointments").update(
+            await sb(supabase.table("appointments").update(
                 {
                     "status": "pending_review",
                     "payment_id": payment_id,
                 }
-            ).eq("id", booking_id).eq("status", current_status).execute()
+            ).eq("id", booking_id).eq("status", current_status))
             return {"status": "ok", "code": 200, "reason": "unexpected_state"}
 
         # ── Step 8: CONFIRM the booking (Atomic Update) ──
         update_result = (
-            supabase.table("appointments")
+            await sb(supabase.table("appointments")
             .update(
                 {
                     "status": "confirmed",
@@ -722,8 +835,7 @@ class PaymentService:
                 }
             )
             .eq("id", booking_id)
-            .eq("status", "pending_payment")
-            .execute()
+            .eq("status", "pending_payment"))
         )
 
         if not update_result.data:
@@ -785,12 +897,11 @@ class PaymentService:
         now = datetime.now(timezone.utc).isoformat()
 
         stale = (
-            supabase.table("appointments")
+            await sb(supabase.table("appointments")
             .select("id, clinic_id, booking_ref, patient_phone, hold_expires_at, razorpay_payment_link_id, amount_paise, doctor_name, department, appointment_date, appointment_time")
             .eq("status", "pending_payment")
             .lt("hold_expires_at", now)
-            .limit(200)
-            .execute()
+            .limit(200))
         )
 
         if not stale.data:
@@ -834,7 +945,7 @@ class PaymentService:
                         payment_id = link_status["payment_id"] or f"recovery_{payment_link_id}"
 
                         recovery_update = (
-                            supabase.table("appointments")
+                            await sb(supabase.table("appointments")
                             .update(
                                 {
                                     "status": "confirmed",
@@ -842,8 +953,7 @@ class PaymentService:
                                 }
                             )
                             .eq("id", booking_id)
-                            .eq("status", "pending_payment")
-                            .execute()
+                            .eq("status", "pending_payment"))
                         )
 
                         if not recovery_update.data:
@@ -890,9 +1000,9 @@ class PaymentService:
                         continue
 
                 # ── Normal expiry path ──
-                supabase.table("appointments").update({"status": "expired"}).eq(
+                await sb(supabase.table("appointments").update({"status": "expired"}).eq(
                     "id", booking_id
-                ).eq("status", "pending_payment").execute()
+                ).eq("status", "pending_payment"))
 
                 self._log_payment_event(
                     booking_id,
@@ -938,7 +1048,7 @@ class PaymentService:
 
         try:
             recent_pending = (
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .select(
                     "id, clinic_id, booking_ref, patient_phone, "
                     "razorpay_payment_link_id, amount_paise, doctor_name, "
@@ -948,8 +1058,7 @@ class PaymentService:
                 .eq("status", "pending_payment")
                 .gte("created_at", five_min_ago)
                 .order("created_at", desc=True)
-                .limit(20)
-                .execute()
+                .limit(20))
             )
         except Exception as e:
             logger.error(f"poll_recent_pending_payments: query failed: {e}")
@@ -998,7 +1107,7 @@ class PaymentService:
                 )
 
                 update_result = (
-                    supabase.table("appointments")
+                    await sb(supabase.table("appointments")
                     .update(
                         {
                             "status": "confirmed",
@@ -1006,8 +1115,7 @@ class PaymentService:
                         }
                     )
                     .eq("id", booking_id)
-                    .eq("status", "pending_payment")
-                    .execute()
+                    .eq("status", "pending_payment"))
                 )
 
                 if not update_result.data:
@@ -1098,7 +1206,7 @@ class PaymentService:
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
         # ── Look up booking ──
         booking_result = (
-            supabase.table("appointments").select("*").eq("id", booking_id).execute()
+            await sb(supabase.table("appointments").select("*").eq("id", booking_id))
         )
 
         if not booking_result.data:
@@ -1164,12 +1272,12 @@ class PaymentService:
             refund_id = refund_result.get("id", "")
 
             # Update booking status
-            supabase.table("appointments").update({
+            await sb(supabase.table("appointments").update({
                 "status": "refunded",
                 "refund_id": refund_id,
                 "refund_reason": reason,
                 "refunded_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", booking_id).execute()
+            }).eq("id", booking_id))
 
             # Log refund_completed only after gateway confirms
             self._log_payment_event(
@@ -1253,7 +1361,7 @@ class PaymentService:
             query = query.eq("clinic_id", clinic_id)
         else:
             logger.warning(f"admin_confirm_booking called without valid clinic_id for {booking_id}")
-        booking_result = query.execute()
+        booking_result = await sb(query)
 
         if not booking_result.data:
             return {"success": False, "reason": "booking_not_found"}
@@ -1266,9 +1374,9 @@ class PaymentService:
                 "reason": f"can_only_confirm_pending_review_not_{booking['status']}",
             }
 
-        supabase.table("appointments").update({"status": "confirmed"}).eq(
+        await sb(supabase.table("appointments").update({"status": "confirmed"}).eq(
             "id", booking_id
-        ).execute()
+        ))
 
         self._log_payment_event(
             booking_id,
@@ -1310,7 +1418,7 @@ class PaymentService:
             query = query.eq("clinic_id", clinic_id)
         else:
             logger.warning(f"admin_reject_booking called without valid clinic_id for {booking_id}")
-        booking_result = query.execute()
+        booking_result = await sb(query)
 
         if not booking_result.data:
             return {"success": False, "reason": "booking_not_found"}
@@ -1373,7 +1481,7 @@ class PaymentService:
         )
         if clinic_id and clinic_id != "default":
             update_query = update_query.eq("clinic_id", clinic_id)
-        update_query.execute()
+        await sb(update_query)
 
         self._log_payment_event(
             booking_id,
@@ -1407,7 +1515,7 @@ class PaymentService:
             query = query.eq("clinic_id", clinic_id)
         else:
             logger.warning(f"admin_cancel_confirmed_booking called without valid clinic_id for {booking_id}")
-        booking_result = query.execute()
+        booking_result = await sb(query)
 
         if not booking_result.data:
             return {"success": False, "reason": "booking_not_found"}
@@ -1430,9 +1538,9 @@ class PaymentService:
             if not refund_result["success"]:
                 return refund_result
         else:
-            supabase.table("appointments").update({"status": "cancelled"}).eq(
+            await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
                 "id", booking_id
-            ).execute()
+            ))
             self._log_payment_event(
                 booking_id, "admin_cancel", {"admin_notes": admin_notes}
             )
@@ -1466,7 +1574,7 @@ class PaymentService:
         )
         if clinic_id:
             query = query.eq("clinic_id", clinic_id)
-        bookings = query.execute()
+        bookings = await sb(query)
 
         total_bookings = len(bookings.data) if bookings.data else 0
         total_amount = sum(b.get("amount_paise", 0) for b in (bookings.data or []))
@@ -1480,7 +1588,7 @@ class PaymentService:
         )
         if clinic_id:
             pr_query = pr_query.eq("clinic_id", clinic_id)
-        pending_review = pr_query.execute()
+        pending_review = await sb(pr_query)
 
         return {
             "date": date_str,
@@ -1504,7 +1612,7 @@ class PaymentService:
             query = supabase.table("doctors").select("consultation_fee")
             if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
                 query = query.eq("clinic_id", clinic_id)
-            result = query.eq("name", doctor_name).execute()
+            result = await sb(query.eq("name", doctor_name))
 
             if result.data and result.data[0].get("consultation_fee"):
                 # consultation_fee is stored in rupees, convert to paise
@@ -1521,7 +1629,7 @@ class PaymentService:
             query = supabase.table("lab_tests").select("price_paise")
             if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
                 query = query.eq("clinic_id", clinic_id)
-            result = query.eq("id", lab_test_id).execute()
+            result = await sb(query.eq("id", lab_test_id))
             if result.data and result.data[0].get("price_paise"):
                 return int(result.data[0]["price_paise"])
         except Exception as e:
@@ -2109,7 +2217,7 @@ class PaymentService:
                         "is_read": False,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     }
-                    supabase.table("admin_notifications").insert(notif_row).execute()
+                    await sb(supabase.table("admin_notifications").insert(notif_row))
             except Exception as in_app_err:
                 logger.warning(f"Could not create in-app admin notification: {in_app_err}")
 

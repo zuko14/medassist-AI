@@ -23,7 +23,10 @@ WHERE id IN (SELECT id FROM ranked WHERE rn > 1);
 ALTER TABLE clinic_admins
     ADD CONSTRAINT uq_admin_clinic_username UNIQUE (clinic_id, username);
 
-INSERT INTO schema_migrations (name) VALUES ('059_admin_auth_hardening.sql') ON CONFLICT (name) DO NOTHING;
+-- NOTE: schema_migrations is written by scripts/migrate.py:124 with the
+-- file's SHA256. checksum is NOT NULL (scripts/migrate.py:60), so a
+-- self-INSERT here omits it and aborts the migration on any fresh
+-- database. Migrations must not record themselves.
 
 -- Verify
 SELECT 'migration_059_complete' AS status,

@@ -11,6 +11,7 @@ requiring redeployments or changing Render environment variables.
 import logging
 from dataclasses import dataclass
 from typing import Optional
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +70,12 @@ async def resolve_processing_center(
 
     try:
         result = (
-            supabase.table("integration_connectors")
+            await sb(supabase.table("integration_connectors")
             .select("config")
             .eq("clinic_id", clinic_id)
             .eq("connector_type", connector_type)
             .eq("is_enabled", True)
-            .single()
-            .execute()
+            .single())
         )
     except Exception as e:
         logger.error(

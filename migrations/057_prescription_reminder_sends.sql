@@ -47,6 +47,9 @@ CREATE POLICY "tenant_isolation_prescription_reminder_sends"
         AND clinic_id = NULLIF(current_setting('app.clinic_id', true), '')::uuid
     );
 
-INSERT INTO schema_migrations (name) VALUES ('057_prescription_reminder_sends.sql') ON CONFLICT (name) DO NOTHING;
+-- NOTE: schema_migrations is written by scripts/migrate.py:124 with the
+-- file's SHA256. checksum is NOT NULL (scripts/migrate.py:60), so a
+-- self-INSERT here omits it and aborts the migration on any fresh
+-- database. Migrations must not record themselves.
 
 SELECT 'migration_057_complete' AS status;

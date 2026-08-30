@@ -1,6 +1,7 @@
 """Database module for Supabase integration (Multi-Tenant Scoped)."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date as dt_date, timedelta, timezone
 import logging
 import time
@@ -33,7 +34,100 @@ def invalidate_doctor_cache(clinic_id: Optional[str] = None, doctor_name: Option
 # Initialize Supabase client with fallback for zero-downtime boots
 _sb_url = settings.supabase_url if (settings.supabase_url and settings.supabase_url.startswith("http")) else "https://placeholder.supabase.co"
 _sb_key = settings.supabase_service_role_key or "placeholder-key"
-supabase: Client = create_client(_sb_url, _sb_key)
+# Bound every PostgREST/storage call (T5.1 / KA-P1-03).
+#
+# Since sb() runs queries on _DB_EXECUTOR, a call that never returns holds a
+# worker thread forever. Without a timeout, a degraded Supabase does not slow
+# the service down — it permanently retires the pool one thread at a time until
+# no query can run at all, and the failure looks like a hang rather than an
+# error. A bounded call surfaces as an exception that the existing fail-closed
+# handling already knows what to do with.
+try:
+    # create_client() (the sync client) takes SyncClientOptions.
+    from supabase.lib.client_options import SyncClientOptions
+
+    _sb_options = SyncClientOptions(
+        postgrest_client_timeout=settings.db_query_timeout_seconds,
+        storage_client_timeout=settings.db_query_timeout_seconds,
+    )
+    supabase: Client = create_client(_sb_url, _sb_key, options=_sb_options)
+except Exception as _opt_err:  # pragma: no cover - defensive
+    logger.warning(
+        f"Could not apply Supabase client timeouts ({_opt_err}); falling back to "
+        f"library defaults. A hung query can occupy a DB worker thread."
+    )
+    supabase: Client = create_client(_sb_url, _sb_key)
+
+# Dedicated worker pool for blocking PostgREST calls (T5.1 / KA-P1-03).
+#
+# Module-level and therefore loop-independent: it survives the event loop being
+# replaced, which matters both for pytest-asyncio (a fresh loop per test) and
+# for any future code that runs a second loop.
+#
+# Sizing is the per-process database concurrency ceiling. Three limits sit
+# behind it, and the smallest wins:
+#
+#   1. these worker threads                    (db_thread_pool_size, 64)
+#   2. the shared httpx connection pool inside the supabase client
+#      (max_connections defaults to 100), which all threads contend for
+#   3. PostgREST's own database pool on the Supabase side
+#
+# 64 x 4 processes = up to 256 concurrent HTTP calls to PostgREST. That is
+# requests, not Postgres connections — PostgREST multiplexes them onto its own
+# pool — but it is still the number to check against the deployment's plan
+# limits. UNVERIFIED under real load: T8.1 must confirm that raising this
+# improves throughput rather than just relocating the queue and converting a
+# bounded wait into a timeout.
+_DB_EXECUTOR = ThreadPoolExecutor(
+    max_workers=getattr(settings, "db_thread_pool_size", 64),
+    thread_name_prefix="kriya-db",
+)
+
+
+async def sb(builder):
+    """Execute a PostgREST query off the event loop (KA-P1-03).
+
+    supabase-py 2.x's `create_client()` returns the SYNCHRONOUS `Client`; the
+    async variant is `create_async_client()`. Every `.execute()` is therefore a
+    blocking httpx request. Calling one directly inside an `async def` freezes
+    the whole event loop for the duration of the round-trip — so within each of
+    the four production processes (2 Render instances x 2 uvicorn workers),
+    FastAPI's concurrency was nullified and requests served strictly one at a
+    time.
+
+    It compounds: the webhook hands full message processing to
+    BackgroundTasks, which run on that same loop after the response is sent, so
+    a booking turn (a Groq call plus ~15 sequential blocking round-trips) froze
+    the loop that must acknowledge the next Meta webhook inside 20 seconds.
+    Under load Meta retries, and the retries multiply the load.
+
+    Usage — build the query exactly as before, then await it:
+
+        res = await sb(supabase.table("patients").select("*").eq("clinic_id", c))
+
+    Only the execution moves to a worker thread. The builder is constructed
+    synchronously (no I/O), and the return value and exception semantics are
+    identical to `.execute()`, which is what makes the conversion of ~390 call
+    sites mechanical and individually revertible.
+
+    Deliberately NOT a switch to `create_async_client()`: that would change the
+    semantics of every call site at once, and this codebase has no test that
+    blocks on real I/O, so such a regression would be invisible to the suite.
+
+    Uses a dedicated executor rather than `asyncio.to_thread`, for two reasons:
+
+    1. `asyncio.to_thread` dispatches to the RUNNING LOOP's default executor.
+       Under pytest-asyncio every test gets a fresh event loop, so a new
+       default executor is created and abandoned per test — which made the
+       suite fail nondeterministically late in a long run.
+    2. The loop's default executor is shared with Starlette's `run_in_threadpool`
+       (sync endpoints, `UploadFile` reads). Database work having its own
+       bounded pool means a burst of queries cannot starve request handling,
+       and the size is a knob that means something.
+    """
+    return await asyncio.get_running_loop().run_in_executor(
+        _DB_EXECUTOR, builder.execute
+    )
 
 
 class TenantIsolationError(RuntimeError):
@@ -108,9 +202,8 @@ async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:
     """Get patient by phone number and clinic_id."""
     try:
         result = (
-            scoped_query("patients", clinic_id)
-            .eq("phone", phone)
-            .execute()
+            await sb(scoped_query("patients", clinic_id)
+            .eq("phone", phone))
         )
         if result.data:
             return result.data[0]
@@ -140,7 +233,7 @@ async def create_patient(
             "opted_in_at": now_iso,
             "last_seen_at": now_iso,
         }
-        result = supabase.table("patients").insert(data).execute()
+        result = await sb(supabase.table("patients").insert(data))
         return result.data[0]
     except Exception as e:
         error_str = str(e).lower()
@@ -155,9 +248,9 @@ async def create_patient(
 async def update_patient(clinic_id: str, phone: str, updates: dict) -> bool:
     """Update patient data."""
     try:
-        supabase.table("patients").update(updates).eq("clinic_id", clinic_id).eq(
+        await sb(supabase.table("patients").update(updates).eq("clinic_id", clinic_id).eq(
             "phone", phone
-        ).execute()
+        ))
         return True
     except Exception as e:
         logger.error(f"Error updating patient: {e}")
@@ -168,9 +261,8 @@ async def get_conversation(clinic_id: str, phone: str) -> Optional[dict]:
     """Get conversation session for phone."""
     try:
         result = (
-            scoped_query("conversations", clinic_id)
-            .eq("phone", phone)
-            .execute()
+            await sb(scoped_query("conversations", clinic_id)
+            .eq("phone", phone))
         )
         if result.data:
             return result.data[0]
@@ -196,7 +288,7 @@ async def create_conversation(clinic_id: str, phone: str) -> dict:
             ).isoformat(),
             "last_message_at": now_dt.isoformat(),
         }
-        result = supabase.table("conversations").insert(data).execute()
+        result = await sb(supabase.table("conversations").insert(data))
         return result.data[0]
     except Exception as e:
         error_str = str(e).lower()
@@ -214,9 +306,9 @@ async def update_conversation(clinic_id: str, phone: str, updates: dict) -> bool
         from datetime import datetime, timezone
 
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-        supabase.table("conversations").update(updates).eq("clinic_id", clinic_id).eq(
+        await sb(supabase.table("conversations").update(updates).eq("clinic_id", clinic_id).eq(
             "phone", phone
-        ).execute()
+        ))
         return True
     except Exception as e:
         logger.error(f"Error updating conversation: {e}")
@@ -263,7 +355,7 @@ async def get_doctors(
         if active_only:
             query = query.eq("is_active", True)
 
-        result = query.execute()
+        result = await sb(query)
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting doctors: {e}")
@@ -282,7 +374,7 @@ async def get_lab_tests(
         query = scoped_query("lab_tests", clinic_id)
         if active_only:
             query = query.eq("is_active", True)
-        result = query.order("name").execute()
+        result = await sb(query.order("name"))
         tests = result.data or []
         if branch_id:
             tests = [
@@ -298,10 +390,9 @@ async def get_lab_test_by_id(clinic_id: str, lab_test_id: str) -> Optional[dict]
     """Get a single active lab test by id, scoped to the clinic."""
     try:
         result = (
-            scoped_query("lab_tests", clinic_id)
+            await sb(scoped_query("lab_tests", clinic_id)
             .eq("id", lab_test_id)
-            .eq("is_active", True)
-            .execute()
+            .eq("is_active", True))
         )
         return result.data[0] if result.data else None
     except Exception as e:
@@ -320,7 +411,7 @@ async def get_lab_collection_window(clinic: dict, branch_id: Optional[str] = Non
     try:
         if branch_id:
             result = (
-                supabase.table("branches").select("config").eq("id", branch_id).execute()
+                await sb(supabase.table("branches").select("config").eq("id", branch_id))
             )
             if result.data:
                 window = (result.data[0].get("config") or {}).get("lab_collection")
@@ -364,10 +455,9 @@ async def get_doctors_at_branch(
     try:
         # Get doctor_ids assigned to this branch
         db_result = (
-            supabase.table("doctor_branches")
+            await sb(supabase.table("doctor_branches")
             .select("doctor_id, session")
-            .eq("branch_id", branch_id)
-            .execute()
+            .eq("branch_id", branch_id))
         )
 
         if not db_result.data:
@@ -392,7 +482,7 @@ async def get_doctors_at_branch(
         if active_only:
             query = query.eq("is_active", True)
 
-        result = query.execute()
+        result = await sb(query)
         doctors = result.data or []
 
         # Enrich with branch_session
@@ -414,9 +504,8 @@ async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
 
     try:
         result = (
-            scoped_query("doctors", clinic_id)
-            .eq("name", name)
-            .execute()
+            await sb(scoped_query("doctors", clinic_id)
+            .eq("name", name))
         )
         if result.data:
             doc = result.data[0]
@@ -608,11 +697,10 @@ async def find_next_available_date(
 
             # Check holiday
             holiday = (
-                supabase.table("hospital_holidays")
+                await sb(supabase.table("hospital_holidays")
                 .select("name")
                 .eq("clinic_id", clinic_id)
-                .eq("holiday_date", check_date_str)
-                .execute()
+                .eq("holiday_date", check_date_str))
             )
             if holiday.data:
                 continue
@@ -658,26 +746,42 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
         if not data.get("department"):
             data["department"] = "General Medicine"
 
-        # Fast-path: check for existing booking at same slot (non-authoritative)
+        # A consultation with no resolvable doctor_id must NOT be written.
+        # Under migration 060 such rows collapsed onto a COALESCE sentinel, so
+        # two different doctors falsely blocked each other while the real
+        # physician went unguarded. Migration 064 keys uniqueness on doctor_id
+        # directly, which means an unresolved doctor is an unguarded slot.
+        # Refusing here is what keeps the index a total guarantee (KA-P0-01).
+        if data.get("booking_type", "consultation") == "consultation" and not data.get(
+            "doctor_id"
+        ):
+            logger.error(
+                f"Refusing consultation booking with unresolved doctor: "
+                f"clinic={clinic_id} doctor_name={data.get('doctor_name')!r} — "
+                f"the slot uniqueness index cannot guard a NULL doctor_id"
+            )
+            return {"success": False, "reason": "doctor_unavailable"}
+
+        # Fast-path: check for existing booking at same slot (non-authoritative).
+        #
+        # Deliberately NOT filtered by branch_id. The authoritative index
+        # (migration 064) is keyed on clinic + doctor + date + time, and a
+        # pre-check narrower than the index is worse than no pre-check: it
+        # reports "free" for a slot the index will reject, and it hid the
+        # KA-P0-01 double-booking because a branch-carrying booking could not
+        # see a conflicting branch-less one.
         conflict_query = (
             supabase.table("appointments")
             .select("id")
             .eq("clinic_id", clinic_id)
             .eq("appointment_date", data["appointment_date"])
             .eq("appointment_time", data["appointment_time"])
+            .eq("doctor_id", data["doctor_id"])
         )
-        if data.get("doctor_id"):
-            conflict_query = conflict_query.eq("doctor_id", data["doctor_id"])
-        elif data.get("doctor_name"):
-            conflict_query = conflict_query.eq("doctor_name", data["doctor_name"])
-
-        if data.get("branch_id"):
-            conflict_query = conflict_query.eq("branch_id", data["branch_id"])
 
         conflict = (
-            conflict_query
-            .in_("status", ["confirmed", "pending_payment", "pending_review"])
-            .execute()
+            await sb(conflict_query
+            .in_("status", ["confirmed", "pending_payment", "pending_review"]))
         )
 
         if conflict.data:
@@ -690,7 +794,7 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
         for attempt in range(3):
             data["booking_ref"] = generate_booking_reference()
             try:
-                result = supabase.table("appointments").insert(data).execute()
+                result = await sb(supabase.table("appointments").insert(data))
                 break
             except Exception as e:
                 if is_booking_ref_conflict(e) and attempt < 2:
@@ -730,9 +834,8 @@ async def get_appointment_by_ref(clinic_id: str, booking_ref: str) -> Optional[d
     """Get appointment by booking reference."""
     try:
         result = (
-            scoped_query("appointments", clinic_id)
-            .eq("booking_ref", booking_ref)
-            .execute()
+            await sb(scoped_query("appointments", clinic_id)
+            .eq("booking_ref", booking_ref))
         )
         if result.data:
             return result.data[0]
@@ -755,11 +858,10 @@ async def cancel_appointment(clinic_id: str, appointment_id: str) -> bool:
     try:
         # First, check if the appointment has a payment_id (needs refund coupling)
         check = (
-            supabase.table("appointments")
+            await sb(supabase.table("appointments")
             .select("id, status, payment_id")
             .eq("clinic_id", clinic_id)
-            .eq("id", appointment_id)
-            .execute()
+            .eq("id", appointment_id))
         )
         if not check.data:
             logger.warning(f"Cancel: appointment {appointment_id} not found in clinic {clinic_id}")
@@ -785,12 +887,11 @@ async def cancel_appointment(clinic_id: str, appointment_id: str) -> bool:
 
         # CAS update: only cancel if still in the expected state
         result = (
-            supabase.table("appointments")
+            await sb(supabase.table("appointments")
             .update({"status": "cancelled"})
             .eq("clinic_id", clinic_id)
             .eq("id", appointment_id)
-            .in_("status", list(CANCELLABLE_STATES))
-            .execute()
+            .in_("status", list(CANCELLABLE_STATES)))
         )
         return bool(result.data)
     except Exception as e:
@@ -820,7 +921,7 @@ async def get_patient_appointments(
             query = query.eq("status", status)
         if from_date:
             query = query.gte("appointment_date", from_date)
-        result = query.order("appointment_date", desc=False).execute()
+        result = await sb(query.order("appointment_date", desc=False))
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting patient appointments: {e}")
@@ -838,7 +939,7 @@ async def log_analytics_event(
             "event_type": event_type,
             **{k: v for k, v in kwargs.items() if v is not None},
         }
-        supabase.table("analytics_events").insert(data).execute()
+        await sb(supabase.table("analytics_events").insert(data))
         return True
     except Exception as e:
         logger.error(f"Error logging analytics: {e}")
@@ -867,15 +968,15 @@ async def delete_patient_data(clinic_id: str, phone: str) -> bool:
         await data_retention_service.anonymize_clinical_records(clinic_id, phone)
 
         # ── Tier 2: Delete conversation / session data ──
-        supabase.table("conversations").delete().eq("clinic_id", clinic_id).eq(
+        await sb(supabase.table("conversations").delete().eq("clinic_id", clinic_id).eq(
             "phone", phone
-        ).execute()
+        ))
 
         # Delete analytics events (operational, not clinical)
         try:
-            supabase.table("analytics_events").delete().eq("clinic_id", clinic_id).eq(
+            await sb(supabase.table("analytics_events").delete().eq("clinic_id", clinic_id).eq(
                 "phone", phone
-            ).execute()
+            ))
         except Exception:
             pass  # Analytics table may not have phone column in all versions
 
@@ -901,9 +1002,8 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     on conflict instead of allowing duplicate tokens under concurrent check-ins.
     """
     appt_result = (
-        scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, appointment_date, token_number, queue_status")
-        .eq("id", appointment_id)
-        .execute()
+        await sb(scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, appointment_date, token_number, queue_status")
+        .eq("id", appointment_id))
     )
     if not appt_result.data:
         return None
@@ -923,12 +1023,11 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     max_retries = 5
     for attempt in range(max_retries):
         max_result = (
-            scoped_query("appointments", clinic_id, "token_number")
+            await sb(scoped_query("appointments", clinic_id, "token_number")
             .eq("doctor_name", doctor_name)
             .eq("appointment_date", appointment_date)
             .order("token_number", desc=True)
-            .limit(1)
-            .execute()
+            .limit(1))
         )
         current_max = (
             max_result.data[0]["token_number"]
@@ -939,11 +1038,10 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
 
         try:
             result = (
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .update({"token_number": next_token, "queue_status": "waiting"})
                 .eq("clinic_id", clinic_id)
-                .eq("id", appointment_id)
-                .execute()
+                .eq("id", appointment_id))
             )
             if result.data:
                 return result.data[0]
@@ -967,34 +1065,32 @@ async def call_next_patient(clinic_id: str, doctor_name: str, date_str: str) -> 
     on queue_status still being 'waiting', so a concurrent caller that
     already claimed the same row causes a retry instead of a double-serve."""
     try:
-        supabase.table("appointments").update({"queue_status": "done"}).eq(
+        await sb(supabase.table("appointments").update({"queue_status": "done"}).eq(
             "clinic_id", clinic_id
         ).eq("doctor_name", doctor_name).eq("appointment_date", date_str).eq(
             "queue_status", "in_consultation"
-        ).execute()
+        ))
 
         max_retries = 5
         for _ in range(max_retries):
             next_result = (
-                scoped_query("appointments", clinic_id)
+                await sb(scoped_query("appointments", clinic_id)
                 .eq("doctor_name", doctor_name)
                 .eq("appointment_date", date_str)
                 .eq("queue_status", "waiting")
                 .order("token_number")
-                .limit(1)
-                .execute()
+                .limit(1))
             )
             if not next_result.data:
                 return None
 
             candidate = next_result.data[0]
             claimed = (
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .update({"queue_status": "in_consultation"})
                 .eq("clinic_id", clinic_id)
                 .eq("id", candidate["id"])
-                .eq("queue_status", "waiting")
-                .execute()
+                .eq("queue_status", "waiting"))
             )
             if claimed.data:
                 return claimed.data[0]
@@ -1009,11 +1105,10 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
     """Look up a patient's queue position for today's appointment."""
     try:
         result = (
-            scoped_query("appointments", clinic_id)
+            await sb(scoped_query("appointments", clinic_id)
             .eq("patient_phone", phone)
             .eq("appointment_date", date_str)
-            .eq("status", "confirmed")
-            .execute()
+            .eq("status", "confirmed"))
         )
         if not result.data:
             return None
@@ -1023,13 +1118,12 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
             return {"checked_in": False, "doctor_name": appt.get("doctor_name")}
 
         serving_result = (
-            scoped_query("appointments", clinic_id, "token_number")
+            await sb(scoped_query("appointments", clinic_id, "token_number")
             .eq("doctor_name", appt["doctor_name"])
             .eq("appointment_date", date_str)
             .in_("queue_status", ["waiting", "in_consultation"])
             .order("token_number")
-            .limit(1)
-            .execute()
+            .limit(1))
         )
         currently_serving = (
             serving_result.data[0]["token_number"] if serving_result.data else appt["token_number"]
@@ -1052,10 +1146,9 @@ async def get_family_members(clinic_id: str, primary_phone: str) -> list:
     """Return all family members registered under a primary phone number."""
     try:
         result = (
-            scoped_query("family_members", clinic_id)
+            await sb(scoped_query("family_members", clinic_id)
             .eq("primary_phone", primary_phone)
-            .order("created_at")
-            .execute()
+            .order("created_at"))
         )
         return result.data or []
     except Exception as e:
@@ -1077,7 +1170,7 @@ async def add_family_member(
             "full_name": full_name,
             "relationship": relationship,
         }
-        result = supabase.table("family_members").insert(data).execute()
+        result = await sb(supabase.table("family_members").insert(data))
         return result.data[0] if result.data else None
     except Exception as e:
         logger.error(f"Error adding family member: {e}")

@@ -53,6 +53,7 @@ from app.services.permissions import (
 from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
 from app.utils.validators import normalize_phone, validate_phone
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,12 @@ async def verify_credentials(
     """
     client_ip = request.client.host if request.client else "unknown"
 
-    if login_rate_limiter.is_rate_limited(client_ip):
+    # T5.1: PersistentRateLimiter is synchronous and hits the rate_limits
+    # table, and verify_credentials is a dependency on EVERY admin request —
+    # so this was a blocking DB round-trip on the event loop for every call.
+    # Wrapped at the call site rather than made async so the limiter keeps its
+    # sync API for the tests and non-async callers that use it directly.
+    if await asyncio.to_thread(login_rate_limiter.is_rate_limited, client_ip):
         remaining_wait = 60
         logger.warning(f"Admin login rate limit exceeded — IP={client_ip}")
         raise HTTPException(
@@ -205,18 +211,17 @@ async def verify_credentials(
     try:
         res = (
     # unscoped: login authentication by username
-            supabase.table("clinic_admins")
+            await sb(supabase.table("clinic_admins")
             .select("*")
             .eq("username", credentials.username)
-            .eq("is_active", True)
-            .execute()
+            .eq("is_active", True))
         )
         if res.data and len(res.data) > 0:
             user_row = res.data[0]
             if check_password_hash(
                 credentials.password, user_row.get("password_hash", "")
             ):
-                login_rate_limiter.reset(client_ip)
+                await asyncio.to_thread(login_rate_limiter.reset, client_ip)
                 return AdminUser(
                     username=user_row["username"],
                     role=user_row.get("role", "clinic_admin"),
@@ -240,7 +245,7 @@ async def verify_credentials(
     )
 
     if username_ok and password_ok:
-        login_rate_limiter.reset(client_ip)
+        await asyncio.to_thread(login_rate_limiter.reset, client_ip)
         return AdminUser(
             username=credentials.username,
             role="super_admin",
@@ -249,8 +254,10 @@ async def verify_credentials(
         )
 
     # Record failed attempt ONLY on invalid credentials (T3.2b)
-    login_rate_limiter.record_attempt(client_ip)
-    remaining = login_rate_limiter.remaining_attempts(client_ip)
+    await asyncio.to_thread(login_rate_limiter.record_attempt, client_ip)
+    remaining = await asyncio.to_thread(
+        login_rate_limiter.remaining_attempts, client_ip
+    )
     logger.warning(
         f"Failed admin login attempt — IP={client_ip}, "
         f"user='{credentials.username}', remaining={remaining}"
@@ -331,7 +338,7 @@ async def resolve_clinic_id_for_write(
     # unscoped: fallback clinic lookup for legacy single-tenant
     clinics = (
         # unscoped: fallback clinic lookup for legacy single-tenant environment
-        supabase.table("clinics").select("id").order("created_at").limit(1).execute()
+        await sb(supabase.table("clinics").select("id").order("created_at").limit(1))
     )
     if not clinics.data:
         raise HTTPException(
@@ -395,10 +402,9 @@ async def change_password(
     # unscoped: caller self-password change by user.id
     res = (
     # unscoped: login authentication by username
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id, password_hash")
-        .eq("id", user.user_id)
-        .execute()
+        .eq("id", user.user_id))
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Admin account not found")
@@ -407,9 +413,9 @@ async def change_password(
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
     # unscoped: caller self-password update by user.id
-    supabase.table("clinic_admins").update(
+    await sb(supabase.table("clinic_admins").update(
         {"password_hash": hash_password(body.new_password)}
-    ).eq("id", user.user_id).execute()
+    ).eq("id", user.user_id))
 
     client_ip = request.client.host if request.client else "unknown"
     await log_admin_action(
@@ -451,7 +457,7 @@ async def list_staff(
     ).eq("role", "staff")
     if effective_clinic_id != "default":
         query = query.eq("clinic_id", effective_clinic_id)
-    result = query.order("created_at", desc=True).limit(2000).execute()
+    result = await sb(query.order("created_at", desc=True).limit(2000))
     return {"staff": result.data or []}
 
 
@@ -493,11 +499,10 @@ async def create_staff(
     if body.branch_id:
         branch_check = (
             # unscoped: tenant-scoped operation with verified clinic authorization
-            supabase.table("branches")
+            await sb(supabase.table("branches")
             .select("id")
             .eq("id", body.branch_id)
-            .eq("clinic_id", effective_clinic_id)
-            .execute()
+            .eq("clinic_id", effective_clinic_id))
         )
         if not branch_check.data:
             raise HTTPException(
@@ -515,17 +520,16 @@ async def create_staff(
     # unscoped: check username global uniqueness
     existing = (
         # unscoped: checking global username uniqueness across all clinic admins
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id")
-        .eq("username", body.username)
-        .execute()
+        .eq("username", body.username))
     )
     if existing.data:
         raise HTTPException(status_code=409, detail="Username already exists")
 
     result = (
         # unscoped: inserting new clinic staff member with explicit clinic_id
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .insert(
             {
                 "clinic_id": effective_clinic_id,
@@ -537,8 +541,7 @@ async def create_staff(
                 "branch_id": body.branch_id,
                 "is_active": True,
             }
-        )
-        .execute()
+        ))
     )
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create staff account")
@@ -574,10 +577,9 @@ async def update_staff(
 
     res = (
     # unscoped: login authentication by username
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active")
-        .eq("id", staff_id)
-        .execute()
+        .eq("id", staff_id))
     )
     if not res.data or res.data[0]["role"] != "staff":
         raise HTTPException(status_code=404, detail="Staff account not found")
@@ -614,11 +616,10 @@ async def update_staff(
         if body.branch_id:
             branch_check = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("branches")
+                await sb(supabase.table("branches")
                 .select("id")
                 .eq("id", body.branch_id)
-                .eq("clinic_id", target["clinic_id"])
-                .execute()
+                .eq("clinic_id", target["clinic_id"]))
             )
             if not branch_check.data:
                 raise HTTPException(
@@ -640,7 +641,7 @@ async def update_staff(
         raise HTTPException(status_code=400, detail="No changes provided")
 
     # unscoped: update staff member within clinic after clinic verification
-    result = supabase.table("clinic_admins").update(update_data).eq("id", staff_id).execute()
+    result = await sb(supabase.table("clinic_admins").update(update_data).eq("id", staff_id))
 
     client_ip = request.client.host if (request and request.client) else "unknown"
     await log_admin_action(
@@ -672,10 +673,9 @@ async def toggle_staff(
     their audit trail."""
     res = (
     # unscoped: login authentication by username
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id, clinic_id, is_active, role, branch_id")
-        .eq("id", staff_id)
-        .execute()
+        .eq("id", staff_id))
     )
     if not res.data or res.data[0]["role"] != "staff":
         raise HTTPException(status_code=404, detail="Staff account not found")
@@ -689,9 +689,9 @@ async def toggle_staff(
 
     new_status = not target["is_active"]
     # unscoped: toggle staff member active status after clinic verification
-    supabase.table("clinic_admins").update({"is_active": new_status}).eq(
+    await sb(supabase.table("clinic_admins").update({"is_active": new_status}).eq(
         "id", staff_id
-    ).execute()
+    ))
 
     client_ip = request.client.host if (request and request.client) else "unknown"
     await log_admin_action(
@@ -987,7 +987,7 @@ async def get_doctors(
         query = supabase.table("doctors").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.limit(2000).execute()
+        result = await sb(query.limit(2000))
         doctors = result.data or []
 
         # Enrich each doctor with their branch assignments
@@ -995,11 +995,10 @@ async def get_doctors(
             doctor_ids = [d["id"] for d in doctors]
             db_result = (
         # unscoped: doctor branch association
-                supabase.table("doctor_branches")
+                await sb(supabase.table("doctor_branches")
                 .select("doctor_id, branch_id, session, branches(id, name, is_active)")
                 .in_("doctor_id", doctor_ids)
-                .limit(2000)
-                .execute()
+                .limit(2000))
             )
             # Build lookup: {doctor_id: [{branch_id, branch_name, session}, ...]}
             branch_map: dict[str, list[dict]] = {}
@@ -1163,7 +1162,7 @@ async def create_doctor(
         doctor_data = _apply_slot_config(doctor_data)
         doctor_data["clinic_id"] = effective_clinic_id
         # unscoped: inserting new doctor record with explicit clinic_id
-        result = supabase.table("doctors").insert(doctor_data).execute()
+        result = await sb(supabase.table("doctors").insert(doctor_data))
         new_doctor = result.data[0]
 
         # ── Branch assignment ──
@@ -1173,11 +1172,10 @@ async def create_doctor(
             # Auto-select single branch for single-branch clinics
             branches_result = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("branches")
+                await sb(supabase.table("branches")
                 .select("id")
                 .eq("clinic_id", effective_clinic_id)
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             clinic_branches = branches_result.data if isinstance(branches_result.data, list) else []
             if len(clinic_branches) == 1:
@@ -1187,11 +1185,10 @@ async def create_doctor(
             # IDOR check: verify branch belongs to this clinic
             branch_check = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("branches")
+                await sb(supabase.table("branches")
                 .select("id")
                 .eq("id", branch_id_to_assign)
-                .eq("clinic_id", effective_clinic_id)
-                .execute()
+                .eq("clinic_id", effective_clinic_id))
             )
             if not branch_check.data:
                 logger.warning(
@@ -1206,11 +1203,11 @@ async def create_doctor(
             # Create junction record
             try:
         # unscoped: doctor branch association
-                supabase.table("doctor_branches").insert({
+                await sb(supabase.table("doctor_branches").insert({
                     "doctor_id": new_doctor["id"],
                     "branch_id": branch_id_to_assign,
                     "session": requested_branch_session,
-                }).execute()
+                }))
                 new_doctor["branch_id"] = branch_id_to_assign
                 new_doctor["branch_session"] = requested_branch_session
             except Exception as be:
@@ -1253,14 +1250,38 @@ async def update_doctor(
     """Update an existing doctor, optionally changing branch assignment."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
+        # ── Tenant ownership gate (KA-P1-05) ────────────────────────────────
+        # Every downstream step in this handler keys on doctor_id alone: the
+        # staff branch pre-check below, the branch-only fetch, and the
+        # doctor_branches delete/insert (which sits on a table with no
+        # clinic_id column at all). Previously the only clinic predicate was
+        # on the profile UPDATE, so a body containing ONLY branch fields left
+        # update_data empty, skipped that UPDATE, and read + rewrote another
+        # tenant's doctor.
+        #
+        # Resolve ownership once, here, and let everything after it rely on
+        # this row. One guard at the top is smaller than a predicate on each
+        # of the four call sites, and cannot be forgotten by the next edit.
+        # unscoped: clinic_id predicate is applied conditionally on the next line
+        owner_query = supabase.table("doctors").select("*").eq("id", doctor_id)
+        if effective_clinic_id != "default":
+            owner_query = owner_query.eq("clinic_id", effective_clinic_id)
+        owner_res = await sb(owner_query)
+        if not owner_res.data:
+            # 404 rather than 403: do not confirm that a doctor_id exists in
+            # some other tenant. The 400-vs-404 difference was an enumeration
+            # oracle for doctor IDs across the whole platform.
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        existing_doctor = owner_res.data[0]
+
         # Branch-scoped staff check on existing doctor
         if user.role == "staff" and user.branch_id:
             doc_branches = (
-        # unscoped: doctor branch association
-                supabase.table("doctor_branches")
+        # doctor_branches has no clinic_id column; doctor_id ownership was
+        # unscoped: verified against effective_clinic_id by the gate above
+                await sb(supabase.table("doctor_branches")
                 .select("branch_id")
-                .eq("doctor_id", doctor_id)
-                .execute()
+                .eq("doctor_id", doctor_id))
             )
             if doc_branches.data:
                 assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
@@ -1293,17 +1314,15 @@ async def update_doctor(
             query = supabase.table("doctors").update(update_data)
             if effective_clinic_id != "default":
                 query = query.eq("clinic_id", effective_clinic_id)
-            result = query.eq("id", doctor_id).execute()
+            result = await sb(query.eq("id", doctor_id))
             if not result.data:
                 raise HTTPException(status_code=404, detail="Doctor not found")
             updated_doctor = result.data[0]
         else:
-            # Only branch change, fetch the doctor for response
-            # unscoped: tenant-scoped operation with verified clinic authorization
-            result = supabase.table("doctors").select("*").eq("id", doctor_id).execute()
-            if not result.data:
-                raise HTTPException(status_code=404, detail="Doctor not found")
-            updated_doctor = result.data[0]
+            # Only a branch change was requested. Reuse the row the ownership
+            # gate already fetched — re-reading it here by id alone was the
+            # unscoped cross-tenant read in KA-P1-05.
+            updated_doctor = existing_doctor
 
         # ── Branch assignment upsert ──
         if requested_branch_id is not None:
@@ -1311,11 +1330,10 @@ async def update_doctor(
 
             branch_check = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("branches")
+                await sb(supabase.table("branches")
                 .select("id")
                 .eq("id", requested_branch_id)
-                .eq("clinic_id", doc_clinic_id)
-                .execute()
+                .eq("clinic_id", doc_clinic_id))
             )
             if not branch_check.data:
                 raise HTTPException(
@@ -1327,13 +1345,13 @@ async def update_doctor(
 
             # scoped: clear doctor branch associations for validated doctor
         # unscoped: doctor branch association
-            supabase.table("doctor_branches").delete().eq("doctor_id", doctor_id).execute()
+            await sb(supabase.table("doctor_branches").delete().eq("doctor_id", doctor_id))
         # unscoped: doctor branch association
-            supabase.table("doctor_branches").insert({
+            await sb(supabase.table("doctor_branches").insert({
                 "doctor_id": doctor_id,
                 "branch_id": requested_branch_id,
                 "session": session_val,
-            }).execute()
+            }))
             updated_doctor["branch_id"] = requested_branch_id
             updated_doctor["branch_session"] = session_val
 
@@ -1375,10 +1393,9 @@ async def delete_doctor(
         if user.role == "staff" and user.branch_id:
             doc_branches = (
         # unscoped: doctor branch association
-                supabase.table("doctor_branches")
+                await sb(supabase.table("doctor_branches")
                 .select("branch_id")
-                .eq("doctor_id", doctor_id)
-                .execute()
+                .eq("doctor_id", doctor_id))
             )
             if doc_branches.data:
                 assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
@@ -1391,7 +1408,7 @@ async def delete_doctor(
         query = supabase.table("doctors").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        query.eq("id", doctor_id).execute()
+        await sb(query.eq("id", doctor_id))
 
         client_ip = request.client.host if (request and request.client) else "unknown"
         await log_admin_action(
@@ -1426,7 +1443,7 @@ async def get_lab_tests_admin(
             query = query.eq("clinic_id", effective_clinic_id)
         if branch_id:
             query = query.eq("branch_id", branch_id)
-        result = query.order("name").limit(2000).execute()
+        result = await sb(query.order("name").limit(2000))
         return result.data or []
     except Exception as e:
         logger.error(f"Error fetching lab tests for clinic_id={effective_clinic_id}: {e}")
@@ -1449,11 +1466,10 @@ async def create_lab_test(
             enforce_branch_scope(user, test.branch_id)
             branch_check = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("branches")
+                await sb(supabase.table("branches")
                 .select("id")
                 .eq("id", test.branch_id)
-                .eq("clinic_id", effective_clinic_id)
-                .execute()
+                .eq("clinic_id", effective_clinic_id))
             )
             if not branch_check.data:
                 raise HTTPException(
@@ -1468,7 +1484,7 @@ async def create_lab_test(
         test_data["clinic_id"] = effective_clinic_id
 
         # unscoped: insert lab test with effective_clinic_id
-        result = supabase.table("lab_tests").insert(test_data).execute()
+        result = await sb(supabase.table("lab_tests").insert(test_data))
         new_test = result.data[0]
 
         client_ip = request.client.host if (request and request.client) else "unknown"
@@ -1519,7 +1535,7 @@ async def update_lab_test(
         query = supabase.table("lab_tests").update(update_data)
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.eq("id", test_id).execute()
+        result = await sb(query.eq("id", test_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Lab test not found")
 
@@ -1556,7 +1572,7 @@ async def delete_lab_test(
         query = supabase.table("lab_tests").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.eq("id", test_id).execute()
+        result = await sb(query.eq("id", test_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Lab test not found")
 
@@ -1824,7 +1840,7 @@ async def import_lab_tests_csv(
         raise HTTPException(status_code=400, detail="CSV contains no valid data rows.")
 
     # unscoped: fetching existing lab test names within verified clinic scope for upsert matching
-    existing_result = supabase.table("lab_tests").select("id, name").eq("clinic_id", effective_clinic_id).execute()
+    existing_result = await sb(supabase.table("lab_tests").select("id, name").eq("clinic_id", effective_clinic_id))
     existing_map = {r["name"].lower(): r["id"] for r in (existing_result.data or [])}
 
     created, updated = 0, 0
@@ -1832,11 +1848,11 @@ async def import_lab_tests_csv(
         name_lower = test_data["name"].lower()
         if name_lower in existing_map:
             # unscoped: updating existing lab test within verified clinic
-            supabase.table("lab_tests").update(test_data).eq("id", existing_map[name_lower]).execute()
+            await sb(supabase.table("lab_tests").update(test_data).eq("id", existing_map[name_lower]))
             updated += 1
         else:
             # unscoped: inserting new lab test within verified clinic
-            supabase.table("lab_tests").insert(test_data).execute()
+            await sb(supabase.table("lab_tests").insert(test_data))
             created += 1
 
     await log_admin_action(
@@ -1897,27 +1913,26 @@ async def update_lab_collection_window(
             enforce_branch_scope(user, branch_id)
             branch_result = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("branches")
+                await sb(supabase.table("branches")
                 .select("config")
                 .eq("id", branch_id)
-                .eq("clinic_id", effective_clinic_id)
-                .execute()
+                .eq("clinic_id", effective_clinic_id))
             )
             if not branch_result.data:
                 raise HTTPException(status_code=404, detail="Branch not found")
             config = branch_result.data[0].get("config") or {}
             config["lab_collection"] = window
             # unscoped: updating branch configuration by branch_id within verified clinic
-            supabase.table("branches").update({"config": config}).eq("id", branch_id).execute()
+            await sb(supabase.table("branches").update({"config": config}).eq("id", branch_id))
         else:
             # unscoped: updating clinic configuration by clinic_id within verified clinic
-            clinic_result = supabase.table("clinics").select("config").eq("id", effective_clinic_id).execute()
+            clinic_result = await sb(supabase.table("clinics").select("config").eq("id", effective_clinic_id))
             if not clinic_result.data:
                 raise HTTPException(status_code=404, detail="Clinic not found")
             config = clinic_result.data[0].get("config") or {}
             config["lab_collection"] = window
             # unscoped: updating clinic configuration by clinic_id within verified clinic
-            supabase.table("clinics").update({"config": config}).eq("id", effective_clinic_id).execute()
+            await sb(supabase.table("clinics").update({"config": config}).eq("id", effective_clinic_id))
 
         return {"success": True, "lab_collection": window}
     except HTTPException:
@@ -1944,7 +1959,7 @@ async def get_leaves(
             query = query.eq("clinic_id", effective_clinic_id)
         if doctor:
             query = query.eq("doctor_name", doctor)
-        result = query.order("leave_date").limit(2000).execute()
+        result = await sb(query.order("leave_date").limit(2000))
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting leaves: {e}")
@@ -1968,20 +1983,18 @@ async def create_leave(
         if user.role == "staff" and user.branch_id:
             doc_res = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("id")
                 .eq("name", leave.doctor_name)
-                .eq("clinic_id", effective_clinic_id)
-                .execute()
+                .eq("clinic_id", effective_clinic_id))
             )
             if doc_res.data:
                 doc_id = doc_res.data[0]["id"]
                 doc_branches = (
         # unscoped: doctor branch association
-                    supabase.table("doctor_branches")
+                    await sb(supabase.table("doctor_branches")
                     .select("branch_id")
-                    .eq("doctor_id", doc_id)
-                    .execute()
+                    .eq("doctor_id", doc_id))
                 )
                 if doc_branches.data:
                     assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
@@ -2013,7 +2026,7 @@ async def create_leave(
             current_date += timedelta(days=1)
 
         # unscoped: insert doctor leaves for validated doctor
-        result = supabase.table("doctor_leaves").insert(leaves_to_insert).execute()
+        result = await sb(supabase.table("doctor_leaves").insert(leaves_to_insert))
 
         client_ip = request.client.host if (request and request.client) else "unknown"
         await log_admin_action(
@@ -2048,29 +2061,26 @@ async def delete_leave(
         if user.role == "staff" and user.branch_id:
             leave_res = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("doctor_leaves")
+                await sb(supabase.table("doctor_leaves")
                 .select("doctor_name, clinic_id")
-                .eq("id", leave_id)
-                .execute()
+                .eq("id", leave_id))
             )
             if leave_res.data:
                 doc_name = leave_res.data[0]["doctor_name"]
                 doc_res = (
                     # unscoped: tenant-scoped operation with verified clinic authorization
-                    supabase.table("doctors")
+                    await sb(supabase.table("doctors")
                     .select("id")
                     .eq("name", doc_name)
-                    .eq("clinic_id", leave_res.data[0]["clinic_id"])
-                    .execute()
+                    .eq("clinic_id", leave_res.data[0]["clinic_id"]))
                 )
                 if doc_res.data:
                     doc_id = doc_res.data[0]["id"]
                     doc_branches = (
         # unscoped: doctor branch association
-                        supabase.table("doctor_branches")
+                        await sb(supabase.table("doctor_branches")
                         .select("branch_id")
-                        .eq("doctor_id", doc_id)
-                        .execute()
+                        .eq("doctor_id", doc_id))
                     )
                     if doc_branches.data:
                         assigned_branch_ids = [str(b["branch_id"]) for b in doc_branches.data]
@@ -2084,7 +2094,7 @@ async def delete_leave(
         query = supabase.table("doctor_leaves").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        query.eq("id", leave_id).execute()
+        await sb(query.eq("id", leave_id))
 
         client_ip = request.client.host if (request and request.client) else "unknown"
         await log_admin_action(
@@ -2114,7 +2124,7 @@ async def get_holidays(
         query = supabase.table("hospital_holidays").select("*").order("holiday_date")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.limit(2000).execute()
+        result = await sb(query.limit(2000))
         return result.data or []
     except Exception as e:
         logger.error(f"Error getting holidays: {e}")
@@ -2134,15 +2144,14 @@ async def create_holiday(
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         result = (
             # unscoped: inserting hospital holiday record with explicit clinic_id
-            supabase.table("hospital_holidays")
+            await sb(supabase.table("hospital_holidays")
             .insert(
                 {
                     "clinic_id": effective_clinic_id,
                     "holiday_date": str(holiday_date),
                     "name": name,
                 }
-            )
-            .execute()
+            ))
         )
 
         client_ip = request.client.host if (request and request.client) else "unknown"
@@ -2177,7 +2186,7 @@ async def delete_holiday(
         query = supabase.table("hospital_holidays").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        query.eq("holiday_date", holiday_date).execute()
+        await sb(query.eq("holiday_date", holiday_date))
 
         client_ip = request.client.host if (request and request.client) else "unknown"
         await log_admin_action(
@@ -2377,7 +2386,7 @@ async def upload_lab_report(
                 f"Admin manual lab report upload held for review: {match_res.review_reason}"
             )
             # unscoped: inserting manual lab report upload with explicit clinic_id
-            nr_insert = supabase.table("lab_reports").insert({
+            nr_insert = await sb(supabase.table("lab_reports").insert({
                 "clinic_id": effective_clinic_id,
                 "patient_phone": effective_phone,
                 "patient_name": effective_name,
@@ -2387,7 +2396,7 @@ async def upload_lab_report(
                 "status": "needs_review",
                 "match_source": match_res.match_source,
                 "error_message": match_res.review_reason,
-            }).execute()
+            }))
             nr_id = nr_insert.data[0].get("id") if (nr_insert.data and isinstance(nr_insert.data, list)) else None
             return {
                 "success": True,
@@ -2463,10 +2472,10 @@ async def get_patients(
     """Get all patients with appointment counts."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        result = supabase.rpc(
+        result = await sb(supabase.rpc(
             "get_patients_with_counts",
             {"p_clinic_id": effective_clinic_id},
-        ).execute()
+        ))
         if result.data:
             return {"patients": result.data}
         if effective_clinic_id == "default" and user.role == "super_admin":
@@ -2475,20 +2484,18 @@ async def get_patients(
             # sentinel landed here and read the rows of every tenant (KRIYA-002).
             patients = (
                 # unscoped: super_admin platform-wide view limited to 2000 rows
-                supabase.table("patients")
+                await sb(supabase.table("patients")
                 .select("*")
                 .order("phone")
-                .limit(2000)          # T3.4: no admin read may be unbounded
-                .execute()
+                .limit(2000))
             )
         else:
             patients = (
                 # unscoped: tenant-scoped query filtered by clinic_id
-                supabase.table("patients")
+                await sb(supabase.table("patients")
                 .select("*")
                 .eq("clinic_id", effective_clinic_id)
-                .order("phone")
-                .execute()
+                .order("phone"))
             )
         return {"patients": patients.data or []}
     except Exception:
@@ -2496,20 +2503,18 @@ async def get_patients(
         if effective_clinic_id == "default" and user.role == "super_admin":
             patients = (
                 # unscoped: super_admin platform-wide view limited to 2000 rows
-                supabase.table("patients")
+                await sb(supabase.table("patients")
                 .select("*")
                 .order("phone")
-                .limit(2000)          # T3.4: no admin read may be unbounded
-                .execute()
+                .limit(2000))
             )
         else:
             patients = (
                 # unscoped: tenant-scoped query filtered by clinic_id
-                supabase.table("patients")
+                await sb(supabase.table("patients")
                 .select("*")
                 .eq("clinic_id", effective_clinic_id)
-                .order("phone")
-                .execute()
+                .order("phone"))
             )
         return {"patients": patients.data or []}
 
@@ -2606,7 +2611,7 @@ async def get_bookings(
             query = query.eq("clinic_id", effective_clinic_id)
         if status:
             query = query.eq("status", status)
-        result = query.order("created_at", desc=True).limit(limit).execute()
+        result = await sb(query.order("created_at", desc=True).limit(limit))
         return {"bookings": result.data or []}
     except Exception as e:
         logger.error(f"Error getting bookings: {e}")
@@ -2627,7 +2632,7 @@ async def get_pending_review_bookings(
         )
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.order("created_at", desc=True).limit(2000).execute()
+        result = await sb(query.order("created_at", desc=True).limit(2000))
         return {"bookings": result.data or []}
     except Exception as e:
         logger.error(f"Error getting pending review bookings: {e}")
@@ -2719,10 +2724,9 @@ async def admin_refund_booking(
         # scoped: fetch booking by id and enforce clinic access below
         booking_result = (
             # unscoped: tenant-scoped operation with verified clinic authorization
-            supabase.table("appointments")
+            await sb(supabase.table("appointments")
             .select("*")
-            .eq("id", booking_id)
-            .execute()
+            .eq("id", booking_id))
         )
         if not booking_result.data:
             raise HTTPException(status_code=404, detail="Booking not found")
@@ -2769,11 +2773,10 @@ async def get_payment_events(
             clinic_id = user.clinic_id or "default"
             booking_check = (
                 # unscoped: tenant-scoped operation with verified clinic authorization
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .select("id")
                 .eq("id", booking_id)
-                .eq("clinic_id", clinic_id)
-                .execute()
+                .eq("clinic_id", clinic_id))
             )
             if not booking_check.data:
                 raise HTTPException(status_code=404, detail="Booking not found")
@@ -2781,11 +2784,10 @@ async def get_payment_events(
         # scoped: fetch payment events for verified booking
         result = (
             # unscoped: tenant-scoped operation with verified clinic authorization
-            supabase.table("payment_events")
+            await sb(supabase.table("payment_events")
             .select("*")
             .eq("booking_id", booking_id)
-            .order("created_at", desc=False)
-            .execute()
+            .order("created_at", desc=False))
         )
         return {"events": result.data or []}
     except HTTPException:
@@ -2834,40 +2836,40 @@ async def get_payment_stats(
             return query
 
         # scoped: total confirmed with payments
-        confirmed = _scope(
+        confirmed = await sb(_scope(
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
             .eq("status", "confirmed")
             .not_.is_("payment_id", "null")
             .gte("created_at", cutoff)
-        ).execute()
+        ))
 
         # scoped: total pending review
-        pending = _scope(
+        pending = await sb(_scope(
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id", count="exact")
             .eq("status", "pending_review")
-        ).execute()
+        ))
 
         # scoped: total refunded
-        refunded = _scope(
+        refunded = await sb(_scope(
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
             .eq("status", "refunded")
             .gte("created_at", cutoff)
-        ).execute()
+        ))
 
         # scoped: total expired
-        expired = _scope(
+        expired = await sb(_scope(
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id", count="exact")
             .eq("status", "expired")
             .gte("created_at", cutoff)
-        ).execute()
+        ))
 
         confirmed_amount = sum(b.get("amount_paise", 0) for b in (confirmed.data or []))
         refunded_amount = sum(b.get("amount_paise", 0) for b in (refunded.data or []))
@@ -2875,11 +2877,10 @@ async def get_payment_stats(
         # global-read: signature failures from payment_events (left platform-wide)
         sig_failures = (
             # unscoped: tenant-scoped operation with verified clinic authorization
-            supabase.table("payment_events")
+            await sb(supabase.table("payment_events")
             .select("id", count="exact")
             .eq("event_type", "signature_failed")
-            .gte("created_at", cutoff)
-            .execute()
+            .gte("created_at", cutoff))
         )
 
         return {
@@ -2987,20 +2988,18 @@ async def update_clinic_profile(
     if (not target_clinic_id or target_clinic_id == "default") and user.role == "super_admin":
         db_clinics = (
             # unscoped: super_admin default clinic lookup
-            supabase.table("clinics")
+            await sb(supabase.table("clinics")
             .select("*")
             .order("created_at")
-            .limit(1)
-            .execute()
+            .limit(1))
         )
         if db_clinics.data:
             target_clinic_id = db_clinics.data[0]["id"]
             result = (
                 # unscoped: super_admin updating default clinic configuration
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .update(row_updates)
-                .eq("id", target_clinic_id)
-                .execute()
+                .eq("id", target_clinic_id))
             )
             if not result.data:
                 raise HTTPException(status_code=404, detail="Clinic not found")
@@ -3008,14 +3007,13 @@ async def update_clinic_profile(
         else:
             insert_res = (
                 # unscoped: super_admin initializing default clinic record
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .insert({
                     "name": row_updates.get("name") or settings.hospital_name,
                     "whatsapp_number": settings.hospital_phone,
                     "plan": "enterprise",
                     "config": cfg,
-                })
-                .execute()
+                }))
             )
             if not insert_res.data:
                 raise HTTPException(
@@ -3026,10 +3024,9 @@ async def update_clinic_profile(
     else:
         result = (
             # unscoped: updating clinic configuration filtered by target_clinic_id
-            supabase.table("clinics")
+            await sb(supabase.table("clinics")
             .update(row_updates)
-            .eq("id", target_clinic_id)
-            .execute()
+            .eq("id", target_clinic_id))
         )
         if not result.data:
             raise HTTPException(status_code=404, detail="Clinic not found")
@@ -3131,20 +3128,18 @@ async def update_payment_settings(
         # Check if any clinic exists in DB
         db_clinics = (
             # unscoped: super_admin default clinic lookup
-            supabase.table("clinics")
+            await sb(supabase.table("clinics")
             .select("*")
             .order("created_at")
-            .limit(1)
-            .execute()
+            .limit(1))
         )
         if db_clinics.data:
             target_clinic_id = db_clinics.data[0]["id"]
             result = (
                 # unscoped: super_admin updating default clinic configuration
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .update({"config": cfg})
-                .eq("id", target_clinic_id)
-                .execute()
+                .eq("id", target_clinic_id))
             )
             if not result.data:
                 raise HTTPException(status_code=404, detail="Clinic not found")
@@ -3153,14 +3148,13 @@ async def update_payment_settings(
             # First-time setup: initialize default clinic record
             insert_res = (
                 # unscoped: super_admin initializing default clinic record
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .insert({
                     "name": settings.hospital_name,
                     "whatsapp_number": settings.hospital_phone,
                     "plan": "enterprise",
                     "config": cfg,
-                })
-                .execute()
+                }))
             )
             if not insert_res.data:
                 raise HTTPException(
@@ -3171,10 +3165,9 @@ async def update_payment_settings(
     else:
         result = (
             # unscoped: updating clinic configuration filtered by target_clinic_id
-            supabase.table("clinics")
+            await sb(supabase.table("clinics")
             .update({"config": cfg})
-            .eq("id", target_clinic_id)
-            .execute()
+            .eq("id", target_clinic_id))
         )
         if not result.data:
             raise HTTPException(status_code=404, detail="Clinic not found")
@@ -3236,7 +3229,7 @@ async def get_connectors(
             query = query.eq("clinic_id", effective_clinic_id)
         if branch_id:
             query = query.eq("branch_id", branch_id)
-        result = query.order("created_at", desc=True).limit(2000).execute()
+        result = await sb(query.order("created_at", desc=True).limit(2000))
         connectors = [_mask_connector(row) for row in (result.data or [])]
         return {"connectors": connectors}
     except Exception as e:
@@ -3288,11 +3281,10 @@ async def upsert_connector_credentials(
     if body.branch_id:
         branch = (
             # unscoped: tenant-scoped operation with verified clinic authorization
-            supabase.table("branches")
+            await sb(supabase.table("branches")
             .select("id")
             .eq("id", body.branch_id)
-            .eq("clinic_id", effective_clinic_id)
-            .execute()
+            .eq("clinic_id", effective_clinic_id))
         )
         if not branch.data:
             raise HTTPException(status_code=404, detail="Branch not found for this clinic")
@@ -3305,7 +3297,7 @@ async def upsert_connector_credentials(
         .eq("connector_type", body.connector_type)
     )
     query = query.eq("branch_id", body.branch_id) if body.branch_id else query.is_("branch_id", "null")
-    existing = query.execute()
+    existing = await sb(query)
     existing_row = existing.data[0] if existing.data else None
 
     cfg = dict(existing_row.get("config") or {}) if existing_row else {}
@@ -3364,10 +3356,9 @@ async def upsert_connector_credentials(
             # scoped: update connector config for validated clinic
             result = (
                 # unscoped: updating integration connector configuration by connector_id
-                supabase.table("integration_connectors")
+                await sb(supabase.table("integration_connectors")
                 .update(update_data)
-                .eq("id", existing_row["id"])
-                .execute()
+                .eq("id", existing_row["id"]))
             )
             if not result.data:
                 raise HTTPException(status_code=500, detail="Update returned no data — row may have been deleted")
@@ -3381,7 +3372,7 @@ async def upsert_connector_credentials(
                 "is_enabled": bool(body.is_enabled) if body.is_enabled is not None else False,
             }
             # unscoped: insert connector for validated clinic
-            result = supabase.table("integration_connectors").insert(insert_data).execute()
+            result = await sb(supabase.table("integration_connectors").insert(insert_data))
             if not result.data:
                 raise HTTPException(status_code=500, detail="Failed to save connector credentials")
             saved = result.data[0]
@@ -3426,10 +3417,9 @@ async def toggle_connector(
     try:
         connector = (
             # unscoped: tenant-scoped operation with verified clinic authorization
-            supabase.table("integration_connectors")
+            await sb(supabase.table("integration_connectors")
             .select("clinic_id")
-            .eq("id", connector_id)
-            .execute()
+            .eq("id", connector_id))
         )
         if not connector.data:
             raise HTTPException(status_code=404, detail="Connector not found")
@@ -3437,15 +3427,14 @@ async def toggle_connector(
 
         result = (
             # unscoped: updating integration connector configuration by connector_id
-            supabase.table("integration_connectors")
+            await sb(supabase.table("integration_connectors")
             .update(
                 {
                     "is_enabled": body.is_enabled,
                     "updated_at": datetime.now().isoformat(),
                 }
             )
-            .eq("id", connector_id)
-            .execute()
+            .eq("id", connector_id))
         )
 
         if not result.data:
@@ -3465,10 +3454,9 @@ async def _load_connector_for_action(connector_id: str, user: "AdminUser", clini
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     row = (
         # unscoped: tenant-scoped operation with verified clinic authorization
-        supabase.table("integration_connectors")
+        await sb(supabase.table("integration_connectors")
         .select("*")
-        .eq("id", connector_id)
-        .execute()
+        .eq("id", connector_id))
     )
     if not row.data:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -3645,11 +3633,10 @@ async def get_connector_audit_log(
         # First get the connector to find its clinic_id, type and branch
         connector = (
             # unscoped: tenant-scoped operation with verified clinic authorization
-            supabase.table("integration_connectors")
+            await sb(supabase.table("integration_connectors")
             .select("clinic_id, connector_type, branch_id")
             .eq("id", connector_id)
-            .single()
-            .execute()
+            .single())
         )
 
         if not connector.data:
@@ -3665,7 +3652,7 @@ async def get_connector_audit_log(
         )
         branch_id = connector.data.get("branch_id")
         query = query.eq("branch_id", branch_id) if branch_id else query.is_("branch_id", "null")
-        logs = query.order("created_at", desc=True).limit(limit).execute()
+        logs = await sb(query.order("created_at", desc=True).limit(limit))
 
         return {"audit_log": logs.data or []}
     except HTTPException:
@@ -3694,7 +3681,7 @@ async def get_connector_failed_reports(
             query = query.eq("branch_id", branch_id)
         if unresolved_only:
             query = query.is_("resolved_at", "null")
-        result = query.order("last_attempt_at", desc=True).limit(2000).execute()
+        result = await sb(query.order("last_attempt_at", desc=True).limit(2000))
         return {"failed_reports": result.data or []}
     except Exception as e:
         logger.error(f"Failed to get connector failed reports: {e}")
@@ -3717,7 +3704,7 @@ async def resolve_connector_failed_report(
         ).eq("id", failed_report_id)
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.execute()
+        result = await sb(query)
         if not result.data:
             raise HTTPException(status_code=404, detail="Failed report not found")
         return {"success": True, "failed_report": result.data[0]}
@@ -3769,7 +3756,7 @@ async def get_diagnostic_reports_queue(
         else:
             lr_query = lr_query.in_("status", ["needs_review", "failed"])
 
-        lr_res = lr_query.order("uploaded_at", desc=True).limit(100).execute()
+        lr_res = await sb(lr_query.order("uploaded_at", desc=True).limit(100))
         lab_reports_queue = lr_res.data or []
 
         # 2. Fetch connector_failed_reports that are unresolved
@@ -3779,7 +3766,7 @@ async def get_diagnostic_reports_queue(
             cfr_query = cfr_query.eq("clinic_id", effective_clinic_id)
         if target_branch:
             cfr_query = cfr_query.eq("branch_id", target_branch)
-        cfr_res = cfr_query.order("last_attempt_at", desc=True).limit(50).execute()
+        cfr_res = await sb(cfr_query.order("last_attempt_at", desc=True).limit(50))
         connector_failures = cfr_res.data or []
 
         return {
@@ -3806,10 +3793,9 @@ async def resolve_report_match(
 
     existing = (
         # unscoped: tenant-scoped operation with verified clinic authorization
-        supabase.table("lab_reports")
+        await sb(supabase.table("lab_reports")
         .select("*")
-        .eq("id", report_id)
-        .execute()
+        .eq("id", report_id))
     )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -3836,7 +3822,7 @@ async def resolve_report_match(
             lab_service = LabReportService()
             # scoped: update lab report queue item
             # unscoped: update lab report queue item
-            supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
+            await sb(supabase.table("lab_reports").update(update_payload).eq("id", report_id))
             await lab_service.resend_report(report_id, new_phone=norm_phone)
             update_payload["status"] = "sent"
         except Exception as e:
@@ -3844,10 +3830,10 @@ async def resolve_report_match(
             update_payload["status"] = "failed"
             update_payload["error_message"] = str(e)
             # unscoped: update lab report queue item
-            supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
+            await sb(supabase.table("lab_reports").update(update_payload).eq("id", report_id))
     else:
             # unscoped: update lab report queue item
-        supabase.table("lab_reports").update(update_payload).eq("id", report_id).execute()
+        await sb(supabase.table("lab_reports").update(update_payload).eq("id", report_id))
 
     client_ip = request.client.host if request and request.client else "unknown"
     await log_admin_action(
@@ -3885,10 +3871,9 @@ async def resend_lab_report(
 
     existing = (
         # unscoped: tenant-scoped operation with verified clinic authorization
-        supabase.table("lab_reports")
+        await sb(supabase.table("lab_reports")
         .select("*")
-        .eq("id", report_id)
-        .execute()
+        .eq("id", report_id))
     )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -3955,7 +3940,7 @@ async def get_lab_report_deliveries(
             query = supabase.table("lab_reports").select(cols)
             if effective_clinic_id != "default":
                 query = query.eq("clinic_id", effective_clinic_id)
-            res = query.order("uploaded_at", desc=True).limit(2000).execute()
+            res = await sb(query.order("uploaded_at", desc=True).limit(2000))
             all_records = res.data or []
         except Exception:
             # Fallback for older schema variations
@@ -3964,14 +3949,14 @@ async def get_lab_report_deliveries(
                 query = supabase.table("lab_reports").select("*")
                 if effective_clinic_id != "default":
                     query = query.eq("clinic_id", effective_clinic_id)
-                res = query.order("uploaded_at", desc=True).limit(2000).execute()
+                res = await sb(query.order("uploaded_at", desc=True).limit(2000))
                 all_records = res.data or []
             except Exception:
                 # unscoped: tenant-scoped operation with verified clinic authorization
                 query = supabase.table("lab_reports").select("*")
                 if effective_clinic_id != "default":
                     query = query.eq("clinic_id", effective_clinic_id)
-                res = query.limit(2000).execute()
+                res = await sb(query.limit(2000))
                 all_records = res.data or []
 
         # Sort newest first using either uploaded_at or sent_at
@@ -4086,7 +4071,7 @@ async def get_diagnostic_stats(
         if effective_clinic_id != "default":
             lr_query = lr_query.eq("clinic_id", effective_clinic_id)
 
-        lr_res = lr_query.order("uploaded_at", desc=True).limit(5000).execute()
+        lr_res = await sb(lr_query.order("uploaded_at", desc=True).limit(5000))
         today_reports = lr_res.data or []
 
         sent_today = sum(1 for r in today_reports if r.get("status") == "sent")
@@ -4140,7 +4125,7 @@ async def get_diagnostic_stats(
             conn_query = conn_query.eq("clinic_id", effective_clinic_id)
         if target_branch:
             conn_query = conn_query.eq("branch_id", target_branch)
-        conn_res = conn_query.execute()
+        conn_res = await sb(conn_query)
         connectors = sorted(conn_res.data or [], key=lambda c: c.get("updated_at") or "", reverse=True)
 
         evaluated = []
@@ -4244,7 +4229,7 @@ async def get_admin_audit_logs(
         query = supabase.table("admin_audit_logs").select("*")
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.order("created_at", desc=True).limit(limit).execute()
+        result = await sb(query.order("created_at", desc=True).limit(limit))
         return {"audit_logs": result.data or []}
     except Exception as e:
         logger.error(f"Failed to get admin audit logs: {e}")
@@ -4267,7 +4252,7 @@ async def get_branches(
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
         query = query.order("display_order").limit(2000)
-        result = query.execute()
+        result = await sb(query)
         return {"branches": result.data or []}
     except Exception as e:
         logger.error(f"Error getting branches: {e}")
@@ -4294,11 +4279,10 @@ async def create_branch(
             try:
                 clinic_result = (
                     # unscoped: tenant-scoped operation with verified clinic authorization
-                    supabase.table("clinics")
+                    await sb(supabase.table("clinics")
                     .select("name")
                     .eq("id", effective_clinic_id)
-                    .limit(1)
-                    .execute()
+                    .limit(1))
                 )
                 clinic_name = (
                     clinic_result.data[0]["name"]
@@ -4311,7 +4295,7 @@ async def create_branch(
 
         branch_data["clinic_id"] = effective_clinic_id
         # unscoped: inserting new branch record with explicit clinic_id
-        result = supabase.table("branches").insert(branch_data).execute()
+        result = await sb(supabase.table("branches").insert(branch_data))
 
         # Invalidate branch cache
         from app.services.tenant import invalidate_branch_cache
@@ -4351,11 +4335,10 @@ async def update_branch(
             try:
                 clinic_result = (
                     # unscoped: tenant-scoped operation with verified clinic authorization
-                    supabase.table("clinics")
+                    await sb(supabase.table("clinics")
                     .select("name")
                     .eq("id", effective_clinic_id)
-                    .limit(1)
-                    .execute()
+                    .limit(1))
                 )
                 clinic_name = (
                     clinic_result.data[0]["name"]
@@ -4370,7 +4353,7 @@ async def update_branch(
         query = supabase.table("branches").update(update_data)
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        result = query.eq("id", branch_id).execute()
+        result = await sb(query.eq("id", branch_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Branch not found")
 
@@ -4407,13 +4390,13 @@ async def delete_branch(
 
         for table in _BRANCH_DEPENDENT_TABLES:
             # unscoped: tenant-scoped operation with verified clinic authorization
-            dep = supabase.table(table).select("id").eq("branch_id", branch_id).limit(1).execute()
+            dep = await sb(supabase.table(table).select("id").eq("branch_id", branch_id).limit(1))
             if dep.data:
                 # unscoped: updating branch configuration by branch_id within verified clinic
                 query = supabase.table("branches").update({"is_active": False})
                 if effective_clinic_id != "default":
                     query = query.eq("clinic_id", effective_clinic_id)
-                query.eq("id", branch_id).execute()
+                await sb(query.eq("id", branch_id))
                 invalidate_branch_cache(effective_clinic_id)
                 label = table.replace("_", " ")
                 return {
@@ -4426,7 +4409,7 @@ async def delete_branch(
         query = supabase.table("branches").delete()
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
-        query.eq("id", branch_id).execute()
+        await sb(query.eq("id", branch_id))
         invalidate_branch_cache(effective_clinic_id)
 
         return {"success": True, "deleted": True, "message": "Branch permanently deleted."}
@@ -4445,10 +4428,9 @@ async def get_branch_doctors(
     try:
         result = (
         # unscoped: doctor branch association
-            supabase.table("doctor_branches")
+            await sb(supabase.table("doctor_branches")
             .select("*, doctors(*)")
-            .eq("branch_id", branch_id)
-            .execute()
+            .eq("branch_id", branch_id))
         )
         return {"doctor_branches": result.data or []}
     except HTTPException:
@@ -4474,7 +4456,7 @@ async def assign_doctor_to_branch(
     doc_query = supabase.table("doctors").select("id").eq("id", body.doctor_id)
     if branch_clinic_id:
         doc_query = doc_query.eq("clinic_id", branch_clinic_id)
-    doc_res = doc_query.execute()
+    doc_res = await sb(doc_query)
     if not doc_res.data:
         raise HTTPException(status_code=404, detail="Doctor not found in this clinic")
 
@@ -4485,7 +4467,7 @@ async def assign_doctor_to_branch(
             "session": body.session,
         }
         # unscoped: assign doctor to branch for validated branch
-        result = supabase.table("doctor_branches").insert(data).execute()
+        result = await sb(supabase.table("doctor_branches").insert(data))
 
         client_ip = request.client.host if request.client else "unknown"
         await log_admin_action(
@@ -4522,9 +4504,9 @@ async def remove_doctor_from_branch(
     branch = resolve_owned_branch(user, branch_id)
     try:
         # unscoped: doctor branch association
-        supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
+        await sb(supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
             "doctor_id", doctor_id
-        ).execute()
+        ))
 
         client_ip = request.client.host if request.client else "unknown"
         await log_admin_action(
@@ -4559,11 +4541,10 @@ async def update_doctor_branch_session(
     try:
         result = (
         # unscoped: doctor branch association
-            supabase.table("doctor_branches")
+            await sb(supabase.table("doctor_branches")
             .update({"session": body.session})
             .eq("branch_id", branch_id)
-            .eq("doctor_id", doctor_id)
-            .execute()
+            .eq("doctor_id", doctor_id))
         )
         if not result.data:
             raise HTTPException(

@@ -52,6 +52,7 @@ from app.utils.connector_crypto import (
 from app.services.patient_match import patient_match_service
 from app.services.distributed_lock import distributed_job_lock
 from connectors.mocdoc.worker import MocDocConnector
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger("connectors")
 
@@ -121,14 +122,13 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
         # This eliminates the TOCTOU race where two workers could both
         # read "unlocked" and then both write their lock.
         update_result = (
-            supabase.table("integration_connectors")
+            await sb(supabase.table("integration_connectors")
             .update({
                 "locked_at": now_str,
                 "locked_by": worker_id,
             })
             .eq("id", connector_id)
-            .or_(f"locked_at.is.null,locked_at.lt.{lease_cutoff}")
-            .execute()
+            .or_(f"locked_at.is.null,locked_at.lt.{lease_cutoff}"))
         )
 
         if update_result.data:
@@ -138,10 +138,9 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
         # Lock is held by another process — compute remaining TTL
         try:
             res = (
-                supabase.table("integration_connectors")
+                await sb(supabase.table("integration_connectors")
                 .select("locked_at")
-                .eq("id", connector_id)
-                .execute()
+                .eq("id", connector_id))
             )
             if res.data and res.data[0].get("locked_at"):
                 dt = datetime.fromisoformat(res.data[0]["locked_at"].replace("Z", "+00:00"))
@@ -172,9 +171,9 @@ async def renew_connector_lock(connector_id: str) -> None:
     if connector_id not in _locks_held_by_this_process:
         return
     try:
-        supabase.table("integration_connectors").update({
+        await sb(supabase.table("integration_connectors").update({
             "locked_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", connector_id).execute()
+        }).eq("id", connector_id))
     except Exception as e:
         logger.warning(f"Could not renew lock for connector {connector_id}: {e}")
 
@@ -182,10 +181,10 @@ async def renew_connector_lock(connector_id: str) -> None:
 async def release_connector_lock(connector_id: str) -> None:
     """Release distributed advisory lock on connector record."""
     try:
-        supabase.table("integration_connectors").update({
+        await sb(supabase.table("integration_connectors").update({
             "locked_at": None,
             "locked_by": None,
-        }).eq("id", connector_id).execute()
+        }).eq("id", connector_id))
     except Exception as e:
         logger.warning(f"Could not release lock for connector {connector_id}: {e}")
     finally:
@@ -224,7 +223,7 @@ async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) 
             .eq("clinic_id", clinic_id)
             .eq("connector_type", "mocdoc")
         )
-        connector = _scope_by_branch(query, branch_id).single().execute()
+        connector = await sb(_scope_by_branch(query, branch_id).single())
 
         admin_phone = connector.data.get("config", {}).get("admin_alert_phone")
         if not admin_phone:
@@ -304,19 +303,19 @@ async def record_report_failure(
             .eq("connector_type", connector_type)
             .eq("external_report_id", external_report_id)
         )
-        existing = _scope_by_branch(query, branch_id).execute()
+        existing = await sb(_scope_by_branch(query, branch_id))
 
         if existing.data and len(existing.data) > 0:
             row = existing.data[0]
             new_count = row.get("failure_count", 0) + 1
-            supabase.table("connector_failed_reports").update(
+            await sb(supabase.table("connector_failed_reports").update(
                 {
                     "failure_count": new_count,
                     "last_error": error_message,
                     "last_attempt_at": now,
                     "resolved_at": None,
                 }
-            ).eq("id", row["id"]).execute()
+            ).eq("id", row["id"]))
 
             if new_count >= alert_threshold and row.get("failure_count", 0) < alert_threshold:
                 alert_msg = (
@@ -328,7 +327,7 @@ async def record_report_failure(
                 )
                 await send_admin_alert(clinic_id, alert_msg, branch_id=branch_id)
         else:
-            supabase.table("connector_failed_reports").insert(
+            await sb(supabase.table("connector_failed_reports").insert(
                 {
                     "clinic_id": clinic_id,
                     "connector_type": connector_type,
@@ -342,7 +341,7 @@ async def record_report_failure(
                     "resolved_at": None,
                     "branch_id": branch_id,
                 }
-            ).execute()
+            ))
     except Exception as e:
         logger.error(f"Failed to record report failure: {e}")
 
@@ -363,7 +362,7 @@ async def record_report_success(
             .eq("connector_type", connector_type)
             .eq("external_report_id", external_report_id)
         )
-        _scope_by_branch(query, branch_id).is_("resolved_at", "null").execute()
+        await sb(_scope_by_branch(query, branch_id).is_("resolved_at", "null"))
     except Exception as e:
         logger.error(f"Failed to resolve report failure tracking: {e}")
 
@@ -434,7 +433,7 @@ async def run_connector(
             .eq("clinic_id", clinic_id)
             .eq("connector_type", connector_type)
         )
-        result = _scope_by_branch(query, branch_id).single().execute()
+        result = await sb(_scope_by_branch(query, branch_id).single())
 
         if not result.data:
             logger.error(f"No connector config found for clinic {clinic_id}")
@@ -617,7 +616,7 @@ async def run_connector(
                         f"NEEDS_REVIEW for report {meta.external_report_id}: {match_result.review_reason}"
                     )
                     try:
-                        supabase.table("lab_reports").insert({
+                        await sb(supabase.table("lab_reports").insert({
                             "clinic_id": clinic_id,
                             "patient_phone": meta.patient_phone or "MISSING",
                             "patient_name": meta.patient_name or "Unknown",
@@ -630,7 +629,7 @@ async def run_connector(
                             "match_confidence": match_result.match_confidence,
                             "match_source": match_result.match_source,
                             "error_message": match_result.review_reason,
-                        }).execute()
+                        }))
                     except Exception as e_nr:
                         logger.error(f"Failed to record needs_review row: {e_nr}")
 
@@ -753,12 +752,12 @@ async def run_connector(
                     "reports_failed", "duration_ms", "error_message"
                 }
                 audit_row = {k: v for k, v in summary.items() if k in allowed_audit_cols}
-                supabase.table("connector_audit_log").insert({
+                await sb(supabase.table("connector_audit_log").insert({
                     "clinic_id": clinic_id,
                     "connector_type": connector_type,
                     "branch_id": branch_id,
                     **audit_row,
-                }).execute()
+                }))
             except Exception as e:
                 logger.error(f"Failed to save audit log: {e}")
 
@@ -783,7 +782,7 @@ async def run_connector(
                     .eq("clinic_id", clinic_id)
                     .eq("connector_type", connector_type)
                 )
-                _scope_by_branch(update_query, branch_id).execute()
+                await sb(_scope_by_branch(update_query, branch_id))
             except Exception as e:
                 logger.error(f"Failed to update connector timestamps: {e}")
 
@@ -814,10 +813,9 @@ async def run_all_connectors() -> None:
     """
     logger.info("=== Polling all enabled connectors ===")
 
-    result = supabase.table("integration_connectors") \
+    result = await sb(supabase.table("integration_connectors") \
         .select("clinic_id, connector_type, branch_id, config, last_run_at") \
-        .eq("is_enabled", True) \
-        .execute()
+        .eq("is_enabled", True))
 
     connectors = result.data or []
 
@@ -878,12 +876,11 @@ async def cleanup_expired_storage() -> None:
         try:
             while time.time() - start_time < max_duration_seconds:
                 old_reports = (
-                    supabase.table("lab_reports")
+                    await sb(supabase.table("lab_reports")
                     .select("id, file_path")
                     .lt("uploaded_at", cutoff.isoformat())
                     .not_.is_("file_path", "null")
-                    .limit(500)
-                    .execute()
+                    .limit(500))
                 )
 
                 if not old_reports.data:
@@ -895,9 +892,9 @@ async def cleanup_expired_storage() -> None:
                         file_path = report.get("file_path")
                         if file_path:
                             supabase.storage.from_("lab-reports").remove([file_path])
-                            supabase.table("lab_reports").update({
+                            await sb(supabase.table("lab_reports").update({
                                 "file_path": None,
-                            }).eq("id", report["id"]).execute()
+                            }).eq("id", report["id"]))
                             batch_deleted += 1
                     except Exception as e:
                         logger.warning(f"Failed to delete {report.get('file_path')}: {e}")
@@ -913,10 +910,9 @@ async def cleanup_expired_storage() -> None:
 
         # Also clean old audit logs (90 days)
         try:
-            supabase.table("connector_audit_log") \
+            await sb(supabase.table("connector_audit_log") \
                 .delete() \
-                .lt("created_at", cutoff.isoformat()) \
-                .execute()
+                .lt("created_at", cutoff.isoformat()))
             logger.info("Cleaned up old audit log entries")
         except Exception as e:
             logger.warning(f"Audit log cleanup failed: {e}")

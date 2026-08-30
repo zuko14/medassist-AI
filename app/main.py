@@ -72,6 +72,19 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting MediAssist AI...")
 
+    # Off-loop database execution (T5.1 / KA-P1-03). app.database._DB_EXECUTOR
+    # is a dedicated, module-level pool sized from settings.db_thread_pool_size
+    # — deliberately NOT the loop's default executor, which Starlette also uses
+    # for sync endpoints, and NOT AnyIO's limiter, which governs a different
+    # pool entirely. Logged at boot so the per-process database concurrency
+    # ceiling is visible in the startup record.
+    from app.database import _DB_EXECUTOR
+
+    logger.info(
+        f"DB executor ready: {_DB_EXECUTOR._max_workers} worker threads "
+        f"(per-process query concurrency ceiling)"
+    )
+
     # Security audit log on startup
     if not settings.meta_app_secret:
         logger.warning(
@@ -156,7 +169,7 @@ async def lifespan(app: FastAPI):
             highest_file_num = int(highest_file[:3])
 
             # 2. Query highest applied migration from DB
-            result = supabase.table("schema_migrations").select("name").order("name", desc=True).limit(1).execute()
+            result = await sb(supabase.table("schema_migrations").select("name").order("name", desc=True).limit(1))
             if not result.data:
                 raise RuntimeError("schema_migrations table is empty — no migrations applied")
             highest_applied = result.data[0]["name"]
@@ -172,9 +185,9 @@ async def lifespan(app: FastAPI):
                 )
 
             # 4. Verify critical tables still exist (regression guard)
-            supabase.table("inbound_messages").select("id").limit(1).execute()
-            supabase.table("scheduler_locks").select("job_name").limit(1).execute()
-            supabase.table("appointments").select("refund_id").limit(1).execute()
+            await sb(supabase.table("inbound_messages").select("id").limit(1))
+            await sb(supabase.table("scheduler_locks").select("job_name").limit(1))
+            await sb(supabase.table("appointments").select("refund_id").limit(1))
 
             logger.info(
                 f"✅ Schema pre-flight passed: DB at {highest_applied} "
@@ -207,6 +220,41 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Shutting down MediAssist AI...")
+
+    # Drain in-flight background work before the worker exits (KA-P1-04).
+    # FastAPI BackgroundTasks and spawn_background_task() coroutines run on
+    # this event loop AFTER the response is sent. A rolling deploy that tears
+    # the loop down mid-flight abandons them; the durable-queue sweep then has
+    # to recover the message, which is the slow path and — before T0.2 — the
+    # lossy one. Bounded so a wedged task cannot block the deploy indefinitely.
+    try:
+        import asyncio as _asyncio
+        from app.utils.async_tasks import _BACKGROUND_TASKS
+
+        running_loop = _asyncio.get_running_loop()
+        # Only tasks belonging to THIS loop can be awaited here. A task bound to
+        # a different (or already closed) loop cannot be waited on — asyncio.wait
+        # would raise or block until the timeout, delaying every shutdown.
+        # _BACKGROUND_TASKS is a module-level set, so a foreign task is not
+        # hypothetical: anything spawned under a previous loop stays in it.
+        pending = [
+            t
+            for t in list(_BACKGROUND_TASKS)
+            if not t.done() and t.get_loop() is running_loop
+        ]
+        if pending:
+            logger.info(f"Draining {len(pending)} in-flight background task(s)...")
+            done, still_running = await _asyncio.wait(pending, timeout=10.0)
+            if still_running:
+                logger.warning(
+                    f"{len(still_running)} background task(s) did not finish within "
+                    f"10s — the durable inbound queue will recover any dropped work"
+                )
+            else:
+                logger.info("All in-flight background tasks drained cleanly")
+    except Exception as drain_err:
+        logger.warning(f"Background task drain failed: {drain_err}")
+
     await callmedex_container.queue_engine.shutdown()
     scheduler_service.shutdown()
     from connectors.runner import release_all_locks_held
@@ -380,6 +428,7 @@ async def live_probe():
 
 
 from fastapi.responses import HTMLResponse as HTMLResp
+from app.database import sb  # T5.1: off-loop query execution
 
 
 @app.get("/privacy", response_class=HTMLResp, include_in_schema=False)

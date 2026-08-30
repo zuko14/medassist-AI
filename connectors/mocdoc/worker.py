@@ -24,6 +24,7 @@ from connectors.base import HospitalConnector, ReportMetadata
 from connectors.mocdoc import selectors as S
 from app.config import settings
 from app.utils.pii_sanitizer import sanitize_report_text
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -706,7 +707,7 @@ class MocDocConnector(HospitalConnector):
                 .eq("clinic_id", self.clinic_id)
                 .eq("connector_type", self.connector_type)
             )
-            processed_res = processed_query.execute()
+            processed_res = await sb(processed_query)
             for r in (processed_res.data or []):
                 if r.get("external_report_id"):
                     self._processed_ids.add(r["external_report_id"])

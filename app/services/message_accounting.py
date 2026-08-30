@@ -77,6 +77,7 @@ def resolve_category(message_type: str, template_name: Optional[str] = None) -> 
 # to avoid a DB query on every message send.
 
 import time
+from app.database import sb  # T5.1: off-loop query execution
 
 _pricing_cache: Optional[dict] = None
 _pricing_cache_at: float = 0.0
@@ -98,10 +99,9 @@ async def _get_pricing() -> dict:
         from app.database import supabase
 
         result = (
-            supabase.table("meta_pricing_config")
+            await sb(supabase.table("meta_pricing_config")
             .select("utility_paise, marketing_paise, authentication_paise, service_paise")
-            .eq("id", "default")
-            .execute()
+            .eq("id", "default"))
         )
         if result.data:
             _pricing_cache = result.data[0]
@@ -153,10 +153,9 @@ async def _get_plan_tiers() -> dict:
         from app.database import supabase
 
         result = (
-            supabase.table("plan_tiers")
+            await sb(supabase.table("plan_tiers")
             .select("plan_name, display_name, monthly_price_paise, included_messages_month, overage_price_paise")
-            .eq("is_active", True)
-            .execute()
+            .eq("is_active", True))
         )
         if result.data:
             _plan_tiers_cache = {row["plan_name"]: row for row in result.data}
@@ -217,7 +216,7 @@ async def log_outbound(
 
         category = resolve_category(message_type, template_name)
 
-        supabase.table("outbound_message_ledger").insert({
+        await sb(supabase.table("outbound_message_ledger").insert({
             "clinic_id": clinic_id,
             "recipient_phone": recipient_phone,
             "message_type": message_type,
@@ -228,7 +227,7 @@ async def log_outbound(
             "source_service": source_service,
             "meta_message_id": meta_message_id,
             "sent_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
+        }))
 
         logger.debug(
             f"Ledger: logged {message_type} ({category}) to {recipient_phone[:6]}*** "
@@ -296,14 +295,13 @@ async def get_clinic_usage(clinic_id: str, plan_name: str) -> dict:
         # Query ledger for this clinic in current billing period
         # Exclude mark_read from billable counts
         result = (
-            supabase.table("outbound_message_ledger")
+            await sb(supabase.table("outbound_message_ledger")
             .select("category, sent_at, send_success")
             .eq("clinic_id", clinic_id)
             .eq("send_success", True)
             .neq("message_type", "mark_read")
             .gte("sent_at", period_start)
-            .lt("sent_at", period_end)
-            .execute()
+            .lt("sent_at", period_end))
         )
         rows = result.data or []
     except Exception as e:
@@ -374,9 +372,8 @@ async def get_platform_usage(days: int = 30) -> dict:
     # Fetch all clinics
     try:
         clinics_res = (
-            supabase.table("clinics")
-            .select("id, name, plan, is_active")
-            .execute()
+            await sb(supabase.table("clinics")
+            .select("id, name, plan, is_active"))
         )
         clinics = clinics_res.data or []
     except Exception as e:
@@ -386,12 +383,11 @@ async def get_platform_usage(days: int = 30) -> dict:
     # Fetch all ledger entries in period (exclude mark_read from billing)
     try:
         ledger_res = (
-            supabase.table("outbound_message_ledger")
+            await sb(supabase.table("outbound_message_ledger")
             .select("clinic_id, category, send_success, message_type")
             .eq("send_success", True)
             .neq("message_type", "mark_read")
-            .gte("sent_at", start_date)
-            .execute()
+            .gte("sent_at", start_date))
         )
         ledger_rows = ledger_res.data or []
     except Exception as e:

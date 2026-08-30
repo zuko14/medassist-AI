@@ -19,6 +19,7 @@ from typing import Optional
 
 from app.database import supabase
 from app.utils.validators import validate_phone, normalize_phone
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ class PatientMatchService:
                 .eq("clinic_id", clinic_id)
                 .eq("phone", norm_phone)
             )
-            res = query.execute()
+            res = await sb(query)
             records = res.data if isinstance(res.data, list) else []
         except Exception as e:
             logger.error(f"Failed to query patients for match (failing closed): {e}")

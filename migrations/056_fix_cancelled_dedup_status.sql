@@ -31,7 +31,10 @@ BEGIN
     END IF;
 END $$;
 
-INSERT INTO schema_migrations (name) VALUES ('056_fix_cancelled_dedup_status.sql') ON CONFLICT (name) DO NOTHING;
+-- NOTE: schema_migrations is written by scripts/migrate.py:124 with the
+-- file's SHA256. checksum is NOT NULL (scripts/migrate.py:60), so a
+-- self-INSERT here omits it and aborts the migration on any fresh
+-- database. Migrations must not record themselves.
 
 SELECT 'migration_056_complete' AS status,
        (SELECT COUNT(*) FROM appointments WHERE status = 'cancelled_dedup') AS dedup_count;

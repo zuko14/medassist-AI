@@ -14,6 +14,7 @@ from app.services.report_summarizer import ReportSummarizer
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
 from app.utils.validators import mask_phone
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ class LabReportService:
                     "match_source": match_source,
                     "matched_patient_id": matched_patient_id,
                 }
-                claim_result = supabase.table("lab_reports").insert(claim_row).execute()
+                claim_result = await sb(supabase.table("lab_reports").insert(claim_row))
                 if claim_result.data:
                     claim_id = claim_result.data[0]["id"]
             except Exception as e:
@@ -157,11 +158,10 @@ class LabReportService:
                     )
                     try:
                         existing = (
-                            supabase.table("lab_reports")
+                            await sb(supabase.table("lab_reports")
                             .select("*")
                             .eq("clinic_id", clinic_id)
-                            .eq("external_report_id", external_report_id)
-                            .execute()
+                            .eq("external_report_id", external_report_id))
                         )
                         if (
                             existing
@@ -524,10 +524,10 @@ class LabReportService:
 
         try:
             if claim_id:
-                result = supabase.table("lab_reports").update(row).eq("id", claim_id).execute()
+                result = await sb(supabase.table("lab_reports").update(row).eq("id", claim_id))
                 saved_record = result.data[0] if result.data else row
             else:
-                result = supabase.table("lab_reports").insert(row).execute()
+                result = await sb(supabase.table("lab_reports").insert(row))
                 saved_record = result.data[0] if result.data else row
         except Exception as e:
             # Unique violation on (clinic_id, external_report_id) means another intake
@@ -538,11 +538,10 @@ class LabReportService:
                     f"delivered concurrently by another intake path"
                 )
                 existing = (
-                    supabase.table("lab_reports")
+                    await sb(supabase.table("lab_reports")
                     .select("*")
                     .eq("clinic_id", clinic_id)
-                    .eq("external_report_id", external_report_id)
-                    .execute()
+                    .eq("external_report_id", external_report_id))
                 )
                 saved_record = (
                     existing.data[0]
@@ -582,7 +581,7 @@ class LabReportService:
         )
         if clinic_id != "default":
             query = query.eq("clinic_id", clinic_id)
-        result = query.execute()
+        result = await sb(query)
         return result.data or []
 
     async def get_reports_by_phone(
@@ -612,7 +611,7 @@ class LabReportService:
         else:
             logger.warning(f"get_reports_by_phone called without valid clinic_id for {phone[:6]}***")
 
-        result = query.execute()
+        result = await sb(query)
         return result.data or []
 
     async def resend_report(
@@ -625,7 +624,7 @@ class LabReportService:
         query = supabase.table("lab_reports").select("*").eq("id", report_id)
         if clinic_id and clinic_id != "default":
             query = query.eq("clinic_id", clinic_id)
-        report = query.execute()
+        report = await sb(query)
         if not report.data:
             raise ValueError("Report not found")
         report = report.data[0]
@@ -634,7 +633,7 @@ class LabReportService:
             update_query = supabase.table("lab_reports").update({"patient_phone": new_phone}).eq("id", report_id)
             if clinic_id and clinic_id != "default":
                 update_query = update_query.eq("clinic_id", clinic_id)
-            update_query.execute()
+            await sb(update_query)
 
         try:
             # Check if PDF has been cleaned up by storage retention policy
@@ -792,7 +791,7 @@ class LabReportService:
             finally:
                 await release_phone_lock_acquired(patient_phone)
 
-            supabase.table("lab_reports").update(
+            await sb(supabase.table("lab_reports").update(
                 {
                     "status": "sent",
                     "ai_summary_sent": summary_sent_ok,
@@ -802,19 +801,19 @@ class LabReportService:
                     "delivery_error": None,
                     "error_message": None,
                 }
-            ).eq("id", report_id).execute()
+            ).eq("id", report_id))
         except Exception as e:
-            supabase.table("lab_reports").update(
+            await sb(supabase.table("lab_reports").update(
                 {
                     "status": "failed",
                     "delivery_status": "failed",
                     "error_message": str(e),
                 }
-            ).eq("id", report_id).execute()
+            ).eq("id", report_id))
             raise
 
         updated = (
-            supabase.table("lab_reports").select("*").eq("id", report_id).execute()
+            await sb(supabase.table("lab_reports").select("*").eq("id", report_id))
         )
         return updated.data[0]
 
@@ -837,13 +836,12 @@ class LabReportService:
 
         try:
             pending = (
-                supabase.table("lab_reports")
+                await sb(supabase.table("lab_reports")
                 .select("*")
                 .eq("status", "pending_retry")
                 .lt("next_retry_at", now_iso)
                 .order("next_retry_at")
-                .limit(10)  # Process at most 10 per cycle to avoid overload
-                .execute()
+                .limit(10))
             )
         except Exception as e:
             logger.error(f"Retry worker: failed to query pending_retry reports: {e}")
@@ -861,12 +859,12 @@ class LabReportService:
 
             if not file_path:
                 logger.warning(f"Retry worker: report {report_id} has no file_path — marking failed")
-                supabase.table("lab_reports").update({
+                await sb(supabase.table("lab_reports").update({
                     "status": "failed",
                     "delivery_status": "failed",
                     "error_message": "No file_path available for retry",
                     "next_retry_at": None,
-                }).eq("id", report_id).execute()
+                }).eq("id", report_id))
                 processed += 1
                 continue
 
@@ -1044,7 +1042,7 @@ class LabReportService:
                     await release_phone_lock_acquired(patient_phone)
 
                 if sent_ok:
-                    supabase.table("lab_reports").update({
+                    await sb(supabase.table("lab_reports").update({
                         "status": "sent",
                         "ai_summary_sent": summary_sent_ok,
                         "delivery_status": "sent",
@@ -1052,7 +1050,7 @@ class LabReportService:
                         "error_message": None,
                         "retry_count": retry_count,
                         "next_retry_at": None,
-                    }).eq("id", report_id).execute()
+                    }).eq("id", report_id))
                     logger.info(
                         f"Retry worker: successfully delivered report {report_id} "
                         f"on attempt {retry_count} to {mask_phone(patient_phone)}"
@@ -1069,25 +1067,25 @@ class LabReportService:
                     f"for report {report_id}: {e}"
                 )
                 if retry_count >= MAX_RETRIES:
-                    supabase.table("lab_reports").update({
+                    await sb(supabase.table("lab_reports").update({
                         "status": "failed",
                         "delivery_status": "failed",
                         "error_message": f"All {MAX_RETRIES} delivery attempts failed. Last error: {e}",
                         "retry_count": retry_count,
                         "next_retry_at": None,
-                    }).eq("id", report_id).execute()
+                    }).eq("id", report_id))
                     logger.error(
                         f"Retry worker: report {report_id} permanently failed after {MAX_RETRIES} attempts"
                     )
                 else:
                     backoff_seconds = min(120 * (4 ** (retry_count - 1)), 1800)
                     next_retry = (datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)).isoformat()
-                    supabase.table("lab_reports").update({
+                    await sb(supabase.table("lab_reports").update({
                         "status": "pending_retry",
                         "retry_count": retry_count,
                         "next_retry_at": next_retry,
                         "error_message": str(e),
-                    }).eq("id", report_id).execute()
+                    }).eq("id", report_id))
                     logger.info(
                         f"Retry worker: report {report_id} re-queued — "
                         f"next retry in {backoff_seconds}s (attempt {retry_count + 1}/{MAX_RETRIES})"

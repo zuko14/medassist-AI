@@ -1,12 +1,14 @@
 """Tenant resolution module for multi-tenant clinic isolation."""
 
 import logging
+from collections import OrderedDict
 from typing import Optional
 
 from app.database import supabase
 from app.config import settings
 
 import time
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +23,19 @@ logger = logging.getLogger(__name__)
 # - For DPDP deletion requests: coordinate via a separate flag checked pre-message-process
 CACHE_TTL_SECONDS = 30  # 30s — max propagation delay for clinic state changes
 
-# In-memory caches with TTL support
-_tenant_cache: dict[str, dict] = {}
-_branch_cache: dict[str, list[dict]] = {}
+# Maximum entries per cache before the oldest is evicted (KA-P3-19).
+# Entries were previously dropped ONLY when a key was read back after expiry,
+# so a key never read again was never freed. Each clinic occupies two tenant
+# keys (phone_number_id and normalised phone), so 2000 comfortably holds ~1000
+# clinics per process while bounding the four long-lived production processes
+# that also host Chromium.
+CACHE_MAX_ENTRIES = 2000
+
+# In-memory caches with TTL support. OrderedDict so eviction is O(1) FIFO.
+# OrderedDict is a dict subclass, so every existing reader (.get, [], in,
+# .pop, .clear) and the tenant-cache tests behave identically.
+_tenant_cache: "OrderedDict[str, dict]" = OrderedDict()
+_branch_cache: "OrderedDict[str, list[dict]]" = OrderedDict()
 
 
 def _get_cached_item(cache: dict, key: str) -> Optional[any]:
@@ -42,11 +54,19 @@ def _get_cached_item(cache: dict, key: str) -> Optional[any]:
 
 
 def _set_cached_item(cache: dict, key: str, data: any) -> None:
-    """Store item in cache with current timestamp."""
+    """Store item in cache with current timestamp, evicting oldest past the cap."""
     cache[key] = {
         "data": data,
         "cached_at": time.time(),
     }
+    # Bound the cache (KA-P3-19). TTL alone never freed a key that was written
+    # once and never read again, so an unbounded tenant population grew these
+    # dicts for the life of the process.
+    if isinstance(cache, OrderedDict):
+        cache.move_to_end(key)
+        while len(cache) > CACHE_MAX_ENTRIES:
+            evicted_key, _ = cache.popitem(last=False)
+            logger.debug(f"Tenant cache full ({CACHE_MAX_ENTRIES}) — evicted {evicted_key}")
 
 
 class TenantNotFound(Exception):
@@ -105,11 +125,10 @@ async def resolve_tenant(
     if phone_number_id:
         try:
             result = (
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .select("*")
                 .eq("phone_number_id", phone_number_id)
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             if result.data:
                 clinic = result.data[0]
@@ -129,11 +148,10 @@ async def resolve_tenant(
     if not db_failed:
         try:
             result = (
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .select("*")
                 .eq("whatsapp_number", phone)
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
 
             if result.data:
@@ -162,12 +180,11 @@ async def resolve_tenant(
     if settings.app_env != "production":
         try:
             sandbox_res = (
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .select("*")
                 .eq("is_sandbox", True)
                 .eq("is_active", True)
-                .limit(1)
-                .execute()
+                .limit(1))
             )
             if sandbox_res.data:
                 clinic = sandbox_res.data[0]
@@ -185,12 +202,11 @@ async def resolve_tenant(
     # phone number to an arbitrary clinic is an active cross-tenant security hazard (C1).
     try:
         active_clinics_res = (
-            supabase.table("clinics")
+            await sb(supabase.table("clinics")
             .select("*")
             .eq("is_active", True)
             .neq("status", "DELETED")
-            .limit(2)
-            .execute()
+            .limit(2))
         )
         active_clinics = active_clinics_res.data or []
         if len(active_clinics) > 1:
@@ -243,13 +259,12 @@ async def get_clinic_by_id(clinic_id: Optional[str]) -> dict:
     if not clinic_id or str(clinic_id).strip().lower() in ("default", "none", "null", ""):
         try:
             fallback = (
-                supabase.table("clinics")
+                await sb(supabase.table("clinics")
                 .select("*")
                 .eq("is_active", True)
                 .neq("status", "DELETED")
                 .order("created_at")
-                .limit(1)
-                .execute()
+                .limit(1))
             )
             if fallback.data:
                 return fallback.data[0]
@@ -258,7 +273,7 @@ async def get_clinic_by_id(clinic_id: Optional[str]) -> dict:
         return _build_fallback_clinic()
 
     try:
-        result = supabase.table("clinics").select("*").eq("id", str(clinic_id).strip()).execute()
+        result = await sb(supabase.table("clinics").select("*").eq("id", str(clinic_id).strip()))
 
         if not result.data:
             raise TenantNotFound(f"Clinic {clinic_id} not found")
@@ -502,12 +517,11 @@ async def get_clinic_branches(clinic_id: str) -> list[dict]:
 
     try:
         result = (
-            supabase.table("branches")
+            await sb(supabase.table("branches")
             .select("*")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
-            .order("display_order")
-            .execute()
+            .order("display_order"))
         )
 
         branches = result.data or []
@@ -547,7 +561,7 @@ async def get_branch_by_id(branch_id: str) -> Optional[dict]:
                     return branch
 
     try:
-        result = supabase.table("branches").select("*").eq("id", branch_id).execute()
+        result = await sb(supabase.table("branches").select("*").eq("id", branch_id))
         if result.data:
             return result.data[0]
         return None

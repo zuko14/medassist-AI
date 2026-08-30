@@ -13,6 +13,7 @@ from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import TEMPLATES
 from app.utils.helpers import format_slot_time
 from app.services.tenant import get_clinic_by_id
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,16 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── DPDP: Purge completed durable-queue rows (daily 3:30 AM) ──
+        # inbound_messages had no purge at all and grows one row per patient
+        # message forever, each holding a raw phone number (KA-P2-10).
+        self.scheduler.add_job(
+            self.purge_inbound_messages,
+            CronTrigger(hour=3, minute=30),
+            id="inbound_messages_purge",
+            replace_existing=True,
+        )
+
         # ── Payment: Expire stale pending_payment bookings (every minute) ──
         # Also recovers bookings where Razorpay shows paid but webhook was missed
         self.scheduler.add_job(
@@ -304,29 +315,44 @@ class SchedulerService:
             coalesce=True,
         )
 
-        # ── Connector Polling: Poll all enabled integration connectors (every 1 minute) ──
-        # Each connector internally respects its own poll_interval_minutes before re-running,
-        # so the 1-minute tick is just the evaluation frequency, not the actual poll rate.
-        # This replaces the need for a separate Render background worker process.
-        from connectors.runner import run_all_connectors, cleanup_expired_storage
-        self.scheduler.add_job(
-            run_all_connectors,
-            "interval",
-            minutes=1,
-            id="connector_polling",
-            replace_existing=True,
-        )
+        # ── Connector Polling (Playwright/Chromium) ──────────────────────────
+        # KA-P2-20: these two jobs drive a headless Chromium. Running them
+        # inside the web service puts a spiky, memory-hungry browser in the
+        # container that must acknowledge Meta webhooks within 20s; an OOM kill
+        # there takes down request handling and every in-flight BackgroundTask.
+        #
+        # settings.run_connectors_in_web defaults to True, so behaviour is
+        # unchanged for any deployment that has not provisioned the dedicated
+        # worker — connectors keep polling rather than silently stopping.
+        # render.yaml sets it false on the web services and runs
+        # `python -m connectors.runner --all` in its own worker.
+        if settings.run_connectors_in_web:
+            # Each connector respects its own poll_interval_minutes before
+            # re-running, so the 1-minute tick is the evaluation frequency,
+            # not the poll rate.
+            from connectors.runner import run_all_connectors, cleanup_expired_storage
 
-        # ── Connector Storage Cleanup: Delete PDFs older than 90 days (daily 2 AM IST) ──
-        self.scheduler.add_job(
-            cleanup_expired_storage,
-            CronTrigger(hour=2, minute=0),
-            id="connector_storage_cleanup",
-            replace_existing=True,
-        )
+            self.scheduler.add_job(
+                run_all_connectors,
+                "interval",
+                minutes=1,
+                id="connector_polling",
+                replace_existing=True,
+            )
+
+            # Delete PDFs older than 90 days (daily 2 AM IST).
+            self.scheduler.add_job(
+                cleanup_expired_storage,
+                CronTrigger(hour=2, minute=0),
+                id="connector_storage_cleanup",
+                replace_existing=True,
+            )
 
         self.scheduler.start()
-        logger.info("Scheduler started (with integrated connector polling)")
+        logger.info(
+            "Scheduler started (connector polling in-process: "
+            f"{settings.run_connectors_in_web})"
+        )
 
     def shutdown(self):
         """Shutdown the scheduler."""
@@ -374,7 +400,7 @@ class SchedulerService:
                 ).isoformat()
 
                 rows = (
-                    supabase.table("inbound_messages")
+                    await sb(supabase.table("inbound_messages")
                     .select(
                         "message_id, phone, display_phone, phone_number_id, "
                         "payload, attempt_count"
@@ -387,8 +413,7 @@ class SchedulerService:
                     # and 'received' is the status of in-flight messages (KRIYA-004).
                     .lt("created_at", cutoff)
                     .order("created_at")
-                    .limit(20)
-                    .execute()
+                    .limit(20))
                 )
 
                 if not rows.data:
@@ -399,6 +424,31 @@ class SchedulerService:
                     claimed = await message_queue.claim_message(msg_id)
                     if not claimed:
                         continue
+
+                    # Drop any stale processed_messages claim before doing
+                    # anything else with this row.
+                    #
+                    # KA-P1-04: process_message() writes the claim (acquire())
+                    # and then moves the durable row to 'processing'
+                    # (claim_message()) in two separate round-trips. A crash
+                    # between them leaves the claim written but the row still
+                    # 'received' — exactly the rows this sweep selects. Without
+                    # this release, process_message() re-runs, acquire() sees
+                    # its own orphaned claim, logs "duplicate dropped" and
+                    # returns; process_message_safe() then marks the row
+                    # 'completed'. The patient's message is discarded and
+                    # recorded as handled.
+                    #
+                    # reap_abandoned_claims() already does exactly this for
+                    # rows stuck in 'processing'. This is the same fix applied
+                    # to the sibling path that was missed. Safe because every
+                    # row here is older than `cutoff` and therefore not in
+                    # flight.
+                    #
+                    # Done BEFORE reconstruction so an unreconstructable row
+                    # does not leave its claim orphaned forever on the
+                    # dead-letter path below.
+                    await message_queue.release(msg_id)
 
                     msg = _reconstruct_message(msg_row)
                     if msg is None:
@@ -422,7 +472,20 @@ class SchedulerService:
                         msg_row.get("phone_number_id"),
                     )
             except Exception as e:
-                logger.warning(f"Error in recover_pending_inbound_messages: {e}")
+                # This IS the recovery path for lost patient messages. If it is
+                # broken, the only symptom used to be silence at warning level
+                # (KA-P1-04). Log at error and emit a counter so an alert can
+                # fire on it.
+                logger.error(
+                    f"RECOVERY_SWEEP_FAILED Error in recover_pending_inbound_messages: {e}",
+                    exc_info=True,
+                )
+                try:
+                    from app.services.metrics import metrics
+
+                    metrics.inc_counter("kriya_recovery_failures_total", 1)
+                except Exception:
+                    pass
 
     async def send_24h_reminders(self):
         """Send 24-hour appointment reminders."""
@@ -436,12 +499,11 @@ class SchedulerService:
                 tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
                 appointments = (
-                    supabase.table("appointments")
+                    await sb(supabase.table("appointments")
                     .select("*")
                     .eq("appointment_date", tomorrow)
                     .eq("status", "confirmed")
-                    .eq("reminder_24h_sent", False)
-                    .execute()
+                    .eq("reminder_24h_sent", False))
                 )
 
                 for appt in appointments.data:
@@ -464,9 +526,9 @@ class SchedulerService:
                         )
 
                         # Mark as sent
-                        supabase.table("appointments").update(
+                        await sb(supabase.table("appointments").update(
                             {"reminder_24h_sent": True}
-                        ).eq("id", appt["id"]).execute()
+                        ).eq("id", appt["id"]))
 
                         logger.info(f"Sent 24h reminder for appointment {appt['id']}")
                     except Exception as e:
@@ -489,12 +551,11 @@ class SchedulerService:
                 today = now.strftime("%Y-%m-%d")
 
                 appointments = (
-                    supabase.table("appointments")
+                    await sb(supabase.table("appointments")
                     .select("*")
                     .eq("appointment_date", today)
                     .eq("status", "confirmed")
-                    .eq("reminder_2h_sent", False)
-                    .execute()
+                    .eq("reminder_2h_sent", False))
                 )
 
                 for appt in appointments.data:
@@ -524,9 +585,9 @@ class SchedulerService:
                             )
 
                             # Mark as sent
-                            supabase.table("appointments").update(
+                            await sb(supabase.table("appointments").update(
                                 {"reminder_2h_sent": True}
-                            ).eq("id", appt["id"]).execute()
+                            ).eq("id", appt["id"]))
 
                             logger.info(f"Sent 2h reminder for appointment {appt['id']}")
                         except Exception as e:
@@ -558,12 +619,11 @@ class SchedulerService:
                 now_iso = datetime.now(timezone.utc).isoformat()
 
                 due = (
-                    supabase.table("appointments")
+                    await sb(supabase.table("appointments")
                     .select("id")
                     .eq("status", "confirmed")
                     .lt("appointment_date", today)
-                    .limit(2000)
-                    .execute()
+                    .limit(2000))
                 )
                 rows = due.data or []
                 if not rows:
@@ -574,9 +634,9 @@ class SchedulerService:
                     try:
                         # Re-assert status in the WHERE clause so a cancellation
                         # landing between the scan and this write is not clobbered.
-                        supabase.table("appointments").update(
+                        await sb(supabase.table("appointments").update(
                             {"status": "completed", "completed_at": now_iso}
-                        ).eq("id", appt["id"]).eq("status", "confirmed").execute()
+                        ).eq("id", appt["id"]).eq("status", "confirmed"))
                         completed += 1
                     except Exception as e:
                         logger.error(
@@ -610,14 +670,13 @@ class SchedulerService:
                 window_end = (today - timedelta(days=1)).isoformat()
 
                 appointments = (
-                    supabase.table("appointments")
+                    await sb(supabase.table("appointments")
                     .select("*")
                     .eq("status", "completed")
                     .eq("followup_sent", False)
                     .gte("appointment_date", window_start)
                     .lte("appointment_date", window_end)
-                    .limit(2000)
-                    .execute()
+                    .limit(2000))
                 )
 
                 for appt in appointments.data or []:
@@ -630,7 +689,13 @@ class SchedulerService:
                         # clinic fell through here and had the appointment
                         # permanently marked as followed up.
                         if not has_feature(clinic, "reminders"):
-                            self._burn_followup(appt["id"])
+                            # Skip, do NOT burn (KA-P3-12). Setting
+                            # followup_sent=True here is permanent: when the
+                            # clinic later upgrades to a plan that includes
+                            # reminders, every patient seen before the upgrade
+                            # is already marked as followed up and can never
+                            # receive one. The lookback window below picks them
+                            # up naturally once the feature is enabled.
                             continue
 
                         cfg = followup_config(clinic)
@@ -694,9 +759,9 @@ class SchedulerService:
                             )
                             continue
 
-                        supabase.table("appointments").update(
+                        await sb(supabase.table("appointments").update(
                             {"followup_sent": True}
-                        ).eq("id", appt["id"]).execute()
+                        ).eq("id", appt["id"]))
 
                         logger.info(f"Sent followup for appointment {appt['id']}")
                     except Exception as e:
@@ -768,12 +833,11 @@ class SchedulerService:
                     target_date = (datetime.now() - timedelta(days=offset_days)).strftime("%Y-%m-%d")
 
                     appointments = (
-                        supabase.table("appointments")
+                        await sb(supabase.table("appointments")
                         .select("*")
                         .eq("appointment_date", target_date)
                         .eq("status", "confirmed")
-                        .eq(flag_field, False)
-                        .execute()
+                        .eq(flag_field, False))
                     )
 
                     for appt in appointments.data:
@@ -791,9 +855,9 @@ class SchedulerService:
                                     f"appointment {appt['id']} — patient has opted out "
                                     f"of engagement messages"
                                 )
-                                supabase.table("appointments").update(
+                                await sb(supabase.table("appointments").update(
                                     {flag_field: True}
-                                ).eq("id", appt["id"]).execute()
+                                ).eq("id", appt["id"]))
                                 continue
 
                             from app.templates.whatsapp_templates import get_message
@@ -833,9 +897,9 @@ class SchedulerService:
                                 )
                                 continue
 
-                            supabase.table("appointments").update({flag_field: True}).eq(
+                            await sb(supabase.table("appointments").update({flag_field: True}).eq(
                                 "id", appt["id"]
-                            ).execute()
+                            ))
 
                             logger.info(
                                 f"Sent day+{offset_days} health check-in for appointment {appt['id']}"
@@ -857,23 +921,21 @@ class SchedulerService:
                 next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
 
                 leaves = (
-                    supabase.table("doctor_leaves")
+                    await sb(supabase.table("doctor_leaves")
                     .select("*")
                     .gte("leave_date", tomorrow)
                     .lte("leave_date", next_week)
-                    .eq("leave_type", "full")
-                    .execute()
+                    .eq("leave_type", "full"))
                 )
 
                 for leave in leaves.data:
                     affected = (
-                        supabase.table("appointments")
+                        await sb(supabase.table("appointments")
                         .select("*")
                         .eq("clinic_id", leave.get("clinic_id", "default"))
                         .eq("doctor_name", leave["doctor_name"])
                         .eq("appointment_date", leave["leave_date"])
-                        .eq("status", "confirmed")
-                        .execute()
+                        .eq("status", "confirmed"))
                     )
 
                     for appt in affected.data:
@@ -881,9 +943,9 @@ class SchedulerService:
                             clinic = await get_clinic_by_id(
                                 appt.get("clinic_id", "default")
                             )
-                            supabase.table("appointments").update(
+                            await sb(supabase.table("appointments").update(
                                 {"status": "cancelled"}
-                            ).eq("id", appt["id"]).execute()
+                            ).eq("id", appt["id"]))
 
                             components = TEMPLATES["appointment_cancelled_doctor_leave"][
                                 "components_builder"
@@ -942,10 +1004,9 @@ class SchedulerService:
                 ).isoformat()
                 rows = (
                     # unscoped: platform-wide DLQ sweep; clinic comes from each payload
-                    supabase.table("failed_messages")
+                    (await sb(supabase.table("failed_messages")
                     .select("id,phone,payload,created_at")
-                    .eq("status", "pending_retry")
-                    .execute()
+                    .eq("status", "pending_retry")))
                 ).data or []
                 if not rows:
                     return
@@ -957,9 +1018,9 @@ class SchedulerService:
                 for row in rows:
                     row_id = row["id"]
                     if str(row.get("created_at") or "") < cutoff:
-                        supabase.table("failed_messages").update(
+                        await sb(supabase.table("failed_messages").update(
                             {"status": "failed", "resolved_at": datetime.now(timezone.utc).isoformat()}
-                        ).eq("id", row_id).execute()
+                        ).eq("id", row_id))
                         logger.error(
                             f"ALERT dlq_drain: giving up on message {row_id} from "
                             f"{mask_phone(row.get('phone') or '')} after "
@@ -982,9 +1043,9 @@ class SchedulerService:
                             message_id=payload.get("message_id"),
                             interactive_data=payload.get("interactive_data"),
                         )
-                        supabase.table("failed_messages").update(
+                        await sb(supabase.table("failed_messages").update(
                             {"status": "resolved", "resolved_at": datetime.now(timezone.utc).isoformat()}
-                        ).eq("id", row_id).execute()
+                        ).eq("id", row_id))
                         logger.info(f"dlq_drain: replayed message {row_id}")
                     except Exception as replay_err:
                         # Left as pending_retry so the next cycle tries again
@@ -1013,11 +1074,10 @@ class SchedulerService:
                 since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
                 result = (
                     # unscoped: platform-wide reliability sweep across all tenants
-                    supabase.table("lab_reports")
+                    await sb(supabase.table("lab_reports")
                     .select("clinic_id,report_name,error_message,delivery_updated_at")
                     .eq("status", "failed")
-                    .gte("delivery_updated_at", since)
-                    .execute()
+                    .gte("delivery_updated_at", since))
                 )
                 rows = result.data or []
                 if not rows:
@@ -1074,10 +1134,9 @@ class SchedulerService:
                 return
             try:
                 result = (
-                    supabase.table("failed_messages")
+                    await sb(supabase.table("failed_messages")
                     .select("id", count="exact")
-                    .eq("status", "pending")
-                    .execute()
+                    .eq("status", "pending"))
                 )
 
                 pending_count = len(result.data) if result.data else 0
@@ -1107,10 +1166,28 @@ class SchedulerService:
                 logger.debug(f"Failed messages check skipped: {e}")
 
     async def alert_message_queue_fail_closed(self):
-        """Alert admin if the message queue fail-closed rate is elevated."""
+        """Alert admin if the message queue fail-closed rate is elevated.
+
+        Deliberately NOT wrapped in distributed_job_lock, unlike the other 21
+        scheduled jobs (KA-P3-16).
+
+        `_last_fail_open_count` mirrors message_queue's in-process counter, so
+        each of the four production processes can only see its OWN fail-closed
+        events. Taking a distributed lock here would let one process alert and
+        silently discard the other three processes' signal — losing 75% of the
+        coverage to remove a duplicate. That is the wrong trade for a database
+        -error alarm.
+
+        Instead each process alerts for what it observed, and the message
+        carries its instance id so four alerts read as four distinct data
+        points rather than one duplicated four times. Aggregating the counter
+        into a shared store (so a single locked reader becomes correct) is
+        tracked as T7.1.
+        """
         global _last_fail_open_count
         try:
             from app.services.message_queue import get_fail_closed_count
+            from app.services.distributed_lock import INSTANCE_ID
 
             current = get_fail_closed_count()
             delta = current - _last_fail_open_count
@@ -1119,8 +1196,11 @@ class SchedulerService:
             if delta > 5:
                 admin_phone = settings.hospital_phone
                 alert_msg = (
-                    f"⚠️ Message queue fail-closed / fail-open rate elevated: "
-                    f"{delta} messages could not acquire idempotency lock due to database error since last check."
+                    f"⚠️ Message queue fail-closed / fail-open rate elevated on "
+                    f"{INSTANCE_ID}: {delta} messages could not acquire the idempotency "
+                    f"lock due to database errors since the last check. "
+                    f"(This is one of {settings.expected_process_count} app processes — "
+                    f"check the others too.)"
                 )
                 try:
                     from app.services.tenant import resolve_tenant
@@ -1149,10 +1229,29 @@ class SchedulerService:
                 return
             try:
                 cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
-                supabase.table("rate_limits").delete().lt("window_start", cutoff).execute()
+                await sb(supabase.table("rate_limits").delete().lt("window_start", cutoff))
                 logger.info("Cleaned up stale rate limit entries")
             except Exception as e:
                 logger.debug(f"Rate limits cleanup skipped: {e}")
+
+    async def purge_inbound_messages(self):
+        """Purge completed durable-queue rows (KA-P2-10).
+
+        inbound_messages had no purge job at all and grows one row per patient
+        message forever, each holding a raw phone number.
+        """
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("purge_inbound_messages", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.data_retention import data_retention_service
+
+                count = await data_retention_service.purge_inbound_messages()
+                if count > 0:
+                    logger.info(f"Scheduler: purged {count} completed inbound messages")
+            except Exception as e:
+                logger.error(f"Inbound message purge job failed: {e}")
 
     async def purge_expired_conversations(self):
         """Purge conversation sessions older than the configured purge window."""

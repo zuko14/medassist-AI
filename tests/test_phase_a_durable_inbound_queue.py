@@ -193,8 +193,23 @@ async def test_scheduler_recovers_expired_lease_messages():
     mock_table = MagicMock()
     mock_table.select.return_value.in_.return_value.lt.return_value.order.return_value.limit.return_value = mock_select
 
+    # The distributed lock MUST be controlled here. recover_pending_inbound_messages()
+    # opens with `async with distributed_job_lock(...)` and returns immediately if
+    # the lock is not granted. Left unpatched, acquisition depends on a real
+    # supabase.rpc() round-trip — this test patches supabase.table but not
+    # supabase.rpc — so whether the job body runs at all came down to network
+    # behaviour and test ordering. Granting it explicitly makes the test about
+    # the recovery logic, which is what it is named for.
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lock_granted(*args, **kwargs):
+        yield True
+
     with patch("app.database.supabase.table", return_value=mock_table), \
+         patch("app.services.distributed_lock.distributed_job_lock", _lock_granted), \
          patch("app.services.message_queue.message_queue.claim_message", new_callable=AsyncMock, return_value=True) as mock_claim, \
+         patch("app.services.message_queue.message_queue.release", new_callable=AsyncMock), \
          patch("app.routers.webhook.process_message_safe", new_callable=AsyncMock) as mock_process:
 
         await scheduler_service.recover_pending_inbound_messages()

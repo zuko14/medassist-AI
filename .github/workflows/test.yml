@@ -47,6 +47,7 @@ jobs:
         run: |
           python -m pytest tests/ \
             --ignore=tests/test_real_postgres_invariants.py \
+            --ignore=tests/test_slot_uniqueness_invariant.py \
             -v --tb=short --junitxml=test-results-unit.xml
 
       - name: Upload unit test results
@@ -115,7 +116,9 @@ jobs:
 
       - name: Run real PostgreSQL integration tests
         run: |
-          python -m pytest tests/test_real_postgres_invariants.py \
+          python -m pytest \
+            tests/test_real_postgres_invariants.py \
+            tests/test_slot_uniqueness_invariant.py \
             -v --tb=short --junitxml=test-results-integration.xml
 
       - name: Upload integration test results

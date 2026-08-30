@@ -34,6 +34,24 @@ mock_supabase = MagicMock()
 mock_db_module = MagicMock()
 mock_db_module.supabase = mock_supabase
 mock_db_module.log_analytics_event = AsyncMock()
+
+
+async def _mock_sb(builder):
+    """Stand-in for app.database.sb (T5.1 off-loop query execution).
+
+    Every attribute of a MagicMock module is itself a MagicMock, so without an
+    explicit entry `sb` resolves to one — and `await sb(...)` then raises
+    "object MagicMock can't be used in 'await' expression" in any module that
+    imported it while this fake was installed in sys.modules.
+
+    Runs the builder inline rather than on a thread: these are mocks, there is
+    nothing to block on, and staying on the loop keeps call ordering
+    deterministic for assertions.
+    """
+    return builder.execute()
+
+
+mock_db_module.sb = _mock_sb
 sys.modules["app.database"] = mock_db_module
 
 from app.services.conversation import ConversationManager  # noqa: E402

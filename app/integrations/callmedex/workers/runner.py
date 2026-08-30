@@ -24,6 +24,7 @@ from app.integrations.callmedex.callbacks.handler import CallMedexCallbackHandle
 from app.integrations.callmedex.queue.drivers import InMemoryQueue
 from app.integrations.callmedex.api.exceptions import ConfigurationError, CallMedexException
 from app.integrations.callmedex.config.processing_centers import resolve_processing_center
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -234,11 +235,10 @@ class CallMedexWorkerRunner:
                 try:
                     from app.database import supabase as _supabase_precheck
                     already = (
-                        _supabase_precheck.table("lab_reports")
+                        await sb(_supabase_precheck.table("lab_reports")
                         .select("id")
                         .eq("clinic_id", request.clinic_id)
-                        .eq("external_report_id", request.external_report_id)
-                        .execute()
+                        .eq("external_report_id", request.external_report_id))
                     )
                     if isinstance(already.data, list) and already.data:
                         logger.info(
@@ -361,7 +361,7 @@ class CallMedexWorkerRunner:
                 if not used_fallback_path:
                     try:
                         from app.database import supabase as _supabase
-                        _supabase.table("lab_reports").insert(
+                        await sb(_supabase.table("lab_reports").insert(
                             {
                                 "clinic_id": request.clinic_id,
                                 "patient_phone": patient_phone or "",
@@ -380,7 +380,7 @@ class CallMedexWorkerRunner:
                                 "source": "callmedex",
                                 "sent_at": datetime.now(timezone.utc).isoformat() if whatsapp_sent else None,
                             }
-                        ).execute()
+                        ))
                     except Exception as db_err:
                         logger.warning(f"Failed to persist lab_reports row for {report_job_id}: {db_err}")
 

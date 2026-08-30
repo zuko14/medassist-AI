@@ -68,6 +68,8 @@ app/integrations/callmedex/browser/downloads/
 app/integrations/callmedex/browser/videos/
 app/integrations/callmedex/browser/traces/
 screenshots_browser_automation_callmedex/
-tmp_pg_pytest_data/
-tmp_pg_migrate_test/
+# Scratch PostgreSQL data dirs created by the pgserver test fixture
+# (tests/conftest_db.py). Glob rather than named dirs so an ad-hoc
+# verification run cannot leave a committable directory behind.
+tmp_pg_*/
 

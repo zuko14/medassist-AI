@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.database import supabase, log_analytics_event
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class FeedbackService:
                 "created_at": "now()",
             }
 
-            result = supabase.table("feedback").insert(data).execute()
+            result = await sb(supabase.table("feedback").insert(data))
 
             # Log analytics event
             await log_analytics_event(
@@ -55,11 +56,10 @@ class FeedbackService:
 
             # Get all feedback in period
             result = (
-                supabase.table("feedback")
+                await sb(supabase.table("feedback")
                 .select("*")
                 .eq("clinic_id", clinic_id)
-                .gte("created_at", from_date)
-                .execute()
+                .gte("created_at", from_date))
             )
 
             feedbacks = result.data or []
@@ -94,12 +94,11 @@ class FeedbackService:
         """Get recent feedback entries."""
         try:
             result = (
-                supabase.table("feedback")
+                await sb(supabase.table("feedback")
                 .select("*")
                 .eq("clinic_id", clinic_id)
                 .order("created_at", desc=True)
-                .limit(limit)
-                .execute()
+                .limit(limit))
             )
             return result.data or []
         except Exception as e:

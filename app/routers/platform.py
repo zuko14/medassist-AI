@@ -25,6 +25,7 @@ from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
 from app.services.tenant import invalidate_branch_cache, invalidate_tenant_cache
 from app.utils.security import login_rate_limiter
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,10 @@ async def verify_owner_credentials(
 
     client_ip = request.client.host if request.client else "unknown"
 
-    if login_rate_limiter.check_and_record(client_ip):
+    # T5.1: the limiter is synchronous and hits the rate_limits table; this
+    # dependency runs on every /platform request, so it was a blocking DB
+    # round-trip on the event loop each time.
+    if await asyncio.to_thread(login_rate_limiter.check_and_record, client_ip):
         remaining_wait = 60
         logger.warning(f"Platform owner login rate limit exceeded — IP={client_ip}")
         raise HTTPException(
@@ -70,7 +74,7 @@ async def verify_owner_credentials(
         )
 
     if username_ok and password_ok:
-        login_rate_limiter.reset(client_ip)
+        await asyncio.to_thread(login_rate_limiter.reset, client_ip)
         return AdminUser(
             username=credentials.username,
             role="platform_owner",
@@ -78,7 +82,9 @@ async def verify_owner_credentials(
             user_id="platform_owner_env",
         )
 
-    remaining = login_rate_limiter.remaining_attempts(client_ip)
+    remaining = await asyncio.to_thread(
+        login_rate_limiter.remaining_attempts, client_ip
+    )
     logger.warning(
         f"Failed platform owner login attempt — IP={client_ip}, "
         f"user='{credentials.username}', remaining={remaining}"
@@ -109,7 +115,9 @@ async def reset_clinic_admin_password(
     """
     client_ip = request.client.host if request.client else "unknown"
 
-    if login_rate_limiter.check_and_record(f"admin-reset:{client_ip}"):
+    if await asyncio.to_thread(
+        login_rate_limiter.check_and_record, f"admin-reset:{client_ip}"
+    ):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many password reset attempts. Try again in 60 seconds.",
@@ -119,19 +127,18 @@ async def reset_clinic_admin_password(
     # platform-scoped: reset password by username
     res = (
         # unscoped: platform super-admin resetting password by username across clinic_admins
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id")
-        .eq("username", body.username)
-        .execute()
+        .eq("username", body.username))
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Admin account not found")
 
     # platform-scoped: update admin password hash
     # unscoped: platform super-admin updating password hash for specified username
-    supabase.table("clinic_admins").update(
+    await sb(supabase.table("clinic_admins").update(
         {"password_hash": hash_password(body.new_password)}
-    ).eq("username", body.username).execute()
+    ).eq("username", body.username))
 
     await log_admin_action(
         user=owner,
@@ -196,10 +203,9 @@ async def list_clinic_admins(
 
     res = (
         # unscoped: platform super-admin fleet operation
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id, clinic_id, username, role, is_active, created_at")
-        .order("created_at", desc=True)
-        .execute()
+        .order("created_at", desc=True))
     )
     return {"success": True, "admins": res.data or []}
 
@@ -223,7 +229,7 @@ async def create_clinic_admin(
     if body.clinic_id:
         clinic_res = (
             # unscoped: platform super-admin verifying target clinic exists before creating admin
-            supabase.table("clinics").select("id").eq("id", body.clinic_id).execute()
+            await sb(supabase.table("clinics").select("id").eq("id", body.clinic_id))
         )
         if not clinic_res.data:
             raise HTTPException(status_code=404, detail="Clinic not found")
@@ -231,17 +237,16 @@ async def create_clinic_admin(
     # platform-scoped: check admin username uniqueness
     existing = (
         # unscoped: platform super-admin checking global username uniqueness across clinic admins
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id")
-        .eq("username", body.username)
-        .execute()
+        .eq("username", body.username))
     )
     if existing.data:
         raise HTTPException(status_code=409, detail="Username already exists")
 
     insert_res = (
         # unscoped: platform super-admin verifying target clinic exists before creating admin
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .insert(
             {
                 "clinic_id": body.clinic_id,
@@ -250,8 +255,7 @@ async def create_clinic_admin(
                 "role": body.role,
                 "is_active": True,
             }
-        )
-        .execute()
+        ))
     )
 
     await log_admin_action(
@@ -280,10 +284,9 @@ async def toggle_clinic_admin(
     # platform-scoped: fetch clinic admin status
     res = (
         # unscoped: platform super-admin fetching clinic admin active status by admin_id
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id, is_active")
-        .eq("id", admin_id)
-        .execute()
+        .eq("id", admin_id))
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Admin account not found")
@@ -291,9 +294,9 @@ async def toggle_clinic_admin(
     new_status = not res.data[0]["is_active"]
     # platform-scoped: toggle clinic admin
     # unscoped: platform super-admin toggling clinic admin active status by admin_id
-    supabase.table("clinic_admins").update({"is_active": new_status}).eq(
+    await sb(supabase.table("clinic_admins").update({"is_active": new_status}).eq(
         "id", admin_id
-    ).execute()
+    ))
 
     await log_admin_action(
         user=owner,
@@ -326,9 +329,8 @@ async def get_platform_overview(
         # platform-scoped: aggregate platform clinics list
         clinics_res = (
             # unscoped: platform super-admin fleet operation
-            supabase.table("clinics")
-            .select("id, name, whatsapp_number, plan, is_active, created_at")
-            .execute()
+            await sb(supabase.table("clinics")
+            .select("id, name, whatsapp_number, plan, is_active, created_at"))
         )
         clinics = clinics_res.data or []
 
@@ -359,9 +361,8 @@ async def get_platform_overview(
         # platform-scoped: platform total patient count
         patients_res = (
             # unscoped: platform super-admin aggregating total patient count across all clinics
-            supabase.table("patients")
-            .select("id", count="exact")
-            .execute()
+            await sb(supabase.table("patients")
+            .select("id", count="exact"))
         )
         total_patients = patients_res.count if patients_res.count is not None else len(patients_res.data or [])
 
@@ -369,9 +370,8 @@ async def get_platform_overview(
         # platform-scoped: platform total appointments count
         appts_res = (
             # unscoped: platform super-admin fleet operation
-            supabase.table("appointments")
-            .select("id", count="exact")
-            .execute()
+            await sb(supabase.table("appointments")
+            .select("id", count="exact"))
         )
         total_appointments = appts_res.count if appts_res.count is not None else len(appts_res.data or [])
 
@@ -410,10 +410,9 @@ async def _fetch_clinic_roster_counts() -> dict[str, dict]:
             offset = page * page_size
             docs_res = (
                 # unscoped: platform super-admin fleet operation
-                supabase.table("doctors")
+                await sb(supabase.table("doctors")
                 .select("clinic_id, department, is_active")
-                .range(offset, offset + page_size - 1)
-                .execute()
+                .range(offset, offset + page_size - 1))
             )
             rows = docs_res.data
             if not isinstance(rows, list):
@@ -460,9 +459,8 @@ async def get_platform_clinics_leaderboard(
         # Strict explicit column projection
         clinics_res = (
             # unscoped: platform super-admin fleet operation
-            supabase.table("clinics")
-            .select("id, name, whatsapp_number, plan, is_active, created_at")
-            .execute()
+            await sb(supabase.table("clinics")
+            .select("id, name, whatsapp_number, plan, is_active, created_at"))
         )
         clinics = clinics_res.data or []
         start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -480,11 +478,10 @@ async def get_platform_clinics_leaderboard(
             # Fetch appointments for this clinic in last 30d
             appts_res = (
                 # unscoped: platform super-admin fleet operation
-                supabase.table("appointments")
+                await sb(supabase.table("appointments")
                 .select("id, status, amount_paise, payment_id, created_at")
                 .eq("clinic_id", clinic_id)
-                .gte("created_at", start_30d)
-                .execute()
+                .gte("created_at", start_30d))
             )
             appts = appts_res.data or []
             appointments_count_30d = len(appts)
@@ -500,10 +497,9 @@ async def get_platform_clinics_leaderboard(
             # Patient count
             pat_res = (
                 # unscoped: platform super-admin fleet operation
-                supabase.table("patients")
+                await sb(supabase.table("patients")
                 .select("id", count="exact")
-                .eq("clinic_id", clinic_id)
-                .execute()
+                .eq("clinic_id", clinic_id))
             )
             patients_count = pat_res.count if pat_res.count is not None else len(pat_res.data or [])
 
@@ -567,10 +563,9 @@ async def get_platform_clinic_detail(
         # Fetch clinic basic info
         clinic_res = (
             # unscoped: platform super-admin fleet operation
-            supabase.table("clinics")
+            await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, features, is_active, created_at")
-            .eq("id", clinic_id)
-            .execute()
+            .eq("id", clinic_id))
         )
         if not clinic_res.data:
             raise HTTPException(status_code=404, detail="Clinic not found")
@@ -626,7 +621,7 @@ async def update_clinic_feature(
 
     clinic_res = (
         # unscoped: platform super-admin fetching feature flags for specified clinic_id
-        supabase.table("clinics").select("features").eq("id", clinic_id).execute()
+        await sb(supabase.table("clinics").select("features").eq("id", clinic_id))
     )
     if not clinic_res.data:
         raise HTTPException(status_code=404, detail="Clinic not found")
@@ -639,10 +634,9 @@ async def update_clinic_feature(
 
     result = (
         # unscoped: platform super-admin updating feature flags for specified clinic_id
-        supabase.table("clinics")
+        await sb(supabase.table("clinics")
         .update({"features": features})
-        .eq("id", clinic_id)
-        .execute()
+        .eq("id", clinic_id))
     )
     invalidate_tenant_cache()
 
@@ -679,10 +673,9 @@ async def get_platform_revenue_analytics(
         # Query appointments with payments
         appts_res = (
             # unscoped: platform super-admin fleet operation
-            supabase.table("appointments")
+            await sb(supabase.table("appointments")
             .select("clinic_id, status, amount_paise, created_at, payment_id")
-            .gte("created_at", start_date)
-            .execute()
+            .gte("created_at", start_date))
         )
         appts = appts_res.data or []
 
@@ -767,10 +760,9 @@ async def get_platform_activity_analytics(
         # 1. Query analytics_events
         events_res = (
             # unscoped: platform super-admin querying system-wide analytics events
-            supabase.table("analytics_events")
+            await sb(supabase.table("analytics_events")
             .select("clinic_id, event_type, created_at")
-            .gte("created_at", start_date)
-            .execute()
+            .gte("created_at", start_date))
         )
         events = events_res.data or []
 
@@ -794,10 +786,9 @@ async def get_platform_activity_analytics(
             msg_res = (
                 # platform-scoped: platform activity log from processed messages
         # unscoped: platform super-admin querying cross-tenant recent message activity log
-        supabase.table("processed_messages")
+        await sb(supabase.table("processed_messages")
                 .select("created_at")
-                .gte("created_at", start_date)
-                .execute()
+                .gte("created_at", start_date))
             )
             for m in (msg_res.data or []):
                 created = m.get("created_at", "")[:10]
@@ -851,15 +842,14 @@ async def get_platform_department_analytics(
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
         # unscoped: platform super-admin listing clinics for cross-tenant appointment volume report
-        clinics_res = supabase.table("clinics").select("id, name").execute()
+        clinics_res = await sb(supabase.table("clinics").select("id, name"))
         clinic_names = {c["id"]: c["name"] for c in (clinics_res.data or [])}
 
         appts_res = (
             # unscoped: platform super-admin listing clinics for cross-tenant appointment volume report
-            supabase.table("appointments")
+            await sb(supabase.table("appointments")
             .select("clinic_id, department, created_at")
-            .gte("created_at", start_date)
-            .execute()
+            .gte("created_at", start_date))
         )
         appts = appts_res.data or []
 
@@ -983,10 +973,9 @@ async def get_callmedex_whatsapp_settings(
     # platform-scoped: fetch callmedex whatsapp settings
     res = (
         # unscoped: platform super-admin fetching CallMedex WhatsApp settings for target clinic
-        supabase.table("callmedex_whatsapp_settings")
+        await sb(supabase.table("callmedex_whatsapp_settings")
         .select("phone_number_id, api_token_encrypted, updated_at, updated_by")
-        .eq("id", "default")
-        .execute()
+        .eq("id", "default"))
     )
     row = res.data[0] if res.data else None
 
@@ -1034,10 +1023,9 @@ async def update_callmedex_whatsapp_settings(
     existing = (
         # platform-scoped: read callmedex whatsapp settings
         # unscoped: platform super-admin fetching CallMedex WhatsApp settings for target clinic
-        supabase.table("callmedex_whatsapp_settings")
+        await sb(supabase.table("callmedex_whatsapp_settings")
         .select("*")
-        .eq("id", "default")
-        .execute()
+        .eq("id", "default"))
     )
     row = dict(existing.data[0]) if existing.data else {"id": "default"}
 
@@ -1060,7 +1048,7 @@ async def update_callmedex_whatsapp_settings(
 
     # platform-scoped: upsert callmedex whatsapp settings
     # unscoped: platform super-admin fetching CallMedex WhatsApp settings for target clinic
-    supabase.table("callmedex_whatsapp_settings").upsert(row).execute()
+    await sb(supabase.table("callmedex_whatsapp_settings").upsert(row))
 
     await log_admin_action(
         user=owner,
@@ -1094,12 +1082,11 @@ async def get_callmedex_processing_centers(
     try:
         connectors_res = (
             # unscoped: platform super-admin monitoring connector health across all clinics
-            supabase.table("integration_connectors")
+            await sb(supabase.table("integration_connectors")
             .select(
                 "id, clinic_id, connector_type, is_enabled, last_run_at, last_success_at, last_error"
             )
-            .eq("is_enabled", True)
-            .execute()
+            .eq("is_enabled", True))
         )
         connectors = connectors_res.data or []
         if not connectors:
@@ -1113,21 +1100,19 @@ async def get_callmedex_processing_centers(
         clinic_ids = list({c["clinic_id"] for c in connectors})
         clinics_res = (
             # unscoped: platform super-admin fleet operation
-            supabase.table("clinics")
+            await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, is_active")
-            .in_("id", clinic_ids)
-            .execute()
+            .in_("id", clinic_ids))
         )
         clinics_by_id = {c["id"]: c for c in (clinics_res.data or [])}
 
         start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         reports_res = (
             # unscoped: platform super-admin querying recent lab reports across all connectors
-            supabase.table("lab_reports")
+            await sb(supabase.table("lab_reports")
             .select("clinic_id, uploaded_at")
             .eq("source", "callmedex")
-            .in_("clinic_id", clinic_ids)
-            .execute()
+            .in_("clinic_id", clinic_ids))
         )
         reports_by_clinic: dict[str, list] = {}
         for r in reports_res.data or []:
@@ -1225,10 +1210,9 @@ async def get_pricing_config(
         # platform-scoped: fetch meta pricing config
         result = (
             # unscoped: platform super-admin reading global Meta pricing configuration
-            supabase.table("meta_pricing_config")
+            await sb(supabase.table("meta_pricing_config")
             .select("*")
-            .eq("id", "default")
-            .execute()
+            .eq("id", "default"))
         )
         if not result.data:
             return {"error": "No pricing config found. Run migration 033."}
@@ -1287,7 +1271,7 @@ async def update_pricing_config(
     try:
         # platform-scoped: update meta pricing config
         # unscoped: platform super-admin reading global Meta pricing configuration
-        supabase.table("meta_pricing_config").update(update_data).eq("id", "default").execute()
+        await sb(supabase.table("meta_pricing_config").update(update_data).eq("id", "default"))
 
         # Invalidate the in-memory cache
         from app.services.message_accounting import invalidate_pricing_cache
@@ -1325,10 +1309,9 @@ async def get_plan_tiers(
         # platform-scoped: fetch plan tiers
         result = (
             # unscoped: platform super-admin querying subscription plan tiers
-            supabase.table("plan_tiers")
+            await sb(supabase.table("plan_tiers")
             .select("*")
-            .order("included_messages_month")
-            .execute()
+            .order("included_messages_month"))
         )
         tiers = result.data or []
 
@@ -1338,7 +1321,7 @@ async def get_plan_tiers(
         try:
             clinics_res = (
                 # unscoped: platform super-admin fleet operation
-                supabase.table("clinics").select("plan, is_active").execute()
+                await sb(supabase.table("clinics").select("plan, is_active"))
             )
             for c in clinics_res.data or []:
                 if c.get("is_active") is False:
@@ -1403,10 +1386,9 @@ async def update_plan_tier(
         # platform-scoped: update plan tier configuration
         result = (
             # unscoped: platform super-admin querying subscription plan tiers
-            supabase.table("plan_tiers")
+            await sb(supabase.table("plan_tiers")
             .update(update_data)
-            .eq("plan_name", plan_name)
-            .execute()
+            .eq("plan_name", plan_name))
         )
 
         # Invalidate the plan tiers cache
@@ -1533,10 +1515,9 @@ async def get_clinic_deletion_preview(
     """Preview entity impact stats before soft-deleting a clinic."""
     clinic_res = (
         # unscoped: platform super-admin fleet operation
-        supabase.table("clinics")
+        await sb(supabase.table("clinics")
         .select("id, name, whatsapp_number, plan, is_active, status, created_at")
-        .eq("id", clinic_id)
-        .execute()
+        .eq("id", clinic_id))
     )
     if not clinic_res.data:
         raise HTTPException(status_code=404, detail="Clinic not found")
@@ -1547,38 +1528,34 @@ async def get_clinic_deletion_preview(
 
     doc_res = (
         # unscoped: platform super-admin soft-deleting all doctors for offboarded clinic
-        supabase.table("doctors")
+        await sb(supabase.table("doctors")
         .select("id", count="exact")
-        .eq("clinic_id", clinic_id)
-        .execute()
+        .eq("clinic_id", clinic_id))
     )
     doctor_count = doc_res.count if doc_res.count is not None else len(doc_res.data or [])
 
     appt_res = (
         # unscoped: platform super-admin cancelling pending appointments for offboarded clinic
-        supabase.table("appointments")
+        await sb(supabase.table("appointments")
         .select("id", count="exact")
-        .eq("clinic_id", clinic_id)
-        .execute()
+        .eq("clinic_id", clinic_id))
     )
     appointment_count = appt_res.count if appt_res.count is not None else len(appt_res.data or [])
 
     pat_res = (
         # unscoped: platform super-admin fleet operation
-        supabase.table("patients")
+        await sb(supabase.table("patients")
         .select("id", count="exact")
-        .eq("clinic_id", clinic_id)
-        .execute()
+        .eq("clinic_id", clinic_id))
     )
     patient_count = pat_res.count if pat_res.count is not None else len(pat_res.data or [])
 
     adm_res = (
         # unscoped: platform super-admin disabling all admin logins for offboarded clinic
-        supabase.table("clinic_admins")
+        await sb(supabase.table("clinic_admins")
         .select("id", count="exact")
         .eq("clinic_id", clinic_id)
-        .eq("is_active", True)
-        .execute()
+        .eq("is_active", True))
     )
     active_admin_count = adm_res.count if adm_res.count is not None else len(adm_res.data or [])
 
@@ -1607,10 +1584,9 @@ async def delete_clinic(
     # 1. Fetch clinic
     clinic_res = (
         # unscoped: platform super-admin fleet operation
-        supabase.table("clinics")
+        await sb(supabase.table("clinics")
         .select("id, name, whatsapp_number, is_active, status")
-        .eq("id", clinic_id)
-        .execute()
+        .eq("id", clinic_id))
     )
     if not clinic_res.data:
         raise HTTPException(status_code=404, detail="Clinic not found")
@@ -1624,25 +1600,25 @@ async def delete_clinic(
     try:
         # 2. Soft-delete master clinic row
         # unscoped: platform super-admin soft-deleting clinic record
-        supabase.table("clinics").update(
+        await sb(supabase.table("clinics").update(
             {
                 "status": "DELETED",
                 "deleted_at": now_iso,
                 "is_active": False,
             }
-        ).eq("id", clinic_id).execute()
+        ).eq("id", clinic_id))
 
         # 3. Deactivate all clinic admin accounts for this tenant
         # unscoped: platform super-admin deactivating all admin accounts for clinic
-        supabase.table("clinic_admins").update(
+        await sb(supabase.table("clinic_admins").update(
             {"is_active": False}
-        ).eq("clinic_id", clinic_id).execute()
+        ).eq("clinic_id", clinic_id))
 
         # 4. Deactivate all integration connectors
         # unscoped: platform super-admin deactivating all integration connectors for clinic
-        supabase.table("integration_connectors").update(
+        await sb(supabase.table("integration_connectors").update(
             {"is_enabled": False}
-        ).eq("clinic_id", clinic_id).execute()
+        ).eq("clinic_id", clinic_id))
 
         # 5. Invalidate tenant & branch in-memory caches
         invalidate_tenant_cache(clinic.get("whatsapp_number"))

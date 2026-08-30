@@ -26,5 +26,8 @@ CREATE INDEX IF NOT EXISTS idx_appointments_followup_due
     WHERE status = 'completed' AND followup_sent = FALSE;
 
 -- ── Record migration ──
-INSERT INTO schema_migrations (name) VALUES ('063_appointment_completion_and_followups.sql') ON CONFLICT (name) DO NOTHING;
+-- NOTE: schema_migrations is written by scripts/migrate.py:124 with the
+-- file's SHA256. checksum is NOT NULL (scripts/migrate.py:60), so a
+-- self-INSERT here omits it and aborts the migration on any fresh
+-- database. Migrations must not record themselves.
 

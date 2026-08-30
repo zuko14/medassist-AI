@@ -7,16 +7,31 @@ services:
     autoDeploy: false
     numInstances: 2
     preDeployCommand: python scripts/migrate.py
+    envVars:
+      # KA-P2-20: keep Playwright/Chromium OUT of the process that must
+      # acknowledge Meta webhooks within 20s. Chromium's memory profile is
+      # spiky, and an OOM kill here takes down request handling along with
+      # every in-flight BackgroundTask. Polling runs in the worker below.
+      - key: RUN_CONNECTORS_IN_WEB
+        value: "false"
 
-  # NOTE: Connector polling is now embedded in the main web process scheduler
-  # (app/services/scheduler.py → connector_polling job). No separate worker needed.
-  # The standalone worker definition is kept commented for reference / rollback.
-  # - type: worker
-  #   name: mediassist-connector-worker
-  #   env: docker
-  #   dockerfilePath: ./Dockerfile
-  #   dockerCommand: python -m connectors.runner --all
-  #   autoDeploy: true
+  # Connector polling (Playwright/Chromium) runs in its own process so it
+  # cannot destabilise webhook handling — see KA-P2-20.
+  #
+  # Safe alongside the web services regardless of their setting:
+  # run_connector() takes a per-connector CAS advisory lock on
+  # integration_connectors with a 5-minute lease (connectors/runner.py), so two
+  # processes can never poll the same connector concurrently.
+  #
+  # If this worker is ever removed, set RUN_CONNECTORS_IN_WEB back to "true" on
+  # the web services in the SAME change — otherwise connectors stop polling
+  # silently, with reports piling up and no error raised anywhere.
+  - type: worker
+    name: mediassist-connector-worker
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m connectors.runner --all
+    autoDeploy: false
 
   # Staging environment (W6.5)
   - type: web

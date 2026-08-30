@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.database import supabase
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ async def readiness_check():
     """Readiness check with database connectivity."""
     try:
         # unscoped: database liveness probe connectivity test
-        result = supabase.table("patients").select("count", count="exact").limit(1).execute()
+        result = await sb(supabase.table("patients").select("count", count="exact").limit(1))
         return {
             "status": "ready",
             "database": "connected",

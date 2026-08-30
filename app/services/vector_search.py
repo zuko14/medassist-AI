@@ -26,6 +26,7 @@ Current state:
 
 import logging
 from typing import Optional
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class VectorSearchService:
             if extra_filters:
                 rpc_params["p_filters"] = extra_filters
 
-            result = supabase.rpc("search_similar_tenant_scoped", rpc_params).execute()
+            result = await sb(supabase.rpc("search_similar_tenant_scoped", rpc_params))
             return result.data or []
 
         except Exception as e:

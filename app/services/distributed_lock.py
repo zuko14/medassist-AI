@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import AsyncGenerator
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +32,14 @@ class DistributedJobLock:
         from app.database import supabase
 
         try:
-            res = supabase.rpc(
+            res = await sb(supabase.rpc(
                 "acquire_scheduler_lock",
                 {
                     "p_job_name": job_name,
                     "p_locked_by": self.worker_id,
                     "p_lease_seconds": lease_seconds,
                 },
-            ).execute()
+            ))
             return bool(res.data)
         except Exception as e:
             # Fail CLOSED: not acquiring means the job is skipped this tick,
@@ -58,11 +59,10 @@ class DistributedJobLock:
         ).isoformat()
         try:
             res = (
-                supabase.table("scheduler_locks")
+                await sb(supabase.table("scheduler_locks")
                 .update({"expires_at": new_expiry})
                 .eq("job_name", job_name)
-                .eq("locked_by", self.worker_id)
-                .execute()
+                .eq("locked_by", self.worker_id))
             )
             return bool(res.data)
         except Exception as e:
@@ -74,18 +74,18 @@ class DistributedJobLock:
         try:
             from app.database import supabase
             try:
-                supabase.rpc(
+                await sb(supabase.rpc(
                     "release_scheduler_lock",
                     {
                         "p_job_name": job_name,
                         "p_locked_by": self.worker_id,
                     },
-                ).execute()
+                ))
             except Exception:
                 # Fallback to direct delete if RPC fails
-                supabase.table("scheduler_locks").delete().eq("job_name", job_name).eq(
+                await sb(supabase.table("scheduler_locks").delete().eq("job_name", job_name).eq(
                     "locked_by", self.worker_id
-                ).execute()
+                ))
             logger.debug(f"Released distributed lock for '{job_name}'")
             return True
         except Exception as e:

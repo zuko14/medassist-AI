@@ -7,6 +7,7 @@ from datetime import datetime, date, timezone
 from app.database import scoped_query, supabase
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class PrescriptionService:
             "is_active": True,
             "notes": notes,
         }
-        result = supabase.table("prescriptions").insert(row).execute()
+        result = await sb(supabase.table("prescriptions").insert(row))
 
         # Send confirmation WhatsApp message
         try:
@@ -65,21 +66,19 @@ class PrescriptionService:
         """Get all prescriptions, optionally filtered to active only."""
         if active_only:
             result = (
-                supabase.table("prescriptions")
+                await sb(supabase.table("prescriptions")
                 .select("*")
                 .eq("clinic_id", clinic_id)
                 .eq("is_active", True)
                 .gte("end_date", str(date.today()))
-                .order("created_at", desc=True)
-                .execute()
+                .order("created_at", desc=True))
             )
         else:
             result = (
-                supabase.table("prescriptions")
+                await sb(supabase.table("prescriptions")
                 .select("*")
                 .eq("clinic_id", clinic_id)
-                .order("created_at", desc=True)
-                .execute()
+                .order("created_at", desc=True))
             )
         return result.data or []
 
@@ -87,16 +86,15 @@ class PrescriptionService:
         self, clinic_id: str, prescription_id: str
     ) -> dict:
         """Deactivate a prescription reminder."""
-        supabase.table("prescriptions").update({"is_active": False}).eq(
+        await sb(supabase.table("prescriptions").update({"is_active": False}).eq(
             "clinic_id", clinic_id
-        ).eq("id", prescription_id).execute()
+        ).eq("id", prescription_id))
 
         updated = (
-            supabase.table("prescriptions")
+            await sb(supabase.table("prescriptions")
             .select("*")
             .eq("clinic_id", clinic_id)
-            .eq("id", prescription_id)
-            .execute()
+            .eq("id", prescription_id))
         )
         return updated.data[0]
 
@@ -127,11 +125,10 @@ class PrescriptionService:
 
             # Get all active prescriptions where today is within range (cross-clinic background scan)
             result = (
-                scoped_query("prescriptions", allow_unscoped=True)
+                await sb(scoped_query("prescriptions", allow_unscoped=True)
                 .eq("is_active", True)
                 .lte("start_date", today_str)
-                .gte("end_date", today_str)
-                .execute()
+                .gte("end_date", today_str))
             )
 
             for rx in result.data or []:
@@ -142,11 +139,10 @@ class PrescriptionService:
                         # KA-09: Deduplication — check if already sent today for this time
                         try:
                             dedup_check = (
-                                scoped_query("prescription_reminder_sends", allow_unscoped=True)
+                                await sb(scoped_query("prescription_reminder_sends", allow_unscoped=True)
                                 .eq("prescription_id", rx["id"])
                                 .eq("reminder_time", rt)
-                                .eq("sent_date", today_str)
-                                .execute()
+                                .eq("sent_date", today_str))
                             )
                             if dedup_check.data:
                                 count_skipped_dedup += 1
@@ -168,12 +164,12 @@ class PrescriptionService:
 
                             # Record send for deduplication
                             try:
-                                supabase.table("prescription_reminder_sends").insert({
+                                await sb(supabase.table("prescription_reminder_sends").insert({
                                     "prescription_id": rx["id"],
                                     "reminder_time": rt,
                                     "sent_date": today_str,
                                     "clinic_id": rx_clinic_id,
-                                }).execute()
+                                }))
                             except Exception as dedup_err:
                                 logger.warning(f"Dedup record insert failed for {rx['id']}: {dedup_err}")
 

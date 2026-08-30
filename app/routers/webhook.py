@@ -9,7 +9,7 @@ from app.config import settings
 from app.models.message import WhatsAppWebhookPayload
 from app.services.conversation import conversation_manager
 from app.services.whatsapp import whatsapp_service
-from app.services.tenant import resolve_tenant
+from app.services.tenant import resolve_tenant, TenantNotFound
 from app.utils.validators import normalize_phone
 from app.utils.security import verify_webhook_signature
 
@@ -17,6 +17,7 @@ from app.database import supabase
 from app.services.message_queue import message_queue
 from app.services.metrics import metrics
 from app.utils.correlation import set_correlation_id
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ async def record_delivery_status(status: dict) -> None:
     try:
         from app.database import supabase
         # unscoped: global Meta callback lookup by unique whatsapp_message_id
-        curr_row = supabase.table("lab_reports").select("delivery_status").eq("whatsapp_message_id", wamid).execute()
+        curr_row = await sb(supabase.table("lab_reports").select("delivery_status").eq("whatsapp_message_id", wamid))
         if curr_row and curr_row.data:
             old_state = curr_row.data[0].get("delivery_status") or ""
             old_rank = _DELIVERY_RANK.get(old_state, 0)
@@ -160,11 +161,11 @@ async def record_delivery_status(status: dict) -> None:
                 return
 
         # unscoped: global Meta callback update by unique whatsapp_message_id
-        supabase.table("lab_reports").update({
+        await sb(supabase.table("lab_reports").update({
             "delivery_status": state,
             "delivery_error": err.get("title") or err.get("message") if err else None,
             "delivery_updated_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("whatsapp_message_id", wamid).execute()
+        }).eq("whatsapp_message_id", wamid))
         if state == "failed":
             logger.error(f"Meta delivery FAILED for wamid {wamid}: {err}")
     except Exception as e:
@@ -182,6 +183,23 @@ async def process_message_safe(message, display_phone: str, raw_payload: dict, p
     try:
         await process_message(message, display_phone, phone_number_id)
         await message_queue.mark_completed(message_id)
+    except TenantNotFound as e:
+        # Permanent failure — a missing, suspended or deleted WABA mapping will
+        # not fix itself in five seconds. Retrying three times only produces
+        # three identical errors and pollutes the DLQ an operator must triage.
+        # max_retries=0 sends it straight to dead_letter (KA-P1-04).
+        logger.error(
+            f"TENANT_UNRESOLVED message_id={message_id} "
+            f"display_phone={display_phone}: {e} — dead-lettering immediately"
+        )
+        metrics.inc_counter(
+            "kriya_inbound_messages_total", 1, {"status": "tenant_unresolved"}
+        )
+        await message_queue.mark_failed(message_id, f"tenant_unresolved: {e}", max_retries=0)
+        try:
+            await message_queue.release(message_id)
+        except Exception as rel_err:
+            logger.warning(f"Failed to release message lock for {message_id}: {rel_err}")
     except Exception as e:
         logger.error(f"Message processing failed for {message_id}: {e}")
         await message_queue.mark_failed(message_id, str(e), max_retries=3)
@@ -204,8 +222,16 @@ async def process_message(message, display_phone: str, phone_number_id: str = No
             raise
 
         if not clinic:
-            logger.error(f"Tenant resolution returned None for display_phone={display_phone}")
-            return
+            # KA-P1-04 (second loss path): returning here let
+            # process_message_safe() fall through to mark_completed(), so a
+            # misconfigured or newly-provisioned WABA mapping discarded every
+            # inbound patient message and recorded each one as handled — no
+            # dead-letter row, no alert, no retry. Raise so the message lands
+            # in the DLQ where an operator can see it.
+            raise TenantNotFound(
+                f"Tenant resolution returned None for display_phone={display_phone} "
+                f"phone_number_id={phone_number_id}"
+            )
 
         clinic_id = clinic.get("id")
 

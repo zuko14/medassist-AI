@@ -17,6 +17,7 @@ from app.services.tenant import (
     get_clinic_by_id,
 )
 from app.services.whatsapp import whatsapp_service
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
 
     try:
         # unscoped: creating new tenant clinic record in clinics table during onboarding
-        result = supabase.table("clinics").insert(clinic_insert_payload).execute()
+        result = await sb(supabase.table("clinics").insert(clinic_insert_payload))
 
         if not result.data:
             raise HTTPException(500, "Failed to create clinic")
@@ -165,7 +166,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
                     branch_data = branch.dict()
                     branch_data["clinic_id"] = clinic_id
                     # unscoped: seeding branch for newly created clinic with explicit clinic_id
-                    br_result = supabase.table("branches").insert(branch_data).execute()
+                    br_result = await sb(supabase.table("branches").insert(branch_data))
                     if br_result.data:
                         created_branches.append(br_result.data[0])
                 except Exception as be:
@@ -184,7 +185,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         password = secrets.token_urlsafe(16)
         try:
             # unscoped: auto-provisioning initial clinic admin credentials for new clinic
-            admin_result = supabase.table("clinic_admins").insert(
+            admin_result = await sb(supabase.table("clinic_admins").insert(
                 {
                     "clinic_id": clinic_id,
                     "username": username,
@@ -192,7 +193,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
                     "role": "clinic_admin",
                     "is_active": True,
                 }
-            ).execute()
+            ))
             if admin_result.data:
                 clinic_admin = {"username": username, "password": password}
         except Exception as ae:
@@ -224,9 +225,8 @@ async def list_clinics():
     """List all clinics."""
     result = (
         # unscoped: platform super-admin listing all clinics
-        supabase.table("clinics")
-        .select("id,name,whatsapp_number,plan,is_active,created_at")
-        .execute()
+        await sb(supabase.table("clinics")
+        .select("id,name,whatsapp_number,plan,is_active,created_at"))
     )
     return {"clinics": result.data or []}
 
@@ -292,7 +292,7 @@ async def update_clinic(clinic_id: str, req: UpdateClinicRequest | dict):
         raise HTTPException(400, "No fields provided to update")
 
     # unscoped: platform super-admin updating clinic configuration by clinic_id
-    result = supabase.table("clinics").update(updates).eq("id", clinic_id).execute()
+    result = await sb(supabase.table("clinics").update(updates).eq("id", clinic_id))
 
     if not result.data:
         raise HTTPException(404, "Clinic not found")
@@ -323,10 +323,9 @@ async def deactivate_clinic(clinic_id: str):
     """Soft-delete: sets is_active=false. Data preserved."""
     result = (
         # unscoped: platform super-admin soft-deleting clinic by clinic_id
-        supabase.table("clinics")
+        await sb(supabase.table("clinics")
         .update({"is_active": False})
-        .eq("id", clinic_id)
-        .execute()
+        .eq("id", clinic_id))
     )
 
     if not result.data:

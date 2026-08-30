@@ -192,8 +192,16 @@ async def test_app_lifespan_populates_queue_handlers_and_processes_background_ta
 
         task_id = await global_container.queue_engine.enqueue_task(req)
         
-        # Wait briefly for background worker loop to consume and process task
-        for _ in range(20):
+        # Wait for the background worker loop to consume and process the task.
+        #
+        # 10s, not 2s. `supabase` is NOT mocked in this test, and since T5.1 the
+        # handler's queries run through app.database.sb() — a real, off-loop
+        # PostgREST round-trip that fails against the placeholder test URL only
+        # after a connect attempt (bounded by settings.db_query_timeout_seconds).
+        # The old 2s budget silently assumed the handler did no I/O at all.
+        # This is a wiring test: it asserts the task reaches COMPLETED, not how
+        # fast, and the loop still exits as soon as it does.
+        for _ in range(100):
             await asyncio.sleep(0.1)
             status = await global_container.queue_engine.get_task_status(task_id)
             if status in (TaskStatus.COMPLETED, TaskStatus.FAILED):

@@ -126,7 +126,18 @@ class TestLabTestBookingCreation:
         mock_booking = {"id": "consult-booking-uuid", "booking_ref": "MC-2026-9003"}
         mock_link = {"id": "plink_consult", "short_url": "https://rzp.io/i/consult1"}
 
-        with patch("app.services.payment.supabase") as mock_sb, patch.object(
+        # get_doctor_by_name must be patched: a consultation booking now
+        # requires a resolved doctor_id before the INSERT, because migration
+        # 064 keys the slot uniqueness index on doctor_id and a NULL there is
+        # an unguarded slot (KA-P0-01). Without this the test made a real
+        # network call, got None, and exercised exactly the row shape the
+        # fix forbids.
+        with patch("app.services.payment.supabase") as mock_sb, patch(
+            "app.database.get_doctor_by_name",
+            new_callable=AsyncMock,
+            return_value={"id": "33333333-4444-5555-6666-777777777777",
+                          "name": "Dr. Test", "consultation_fee": 500},
+        ), patch.object(
             service, "_get_doctor_fee_paise", new_callable=AsyncMock, return_value=50000
         ) as mock_doctor_fee, patch.object(
             service, "_get_lab_test_fee_paise", new_callable=AsyncMock

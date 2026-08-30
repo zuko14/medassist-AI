@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.database import supabase
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class BroadcastService:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        res = supabase.table("broadcasts").insert(broadcast_row).execute()
+        res = await sb(supabase.table("broadcasts").insert(broadcast_row))
         if not res.data:
             raise RuntimeError("Failed to create broadcast record in database.")
 
@@ -119,7 +120,7 @@ class BroadcastService:
                 .select("id, name, is_active, status")
                 .eq("is_active", True)
             )
-            clinics_res = clinics_query.execute()
+            clinics_res = await sb(clinics_query)
             all_active_clinics = [
                 c for c in (clinics_res.data or []) if c.get("status") != "DELETED"
             ]
@@ -137,11 +138,10 @@ class BroadcastService:
 
             # 2. Fetch active clinic admins for the targeted clinics
             admins_res = (
-                supabase.table("clinic_admins")
+                await sb(supabase.table("clinic_admins")
                 .select("id, clinic_id, username, is_active")
                 .in_("clinic_id", allowed_clinic_ids)
-                .eq("is_active", True)
-                .execute()
+                .eq("is_active", True))
             )
             target_admins = admins_res.data or []
 
@@ -183,14 +183,14 @@ class BroadcastService:
             total_inserted = 0
             for i in range(0, len(notifications_to_insert), chunk_size):
                 chunk = notifications_to_insert[i : i + chunk_size]
-                ins_res = supabase.table("admin_notifications").insert(chunk).execute()
+                ins_res = await sb(supabase.table("admin_notifications").insert(chunk))
                 if ins_res.data:
                     total_inserted += len(ins_res.data)
 
             # 5. Update broadcast recipient count
-            supabase.table("broadcasts").update(
+            await sb(supabase.table("broadcasts").update(
                 {"recipient_count": total_inserted}
-            ).eq("id", broadcast_id).execute()
+            ).eq("id", broadcast_id))
 
             logger.info(
                 f"Broadcast {broadcast_id} dispatched: {total_inserted} notifications created across {len(allowed_clinic_ids)} clinics."
@@ -207,11 +207,10 @@ class BroadcastService:
     async def get_broadcasts(limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         """Retrieve recent broadcasts with live delivery & read metrics."""
         res = (
-            supabase.table("broadcasts")
+            await sb(supabase.table("broadcasts")
             .select("*")
             .order("created_at", desc=True)
-            .range(offset, offset + limit - 1)
-            .execute()
+            .range(offset, offset + limit - 1))
         )
         broadcasts = res.data or []
 
@@ -220,10 +219,9 @@ class BroadcastService:
         for b in broadcasts:
             bid = b["id"]
             notifs_res = (
-                supabase.table("admin_notifications")
+                await sb(supabase.table("admin_notifications")
                 .select("id, is_read")
-                .eq("broadcast_id", bid)
-                .execute()
+                .eq("broadcast_id", bid))
             )
             notifs = notifs_res.data or []
             delivered = len(notifs)
@@ -240,16 +238,15 @@ class BroadcastService:
     @staticmethod
     async def get_broadcast_by_id(broadcast_id: str) -> Optional[Dict[str, Any]]:
         """Get single broadcast details with full delivery summary."""
-        res = supabase.table("broadcasts").select("*").eq("id", broadcast_id).execute()
+        res = await sb(supabase.table("broadcasts").select("*").eq("id", broadcast_id))
         if not res.data:
             return None
 
         broadcast = res.data[0]
         notifs_res = (
-            supabase.table("admin_notifications")
+            await sb(supabase.table("admin_notifications")
             .select("id, clinic_id, admin_id, is_read, read_at, created_at")
-            .eq("broadcast_id", broadcast_id)
-            .execute()
+            .eq("broadcast_id", broadcast_id))
         )
         notifs = notifs_res.data or []
         delivered = len(notifs)
@@ -287,18 +284,17 @@ class BroadcastService:
         if unread_only:
             query = query.eq("is_read", False)
 
-        res = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+        res = await sb(query.order("created_at", desc=True).range(offset, offset + limit - 1))
         return res.data or []
 
     @staticmethod
     async def get_unread_count(clinic_id: str, admin_id: Optional[str] = None) -> int:
         """Get live unread notification count for the header badge."""
         res = (
-            supabase.table("admin_notifications")
+            await sb(supabase.table("admin_notifications")
             .select("id", count="exact")
             .eq("clinic_id", clinic_id)
-            .eq("is_read", False)
-            .execute()
+            .eq("is_read", False))
         )
         return res.count if res.count is not None else len(res.data or [])
 
@@ -311,11 +307,10 @@ class BroadcastService:
         """Mark a single notification as read, strictly tenant-scoped."""
         now_iso = datetime.now(timezone.utc).isoformat()
         res = (
-            supabase.table("admin_notifications")
+            await sb(supabase.table("admin_notifications")
             .update({"is_read": True, "read_at": now_iso})
             .eq("id", notification_id)
-            .eq("clinic_id", clinic_id)
-            .execute()
+            .eq("clinic_id", clinic_id))
         )
         return bool(res.data)
 
@@ -327,11 +322,10 @@ class BroadcastService:
         """Mark all unread notifications for this clinic as read."""
         now_iso = datetime.now(timezone.utc).isoformat()
         res = (
-            supabase.table("admin_notifications")
+            await sb(supabase.table("admin_notifications")
             .update({"is_read": True, "read_at": now_iso})
             .eq("clinic_id", clinic_id)
-            .eq("is_read", False)
-            .execute()
+            .eq("is_read", False))
         )
         return len(res.data or [])
 

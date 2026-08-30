@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.database import log_analytics_event, supabase
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class AnalyticsService:
             )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
-            all_appts = query.execute()
+            all_appts = await sb(query)
             appts = all_appts.data or []
 
             total_appointments = len(appts)
@@ -68,7 +69,7 @@ class AnalyticsService:
             pat_query = supabase.table("patients").select("created_at")
             if clinic_id != "default":
                 pat_query = pat_query.eq("clinic_id", clinic_id)
-            all_patients = pat_query.execute()
+            all_patients = await sb(pat_query)
             patients = all_patients.data or []
             total_patients = len(patients)
             new_patients = sum(
@@ -113,7 +114,7 @@ class AnalyticsService:
             )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
-            result = query.execute()
+            result = await sb(query)
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting recent appointments: {e}")
@@ -135,7 +136,7 @@ class AnalyticsService:
             )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
-            result = query.execute()
+            result = await sb(query)
 
             return result.data or []
         except Exception as e:
@@ -154,7 +155,7 @@ class AnalyticsService:
             )
             if clinic_id != "default":
                 query = query.eq("clinic_id", clinic_id)
-            result = query.execute()
+            result = await sb(query)
 
             dept_counts = {}
             for row in result.data:

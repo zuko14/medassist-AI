@@ -22,7 +22,10 @@ CREATE INDEX idx_appointments_slot_lookup
     ON appointments(clinic_id, doctor_name, appointment_date, status)
     WHERE status IN ('confirmed', 'pending_payment', 'pending_review');
 
-INSERT INTO schema_migrations (name) VALUES ('058_pending_review_slot_hold.sql') ON CONFLICT (name) DO NOTHING;
+-- NOTE: schema_migrations is written by scripts/migrate.py:124 with the
+-- file's SHA256. checksum is NOT NULL (scripts/migrate.py:60), so a
+-- self-INSERT here omits it and aborts the migration on any fresh
+-- database. Migrations must not record themselves.
 
 -- Verify
 SELECT 'migration_058_complete' AS status;

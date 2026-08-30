@@ -6,6 +6,7 @@ Mounts internal endpoints:
 - GET  /internal/integrations/callmedex/jobs/{task_id}
 """
 
+import asyncio
 import hmac
 import hashlib
 import secrets
@@ -24,6 +25,7 @@ from app.integrations.callmedex.api.schemas import (
 )
 from app.integrations.callmedex.workers.runner import CallMedexWorkerRunner, CallMedexContainer
 from app.utils.security import login_rate_limiter
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +95,9 @@ async def verify_callmedex_auth_and_hmac(
     # is_rate_limited()-only call never recorded an attempt, so the counter
     # never advanced and this check was always a no-op).
     client_ip = request.client.host if request.client else "unknown"
-    if login_rate_limiter.check_and_record(client_ip):
+    # T5.1: the limiter is synchronous and hits the rate_limits table, so this
+    # was a blocking DB round-trip on the event loop for every integration call.
+    if await asyncio.to_thread(login_rate_limiter.check_and_record, client_ip):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded for integration endpoints",
@@ -210,11 +214,10 @@ async def process_report_endpoint(
         try:
             from app.database import supabase
             existing = (
-                supabase.table("lab_reports")
+                await sb(supabase.table("lab_reports")
                 .select("id")
                 .eq("clinic_id", request.clinic_id)
-                .eq("external_report_id", request.external_report_id)
-                .execute()
+                .eq("external_report_id", request.external_report_id))
             )
             if existing.data and len(existing.data) > 0:
                 lab_report_id = existing.data[0].get("id")

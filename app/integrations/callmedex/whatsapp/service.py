@@ -15,6 +15,7 @@ from app.integrations.callmedex.whatsapp.schemas import (
     WhatsAppTemplatePayload,
 )
 from app.utils.validators import mask_phone
+from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,9 @@ class WhatsAppDeliveryService:
             from app.utils.connector_crypto import decrypt_password
 
             row = (
-                supabase.table("callmedex_whatsapp_settings")
+                await sb(supabase.table("callmedex_whatsapp_settings")
                 .select("phone_number_id, api_token_encrypted")
-                .eq("id", "default")
-                .execute()
+                .eq("id", "default"))
             )
             if isinstance(row.data, list) and row.data:
                 r = row.data[0]
