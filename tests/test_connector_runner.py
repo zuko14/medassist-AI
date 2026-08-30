@@ -312,3 +312,81 @@ async def test_placeholder_credentials_are_skipped_not_alerted(config):
 async def test_real_credentials_are_not_mistaken_for_placeholders():
     result, _ = await _run(dry_run=False)
     assert result["run_status"] == "success"
+
+
+# ── Playwright needs a subprocess-capable event loop ────────────────────────
+# `uvicorn --reload` (APP_ENV=development) and `uvicorn --workers N` both build
+# a SelectorEventLoop. On Windows that loop cannot spawn subprocesses at all,
+# so Playwright's driver launch raised a bare `NotImplementedError` — the
+# message-less "Error: NotImplementedError:" shown on the admin dashboard.
+
+
+def test_loop_supports_subprocess_detects_the_base_stub():
+    import asyncio
+
+    from connectors.runner import _loop_supports_subprocess
+
+    selector, proactor = asyncio.SelectorEventLoop(), None
+    try:
+        # A loop is capable iff it overrides BaseEventLoop's raising stub.
+        expected = (
+            type(selector)._make_subprocess_transport
+            is not asyncio.BaseEventLoop._make_subprocess_transport
+        )
+        assert _loop_supports_subprocess(selector) is expected
+        if hasattr(asyncio, "ProactorEventLoop"):
+            proactor = asyncio.ProactorEventLoop()
+            assert _loop_supports_subprocess(proactor) is True
+    finally:
+        selector.close()
+        if proactor is not None:
+            proactor.close()
+
+
+def test_run_connector_spawns_subprocesses_from_a_selector_loop():
+    """Regression: a connector run must be able to start Playwright even when
+    the host loop (uvicorn's SelectorEventLoop) cannot spawn subprocesses."""
+    import asyncio
+    import sys
+
+    from connectors import runner
+
+    async def _spawn(**kwargs):
+        proc = await asyncio.create_subprocess_exec(sys.executable, "-c", "pass")
+        await proc.wait()
+        return {"run_status": "success", "returncode": proc.returncode}
+
+    loop = asyncio.SelectorEventLoop()
+    try:
+        with patch.object(runner, "_run_connector", _spawn):
+            result = loop.run_until_complete(runner.run_connector(clinic_id="c1"))
+    finally:
+        loop.close()
+
+    assert result["run_status"] == "success"
+    assert result["returncode"] == 0
+
+
+def test_run_connector_stays_inline_on_a_capable_loop():
+    """Production (Linux/uvloop) must keep awaiting the run directly rather
+    than paying for a thread hop."""
+    import asyncio
+    import threading
+
+    from connectors import runner
+
+    async def _record(**kwargs):
+        return {"thread": threading.current_thread().name}
+
+    async def _drive():
+        assert runner._loop_supports_subprocess(asyncio.get_running_loop())
+        with patch.object(runner, "_run_connector", _record):
+            return await runner.run_connector(clinic_id="c1")
+
+    loop = runner._new_subprocess_loop()
+    try:
+        result = loop.run_until_complete(_drive())
+    finally:
+        loop.close()
+
+    assert not result["thread"].startswith("connector-loop")

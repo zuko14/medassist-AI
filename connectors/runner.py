@@ -30,6 +30,7 @@ import re
 import signal
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -399,7 +400,88 @@ def _placeholder_credential(config: dict) -> str | None:
     return None
 
 
-async def run_connector(
+# ── Subprocess-capable event loop for Playwright ─────────────────────────────
+# Playwright starts its Node driver via asyncio.create_subprocess_exec, so the
+# loop a connector runs on MUST implement _make_subprocess_transport.
+#
+# Very often it does not.  `uvicorn --reload` (which app/main.py enables
+# whenever APP_ENV=development) and `uvicorn --workers N` both make uvicorn
+# build a SelectorEventLoop.  On Windows that is BaseSelectorEventLoop, which
+# never overrides _make_subprocess_transport, so BaseEventLoop's stub runs and
+# raises a bare `NotImplementedError` carrying no message — exactly the
+# "Error: NotImplementedError:" the admin dashboard reports.
+#
+# A running loop's type cannot be changed, so no event-loop-policy swap or
+# child-watcher reinstall can repair the host loop.  The work has to move to a
+# loop that can spawn.  Only the connector body moves; app/database.sb() already
+# runs PostgREST calls on its own executor, and run_connector holds no
+# loop-bound state, so it is safe on any loop.
+#
+# ponytail: 2 threads bounds concurrent Chromiums (memory). Raise it if manual
+# admin runs start queueing behind scheduled polls.
+_CONNECTOR_LOOP_POOL = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="connector-loop"
+)
+
+
+def _loop_supports_subprocess(loop) -> bool:
+    """True if `loop` can spawn subprocesses, i.e. Playwright can start on it.
+
+    Checks for the un-overridden BaseEventLoop stub rather than testing the
+    platform or loop class, so uvloop, ProactorEventLoop and the Unix selector
+    loop are all recognised without hardcoding a list.
+    """
+    return (
+        type(loop)._make_subprocess_transport
+        is not asyncio.BaseEventLoop._make_subprocess_transport
+    )
+
+
+def _new_subprocess_loop() -> asyncio.AbstractEventLoop:
+    """A fresh event loop guaranteed to support subprocess spawning."""
+    if sys.platform == "win32":
+        # Windows SelectorEventLoop has no subprocess support at all.
+        return asyncio.ProactorEventLoop()
+    return asyncio.new_event_loop()
+
+
+async def run_connector(*args, **kwargs) -> dict:
+    """Execute one connector run on a loop that can spawn Playwright.
+
+    Thin dispatcher around `_run_connector`. When the caller's loop already
+    supports subprocesses (Linux/uvloop production, the standalone worker) the
+    coroutine is awaited inline and nothing changes. Otherwise it is run on a
+    dedicated thread that owns a subprocess-capable loop.
+    """
+    try:
+        caller_loop = asyncio.get_running_loop()
+    except RuntimeError:  # pragma: no cover - run_connector is always awaited
+        caller_loop = None
+
+    if caller_loop is not None and _loop_supports_subprocess(caller_loop):
+        return await _run_connector(*args, **kwargs)
+
+    logger.warning(
+        "Event loop %s cannot spawn subprocesses; running connector on a "
+        "dedicated ProactorEventLoop/selector thread so Playwright can start.",
+        type(caller_loop).__name__,
+    )
+
+    def _in_own_loop() -> dict:
+        with asyncio.Runner(loop_factory=_new_subprocess_loop) as runner:
+            # Playwright uses get_running_loop(), but set the thread-local loop
+            # too so any dependency calling get_event_loop() sees the right one.
+            asyncio.set_event_loop(runner.get_loop())
+            try:
+                return runner.run(_run_connector(*args, **kwargs))
+            finally:
+                # Pool threads are reused — do not leak a closed loop.
+                asyncio.set_event_loop(None)
+
+    return await caller_loop.run_in_executor(_CONNECTOR_LOOP_POOL, _in_own_loop)
+
+
+async def _run_connector(
     clinic_id: str,
     connector_type: str = "mocdoc",
     dry_run: bool = False,
@@ -989,7 +1071,12 @@ def _ensure_subprocess_support():
     It is designed to be called before EACH connector run, not just once.
     """
     if sys.platform == "win32":
-        return  # Windows uses ProactorEventLoop, no child watcher needed
+        # Windows has no child watchers. NOTE: Windows is NOT automatically
+        # on ProactorEventLoop — uvicorn picks SelectorEventLoop whenever
+        # --reload or --workers is used, and that loop cannot spawn at all.
+        # run_connector() handles that case by moving the run onto its own
+        # subprocess-capable loop; nothing here can help.
+        return
 
     import warnings
     with warnings.catch_warnings():
