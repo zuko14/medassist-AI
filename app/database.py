@@ -44,6 +44,27 @@ _sb_key = settings.supabase_service_role_key or "placeholder-key"
 # no query can run at all, and the failure looks like a hang rather than an
 # error. A bounded call surfaces as an exception that the existing fail-closed
 # handling already knows what to do with.
+#
+# HTTP/1.1 is forced deliberately: the httpx default HTTP/2 multiplexes all
+# requests over a single TCP connection. If one request times out, httpx tears
+# down the shared H2 connection and every in-flight request multiplexed on it
+# fails with ReadTimeout simultaneously — visible in production as a cascade
+# where every DB operation fails at the exact same instant. With HTTP/1.1 each
+# request uses its own connection from the pool, so a single slow query cannot
+# poison other requests.
+_db_timeout = httpx.Timeout(
+    settings.db_query_timeout_seconds,
+    connect=10.0,  # allow extra time for TCP+TLS handshake under cold-start
+)
+_db_transport = httpx.HTTPTransport(
+    retries=1,         # one transparent retry on connection-level errors
+    http2=False,       # force HTTP/1.1 — see note above
+)
+_db_httpx_client = httpx.Client(
+    timeout=_db_timeout,
+    transport=_db_transport,
+)
+
 try:
     # create_client() (the sync client) takes SyncClientOptions.
     from supabase.lib.client_options import SyncClientOptions
@@ -53,6 +74,16 @@ try:
         storage_client_timeout=settings.db_query_timeout_seconds,
     )
     supabase: Client = create_client(_sb_url, _sb_key, options=_sb_options)
+
+    # Patch the PostgREST session to use our HTTP/1.1 transport.
+    # supabase-py exposes the underlying httpx session on the postgrest client.
+    if hasattr(supabase, "postgrest") and hasattr(supabase.postgrest, "_session"):
+        supabase.postgrest._session = _db_httpx_client
+        logger.info(
+            "Supabase PostgREST client patched: HTTP/1.1 forced, "
+            f"timeout={settings.db_query_timeout_seconds}s, "
+            f"connect_timeout=10s, retries=1"
+        )
 except Exception as _opt_err:  # pragma: no cover - defensive
     logger.warning(
         f"Could not apply Supabase client timeouts ({_opt_err}); falling back to "

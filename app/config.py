@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     # tunable per deployment; raising it above the library default would just
     # hold a worker thread out of the pool for longer on a call that is not
     # going to answer usefully anyway. Well under Meta's 20s webhook budget.
-    db_query_timeout_seconds: int = 5
+    db_query_timeout_seconds: int = 15
 
     # Whether THIS process runs connector polling (Playwright/Chromium).
     #
