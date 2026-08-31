@@ -1,6 +1,7 @@
 """MediAssist AI - Hospital WhatsApp Assistant — Security Hardened."""
 
 import logging
+import httpx
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -195,6 +196,19 @@ async def lifespan(app: FastAPI):
             )
         except RuntimeError:
             raise
+        except (httpx.TimeoutException, httpx.ConnectError, OSError) as e:
+            # Transient connectivity issue (Supabase outage, DNS failure,
+            # read timeout).  Crashing here would cause infinite restart
+            # loops on the deployment platform while the DB is unreachable.
+            # Log critically so alerts fire, but let the app start — it
+            # will serve 503s on DB-dependent routes until connectivity
+            # recovers, which is strictly better than being fully down.
+            logger.critical(
+                f"⚠️ Schema pre-flight SKIPPED due to database connectivity "
+                f"error ({type(e).__name__}: {e}). The app will start but "
+                f"database-dependent features may be degraded until "
+                f"connectivity is restored."
+            )
         except Exception as e:
             error_msg = f"Database schema validation failed on {settings.app_env} boot: {e}"
             logger.critical(f"FATAL: {error_msg}")
