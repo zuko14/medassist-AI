@@ -142,6 +142,8 @@ class PaymentService:
         # ── Determine fee based on booking type ──
         if booking_type == "lab_test":
             amount_paise = await self._get_lab_test_fee_paise(clinic_id, lab_test_id)
+            if not amount_paise or amount_paise <= 0:
+                return {"success": False, "reason": "lab_test_price_unavailable"}
         else:
             amount_paise = await self._get_doctor_fee_paise(clinic_id, doctor_name)
         if deposit_percent < 100:
@@ -1640,7 +1642,7 @@ class PaymentService:
 
         return settings.booking_fee_paise
 
-    async def _get_lab_test_fee_paise(self, clinic_id: str, lab_test_id: str) -> int:
+    async def _get_lab_test_fee_paise(self, clinic_id: str, lab_test_id: str) -> Optional[int]:
         """Get a lab test's price in paise directly from the catalog."""
         try:
             query = supabase.table("lab_tests").select("price_paise")
@@ -1651,8 +1653,19 @@ class PaymentService:
                 return int(result.data[0]["price_paise"])
         except Exception as e:
             logger.error(f"Error fetching lab test fee: {e}")
+            return None
 
-        return settings.booking_fee_paise
+        # No usable price. Unlike a consultation -- where booking_fee_paise is a
+        # legitimate clinic-wide default -- a lab test has no sensible fallback
+        # price, so charging the generic fee would bill the patient an amount
+        # that appears nowhere in the catalog. Both intake paths (the API and
+        # the CSV import) reject a price <= 0, so reaching here means the row
+        # was deleted mid-booking or written outside those paths.
+        logger.error(
+            f"Lab test {lab_test_id} for clinic {clinic_id} has no usable "
+            f"price_paise -- refusing to bill a fallback amount"
+        )
+        return None
 
     async def _create_razorpay_order(
         self,

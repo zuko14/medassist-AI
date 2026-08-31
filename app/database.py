@@ -21,6 +21,25 @@ DOCTOR_CACHE_TTL_SECONDS = 60
 HOLIDAY_CACHE_TTL_SECONDS = 300
 
 
+def invalidate_holiday_cache(clinic_id: Optional[str] = None, holiday_date: Optional[str] = None) -> None:
+    """Evict cached holiday lookups after an admin adds or removes a holiday.
+
+    get_available_slots caches the RESULT of the hospital_holidays lookup,
+    including the empty list meaning "this day is not a holiday". Without this,
+    declaring a holiday in the admin panel left the bot offering slots on that
+    day — and accepting bookings for it — for up to HOLIDAY_CACHE_TTL_SECONDS.
+    Deleting one had the mirror problem: the clinic stayed closed to patients
+    for the same window after it was reopened.
+    """
+    if clinic_id and holiday_date:
+        _holiday_cache.pop(f"{clinic_id}:{holiday_date}", None)
+    elif clinic_id:
+        for k in [k for k in _holiday_cache if k.startswith(f"{clinic_id}:")]:
+            _holiday_cache.pop(k, None)
+    else:
+        _holiday_cache.clear()
+
+
 def invalidate_doctor_cache(clinic_id: Optional[str] = None, doctor_name: Optional[str] = None) -> None:
     """Evict doctor cache entries. Called immediately upon admin mutations."""
     if doctor_name and clinic_id:

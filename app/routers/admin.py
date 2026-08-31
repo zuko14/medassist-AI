@@ -35,6 +35,7 @@ from app.database import (
     call_next_patient,
     get_patient_queue_status,
     invalidate_doctor_cache,
+    invalidate_holiday_cache,
 )
 from app.services.tenant import (
     ALL_FEATURES,
@@ -1002,6 +1003,19 @@ class LabTestUpdate(BaseModel):
     turnaround_hours: Optional[int] = None
     is_active: Optional[bool] = None
     branch_id: Optional[str] = None
+
+    @field_validator("price_rupees")
+    @classmethod
+    def validate_price(cls, v: Optional[int]) -> Optional[int]:
+        """Same rule as LabTestCreate.
+
+        Without it an edit could set a price the create route would reject: 0
+        made the booking fall through to the generic booking fee, and a
+        negative price reached Razorpay as a negative order amount.
+        """
+        if v is not None and v <= 0:
+            raise ValueError("price_rupees must be greater than 0")
+        return v
 
 
 class LabCollectionWindowUpdate(BaseModel):
@@ -2380,6 +2394,11 @@ async def create_holiday(
             ))
         )
 
+        # The bot caches "is this date a holiday?" for 5 minutes, including the
+        # negative answer. Without this the clinic would keep taking bookings
+        # for a day it just closed.
+        invalidate_holiday_cache(effective_clinic_id, str(holiday_date))
+
         client_ip = request.client.host if (request and request.client) else "unknown"
         await log_admin_action(
             user=user,
@@ -2413,6 +2432,10 @@ async def delete_holiday(
         if effective_clinic_id != "default":
             query = query.eq("clinic_id", effective_clinic_id)
         await sb(query.eq("holiday_date", holiday_date))
+
+        # Mirror of create_holiday: without this the clinic stays shut to
+        # patients for up to 5 minutes after it is reopened.
+        invalidate_holiday_cache(effective_clinic_id, holiday_date)
 
         client_ip = request.client.host if (request and request.client) else "unknown"
         await log_admin_action(

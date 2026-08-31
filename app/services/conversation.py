@@ -2095,8 +2095,53 @@ class ConversationManager:
             # Show all departments
             await self._show_department_list(clinic, phone, context, lang)
 
+    #: WhatsApp caps an interactive list at 10 rows. Nine leaves room for the
+    #: "More options" row that makes item 11 onward reachable at all.
+    LIST_PAGE_SIZE = 9
+
+    def _page_rows(
+        self, rows: list[dict], page: int, more_id: str, lang: str
+    ) -> tuple[list[dict], int]:
+        """Return one page of interactive-list rows, plus the page actually used.
+
+        Every list builder used to hand its full result set to
+        send_interactive_list and let it truncate at 10. The clinic could add an
+        11th doctor, or import a 200-test catalogue from the admin panel, and
+        no patient could ever select any of it -- send_interactive_list logs
+        "ALERT list_truncated ... need pagination" and drops the rest silently.
+
+        A list that already fits is returned untouched, so short catalogues keep
+        showing all 10 rows and gain no extra tap.
+        """
+        if page <= 0 and len(rows) <= 10:
+            return rows, 0
+
+        start = max(0, page) * self.LIST_PAGE_SIZE
+        if start >= len(rows):  # ran past the end; restart from the beginning
+            start, page = 0, 0
+
+        page_rows = list(rows[start : start + self.LIST_PAGE_SIZE])
+        remaining = len(rows) - (start + len(page_rows))
+        if remaining > 0:
+            page_rows.append(
+                {
+                    "id": more_id,
+                    "title": {
+                        "en": "More options",
+                        "hi": "और विकल्प",
+                        "te": "మరిన్ని ఎంపికలు",
+                    }.get(lang, "More options"),
+                    "description": {
+                        "en": f"{remaining} more to choose from",
+                        "hi": f"{remaining} और विकल्प",
+                        "te": f"{remaining} మరిన్ని",
+                    }.get(lang, f"{remaining} more"),
+                }
+            )
+        return page_rows, max(0, page)
+
     async def _show_department_list(
-        self, clinic: dict, phone: str, context: dict, lang: str
+        self, clinic: dict, phone: str, context: dict, lang: str, page: int = 0
     ) -> None:
         """Show list of departments dynamically derived from active doctors."""
         from app.services.tenant import has_feature
@@ -2130,13 +2175,16 @@ class ConversationManager:
             await self._send_main_menu(clinic, phone, lang)
             return
 
-        rows = []
+        all_rows = []
         dept_options = {}
-        for d in dept_names[:10]:  # limit to 10 for WhatsApp interactive list
+        for d in dept_names:
             dept_id = f"dept_{d.lower().replace(' ', '_')}"
-            rows.append({"id": dept_id, "title": d[:24], "description": ""})
+            all_rows.append({"id": dept_id, "title": d[:24], "description": ""})
+            # The map holds EVERY department, not just this page, so a pick
+            # from page 2 still resolves.
             dept_options[dept_id] = d
 
+        rows, page = self._page_rows(all_rows, page, "dept_more", lang)
         sections = [{"title": "Departments", "rows": rows}]
 
         msg = {
@@ -2154,7 +2202,7 @@ class ConversationManager:
             sections=sections,
         )
 
-        merged_context = {**context, "dept_options": dept_options}
+        merged_context = {**context, "dept_options": dept_options, "dept_page": page}
         await self.update_state(clinic, phone, "selecting_department", merged_context)
 
     async def _handle_selecting_department(
@@ -2169,6 +2217,15 @@ class ConversationManager:
     ) -> None:
         """Handle department selection with support for dynamic options and legacy svc_* fallback."""
         button_id = interactive_data.get("id", "") if interactive_data else ""
+
+        # Must be checked before the dept_ prefix match below: "dept_more" is
+        # not a department, and falling through would re-show the same page
+        # forever.
+        if button_id == "dept_more":
+            await self._show_department_list(
+                clinic, phone, context, lang, page=int(context.get("dept_page") or 0) + 1
+            )
+            return
 
         # Legacy mapping retained for backward compatibility (OQ-2)
         LEGACY_SVC_MAP = {
@@ -2238,7 +2295,13 @@ class ConversationManager:
             await self._show_department_list(clinic, phone, context, lang)
 
     async def _show_doctor_list(
-        self, clinic: dict, phone: str, department: str, context: dict, lang: str
+        self,
+        clinic: dict,
+        phone: str,
+        department: str,
+        context: dict,
+        lang: str,
+        page: int = 0,
     ) -> None:
         """Show list of doctors in a department (branch-filtered when branch_id in context)."""
         branch_id = context.get("branch_id")
@@ -2264,21 +2327,18 @@ class ConversationManager:
                 await self._send_main_menu(clinic, phone, lang)
             return
 
-        sections = [
+        all_rows = [
             {
-                "title": department[:24],
-                "rows": [
-                    {
-                        "id": f"doc_{doc['id']}",
-                        "title": doc["name"][:24],
-                        "description": f"{doc['specialization']} · ⭐{doc.get('rating', '4.5')} · ₹{doc['consultation_fee']}"[
-                            :72
-                        ],
-                    }
-                    for doc in doctors
+                "id": f"doc_{doc['id']}",
+                "title": doc["name"][:24],
+                "description": f"{doc['specialization']} · ⭐{doc.get('rating', '4.5')} · ₹{doc['consultation_fee']}"[
+                    :72
                 ],
             }
+            for doc in doctors
         ]
+        rows, page = self._page_rows(all_rows, page, "doc_more", lang)
+        sections = [{"title": department[:24], "rows": rows}]
 
         await self.whatsapp.send_interactive_list(
             clinic,
@@ -2298,7 +2358,7 @@ class ConversationManager:
         )
 
         context["department"] = department
-        merged_context = {**context}
+        merged_context = {**context, "doctor_page": page}
         await self.update_state(clinic, phone, "selecting_doctor", merged_context)
 
     async def _handle_selecting_doctor(
@@ -2313,9 +2373,24 @@ class ConversationManager:
     ) -> None:
         """Handle doctor selection."""
 
+        button_id = interactive_data.get("id", "") if interactive_data else ""
+
+        # Before the doc_ prefix match: "doc_more" would otherwise be parsed as
+        # a doctor id of "more" and sent to the database as a UUID.
+        if button_id == "doc_more":
+            await self._show_doctor_list(
+                clinic,
+                phone,
+                context.get("department") or "",
+                context,
+                lang,
+                page=int(context.get("doctor_page") or 0) + 1,
+            )
+            return
+
         doctor_id = None
-        if interactive_data and interactive_data.get("id", "").startswith("doc_"):
-            doctor_id = interactive_data["id"].replace("doc_", "")
+        if button_id.startswith("doc_"):
+            doctor_id = button_id.replace("doc_", "")
 
         if doctor_id:
             from app.database import supabase
@@ -3848,7 +3923,7 @@ class ConversationManager:
             return
 
     async def _show_lab_test_list(
-        self, clinic: dict, phone: str, context: dict, lang: str
+        self, clinic: dict, phone: str, context: dict, lang: str, page: int = 0
     ) -> None:
         """Fetch active lab tests for this clinic/branch and display as interactive list."""
         from app.database import get_lab_tests
@@ -3866,16 +3941,18 @@ class ConversationManager:
             await self._send_main_menu(clinic, phone, lang)
             return
 
-        rows = []
-        for t in tests[:10]:  # WhatsApp list limit: max 10 rows per section
+        all_rows = []
+        for t in tests:
             price_str = f"₹{t['price_paise'] // 100}"
             sample_str = f" • {t['sample_type']}" if t.get("sample_type") else ""
             desc = f"{price_str}{sample_str}"[:72]
-            rows.append({
+            all_rows.append({
                 "id": f"labtest_{t['id']}",
                 "title": t["name"][:24],
                 "description": desc,
             })
+
+        rows, page = self._page_rows(all_rows, page, "labtest_more", lang)
 
         body = {
             "en": "Select a lab test to book your sample collection:",
@@ -3896,6 +3973,7 @@ class ConversationManager:
             button_text=button_text,
             sections=[{"title": "Available Tests", "rows": rows}],
         )
+        context["lab_test_page"] = page
         await self.update_state(clinic, phone, "browsing_lab_tests", context)
 
     def _next_collection_dates(self, allowed_days_str: str, count: int = 3) -> list[str]:
@@ -3925,9 +4003,20 @@ class ConversationManager:
         """Handle patient picking a lab test from the interactive list."""
         from app.database import get_lab_test_by_id, get_lab_collection_window, format_collection_window
 
+        button_id = interactive_data.get("id", "") if interactive_data else ""
+
+        # Before the labtest_ prefix match: "labtest_more" would otherwise be
+        # read as a test id of "more".
+        if button_id == "labtest_more":
+            await self._show_lab_test_list(
+                clinic, phone, context, lang,
+                page=int(context.get("lab_test_page") or 0) + 1,
+            )
+            return
+
         selected_id = None
-        if interactive_data and interactive_data.get("id", "").startswith("labtest_"):
-            selected_id = interactive_data["id"].removeprefix("labtest_")
+        if button_id.startswith("labtest_"):
+            selected_id = button_id.removeprefix("labtest_")
 
         if not selected_id:
             # Fallback: patient typed something instead of tapping a list row
@@ -4022,9 +4111,17 @@ class ConversationManager:
         patient_name = (patient or {}).get("name") or context.get("patient_name") or "Patient"
 
         result = await payment_service.create_booking_with_payment(
+            # clinic_id and department are required positionally. Omitting them
+            # raised TypeError on every lab-test booking before it could reach
+            # the payment service at all, so the whole flow was dead: the
+            # patient picked a test and a date, then got the generic failure
+            # message. The consultation call site two thousand lines up passes
+            # both; this one did not, and no test exercised this call site.
+            clinic_id=clinic["id"],
             clinic=clinic,
             patient_phone=phone,
             patient_name=patient_name,
+            department="Lab Test",
             doctor_name=None,
             appointment_date=selected_date,
             appointment_time=None,

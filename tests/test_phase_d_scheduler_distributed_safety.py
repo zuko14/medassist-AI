@@ -186,11 +186,15 @@ async def test_08_transient_renew_error_does_not_abort_job():
 
     reached_end = False
 
+    # Timing constraint, do not tighten: the heartbeat fires at lease/3, so the
+    # body must outlive lease/3 for a renewal to be attempted at all, and the
+    # whole body must finish well inside `lease` or the lease genuinely lapses
+    # and aborting is the CORRECT behaviour. lease=6 puts the renewal at 2.0s
+    # and the deadline at 6.0s, leaving ~3.5s of slack for a loaded CI machine.
     with patch("app.database.supabase", mock_sb):
-        # lease 3.0s, heartbeat every 1.0s: one failed renewal well inside the lease
-        async with distributed_job_lock("flaky_job", lease_seconds=3.0, lock_manager=inst) as acquired:
+        async with distributed_job_lock("flaky_job", lease_seconds=6.0, lock_manager=inst) as acquired:
             assert acquired is True
-            await asyncio.sleep(1.3)
+            await asyncio.sleep(2.5)
             reached_end = True
 
     assert reached_end is True, "healthy job aborted on a transient renewal error"
