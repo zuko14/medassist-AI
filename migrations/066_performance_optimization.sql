@@ -111,8 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_patients_clinic_phone_v2
     ON patients(clinic_id, phone);
 
 -- ============================================================
--- 4. RECORD MIGRATION
+-- 4. COMPLETION
+-- Note: schema_migrations is tracked by scripts/migrate.py with SHA256 checksum.
 -- ============================================================
-INSERT INTO schema_migrations (name)
-VALUES ('066_performance_optimization')
-ON CONFLICT (name) DO NOTHING;
+
