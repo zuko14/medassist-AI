@@ -208,6 +208,7 @@ async def verify_credentials(
         )
 
     # 1. Check database clinic_admins table
+    _db_unavailable = False
     try:
         res = (
     # unscoped: login authentication by username
@@ -233,6 +234,7 @@ async def verify_credentials(
                 )
     except Exception as e:
         logger.warning(f"Database error during admin auth lookup: {e}")
+        _db_unavailable = True
 
     # 2. Fallback to global env credentials (Super Admin)
     username_ok = secrets.compare_digest(
@@ -251,6 +253,20 @@ async def verify_credentials(
             role="super_admin",
             clinic_id=None,
             user_id="super_admin_env",
+        )
+
+    # If the database was unreachable, we cannot verify clinic_admin
+    # credentials — return 503 instead of penalising the user with a
+    # failed-attempt counter bump and a misleading 401.
+    if _db_unavailable:
+        logger.error(
+            f"Admin auth blocked by database outage — IP={client_ip}, "
+            f"user='{credentials.username}'"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable. Please try again in a few moments.",
+            headers={"Retry-After": "30"},
         )
 
     # Record failed attempt ONLY on invalid credentials (T3.2b)
