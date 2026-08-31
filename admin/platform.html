@@ -816,6 +816,20 @@
                 </div>
             </div>
 
+            <!-- Billing watchlist: branches are the unit we charge per, so a
+                 new location changes what that clinic owes. Surfaced here so
+                 the owner notices without going looking. -->
+            <div class="section-card" id="branchWatchCard" style="display:none; border-left:4px solid #f59e0b;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div>
+                        <div style="font-weight:700; font-size:1.05rem;">🏢 Location changes — billing review</div>
+                        <div class="chart-subtitle" id="branchWatchSubtitle">Branches opened or closed in the last 30 days</div>
+                    </div>
+                    <div style="font-weight:700; font-size:1.4rem;" id="branchWatchTotal"></div>
+                </div>
+                <div id="branchWatchList" style="margin-top:14px;"></div>
+            </div>
+
             <!-- Leaderboard Table Card -->
             <div class="section-card">
                 <div class="table-toolbar">
@@ -852,6 +866,7 @@
                                 <th>Plan Tier</th>
                                 <th>Doctors</th>
                                 <th>Departments</th>
+                                <th title="Active branches. The platform bills per location, so this is the billing multiplier.">Locations</th>
                                 <th>30d Appts</th>
                                 <th>Total Patients</th>
                                 <th>30d Revenue</th>
@@ -862,7 +877,7 @@
                         </thead>
                         <tbody id="leaderboardBody">
                             <tr>
-                                <td colspan="10" style="text-align:center; padding:40px; color:var(--text3)">
+                                <td colspan="11" style="text-align:center; padding:40px; color:var(--text3)">
                                     <div class="spinner"></div><br><br>Loading platform leaderboard...
                                 </td>
                             </tr>
@@ -1516,6 +1531,12 @@
                     fetch('/platform/departments', { headers: { 'Authorization': ownerAuthHeader } })
                 ]);
 
+                // Billing watchlist is additive: never let it block the dashboard.
+                fetch('/platform/branch-changes', { headers: { 'Authorization': ownerAuthHeader } })
+                    .then(r => (r.ok ? r.json() : null))
+                    .then(renderBranchWatch)
+                    .catch(() => {});
+
                 if (overviewRes.status === 401 || clinicsRes.status === 401) {
                     logoutOwner();
                     return;
@@ -1563,6 +1584,66 @@
             filterLeaderboard();
         }
 
+        function renderBranchWatch(data) {
+            const card = document.getElementById('branchWatchCard');
+            if (!card || !data || !data.success) return;
+
+            const additions = data.additions || [];
+            const removals = data.removals || [];
+            document.getElementById('branchWatchTotal').textContent =
+                (data.total_billable_locations || 0) + ' billable locations';
+
+            if (!additions.length && !removals.length) {
+                document.getElementById('branchWatchSubtitle').textContent =
+                    'No location changes in the last ' + (data.window_days || 30) + ' days';
+                document.getElementById('branchWatchList').innerHTML = '';
+                card.style.display = '';
+                card.style.borderLeftColor = '#22c55e';
+                return;
+            }
+
+            document.getElementById('branchWatchSubtitle').textContent =
+                additions.length + ' opened, ' + removals.length + ' closed in the last '
+                + (data.window_days || 30) + ' days — each active location is billed';
+
+            const row = (icon, colour, title, sub, when) => `
+                <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid rgba(128,128,128,0.15)">
+                    <span style="font-size:1.1rem">${icon}</span>
+                    <div style="flex:1; min-width:0">
+                        <div style="font-weight:600; color:${colour}">${escapeHtml(title)}</div>
+                        <div class="clinic-phone" style="font-weight:400">${escapeHtml(sub)}</div>
+                    </div>
+                    <div style="font-size:0.8rem; color:var(--text3); white-space:nowrap">${escapeHtml(when)}</div>
+                </div>`;
+
+            const fmt = ts => {
+                if (!ts) return '';
+                try {
+                    return new Date(ts).toLocaleDateString('en-IN',
+                        { month: 'short', day: 'numeric', year: 'numeric' });
+                } catch (e) { return ''; }
+            };
+
+            const parts = [];
+            additions.forEach(a => parts.push(row(
+                '\u2795', '#f59e0b',
+                (a.clinic_name || 'Unknown clinic') + ' \u2014 ' + (a.short_name || a.branch_name || 'New branch'),
+                'Billing +1 location' + (a.plan ? ' \u00b7 plan: ' + a.plan : '')
+                    + (a.is_diagnostic ? ' \u00b7 diagnostics' : ''),
+                fmt(a.created_at)
+            )));
+            removals.forEach(r => parts.push(row(
+                '\u2796', '#22c55e',
+                (r.clinic_name || 'Unknown clinic') + ' \u2014 branch ' + (r.action === 'delete_branch' ? 'deleted' : 'deactivated'),
+                'Billing -1 location' + (r.by ? ' \u00b7 by ' + r.by : ''),
+                fmt(r.created_at)
+            )));
+
+            document.getElementById('branchWatchList').innerHTML = parts.join('');
+            card.style.display = '';
+            card.style.borderLeftColor = additions.length ? '#f59e0b' : '#22c55e';
+        }
+
         function filterLeaderboard() {
             const query = document.getElementById('searchInput').value.toLowerCase();
             const planFilter = document.getElementById('planFilter').value;
@@ -1591,7 +1672,7 @@
 
             const tbody = document.getElementById('leaderboardBody');
             if (filtered.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text3)">No hospitals matched your filters.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--text3)">No hospitals matched your filters.</td></tr>`;
                 return;
             }
 
@@ -1618,6 +1699,17 @@
                     ? `<span class="badge status-dormant">⚠️ Dormant</span>`
                     : `<span class="badge status-active">🟢 Active</span>`;
 
+                // A clinic with no branch rows is still one physical location,
+                // so billable_locations floors at 1 server-side.
+                const billable = c.billable_locations || 1;
+                const addedRecently = c.branches_added_30d || 0;
+                const locFlag = addedRecently
+                    ? `<div class="clinic-phone" style="font-weight:600; color:#f59e0b">+${addedRecently} new (30d)</div>`
+                    : '';
+                const locTitle = addedRecently
+                    ? `${billable} billable location(s) — ${addedRecently} added in the last 30 days, billing changed`
+                    : `${billable} billable location(s)`;
+
                 return `
                     <tr onclick="openModal('${c.id}')">
                         <td>
@@ -1630,6 +1722,7 @@
                         <td><span class="badge badge-${plan}">${plan}</span></td>
                         <td style="font-weight:700">${c.doctors_count || 0}</td>
                         <td style="font-weight:700" title="${escapeHtml(deptNames || 'No departments configured')}">${c.departments_count || 0}${deptPreview}</td>
+                        <td style="font-weight:700" title="${escapeHtml(locTitle)}">${billable}${locFlag}</td>
                         <td style="font-weight:700">${c.appointments_count_30d || 0}</td>
                         <td>${c.patients_count || 0}</td>
                         <td style="font-weight:700; color:var(--green)">₹${rev}</td>

@@ -112,7 +112,7 @@ ROUTERS_BARE_BASELINE = 0     # no predicate, no annotation
 SERVICES_BARE_BASELINE = 0
 # Free-text annotations predating ALLOWED_REASONS, held so the enum can be
 # adopted without a flag-day rewrite of 88 call sites.
-ROUTERS_LEGACY_ANNOTATIONS = 55
+ROUTERS_LEGACY_ANNOTATIONS = 51
 SERVICES_LEGACY_ANNOTATIONS = 1
 
 SCANNED_DIRS = ("app/routers", "app/services")

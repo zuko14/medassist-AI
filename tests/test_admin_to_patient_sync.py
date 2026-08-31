@@ -322,3 +322,90 @@ def test_all_service_call_sites_bind_to_their_signatures():
     assert not problems, "Call sites that do not match their signature:\n" + "\n".join(
         f"  - {p}" for p in problems
     )
+
+
+# -- 7. Walk-in delivery is automatic, visible, and recoverable ---------------
+
+
+@pytest.mark.asyncio
+async def test_unverified_delivery_notification_is_raised_once_per_run():
+    """The owner sees these in the admin panel instead of them being blocked."""
+    from connectors.runner import notify_unverified_deliveries
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "n1"}]
+    )
+
+    with patch("connectors.runner.supabase", mock_sb):
+        ok = await notify_unverified_deliveries("clinic-1", 12, "mocdoc")
+
+    assert ok is True
+    row = mock_sb.table.return_value.insert.call_args[0][0]
+    assert row["clinic_id"] == "clinic-1"
+    assert row["admin_id"] is None, "clinic-wide so every admin sees it"
+    assert row["is_read"] is False
+    assert "12" in row["title"]
+    assert len(row["title"]) <= 255
+
+
+@pytest.mark.asyncio
+async def test_no_notification_when_nothing_was_unverified():
+    from connectors.runner import notify_unverified_deliveries
+
+    mock_sb = MagicMock()
+    with patch("connectors.runner.supabase", mock_sb):
+        assert await notify_unverified_deliveries("clinic-1", 0) is False
+    mock_sb.table.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notification_failure_never_breaks_a_successful_run():
+    """The reports were already delivered; a notification error must not undo that."""
+    from connectors.runner import notify_unverified_deliveries
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.insert.return_value.execute.side_effect = Exception("boom")
+
+    with patch("connectors.runner.supabase", mock_sb):
+        assert await notify_unverified_deliveries("clinic-1", 3) is False
+
+
+@pytest.mark.asyncio
+async def test_release_held_walkins_sends_stored_and_reports_the_rest():
+    """The backlog flush: the connector will not re-offer already-recorded reports."""
+    from app.routers.admin import AdminUser, release_held_walkin_reports
+
+    user = AdminUser("admin", role="super_admin", clinic_id=None, user_id="u1")
+    rows = [
+        {"id": "r1", "file_path": "clinic-1/+91.../a.pdf", "match_source": "moc_doc_only"},
+        {"id": "r2", "file_path": "pending_review/xyz", "match_source": "moc_doc_only"},
+        {"id": "r3", "file_path": "clinic-1/+91.../c.pdf", "match_source": "moc_doc_only"},
+    ]
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=rows
+    )
+    mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{}]
+    )
+
+    # Patching the unbound method, so `self` occupies the first slot.
+    async def _resend(self, report_id, clinic_id=None, new_phone=None):
+        if report_id == "r3":
+            raise RuntimeError("WhatsApp rejected the media")
+        return {"status": "sent"}
+
+    with patch("app.routers.admin.supabase", mock_sb), patch(
+        "app.routers.admin.LabReportService.resend_report", new=_resend
+    ), patch("app.routers.admin.log_admin_action", new_callable=AsyncMock):
+        result = await release_held_walkin_reports(
+            clinic_id="default", request=None, user=user
+        )
+
+    assert result["examined"] == 3
+    assert result["sent"] == 1, "only r1 delivers"
+    assert result["no_stored_pdf"] == 1, "r2 was never downloaded"
+    assert result["failed"] == 1, "r3 failed at send time"
+    assert result["errors"][0]["report_id"] == "r3"

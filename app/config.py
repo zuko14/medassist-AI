@@ -98,16 +98,26 @@ class Settings(BaseSettings):
     # going to answer usefully anyway. Well under Meta's 20s webhook budget.
     db_query_timeout_seconds: int = 15
 
-    # Hold lab reports whose phone number is not registered with the clinic
-    # (match_source="moc_doc_only") for staff review instead of delivering the
-    # PDF automatically (AUDIT-P1-1). The number comes from a receptionist
-    # typing it into a third-party HMIS, and nothing in our own data
-    # corroborates that it belongs to the named patient — one wrong digit is an
-    # irreversible disclosure of medical data to a stranger.
+    # PLATFORM DEFAULT for holding lab reports whose phone number is not
+    # registered with the clinic (match_source="moc_doc_only"). Individual
+    # clinics override it with clinics.config.hold_unknown_phone_reports.
     #
-    # Set false only for a diagnostic centre that is almost entirely walk-in
-    # and has accepted that risk in writing; it restores pre-audit behaviour.
-    hold_unknown_phone_reports: bool = True
+    # The default is False — deliver — and that is deliberate. A diagnostic
+    # centre has no pre-registered patient list to match against: walk-ins hand
+    # their number to the receptionist and it goes straight into the HMIS. The
+    # "is this phone known to the clinic?" test can therefore never pass there,
+    # so holding on it verifies nothing and blocks 100% of deliveries. That was
+    # observed in production at a live diagnostics client: 27 reports
+    # discovered, 27 held, 0 delivered.
+    #
+    # The misrouting risk from AUDIT-P1-1 is real, but is now a DETECTIVE
+    # control rather than a preventive one: every delivery to an unverified
+    # number raises an admin notification and the row keeps
+    # match_source="moc_doc_only", so a misroute is visible and recallable.
+    # Clinics that DO maintain a patient registry — consultation clinics, where
+    # an unknown number is a genuine signal — should set the per-clinic
+    # override to true.
+    hold_unknown_phone_reports: bool = False
 
     # Lifetime of an admin panel session cookie, in hours (AUDIT-P1-2).
     # 12h means a session left open overnight on a shared clinic terminal is

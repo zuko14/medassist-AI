@@ -209,7 +209,7 @@ async def list_clinic_admins(
     )
 
     res = (
-        # unscoped: platform super-admin fleet operation
+        # unscoped: platform_admin
         await sb(supabase.table("clinic_admins")
         .select("id, clinic_id, username, role, is_active, created_at")
         .order("created_at", desc=True))
@@ -335,7 +335,7 @@ async def get_platform_overview(
         # 1. Fetch clinics list (explicit columns only — no secrets)
         # platform-scoped: aggregate platform clinics list
         clinics_res = (
-            # unscoped: platform super-admin fleet operation
+            # unscoped: platform_admin
             await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, is_active, created_at"))
         )
@@ -376,7 +376,7 @@ async def get_platform_overview(
         # 3. Total appointments count platform-wide
         # platform-scoped: platform total appointments count
         appts_res = (
-            # unscoped: platform super-admin fleet operation
+            # unscoped: platform_admin
             await sb(supabase.table("appointments")
             .select("id", count="exact"))
         )
@@ -416,7 +416,7 @@ async def _fetch_clinic_roster_counts() -> dict[str, dict]:
         for page in range(max_pages):
             offset = page * page_size
             docs_res = (
-                # unscoped: platform super-admin fleet operation
+                # unscoped: platform_admin
                 await sb(supabase.table("doctors")
                 .select("clinic_id, department, is_active")
                 .range(offset, offset + page_size - 1))
@@ -448,6 +448,180 @@ async def _fetch_clinic_roster_counts() -> dict[str, dict]:
     return roster
 
 
+async def _fetch_clinic_branch_counts(window_days: int = 30) -> dict[str, dict]:
+    """Per-clinic branch census, keyed by clinic_id.
+
+    Branches are the unit the platform bills on: a diagnostic chain that opens
+    a second collection centre costs twice what a single-centre one does. The
+    owner therefore needs the count on the leaderboard, and needs to see when
+    it moved -- a branch added quietly in a clinic admin panel is a silent
+    change to what that clinic owes.
+
+    Paginated for the same reason the roster scan is: PostgREST caps an
+    unbounded select at 1000 rows, and an undercount here would understate a
+    bill. Returns {} on failure -- the leaderboard must still render.
+    """
+    page_size = 1000
+    max_pages = 100  # ponytail: 100k-branch ceiling; server-side aggregate if ever hit
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
+    census: dict[str, dict] = {}
+
+    try:
+        for page in range(max_pages):
+            offset = page * page_size
+            res = (
+                # unscoped: platform_admin
+                await sb(supabase.table("branches")
+                .select("clinic_id, is_active, is_diagnostic, created_at")
+                .range(offset, offset + page_size - 1))
+            )
+            rows = res.data
+            if not isinstance(rows, list):
+                logger.warning("Branch census skipped — unexpected branches payload type")
+                return {}
+            for b in rows:
+                clinic_id = b.get("clinic_id")
+                if not clinic_id:
+                    continue
+                entry = census.setdefault(
+                    clinic_id,
+                    {"total": 0, "active": 0, "diagnostic": 0, "added_recently": 0, "newest_at": None},
+                )
+                entry["total"] += 1
+                # is_active defaults true in schema; only an explicit False excludes.
+                if b.get("is_active") is not False:
+                    entry["active"] += 1
+                if b.get("is_diagnostic"):
+                    entry["diagnostic"] += 1
+                created = b.get("created_at")
+                if created:
+                    if created >= cutoff:
+                        entry["added_recently"] += 1
+                    if not entry["newest_at"] or created > entry["newest_at"]:
+                        entry["newest_at"] = created
+            if len(rows) < page_size:
+                break
+        else:
+            logger.warning(
+                f"Branch census hit the {max_pages}-page cap — counts may be incomplete"
+            )
+    except Exception as e:
+        logger.warning(f"Branch census unavailable for leaderboard: {e}")
+        return {}
+
+    return census
+
+
+def _billable_locations(active_branches: int) -> int:
+    """What the clinic is billed for.
+
+    A clinic with no branch rows at all is still one physical location, so the
+    floor is 1 rather than 0 -- otherwise every single-site clinic on the
+    platform would read as costing nothing.
+    """
+    return max(1, active_branches)
+
+
+@router.get("/branch-changes")
+async def get_platform_branch_changes(
+    request: Request,
+    days: int = 30,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Branches opened or closed across the fleet — the billing watchlist.
+
+    Sourced from branches.created_at rather than the audit log so it is correct
+    for branches created before branch auditing existed; audit rows are folded
+    in on top for the who/when of removals.
+    """
+    days = max(1, min(int(days or 30), 365))
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_platform_branch_changes",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        clinics_res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinics").select("id, name, plan"))
+        )
+        clinic_map = {c["id"]: c for c in (clinics_res.data or [])}
+
+        added_res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("branches")
+            .select("id, clinic_id, name, short_name, is_active, is_diagnostic, created_at")
+            .gte("created_at", cutoff)
+            .order("created_at", desc=True))
+        )
+        additions = []
+        for b in (added_res.data or []):
+            clinic = clinic_map.get(b.get("clinic_id")) or {}
+            additions.append({
+                "branch_id": b.get("id"),
+                "branch_name": b.get("name"),
+                "short_name": b.get("short_name"),
+                "clinic_id": b.get("clinic_id"),
+                "clinic_name": clinic.get("name"),
+                "plan": clinic.get("plan"),
+                "is_active": b.get("is_active", True),
+                "is_diagnostic": b.get("is_diagnostic", False),
+                "created_at": b.get("created_at"),
+            })
+
+        # Removals and deactivations only exist in the audit trail — the row is
+        # gone from `branches`.
+        removals = []
+        try:
+            audit_res = (
+                # unscoped: platform_admin
+                await sb(supabase.table("admin_audit_logs")
+                .select("clinic_id, username, action, resource_id, details, created_at")
+                .in_("action", ["deactivate_branch", "delete_branch"])
+                .gte("created_at", cutoff)
+                .order("created_at", desc=True)
+                .limit(200))
+            )
+            for row in (audit_res.data or []):
+                clinic = clinic_map.get(row.get("clinic_id")) or {}
+                removals.append({
+                    "branch_id": row.get("resource_id"),
+                    "clinic_id": row.get("clinic_id"),
+                    "clinic_name": clinic.get("name"),
+                    "action": row.get("action"),
+                    "by": row.get("username"),
+                    "details": row.get("details") or {},
+                    "created_at": row.get("created_at"),
+                })
+        except Exception as e:
+            # Pre-dates branch auditing, or the table is unavailable. Additions
+            # are the billing-relevant half and must still be returned.
+            logger.warning(f"Branch removal audit unavailable: {e}")
+
+        census = await _fetch_clinic_branch_counts(window_days=days)
+        total_billable = sum(
+            _billable_locations((census.get(cid) or {}).get("active", 0))
+            for cid in clinic_map
+        )
+
+        return {
+            "success": True,
+            "window_days": days,
+            "additions": additions,
+            "removals": removals,
+            "additions_count": len(additions),
+            "removals_count": len(removals),
+            "total_billable_locations": total_billable,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching platform branch changes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch branch changes: {e}")
+
+
 @router.get("/clinics")
 async def get_platform_clinics_leaderboard(
     request: Request,
@@ -465,7 +639,7 @@ async def get_platform_clinics_leaderboard(
     try:
         # Strict explicit column projection
         clinics_res = (
-            # unscoped: platform super-admin fleet operation
+            # unscoped: platform_admin
             await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, is_active, created_at"))
         )
@@ -478,13 +652,16 @@ async def get_platform_clinics_leaderboard(
         # must be exact, not truncated at PostgREST's default 1000-row cap.
         # Informational only: if it fails, the leaderboard still renders.
         roster = await _fetch_clinic_roster_counts()
+        # Branch census: the platform bills per location, so the owner needs the
+        # count and any recent movement in the same table they price plans off.
+        branch_census = await _fetch_clinic_branch_counts()
 
         async def fetch_clinic_metrics(c: dict) -> dict:
             clinic_id = c["id"]
             
             # Fetch appointments for this clinic in last 30d
             appts_res = (
-                # unscoped: platform super-admin fleet operation
+                # unscoped: platform_admin
                 await sb(supabase.table("appointments")
                 .select("id, status, amount_paise, payment_id, created_at")
                 .eq("clinic_id", clinic_id)
@@ -503,7 +680,7 @@ async def get_platform_clinics_leaderboard(
 
             # Patient count
             pat_res = (
-                # unscoped: platform super-admin fleet operation
+                # unscoped: platform_admin
                 await sb(supabase.table("patients")
                 .select("id", count="exact")
                 .eq("clinic_id", clinic_id))
@@ -519,6 +696,8 @@ async def get_platform_clinics_leaderboard(
 
             clinic_roster = roster.get(clinic_id) or {}
             clinic_departments = sorted(clinic_roster.get("departments") or ())
+            branches = branch_census.get(clinic_id) or {}
+            active_branches = branches.get("active", 0)
 
             return {
                 "id": clinic_id,
@@ -530,6 +709,11 @@ async def get_platform_clinics_leaderboard(
                 "doctors_count": clinic_roster.get("doctors", 0),
                 "departments_count": len(clinic_departments),
                 "departments": clinic_departments,
+                "branches_count": active_branches,
+                "diagnostic_branches_count": branches.get("diagnostic", 0),
+                "billable_locations": _billable_locations(active_branches),
+                "branches_added_30d": branches.get("added_recently", 0),
+                "newest_branch_at": branches.get("newest_at"),
                 "appointments_count_30d": appointments_count_30d,
                 "patients_count": patients_count,
                 "revenue_inr_30d": confirmed_revenue_inr,
@@ -569,7 +753,7 @@ async def get_platform_clinic_detail(
     try:
         # Fetch clinic basic info
         clinic_res = (
-            # unscoped: platform super-admin fleet operation
+            # unscoped: platform_admin
             await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, features, is_active, created_at")
             .eq("id", clinic_id))
@@ -679,7 +863,7 @@ async def get_platform_revenue_analytics(
 
         # Query appointments with payments
         appts_res = (
-            # unscoped: platform super-admin fleet operation
+            # unscoped: platform_admin
             await sb(supabase.table("appointments")
             .select("clinic_id, status, amount_paise, created_at, payment_id")
             .gte("created_at", start_date))
@@ -1106,7 +1290,7 @@ async def get_callmedex_processing_centers(
 
         clinic_ids = list({c["clinic_id"] for c in connectors})
         clinics_res = (
-            # unscoped: platform super-admin fleet operation
+            # unscoped: platform_admin
             await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, is_active")
             .in_("id", clinic_ids))
@@ -1327,7 +1511,7 @@ async def get_plan_tiers(
         adoption: dict[str, int] = {}
         try:
             clinics_res = (
-                # unscoped: platform super-admin fleet operation
+                # unscoped: platform_admin
                 await sb(supabase.table("clinics").select("plan, is_active"))
             )
             for c in clinics_res.data or []:
@@ -1521,7 +1705,7 @@ async def get_clinic_deletion_preview(
 ):
     """Preview entity impact stats before soft-deleting a clinic."""
     clinic_res = (
-        # unscoped: platform super-admin fleet operation
+        # unscoped: platform_admin
         await sb(supabase.table("clinics")
         .select("id, name, whatsapp_number, plan, is_active, status, created_at")
         .eq("id", clinic_id))
@@ -1550,7 +1734,7 @@ async def get_clinic_deletion_preview(
     appointment_count = appt_res.count if appt_res.count is not None else len(appt_res.data or [])
 
     pat_res = (
-        # unscoped: platform super-admin fleet operation
+        # unscoped: platform_admin
         await sb(supabase.table("patients")
         .select("id", count="exact")
         .eq("clinic_id", clinic_id))
@@ -1590,7 +1774,7 @@ async def delete_clinic(
 
     # 1. Fetch clinic
     clinic_res = (
-        # unscoped: platform super-admin fleet operation
+        # unscoped: platform_admin
         await sb(supabase.table("clinics")
         .select("id, name, whatsapp_number, is_active, status")
         .eq("id", clinic_id))

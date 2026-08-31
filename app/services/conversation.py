@@ -584,7 +584,7 @@ class ConversationManager:
             elif button_id == "menu_doctors":
                 lang = await get_lang(clinic, phone)
                 if await self._is_diagnostics_only(clinic):
-                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                    await self._start_lab_booking(clinic, phone, lang)
                 else:
                     await self._show_doctors(clinic, phone, lang)
                 return
@@ -592,7 +592,7 @@ class ConversationManager:
             elif button_id == "menu_services":
                 lang = await get_lang(clinic, phone)
                 if await self._is_diagnostics_only(clinic):
-                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                    await self._start_lab_booking(clinic, phone, lang)
                 else:
                     await self._show_services(clinic, phone, lang)
                 return
@@ -603,7 +603,7 @@ class ConversationManager:
                 # button is an inbound message, so it legitimately opens the
                 # 24h window and the full catalogue can be shown here.
                 lang = await get_lang(clinic, phone)
-                await self._show_lab_test_list(clinic, phone, {}, lang)
+                await self._start_lab_booking(clinic, phone, lang)
                 return
 
             elif button_id == "menu_reports":
@@ -830,14 +830,14 @@ class ConversationManager:
         if state not in ["selecting_language", "awaiting_consent"]:
             if intent == "doctor_availability":
                 if await self._is_diagnostics_only(clinic):
-                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                    await self._start_lab_booking(clinic, phone, lang)
                 else:
                     await self._show_doctors(clinic, phone, lang)
                 return
 
             if intent == "view_services":
                 if await self._is_diagnostics_only(clinic):
-                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                    await self._start_lab_booking(clinic, phone, lang)
                 else:
                     await self._show_services(clinic, phone, lang)
                 return
@@ -872,7 +872,7 @@ class ConversationManager:
                 from app.services.tenant import has_feature
 
                 if has_feature(clinic, "lab_test_booking"):
-                    await self._show_lab_test_list(clinic, phone, {}, lang)
+                    await self._start_lab_booking(clinic, phone, lang)
                     return
 
             if (
@@ -1321,12 +1321,12 @@ class ConversationManager:
             await self._start_booking(clinic, phone, patient, lang)
         elif intent == "view_services":
             if await self._is_diagnostics_only(clinic):
-                await self._show_lab_test_list(clinic, phone, {}, lang)
+                await self._start_lab_booking(clinic, phone, lang)
             else:
                 await self._show_services(clinic, phone, lang)
         elif intent == "doctor_availability":
             if await self._is_diagnostics_only(clinic):
-                await self._show_lab_test_list(clinic, phone, {}, lang)
+                await self._start_lab_booking(clinic, phone, lang)
             else:
                 await self._show_doctors(clinic, phone, lang)
         elif intent == "view_reports":
@@ -1377,6 +1377,47 @@ class ConversationManager:
         doctors = await get_doctors(clinic["id"])
         return not doctors
 
+    async def _start_lab_booking(
+        self, clinic: dict, phone: str, lang: str
+    ) -> None:
+        """Entry point for the diagnostics-only lab-test flow.
+
+        A diagnostic chain with several collection centres (Vijaya, Lucid,
+        Apollo Diagnostics and the like) must ask WHERE before it asks WHAT:
+        catalogues and prices differ per centre, and the booking has to carry a
+        branch_id for the sample collection to be routed anywhere.
+
+        Single-location centres -- the common case -- are auto-selected and
+        never see the extra step, so nothing changes for them until the clinic
+        actually adds a second branch in the admin panel.
+        """
+        from app.services.tenant import get_clinic_branches
+
+        branches = await get_clinic_branches(clinic["id"])
+        # Unlike the consultation flow, is_diagnostic branches are NOT filtered
+        # out here -- for a diagnostics-only clinic they are the whole business.
+        active = [b for b in (branches or []) if b.get("is_active", True)]
+
+        if len(active) >= 2:
+            await self._send_branch_selection(clinic, phone, active, lang)
+            await self.update_state(
+                clinic, phone, "selecting_branch", {"lab_flow": True}
+            )
+            return
+
+        context = {}
+        if len(active) == 1:
+            branch = active[0]
+            context = {
+                "branch_id": branch["id"],
+                "branch_name": branch.get("short_name") or branch["name"],
+                "branch_address": branch.get("address", ""),
+                "branch_landmark": branch.get("landmark", ""),
+                "branch_maps_link": branch.get("maps_link", ""),
+            }
+
+        await self._show_lab_test_list(clinic, phone, context, lang)
+
     async def _start_booking(
         self, clinic: dict, phone: str, patient: Optional[dict], lang: str
     ) -> None:
@@ -1391,7 +1432,7 @@ class ConversationManager:
 
         # ── Diagnostics-Only Routing ─────────────────────────────────────────
         if await self._is_diagnostics_only(clinic):
-            await self._show_lab_test_list(clinic, phone, {}, lang)
+            await self._start_lab_booking(clinic, phone, lang)
             return
         # ── End Diagnostics-Only Routing ─────────────────────────────────────
 
@@ -1569,14 +1610,14 @@ class ConversationManager:
             )
 
     async def _send_branch_selection(
-        self, clinic: dict, phone: str, branches: list, lang: str
+        self, clinic: dict, phone: str, branches: list, lang: str, page: int = 0
     ) -> None:
         """Send interactive list of branches for multi-branch clinics.
         Title = locality (short_name) so patients see 'Madhurwada', not 'City Polyclinic'.
         Description = short address + landmark for extra context.
         """
-        rows = []
-        for branch in branches[:10]:  # WhatsApp max 10 rows
+        all_rows = []
+        for branch in branches:
             # Title: locality name (short_name preferred, fallback to name)
             title = (branch.get("short_name") or branch["name"])[:24]
 
@@ -1588,7 +1629,7 @@ class ConversationManager:
                 desc_parts.append(f"Near {branch['landmark']}")
             description = ", ".join(desc_parts) if desc_parts else ""
 
-            rows.append(
+            all_rows.append(
                 {
                     "id": f"branch_{branch['id']}",
                     "title": title,
@@ -1596,6 +1637,7 @@ class ConversationManager:
                 }
             )
 
+        rows, page = self._page_rows(all_rows, page, "branch_more", lang)
         sections = [{"title": "Locations", "rows": rows}]
 
         header_text = {
@@ -1639,6 +1681,23 @@ class ConversationManager:
         """Handle branch selection from interactive list."""
         button_id = interactive_data.get("id", "") if interactive_data else ""
 
+        # Before the branch_ prefix match: "branch_more" would be read as a
+        # branch id of "more".
+        if button_id == "branch_more":
+            from app.services.tenant import get_clinic_branches
+
+            branches = await get_clinic_branches(clinic["id"]) or []
+            if context.get("lab_flow") or await self._is_diagnostics_only(clinic):
+                offer = [b for b in branches if b.get("is_active", True)]
+            else:
+                offer = [b for b in branches if not b.get("is_diagnostic", False)]
+            page = int(context.get("branch_page") or 0) + 1
+            await self._send_branch_selection(clinic, phone, offer, lang, page=page)
+            await self.update_state(
+                clinic, phone, "selecting_branch", {**context, "branch_page": page}
+            )
+            return
+
         if button_id.startswith("branch_"):
             branch_id = button_id.replace("branch_", "")
             from app.services.tenant import get_branch_by_id
@@ -1655,6 +1714,18 @@ class ConversationManager:
                     "branch_landmark": branch.get("landmark", ""),
                     "branch_maps_link": branch.get("maps_link", ""),
                 }
+
+                # Lab flow: the patient is choosing a collection centre, so show
+                # that centre's catalogue. Checked BEFORE the is_diagnostic
+                # redirect below -- for a diagnostics-only chain every branch is
+                # diagnostic, and that redirect would bounce the patient to the
+                # main menu instead of letting them book. _is_diagnostics_only
+                # is re-checked rather than trusting the flag alone, so a
+                # session that lost its context still lands correctly.
+                if context.get("lab_flow") or await self._is_diagnostics_only(clinic):
+                    new_context.pop("lab_flow", None)
+                    await self._show_lab_test_list(clinic, phone, new_context, lang)
+                    return
 
                 # If diagnostic-only branch, redirect to reports
                 if branch.get("is_diagnostic", False):
@@ -1687,8 +1758,13 @@ class ConversationManager:
         from app.services.tenant import get_clinic_branches
 
         branches = await get_clinic_branches(clinic["id"])
-        bookable_branches = [b for b in branches if not b.get("is_diagnostic", False)]
-        await self._send_branch_selection(clinic, phone, bookable_branches, lang)
+        if context.get("lab_flow") or await self._is_diagnostics_only(clinic):
+            # Filtering out diagnostic branches here would resend an EMPTY list
+            # to a diagnostics-only chain and strand the patient.
+            offer = [b for b in (branches or []) if b.get("is_active", True)]
+        else:
+            offer = [b for b in branches if not b.get("is_diagnostic", False)]
+        await self._send_branch_selection(clinic, phone, offer, lang)
 
     async def _handle_selecting_family_member(
         self,

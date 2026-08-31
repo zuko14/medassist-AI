@@ -297,6 +297,52 @@ async def send_admin_alert(clinic_id: str, message: str, branch_id: str = None) 
         return False
 
 
+async def notify_unverified_deliveries(
+    clinic_id: str, count: int, connector_type: str = "connector"
+) -> bool:
+    """Raise an in-panel notification for reports sent to unregistered numbers.
+
+    These deliveries are intentional: a walk-in's number comes from the HMIS and
+    the clinic has no prior record to match it against, so blocking on that
+    check would stop every delivery. The control is visibility instead — the
+    clinic sees the count, and each row stays stamped match_source="moc_doc_only"
+    so an individual misroute can be found and recalled.
+
+    Clinic-wide (admin_id NULL) so every admin of that clinic sees it. Never
+    raises: a notification failure must not fail a connector run that already
+    delivered the reports successfully.
+    """
+    if count <= 0:
+        return False
+    try:
+        await sb(
+            # unscoped: insert_scoped_by_payload — the row carries clinic_id and
+            # admin_notifications is read back through clinic-scoped routes.
+            supabase.table("admin_notifications").insert(
+                {
+                    "clinic_id": clinic_id,
+                    "admin_id": None,
+                    "title": f"{count} report{'s' if count != 1 else ''} sent to unverified numbers",
+                    "message": (
+                        f"{count} lab report{'s were' if count != 1 else ' was'} delivered "
+                        f"via {connector_type} to phone number"
+                        f"{'s' if count != 1 else ''} not registered in your patient list. "
+                        f"This is normal for walk-in patients. Open Reports and filter by "
+                        f"'Walk-in / unverified' to review the recipients."
+                    )[:2000],
+                    "is_read": False,
+                }
+            )
+        )
+        logger.info(
+            f"Notified clinic {clinic_id}: {count} unverified-recipient deliveries"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Could not raise unverified-delivery notification: {e}")
+        return False
+
+
 async def record_report_failure(
     clinic_id: str,
     connector_type: str,
@@ -559,6 +605,10 @@ async def _run_connector(
         "reports_needs_review": 0,
         "reports_uploaded": 0,
         "reports_delivered": 0,
+        # Delivered to a phone number the clinic has no record of. For a
+        # diagnostic centre that is every walk-in, which is exactly why these
+        # are counted and reported rather than blocked.
+        "reports_delivered_unverified": 0,
         "reports_skipped_already_processed": 0,
         "reports_failed": 0,
         "duration_ms": 0,
@@ -750,7 +800,15 @@ async def _run_connector(
                     meta.patient_phone = match_result.normalized_phone
 
                 if not match_result.is_safe_to_send:
-                    summary["reports_failed"] += 1
+                    # A deliberate policy hold is not a delivery failure. Only
+                    # a genuine problem — a missing or malformed phone, a name
+                    # conflict on a shared number, a lookup error — is. Counting
+                    # a configured hold as a failure marked every run "partial"
+                    # and inflated the Delivery Failures tile with work that had
+                    # not actually failed.
+                    policy_hold = match_result.match_source == "moc_doc_only"
+                    if not policy_hold:
+                        summary["reports_failed"] += 1
                     summary["reports_needs_review"] += 1
                     logger.warning(
                         f"NEEDS_REVIEW for report {meta.external_report_id}: {match_result.review_reason}"
@@ -785,15 +843,16 @@ async def _run_connector(
                         match_source=match_result.match_source,
                     )
 
-                    await record_report_failure(
-                        clinic_id=clinic_id,
-                        connector_type=connector_type,
-                        external_report_id=meta.external_report_id,
-                        error_message=match_result.review_reason or "Patient match conflict / needs review",
-                        vam_id=meta.vam_id,
-                        patient_name=meta.patient_name,
-                        branch_id=branch_id,
-                    )
+                    if not policy_hold:
+                        await record_report_failure(
+                            clinic_id=clinic_id,
+                            connector_type=connector_type,
+                            external_report_id=meta.external_report_id,
+                            error_message=match_result.review_reason or "Patient match conflict / needs review",
+                            vam_id=meta.vam_id,
+                            patient_name=meta.patient_name,
+                            branch_id=branch_id,
+                        )
                     continue
 
                 summary["reports_matched"] += 1
@@ -827,6 +886,8 @@ async def _run_connector(
                 )
                 if result.get("success"):
                     summary["reports_delivered"] += 1
+                    if getattr(match_result, "recipient_unverified", False):
+                        summary["reports_delivered_unverified"] += 1
                 if not result.get("already_processed"):
                     summary["reports_uploaded"] += 1
                     logger.info(f"Uploaded: {meta}")
@@ -850,6 +911,19 @@ async def _run_connector(
                 )
 
         await connector.cleanup()
+
+        # Tell the clinic, in the admin panel, that reports went out to numbers
+        # it has no record of. One notification per run rather than one per
+        # report: at a diagnostic centre EVERY delivery is unverified, so
+        # per-report notifications would be pure noise and get ignored, which
+        # is the opposite of a working control. The per-report evidence is the
+        # lab_reports row, which stays stamped match_source="moc_doc_only".
+        if summary.get("reports_delivered_unverified", 0) > 0:
+            await notify_unverified_deliveries(
+                clinic_id=clinic_id,
+                count=summary["reports_delivered_unverified"],
+                connector_type=connector_type,
+            )
 
         summary["run_status"] = (
             "success" if summary["reports_failed"] == 0

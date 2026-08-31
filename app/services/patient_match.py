@@ -78,6 +78,10 @@ class MatchResult:
     patient_name: str = ""
     review_reason: Optional[str] = None
     existing_records: list[dict] = field(default_factory=list)
+    #: True when the report was cleared for delivery WITHOUT the clinic's own
+    #: records corroborating the recipient. Callers raise an admin notification
+    #: on these, which is what makes a misroute visible and recallable.
+    recipient_unverified: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -90,6 +94,7 @@ class MatchResult:
             "patient_name": self.patient_name,
             "review_reason": self.review_reason,
             "existing_records_count": len(self.existing_records),
+            "recipient_unverified": self.recipient_unverified,
         }
 
 
@@ -98,6 +103,37 @@ class PatientMatchService:
 
     def __init__(self, similarity_threshold: float = 0.75):
         self.similarity_threshold = similarity_threshold
+
+    async def _hold_unverified(self, clinic_id: str) -> bool:
+        """Whether THIS clinic holds reports for phone numbers it doesn't know.
+
+        `clinics.config.hold_unknown_phone_reports` overrides the platform
+        default. The distinction is whether the clinic has a patient registry
+        worth checking against:
+
+        - A consultation clinic does. An unknown number there is a real signal
+          and holding is worth the friction, so it should set this true.
+        - A diagnostic centre does not. Walk-ins hand their number to the
+          receptionist and it goes straight into the HMIS, so the check can
+          never pass and holding blocks every delivery while verifying nothing.
+
+        Fails OPEN to the platform default: one config read must not silently
+        start or stop deliveries for an entire clinic.
+        """
+        try:
+            from app.services.tenant import get_clinic_by_id
+
+            clinic = await get_clinic_by_id(clinic_id)
+            config = (clinic or {}).get("config") or {}
+            value = config.get("hold_unknown_phone_reports")
+            if isinstance(value, bool):
+                return value
+        except Exception as e:
+            logger.warning(
+                f"Could not read hold_unknown_phone_reports for clinic {clinic_id}; "
+                f"using platform default {settings.hold_unknown_phone_reports}: {e}"
+            )
+        return settings.hold_unknown_phone_reports
 
     async def match(
         self,
@@ -169,7 +205,7 @@ class PatientMatchService:
             # from the existing review queue (GET /admin/reports/review-queue,
             # POST /admin/reports/{id}/resolve), which already supports
             # correcting the phone before sending.
-            if settings.hold_unknown_phone_reports:
+            if await self._hold_unverified(clinic_id):
                 return MatchResult(
                     status="needs_review",
                     is_safe_to_send=False,
@@ -186,9 +222,11 @@ class PatientMatchService:
                     existing_records=[],
                 )
 
-            # ponytail: opt-out for diagnostic centres whose volume is almost
-            # entirely walk-in and who accept the misrouting risk. Turning this
-            # off restores pre-audit behaviour; there is no middle setting.
+            # Delivering. The recipient is not corroborated by clinic data, so
+            # say so explicitly: the caller raises an admin notification and the
+            # row keeps match_source="moc_doc_only". That pairing is what makes
+            # a misroute visible after the fact instead of blocking every
+            # legitimate walk-in delivery in advance.
             return MatchResult(
                 status="matched",
                 is_safe_to_send=True,
@@ -198,6 +236,7 @@ class PatientMatchService:
                 normalized_phone=norm_phone,
                 patient_name=scraped_name,
                 review_reason=None,
+                recipient_unverified=True,
                 existing_records=[],
             )
 

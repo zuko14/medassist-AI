@@ -4123,6 +4123,108 @@ async def resolve_report_match(
     }
 
 
+@router.post("/reports/release-held-walkins")
+async def release_held_walkin_reports(
+    clinic_id: str = "default",
+    limit: int = 200,
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("REPORTS_RESOLVE")),
+):
+    """Deliver walk-in reports that were held by the old verification gate.
+
+    Reports held with match_source="moc_doc_only" were parked because the phone
+    number was not in the clinic's patient list. For a diagnostic centre that is
+    true of every walk-in, so the gate blocked everything: a live client had 27
+    discovered, 27 held, 0 delivered. The policy is now delivery-by-default, but
+    the connector will not re-offer these — external_report_id dedup means an
+    already-recorded report is never re-processed — so the backlog needs an
+    explicit flush.
+
+    Only rows with a stored PDF can be sent. Rows whose file_path never left the
+    "pending_review/" sentinel have no file (the source download failed when
+    they were held) and are reported separately rather than silently skipped.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    limit = max(1, min(int(limit or 200), 500))
+
+    query = (
+        # unscoped: conditional_scope_below
+        supabase.table("lab_reports")
+        .select("id, patient_phone, file_path, report_name, match_source, status")
+        .eq("status", "needs_review")
+        .eq("match_source", "moc_doc_only")
+        .limit(limit)
+    )
+    if effective_clinic_id != "default":
+        query = query.eq("clinic_id", effective_clinic_id)
+
+    try:
+        held = await sb(query)
+    except Exception as e:
+        logger.error(f"Could not list held walk-in reports: {e}")
+        raise HTTPException(status_code=503, detail="Could not read the review queue")
+
+    rows = held.data or []
+    lab_service = LabReportService()
+    sent, failed, no_pdf = 0, 0, 0
+    errors: list[dict] = []
+
+    for row in rows:
+        file_path = str(row.get("file_path") or "")
+        if not file_path or file_path.startswith("pending_review"):
+            no_pdf += 1
+            continue
+        try:
+            await lab_service.resend_report(row["id"], clinic_id=effective_clinic_id)
+            # resend_report does not clear the review state on its own.
+            await sb(
+                # unscoped: unique_row_key
+                supabase.table("lab_reports")
+                .update(
+                    {
+                        "status": "sent",
+                        "resolved_at": datetime.now(timezone.utc).isoformat(),
+                        "resolved_by": user.username,
+                        "error_message": None,
+                    }
+                )
+                .eq("id", row["id"])
+            )
+            sent += 1
+        except Exception as e:
+            failed += 1
+            logger.error(f"Release of held report {row.get('id')} failed: {e}")
+            if len(errors) < 20:
+                errors.append({"report_id": row.get("id"), "error": str(e)[:200]})
+
+    await log_admin_action(
+        user=user,
+        action="release_held_walkin_reports",
+        resource_type="lab_report",
+        resource_id=None,
+        details={"sent": sent, "failed": failed, "no_pdf": no_pdf, "examined": len(rows)},
+        ip_address=request.client.host if (request and request.client) else "unknown",
+    )
+
+    return {
+        "success": True,
+        "examined": len(rows),
+        "sent": sent,
+        "failed": failed,
+        "no_stored_pdf": no_pdf,
+        "errors": errors,
+        "message": (
+            f"Delivered {sent} held walk-in report(s)."
+            + (f" {failed} failed." if failed else "")
+            + (
+                f" {no_pdf} had no stored PDF and must be re-fetched from the source."
+                if no_pdf
+                else ""
+            )
+        ),
+    }
+
+
 @router.post("/reports/{report_id}/resend")
 async def resend_lab_report(
     report_id: str,
@@ -4544,6 +4646,7 @@ async def get_branches(
 async def create_branch(
     branch: BranchCreate,
     clinic_id: str = "default",
+    request: Request = None,
     user: AdminUser = Depends(require_admin),
 ):
     """Create a new branch."""
@@ -4583,7 +4686,25 @@ async def create_branch(
 
         invalidate_branch_cache(effective_clinic_id)
 
-        return {"success": True, "branch": result.data[0]}
+        # A branch is the billing unit: the platform charges per location, so
+        # adding one changes what this clinic owes. Audit it explicitly rather
+        # than leaving branches.created_at as the only trace.
+        new_branch = result.data[0]
+        await log_admin_action(
+            user=user,
+            action="create_branch",
+            resource_type="branch",
+            resource_id=str(new_branch.get("id")),
+            details={
+                "name": new_branch.get("name"),
+                "short_name": new_branch.get("short_name"),
+                "is_diagnostic": new_branch.get("is_diagnostic", False),
+                "billing_impact": "adds_one_billable_location",
+            },
+            ip_address=request.client.host if (request and request.client) else "unknown",
+        )
+
+        return {"success": True, "branch": new_branch}
     except HTTPException:
         raise
     except Exception as e:
@@ -4602,6 +4723,7 @@ async def update_branch(
     branch_id: str,
     branch: BranchUpdate,
     clinic_id: str = "default",
+    request: Request = None,
     user: AdminUser = Depends(require_admin),
 ):
     """Update a branch."""
@@ -4659,6 +4781,7 @@ _BRANCH_DEPENDENT_TABLES = ["appointments", "doctor_branches", "integration_conn
 async def delete_branch(
     branch_id: str,
     clinic_id: str = "default",
+    request: Request = None,
     user: AdminUser = Depends(require_admin),
 ):
     """Permanently delete a branch if nothing references it (appointments,
@@ -4679,6 +4802,17 @@ async def delete_branch(
                     query = query.eq("clinic_id", effective_clinic_id)
                 await sb(query.eq("id", branch_id))
                 invalidate_branch_cache(effective_clinic_id)
+                await log_admin_action(
+                    user=user,
+                    action="deactivate_branch",
+                    resource_type="branch",
+                    resource_id=branch_id,
+                    details={
+                        "reason": f"has {table} records",
+                        "billing_impact": "removes_one_billable_location",
+                    },
+                    ip_address=request.client.host if (request and request.client) else "unknown",
+                )
                 label = table.replace("_", " ")
                 return {
                     "success": True,
@@ -4692,6 +4826,14 @@ async def delete_branch(
             query = query.eq("clinic_id", effective_clinic_id)
         await sb(query.eq("id", branch_id))
         invalidate_branch_cache(effective_clinic_id)
+        await log_admin_action(
+            user=user,
+            action="delete_branch",
+            resource_type="branch",
+            resource_id=branch_id,
+            details={"billing_impact": "removes_one_billable_location"},
+            ip_address=request.client.host if (request and request.client) else "unknown",
+        )
 
         return {"success": True, "deleted": True, "message": "Branch permanently deleted."}
     except Exception as e:

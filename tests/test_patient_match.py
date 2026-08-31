@@ -1,7 +1,7 @@
 """Tests for PatientMatchService."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.patient_match import (
     PatientMatchService,
@@ -42,11 +42,17 @@ def _no_patient_records():
 
 
 @pytest.mark.asyncio
-async def test_patient_match_walkin_unknown_phone_is_held_for_review():
-    """AUDIT-P1-1: an unregistered phone is held, not auto-delivered.
+async def test_walkin_unknown_phone_is_delivered_and_flagged_unverified():
+    """A diagnostic centre's walk-in report must go out automatically.
 
-    Nothing in clinic data corroborates that a phone typed into a third-party
-    HMIS belongs to the named patient, so the PDF must not go out unreviewed.
+    There is no patient registry to match a walk-in against — the number is
+    handed to the receptionist and typed into the HMIS — so holding on "phone
+    not known to this clinic" verifies nothing and blocks every delivery. That
+    happened in production: 27 discovered, 27 held, 0 delivered.
+
+    The AUDIT-P1-1 misrouting concern is kept as a detective control instead:
+    recipient_unverified drives an admin notification, and the row stays
+    stamped moc_doc_only so a misroute stays findable.
     """
     service = PatientMatchService(similarity_threshold=0.75)
 
@@ -57,21 +63,21 @@ async def test_patient_match_walkin_unknown_phone_is_held_for_review():
             scraped_phone="+919876543210",
         )
 
-    assert result.status == "needs_review"
-    assert result.is_safe_to_send is False
+    assert result.status == "matched"
+    assert result.is_safe_to_send is True
     assert result.match_source == "moc_doc_only"
-    assert result.match_confidence == 0.0
+    assert result.match_confidence == 1.0
     assert result.normalized_phone == "+919876543210"
-    assert result.review_reason and "not registered" in result.review_reason
+    assert result.recipient_unverified is True, "delivery must be flagged for the owner"
 
 
 @pytest.mark.asyncio
-async def test_patient_match_walkin_opt_out_restores_auto_send():
-    """hold_unknown_phone_reports=False is the documented opt-out."""
+async def test_a_clinic_can_opt_in_to_holding_unknown_numbers():
+    """A clinic that keeps a real patient registry can turn the gate back on."""
     service = PatientMatchService(similarity_threshold=0.75)
 
-    with patch("app.services.patient_match.supabase", _no_patient_records()), patch(
-        "app.services.patient_match.settings.hold_unknown_phone_reports", False
+    with patch("app.services.patient_match.supabase", _no_patient_records()), patch.object(
+        service, "_hold_unverified", new_callable=AsyncMock, return_value=True
     ):
         result = await service.match(
             clinic_id="clinic-1",
@@ -79,9 +85,35 @@ async def test_patient_match_walkin_opt_out_restores_auto_send():
             scraped_phone="+919876543210",
         )
 
-    assert result.status == "matched"
-    assert result.is_safe_to_send is True
-    assert result.match_confidence == 1.0
+    assert result.status == "needs_review"
+    assert result.is_safe_to_send is False
+    assert result.match_confidence == 0.0
+    assert result.review_reason and "not registered" in result.review_reason
+
+
+@pytest.mark.asyncio
+async def test_per_clinic_config_overrides_the_platform_default():
+    service = PatientMatchService(similarity_threshold=0.75)
+
+    async def _clinic(_cid):
+        return {"id": _cid, "config": {"hold_unknown_phone_reports": True}}
+
+    with patch("app.services.tenant.get_clinic_by_id", new=_clinic):
+        assert await service._hold_unverified("clinic-1") is True
+
+
+@pytest.mark.asyncio
+async def test_hold_policy_falls_back_to_platform_default_when_config_unreadable():
+    """A config read failure must not silently stop a clinic's deliveries."""
+    service = PatientMatchService(similarity_threshold=0.75)
+
+    async def _boom(_cid):
+        raise RuntimeError("clinic lookup failed")
+
+    with patch("app.services.tenant.get_clinic_by_id", new=_boom), patch(
+        "app.services.patient_match.settings.hold_unknown_phone_reports", False
+    ):
+        assert await service._hold_unverified("clinic-1") is False
 
 
 @pytest.mark.asyncio
