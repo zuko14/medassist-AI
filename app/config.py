@@ -76,13 +76,14 @@ class Settings(BaseSettings):
 
     # Worker threads available to app.database.sb() for off-loop PostgREST
     # execution (T5.1 / KA-P1-03). This is the per-process concurrency ceiling
-    # for database work: 40 is AnyIO's default, raised here because every query
-    # now takes a token.
+    # for database work.
     #
     # Do NOT raise this above the connection budget Supabase/PostgREST will
     # accept for this deployment — that only moves the queue from the limiter
     # to the connection pool, turning a bounded wait into a timeout.
-    db_thread_pool_size: int = 64
+    # 16 threads × 2 processes (WEB_CONCURRENCY=1 per Render instance × 2
+    # instances) = 32 max concurrent PostgREST calls — fits Supabase Micro/Small.
+    db_thread_pool_size: int = 16
 
     # Hard ceiling on a single PostgREST/storage call, in seconds.
     # sb() runs queries on a bounded worker pool, so a call that never returns
