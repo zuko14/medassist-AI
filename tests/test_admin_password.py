@@ -56,7 +56,11 @@ async def test_change_password_updates_hash_on_success():
         result = await change_password(body=body, request=_mock_request(), user=admin)
 
     assert result == {"success": True, "message": "Password updated successfully"}
-    mock_sb.table.return_value.update.assert_called_once()
+    # Two updates: the password hash, then the session revocation. A password
+    # change that leaves existing sessions alive would defeat the point of
+    # holding them server-side (AUDIT-P1-2).
+    assert mock_sb.table.return_value.update.call_count == 2
+    mock_sb.table.assert_any_call("admin_sessions")
 
 
 @pytest.mark.asyncio

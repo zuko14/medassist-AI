@@ -140,6 +140,13 @@ async def reset_clinic_admin_password(
         {"password_hash": hash_password(body.new_password)}
     ).eq("username", body.username))
 
+    # An owner-mediated reset is the lock-out recovery path, so it is also the
+    # path used after a suspected compromise. It must terminate the sessions
+    # the old password already produced, not just change the next login.
+    from app.routers.admin import revoke_sessions_for_user
+
+    await revoke_sessions_for_user(body.username)
+
     await log_admin_action(
         user=owner,
         action="reset_admin_password",

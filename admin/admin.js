@@ -1,6 +1,17 @@
 // ═══════ CONFIG ═══════
 const API = window.location.origin;
 let auth = '';
+
+// Build request headers. When `auth` is empty the browser is authenticating
+// with the HttpOnly session cookie (set by POST /admin/login), which fetch
+// sends automatically for same-origin requests. The Authorization header must
+// then be ABSENT, not empty: leaving it in place would let the server fall
+// back to HTTP Basic and re-authenticate a session that was just revoked.
+function authHeaders(extra) {
+    const h = Object.assign({}, extra || {});
+    if (auth) h.Authorization = auth;
+    return h;
+}
 // T0.1d: real clinic scope, sourced from the server via /admin/me.
 // 'default' is the platform-wide sentinel, honoured only for super_admin.
 let CLINIC_SCOPE = 'default';
@@ -186,11 +197,35 @@ function applyFeatureVisibility() {
     if (staffForm) staffForm.style.display = hasPermission('STAFF_CREATE') ? '' : 'none';
 }
 
-function login() {
+async function login() {
     const u = document.getElementById('loginUser').value.trim();
     const p = document.getElementById('loginPass').value;
     if (!u || !p) return;
-    auth = 'Basic ' + btoa(u + ':' + p);
+
+    // Exchange the password for a revocable, expiring HttpOnly session cookie.
+    // If the server reports session:false, migration 067 has not been applied
+    // there yet, so keep using HTTP Basic rather than locking the user out.
+    try {
+        const r = await fetch(API + '/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p })
+        });
+        if (!r.ok) {
+            let detail = 'Invalid username or password';
+            try { detail = (await r.json()).detail || detail; } catch (e) {}
+            auth = '';
+            document.getElementById('loginError').innerHTML =
+                '<div class="alert alert-err">' + esc(detail) + '</div>';
+            return;
+        }
+        const d = await r.json();
+        auth = d.session ? '' : 'Basic ' + btoa(u + ':' + p);
+    } catch (e) {
+        document.getElementById('loginError').innerHTML =
+            '<div class="alert alert-err">Could not reach the server. Check your connection.</div>';
+        return;
+    }
 
     api('/admin/stats?days=30').then(data => {
         document.getElementById('loginScreen').style.display = 'none';
@@ -222,6 +257,9 @@ function login() {
 function logout() {
     stopNotificationPolling();
     closeNotifDrawer();
+    // Revoke server-side first, while the cookie is still being sent. Clearing
+    // local state alone would leave the session valid until it expired.
+    fetch(API + '/admin/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
     auth = '';
     CLINIC_SCOPE = 'default';
     myPlan = null;
@@ -278,7 +316,7 @@ async function submitChangePassword() {
     try {
         const r = await fetch(API + '/admin/change-password', {
             method: 'PUT',
-            headers: { Authorization: auth, 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ current_password, new_password })
         });
         const data = await r.json();
@@ -329,7 +367,7 @@ document.querySelectorAll('.nav-link[tabindex]').forEach(link => {
 
 // ═══════ API HELPERS ═══════
 async function api(path) {
-    const r = await fetch(API + path, { headers: { Authorization: auth } });
+    const r = await fetch(API + path, { headers: authHeaders() });
     if (!r.ok) throw new Error(r.status);
     return r.json();
 }
@@ -337,7 +375,7 @@ async function api(path) {
 async function apiPost(path, body) {
     const r = await fetch(API + path, {
         method: 'POST',
-        headers: { Authorization: auth, 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
     });
     const data = await r.json().catch(() => ({}));
@@ -348,7 +386,7 @@ async function apiPost(path, body) {
 async function apiPut(path, body) {
     const r = await fetch(API + path, {
         method: 'PUT',
-        headers: { Authorization: auth, 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
     });
     const data = await r.json().catch(() => ({}));
@@ -357,7 +395,7 @@ async function apiPut(path, body) {
 }
 
 async function apiDel(path) {
-    const r = await fetch(API + path, { method: 'DELETE', headers: { Authorization: auth } });
+    const r = await fetch(API + path, { method: 'DELETE', headers: authHeaders() });
     if (!r.ok) throw new Error(r.status);
 }
 
@@ -947,7 +985,7 @@ async function addHoliday() {
     if (!date || !name) { msg('holMsg', 'Please enter date and holiday name', true); return; }
     try {
         const r = await fetch(`${API}/admin/holidays?holiday_date=${date}&name=${encodeURIComponent(name)}`, {
-            method: 'POST', headers: { Authorization: auth }
+            method: 'POST', headers: authHeaders()
         });
         if (!r.ok) throw new Error();
         msg('holMsg', '✅ Holiday added successfully!');
@@ -968,7 +1006,7 @@ async function cancelAppt(id) {
     try {
         const r = await fetch(API + '/admin/appointments/' + id, {
             method: 'DELETE',
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         const data = await r.json();
         if (data.success) {
@@ -986,7 +1024,7 @@ async function checkInAppt(id) {
     try {
         const r = await fetch(`${API}/admin/appointments/${id}/check-in?clinic_id=${CLINIC_SCOPE}`, {
             method: 'POST',
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         const data = await r.json();
         if (r.ok && data.token_number) {
@@ -1139,7 +1177,7 @@ async function submitLabReport() {
     try {
         const r = await fetch(API + '/admin/lab-reports/upload', {
             method: 'POST',
-            headers: { Authorization: auth },
+            headers: authHeaders(),
             body: fd
         });
         const data = await r.json();
@@ -1164,7 +1202,7 @@ async function resendReport(id) {
     try {
         const r = await fetch(API + '/admin/lab-reports/' + id + '/resend', {
             method: 'POST',
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         const data = await r.json();
         if (data.success) {
@@ -1380,7 +1418,7 @@ async function submitLabTestCsv() {
     try {
         const resp = await fetch(API + '/admin/lab-tests/import-csv', {
             method: 'POST',
-            headers: { Authorization: auth },
+            headers: authHeaders(),
             body: formData,
         });
         const data = await resp.json();
@@ -1567,7 +1605,7 @@ async function deactivateRx(id) {
     try {
         const r = await fetch(API + '/admin/prescriptions/' + id + '/deactivate', {
             method: 'POST',
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         const data = await r.json();
         if (data.success) {
@@ -3043,7 +3081,7 @@ async function fetchNotificationCount() {
     if (!auth) return;
     try {
         const res = await fetch(API + '/admin/notifications/unread-count', {
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -3081,7 +3119,7 @@ async function fetchNotificationsList() {
 
     try {
         const res = await fetch(API + '/admin/notifications?limit=30', {
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         if (!res.ok) {
             listEl.innerHTML = '<div style="text-align:center; padding:20px; color:var(--red); font-size:0.85rem;">Failed to load alerts.</div>';
@@ -3128,7 +3166,7 @@ async function markNotificationRead(notifId) {
     try {
         const res = await fetch(API + `/admin/notifications/${notifId}/read`, {
             method: 'PATCH',
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         if (res.ok) {
             fetchNotificationCount();
@@ -3143,7 +3181,7 @@ async function markAllNotificationsRead() {
     try {
         const res = await fetch(API + '/admin/notifications/mark-all-read', {
             method: 'POST',
-            headers: { Authorization: auth }
+            headers: authHeaders()
         });
         if (res.ok) {
             toast('All notifications marked as read.');

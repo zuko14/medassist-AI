@@ -33,16 +33,46 @@ def test_compute_name_similarity():
     assert sim3 >= 0.8
 
 
-@pytest.mark.asyncio
-async def test_patient_match_walkin_no_db_record():
-    """Walk-in diagnostic patient not in database -> Safe to send as moc_doc_only."""
-    service = PatientMatchService(similarity_threshold=0.75)
+def _no_patient_records():
     mock_sb = MagicMock()
     mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
         data=[]
     )
+    return mock_sb
 
-    with patch("app.services.patient_match.supabase", mock_sb):
+
+@pytest.mark.asyncio
+async def test_patient_match_walkin_unknown_phone_is_held_for_review():
+    """AUDIT-P1-1: an unregistered phone is held, not auto-delivered.
+
+    Nothing in clinic data corroborates that a phone typed into a third-party
+    HMIS belongs to the named patient, so the PDF must not go out unreviewed.
+    """
+    service = PatientMatchService(similarity_threshold=0.75)
+
+    with patch("app.services.patient_match.supabase", _no_patient_records()):
+        result = await service.match(
+            clinic_id="clinic-1",
+            scraped_name="Mrs. Sunita Verma",
+            scraped_phone="+919876543210",
+        )
+
+    assert result.status == "needs_review"
+    assert result.is_safe_to_send is False
+    assert result.match_source == "moc_doc_only"
+    assert result.match_confidence == 0.0
+    assert result.normalized_phone == "+919876543210"
+    assert result.review_reason and "not registered" in result.review_reason
+
+
+@pytest.mark.asyncio
+async def test_patient_match_walkin_opt_out_restores_auto_send():
+    """hold_unknown_phone_reports=False is the documented opt-out."""
+    service = PatientMatchService(similarity_threshold=0.75)
+
+    with patch("app.services.patient_match.supabase", _no_patient_records()), patch(
+        "app.services.patient_match.settings.hold_unknown_phone_reports", False
+    ):
         result = await service.match(
             clinic_id="clinic-1",
             scraped_name="Mrs. Sunita Verma",
@@ -51,9 +81,7 @@ async def test_patient_match_walkin_no_db_record():
 
     assert result.status == "matched"
     assert result.is_safe_to_send is True
-    assert result.match_source == "moc_doc_only"
     assert result.match_confidence == 1.0
-    assert result.normalized_phone == "+919876543210"
 
 
 @pytest.mark.asyncio

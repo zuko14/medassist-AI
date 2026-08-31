@@ -22,13 +22,23 @@ payment, lab-report and queue layers, i.e. most of the query volume — was
 never linted at all. Turning that on surfaced 86 tenant-table queries with no
 clinic predicate and no annotation.
 
-Most of those 86 are probably fine (message_queue keys on a globally unique
-wamid; lab_reports keys on a unique external_report_id), but none has been
-reviewed. Failing on all 86 today would block every unrelated change, so they
-are held by a RATCHET: the count may not grow. New unscoped queries fail
-immediately; the existing ones are a burn-down list. Lower SERVICES_BARE_BASELINE
-as they are reviewed — the test fails if you lower it too far, so the number
-cannot drift back up.
+Those 86 have since been burned down to zero (2026-08-31). Two thirds were
+never violations at all: the analyzer could not see the conditional-scoping
+idiom, where the predicate lands in a later statement
+
+    query = supabase.table("appointments").select("*")
+    if clinic_id != "default":
+        query = query.eq("clinic_id", clinic_id)
+
+which _scoped_by_later_reassignment now recognises — narrowly, by requiring the
+SAME variable to be reassigned from an expression carrying the predicate, so a
+scoped query cannot launder an unscoped sibling in the same function. The
+remainder were reviewed one by one and annotated with a structural reason from
+ALLOWED_REASONS: a unique row key, a Meta/Razorpay callback id, a per-tenant
+sweep, or an INSERT whose payload carries clinic_id.
+
+The RATCHET stays: the counts may go down, never up. A new unscoped query fails
+immediately.
 """
 
 import ast
@@ -78,16 +88,31 @@ ALLOWED_REASONS = {
     # Platform-owner endpoints that legitimately span tenants; these sit behind
     # the separate owner credential, not clinic-admin auth.
     "platform_admin",
+    # The predicate is a globally unique primary key (a UUID) for a row this
+    # code already holds, having fetched it under a scoped or sweep query.
+    # Reaching another tenant's row would require guessing its UUID, and the
+    # routes that accept an id from a caller re-check clinic ownership.
+    "unique_row_key",
+    # An INSERT carries its tenant in the row payload; there is no filter to
+    # put a predicate on. Where clinic_id is set conditionally, it is because
+    # the tenant is genuinely not yet resolved at that point (webhook ingest
+    # before phone_number_id lookup), and the row is attributed later.
+    "insert_scoped_by_payload",
 }
 
 # ── Ratchets ────────────────────────────────────────────────────────────────
-# Measured on the tree at the time of the 2026-08-30 audit remediation.
 # These may go DOWN, never up.
+#
+# 2026-08-31: app/services burned down from 86 to 0. Two thirds of that came
+# from teaching the linter the conditional-scoping idiom it could not see
+# (_scoped_by_later_reassignment); the rest were reviewed individually and
+# carry a structural reason from ALLOWED_REASONS. Routers' free-text legacy
+# annotations fell 88 -> 55 for the same analyzer reason.
 ROUTERS_BARE_BASELINE = 0     # no predicate, no annotation
-SERVICES_BARE_BASELINE = 86
+SERVICES_BARE_BASELINE = 0
 # Free-text annotations predating ALLOWED_REASONS, held so the enum can be
 # adopted without a flag-day rewrite of 88 call sites.
-ROUTERS_LEGACY_ANNOTATIONS = 88
+ROUTERS_LEGACY_ANNOTATIONS = 55
 SERVICES_LEGACY_ANNOTATIONS = 1
 
 SCANNED_DIRS = ("app/routers", "app/services")
@@ -131,6 +156,66 @@ def _annotation_for(lines, lineno):
     return None
 
 
+def _enclosing_function(tree, node):
+    """Innermost FunctionDef containing node, if any."""
+    best = None
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node in list(ast.walk(fn)):
+            if best is None or fn.lineno >= best.lineno:
+                best = fn
+    return best
+
+
+def _assign_target_names(stmt):
+    """Names assigned by `stmt`, e.g. ['query'] for `query = supabase.table(..)`."""
+    if not isinstance(stmt, ast.Assign):
+        return []
+    names = []
+    for t in stmt.targets:
+        if isinstance(t, ast.Name):
+            names.append(t.id)
+    return names
+
+
+def _scoped_by_later_reassignment(tree, node):
+    """True for the conditional-scoping idiom the AST cannot see in one statement:
+
+        query = supabase.table("appointments").select("*")
+        if clinic_id != "default":
+            query = query.eq("clinic_id", clinic_id)
+
+    The predicate is real, it just lands in a different statement. Matching is
+    deliberately narrow: the SAME variable the query was assigned to must be
+    reassigned from an expression carrying .eq("clinic_id", ...), inside the
+    same function. A clinic predicate merely appearing somewhere else in the
+    function does NOT count -- that would let one scoped query launder an
+    unscoped sibling.
+    """
+    fn = _enclosing_function(tree, node)
+    if fn is None:
+        return False
+
+    target_names = []
+    for stmt in ast.walk(fn):
+        if isinstance(stmt, ast.Assign) and node in list(ast.walk(stmt)):
+            target_names.extend(_assign_target_names(stmt))
+    if not target_names:
+        return False
+
+    for stmt in ast.walk(fn):
+        if not isinstance(stmt, ast.Assign):
+            continue
+        if not any(n in target_names for n in _assign_target_names(stmt)):
+            continue
+        if stmt.value is node or node in list(ast.walk(stmt.value)):
+            continue  # the original assignment, not a re-scoping of it
+        if _has_clinic_predicate(stmt.value):
+            return True
+    return False
+
+
 def _enclosing_statement(tree, node):
     """Largest enclosing statement, so the whole builder chain is visible."""
     best = None
@@ -163,6 +248,9 @@ def _scan(directory):
                 continue
 
             if _has_clinic_predicate(_enclosing_statement(tree, node)):
+                continue
+
+            if _scoped_by_later_reassignment(tree, node):
                 continue
 
             location = f"{path}:{node.lineno}: supabase.table({table!r})"

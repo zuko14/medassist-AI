@@ -55,6 +55,7 @@ class DataRetentionService:
 
         try:
             result = (
+                # unscoped: platform_sweep
                 await sb(supabase.table("conversations")
                 .delete()
                 .lt("updated_at", cutoff))

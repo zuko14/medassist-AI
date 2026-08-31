@@ -173,25 +173,23 @@ async def receive_lab_report(
         logger.warning(
             f"Intake held for review by patient match gate for {external_report_id}: {match_res.review_reason}"
         )
-        try:
-            # unscoped: recording held lab_report in needs_review state with explicit clinic_id
-            nr_insert = await sb(supabase.table("lab_reports").insert({
-                "clinic_id": clinic_id,
-                "patient_phone": patient_phone,
-                "patient_name": patient_name,
-                "report_name": report_name,
-                "report_type": report_type,
-                "file_path": f"pending_review/{external_report_id}",
-                "status": "needs_review",
-                "external_report_id": external_report_id,
-                "match_source": effective_match_source,
-                "error_message": match_res.review_reason,
-            }))
-            raw_id = nr_insert.data[0].get("id") if (nr_insert.data and isinstance(nr_insert.data, list) and isinstance(nr_insert.data[0], dict)) else None
-            nr_id = str(raw_id) if isinstance(raw_id, (str, int)) else None
-        except Exception as e_nr:
-            logger.error(f"Failed to record needs_review row: {e_nr}")
-            nr_id = None
+        # Store the PDF even though we are not delivering it, so that clearing
+        # the item from the review queue with "send now" actually sends it.
+        nr_id = await LabReportService().store_for_review(
+            clinic_id=clinic_id,
+            patient_phone=patient_phone,
+            patient_name=patient_name,
+            report_name=report_name,
+            report_type=report_type,
+            review_reason=match_res.review_reason or "Held by patient match gate",
+            file_bytes=file_bytes,
+            filename=filename,
+            content_type=content_type,
+            external_report_id=external_report_id,
+            source=connector_type,
+            match_confidence=effective_match_confidence,
+            match_source=effective_match_source,
+        )
 
         return LabReportResponse(
             success=True,

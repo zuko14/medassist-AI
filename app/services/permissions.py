@@ -160,6 +160,7 @@ def resolve_owned_branch(user: "AdminUser", branch_id: str) -> dict:
 
     from app.database import supabase
 
+    # unscoped: unique_row_key
     result = supabase.table("branches").select("*").eq("id", branch_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Branch not found")

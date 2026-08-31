@@ -98,6 +98,22 @@ class Settings(BaseSettings):
     # going to answer usefully anyway. Well under Meta's 20s webhook budget.
     db_query_timeout_seconds: int = 15
 
+    # Hold lab reports whose phone number is not registered with the clinic
+    # (match_source="moc_doc_only") for staff review instead of delivering the
+    # PDF automatically (AUDIT-P1-1). The number comes from a receptionist
+    # typing it into a third-party HMIS, and nothing in our own data
+    # corroborates that it belongs to the named patient — one wrong digit is an
+    # irreversible disclosure of medical data to a stranger.
+    #
+    # Set false only for a diagnostic centre that is almost entirely walk-in
+    # and has accepted that risk in writing; it restores pre-audit behaviour.
+    hold_unknown_phone_reports: bool = True
+
+    # Lifetime of an admin panel session cookie, in hours (AUDIT-P1-2).
+    # 12h means a session left open overnight on a shared clinic terminal is
+    # dead by the next shift. Sessions are revocable server-side regardless.
+    admin_session_hours: int = 12
+
     # Whether THIS process runs connector polling (Playwright/Chromium).
     #
     # KA-P2-20: polling was folded into the web service, so a headless Chromium

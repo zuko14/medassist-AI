@@ -42,6 +42,7 @@ class PrescriptionService:
             "is_active": True,
             "notes": notes,
         }
+        # unscoped: insert_scoped_by_payload
         result = await sb(supabase.table("prescriptions").insert(row))
 
         # Send confirmation WhatsApp message

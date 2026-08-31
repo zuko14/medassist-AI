@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.config import settings
 from app.database import supabase
 from app.utils.validators import validate_phone, normalize_phone
 from app.database import sb  # T5.1: off-loop query execution
@@ -157,7 +158,37 @@ class PatientMatchService:
 
         # Step 3: Evaluate matching rules
         if not records:
-            # No existing patient in MediAssist DB -> Standard diagnostic center walk-in
+            # Walk-in: the phone on the report is unknown to this clinic, so
+            # nothing in our own data corroborates that it belongs to the named
+            # patient (AUDIT-P1-1). The number was typed by a receptionist into
+            # a third-party HMIS; a single wrong digit sends a medical PDF to an
+            # uninvolved stranger, which is a DPDP-reportable disclosure and is
+            # irreversible once WhatsApp has delivered it.
+            #
+            # Hold it for a human instead of auto-delivering. Staff clear it
+            # from the existing review queue (GET /admin/reports/review-queue,
+            # POST /admin/reports/{id}/resolve), which already supports
+            # correcting the phone before sending.
+            if settings.hold_unknown_phone_reports:
+                return MatchResult(
+                    status="needs_review",
+                    is_safe_to_send=False,
+                    match_source="moc_doc_only",
+                    match_confidence=0.0,
+                    matched_patient_id=None,
+                    normalized_phone=norm_phone,
+                    patient_name=scraped_name,
+                    review_reason=(
+                        "Walk-in report: phone number is not registered with this "
+                        "clinic, so the recipient could not be verified. Confirm the "
+                        "number with the patient before sending."
+                    ),
+                    existing_records=[],
+                )
+
+            # ponytail: opt-out for diagnostic centres whose volume is almost
+            # entirely walk-in and who accept the misrouting risk. Turning this
+            # off restores pre-audit behaviour; there is no middle setting.
             return MatchResult(
                 status="matched",
                 is_safe_to_send=True,

@@ -100,19 +100,23 @@ except Exception as _opt_err:  # pragma: no cover - defensive
 # Sizing is the per-process database concurrency ceiling. Three limits sit
 # behind it, and the smallest wins:
 #
-#   1. these worker threads                    (db_thread_pool_size, 64)
+#   1. these worker threads                    (db_thread_pool_size, 16)
 #   2. the shared httpx connection pool inside the supabase client
 #      (max_connections defaults to 100), which all threads contend for
 #   3. PostgREST's own database pool on the Supabase side
 #
-# 64 x 4 processes = up to 256 concurrent HTTP calls to PostgREST. That is
-# requests, not Postgres connections — PostgREST multiplexes them onto its own
-# pool — but it is still the number to check against the deployment's plan
-# limits. UNVERIFIED under real load: T8.1 must confirm that raising this
-# improves throughput rather than just relocating the queue and converting a
-# bounded wait into a timeout.
+# 16 x 2 processes = up to 32 concurrent HTTP calls to PostgREST, which fits a
+# Supabase Micro/Small connection budget. That is requests, not Postgres
+# connections — PostgREST multiplexes them onto its own pool — but it is still
+# the number to check against the deployment's plan limits.
+#
+# This was 64 until the cascading-timeout incident (AUDIT-P1-3). 64 x 4
+# processes overshot what Micro would accept, and the queue simply moved from
+# this limiter to the connection pool, converting a bounded wait into a
+# timeout. Raising it again is UNVERIFIED under real load: T8.1 must show it
+# improves throughput rather than just relocating the queue.
 _DB_EXECUTOR = ThreadPoolExecutor(
-    max_workers=getattr(settings, "db_thread_pool_size", 64),
+    max_workers=getattr(settings, "db_thread_pool_size", 16),
     thread_name_prefix="kriya-db",
 )
 

@@ -135,3 +135,62 @@ async def test_06_acquire_fails_closed_on_db_error():
     with patch("app.database.supabase", mock_sb):
         acquired = await inst.acquire("failing_job", lease_seconds=120)
         assert acquired is False
+
+
+# --- AUDIT-P0-2: lease loss must ABORT the running body, not just flag it ---
+
+
+@pytest.mark.asyncio
+async def test_07_stolen_lease_cancels_running_job_body():
+    """A stolen lease cancels the in-flight body instead of letting it finish.
+
+    Before the fix the heartbeat logged LOCK_STOLEN and set an event nothing
+    read, so both instances ran the job to completion.
+    """
+    from app.services.distributed_lock import LockStolenError
+
+    inst = DistributedJobLock(instance_id="replica-pod-1")
+
+    mock_sb = MagicMock()
+    mock_sb.rpc.return_value.execute.return_value = MagicMock(data=True)
+    # renew matches 0 rows -> lease was taken by another instance
+    mock_sb.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+
+    reached_end = False
+
+    with patch("app.database.supabase", mock_sb):
+        with pytest.raises(LockStolenError):
+            async with distributed_job_lock("theft_job", lease_seconds=0.1, lock_manager=inst) as acquired:
+                assert acquired is True
+                for _ in range(100):
+                    await asyncio.sleep(0.01)
+                reached_end = True
+
+    assert reached_end is False, "job body ran to completion after losing its lease"
+
+
+@pytest.mark.asyncio
+async def test_08_transient_renew_error_does_not_abort_job():
+    """A dropped packet is not evidence of theft; the body keeps running.
+
+    renew() raises on transport failure and returns False only on a 0-row
+    update, so the heartbeat tolerates errors until the lease actually lapses.
+    """
+    inst = DistributedJobLock(instance_id="replica-pod-1")
+
+    mock_sb = MagicMock()
+    mock_sb.rpc.return_value.execute.return_value = MagicMock(data=True)
+    mock_sb.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.side_effect = Exception(
+        "ReadTimeout"
+    )
+
+    reached_end = False
+
+    with patch("app.database.supabase", mock_sb):
+        # lease 3.0s, heartbeat every 1.0s: one failed renewal well inside the lease
+        async with distributed_job_lock("flaky_job", lease_seconds=3.0, lock_manager=inst) as acquired:
+            assert acquired is True
+            await asyncio.sleep(1.3)
+            reached_end = True
+
+    assert reached_end is True, "healthy job aborted on a transient renewal error"

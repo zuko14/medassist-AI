@@ -101,6 +101,116 @@ class LabReportService:
 
     # Removed hardcoded WhatsApp API methods in favor of whatsapp_service
 
+    async def _store_pdf(
+        self,
+        clinic_id: str,
+        patient_phone: str,
+        filename: str,
+        file_bytes: bytes,
+        content_type: str,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Upload a report PDF to Supabase Storage.
+
+        Returns (storage_path, signed_url); (None, None) if the upload failed.
+        Shared by the delivery path and by store_for_review so that a report
+        held for staff review is stored under a real path and can actually be
+        sent later — a review row pointing at "pending_review/..." is not
+        recoverable by resend_report.
+        """
+        storage_path = f"{clinic_id}/{patient_phone}/{uuid4()}_{filename}"
+        try:
+            upload_result = supabase.storage.from_("lab-reports").upload(
+                storage_path, file_bytes, {"content-type": content_type}
+            )
+            logger.info(f"Uploaded report to storage: {storage_path} -> {upload_result}")
+        except Exception as e:
+            logger.error(
+                f"Supabase Storage upload FAILED (file will not be retrievable for bot resend): "
+                f"{type(e).__name__}: {e}"
+            )
+            return None, None
+
+        pdf_signed_url = None
+        try:
+            signed = supabase.storage.from_("lab-reports").create_signed_url(
+                storage_path, 604800
+            )
+            raw_signed_url = signed.get("signedURL") or signed.get("signedUrl")
+            if raw_signed_url:
+                if "/+" in raw_signed_url:
+                    prefix, sep, suffix = raw_signed_url.partition("?")
+                    prefix = prefix.replace("+", "%2B")
+                    pdf_signed_url = f"{prefix}?{suffix}" if suffix else prefix
+                else:
+                    pdf_signed_url = raw_signed_url
+        except Exception as sign_err:
+            logger.warning(f"Failed to generate signed URL from storage: {sign_err}")
+
+        return storage_path, pdf_signed_url
+
+    async def store_for_review(
+        self,
+        clinic_id: str,
+        patient_phone: str,
+        patient_name: str,
+        report_name: str,
+        report_type: str,
+        review_reason: str,
+        file_bytes: Optional[bytes] = None,
+        filename: Optional[str] = None,
+        content_type: str = "application/pdf",
+        external_report_id: Optional[str] = None,
+        source: str = "connector",
+        match_confidence: Optional[float] = None,
+        match_source: Optional[str] = None,
+    ) -> Optional[str]:
+        """Record a report as needs_review WITHOUT delivering it.
+
+        Stores the PDF first when the bytes are available, so that clearing the
+        item from the review queue with send_now actually delivers something.
+        Returns the new lab_reports row id, or None if the insert failed.
+        """
+        storage_path = None
+        if file_bytes:
+            storage_path, _ = await self._store_pdf(
+                clinic_id,
+                patient_phone or "unknown",
+                filename or f"{(external_report_id or uuid4().hex)}.pdf",
+                file_bytes,
+                content_type,
+            )
+
+        row = {
+            "clinic_id": clinic_id,
+            "patient_phone": patient_phone or "MISSING",
+            "patient_name": patient_name or "Unknown",
+            "report_name": report_name or "Lab Report",
+            "report_type": report_type or "Laboratory",
+            # No stored PDF -> keep the legacy sentinel so resolve_report_match
+            # still refuses to claim it sent something it cannot send.
+            "file_path": storage_path or f"pending_review/{external_report_id or uuid4().hex[:12]}",
+            "status": "needs_review",
+            "external_report_id": external_report_id,
+            "source": source,
+            "match_confidence": match_confidence,
+            "match_source": match_source,
+            "error_message": review_reason,
+        }
+        try:
+            # unscoped: insert_scoped_by_payload
+            res = await sb(supabase.table("lab_reports").insert(row))
+            if res.data and isinstance(res.data, list) and isinstance(res.data[0], dict):
+                return str(res.data[0].get("id"))
+        except Exception as e:
+            error_str = str(e).lower()
+            if "unique" in error_str or "duplicate" in error_str or "23505" in error_str:
+                logger.info(
+                    f"Report {external_report_id} already recorded — skipping duplicate review row"
+                )
+                return None
+            logger.error(f"Failed to record needs_review row for {external_report_id}: {e}")
+        return None
+
     async def upload_and_send(
         self,
         clinic_id: str,
@@ -147,6 +257,7 @@ class LabReportService:
                     "match_source": match_source,
                     "matched_patient_id": matched_patient_id,
                 }
+                # unscoped: insert_scoped_by_payload
                 claim_result = await sb(supabase.table("lab_reports").insert(claim_row))
                 if claim_result.data:
                     claim_id = claim_result.data[0]["id"]
@@ -208,36 +319,13 @@ class LabReportService:
             )
 
         # Step C — Upload to Supabase Storage
-        storage_path = f"{clinic_id}/{patient_phone}/{uuid4()}_{filename}"
-        storage_ok = False
-        pdf_signed_url = None
-        try:
-            upload_result = supabase.storage.from_("lab-reports").upload(
-                storage_path, file_bytes, {"content-type": content_type}
-            )
-            logger.info(
-                f"Uploaded report to storage: {storage_path} -> {upload_result}"
-            )
-            storage_ok = True
-            try:
-                signed = supabase.storage.from_("lab-reports").create_signed_url(
-                    storage_path, 604800
-                )
-                raw_signed_url = signed.get("signedURL") or signed.get("signedUrl")
-                if raw_signed_url:
-                    if "/+" in raw_signed_url:
-                        prefix, sep, suffix = raw_signed_url.partition("?")
-                        prefix = prefix.replace("+", "%2B")
-                        pdf_signed_url = f"{prefix}?{suffix}" if suffix else prefix
-                    else:
-                        pdf_signed_url = raw_signed_url
-            except Exception as sign_err:
-                logger.warning(f"Failed to generate signed URL from storage: {sign_err}")
-        except Exception as e:
-            logger.error(
-                f"Supabase Storage upload FAILED (file will not be retrievable for bot resend): {type(e).__name__}: {e}"
-            )
+        storage_path, pdf_signed_url = await self._store_pdf(
+            clinic_id, patient_phone, filename, file_bytes, content_type
+        )
+        storage_ok = storage_path is not None
+        if not storage_ok:
             # Continue — still send via WhatsApp even if storage failed
+            storage_path = f"{clinic_id}/{patient_phone}/{uuid4()}_{filename}"
 
         # Steps D, E, F — WhatsApp delivery
         sent_ok = False
@@ -524,9 +612,11 @@ class LabReportService:
 
         try:
             if claim_id:
+                # unscoped: unique_row_key
                 result = await sb(supabase.table("lab_reports").update(row).eq("id", claim_id))
                 saved_record = result.data[0] if result.data else row
             else:
+                # unscoped: insert_scoped_by_payload
                 result = await sb(supabase.table("lab_reports").insert(row))
                 saved_record = result.data[0] if result.data else row
         except Exception as e:
@@ -791,6 +881,7 @@ class LabReportService:
             finally:
                 await release_phone_lock_acquired(patient_phone)
 
+            # unscoped: unique_row_key
             await sb(supabase.table("lab_reports").update(
                 {
                     "status": "sent",
@@ -803,6 +894,7 @@ class LabReportService:
                 }
             ).eq("id", report_id))
         except Exception as e:
+            # unscoped: unique_row_key
             await sb(supabase.table("lab_reports").update(
                 {
                     "status": "failed",
@@ -813,6 +905,7 @@ class LabReportService:
             raise
 
         updated = (
+            # unscoped: unique_row_key
             await sb(supabase.table("lab_reports").select("*").eq("id", report_id))
         )
         return updated.data[0]
@@ -836,6 +929,7 @@ class LabReportService:
 
         try:
             pending = (
+                # unscoped: platform_sweep
                 await sb(supabase.table("lab_reports")
                 .select("*")
                 .eq("status", "pending_retry")
@@ -859,6 +953,7 @@ class LabReportService:
 
             if not file_path:
                 logger.warning(f"Retry worker: report {report_id} has no file_path — marking failed")
+                # unscoped: unique_row_key
                 await sb(supabase.table("lab_reports").update({
                     "status": "failed",
                     "delivery_status": "failed",
@@ -1042,6 +1137,7 @@ class LabReportService:
                     await release_phone_lock_acquired(patient_phone)
 
                 if sent_ok:
+                    # unscoped: unique_row_key
                     await sb(supabase.table("lab_reports").update({
                         "status": "sent",
                         "ai_summary_sent": summary_sent_ok,
@@ -1067,6 +1163,7 @@ class LabReportService:
                     f"for report {report_id}: {e}"
                 )
                 if retry_count >= MAX_RETRIES:
+                    # unscoped: unique_row_key
                     await sb(supabase.table("lab_reports").update({
                         "status": "failed",
                         "delivery_status": "failed",
@@ -1080,6 +1177,7 @@ class LabReportService:
                 else:
                     backoff_seconds = min(120 * (4 ** (retry_count - 1)), 1800)
                     next_retry = (datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)).isoformat()
+                    # unscoped: unique_row_key
                     await sb(supabase.table("lab_reports").update({
                         "status": "pending_retry",
                         "retry_count": retry_count,

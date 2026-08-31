@@ -118,6 +118,7 @@ class MessageQueueManager:
             record["clinic_id"] = clinic_id
 
         try:
+            # unscoped: insert_scoped_by_payload
             result = await sb(supabase.table("inbound_messages").insert(record))
             if result.data:
                 logger.info(f"Durable queue: ingested new message {message_id}")
@@ -148,6 +149,7 @@ class MessageQueueManager:
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
             res = (
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("inbound_messages")
                 .update({"status": "processing", "locked_at": now_iso, "updated_at": now_iso})
                 .eq("message_id", message_id)
@@ -175,6 +177,7 @@ class MessageQueueManager:
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
             res = (
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("inbound_messages")
                 .update({"status": "completed", "completed_at": now_iso, "updated_at": now_iso})
                 .eq("message_id", message_id))
@@ -194,6 +197,7 @@ class MessageQueueManager:
 
         try:
             row_res = (
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("inbound_messages")
                 .select("attempt_count, phone, display_phone, payload, clinic_id")
                 .eq("message_id", message_id))
@@ -219,6 +223,7 @@ class MessageQueueManager:
             if attempts < max_retries:
                 # Bounded exponential backoff: 5s, 10s, 20s
                 retry_at = (now + timedelta(seconds=5 * attempts)).isoformat()
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("inbound_messages").update(
                     {
                         "status": "failed_retryable",
@@ -250,6 +255,7 @@ class MessageQueueManager:
                     )
                 return "failed_retryable"
             else:
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("inbound_messages").update(
                     {
                         "status": "dead_letter",
@@ -306,6 +312,7 @@ class MessageQueueManager:
                 return False
 
             now_iso = datetime.now(timezone.utc).isoformat()
+            # unscoped: meta_callback_by_unique_id
             await sb(supabase.table("inbound_messages").update(
                 {
                     "status": "received",
@@ -334,6 +341,7 @@ class MessageQueueManager:
         try:
             cutoff = (datetime.now(timezone.utc) - timedelta(seconds=lease_timeout_seconds)).isoformat()
             res = (
+                # unscoped: platform_sweep
                 await sb(supabase.table("inbound_messages")
                 .select("id, message_id, attempt_count")
                 .eq("status", "processing")
@@ -344,6 +352,7 @@ class MessageQueueManager:
             for row in stale_rows:
                 now_iso = datetime.now(timezone.utc).isoformat()
                 up_res = (
+                    # unscoped: unique_row_key
                     await sb(supabase.table("inbound_messages")
                     .update({
                         "status": "received",
@@ -399,6 +408,7 @@ class MessageQueueManager:
         for attempt in range(2):
             try:
                 # Atomic INSERT ON CONFLICT DO NOTHING
+                # unscoped: insert_scoped_by_payload
                 result = await sb(supabase.table("processed_messages").insert(payload))
 
                 # If insert succeeded, result.data will have the new row
@@ -421,6 +431,7 @@ class MessageQueueManager:
                 if clinic_id:
                     try:
                         result = (
+                            # unscoped: insert_scoped_by_payload
                             await sb(supabase.table("processed_messages")
                             .insert({"message_id": message_id}))
                         )
@@ -460,6 +471,7 @@ class MessageQueueManager:
         from app.database import supabase
 
         try:
+            # unscoped: meta_callback_by_unique_id
             await sb(supabase.table("processed_messages").delete().eq("message_id", message_id))
             logger.info(f"Message queue: released claim for message_id={message_id}")
         except Exception as e:
@@ -487,6 +499,7 @@ class MessageQueueManager:
 
         try:
             stale = (
+                # unscoped: platform_sweep
                 await sb(supabase.table("inbound_messages")
                 .select("message_id, attempt_count")
                 .eq("status", "processing")
@@ -510,6 +523,7 @@ class MessageQueueManager:
                 #    predicate is a CAS: if another process reaped this row
                 #    first, the update matches nothing and no double-handling
                 #    occurs.
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("inbound_messages").update(
                     {
                         "status": "failed_retryable",
@@ -545,6 +559,7 @@ class MessageQueueManager:
 
         try:
             result = (
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("processed_messages")
                 .select("id")
                 .eq("message_id", message_id))

@@ -755,23 +755,35 @@ async def _run_connector(
                     logger.warning(
                         f"NEEDS_REVIEW for report {meta.external_report_id}: {match_result.review_reason}"
                     )
+                    # Download the PDF even though we are not delivering it.
+                    # Held reports are cleared by staff from the review queue
+                    # with "send now", and that can only work if the file is in
+                    # storage — a row pointing at "pending_review/..." makes the
+                    # approve-and-send button silently do nothing.
+                    held_bytes = None
                     try:
-                        await sb(supabase.table("lab_reports").insert({
-                            "clinic_id": clinic_id,
-                            "patient_phone": meta.patient_phone or "MISSING",
-                            "patient_name": meta.patient_name or "Unknown",
-                            "report_name": meta.report_name or "Lab Report",
-                            "report_type": meta.report_type or "Laboratory",
-                            "file_path": f"pending_review/{meta.external_report_id}",
-                            "status": "needs_review",
-                            "external_report_id": meta.external_report_id,
-                            "source": connector_type,
-                            "match_confidence": match_result.match_confidence,
-                            "match_source": match_result.match_source,
-                            "error_message": match_result.review_reason,
-                        }))
-                    except Exception as e_nr:
-                        logger.error(f"Failed to record needs_review row: {e_nr}")
+                        held_bytes = await connector.download_report(meta)
+                    except Exception as e_dl:
+                        logger.warning(
+                            f"Could not download held report {meta.external_report_id} "
+                            f"for review storage: {e_dl}"
+                        )
+                    from app.services.lab_reports import LabReportService
+
+                    await LabReportService().store_for_review(
+                        clinic_id=clinic_id,
+                        patient_phone=meta.patient_phone,
+                        patient_name=meta.patient_name,
+                        report_name=meta.report_name,
+                        report_type=meta.report_type,
+                        review_reason=match_result.review_reason or "Patient match conflict / needs review",
+                        file_bytes=held_bytes,
+                        filename=f"{meta.external_report_id}.pdf",
+                        external_report_id=meta.external_report_id,
+                        source=connector_type,
+                        match_confidence=match_result.match_confidence,
+                        match_source=match_result.match_source,
+                    )
 
                     await record_report_failure(
                         clinic_id=clinic_id,

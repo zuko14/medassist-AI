@@ -561,6 +561,7 @@ async def get_branch_by_id(branch_id: str) -> Optional[dict]:
                     return branch
 
     try:
+        # unscoped: unique_row_key
         result = await sb(supabase.table("branches").select("*").eq("id", branch_id))
         if result.data:
             return result.data[0]

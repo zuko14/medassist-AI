@@ -227,6 +227,7 @@ class PaymentService:
             )
             booking_data["booking_ref"] = booking_ref
             try:
+                # unscoped: insert_scoped_by_payload
                 result = await sb(supabase.table("appointments").insert(booking_data))
                 if result.data:
                     booking = result.data[0]
@@ -269,6 +270,7 @@ class PaymentService:
             payment_link_id = link["id"]
             payment_link = link["short_url"]
 
+            # unscoped: unique_row_key
             await sb(supabase.table("appointments").update(
                 {"razorpay_payment_link_id": payment_link_id}
             ).eq("id", booking_id))
@@ -296,6 +298,7 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Razorpay payment link creation failed: {e}")
             try:
+                # unscoped: unique_row_key
                 await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
                     "id", booking_id
                 ))
@@ -514,6 +517,7 @@ class PaymentService:
         except Exception as idemp_err:
             logger.warning(f"Scoped idempotency check failed ({idemp_err}) — retrying global check")
             existing_confirmed = (
+                # unscoped: meta_callback_by_unique_id
                 await sb(supabase.table("appointments")
                 .select("id")
                 .eq("payment_id", payment_id)
@@ -691,6 +695,7 @@ class PaymentService:
                 return {"status": "ok", "code": 200, "reason": "mismatch_on_settled_booking"}
 
             mismatch_update = (
+                # unscoped: unique_row_key
                 await sb(supabase.table("appointments")
                 .update(
                     {
@@ -758,6 +763,7 @@ class PaymentService:
                 reason="Payment received after slot hold expired",
                 clinic=clinic,
             )
+            # unscoped: unique_row_key
             await sb(supabase.table("appointments").update({
                 "status": "refunded",
                 "refund_reason": "late_payment",
@@ -817,6 +823,7 @@ class PaymentService:
                 provider_event_id=rz_event_id,
             )
             # Use CAS: only update if status hasn't changed since we read it
+            # unscoped: unique_row_key
             await sb(supabase.table("appointments").update(
                 {
                     "status": "pending_review",
@@ -827,6 +834,7 @@ class PaymentService:
 
         # ── Step 8: CONFIRM the booking (Atomic Update) ──
         update_result = (
+            # unscoped: unique_row_key
             await sb(supabase.table("appointments")
             .update(
                 {
@@ -897,6 +905,7 @@ class PaymentService:
         now = datetime.now(timezone.utc).isoformat()
 
         stale = (
+            # unscoped: platform_sweep
             await sb(supabase.table("appointments")
             .select("id, clinic_id, booking_ref, patient_phone, hold_expires_at, razorpay_payment_link_id, amount_paise, doctor_name, department, appointment_date, appointment_time")
             .eq("status", "pending_payment")
@@ -945,6 +954,7 @@ class PaymentService:
                         payment_id = link_status["payment_id"] or f"recovery_{payment_link_id}"
 
                         recovery_update = (
+                            # unscoped: unique_row_key
                             await sb(supabase.table("appointments")
                             .update(
                                 {
@@ -1000,6 +1010,7 @@ class PaymentService:
                         continue
 
                 # ── Normal expiry path ──
+                # unscoped: unique_row_key
                 await sb(supabase.table("appointments").update({"status": "expired"}).eq(
                     "id", booking_id
                 ).eq("status", "pending_payment"))
@@ -1048,6 +1059,7 @@ class PaymentService:
 
         try:
             recent_pending = (
+                # unscoped: platform_sweep
                 await sb(supabase.table("appointments")
                 .select(
                     "id, clinic_id, booking_ref, patient_phone, "
@@ -1107,6 +1119,7 @@ class PaymentService:
                 )
 
                 update_result = (
+                    # unscoped: unique_row_key
                     await sb(supabase.table("appointments")
                     .update(
                         {
@@ -1206,6 +1219,7 @@ class PaymentService:
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
         # ── Look up booking ──
         booking_result = (
+            # unscoped: unique_row_key
             await sb(supabase.table("appointments").select("*").eq("id", booking_id))
         )
 
@@ -1272,6 +1286,7 @@ class PaymentService:
             refund_id = refund_result.get("id", "")
 
             # Update booking status
+            # unscoped: unique_row_key
             await sb(supabase.table("appointments").update({
                 "status": "refunded",
                 "refund_id": refund_id,
@@ -1374,6 +1389,7 @@ class PaymentService:
                 "reason": f"can_only_confirm_pending_review_not_{booking['status']}",
             }
 
+        # unscoped: unique_row_key
         await sb(supabase.table("appointments").update({"status": "confirmed"}).eq(
             "id", booking_id
         ))
@@ -1538,6 +1554,7 @@ class PaymentService:
             if not refund_result["success"]:
                 return refund_result
         else:
+            # unscoped: unique_row_key
             await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
                 "id", booking_id
             ))
@@ -1857,6 +1874,7 @@ class PaymentService:
                 event_row["clinic_id"] = clinic_id
             if provider_event_id:
                 event_row["provider_event_id"] = provider_event_id
+            # unscoped: insert_scoped_by_payload
             supabase.table("payment_events").insert(event_row).execute()
         except Exception as e:
             # If audit logging fails, that is itself a bug — log loudly
@@ -1919,6 +1937,7 @@ class PaymentService:
                     event_row["clinic_id"] = clinic_id
                 if provider_event_id:
                     event_row["provider_event_id"] = provider_event_id
+                # unscoped: insert_scoped_by_payload
                 supabase.table("payment_events").insert(event_row).execute()
             else:
                 supabase.table("webhook_security_events").insert(

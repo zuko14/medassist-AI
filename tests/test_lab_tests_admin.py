@@ -589,12 +589,18 @@ class TestAdminManualLabReportUpload:
 
         pdf_bytes = b"%PDF-1.4 test document content"
 
-        mock_match = MagicMock(
+        # A real MatchResult, not a MagicMock: a mock fabricates any attribute
+        # asked of it, which is exactly how admin.py came to read a
+        # `matched_patient_name` field that MatchResult has never had.
+        from app.services.patient_match import MatchResult
+
+        mock_match = MatchResult(
+            status="matched",
             is_safe_to_send=True,
             match_confidence=0.98,
-            match_source="exact_phone",
+            match_source="patients_table",
             normalized_phone="+919876543210",
-            matched_patient_name="Test Patient",
+            patient_name="Test Patient",
             matched_patient_id="pid-101",
         )
 

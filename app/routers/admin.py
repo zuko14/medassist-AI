@@ -2,6 +2,7 @@
 
 import asyncio
 import csv
+import hashlib
 import io
 import logging
 import re
@@ -62,7 +63,7 @@ logger = logging.getLogger(__name__)
 CLINIC_TZ = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
 
 
 class AdminUser(str):
@@ -183,45 +184,47 @@ def hash_password(plain_password: str) -> str:
     return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-async def verify_credentials(
-    request: Request,
-    credentials: HTTPBasicCredentials = Depends(security),
+#: Name of the HttpOnly cookie carrying the admin session token.
+ADMIN_SESSION_COOKIE = "kriya_admin_session"
+
+
+def _hash_session_token(token: str) -> str:
+    """SHA-256 of a session token. Only the hash is ever stored."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _authenticate_password(
+    username: str, password: str, client_ip: str
 ) -> AdminUser:
-    """Verify admin credentials with brute-force protection and tenant isolation.
+    """Validate a username/password pair and return the authorized user.
 
-    Checks the `clinic_admins` table first, then falls back to global environment settings.
+    Shared by the session-login route and the legacy HTTP Basic fallback so
+    that brute-force accounting, the clinic_admins lookup, the env super-admin
+    fallback and the database-outage 503 behave identically on both paths.
+    Raises HTTPException on any failure.
     """
-    client_ip = request.client.host if request.client else "unknown"
-
-    # T5.1: PersistentRateLimiter is synchronous and hits the rate_limits
-    # table, and verify_credentials is a dependency on EVERY admin request —
-    # so this was a blocking DB round-trip on the event loop for every call.
-    # Wrapped at the call site rather than made async so the limiter keeps its
-    # sync API for the tests and non-async callers that use it directly.
     if await asyncio.to_thread(login_rate_limiter.is_rate_limited, client_ip):
-        remaining_wait = 60
-        logger.warning(f"Admin login rate limit exceeded — IP={client_ip}")
+        logger.warning(f"Admin login rate limit exceeded - IP={client_ip}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many login attempts. Try again in {remaining_wait} seconds.",
-            headers={"Retry-After": str(remaining_wait)},
+            detail="Too many login attempts. Try again in 60 seconds.",
+            headers={"Retry-After": "60"},
         )
 
     # 1. Check database clinic_admins table
     _db_unavailable = False
     try:
         res = (
-    # unscoped: login authentication by username
+    # unscoped: global_auth_lookup - username is unique platform-wide and the
+    # clinic is the RESULT of this lookup, so it cannot be a predicate of it.
             await sb(supabase.table("clinic_admins")
             .select("*")
-            .eq("username", credentials.username)
+            .eq("username", username)
             .eq("is_active", True))
         )
         if res.data and len(res.data) > 0:
             user_row = res.data[0]
-            if check_password_hash(
-                credentials.password, user_row.get("password_hash", "")
-            ):
+            if check_password_hash(password, user_row.get("password_hash", "")):
                 await asyncio.to_thread(login_rate_limiter.reset, client_ip)
                 return AdminUser(
                     username=user_row["username"],
@@ -232,36 +235,34 @@ async def verify_credentials(
                     branch_id=user_row.get("branch_id"),
                     staff_role=user_row.get("staff_role"),
                 )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Database error during admin auth lookup: {e}")
         _db_unavailable = True
 
     # 2. Fallback to global env credentials (Super Admin)
     username_ok = secrets.compare_digest(
-        credentials.username.encode("utf-8"),
-        settings.admin_username.encode("utf-8"),
+        username.encode("utf-8"), settings.admin_username.encode("utf-8")
     )
     password_ok = secrets.compare_digest(
-        credentials.password.encode("utf-8"),
-        settings.admin_password.encode("utf-8"),
+        password.encode("utf-8"), settings.admin_password.encode("utf-8")
     )
-
     if username_ok and password_ok:
         await asyncio.to_thread(login_rate_limiter.reset, client_ip)
         return AdminUser(
-            username=credentials.username,
+            username=username,
             role="super_admin",
             clinic_id=None,
             user_id="super_admin_env",
         )
 
     # If the database was unreachable, we cannot verify clinic_admin
-    # credentials — return 503 instead of penalising the user with a
+    # credentials - return 503 instead of penalising the user with a
     # failed-attempt counter bump and a misleading 401.
     if _db_unavailable:
         logger.error(
-            f"Admin auth blocked by database outage — IP={client_ip}, "
-            f"user='{credentials.username}'"
+            f"Admin auth blocked by database outage - IP={client_ip}, user='{username}'"
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -271,18 +272,218 @@ async def verify_credentials(
 
     # Record failed attempt ONLY on invalid credentials (T3.2b)
     await asyncio.to_thread(login_rate_limiter.record_attempt, client_ip)
-    remaining = await asyncio.to_thread(
-        login_rate_limiter.remaining_attempts, client_ip
-    )
+    remaining = await asyncio.to_thread(login_rate_limiter.remaining_attempts, client_ip)
     logger.warning(
-        f"Failed admin login attempt — IP={client_ip}, "
-        f"user='{credentials.username}', remaining={remaining}"
+        f"Failed admin login attempt - IP={client_ip}, user='{username}', remaining={remaining}"
     )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid credentials",
         headers={"WWW-Authenticate": "Basic"},
     )
+
+
+async def create_admin_session(
+    user: AdminUser, ip_address: str, user_agent: str
+) -> Optional[str]:
+    """Mint a session token and persist its hash. Returns None if storage failed.
+
+    A None return is not fatal: the caller tells the client to keep using HTTP
+    Basic, so a missing admin_sessions table (migration 067 not yet applied)
+    degrades to the previous behaviour rather than locking every admin out.
+    """
+    token = secrets.token_urlsafe(48)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        hours=settings.admin_session_hours
+    )
+    row = {
+        "token_hash": _hash_session_token(token),
+        "username": user.username,
+        "role": user.role,
+        "clinic_id": user.clinic_id,
+        "user_id": str(user.user_id) if user.user_id else None,
+        "branch_id": user.branch_id,
+        "staff_role": user.staff_role,
+        "permissions": list(user.permissions or []),
+        "expires_at": expires_at.isoformat(),
+        "ip_address": ip_address,
+        "user_agent": (user_agent or "")[:500],
+    }
+    try:
+        # unscoped: insert_scoped_by_payload — admin_sessions is a platform
+        # table, not a tenant one; the row carries the session's clinic_id
+        # snapshot and is only ever read back by its unique token hash.
+        await sb(supabase.table("admin_sessions").insert(row))
+        return token
+    except Exception as e:
+        logger.error(f"Could not create admin session for '{user.username}': {e}")
+        return None
+
+
+async def resolve_admin_session(token: str) -> Optional[AdminUser]:
+    """Look up a live session by token. Returns None if absent/expired/revoked."""
+    try:
+        res = (
+    # unscoped: global_auth_lookup - a session token is globally unique and the
+    # clinic is the RESULT of resolving it.
+            await sb(supabase.table("admin_sessions")
+            .select("*")
+            .eq("token_hash", _hash_session_token(token))
+            .is_("revoked_at", "null"))
+        )
+    except Exception as e:
+        logger.warning(f"Admin session lookup failed: {e}")
+        return None
+
+    if not res.data:
+        return None
+    row = res.data[0]
+
+    try:
+        expires_at = datetime.fromisoformat(
+            str(row["expires_at"]).replace("Z", "+00:00")
+        )
+    except (ValueError, KeyError, TypeError):
+        return None
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        return None
+
+    return AdminUser(
+        username=row["username"],
+        role=row.get("role", "clinic_admin"),
+        clinic_id=row.get("clinic_id"),
+        user_id=row.get("user_id"),
+        permissions=row.get("permissions") or [],
+        branch_id=row.get("branch_id"),
+        staff_role=row.get("staff_role"),
+    )
+
+
+async def revoke_admin_session(token: str) -> None:
+    """Revoke a single session. Idempotent; never raises."""
+    try:
+        await sb(
+    # unscoped: global_auth_lookup - revocation is keyed on the globally unique
+    # session token hash.
+            supabase.table("admin_sessions")
+            .update({"revoked_at": datetime.now(timezone.utc).isoformat()})
+            .eq("token_hash", _hash_session_token(token))
+            .is_("revoked_at", "null")
+        )
+    except Exception as e:
+        logger.warning(f"Admin session revoke failed: {e}")
+
+
+async def revoke_sessions_for_user(username: str) -> None:
+    """Revoke every live session for a username.
+
+    This is the point of holding sessions server-side: with HTTP Basic there
+    was no way to cut off a credential that was already in someone's hands.
+    """
+    try:
+        await sb(
+    # unscoped: global_auth_lookup - username is unique platform-wide.
+            supabase.table("admin_sessions")
+            .update({"revoked_at": datetime.now(timezone.utc).isoformat()})
+            .eq("username", username)
+            .is_("revoked_at", "null")
+        )
+    except Exception as e:
+        logger.warning(f"Bulk session revoke failed for '{username}': {e}")
+
+
+async def verify_credentials(
+    request: Request,
+    credentials: Optional[HTTPBasicCredentials] = Depends(security),
+) -> AdminUser:
+    """Authenticate an admin request.
+
+    Order: session cookie first, then HTTP Basic. Basic is retained so existing
+    API clients and scripts keep working, and so a deployment where migration
+    067 has not been applied still authenticates.
+    """
+    session_token = request.cookies.get(ADMIN_SESSION_COOKIE)
+    if session_token:
+        session_user = await resolve_admin_session(session_token)
+        if session_user is not None:
+            return session_user
+        # A presented-but-dead cookie is an expired or revoked session, not an
+        # anonymous request. Say so rather than falling through to a Basic
+        # challenge the browser would answer from its own credential cache.
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired. Please sign in again.",
+            )
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    client_ip = request.client.host if request.client else "unknown"
+    return await _authenticate_password(
+        credentials.username, credentials.password, client_ip
+    )
+
+
+class AdminLoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/login")
+async def admin_login(body: AdminLoginRequest, request: Request, response: Response):
+    """Exchange credentials for a revocable, expiring HttpOnly session cookie."""
+    client_ip = request.client.host if request.client else "unknown"
+    user = await _authenticate_password(body.username, body.password, client_ip)
+
+    token = await create_admin_session(
+        user, client_ip, request.headers.get("user-agent", "")
+    )
+    if token:
+        response.set_cookie(
+            key=ADMIN_SESSION_COOKIE,
+            value=token,
+            max_age=settings.admin_session_hours * 3600,
+            httponly=True,  # unreachable from JS, so XSS cannot exfiltrate it
+            secure=settings.app_env == "production",
+            samesite="strict",  # admin panel is same-origin: this is also the CSRF control
+            path="/",
+        )
+
+    await log_admin_action(
+        user=user,
+        action="admin_login",
+        resource_type="session",
+        resource_id=user.username,
+        details={"session": bool(token)},
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "username": user.username,
+        "role": user.role,
+        "clinic_id": user.clinic_id,
+        # False means migration 067 is not applied and the client must keep
+        # sending HTTP Basic. The panel checks this.
+        "session": bool(token),
+    }
+
+
+@router.post("/logout")
+async def admin_logout(request: Request, response: Response):
+    """Revoke the current session server-side and clear the cookie."""
+    token = request.cookies.get(ADMIN_SESSION_COOKIE)
+    if token:
+        await revoke_admin_session(token)
+    response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+    return {"success": True}
 
 
 async def require_admin(user: AdminUser = Depends(verify_credentials)) -> AdminUser:
@@ -432,6 +633,10 @@ async def change_password(
     await sb(supabase.table("clinic_admins").update(
         {"password_hash": hash_password(body.new_password)}
     ).eq("id", user.user_id))
+
+    # A password change must invalidate credentials already in circulation,
+    # which is the entire reason sessions are held server-side (AUDIT-P1-2).
+    await revoke_sessions_for_user(user.username)
 
     client_ip = request.client.host if request.client else "unknown"
     await log_admin_action(
@@ -594,7 +799,7 @@ async def update_staff(
     res = (
     # unscoped: login authentication by username
         await sb(supabase.table("clinic_admins")
-        .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active")
+        .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active, username")
         .eq("id", staff_id))
     )
     if not res.data or res.data[0]["role"] != "staff":
@@ -690,7 +895,7 @@ async def toggle_staff(
     res = (
     # unscoped: login authentication by username
         await sb(supabase.table("clinic_admins")
-        .select("id, clinic_id, is_active, role, branch_id")
+        .select("id, clinic_id, is_active, role, branch_id, username")
         .eq("id", staff_id))
     )
     if not res.data or res.data[0]["role"] != "staff":
@@ -708,6 +913,11 @@ async def toggle_staff(
     await sb(supabase.table("clinic_admins").update({"is_active": new_status}).eq(
         "id", staff_id
     ))
+
+    # Offboarding has to end the session the person is holding right now, not
+    # just stop the next login.
+    if not new_status and target.get("username"):
+        await revoke_sessions_for_user(target["username"])
 
     client_ip = request.client.host if (request and request.client) else "unknown"
     await log_admin_action(
@@ -2394,26 +2604,27 @@ async def upload_lab_report(
             scraped_phone=patient_phone,
         )
         effective_phone = match_res.normalized_phone or patient_phone
-        effective_name = match_res.matched_patient_name or patient_name
+        effective_name = match_res.patient_name or patient_name
 
         # If patient matching determines unsafe match, hold for review
         if not match_res.is_safe_to_send:
             logger.warning(
                 f"Admin manual lab report upload held for review: {match_res.review_reason}"
             )
-            # unscoped: inserting manual lab report upload with explicit clinic_id
-            nr_insert = await sb(supabase.table("lab_reports").insert({
-                "clinic_id": effective_clinic_id,
-                "patient_phone": effective_phone,
-                "patient_name": effective_name,
-                "report_name": report_name,
-                "report_type": report_type,
-                "file_path": f"pending_review/{uuid4().hex[:12]}",
-                "status": "needs_review",
-                "match_source": match_res.match_source,
-                "error_message": match_res.review_reason,
-            }))
-            nr_id = nr_insert.data[0].get("id") if (nr_insert.data and isinstance(nr_insert.data, list)) else None
+            nr_id = await LabReportService().store_for_review(
+                clinic_id=effective_clinic_id,
+                patient_phone=effective_phone,
+                patient_name=effective_name,
+                report_name=report_name,
+                report_type=report_type,
+                review_reason=match_res.review_reason or "Held by patient match gate",
+                file_bytes=file_bytes,
+                filename=file.filename or f"manual_upload_{uuid4().hex[:8]}.pdf",
+                content_type=file.content_type or "application/pdf",
+                source="admin_manual",
+                match_confidence=match_res.match_confidence,
+                match_source=match_res.match_source,
+            )
             return {
                 "success": True,
                 "status": "needs_review",
@@ -3832,8 +4043,23 @@ async def resolve_report_match(
         "status": "matched",
     }
 
+    # A row whose file_path never left the "pending_review/" sentinel has no
+    # stored PDF, so there is nothing to deliver. Saying so beats silently
+    # marking it resolved and letting staff believe the patient got the report.
+    has_stored_pdf = bool(report.get("file_path")) and not str(
+        report.get("file_path", "")
+    ).startswith("pending_review")
+    if body.send_now and not has_stored_pdf:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This report has no stored PDF (the source download failed when it "
+                "was held). Re-upload it from the admin panel to send it."
+            ),
+        )
+
     # If send_now is True, attempt delivery via LabReportService
-    if body.send_now and report.get("file_path") and not str(report.get("file_path", "")).startswith("pending_review"):
+    if body.send_now and has_stored_pdf:
         try:
             lab_service = LabReportService()
             # scoped: update lab report queue item

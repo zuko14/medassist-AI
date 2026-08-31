@@ -26,6 +26,13 @@ EXEMPT_ROUTES = {
     ("GET", "/admin-panel"),             # Static HTML UI page (all clinical data is loaded via protected API routes)
     ("GET", "/admin-panel/admin.js"),    # Static JS UI bundle (all clinical data is loaded via protected API routes)
     ("GET", "/admin/lab-tests/csv-template"),  # Generic static CSV template download
+    # Pre-authentication session endpoints (AUDIT-P1-2). Neither reads or
+    # writes tenant data: /login takes a credential and returns only the
+    # authenticated user's own context, /logout revokes whatever session token
+    # the caller presents and is an idempotent no-op without one. Requiring a
+    # valid session to log out would strand users holding an expired cookie.
+    ("POST", "/admin/login"),
+    ("POST", "/admin/logout"),
 }
 
 

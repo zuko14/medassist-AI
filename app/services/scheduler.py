@@ -400,6 +400,7 @@ class SchedulerService:
                 ).isoformat()
 
                 rows = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("inbound_messages")
                     .select(
                         "message_id, phone, display_phone, phone_number_id, "
@@ -499,6 +500,7 @@ class SchedulerService:
                 tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
                 appointments = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("appointments")
                     .select("*")
                     .eq("appointment_date", tomorrow)
@@ -526,6 +528,7 @@ class SchedulerService:
                         )
 
                         # Mark as sent
+                        # unscoped: unique_row_key
                         await sb(supabase.table("appointments").update(
                             {"reminder_24h_sent": True}
                         ).eq("id", appt["id"]))
@@ -551,6 +554,7 @@ class SchedulerService:
                 today = now.strftime("%Y-%m-%d")
 
                 appointments = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("appointments")
                     .select("*")
                     .eq("appointment_date", today)
@@ -585,6 +589,7 @@ class SchedulerService:
                             )
 
                             # Mark as sent
+                            # unscoped: unique_row_key
                             await sb(supabase.table("appointments").update(
                                 {"reminder_2h_sent": True}
                             ).eq("id", appt["id"]))
@@ -619,6 +624,7 @@ class SchedulerService:
                 now_iso = datetime.now(timezone.utc).isoformat()
 
                 due = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("appointments")
                     .select("id")
                     .eq("status", "confirmed")
@@ -634,6 +640,7 @@ class SchedulerService:
                     try:
                         # Re-assert status in the WHERE clause so a cancellation
                         # landing between the scan and this write is not clobbered.
+                        # unscoped: unique_row_key
                         await sb(supabase.table("appointments").update(
                             {"status": "completed", "completed_at": now_iso}
                         ).eq("id", appt["id"]).eq("status", "confirmed"))
@@ -670,6 +677,7 @@ class SchedulerService:
                 window_end = (today - timedelta(days=1)).isoformat()
 
                 appointments = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("appointments")
                     .select("*")
                     .eq("status", "completed")
@@ -759,6 +767,7 @@ class SchedulerService:
                             )
                             continue
 
+                        # unscoped: unique_row_key
                         await sb(supabase.table("appointments").update(
                             {"followup_sent": True}
                         ).eq("id", appt["id"]))
@@ -778,6 +787,7 @@ class SchedulerService:
         past the retry window) — never for a failed send.
         """
         try:
+            # unscoped: unique_row_key
             supabase.table("appointments").update({"followup_sent": True}).eq(
                 "id", appointment_id
             ).execute()
@@ -833,6 +843,7 @@ class SchedulerService:
                     target_date = (datetime.now() - timedelta(days=offset_days)).strftime("%Y-%m-%d")
 
                     appointments = (
+                        # unscoped: platform_sweep
                         await sb(supabase.table("appointments")
                         .select("*")
                         .eq("appointment_date", target_date)
@@ -855,6 +866,7 @@ class SchedulerService:
                                     f"appointment {appt['id']} — patient has opted out "
                                     f"of engagement messages"
                                 )
+                                # unscoped: unique_row_key
                                 await sb(supabase.table("appointments").update(
                                     {flag_field: True}
                                 ).eq("id", appt["id"]))
@@ -897,6 +909,7 @@ class SchedulerService:
                                 )
                                 continue
 
+                            # unscoped: unique_row_key
                             await sb(supabase.table("appointments").update({flag_field: True}).eq(
                                 "id", appt["id"]
                             ))
@@ -921,6 +934,7 @@ class SchedulerService:
                 next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
 
                 leaves = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("doctor_leaves")
                     .select("*")
                     .gte("leave_date", tomorrow)
@@ -943,6 +957,7 @@ class SchedulerService:
                             clinic = await get_clinic_by_id(
                                 appt.get("clinic_id", "default")
                             )
+                            # unscoped: unique_row_key
                             await sb(supabase.table("appointments").update(
                                 {"status": "cancelled"}
                             ).eq("id", appt["id"]))
@@ -1233,6 +1248,19 @@ class SchedulerService:
                 logger.info("Cleaned up stale rate limit entries")
             except Exception as e:
                 logger.debug(f"Rate limits cleanup skipped: {e}")
+
+            # Admin sessions expire by timestamp at read time, so leftovers are
+            # inert — but they are an audit record of who logged in from where,
+            # so keep them a week past expiry rather than deleting on the dot.
+            try:
+                session_cutoff = (
+                    datetime.now(timezone.utc) - timedelta(days=7)
+                ).isoformat()
+                await sb(
+                    supabase.table("admin_sessions").delete().lt("expires_at", session_cutoff)
+                )
+            except Exception as e:
+                logger.debug(f"Admin session cleanup skipped: {e}")
 
     async def purge_inbound_messages(self):
         """Purge completed durable-queue rows (KA-P2-10).
