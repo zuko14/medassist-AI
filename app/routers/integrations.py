@@ -9,6 +9,7 @@ exact same function that the admin panel uses for manual uploads.
 """
 
 import logging
+import secrets
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.database import supabase, scoped_query
 from app.services.lab_reports import LabReportService
+from app.services.tenant import get_clinic_by_id
 from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,15 @@ router = APIRouter(
 async def verify_integration_secret(
     x_integration_secret: Optional[str] = Header(None),
 ):
-    """Verify the X-Integration-Secret header for machine-to-machine auth."""
+    """Verify the X-Integration-Secret header for machine-to-machine auth.
+
+    This is the PLATFORM gate only: it proves the caller is some authorized
+    integration, not which clinic it may write to. The clinic_id arrives as a
+    caller-supplied form field, so this check alone would let any holder of the
+    shared secret post reports into any tenant — and have them WhatsApp'd to
+    that tenant's patients. assert_clinic_integration_secret() below pins a
+    caller to one clinic once that clinic sets its own secret.
+    """
     if not settings.integration_secret:
         raise HTTPException(
             status_code=503,
@@ -43,6 +53,45 @@ async def verify_integration_secret(
         raise HTTPException(
             status_code=401,
             detail="Invalid integration secret",
+        )
+
+
+async def assert_clinic_integration_secret(
+    clinic_id: str, presented_secret: Optional[str]
+) -> None:
+    """Pin an integration caller to ONE clinic, when that clinic has its own key.
+
+    Mirrors the per-clinic Razorpay credential pattern
+    (app/services/payment.py: `cfg.get(...) or settings....`): a clinic that
+    sets `integration_secret` in its `clinics.config` can only be written to
+    with that value. Clinics that have not set one keep working on the global
+    INTEGRATION_SECRET exactly as before, so this is safe to deploy against
+    live connectors without touching them.
+
+    To pin a clinic, set config.integration_secret on its clinics row.
+    """
+    try:
+        clinic = await get_clinic_by_id(clinic_id)
+    except Exception:
+        # Unknown clinic ids are rejected downstream by the FK on lab_reports;
+        # do not turn a lookup failure into an auth bypass or a 500 here.
+        return
+
+    clinic_secret = (clinic.get("config") or {}).get("integration_secret")
+    if not clinic_secret:
+        return  # not pinned; the global gate above already applied
+
+    if not presented_secret or not secrets.compare_digest(
+        str(presented_secret), str(clinic_secret)
+    ):
+        logger.warning(
+            "Integration API: secret does not match the per-clinic key for "
+            "clinic_id=%s — refusing cross-tenant write",
+            clinic_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Integration secret is not valid for this clinic",
         )
 
 
@@ -70,6 +119,7 @@ async def receive_lab_report(
     match_source: Optional[str] = Form(default=None),
     matched_patient_id: Optional[str] = Form(default=None),
     file: UploadFile = File(...),
+    x_integration_secret: Optional[str] = Header(None),
 ):
     """Receive a lab report from a connector and process it.
 
@@ -82,6 +132,10 @@ async def receive_lab_report(
     (AI summary, WhatsApp delivery, storage, audit) is handled by the
     existing LabReportService.
     """
+
+    # Step 0: clinic_id is caller-supplied. Refuse it if this clinic has pinned
+    # its own integration key and the caller does not hold it.
+    await assert_clinic_integration_secret(clinic_id, x_integration_secret)
 
     # Step 1: Idempotency check (connector processed reports + lab_reports cross-path)
     try:

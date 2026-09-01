@@ -43,8 +43,7 @@ class AnalyticsService:
                 .select("status,department,created_at")
                 .gte("created_at", from_date)
             )
-            if clinic_id != "default":
-                query = query.eq("clinic_id", clinic_id)
+            query = query.eq("clinic_id", clinic_id)
             all_appts = await sb(query)
             appts = all_appts.data or []
 
@@ -67,8 +66,7 @@ class AnalyticsService:
 
             # Patients
             pat_query = supabase.table("patients").select("created_at")
-            if clinic_id != "default":
-                pat_query = pat_query.eq("clinic_id", clinic_id)
+            pat_query = pat_query.eq("clinic_id", clinic_id)
             all_patients = await sb(pat_query)
             patients = all_patients.data or []
             total_patients = len(patients)
@@ -112,8 +110,7 @@ class AnalyticsService:
                 .order("created_at", desc=True)
                 .limit(limit)
             )
-            if clinic_id != "default":
-                query = query.eq("clinic_id", clinic_id)
+            query = query.eq("clinic_id", clinic_id)
             result = await sb(query)
             return result.data or []
         except Exception as e:
@@ -134,8 +131,7 @@ class AnalyticsService:
                 .order("appointment_date")
                 .order("appointment_time")
             )
-            if clinic_id != "default":
-                query = query.eq("clinic_id", clinic_id)
+            query = query.eq("clinic_id", clinic_id)
             result = await sb(query)
 
             return result.data or []
@@ -153,8 +149,7 @@ class AnalyticsService:
                 .select("department")
                 .gte("created_at", from_date)
             )
-            if clinic_id != "default":
-                query = query.eq("clinic_id", clinic_id)
+            query = query.eq("clinic_id", clinic_id)
             result = await sb(query)
 
             dept_counts = {}

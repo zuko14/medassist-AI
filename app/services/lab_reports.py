@@ -8,7 +8,7 @@ from uuid import uuid4
 
 
 from app.config import settings
-from app.database import supabase, log_analytics_event
+from app.database import supabase, log_analytics_event, is_valid_clinic_scope
 from app.utils.pdf_reader import extract_text_from_pdf
 from app.services.report_summarizer import ReportSummarizer
 from app.services.whatsapp import whatsapp_service
@@ -669,8 +669,7 @@ class LabReportService:
             .order("uploaded_at", desc=True)
             .limit(limit)
         )
-        if clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        query = query.eq("clinic_id", clinic_id)
         result = await sb(query)
         return result.data or []
 
@@ -682,6 +681,12 @@ class LabReportService:
         KA-16: Uses exact match on normalized phone instead of substring.
         clinic_id is now required — no 'default' sentinel bypass.
         """
+        if not is_valid_clinic_scope(clinic_id):
+            # Phone numbers are NOT unique across tenants. Unscoped, a patient
+            # asking for 'my reports' could be shown another clinic's reports
+            # for the same number.
+            raise ValueError("clinic_id is required to list reports by phone")
+
         # Normalize to last 10 digits (Indian mobile) for consistent matching
         clean_phone = phone.lstrip("+").lstrip("0")
         if len(clean_phone) > 10:
@@ -695,12 +700,7 @@ class LabReportService:
             .eq("status", "sent")
             .order("uploaded_at", desc=True)
         )
-        # KA-16: Always scope — no 'default' bypass
-        if clinic_id and clinic_id not in ("default", "none", "null"):
-            query = query.eq("clinic_id", clinic_id)
-        else:
-            logger.warning(f"get_reports_by_phone called without valid clinic_id for {phone[:6]}***")
-
+        query = query.eq("clinic_id", clinic_id)
         result = await sb(query)
         return result.data or []
 
@@ -711,18 +711,29 @@ class LabReportService:
         clinic_id: Optional[str] = None,
     ) -> dict:
         """Resend a previously uploaded lab report, scoped by clinic_id when provided."""
-        query = supabase.table("lab_reports").select("*").eq("id", report_id)
-        if clinic_id and clinic_id != "default":
-            query = query.eq("clinic_id", clinic_id)
+        if not is_valid_clinic_scope(clinic_id):
+            # A report id alone is not an authorization. Resending without a
+            # tenant predicate would let one clinic's admin push another
+            # clinic's report to that other clinic's patient.
+            raise ValueError("clinic_id is required to resend a lab report")
+        query = (
+            supabase.table("lab_reports")
+            .select("*")
+            .eq("id", report_id)
+            .eq("clinic_id", clinic_id)
+        )
         report = await sb(query)
         if not report.data:
             raise ValueError("Report not found")
         report = report.data[0]
         if new_phone:
             report["patient_phone"] = new_phone
-            update_query = supabase.table("lab_reports").update({"patient_phone": new_phone}).eq("id", report_id)
-            if clinic_id and clinic_id != "default":
-                update_query = update_query.eq("clinic_id", clinic_id)
+            update_query = (
+                supabase.table("lab_reports")
+                .update({"patient_phone": new_phone})
+                .eq("id", report_id)
+                .eq("clinic_id", clinic_id)
+            )
             await sb(update_query)
 
         try:

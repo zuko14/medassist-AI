@@ -11,6 +11,7 @@ Verifies:
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.tenancy import TENANT_OWNED_TABLES  # noqa: E402
 from app.database import (
     TENANT_OWNED_TABLES,
     TenantIsolationError,
@@ -28,10 +29,18 @@ lab_report_service = LabReportService()
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_all_tenant_owned_tables_fail_closed_without_clinic_id():
-    """Verify that every table in TENANT_OWNED_TABLES strictly raises TenantIsolationError."""
+    """Verify that every table in TENANT_OWNED_TABLES strictly raises TenantIsolationError.
+
+    doctor_branches is deliberately absent. It is a pure junction table
+    (id, doctor_id, branch_id, session) with NO clinic_id column -- see
+    migrations/010_branches.sql. Listing it made scoped_query() emit a
+    predicate on a non-existent column, i.e. a guaranteed 500 for the first
+    caller to reach for the safe helper. Its isolation is transitive: both
+    doctor_id and branch_id are resolved under clinic-scoped queries.
+    """
     expected_tables = {
         "appointments", "patients", "lab_reports", "lab_tests", "doctors",
-        "branches", "doctor_branches", "doctor_leaves", "hospital_holidays",
+        "branches", "doctor_leaves", "hospital_holidays",
         "clinic_admins", "integration_connectors", "connector_failed_reports",
         "conversations", "inbound_messages", "processed_messages",
         "family_members", "payment_events", "failed_messages",

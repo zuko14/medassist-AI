@@ -377,19 +377,23 @@ async def test_release_held_walkins_sends_stored_and_reports_the_rest():
     from app.routers.admin import AdminUser, release_held_walkin_reports
 
     user = AdminUser("admin", role="super_admin", clinic_id=None, user_id="u1")
+    # /admin is single-tenant: a super_admin must name the clinic it acts on.
+    scope = "33333333-3333-3333-3333-333333333333"
     rows = [
         {"id": "r1", "file_path": "clinic-1/+91.../a.pdf", "match_source": "moc_doc_only"},
         {"id": "r2", "file_path": "pending_review/xyz", "match_source": "moc_doc_only"},
         {"id": "r3", "file_path": "clinic-1/+91.../c.pdf", "match_source": "moc_doc_only"},
     ]
 
+    # Self-chaining builder: .eq()/.limit() return the chain, so the mock does
+    # not break every time a query gains a predicate (this one gained clinic_id).
+    chain = MagicMock()
+    for m in ("select", "update", "eq", "limit", "order", "in_", "is_"):
+        getattr(chain, m).return_value = chain
+    chain.execute.return_value = MagicMock(data=rows)
+
     mock_sb = MagicMock()
-    mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
-        data=rows
-    )
-    mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
-        data=[{}]
-    )
+    mock_sb.table.return_value = chain
 
     # Patching the unbound method, so `self` occupies the first slot.
     async def _resend(self, report_id, clinic_id=None, new_phone=None):
@@ -401,7 +405,7 @@ async def test_release_held_walkins_sends_stored_and_reports_the_rest():
         "app.routers.admin.LabReportService.resend_report", new=_resend
     ), patch("app.routers.admin.log_admin_action", new_callable=AsyncMock):
         result = await release_held_walkin_reports(
-            clinic_id="default", request=None, user=user
+            clinic_id=scope, request=None, user=user
         )
 
     assert result["examined"] == 3

@@ -137,6 +137,7 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
         # This eliminates the TOCTOU race where two workers could both
         # read "unlocked" and then both write their lock.
         update_result = (
+            # unscoped: unique_row_key
             await sb(supabase.table("integration_connectors")
             .update({
                 "locked_at": now_str,
@@ -153,6 +154,7 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
         # Lock is held by another process — compute remaining TTL
         try:
             res = (
+                # unscoped: unique_row_key
                 await sb(supabase.table("integration_connectors")
                 .select("locked_at")
                 .eq("id", connector_id))
@@ -186,6 +188,7 @@ async def renew_connector_lock(connector_id: str) -> None:
     if connector_id not in _locks_held_by_this_process:
         return
     try:
+        # unscoped: unique_row_key
         await sb(supabase.table("integration_connectors").update({
             "locked_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", connector_id))
@@ -196,6 +199,7 @@ async def renew_connector_lock(connector_id: str) -> None:
 async def release_connector_lock(connector_id: str) -> None:
     """Release distributed advisory lock on connector record."""
     try:
+        # unscoped: unique_row_key
         await sb(supabase.table("integration_connectors").update({
             "locked_at": None,
             "locked_by": None,
@@ -369,6 +373,7 @@ async def record_report_failure(
         if existing.data and len(existing.data) > 0:
             row = existing.data[0]
             new_count = row.get("failure_count", 0) + 1
+            # unscoped: unique_row_key
             await sb(supabase.table("connector_failed_reports").update(
                 {
                     "failure_count": new_count,
@@ -388,6 +393,7 @@ async def record_report_failure(
                 )
                 await send_admin_alert(clinic_id, alert_msg, branch_id=branch_id)
         else:
+            # unscoped: insert_scoped_by_payload
             await sb(supabase.table("connector_failed_reports").insert(
                 {
                     "clinic_id": clinic_id,
@@ -1012,6 +1018,7 @@ async def _run_connector(
                     "reports_failed", "duration_ms", "error_message"
                 }
                 audit_row = {k: v for k, v in summary.items() if k in allowed_audit_cols}
+                # unscoped: insert_scoped_by_payload
                 await sb(supabase.table("connector_audit_log").insert({
                     "clinic_id": clinic_id,
                     "connector_type": connector_type,
@@ -1073,6 +1080,7 @@ async def run_all_connectors() -> None:
     """
     logger.info("=== Polling all enabled connectors ===")
 
+    # unscoped: platform_sweep
     result = await sb(supabase.table("integration_connectors") \
         .select("clinic_id, connector_type, branch_id, config, last_run_at") \
         .eq("is_enabled", True))
@@ -1140,6 +1148,7 @@ async def cleanup_expired_storage() -> None:
         try:
             while time.time() - start_time < max_duration_seconds:
                 old_reports = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("lab_reports")
                     .select("id, file_path")
                     .lt("uploaded_at", cutoff.isoformat())
@@ -1156,6 +1165,7 @@ async def cleanup_expired_storage() -> None:
                         file_path = report.get("file_path")
                         if file_path:
                             supabase.storage.from_("lab-reports").remove([file_path])
+                            # unscoped: platform_sweep
                             await sb(supabase.table("lab_reports").update({
                                 "file_path": None,
                             }).eq("id", report["id"]))
@@ -1174,6 +1184,7 @@ async def cleanup_expired_storage() -> None:
 
         # Also clean old audit logs (90 days)
         try:
+            # unscoped: platform_sweep
             await sb(supabase.table("connector_audit_log") \
                 .delete() \
                 .lt("created_at", cutoff.isoformat()))

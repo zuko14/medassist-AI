@@ -74,8 +74,17 @@ def test_resend_lab_report_own_tenant_succeeds():
         app.dependency_overrides.pop(verify_credentials, None)
 
 
-def test_resend_lab_report_super_admin_unrestricted():
-    """P0-2: Super admin can resend any lab report without clinic filter."""
+def test_resend_lab_report_super_admin_must_name_a_clinic():
+    """A super_admin with no clinic scope cannot resend ANY report.
+
+    This assertion is inverted from what it used to be. It previously read
+    "Super admin can resend any lab report without clinic filter" and asserted
+    resend_report(..., clinic_id=None) — an unscoped call that reaches every
+    tenant's lab_reports by row id. That is the same "super_admin means no
+    tenant predicate" assumption that let a super_admin delete a live clinic's
+    doctors from a test clinic's panel (2026-09-01). /admin is single-tenant:
+    the super_admin must name the clinic.
+    """
     client = TestClient(app)
 
     super_user = AdminUser(
@@ -93,11 +102,17 @@ def test_resend_lab_report_super_admin_unrestricted():
         with patch("app.routers.admin.LabReportService.resend_report", new_callable=AsyncMock) as mock_resend:
             mock_resend.return_value = {"success": True}
 
+            # No clinic named -> refused, and the service is never reached.
             response = client.post(f"/admin/lab-reports/{fake_report_id}/resend")
-            assert response.status_code == 200
-            assert response.json()["success"] is True
+            assert response.status_code == 400
+            mock_resend.assert_not_called()
 
-            mock_resend.assert_called_once_with(fake_report_id, clinic_id=None)
+            # Naming a clinic scopes the call to exactly that clinic.
+            response = client.post(
+                f"/admin/lab-reports/{fake_report_id}/resend?clinic_id=clinic_bbb"
+            )
+            assert response.status_code == 200
+            mock_resend.assert_called_once_with(fake_report_id, clinic_id="clinic_bbb")
     finally:
         app.dependency_overrides.pop(verify_credentials, None)
 

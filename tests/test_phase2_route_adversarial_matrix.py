@@ -21,10 +21,10 @@ def client():
 EXEMPT_ROUTES = {
     ("GET", "/admin/me"),               # Self-identity introspection (returns authenticated user's own token context)
     ("PUT", "/admin/change-password"),   # Self-password update for authenticated user_id
+    ("PUT", "/admin/change-username"),   # Self-username update for authenticated user_id
     ("GET", "/admin/connectors/types"),  # Global static catalog of supported connector integrations
     ("GET", "/admin"),                   # Static HTML UI page (all clinical data is loaded via protected API routes)
     ("GET", "/admin-panel"),             # Static HTML UI page (all clinical data is loaded via protected API routes)
-    ("GET", "/admin-panel/admin.js"),    # Static JS UI bundle (all clinical data is loaded via protected API routes)
     ("GET", "/admin/lab-tests/csv-template"),  # Generic static CSV template download
     # Pre-authentication session endpoints (AUDIT-P1-2). Neither reads or
     # writes tenant data: /login takes a credential and returns only the

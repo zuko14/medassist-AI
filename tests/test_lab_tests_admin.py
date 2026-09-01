@@ -582,7 +582,13 @@ class TestAdminManualLabReportUpload:
         app.include_router(router)
 
         async def fake_user():
-            return AdminUser(username="admin", role="super_admin", clinic_id="default")
+            # "default" is not a clinic id; it is the sentinel that used to
+            # mean "no tenant filter". Scope this caller for real.
+            return AdminUser(
+                username="admin",
+                role="super_admin",
+                clinic_id="44444444-4444-4444-4444-444444444444",
+            )
 
         app.dependency_overrides[verify_credentials] = fake_user
         client = TestClient(app)
@@ -615,7 +621,7 @@ class TestAdminManualLabReportUpload:
                     "patient_name": "Test Patient",
                     "report_name": "Lipid Profile",
                     "report_type": "Biochemistry",
-                    "clinic_id": "default",
+                    "clinic_id": "44444444-4444-4444-4444-444444444444",
                 },
                 files={"file": ("report.pdf", pdf_bytes, "application/pdf")},
             )

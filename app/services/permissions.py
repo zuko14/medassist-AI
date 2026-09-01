@@ -149,16 +149,34 @@ def enforce_branch_scope(user: "AdminUser", resource_branch_id: Optional[str]) -
 assert_staff_not_pinned_elsewhere = enforce_branch_scope
 
 
-def resolve_owned_branch(user: "AdminUser", branch_id: str) -> dict:
-    """Verify that branch_id exists and belongs to user's clinic, then enforce branch pinning.
+def resolve_owned_branch(
+    user: "AdminUser", branch_id: str, clinic_id: Optional[str] = None
+) -> dict:
+    """Verify branch_id exists inside the caller's ACTIVE clinic scope, then
+    enforce branch pinning. Returns the branch row.
 
-    Raises 403 if the user is a staff member pinned to a different branch,
-    and 404 if the branch does not exist or belongs to a different clinic (to prevent cross-tenant IDOR).
+    404 if the branch does not exist or belongs to another clinic (cross-tenant
+    IDOR), 403 if the caller is staff pinned to a different branch.
+
+    `clinic_id` is the scope already resolved by
+    admin.enforce_clinic_access() for this request. Pass it. It used to be
+    absent, and super_admin was exempted from the ownership check entirely —
+    so a super_admin acting in what looked like one clinic's panel could
+    assign, unassign and re-session doctors on ANY tenant's branches. There is
+    no legitimate /admin caller that needs to reach across tenants; that is
+    what /platform is for.
     """
     # 1. Branch-pinning check for branch-scoped staff (fail fast before DB call)
     enforce_branch_scope(user, branch_id)
 
-    from app.database import supabase
+    from app.database import supabase, is_valid_clinic_scope
+
+    scope = clinic_id if is_valid_clinic_scope(clinic_id) else getattr(user, "clinic_id", None)
+    if not is_valid_clinic_scope(scope):
+        raise HTTPException(
+            status_code=400,
+            detail="No clinic selected. Pass ?clinic_id=<clinic id> for this action.",
+        )
 
     # unscoped: unique_row_key
     result = supabase.table("branches").select("*").eq("id", branch_id).execute()
@@ -166,11 +184,8 @@ def resolve_owned_branch(user: "AdminUser", branch_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Branch not found")
 
     branch = result.data[0]
-    # 2. Cross-tenant IDOR check: non-super_admins can only access branches in their own clinic
-    if user.role != "super_admin":
-        user_clinic_id = str(user.clinic_id or "default")
-        branch_clinic_id = str(branch.get("clinic_id") or "default")
-        if branch_clinic_id != user_clinic_id:
-            raise HTTPException(status_code=404, detail="Branch not found")
+    # 2. Cross-tenant IDOR check — applies to EVERY role, super_admin included.
+    if str(branch.get("clinic_id") or "") != str(scope):
+        raise HTTPException(status_code=404, detail="Branch not found")
 
     return branch

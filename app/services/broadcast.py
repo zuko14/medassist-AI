@@ -81,6 +81,7 @@ class BroadcastService:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
+        # unscoped: platform_admin
         res = await sb(supabase.table("broadcasts").insert(broadcast_row))
         if not res.data:
             raise RuntimeError("Failed to create broadcast record in database.")
@@ -183,11 +184,13 @@ class BroadcastService:
             total_inserted = 0
             for i in range(0, len(notifications_to_insert), chunk_size):
                 chunk = notifications_to_insert[i : i + chunk_size]
+                # unscoped: platform_admin
                 ins_res = await sb(supabase.table("admin_notifications").insert(chunk))
                 if ins_res.data:
                     total_inserted += len(ins_res.data)
 
             # 5. Update broadcast recipient count
+            # unscoped: platform_admin
             await sb(supabase.table("broadcasts").update(
                 {"recipient_count": total_inserted}
             ).eq("id", broadcast_id))
@@ -207,6 +210,7 @@ class BroadcastService:
     async def get_broadcasts(limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         """Retrieve recent broadcasts with live delivery & read metrics."""
         res = (
+            # unscoped: platform_admin
             await sb(supabase.table("broadcasts")
             .select("*")
             .order("created_at", desc=True)
@@ -219,6 +223,7 @@ class BroadcastService:
         for b in broadcasts:
             bid = b["id"]
             notifs_res = (
+                # unscoped: platform_admin
                 await sb(supabase.table("admin_notifications")
                 .select("id, is_read")
                 .eq("broadcast_id", bid))
@@ -238,12 +243,14 @@ class BroadcastService:
     @staticmethod
     async def get_broadcast_by_id(broadcast_id: str) -> Optional[Dict[str, Any]]:
         """Get single broadcast details with full delivery summary."""
+        # unscoped: platform_admin
         res = await sb(supabase.table("broadcasts").select("*").eq("id", broadcast_id))
         if not res.data:
             return None
 
         broadcast = res.data[0]
         notifs_res = (
+            # unscoped: platform_admin
             await sb(supabase.table("admin_notifications")
             .select("id, clinic_id, admin_id, is_read, read_at, created_at")
             .eq("broadcast_id", broadcast_id))
@@ -272,6 +279,7 @@ class BroadcastService:
     ) -> List[Dict[str, Any]]:
         """Fetch in-app notifications for a clinic admin enforcing strict tenant isolation."""
         query = (
+            # unscoped: platform_admin
             supabase.table("admin_notifications")
             .select("*")
             .eq("clinic_id", clinic_id)
@@ -291,6 +299,7 @@ class BroadcastService:
     async def get_unread_count(clinic_id: str, admin_id: Optional[str] = None) -> int:
         """Get live unread notification count for the header badge."""
         res = (
+            # unscoped: platform_admin
             await sb(supabase.table("admin_notifications")
             .select("id", count="exact")
             .eq("clinic_id", clinic_id)
@@ -307,6 +316,7 @@ class BroadcastService:
         """Mark a single notification as read, strictly tenant-scoped."""
         now_iso = datetime.now(timezone.utc).isoformat()
         res = (
+            # unscoped: platform_admin
             await sb(supabase.table("admin_notifications")
             .update({"is_read": True, "read_at": now_iso})
             .eq("id", notification_id)
@@ -322,6 +332,7 @@ class BroadcastService:
         """Mark all unread notifications for this clinic as read."""
         now_iso = datetime.now(timezone.utc).isoformat()
         res = (
+            # unscoped: platform_admin
             await sb(supabase.table("admin_notifications")
             .update({"is_read": True, "read_at": now_iso})
             .eq("clinic_id", clinic_id)

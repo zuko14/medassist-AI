@@ -186,8 +186,10 @@ async def lifespan(app: FastAPI):
                 )
 
             # 4. Verify critical tables still exist (regression guard)
+            # unscoped: migration_backfill
             await sb(supabase.table("inbound_messages").select("id").limit(1))
             await sb(supabase.table("scheduler_locks").select("job_name").limit(1))
+            # unscoped: migration_backfill
             await sb(supabase.table("appointments").select("refund_id").limit(1))
 
             logger.info(
@@ -401,10 +403,12 @@ async def admin_panel():
     )
 
 
-@app.get("/admin-panel/admin.js")
-async def admin_panel_js():
-    """Serve admin panel JavaScript (T3.3 CSP hardening)."""
-    return FileResponse("admin/admin.js", media_type="application/javascript")
+# NOTE: /admin-panel/admin.js is gone. admin/admin.js was a second copy of the
+# panel that admin/index.html never loaded, and the two drifted apart more than
+# once — session handling was fixed in one and not the other, and it still held
+# the unscoped api() helpers that leaked across tenants. Serving a stale second
+# frontend is a maintenance trap, not a feature. The panel is admin/index.html,
+# which carries its own inline script.
 
 
 @app.get("/platform-panel")

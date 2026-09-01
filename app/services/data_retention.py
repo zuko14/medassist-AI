@@ -86,6 +86,7 @@ class DataRetentionService:
 
         try:
             result = (
+                # unscoped: platform_sweep
                 await sb(supabase.table("analytics_events")
                 .delete()
                 .lt("created_at", cutoff))
@@ -152,6 +153,7 @@ class DataRetentionService:
 
         try:
             result = (
+                # unscoped: platform_sweep
                 await sb(supabase.table("failed_messages")
                 .delete()
                 .lt("created_at", cutoff))

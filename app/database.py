@@ -219,16 +219,11 @@ class TenantIsolationError(RuntimeError):
 #: clinic_id is always a bug — the application connects as Supabase
 #: `service_role`, which holds BYPASSRLS, so the database will happily return
 #: every tenant's rows. This set is the single source of truth.
-TENANT_OWNED_TABLES = frozenset({
-    "appointments", "patients", "lab_reports", "lab_tests", "doctors",
-    "branches", "doctor_branches", "doctor_leaves", "hospital_holidays",
-    "clinic_admins", "integration_connectors", "connector_failed_reports",
-    "conversations", "inbound_messages", "processed_messages",
-    "family_members", "payment_events", "failed_messages",
-    "prescriptions", "prescription_reminder_sends", "broadcasts",
-    "admin_notifications", "outbound_message_ledger", "connector_audit_log",
-    "integration_processed_reports", "analytics_events",
-})
+# The canonical tenant-table list and scope predicate live in app/tenancy.py —
+# a module with no imports, so the tests that fake `app.database` in sys.modules
+# cannot turn either of them into a MagicMock. Re-exported here because ~30 call
+# sites already import them from this module.
+from app.tenancy import TENANT_OWNED_TABLES, is_valid_clinic_scope  # noqa: F401,E402
 
 
 def scoped_query(
@@ -273,11 +268,6 @@ def scoped_query(
     return q
 
 
-def is_valid_clinic_scope(clinic_id: Optional[str]) -> bool:
-    """Return True if clinic_id is a specific tenant ID (not default/none/empty)."""
-    return bool(clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""))
-
-
 
 async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:
     """Get patient by phone number and clinic_id."""
@@ -314,6 +304,7 @@ async def create_patient(
             "opted_in_at": now_iso,
             "last_seen_at": now_iso,
         }
+        # unscoped: insert_scoped_by_payload
         result = await sb(supabase.table("patients").insert(data))
         return result.data[0]
     except Exception as e:
@@ -369,6 +360,7 @@ async def create_conversation(clinic_id: str, phone: str) -> dict:
             ).isoformat(),
             "last_message_at": now_dt.isoformat(),
         }
+        # unscoped: insert_scoped_by_payload
         result = await sb(supabase.table("conversations").insert(data))
         return result.data[0]
     except Exception as e:
@@ -492,6 +484,7 @@ async def get_lab_collection_window(clinic: dict, branch_id: Optional[str] = Non
     try:
         if branch_id:
             result = (
+                # unscoped: unique_row_key
                 await sb(supabase.table("branches").select("config").eq("id", branch_id))
             )
             if result.data:
@@ -875,6 +868,7 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
         for attempt in range(3):
             data["booking_ref"] = generate_booking_reference()
             try:
+                # unscoped: insert_scoped_by_payload
                 result = await sb(supabase.table("appointments").insert(data))
                 break
             except Exception as e:
@@ -1020,6 +1014,7 @@ async def log_analytics_event(
             "event_type": event_type,
             **{k: v for k, v in kwargs.items() if v is not None},
         }
+        # unscoped: insert_scoped_by_payload
         await sb(supabase.table("analytics_events").insert(data))
         return True
     except Exception as e:
@@ -1251,6 +1246,7 @@ async def add_family_member(
             "full_name": full_name,
             "relationship": relationship,
         }
+        # unscoped: insert_scoped_by_payload
         result = await sb(supabase.table("family_members").insert(data))
         return result.data[0] if result.data else None
     except Exception as e:

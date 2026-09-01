@@ -46,27 +46,14 @@ import pathlib
 
 import pytest
 
-# Tables that carry a clinic_id column and therefore need a tenant predicate.
-# Mirrors TENANT_OWNED_TABLES in app/services/tenant_scoped_client.py.
-TENANT_OWNED_TABLES = {
-    "appointments",
-    "patients",
-    "lab_reports",
-    "lab_tests",
-    "doctors",
-    "branches",
-    "doctor_leaves",
-    "hospital_holidays",
-    "clinic_admins",
-    "integration_connectors",
-    "connector_failed_reports",
-    "conversations",
-    "inbound_messages",
-    "processed_messages",
-    "prescriptions",
-    "family_members",
-    "payment_events",
-}
+# The tenant-table list is imported, not copied. Three divergent copies existed
+# (app/database.py: 26 tables, app/services/tenant_scoped_client.py: 15, and one
+# here: 17). This one was missing doctor_branches — the join table behind the
+# 2026-09-01 incident's doctor/branch mix-up — plus admin_notifications,
+# broadcasts, outbound_message_ledger and five others, so queries against them
+# were never linted at all. app/database.py is the single source of truth.
+from app.tenancy import TENANT_OWNED_TABLES  # noqa: E402
+
 
 # The ONLY reasons that justify omitting a clinic_id predicate. Free text is
 # no longer accepted for NEW annotations — see ROUTERS_LEGACY_ANNOTATIONS.
@@ -82,9 +69,11 @@ ALLOWED_REASONS = {
     "meta_callback_by_unique_id",
     # Backfills and schema maintenance.
     "migration_backfill",
-    # The predicate is applied conditionally just below, typically
-    # `if effective_clinic_id != "default"`.
-    "conditional_scope_below",
+    # NOTE: "conditional_scope_below" was removed on 2026-09-01. It blessed
+    # `if effective_clinic_id != "default": q = q.eq("clinic_id", ...)`, which
+    # is precisely the shape that shipped a query with NO tenant predicate
+    # whenever the scope was the sentinel — the cross-tenant incident. Apply
+    # the predicate unconditionally; a bad scope must match zero rows.
     # Platform-owner endpoints that legitimately span tenants; these sit behind
     # the separate owner credential, not clinic-admin auth.
     "platform_admin",
@@ -108,14 +97,18 @@ ALLOWED_REASONS = {
 # (_scoped_by_later_reassignment); the rest were reviewed individually and
 # carry a structural reason from ALLOWED_REASONS. Routers' free-text legacy
 # annotations fell 88 -> 55 for the same analyzer reason.
-ROUTERS_BARE_BASELINE = 0     # no predicate, no annotation
-SERVICES_BARE_BASELINE = 0
-# Free-text annotations predating ALLOWED_REASONS, held so the enum can be
-# adopted without a flag-day rewrite of 88 call sites.
-ROUTERS_LEGACY_ANNOTATIONS = 51
-SERVICES_LEGACY_ANNOTATIONS = 1
+#: Bare = a query on a tenant-owned table with no clinic_id predicate AND no
+#: annotation. This must stay at zero; there is no legitimate reason to leave
+#: one un-annotated.
+TOTAL_BARE_BASELINE = 0
+#: Free-text annotations predating ALLOWED_REASONS, held so the enum can be
+#: adopted without a flag-day rewrite of every call site. May fall, never rise.
+TOTAL_LEGACY_ANNOTATIONS = 54
 
-SCANNED_DIRS = ("app/routers", "app/services")
+# Scan the WHOLE application, not two subdirectories. app/database.py,
+# app/main.py and connectors/ were never linted at all — connectors/runner.py
+# alone holds 11 tenant-table queries that no guard had ever looked at.
+SCANNED_DIRS = ("app", "connectors")
 
 
 def _table_name(call):
@@ -187,11 +180,22 @@ def _scoped_by_later_reassignment(tree, node):
             query = query.eq("clinic_id", clinic_id)
 
     The predicate is real, it just lands in a different statement. Matching is
-    deliberately narrow: the SAME variable the query was assigned to must be
-    reassigned from an expression carrying .eq("clinic_id", ...), inside the
-    same function. A clinic predicate merely appearing somewhere else in the
-    function does NOT count -- that would let one scoped query launder an
-    unscoped sibling.
+    deliberately narrow on two axes:
+
+    1. The SAME variable the query was assigned to must be reassigned from an
+       expression carrying .eq("clinic_id", ...), inside the same function. A
+       clinic predicate merely appearing somewhere else in the function does
+       NOT count -- that would let one scoped query launder an unscoped
+       sibling.
+
+    2. The reassignment must be UNCONDITIONAL. The idiom shown above is the
+       one that caused the 2026-09-01 cross-tenant incident: when clinic_id
+       was the "default" sentinel the `if` did not fire, the query shipped
+       with no WHERE clause, and a super_admin read -- and DELETED -- every
+       tenant's doctors from one clinic's admin panel. This linter had been
+       taught to treat that shape as scoped, so it reported zero violations
+       throughout. A predicate that an `if` can skip is not a predicate;
+       apply it unconditionally, and let a bad scope match zero rows.
     """
     fn = _enclosing_function(tree, node)
     if fn is None:
@@ -204,6 +208,28 @@ def _scoped_by_later_reassignment(tree, node):
     if not target_names:
         return False
 
+    # Statements that only execute when some condition holds. A predicate
+    # applied in here is NOT a predicate — see the docstring below.
+    # A `try:` BODY is not conditional (it always runs), so only the handlers
+    # and else-clause count; likewise `finally` always runs.
+    conditional = set()
+
+    def _mark(stmts):
+        for st in stmts:
+            for sub in ast.walk(st):
+                conditional.add(id(sub))
+
+    for branch in ast.walk(fn):
+        if isinstance(branch, ast.If):
+            _mark(branch.body)
+            _mark(branch.orelse)
+        elif isinstance(branch, ast.While):
+            _mark(branch.body)
+            _mark(branch.orelse)
+        elif isinstance(branch, ast.Try):
+            _mark(branch.handlers)
+            _mark(branch.orelse)
+
     for stmt in ast.walk(fn):
         if not isinstance(stmt, ast.Assign):
             continue
@@ -211,6 +237,8 @@ def _scoped_by_later_reassignment(tree, node):
             continue
         if stmt.value is node or node in list(ast.walk(stmt.value)):
             continue  # the original assignment, not a re-scoping of it
+        if id(stmt) in conditional:
+            continue  # KRIYA-TENANT-001: a conditional predicate is no predicate
         if _has_clinic_predicate(stmt.value):
             return True
     return False
@@ -266,29 +294,36 @@ def _scan(directory):
     return bare, legacy, bad_reason
 
 
-def test_no_new_unscoped_router_queries():
-    """Routers are at zero bare queries and must stay there."""
-    bare, _, _ = _scan("app/routers")
-    assert len(bare) <= ROUTERS_BARE_BASELINE, (
-        f"{len(bare)} query/queries on tenant-owned tables in app/routers/** "
-        f"have no clinic_id predicate and no '# unscoped: <reason>' "
-        f"annotation (baseline {ROUTERS_BARE_BASELINE}):\n"
-        + "\n".join(f"  - {v}" for v in bare)
-    )
+def _scan_all():
+    """Scan every root in SCANNED_DIRS and merge the results.
 
-
-def test_unscoped_service_queries_do_not_grow():
-    """Ratchet on app/services/**, which the old linter never scanned.
-
-    86 pre-existing unscoped queries are grandfathered. Adding an 87th fails.
+    SCANNED_DIRS used to be declared and then ignored: the tests hardcoded
+    "app/routers" and "app/services", so app/database.py, app/main.py and the
+    whole connectors/ package were never linted by anything. That is a
+    constant that looks like coverage without providing any.
     """
-    bare, _, _ = _scan("app/services")
-    assert len(bare) <= SERVICES_BARE_BASELINE, (
-        f"{len(bare)} unscoped tenant-table queries in app/services/** — the "
-        f"ratchet is {SERVICES_BARE_BASELINE}. A NEW query on a tenant-owned "
-        f"table needs either .eq('clinic_id', ...) or an explicit "
-        f"'# unscoped: <reason>' drawn from {sorted(ALLOWED_REASONS)}:\n"
-        + "\n".join(f"  - {v}" for v in bare)
+    bare, legacy, bad = [], [], []
+    for d in SCANNED_DIRS:
+        b, l, r = _scan(d)
+        bare += b
+        legacy += l
+        bad += r
+    return bare, legacy, bad
+
+
+def test_no_unscoped_tenant_queries_anywhere():
+    """Zero bare queries across the entire application. No exceptions.
+
+    Every query on a tenant-owned table either carries a clinic_id predicate
+    or says, on the line, which structural reason exempts it.
+    """
+    bare, _, _ = _scan_all()
+    assert len(bare) <= TOTAL_BARE_BASELINE, (
+        f"{len(bare)} query/queries on tenant-owned tables across "
+        f"{SCANNED_DIRS} have no clinic_id predicate and no "
+        f"'# unscoped: <reason>' annotation (baseline {TOTAL_BARE_BASELINE}). "
+        f"Add the predicate, or an explicit reason from "
+        f"{sorted(ALLOWED_REASONS)}:" + "".join(f"\n  - {v}" for v in bare)
     )
 
 
@@ -298,25 +333,16 @@ def test_ratchet_baselines_are_not_stale():
     Without this the ratchet silently loosens: a later change could reintroduce
     exactly as many unscoped queries as were removed.
     """
-    routers_bare, routers_legacy, _ = _scan("app/routers")
-    services_bare, services_legacy, _ = _scan("app/services")
+    bare, legacy, _ = _scan_all()
 
-    assert len(routers_bare) == ROUTERS_BARE_BASELINE, (
-        f"app/routers bare count is {len(routers_bare)}, baseline says "
-        f"{ROUTERS_BARE_BASELINE} — update ROUTERS_BARE_BASELINE"
+    assert len(bare) == TOTAL_BARE_BASELINE, (
+        f"bare count is {len(bare)}, baseline says {TOTAL_BARE_BASELINE} "
+        f"— update TOTAL_BARE_BASELINE in the same commit"
     )
-    assert len(services_bare) == SERVICES_BARE_BASELINE, (
-        f"app/services bare count is {len(services_bare)}, baseline says "
-        f"{SERVICES_BARE_BASELINE} — update SERVICES_BARE_BASELINE"
-    )
-    assert len(routers_legacy) <= ROUTERS_LEGACY_ANNOTATIONS, (
-        f"free-text '# unscoped:' annotations in app/routers grew to "
-        f"{len(routers_legacy)} (baseline {ROUTERS_LEGACY_ANNOTATIONS}). New "
-        f"annotations must use a reason from {sorted(ALLOWED_REASONS)}."
-    )
-    assert len(services_legacy) <= SERVICES_LEGACY_ANNOTATIONS, (
-        f"free-text '# unscoped:' annotations in app/services grew to "
-        f"{len(services_legacy)} (baseline {SERVICES_LEGACY_ANNOTATIONS})."
+    assert len(legacy) <= TOTAL_LEGACY_ANNOTATIONS, (
+        f"free-text '# unscoped:' annotations grew to {len(legacy)} "
+        f"(baseline {TOTAL_LEGACY_ANNOTATIONS}). New annotations must use a "
+        f"reason from {sorted(ALLOWED_REASONS)}."
     )
 
 

@@ -17,6 +17,16 @@ from app.routers.admin import (
 )
 
 
+#: /admin is single-tenant: every call resolves to one clinic. These tests used
+#: `user=MagicMock(), clinic_id="default"`, which is now a 400 — that unscoped
+#: combination is the one that produced the cross-tenant incident.
+TEST_CLINIC = "22222222-2222-2222-2222-222222222222"
+
+
+def scoped_admin(clinic_id: str = TEST_CLINIC) -> AdminUser:
+    return AdminUser(username="tester", role="clinic_admin", clinic_id=clinic_id)
+
+
 @pytest.mark.asyncio
 async def test_create_doctor_generates_morning_and_evening_slots():
     payload = DoctorCreate(
@@ -36,7 +46,7 @@ async def test_create_doctor_generates_morning_and_evening_slots():
     )
 
     with patch("app.routers.admin.supabase", mock_sb):
-        await create_doctor(payload, clinic_id="default", user=MagicMock())
+        await create_doctor(payload, clinic_id="default", user=scoped_admin())
 
     inserted = mock_sb.table.return_value.insert.call_args_list[0][0][0]
     assert inserted["morning_slots"] == ["09:00", "09:30", "10:00", "10:30"]
@@ -54,7 +64,7 @@ async def test_create_doctor_rejects_end_before_start():
     )
 
     with pytest.raises(HTTPException) as exc:
-        await create_doctor(payload, clinic_id="default", user=MagicMock())
+        await create_doctor(payload, clinic_id="default", user=scoped_admin())
     assert exc.value.status_code == 422
 
 
@@ -68,7 +78,7 @@ async def test_update_doctor_regenerates_slots_when_timing_changed():
     )
 
     with patch("app.routers.admin.supabase", mock_sb):
-        await update_doctor("doc-1", payload, clinic_id="default", user=MagicMock())
+        await update_doctor("doc-1", payload, clinic_id="default", user=scoped_admin())
 
     updated = mock_sb.table.return_value.update.call_args[0][0]
     assert updated["morning_slots"] == ["08:00", "08:15", "08:30", "08:45"]
@@ -175,7 +185,7 @@ async def test_create_doctor_morning_only_shift():
     )
 
     with patch("app.routers.admin.supabase", mock_sb):
-        await create_doctor(payload, clinic_id="default", user=MagicMock())
+        await create_doctor(payload, clinic_id="default", user=scoped_admin())
 
     inserted = mock_sb.table.return_value.insert.call_args_list[0][0][0]
     assert inserted["morning_slots"] == ["09:00", "09:30", "10:00", "10:30"]
@@ -201,7 +211,7 @@ async def test_create_doctor_evening_only_shift():
     )
 
     with patch("app.routers.admin.supabase", mock_sb):
-        await create_doctor(payload, clinic_id="default", user=MagicMock())
+        await create_doctor(payload, clinic_id="default", user=scoped_admin())
 
     inserted = mock_sb.table.return_value.insert.call_args_list[0][0][0]
     assert inserted["evening_slots"] == ["17:00", "17:30", "18:00", "18:30"]
@@ -219,7 +229,7 @@ async def test_create_doctor_rejects_both_shifts_disabled():
         department="OPD",
     )
     with pytest.raises(HTTPException) as exc:
-        await create_doctor(payload, clinic_id="default", user=MagicMock())
+        await create_doctor(payload, clinic_id="default", user=scoped_admin())
     assert exc.value.status_code == 422
     assert "at least one shift" in exc.value.detail.lower()
 

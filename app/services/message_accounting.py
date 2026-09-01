@@ -216,6 +216,7 @@ async def log_outbound(
 
         category = resolve_category(message_type, template_name)
 
+        # unscoped: insert_scoped_by_payload
         await sb(supabase.table("outbound_message_ledger").insert({
             "clinic_id": clinic_id,
             "recipient_phone": recipient_phone,
@@ -295,6 +296,7 @@ async def get_clinic_usage(clinic_id: str, plan_name: str) -> dict:
         # Query ledger for this clinic in current billing period
         # Exclude mark_read from billable counts
         result = (
+            # unscoped: platform_sweep
             await sb(supabase.table("outbound_message_ledger")
             .select("category, sent_at, send_success")
             .eq("clinic_id", clinic_id)
@@ -383,6 +385,7 @@ async def get_platform_usage(days: int = 30) -> dict:
     # Fetch all ledger entries in period (exclude mark_read from billing)
     try:
         ledger_res = (
+            # unscoped: platform_sweep
             await sb(supabase.table("outbound_message_ledger")
             .select("clinic_id, category, send_success, message_type")
             .eq("send_success", True)

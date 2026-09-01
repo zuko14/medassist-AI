@@ -8,26 +8,15 @@ and strictly prevents cross-tenant data leakage even if a route-level check were
 import logging
 from typing import Any, Dict, List, Optional, Union
 from app.database import supabase
+from app.tenancy import TENANT_OWNED_TABLES
 
 logger = logging.getLogger(__name__)
 
-TENANT_OWNED_TABLES = {
-    "appointments",
-    "patients",
-    "lab_reports",
-    "lab_tests",
-    "doctors",
-    "branches",
-    "doctor_branches",
-    "doctor_leaves",
-    "hospital_holidays",
-    "clinic_admins",
-    "integration_connectors",
-    "connector_failed_reports",
-    "conversations",
-    "inbound_messages",
-    "processed_messages",
-}
+# TENANT_OWNED_TABLES comes from app.tenancy: the single source of truth. The
+# private copy that used to live here had drifted to 15 of the 25 tables, and
+# importing it from app.database instead made this guard silently empty under
+# the tests that fake that module in sys.modules.
+
 
 
 class TenantIsolationError(RuntimeError):

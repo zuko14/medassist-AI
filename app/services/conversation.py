@@ -277,6 +277,7 @@ class ConversationManager:
                 from app.database import supabase
                 import json
 
+                # unscoped: insert_scoped_by_payload
                 await sb(supabase.table("failed_messages").insert(
                     {
                         "phone": phone,
@@ -3403,9 +3404,12 @@ class ConversationManager:
             if booking_id:
                 from app.database import supabase
 
-                query = supabase.table("appointments").update({"status": "cancelled"}).eq("id", booking_id)
-                if clinic and clinic.get("id"):
-                    query = query.eq("clinic_id", clinic["id"])
+                query = (
+                    supabase.table("appointments")
+                    .update({"status": "cancelled"})
+                    .eq("id", booking_id)
+                    .eq("clinic_id", (clinic or {}).get("id") or "")
+                )
                 await sb(query.eq("status", "pending_payment"))
 
             cancel_msg = {
@@ -3424,9 +3428,12 @@ class ConversationManager:
             if booking_id:
                 from app.database import supabase
 
-                query = supabase.table("appointments").select("status, booking_ref").eq("id", booking_id)
-                if clinic and clinic.get("id"):
-                    query = query.eq("clinic_id", clinic["id"])
+                query = (
+                    supabase.table("appointments")
+                    .select("status, booking_ref")
+                    .eq("id", booking_id)
+                    .eq("clinic_id", (clinic or {}).get("id") or "")
+                )
                 result = await sb(query)
                 if result.data:
                     status = result.data[0]["status"]
@@ -3898,7 +3905,31 @@ class ConversationManager:
 
         from app.services.lab_reports import LabReportService
 
-        reports = await LabReportService().get_reports_by_phone(phone, clinic["id"])
+        # get_reports_by_phone refuses an unscoped call: phone numbers are not
+        # unique across tenants, so without a real clinic id it could hand this
+        # patient another clinic's reports. That happens when tenant resolution
+        # fell back to the synthetic clinic (id "default"), i.e. we do not know
+        # which facility this message belongs to. Decline politely rather than
+        # letting the ValueError escape into the webhook handler.
+        try:
+            reports = await LabReportService().get_reports_by_phone(
+                phone, clinic.get("id")
+            )
+        except ValueError:
+            logger.error(
+                "LAB_REPORTS_UNSCOPED_CLINIC phone=%s clinic_id=%r — refusing to "
+                "list reports without a resolved tenant",
+                mask_phone(phone),
+                clinic.get("id"),
+            )
+            await self.whatsapp.send_text(
+                clinic,
+                phone,
+                "Sorry, we couldn't look up your reports right now. "
+                "Please contact reception and they'll share them with you.",
+            )
+            await self._send_main_menu(clinic, phone, lang)
+            return
 
         if not reports:
             await self.whatsapp.send_text(
@@ -3965,7 +3996,9 @@ class ConversationManager:
                 from app.services.lab_reports import LabReportService
 
                 try:
-                    await LabReportService().resend_report(selected["id"])
+                    await LabReportService().resend_report(
+                        selected["id"], clinic_id=clinic.get("id")
+                    )
                     await self.whatsapp.send_text(
                         clinic,
                         phone,

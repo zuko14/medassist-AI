@@ -132,16 +132,26 @@ def test_csp_has_no_unsafe_inline_for_scripts():
 
 
 
-def test_admin_js_served_and_valid():
-    """T3.3: Admin JS is served at /admin-panel/admin.js."""
+def test_stale_duplicate_admin_bundle_is_not_served():
+    """T3.3 (revised): there is exactly ONE admin frontend.
+
+    admin/admin.js used to be served here as a second copy of the panel that
+    admin/index.html never loaded. The two drifted: session handling was fixed
+    in one and not the other, and the dead copy still carried the unscoped
+    api() helpers behind the cross-tenant incident. A second frontend that
+    nobody loads but everybody can fetch is a maintenance trap.
+    """
     from fastapi.testclient import TestClient
     from app.main import app
 
     client = TestClient(app)
-    resp = client.get("/admin-panel/admin.js")
+    assert client.get("/admin-panel/admin.js").status_code == 404
+
+    resp = client.get("/admin-panel")
     assert resp.status_code == 200
-    assert "application/javascript" in resp.headers["content-type"]
-    assert "CLINIC_SCOPE" in resp.text
+    assert "text/html" in resp.headers["content-type"]
+    # The panel ships its scope helper inline; no separate bundle to drift.
+    assert "withScope" in resp.text
 
 
 @pytest.mark.asyncio

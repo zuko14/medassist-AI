@@ -1033,6 +1033,7 @@ class SchedulerService:
                 for row in rows:
                     row_id = row["id"]
                     if str(row.get("created_at") or "") < cutoff:
+                        # unscoped: platform_sweep
                         await sb(supabase.table("failed_messages").update(
                             {"status": "failed", "resolved_at": datetime.now(timezone.utc).isoformat()}
                         ).eq("id", row_id))
@@ -1058,6 +1059,7 @@ class SchedulerService:
                             message_id=payload.get("message_id"),
                             interactive_data=payload.get("interactive_data"),
                         )
+                        # unscoped: platform_sweep
                         await sb(supabase.table("failed_messages").update(
                             {"status": "resolved", "resolved_at": datetime.now(timezone.utc).isoformat()}
                         ).eq("id", row_id))
@@ -1149,6 +1151,7 @@ class SchedulerService:
                 return
             try:
                 result = (
+                    # unscoped: platform_sweep
                     await sb(supabase.table("failed_messages")
                     .select("id", count="exact")
                     .eq("status", "pending"))

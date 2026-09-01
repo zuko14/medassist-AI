@@ -888,44 +888,27 @@ class TestAdminBookingScoping:
         assert result["reason"] == "booking_not_found"
 
     @pytest.mark.asyncio
-    async def test_admin_confirm_booking_default_clinic_id_is_unscoped(self):
-        """clinic_id='default' (super_admin path) must NOT add a clinic filter —
-        preserves existing super_admin cross-clinic behavior."""
+    async def test_admin_confirm_booking_refuses_an_unscoped_call(self):
+        """clinic_id='default' must be REFUSED, not treated as "no filter".
+
+        This assertion is inverted from what it used to be. It previously read
+        "clinic_id='default' (super_admin path) must NOT add a clinic filter -
+        preserves existing super_admin cross-clinic behavior" and asserted that
+        exactly one .eq() was applied. That is the fail-open sentinel: a booking
+        id with no tenant predicate resolves against every clinic's
+        appointments, so a super_admin could confirm, reject or refund any
+        tenant's booking. Same root cause as the 2026-09-01 doctor-roster
+        incident; see tests/test_tenant_scope_fail_closed.py.
+        """
         from app.services.payment import PaymentService
 
         service = PaymentService()
-        mock_booking = {
-            "id": "booking-1",
-            "clinic_id": "clinic-A",
-            "status": "pending_review",
-            "patient_phone": "+919876543210",
-        }
 
-        with patch("app.services.payment.supabase") as mock_sb, patch.object(
-            service, "_increment_patient_visit_count", new_callable=AsyncMock
-        ), patch.object(
-            service, "_notify_payment_confirmed", new_callable=AsyncMock
-        ), patch.object(
-            service, "_log_payment_event"
-        ):
-            mock_table = MagicMock()
-            mock_sb.table.return_value = mock_table
-            mock_select = MagicMock()
-            mock_table.select.return_value = mock_select
-            # Only ONE .eq() call expected: .eq("id", booking_id) — no clinic filter
-            mock_select.eq.return_value.execute.return_value = MagicMock(
-                data=[mock_booking]
-            )
-            mock_table.update.return_value.eq.return_value.execute.return_value = (
-                MagicMock(data=[mock_booking])
-            )
+        with patch("app.services.payment.supabase") as mock_sb:
+            with pytest.raises(ValueError, match="clinic_id is required"):
+                await service.admin_confirm_booking("booking-1", clinic_id="default")
 
-            result = await service.admin_confirm_booking(
-                "booking-1", clinic_id="default"
-            )
-
-        assert result["success"] is True
-        mock_select.eq.assert_called_once_with("id", "booking-1")
+            mock_sb.table.assert_not_called()
 
 
 class TestHoldExpiry:

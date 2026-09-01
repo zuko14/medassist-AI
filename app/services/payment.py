@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 import httpx
 
 from app.config import settings
-from app.database import supabase
+from app.database import supabase, is_valid_clinic_scope
 from app.utils.helpers import format_slot_time
 from app.database import sb  # T5.1: off-loop query execution
 
@@ -508,6 +508,7 @@ class PaymentService:
 
         try:
             idemp_query = (
+                # unscoped: meta_callback_by_unique_id
                 supabase.table("appointments")
                 .select("id")
                 .eq("payment_id", payment_id)
@@ -539,6 +540,7 @@ class PaymentService:
         booking_result = None
 
         def _build_booking_query():
+            # unscoped: meta_callback_by_unique_id
             q = supabase.table("appointments").select("*")
             if use_clinic_scope:
                 q = q.eq("clinic_id", use_clinic_scope)
@@ -1372,12 +1374,17 @@ class PaymentService:
         self, booking_id: str, clinic_id: str = "", admin_notes: str = ""
     ) -> dict:
         """Manually confirm a pending_review booking (admin override), scoped to clinic_id."""
-        query = supabase.table("appointments").select("*").eq("id", booking_id)
-        # KA-14: Always scope — 'default' sentinel removed
-        if clinic_id and clinic_id not in ("default", "none", "null"):
-            query = query.eq("clinic_id", clinic_id)
-        else:
-            logger.warning(f"admin_confirm_booking called without valid clinic_id for {booking_id}")
+        if not is_valid_clinic_scope(clinic_id):
+            # Warning-and-continue meant an unscoped booking id resolved
+            # against every tenant's appointments. A booking id alone is
+            # not authorization to confirm, reject or refund.
+            raise ValueError("clinic_id is required for admin_confirm_booking")
+        query = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("id", booking_id)
+            .eq("clinic_id", clinic_id)
+        )
         booking_result = await sb(query)
 
         if not booking_result.data:
@@ -1430,12 +1437,17 @@ class PaymentService:
         initiate_refund() checks status in ('confirmed', 'pending_review'), so refunding
         BEFORE cancelling ensures the refund is processed rather than blocked.
         """
-        query = supabase.table("appointments").select("*").eq("id", booking_id)
-        # KA-14: Always scope — 'default' sentinel removed
-        if clinic_id and clinic_id not in ("default", "none", "null"):
-            query = query.eq("clinic_id", clinic_id)
-        else:
-            logger.warning(f"admin_reject_booking called without valid clinic_id for {booking_id}")
+        if not is_valid_clinic_scope(clinic_id):
+            # Warning-and-continue meant an unscoped booking id resolved
+            # against every tenant's appointments. A booking id alone is
+            # not authorization to confirm, reject or refund.
+            raise ValueError("clinic_id is required for admin_reject_booking")
+        query = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("id", booking_id)
+            .eq("clinic_id", clinic_id)
+        )
         booking_result = await sb(query)
 
         if not booking_result.data:
@@ -1492,13 +1504,14 @@ class PaymentService:
         if refund_result.get("refund_id"):
             update_data["refund_id"] = refund_result.get("refund_id")
 
+        if not is_valid_clinic_scope(clinic_id):
+            raise ValueError("clinic_id is required to cancel/refund a booking")
         update_query = (
             supabase.table("appointments")
             .update(update_data)
             .eq("id", booking_id)
+            .eq("clinic_id", clinic_id)
         )
-        if clinic_id and clinic_id != "default":
-            update_query = update_query.eq("clinic_id", clinic_id)
         await sb(update_query)
 
         self._log_payment_event(
@@ -1527,12 +1540,17 @@ class PaymentService:
         the patient over WhatsApp so the bot conversation stays in sync with
         what the admin just did.
         """
-        query = supabase.table("appointments").select("*").eq("id", booking_id)
-        # KA-14: Always scope — 'default' sentinel removed
-        if clinic_id and clinic_id not in ("default", "none", "null"):
-            query = query.eq("clinic_id", clinic_id)
-        else:
-            logger.warning(f"admin_cancel_confirmed_booking called without valid clinic_id for {booking_id}")
+        if not is_valid_clinic_scope(clinic_id):
+            # Warning-and-continue meant an unscoped booking id resolved
+            # against every tenant's appointments. A booking id alone is
+            # not authorization to confirm, reject or refund.
+            raise ValueError("clinic_id is required for admin_cancel_confirmed_booking")
+        query = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("id", booking_id)
+            .eq("clinic_id", clinic_id)
+        )
         booking_result = await sb(query)
 
         if not booking_result.data:
@@ -1585,6 +1603,7 @@ class PaymentService:
 
         # Get confirmed bookings for the date
         query = (
+            # unscoped: platform_sweep
             supabase.table("appointments")
             .select("id, amount_paise, payment_id, booking_ref, patient_phone")
             .eq("status", "confirmed")
@@ -1600,6 +1619,7 @@ class PaymentService:
 
         # Get pending_review bookings
         pr_query = (
+            # unscoped: platform_sweep
             supabase.table("appointments")
             .select("id")
             .eq("status", "pending_review")
@@ -1628,9 +1648,13 @@ class PaymentService:
     async def _get_doctor_fee_paise(self, clinic_id: str, doctor_name: str) -> int:
         """Get the doctor's consultation fee in paise. Falls back to config default."""
         try:
-            query = supabase.table("doctors").select("consultation_fee")
-            if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
-                query = query.eq("clinic_id", clinic_id)
+            # Doctor names are not unique across tenants: unscoped, this could
+            # price a booking from another clinic's fee schedule.
+            query = (
+                supabase.table("doctors")
+                .select("consultation_fee")
+                .eq("clinic_id", clinic_id)
+            )
             result = await sb(query.eq("name", doctor_name))
 
             if result.data and result.data[0].get("consultation_fee"):
@@ -1645,9 +1669,11 @@ class PaymentService:
     async def _get_lab_test_fee_paise(self, clinic_id: str, lab_test_id: str) -> Optional[int]:
         """Get a lab test's price in paise directly from the catalog."""
         try:
-            query = supabase.table("lab_tests").select("price_paise")
-            if clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", ""):
-                query = query.eq("clinic_id", clinic_id)
+            query = (
+                supabase.table("lab_tests")
+                .select("price_paise")
+                .eq("clinic_id", clinic_id)
+            )
             result = await sb(query.eq("id", lab_test_id))
             if result.data and result.data[0].get("price_paise"):
                 return int(result.data[0]["price_paise"])
@@ -2249,6 +2275,7 @@ class PaymentService:
                         "is_read": False,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     }
+                    # unscoped: insert_scoped_by_payload
                     await sb(supabase.table("admin_notifications").insert(notif_row))
             except Exception as in_app_err:
                 logger.warning(f"Could not create in-app admin notification: {in_app_err}")

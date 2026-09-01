@@ -165,6 +165,7 @@ class PrescriptionService:
 
                             # Record send for deduplication
                             try:
+                                # unscoped: insert_scoped_by_payload
                                 await sb(supabase.table("prescription_reminder_sends").insert({
                                     "prescription_id": rx["id"],
                                     "reminder_time": rt,

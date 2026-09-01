@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import settings
 from app.database import (
-    scoped_query,
+    is_valid_clinic_scope,
     supabase,
     check_in_appointment,
     call_next_patient,
@@ -502,10 +502,35 @@ async def require_admin(user: AdminUser = Depends(verify_credentials)) -> AdminU
 def enforce_clinic_access(
     user: AdminUser, requested_clinic_id: str = "default"
 ) -> str:
-    """Enforce tenant isolation boundaries.
+    """Resolve the ONE clinic this /admin request operates on, or refuse.
 
-    Returns effective clinic_id or raises 403 Forbidden if user tries to access a clinic
-    outside their authorized scope.
+    Returns a real clinic id. NEVER returns the "default" sentinel, an empty
+    string, or None.
+
+    Why this function fails closed (KRIYA-TENANT-001, production incident
+    2026-09-01)
+    ------------------------------------------------------------------
+    This used to return the literal string "default" for a super_admin with no
+    clinic_id. Every caller then did:
+
+        query = supabase.table("doctors").select("*")
+        query = query.eq("clinic_id", effective_clinic_id)
+
+    so "default" meant NO WHERE CLAUSE — a silent cross-tenant wildcard, on
+    reads AND on writes AND on deletes. A super_admin who opened the admin
+    panel believing it showed one clinic was in fact looking at every tenant's
+    doctors at once, and `DELETE /admin/doctors/{id}` deleted rows by primary
+    key with no tenant predicate at all. That is how a live clinic's entire
+    doctor roster was destroyed from what looked like a test-clinic panel, and
+    why its patients stopped seeing doctors on WhatsApp.
+
+    The /admin panel is a SINGLE-TENANT surface. There is no "all clinics"
+    mode here — cross-tenant reporting lives in /platform, which authenticates
+    separately. A super_admin must therefore name the clinic they are acting
+    on (?clinic_id=<uuid>); an unspecified scope is an error, not a wildcard.
+
+    Do NOT reintroduce a branch that returns "default", "" or None. Callers
+    interpolate this straight into a tenant predicate.
     """
     if isinstance(user, AdminUser):
         if not user.can_access_clinic(requested_clinic_id):
@@ -517,52 +542,84 @@ def enforce_clinic_access(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Forbidden: Access to clinic '{requested_clinic_id}' is restricted",
             )
-        if requested_clinic_id == "default":
-            if user.clinic_id:
-                return user.clinic_id
-            if user.role != "super_admin":
-                # Defence in depth. Unreachable once tenant_scope_enforce=True,
-                # because can_access_clinic() denies first. Kept in case that
-                # guard is ever weakened.
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Account is not scoped to a clinic. Contact your administrator.",
-                )
+        if not is_valid_clinic_scope(requested_clinic_id) and user.clinic_id:
+            requested_clinic_id = user.clinic_id
 
-    return requested_clinic_id
+    if not is_valid_clinic_scope(requested_clinic_id):
+        # Only reachable for a super_admin (every other role is already denied
+        # by can_access_clinic). Make them pick a clinic instead of silently
+        # operating on all of them.
+        logger.warning(
+            "TENANT_SCOPE_REQUIRED user=%s role=%s - /admin call with no clinic scope",
+            getattr(user, "username", user),
+            getattr(user, "role", "?"),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No clinic selected. Choose a clinic before using the admin "
+                "panel (super-admin accounts must pass ?clinic_id=<clinic id>)."
+            ),
+        )
+
+    return str(requested_clinic_id).strip()
 
 
 async def resolve_clinic_id_for_write(
     user: AdminUser, requested_clinic_id: str = "default"
 ) -> str:
-    """Resolve a clinic_id for a row that is about to be INSERTed (or otherwise
-    written with an equality filter that has no "show everything" fallback).
+    """Resolve the clinic_id to stamp on a row that is about to be INSERTed.
 
-    "default" is a sentinel meaning "no clinic specified" — the admin frontend
-    never sends a real clinic_id, so every write defaulted to the literal
-    string "default". That is never an actual clinics.id value. Writing it
-    into a row's clinic_id column desyncs that row from every downstream
-    query that filters by the real UUID — most importantly the WhatsApp
-    bot's get_doctors()/get_available_slots(), which use the clinic resolved
-    from the incoming WhatsApp number. A doctor, leave, or holiday written
-    with clinic_id='default' becomes permanently invisible to patients even
-    though it shows up fine in the admin panel that just created it (the
-    admin panel's own list endpoints skip the clinic_id filter entirely when
-    it's still "default").
+    Thin alias for enforce_clinic_access(), kept because ~20 write paths call
+    it by this name and the name documents intent at the call site.
+
+    It used to fall back to "the first clinic in the clinics table by
+    created_at" when the scope was unresolved. That silently wrote one
+    tenant's new doctors, leaves and holidays into a DIFFERENT tenant — the
+    write-side twin of the read-side wildcard described in
+    enforce_clinic_access(). There is no safe guess here: an unresolved scope
+    is now a 400.
     """
-    effective = enforce_clinic_access(user, requested_clinic_id)
-    if effective != "default":
-        return effective
-    # unscoped: fallback clinic lookup for legacy single-tenant
-    clinics = (
-        # unscoped: fallback clinic lookup for legacy single-tenant environment
-        await sb(supabase.table("clinics").select("id").order("created_at").limit(1))
+    return enforce_clinic_access(user, requested_clinic_id)
+
+
+@router.get("/clinics")
+async def list_admin_clinics(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Clinics this account may act on, for the panel's clinic selector.
+
+    /admin is single-tenant: every request operates on exactly one clinic
+    (see enforce_clinic_access). A super_admin has no clinic of their own, so
+    without this they had no way to name one — which is how "no clinic
+    selected" silently became "every clinic at once".
+    """
+    if user.role != "super_admin":
+        # Honours the tenant boundary like every other /admin route: asking
+        # for someone else's clinic is a 403, not a filtered-down 200.
+        scope = enforce_clinic_access(user, clinic_id)
+        return {"clinics": [{"id": scope, "name": None}]}
+
+    rows = (
+        # unscoped: platform_sweep — super_admin choosing which tenant to act on
+        await sb(supabase.table("clinics")
+        .select("id, name, whatsapp_number, is_sandbox, status")
+        .neq("status", "DELETED")
+        .order("name")
+        .limit(500))
     )
-    if not clinics.data:
-        raise HTTPException(
-            status_code=400, detail="No clinic configured. Create a clinic first."
-        )
-    return clinics.data[0]["id"]
+    return {
+        "clinics": [
+            {
+                "id": c["id"],
+                "name": c.get("name") or "Clinic",
+                "whatsapp_number": c.get("whatsapp_number"),
+                "is_sandbox": bool(c.get("is_sandbox")),
+            }
+            for c in (rows.data or [])
+        ]
+    }
 
 
 @router.get("/me")
@@ -577,6 +634,10 @@ async def get_current_admin(user: AdminUser = Depends(verify_credentials)):
         "permissions": user.permissions,
         "branch_id": user.branch_id,
         "staff_role": user.staff_role,
+        # Env-credential principals have no clinic_admins row, so they cannot
+        # change their own username or password. The panel hides those actions
+        # rather than offering a button that can only ever return a 400.
+        "env_account": user.user_id in ("super_admin_env", "platform_owner_env"),
     }
     if user.role == "super_admin" or not user.clinic_id:
         return {
@@ -651,6 +712,159 @@ async def change_password(
     return {"success": True, "message": "Password updated successfully"}
 
 
+#: Usernames a database account may never take. Both belong to env-credential
+#: principals that have no clinic_admins row, and _authenticate_password()
+#: checks the database BEFORE the env fallback — letting a tenant account
+#: occupy one of these names would put a tenant-controlled row in front of a
+#: platform credential on the login path.
+def _reserved_usernames() -> set[str]:
+    return {
+        (settings.admin_username or "").strip().lower(),
+        (settings.owner_username or "").strip().lower(),
+    } - {""}
+
+
+class ChangeUsernameRequest(BaseModel):
+    """Self-service rename. The current password is required because a rename
+    is a credential change: without it, anyone holding a live session cookie
+    could rename the account and lock the real owner out of their own panel.
+    """
+
+    current_password: str
+    new_username: str = Field(..., min_length=3, max_length=64)
+
+    @field_validator("new_username")
+    @classmethod
+    def _validate_username(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", v):
+            raise ValueError(
+                "Username may use letters, numbers, dot, underscore and hyphen, "
+                "and must start and end with a letter or number."
+            )
+        if len(v) < 3:
+            raise ValueError("Username must be at least 3 characters.")
+        return v
+
+
+@router.put("/change-username")
+async def change_username(
+    body: ChangeUsernameRequest,
+    request: Request,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Self-service username change for DB-backed clinic_admins accounts.
+
+    Clinic logins are auto-provisioned at onboarding as
+    `<clinic-name-slug><6 hex>` (app/routers/clinics.py), e.g.
+    "visakhamultispeciala3f9c1" — correct, unique, and unusable by a human at
+    a reception desk. This lets the account pick its own name.
+
+    Every live session for the OLD name is revoked. That is not just hygiene:
+    admin_sessions stores a SNAPSHOT of the username and resolve_admin_session()
+    rebuilds AdminUser from it, so a session left alive across a rename would
+    keep asserting the old identity in audit logs, and a later
+    revoke_sessions_for_user(new_name) would not match it. The caller is signed
+    out and signs back in under the new name.
+    """
+    if not user.user_id or user.user_id in ("super_admin_env", "platform_owner_env"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This account's username comes from an environment variable and "
+                "can't be changed here. Contact your platform administrator."
+            ),
+        )
+
+    new_username = body.new_username
+    if new_username.lower() in _reserved_usernames():
+        raise HTTPException(status_code=409, detail="That username is reserved.")
+
+    # The caller's own row, by primary key.
+    # unscoped: unique_row_key
+    res = (
+        await sb(supabase.table("clinic_admins")
+        .select("id, username, password_hash")
+        .eq("id", user.user_id))
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Admin account not found")
+    row = res.data[0]
+    old_username = row["username"]
+
+    if not check_password_hash(body.current_password, row.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    if new_username == old_username:
+        return {
+            "success": True,
+            "username": old_username,
+            "relogin_required": False,
+            "message": "That is already your username.",
+        }
+
+    # Exact match, deliberately not ILIKE. The username column's UNIQUE index
+    # is case-sensitive and the login path matches exactly
+    # (_authenticate_password does .eq("username", ...)), so an exact check is
+    # precisely the database's own rule — it cannot reject a name the INSERT
+    # would have accepted. ILIKE would also treat "_" as a single-character
+    # wildcard, and "_" is legal in a username here, so "ab_de" would collide
+    # with "abcde" and the user would be told a free name was taken.
+    # unscoped: global_auth_lookup
+    clash = (
+        await sb(supabase.table("clinic_admins")
+        .select("id")
+        .eq("username", new_username)
+        .neq("id", user.user_id)
+        .limit(1))
+    )
+    if clash.data:
+        raise HTTPException(status_code=409, detail="That username is already taken.")
+
+    try:
+        # The caller's own row, by primary key.
+        # unscoped: unique_row_key
+        updated = await sb(supabase.table("clinic_admins").update(
+            {"username": new_username}
+        ).eq("id", user.user_id))
+    except Exception as e:
+        # The UNIQUE index is the real arbiter — the check above can lose a race
+        # with a concurrent rename or a platform-owner account creation.
+        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+            raise HTTPException(
+                status_code=409, detail="That username is already taken."
+            )
+        logger.error(f"Username change failed for {user.user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not update username")
+
+    if not updated.data:
+        raise HTTPException(status_code=404, detail="Admin account not found")
+
+    await revoke_sessions_for_user(old_username)
+
+    # Everything below is bookkeeping: the rename has already committed and the
+    # old sessions are already dead. An exception here would return a 500 to a
+    # caller whose username DID change, leaving them signed out, unaware of the
+    # new name, and unable to get back in. Match the defensive read used by
+    # delete_doctor rather than assuming request is populated.
+    client_ip = request.client.host if (request and request.client) else "unknown"
+    await log_admin_action(
+        user=user,
+        action="change_username",
+        resource_type="clinic_admin",
+        resource_id=user.user_id,
+        details={"from": old_username, "to": new_username},
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "username": new_username,
+        "relogin_required": True,
+        "message": "Username updated. Please sign in again with your new username.",
+    }
+
+
 class StaffCreate(BaseModel):
     username: str = Field(..., min_length=3)
     password: str = Field(..., min_length=8)
@@ -677,8 +891,7 @@ async def list_staff(
     query = supabase.table("clinic_admins").select(
         "id, username, role, staff_role, permissions, branch_id, is_active, created_at"
     ).eq("role", "staff")
-    if effective_clinic_id != "default":
-        query = query.eq("clinic_id", effective_clinic_id)
+    query = query.eq("clinic_id", effective_clinic_id)
     result = await sb(query.order("created_at", desc=True).limit(2000))
     return {"staff": result.data or []}
 
@@ -1225,8 +1438,7 @@ async def get_doctors(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("doctors").select("*")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query.limit(2000))
         doctors = result.data or []
 
@@ -1504,8 +1716,7 @@ async def update_doctor(
         # of the four call sites, and cannot be forgotten by the next edit.
         # unscoped: clinic_id predicate is applied conditionally on the next line
         owner_query = supabase.table("doctors").select("*").eq("id", doctor_id)
-        if effective_clinic_id != "default":
-            owner_query = owner_query.eq("clinic_id", effective_clinic_id)
+        owner_query = owner_query.eq("clinic_id", effective_clinic_id)
         owner_res = await sb(owner_query)
         if not owner_res.data:
             # 404 rather than 403: do not confirm that a doctor_id exists in
@@ -1552,8 +1763,7 @@ async def update_doctor(
         if update_data:
             # unscoped: updating doctor profile by doctor_id within verified clinic
             query = supabase.table("doctors").update(update_data)
-            if effective_clinic_id != "default":
-                query = query.eq("clinic_id", effective_clinic_id)
+            query = query.eq("clinic_id", effective_clinic_id)
             result = await sb(query.eq("id", doctor_id))
             if not result.data:
                 raise HTTPException(status_code=404, detail="Doctor not found")
@@ -1644,10 +1854,27 @@ async def delete_doctor(
                         status_code=403, detail="Doctor is not assigned to your branch."
                     )
 
+        # Read the row BEFORE deleting, inside the tenant scope. Two reasons:
+        #   1. A doctor id from another clinic now 404s instead of silently
+        #      deleting nothing (or, before the scope fix, deleting THAT row).
+        #   2. The audit log keeps the full row. This delete is a hard DELETE
+        #      and doctor_branches cascades off it, so when a live clinic's
+        #      roster was destroyed on 2026-09-01 the audit trail held only a
+        #      UUID — nothing to restore from without a database PITR.
+        existing = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            await sb(supabase.table("doctors")
+            .select("*")
+            .eq("id", doctor_id)
+            .eq("clinic_id", effective_clinic_id))
+        )
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        snapshot = existing.data[0]
+
         # unscoped: soft-deleting doctor record by doctor_id within verified clinic
         query = supabase.table("doctors").delete()
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         await sb(query.eq("id", doctor_id))
 
         client_ip = request.client.host if (request and request.client) else "unknown"
@@ -1656,6 +1883,7 @@ async def delete_doctor(
             action="delete_doctor",
             resource_type="doctor",
             resource_id=doctor_id,
+            details={"deleted_row": snapshot},
             ip_address=client_ip,
         )
         invalidate_doctor_cache(clinic_id=effective_clinic_id)
@@ -1679,8 +1907,7 @@ async def get_lab_tests_admin(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("lab_tests").select("*")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         if branch_id:
             query = query.eq("branch_id", branch_id)
         result = await sb(query.order("name").limit(2000))
@@ -1773,8 +2000,7 @@ async def update_lab_test(
 
         # unscoped: updating lab test catalog item by test_id within verified clinic
         query = supabase.table("lab_tests").update(update_data)
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query.eq("id", test_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Lab test not found")
@@ -1810,8 +2036,7 @@ async def delete_lab_test(
     try:
         # unscoped: soft-deleting lab test catalog item by test_id within verified clinic
         query = supabase.table("lab_tests").delete()
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query.eq("id", test_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Lab test not found")
@@ -2195,8 +2420,7 @@ async def get_leaves(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("doctor_leaves").select("*")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         if doctor:
             query = query.eq("doctor_name", doctor)
         result = await sb(query.order("leave_date").limit(2000))
@@ -2332,8 +2556,7 @@ async def delete_leave(
 
         # unscoped: deleting doctor leave record by leave_id within verified clinic
         query = supabase.table("doctor_leaves").delete()
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         await sb(query.eq("id", leave_id))
 
         client_ip = request.client.host if (request and request.client) else "unknown"
@@ -2362,8 +2585,7 @@ async def get_holidays(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("hospital_holidays").select("*").order("holiday_date")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query.limit(2000))
         return result.data or []
     except Exception as e:
@@ -2429,8 +2651,7 @@ async def delete_holiday(
     try:
         # unscoped: deleting hospital holiday record by holiday_id within verified clinic
         query = supabase.table("hospital_holidays").delete()
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         await sb(query.eq("holiday_date", holiday_date))
 
         # Mirror of create_holiday: without this the clinic stays shut to
@@ -2695,11 +2916,12 @@ async def get_lab_reports(
 @router.post("/lab-reports/{report_id}/resend")
 async def resend_lab_report(
     report_id: str,
+    clinic_id: str = "default",
     user: AdminUser = Depends(verify_credentials),
 ):
     """Resend a lab report to the patient with strict tenant scoping."""
     try:
-        effective_clinic_id = user.clinic_id if user.role != "super_admin" else None
+        effective_clinic_id = enforce_clinic_access(user, clinic_id)
         await LabReportService().resend_report(report_id, clinic_id=effective_clinic_id)
         return {"success": True, "message": "Report resent successfully"}
     except ValueError as e:
@@ -2719,7 +2941,14 @@ async def resend_lab_report(
 async def get_patients(
     clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)
 ):
-    """Get all patients with appointment counts."""
+    """Get all patients with appointment counts, for ONE clinic.
+
+    The platform-wide `if effective_clinic_id == "default"` branch that used to
+    live here returned every tenant's patients — names and phone numbers, i.e.
+    other clinics' PHI under the DPDP Act — to any principal whose scope
+    resolved to the sentinel. enforce_clinic_access() no longer produces that
+    sentinel, and the branch is gone rather than left unreachable.
+    """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         result = await sb(supabase.rpc(
@@ -2728,44 +2957,23 @@ async def get_patients(
         ))
         if result.data:
             return {"patients": result.data}
-        if effective_clinic_id == "default" and user.role == "super_admin":
-            # Platform-wide view. Only a super_admin can reach this branch.
-            # Before T0.1 any principal whose scope resolved to the "default"
-            # sentinel landed here and read the rows of every tenant (KRIYA-002).
-            patients = (
-                # unscoped: super_admin platform-wide view limited to 2000 rows
-                await sb(supabase.table("patients")
-                .select("*")
-                .order("phone")
-                .limit(2000))
-            )
-        else:
-            patients = (
-                # unscoped: tenant-scoped query filtered by clinic_id
-                await sb(supabase.table("patients")
-                .select("*")
-                .eq("clinic_id", effective_clinic_id)
-                .order("phone"))
-            )
+        patients = (
+            await sb(supabase.table("patients")
+            .select("*")
+            .eq("clinic_id", effective_clinic_id)
+            .order("phone")
+            .limit(2000))
+        )
         return {"patients": patients.data or []}
     except Exception:
-        # Fallback if RPC doesn't exist
-        if effective_clinic_id == "default" and user.role == "super_admin":
-            patients = (
-                # unscoped: super_admin platform-wide view limited to 2000 rows
-                await sb(supabase.table("patients")
-                .select("*")
-                .order("phone")
-                .limit(2000))
-            )
-        else:
-            patients = (
-                # unscoped: tenant-scoped query filtered by clinic_id
-                await sb(supabase.table("patients")
-                .select("*")
-                .eq("clinic_id", effective_clinic_id)
-                .order("phone"))
-            )
+        # Fallback if the RPC doesn't exist in this deployment.
+        patients = (
+            await sb(supabase.table("patients")
+            .select("*")
+            .eq("clinic_id", effective_clinic_id)
+            .order("phone")
+            .limit(2000))
+        )
         return {"patients": patients.data or []}
 
 
@@ -2857,8 +3065,7 @@ async def get_bookings(
             "appointment_date, appointment_time, status, razorpay_payment_link_id, "
             "payment_id, amount_paise, hold_expires_at, booking_ref, created_at, updated_at"
         )
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         if status:
             query = query.eq("status", status)
         result = await sb(query.order("created_at", desc=True).limit(limit))
@@ -2880,8 +3087,7 @@ async def get_pending_review_bookings(
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments").select("*").eq("status", "pending_review")
         )
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query.order("created_at", desc=True).limit(2000))
         return {"bookings": result.data or []}
     except Exception as e:
@@ -3014,22 +3220,24 @@ async def admin_refund_booking(
 @router.get("/payment-events/{booking_id}")
 async def get_payment_events(
     booking_id: str,
+    clinic_id: str = "default",
     user: AdminUser = Depends(require_admin),
 ):
     """Get the payment audit trail for a booking."""
     try:
-        # IDOR check: verify booking belongs to user's clinic unless super_admin
-        if user.role != "super_admin":
-            clinic_id = user.clinic_id or "default"
-            booking_check = (
-                # unscoped: tenant-scoped operation with verified clinic authorization
-                await sb(supabase.table("appointments")
-                .select("id")
-                .eq("id", booking_id)
-                .eq("clinic_id", clinic_id))
-            )
-            if not booking_check.data:
-                raise HTTPException(status_code=404, detail="Booking not found")
+        # IDOR check: the booking must live in the caller's active clinic.
+        # This used to be skipped for super_admin, which let a super_admin read
+        # any tenant's payment trail by guessing a booking id.
+        effective_clinic_id = enforce_clinic_access(user, clinic_id)
+        booking_check = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            await sb(supabase.table("appointments")
+            .select("id")
+            .eq("id", booking_id)
+            .eq("clinic_id", effective_clinic_id))
+        )
+        if not booking_check.data:
+            raise HTTPException(status_code=404, detail="Booking not found")
 
         # scoped: fetch payment events for verified booking
         result = (
@@ -3081,9 +3289,7 @@ async def get_payment_stats(
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
         def _scope(query):
-            if effective_clinic_id != "default":
-                return query.eq("clinic_id", effective_clinic_id)
-            return query
+            return query.eq("clinic_id", effective_clinic_id)
 
         # scoped: total confirmed with payments
         confirmed = await sb(_scope(
@@ -3234,53 +3440,16 @@ async def update_clinic_profile(
     if "is_sandbox" in updates and updates["is_sandbox"] is not None:
         row_updates["is_sandbox"] = updates["is_sandbox"]
 
-    target_clinic_id = clinic.get("id")
-    if (not target_clinic_id or target_clinic_id == "default") and user.role == "super_admin":
-        db_clinics = (
-            # unscoped: super_admin default clinic lookup
-            await sb(supabase.table("clinics")
-            .select("*")
-            .order("created_at")
-            .limit(1))
-        )
-        if db_clinics.data:
-            target_clinic_id = db_clinics.data[0]["id"]
-            result = (
-                # unscoped: super_admin updating default clinic configuration
-                await sb(supabase.table("clinics")
-                .update(row_updates)
-                .eq("id", target_clinic_id))
-            )
-            if not result.data:
-                raise HTTPException(status_code=404, detail="Clinic not found")
-            updated_clinic = result.data[0]
-        else:
-            insert_res = (
-                # unscoped: super_admin initializing default clinic record
-                await sb(supabase.table("clinics")
-                .insert({
-                    "name": row_updates.get("name") or settings.hospital_name,
-                    "whatsapp_number": settings.hospital_phone,
-                    "plan": "enterprise",
-                    "config": cfg,
-                }))
-            )
-            if not insert_res.data:
-                raise HTTPException(
-                    status_code=500, detail="Failed to initialize default clinic settings"
-                )
-            updated_clinic = insert_res.data[0]
-            target_clinic_id = updated_clinic["id"]
-    else:
-        result = (
-            # unscoped: updating clinic configuration filtered by target_clinic_id
-            await sb(supabase.table("clinics")
-            .update(row_updates)
-            .eq("id", target_clinic_id))
-        )
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Clinic not found")
-        updated_clinic = result.data[0]
+    target_clinic_id = clinic["id"]
+    result = (
+        # unscoped: updating clinic configuration filtered by target_clinic_id
+        await sb(supabase.table("clinics")
+        .update(row_updates)
+        .eq("id", target_clinic_id))
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    updated_clinic = result.data[0]
 
     invalidate_tenant_cache(updated_clinic.get("whatsapp_number"))
 
@@ -3373,55 +3542,16 @@ async def update_payment_settings(
             detail="payment_deposit_percent (1-99) is required when payment_mode is 'partial'",
         )
 
-    target_clinic_id = clinic.get("id")
-    if (not target_clinic_id or target_clinic_id == "default") and user.role == "super_admin":
-        # Check if any clinic exists in DB
-        db_clinics = (
-            # unscoped: super_admin default clinic lookup
-            await sb(supabase.table("clinics")
-            .select("*")
-            .order("created_at")
-            .limit(1))
-        )
-        if db_clinics.data:
-            target_clinic_id = db_clinics.data[0]["id"]
-            result = (
-                # unscoped: super_admin updating default clinic configuration
-                await sb(supabase.table("clinics")
-                .update({"config": cfg})
-                .eq("id", target_clinic_id))
-            )
-            if not result.data:
-                raise HTTPException(status_code=404, detail="Clinic not found")
-            updated_clinic = result.data[0]
-        else:
-            # First-time setup: initialize default clinic record
-            insert_res = (
-                # unscoped: super_admin initializing default clinic record
-                await sb(supabase.table("clinics")
-                .insert({
-                    "name": settings.hospital_name,
-                    "whatsapp_number": settings.hospital_phone,
-                    "plan": "enterprise",
-                    "config": cfg,
-                }))
-            )
-            if not insert_res.data:
-                raise HTTPException(
-                    status_code=500, detail="Failed to initialize default clinic settings"
-                )
-            updated_clinic = insert_res.data[0]
-            target_clinic_id = updated_clinic["id"]
-    else:
-        result = (
-            # unscoped: updating clinic configuration filtered by target_clinic_id
-            await sb(supabase.table("clinics")
-            .update({"config": cfg})
-            .eq("id", target_clinic_id))
-        )
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Clinic not found")
-        updated_clinic = result.data[0]
+    target_clinic_id = clinic["id"]
+    result = (
+        # unscoped: updating clinic configuration filtered by target_clinic_id
+        await sb(supabase.table("clinics")
+        .update({"config": cfg})
+        .eq("id", target_clinic_id))
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    updated_clinic = result.data[0]
 
     invalidate_tenant_cache(updated_clinic.get("whatsapp_number"))
 
@@ -3475,8 +3605,7 @@ async def get_connectors(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("integration_connectors").select("*")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         if branch_id:
             query = query.eq("branch_id", branch_id)
         result = await sb(query.order("created_at", desc=True).limit(2000))
@@ -3706,12 +3835,12 @@ async def _load_connector_for_action(connector_id: str, user: "AdminUser", clini
         # unscoped: tenant-scoped operation with verified clinic authorization
         await sb(supabase.table("integration_connectors")
         .select("*")
-        .eq("id", connector_id))
+        .eq("id", connector_id)
+        .eq("clinic_id", effective_clinic_id))
     )
     if not row.data:
         raise HTTPException(status_code=404, detail="Connector not found")
     connector = row.data[0]
-    enforce_clinic_access(user, connector["clinic_id"])
     enforce_branch_scope(user, connector.get("branch_id"))
     return connector
 
@@ -3925,8 +4054,7 @@ async def get_connector_failed_reports(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("connector_failed_reports").select("*")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         if branch_id:
             query = query.eq("branch_id", branch_id)
         if unresolved_only:
@@ -3952,8 +4080,7 @@ async def resolve_connector_failed_report(
         query = supabase.table("connector_failed_reports").update(
             {"resolved_at": datetime.now().isoformat()}
         ).eq("id", failed_report_id)
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query)
         if not result.data:
             raise HTTPException(status_code=404, detail="Failed report not found")
@@ -3996,8 +4123,7 @@ async def get_diagnostic_reports_queue(
         # 1. Fetch lab_reports in needs_review or failed
         # unscoped: tenant-scoped operation with verified clinic authorization
         lr_query = supabase.table("lab_reports").select("*")
-        if effective_clinic_id != "default":
-            lr_query = lr_query.eq("clinic_id", effective_clinic_id)
+        lr_query = lr_query.eq("clinic_id", effective_clinic_id)
 
         if status_filter == "needs_review":
             lr_query = lr_query.eq("status", "needs_review")
@@ -4012,8 +4138,7 @@ async def get_diagnostic_reports_queue(
         # 2. Fetch connector_failed_reports that are unresolved
         # unscoped: tenant-scoped operation with verified clinic authorization
         cfr_query = supabase.table("connector_failed_reports").select("*").is_("resolved_at", "null")
-        if effective_clinic_id != "default":
-            cfr_query = cfr_query.eq("clinic_id", effective_clinic_id)
+        cfr_query = cfr_query.eq("clinic_id", effective_clinic_id)
         if target_branch:
             cfr_query = cfr_query.eq("branch_id", target_branch)
         cfr_res = await sb(cfr_query.order("last_attempt_at", desc=True).limit(50))
@@ -4045,12 +4170,12 @@ async def resolve_report_match(
         # unscoped: tenant-scoped operation with verified clinic authorization
         await sb(supabase.table("lab_reports")
         .select("*")
-        .eq("id", report_id))
+        .eq("id", report_id)
+        .eq("clinic_id", effective_clinic_id))
     )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Report not found")
     report = existing.data[0]
-    enforce_clinic_access(user, report["clinic_id"])
 
     norm_phone = normalize_phone(body.patient_phone)
     if not validate_phone(norm_phone):
@@ -4088,7 +4213,9 @@ async def resolve_report_match(
             # scoped: update lab report queue item
             # unscoped: update lab report queue item
             await sb(supabase.table("lab_reports").update(update_payload).eq("id", report_id))
-            await lab_service.resend_report(report_id, new_phone=norm_phone)
+            await lab_service.resend_report(
+                report_id, new_phone=norm_phone, clinic_id=effective_clinic_id
+            )
             update_payload["status"] = "sent"
         except Exception as e:
             logger.error(f"Failed to resend resolved report {report_id}: {e}")
@@ -4148,15 +4275,13 @@ async def release_held_walkin_reports(
     limit = max(1, min(int(limit or 200), 500))
 
     query = (
-        # unscoped: conditional_scope_below
         supabase.table("lab_reports")
         .select("id, patient_phone, file_path, report_name, match_source, status")
         .eq("status", "needs_review")
         .eq("match_source", "moc_doc_only")
+        .eq("clinic_id", effective_clinic_id)
         .limit(limit)
     )
-    if effective_clinic_id != "default":
-        query = query.eq("clinic_id", effective_clinic_id)
 
     try:
         held = await sb(query)
@@ -4226,7 +4351,7 @@ async def release_held_walkin_reports(
 
 
 @router.post("/reports/{report_id}/resend")
-async def resend_lab_report(
+async def resend_lab_report_from_queue(
     report_id: str,
     body: Optional[ResendReportRequest] = None,
     clinic_id: str = "default",
@@ -4240,12 +4365,12 @@ async def resend_lab_report(
         # unscoped: tenant-scoped operation with verified clinic authorization
         await sb(supabase.table("lab_reports")
         .select("*")
-        .eq("id", report_id))
+        .eq("id", report_id)
+        .eq("clinic_id", effective_clinic_id))
     )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Report not found")
     report = existing.data[0]
-    enforce_clinic_access(user, report["clinic_id"])
 
     new_phone = body.new_phone if body and body.new_phone else None
     if new_phone:
@@ -4255,7 +4380,9 @@ async def resend_lab_report(
 
     lab_service = LabReportService()
     try:
-        res = await lab_service.resend_report(report_id, new_phone=new_phone)
+        res = await lab_service.resend_report(
+            report_id, new_phone=new_phone, clinic_id=effective_clinic_id
+        )
     except Exception as e:
         logger.error(f"Resend failed for report {report_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to resend report: {str(e)}")
@@ -4305,8 +4432,7 @@ async def get_lab_report_deliveries(
         try:
             # unscoped: tenant-scoped operation with verified clinic authorization
             query = supabase.table("lab_reports").select(cols)
-            if effective_clinic_id != "default":
-                query = query.eq("clinic_id", effective_clinic_id)
+            query = query.eq("clinic_id", effective_clinic_id)
             res = await sb(query.order("uploaded_at", desc=True).limit(2000))
             all_records = res.data or []
         except Exception:
@@ -4314,15 +4440,13 @@ async def get_lab_report_deliveries(
             try:
                 # unscoped: tenant-scoped operation with verified clinic authorization
                 query = supabase.table("lab_reports").select("*")
-                if effective_clinic_id != "default":
-                    query = query.eq("clinic_id", effective_clinic_id)
+                query = query.eq("clinic_id", effective_clinic_id)
                 res = await sb(query.order("uploaded_at", desc=True).limit(2000))
                 all_records = res.data or []
             except Exception:
                 # unscoped: tenant-scoped operation with verified clinic authorization
                 query = supabase.table("lab_reports").select("*")
-                if effective_clinic_id != "default":
-                    query = query.eq("clinic_id", effective_clinic_id)
+                query = query.eq("clinic_id", effective_clinic_id)
                 res = await sb(query.limit(2000))
                 all_records = res.data or []
 
@@ -4435,8 +4559,7 @@ async def get_diagnostic_stats(
             .select("id, status, uploaded_at, sent_at, ai_summary, ai_summary_sent")
             .gte("uploaded_at", today_start)
         )
-        if effective_clinic_id != "default":
-            lr_query = lr_query.eq("clinic_id", effective_clinic_id)
+        lr_query = lr_query.eq("clinic_id", effective_clinic_id)
 
         lr_res = await sb(lr_query.order("uploaded_at", desc=True).limit(5000))
         today_reports = lr_res.data or []
@@ -4460,8 +4583,7 @@ async def get_diagnostic_stats(
         def _count(table: str, apply) -> int:
             # unscoped: tenant-scoped operation with verified clinic authorization
             q = supabase.table(table).select("id", count="exact")
-            if effective_clinic_id != "default":
-                q = q.eq("clinic_id", effective_clinic_id)
+            q = q.eq("clinic_id", effective_clinic_id)
             return apply(q).limit(1).execute().count or 0
 
         needs_review_total = _count(
@@ -4488,8 +4610,7 @@ async def get_diagnostic_stats(
         # 2. Connector status
         # unscoped: tenant-scoped operation with verified clinic authorization
         conn_query = supabase.table("integration_connectors").select("*")
-        if effective_clinic_id != "default":
-            conn_query = conn_query.eq("clinic_id", effective_clinic_id)
+        conn_query = conn_query.eq("clinic_id", effective_clinic_id)
         if target_branch:
             conn_query = conn_query.eq("branch_id", target_branch)
         conn_res = await sb(conn_query)
@@ -4610,8 +4731,7 @@ async def get_admin_audit_logs(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("admin_audit_logs").select("*")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query.order("created_at", desc=True).limit(limit))
         return {"audit_logs": result.data or []}
     except Exception as e:
@@ -4632,8 +4752,7 @@ async def get_branches(
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("branches").select("*")
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         query = query.order("display_order").limit(2000)
         result = await sb(query)
         return {"branches": result.data or []}
@@ -4754,8 +4873,7 @@ async def update_branch(
 
         # unscoped: updating branch configuration by branch_id within verified clinic
         query = supabase.table("branches").update(update_data)
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         result = await sb(query.eq("id", branch_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Branch not found")
@@ -4798,8 +4916,7 @@ async def delete_branch(
             if dep.data:
                 # unscoped: updating branch configuration by branch_id within verified clinic
                 query = supabase.table("branches").update({"is_active": False})
-                if effective_clinic_id != "default":
-                    query = query.eq("clinic_id", effective_clinic_id)
+                query = query.eq("clinic_id", effective_clinic_id)
                 await sb(query.eq("id", branch_id))
                 invalidate_branch_cache(effective_clinic_id)
                 await log_admin_action(
@@ -4822,8 +4939,7 @@ async def delete_branch(
 
         # unscoped: deleting branch record by branch_id within verified clinic
         query = supabase.table("branches").delete()
-        if effective_clinic_id != "default":
-            query = query.eq("clinic_id", effective_clinic_id)
+        query = query.eq("clinic_id", effective_clinic_id)
         await sb(query.eq("id", branch_id))
         invalidate_branch_cache(effective_clinic_id)
         await log_admin_action(
@@ -4844,10 +4960,12 @@ async def delete_branch(
 @router.get("/branches/{branch_id}/doctors")
 async def get_branch_doctors(
     branch_id: str,
+    clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Get doctors assigned to a specific branch."""
-    resolve_owned_branch(user, branch_id)
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    resolve_owned_branch(user, branch_id, effective_clinic_id)
     try:
         result = (
         # unscoped: doctor branch association
@@ -4868,17 +4986,21 @@ async def assign_doctor_to_branch(
     branch_id: str,
     body: DoctorBranchAssign,
     request: Request,
+    clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Assign a doctor to a branch with session control."""
-    branch = resolve_owned_branch(user, branch_id)
-    branch_clinic_id = branch.get("clinic_id")
+    branch_clinic_id = enforce_clinic_access(user, clinic_id)
+    resolve_owned_branch(user, branch_id, branch_clinic_id)
 
     # Verify doctor exists and belongs to the branch's clinic
     # unscoped: tenant-scoped operation with verified clinic authorization
-    doc_query = supabase.table("doctors").select("id").eq("id", body.doctor_id)
-    if branch_clinic_id:
-        doc_query = doc_query.eq("clinic_id", branch_clinic_id)
+    doc_query = (
+        supabase.table("doctors")
+        .select("id")
+        .eq("id", body.doctor_id)
+        .eq("clinic_id", branch_clinic_id)
+    )
     doc_res = await sb(doc_query)
     if not doc_res.data:
         raise HTTPException(status_code=404, detail="Doctor not found in this clinic")
@@ -4921,10 +5043,11 @@ async def remove_doctor_from_branch(
     branch_id: str,
     doctor_id: str,
     request: Request,
+    clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Remove a doctor from a branch."""
-    branch = resolve_owned_branch(user, branch_id)
+    branch = resolve_owned_branch(user, branch_id, enforce_clinic_access(user, clinic_id))
     try:
         # unscoped: doctor branch association
         await sb(supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
@@ -4957,10 +5080,11 @@ async def update_doctor_branch_session(
     doctor_id: str,
     body: DoctorBranchAssign,
     request: Request,
+    clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Update a doctor's session assignment at a branch."""
-    branch = resolve_owned_branch(user, branch_id)
+    branch = resolve_owned_branch(user, branch_id, enforce_clinic_access(user, clinic_id))
     try:
         result = (
         # unscoped: doctor branch association
@@ -5016,25 +5140,13 @@ async def get_messaging_usage(
         from app.services.message_accounting import get_clinic_usage
 
         # Determine and enforce which clinic this admin belongs to
-        effective_clinic_id = enforce_clinic_access(user, clinic_id) if clinic_id else user.clinic_id
-        plan_name = "essential"  # default
-
-        if effective_clinic_id and effective_clinic_id != "default":
-            # Fetch clinic plan from database
-            try:
-                clinic_data = await get_clinic_by_id(effective_clinic_id)
-                plan_name = clinic_data.get("plan", "essential")
-            except Exception:
-                pass
-        elif user.role == "super_admin":
-            effective_clinic_id = "default"
-
-        if (not effective_clinic_id or effective_clinic_id == "default") and user.role == "super_admin":
-            return {
-                "message": "Super admin: use /platform/messaging-usage for platform-wide view. "
-                           "Specify clinic_id query parameter for per-clinic usage.",
-                "plan": "N/A",
-            }
+        effective_clinic_id = enforce_clinic_access(user, clinic_id)
+        plan_name = "essential"
+        try:
+            clinic_data = await get_clinic_by_id(effective_clinic_id)
+            plan_name = clinic_data.get("plan", "essential")
+        except Exception:
+            pass
 
         usage = await get_clinic_usage(effective_clinic_id, plan_name)
 

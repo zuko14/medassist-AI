@@ -868,6 +868,9 @@
             <div class="nav-link" onclick="toggleTheme()" id="themeToggleBtn" role="button" aria-label="Switch to light theme" tabindex="0">
                 <span class="ico" id="themeToggleIcon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></span> <span id="themeToggleLabel">Dark Mode</span>
             </div>
+            <div class="nav-link" id="changeUsernameNav" onclick="openChangeUsername()" role="button" aria-label="Change username" tabindex="0">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span> Change Username
+            </div>
             <div class="nav-link" onclick="openChangePassword()" role="button" aria-label="Change password" tabindex="0">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span> Change Password
             </div>
@@ -1966,6 +1969,34 @@
     </div>
 </div>
 
+<!-- ═══ CHANGE USERNAME MODAL ═══ -->
+<div class="modal-overlay" id="changeUsernameModal">
+    <div class="modal" style="max-width:420px">
+        <h3>Change Username</h3>
+        <div id="changeUsernameError"></div>
+        <p style="font-size:.85rem; opacity:.75; margin:.25rem 0 1rem;">
+            Signed in as <strong id="cuCurrentName"></strong>. Choosing a new
+            username signs you out — sign back in with the new one.
+        </p>
+        <div class="field">
+            <label>New Username</label>
+            <input type="text" id="cuNew" placeholder="3-64 characters" autocomplete="username"
+                   spellcheck="false" autocapitalize="none">
+        </div>
+        <div class="field">
+            <label>Current Password</label>
+            <div class="pwd-field">
+                <input type="password" id="cuPassword" placeholder="Confirm it's you">
+                <button type="button" class="pwd-toggle" onclick="togglePwd('cuPassword', this)" aria-label="Show password">👁</button>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeChangeUsername()">Cancel</button>
+            <button class="btn btn-accent" id="cuSubmitBtn" onclick="submitChangeUsername()">Update Username</button>
+        </div>
+    </div>
+</div>
+
 <!-- ═══ CHANGE PASSWORD MODAL ═══ -->
 <div class="modal-overlay" id="changePasswordModal">
     <div class="modal" style="max-width:420px">
@@ -2040,6 +2071,13 @@ async function releaseHeldWalkins() {
 // T0.1d: real clinic scope, sourced from the server via /admin/me.
 // 'default' is the platform-wide sentinel, honoured only for super_admin.
 let CLINIC_SCOPE = 'default';
+//: clinic id -> display name, for the super-admin scope pill.
+let clinicScopeNames = {};
+//: our own username, shown in the rename dialog.
+let myUsername = '';
+//: true for env-credential logins, which have no clinic_admins row and so
+//: cannot change their own username or password.
+let myEnvAccount = false;
 let doctorCache = [];
 
 const DEPARTMENT_OPTIONS = [
@@ -2212,6 +2250,11 @@ function applyFeatureVisibility() {
         }
     });
 
+    // Env-credential accounts (super_admin / platform owner from settings) have
+    // no database row to update, so these two actions can only return a 400.
+    document.querySelectorAll('#changeUsernameNav, [aria-label="Change password"]')
+        .forEach(el => { el.style.display = myEnvAccount ? 'none' : ''; });
+
     const docForm = document.getElementById('docFormCard');
     if (docForm) docForm.style.display = hasPermission('DOCTORS_CREATE') ? '' : 'none';
     const leaveForm = document.getElementById('leaveFormCard');
@@ -2252,31 +2295,148 @@ async function login() {
         return;
     }
 
-    api('/admin/stats?days=30').then(data => {
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('app').classList.add('open');
-        renderDashboard(data);
-        loadDoctorsSilent();
-        fetchNotificationCount();
-        startNotificationPolling();
-        api('/admin/me').then(me => {
-            CLINIC_SCOPE = me.clinic_id || 'default';
-            myPlan = me.plan;
-            myFeatures = me.features; // null for super_admin
-            myRole = me.role;
-            myPermissions = me.permissions || [];
-            myBranchId = me.branch_id || null;
-            myStaffRole = me.staff_role || null;
-            applyFeatureVisibility();
-            if (myPlan === 'diagstream') {
-                loadDiagnosticDashboard();
-            }
-        }).catch(() => {});
-    }).catch(() => {
+    // Identity FIRST. Every other /admin call needs a resolved clinic scope,
+    // and a super_admin has none until they choose one.
+    let me;
+    try {
+        me = await api('/admin/me');
+    } catch (e) {
         auth = '';
         document.getElementById('loginError').innerHTML =
             '<div class="alert alert-err">Invalid username or password</div>';
+        return;
+    }
+
+    myPlan = me.plan;
+    myFeatures = me.features; // null for super_admin
+    myRole = me.role;
+    myPermissions = me.permissions || [];
+    myBranchId = me.branch_id || null;
+    myStaffRole = me.staff_role || null;
+    myUsername = me.username || '';
+    myEnvAccount = !!me.env_account;
+    CLINIC_SCOPE = me.clinic_id || 'default';
+
+    if (!me.clinic_id) {
+        // Super-admin: no clinic of their own. Ask which tenant they are
+        // acting on rather than letting the request go out unscoped.
+        let remembered = null;
+        try { remembered = sessionStorage.getItem('kriya_clinic_scope'); } catch (e) {}
+        const picked = remembered || await promptForClinic();
+        if (!picked) { auth = ''; return; }
+        CLINIC_SCOPE = picked;
+        try { sessionStorage.setItem('kriya_clinic_scope', picked); } catch (e) {}
+    }
+
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').classList.add('open');
+    applyFeatureVisibility();
+    renderClinicScopeBanner();
+
+    try {
+        renderDashboard(await api('/admin/stats?days=30'));
+    } catch (e) {
+        console.error('Dashboard load failed for clinic', CLINIC_SCOPE, e);
+    }
+    loadDoctorsSilent();
+    fetchNotificationCount();
+    startNotificationPolling();
+    if (myPlan === 'diagstream') loadDiagnosticDashboard();
+}
+
+// Blocking clinic chooser for accounts with no clinic of their own.
+// Resolves to a clinic id, or null if the user cancels.
+async function promptForClinic() {
+    let clinics = [];
+    try {
+        clinics = (await api('/admin/clinics')).clinics || [];
+    } catch (e) {
+        document.getElementById('loginError').innerHTML =
+            '<div class="alert alert-err">Could not load the clinic list.</div>';
+        return null;
+    }
+    if (!clinics.length) {
+        document.getElementById('loginError').innerHTML =
+            '<div class="alert alert-err">No clinics exist yet. Create one from the platform panel.</div>';
+        return null;
+    }
+    clinics.forEach(c => { if (c.name) clinicScopeNames[c.id] = c.name; });
+    if (clinics.length === 1) return clinics[0].id;
+
+    return new Promise(resolve => {
+        const opts = clinics.map(c =>
+            `<option value="${esc(c.id)}">${esc(c.name)}` +
+            `${c.is_sandbox ? ' (test)' : ''}` +
+            `${c.whatsapp_number ? ' — ' + esc(c.whatsapp_number) : ''}</option>`
+        ).join('');
+        const wrap = document.createElement('div');
+        wrap.id = 'clinicPickerOverlay';
+        wrap.style.cssText =
+            'position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.6);' +
+            'display:flex; align-items:center; justify-content:center; padding:1rem;';
+        wrap.innerHTML =
+            '<div style="background:var(--surface,#fff); color:var(--text,#111); border-radius:14px;' +
+            'padding:1.5rem; max-width:440px; width:100%; box-shadow:0 10px 40px rgba(0,0,0,.35);">' +
+            '<h2 style="margin:0 0 .35rem; font-size:1.05rem;">Choose a clinic</h2>' +
+            '<p style="margin:0 0 1rem; font-size:.85rem; opacity:.75;">' +
+            'This panel acts on one clinic at a time. Everything you view or change ' +
+            'applies only to the clinic you pick here.</p>' +
+            '<select id="clinicPickerSel" style="width:100%; padding:.6rem; border-radius:8px;' +
+            'border:1px solid var(--border,#ccc); background:inherit; color:inherit;">' + opts + '</select>' +
+            '<button id="clinicPickerGo" style="margin-top:1rem; width:100%; padding:.65rem;' +
+            'border:0; border-radius:8px; background:#2563eb; color:#fff; font-weight:600; cursor:pointer;">' +
+            'Continue</button></div>';
+        document.body.appendChild(wrap);
+        wrap.querySelector('#clinicPickerGo').onclick = () => {
+            const v = wrap.querySelector('#clinicPickerSel').value;
+            wrap.remove();
+            resolve(v || null);
+        };
     });
+}
+
+// Standing reminder of which tenant is being edited, so a super-admin can
+// never mistake one clinic's panel for another's.
+function renderClinicScopeBanner() {
+    if (myRole !== 'super_admin') return;
+    let el = document.getElementById('clinicScopeBanner');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'clinicScopeBanner';
+        // Fixed to the viewport, not inserted into #app: .app is a flex row
+        // (fixed sidebar + main), so a child there would fight for width.
+        el.style.cssText =
+            'position:fixed; right:12px; bottom:12px; z-index:900;' +
+            'padding:.4rem .7rem; border-radius:999px; background:#b45309;' +
+            'color:#fff; font-size:.75rem; font-weight:600; display:flex;' +
+            'align-items:center; gap:.5rem; box-shadow:0 2px 10px rgba(0,0,0,.3);' +
+            'max-width:min(92vw,420px);';
+        document.body.appendChild(el);
+    }
+    const label = (clinicScopeNames[CLINIC_SCOPE] || CLINIC_SCOPE);
+    el.innerHTML =
+        '<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
+        'Super-admin - editing ' + esc(label) + '</span>' +
+        '<button onclick="switchClinic()" style="background:rgba(255,255,255,.25);' +
+        'border:0; color:#fff; padding:.2rem .55rem; border-radius:999px;' +
+        'cursor:pointer; font:inherit; flex:0 0 auto;">Switch</button>';
+}
+
+async function switchClinic() {
+    const picked = await promptForClinic();
+    if (!picked || picked === CLINIC_SCOPE) return;
+    CLINIC_SCOPE = picked;
+    try { sessionStorage.setItem('kriya_clinic_scope', picked); } catch (e) {}
+    renderClinicScopeBanner();
+    doctorCache = [];
+    try {
+        renderDashboard(await api('/admin/stats?days=30'));
+    } catch (e) {
+        console.error('Dashboard load failed for clinic', CLINIC_SCOPE, e);
+    }
+    loadDoctorsSilent();
+    fetchNotificationCount();
+    if (myPlan === 'diagstream') loadDiagnosticDashboard();
 }
 
 function logout() {
@@ -2287,12 +2447,16 @@ function logout() {
     fetch(API + '/admin/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
     auth = '';
     CLINIC_SCOPE = 'default';
+    try { sessionStorage.removeItem('kriya_clinic_scope'); } catch (e) {}
+    const scopeBanner = document.getElementById('clinicScopeBanner');
+    if (scopeBanner) scopeBanner.remove();
     myPlan = null;
     myFeatures = null;
     myRole = null;
     myPermissions = [];
     myBranchId = null;
     myStaffRole = null;
+    myUsername = '';
     doctorCache = [];
     document.getElementById('app').classList.remove('open');
     document.getElementById('loginScreen').style.display = '';
@@ -2306,6 +2470,94 @@ function togglePwd(inputId, btn) {
     input.type = showing ? 'password' : 'text';
     btn.textContent = showing ? '👁' : '🙈';
     btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+}
+
+function openChangeUsername() {
+    document.getElementById('cuNew').value = '';
+    document.getElementById('cuPassword').value = '';
+    document.getElementById('changeUsernameError').innerHTML = '';
+    document.getElementById('cuCurrentName').textContent = myUsername || '(unknown)';
+    document.getElementById('changeUsernameModal').classList.add('open');
+}
+
+function closeChangeUsername() {
+    document.getElementById('changeUsernameModal').classList.remove('open');
+}
+
+async function submitChangeUsername() {
+    const new_username = document.getElementById('cuNew').value.trim();
+    const current_password = document.getElementById('cuPassword').value;
+
+    if (!new_username || !current_password) {
+        msg('changeUsernameError', 'Enter a new username and your current password.', true);
+        return;
+    }
+    if (new_username === myUsername) {
+        msg('changeUsernameError', 'That is already your username.', true);
+        return;
+    }
+    // Mirror the server's rule so a typo is caught before a round trip. The
+    // server re-validates — this is convenience, not the boundary.
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(new_username) || new_username.length < 3) {
+        msg('changeUsernameError',
+            'Use 3-64 letters, numbers, dot, underscore or hyphen, starting and ending with a letter or number.',
+            true);
+        return;
+    }
+
+    const btn = document.getElementById('cuSubmitBtn');
+    btn.disabled = true;
+    try {
+        const r = await fetch(API + '/admin/change-username', {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ current_password, new_username })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            msg('changeUsernameError', esc(detailText(data) || 'Could not change username.'), true);
+            return;
+        }
+        closeChangeUsername();
+        // The server revoked every session for the OLD username, so this tab's
+        // cookie is already dead. Returning to the login screen is the honest
+        // outcome; leaving the panel open would 401 on the next click.
+        forceRelogin('Username changed to ' + new_username + '. Please sign in again.');
+    } catch (e) {
+        msg('changeUsernameError', 'Network error - please try again.', true);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+//: FastAPI returns 422 validation errors as a list of objects, not a string;
+//: rendering those raw shows "[object Object]" to the user.
+function detailText(data) {
+    const d = data && data.detail;
+    if (!d) return '';
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) return d.map(e => (e && e.msg) || '').filter(Boolean).join(' ');
+    return '';
+}
+
+//: A credential change revokes every server-side session for that account, so
+//: the panel must return to the login screen instead of sitting there with a
+//: dead cookie and failing on the next request.
+function forceRelogin(message) {
+    stopNotificationPolling();
+    auth = '';
+    CLINIC_SCOPE = 'default';
+    try { sessionStorage.removeItem('kriya_clinic_scope'); } catch (e) {}
+    const scopeBanner = document.getElementById('clinicScopeBanner');
+    if (scopeBanner) scopeBanner.remove();
+    myUsername = '';
+    doctorCache = [];
+    document.getElementById('app').classList.remove('open');
+    document.getElementById('loginScreen').style.display = '';
+    document.getElementById('loginUser').value = '';
+    document.getElementById('loginPass').value = '';
+    document.getElementById('loginError').innerHTML =
+        '<div class="alert alert-ok">' + esc(message) + '</div>';
 }
 
 function openChangePassword() {
@@ -2346,11 +2598,14 @@ async function submitChangePassword() {
         });
         const data = await r.json();
         if (!r.ok) {
-            msg('changePasswordError', esc(data.detail || 'Failed to change password.'), true);
+            msg('changePasswordError', esc(detailText(data) || 'Failed to change password.'), true);
             return;
         }
         closeChangePassword();
-        toast('Password updated successfully.');
+        // change_password revokes every session for this account server-side
+        // (AUDIT-P1-2). Without this the panel stayed open on a dead cookie and
+        // every later click failed with an unexplained 401.
+        forceRelogin('Password updated. Please sign in again.');
     } catch (e) {
         msg('changePasswordError', 'Network error — please try again.', true);
     }
@@ -2391,14 +2646,26 @@ document.querySelectorAll('.nav-link[tabindex]').forEach(link => {
 });
 
 // ═══════ API HELPERS ═══════
+// Every /admin endpoint operates on exactly ONE clinic, named by ?clinic_id.
+// Only 7 of ~80 call sites used to send it; the rest fell through to the
+// server's "default" sentinel, which meant NO tenant filter — a super_admin
+// saw and could delete every tenant's rows from what looked like one clinic's
+// panel. The scope now goes on centrally so no call site can forget it.
+function withScope(path) {
+    if (!CLINIC_SCOPE || CLINIC_SCOPE === 'default') return path;
+    if (/[?&]clinic_id=/.test(path)) return path;
+    return path + (path.includes('?') ? '&' : '?') +
+        'clinic_id=' + encodeURIComponent(CLINIC_SCOPE);
+}
+
 async function api(path) {
-    const r = await fetch(API + path, { headers: authHeaders() });
+    const r = await fetch(API + withScope(path), { headers: authHeaders() });
     if (!r.ok) throw new Error(r.status);
     return r.json();
 }
 
 async function apiPost(path, body) {
-    const r = await fetch(API + path, {
+    const r = await fetch(API + withScope(path), {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
@@ -2409,7 +2676,7 @@ async function apiPost(path, body) {
 }
 
 async function apiPut(path, body) {
-    const r = await fetch(API + path, {
+    const r = await fetch(API + withScope(path), {
         method: 'PUT',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
@@ -2420,7 +2687,7 @@ async function apiPut(path, body) {
 }
 
 async function apiDel(path) {
-    const r = await fetch(API + path, { method: 'DELETE', headers: authHeaders() });
+    const r = await fetch(API + withScope(path), { method: 'DELETE', headers: authHeaders() });
     if (!r.ok) throw new Error(r.status);
 }
 
@@ -3029,7 +3296,7 @@ async function cancelAppt(id) {
     const ok = await confirmDialog('Cancel this appointment?', { okText: 'Cancel Appointment', danger: true });
     if (!ok) return;
     try {
-        const r = await fetch(API + '/admin/appointments/' + id, {
+        const r = await fetch(API + withScope('/admin/appointments/' + id), {
             method: 'DELETE',
             headers: authHeaders()
         });
@@ -3221,6 +3488,9 @@ async function submitLabReport() {
     fd.append('patient_name', name);
     fd.append('report_name', reportName);
     fd.append('report_type', reportType);
+    // clinic_id is a Form field on this endpoint, not a query param, so
+    // withScope() cannot supply it — send it with the rest of the form.
+    fd.append('clinic_id', CLINIC_SCOPE);
 
     try {
         const r = await fetch(API + '/admin/lab-reports/upload', {
@@ -3248,7 +3518,7 @@ async function resendReport(id) {
     const ok = await confirmDialog('Resend this report to the patient?', { okText: 'Resend' });
     if (!ok) return;
     try {
-        const r = await fetch(API + '/admin/lab-reports/' + id + '/resend', {
+        const r = await fetch(API + withScope('/admin/lab-reports/' + id + '/resend'), {
             method: 'POST',
             headers: authHeaders()
         });
@@ -3491,7 +3761,7 @@ async function submitLabTestCsv() {
     const resEl = document.getElementById('labCsvResults');
 
     try {
-        const resp = await fetch(API + '/admin/lab-tests/import-csv', {
+        const resp = await fetch(API + withScope('/admin/lab-tests/import-csv'), {
             method: 'POST',
             headers: authHeaders(),
             body: formData,
@@ -3702,7 +3972,7 @@ async function deactivateRx(id) {
     const ok = await confirmDialog('Deactivate this prescription reminder?', { okText: 'Deactivate', danger: true });
     if (!ok) return;
     try {
-        const r = await fetch(API + '/admin/prescriptions/' + id + '/deactivate', {
+        const r = await fetch(API + withScope('/admin/prescriptions/' + id + '/deactivate'), {
             method: 'POST',
             headers: authHeaders()
         });
@@ -5222,7 +5492,7 @@ function stopNotificationPolling() {
 async function fetchNotificationCount() {
     if (!auth) return;
     try {
-        const res = await fetch(API + '/admin/notifications/unread-count', {
+        const res = await fetch(API + withScope('/admin/notifications/unread-count'), {
             headers: authHeaders()
         });
         if (!res.ok) return;
@@ -5260,7 +5530,7 @@ async function fetchNotificationsList() {
     listEl.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text3); font-size:0.85rem;"><div class="spin"></div>Loading broadcasts...</div>';
 
     try {
-        const res = await fetch(API + '/admin/notifications?limit=30', {
+        const res = await fetch(API + withScope('/admin/notifications?limit=30'), {
             headers: authHeaders()
         });
         if (!res.ok) {
@@ -5306,7 +5576,7 @@ async function fetchNotificationsList() {
 
 async function markNotificationRead(notifId) {
     try {
-        const res = await fetch(API + `/admin/notifications/${notifId}/read`, {
+        const res = await fetch(API + withScope(`/admin/notifications/${notifId}/read`), {
             method: 'PATCH',
             headers: authHeaders()
         });
@@ -5321,7 +5591,7 @@ async function markNotificationRead(notifId) {
 
 async function markAllNotificationsRead() {
     try {
-        const res = await fetch(API + '/admin/notifications/mark-all-read', {
+        const res = await fetch(API + withScope('/admin/notifications/mark-all-read'), {
             method: 'POST',
             headers: authHeaders()
         });

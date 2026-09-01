@@ -240,6 +240,7 @@ class MessageQueueManager:
                 # Write to failed_messages on failure
                 try:
                     import json
+                    # unscoped: insert_scoped_by_payload
                     await sb(supabase.table("failed_messages").insert(
                         {
                             "phone": phone,
@@ -268,6 +269,7 @@ class MessageQueueManager:
                 # Also insert into dead-letter queue table for operator dashboard
                 try:
                     import json
+                    # unscoped: insert_scoped_by_payload
                     await sb(supabase.table("failed_messages").insert(
                         {
                             "phone": phone,
@@ -293,8 +295,12 @@ class MessageQueueManager:
         self, message_id: str, clinic_id: Optional[str] = None
     ) -> bool:
         """Replay a dead-letter message with tenant authorization check."""
-        from app.database import supabase
+        from app.database import supabase, is_valid_clinic_scope
         from datetime import datetime, timezone
+
+        if not is_valid_clinic_scope(clinic_id):
+            logger.warning("Replay rejected: no clinic scope supplied")
+            return False
 
         try:
             query = (
@@ -302,9 +308,8 @@ class MessageQueueManager:
                 .select("*")
                 .eq("message_id", message_id)
                 .in_("status", ["dead_letter", "failed_retryable"])
+                .eq("clinic_id", clinic_id)
             )
-            if clinic_id:
-                query = query.eq("clinic_id", clinic_id)
             res = await sb(query)
 
             if not res.data:

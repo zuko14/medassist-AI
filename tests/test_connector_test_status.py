@@ -16,10 +16,19 @@ from app.routers.admin import test_connector_status as get_test_status
 
 
 def _mock_supabase(connector_row):
-    mock_sb = MagicMock()
+    """Self-chaining builder: .eq() returns itself, so the mock keeps working
+    however many predicates the query adds. The connector lookup is now scoped
+    by BOTH id and clinic_id; a fixed-depth mock silently returned a MagicMock
+    instead of the row."""
+    chain = MagicMock()
+    chain.eq.return_value = chain
+    chain.execute.return_value = MagicMock(data=[connector_row])
+
     mock_table = MagicMock()
-    mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[connector_row])
-    mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[connector_row])
+    mock_table.select.return_value = chain
+    mock_table.update.return_value = chain
+
+    mock_sb = MagicMock()
     mock_sb.table.return_value = mock_table
     return mock_sb
 
