@@ -1218,8 +1218,17 @@ class PaymentService:
                              a canonical key derived from booking_id and payment_id
                              is used to ensure retries do not trigger duplicate refunds.
 
-        Returns: {"success": bool, "refund_id": str, "reason": str}
+        Returns:
+            {"success": bool, "refund_id": str, "amount_inr": float,
+             "is_late": bool, "reason": str}
+
+            `is_late` is True ONLY when the refund was refused because the
+            cancellation cutoff had already passed. Callers use it to tell a
+            "you cancelled too late" message apart from a gateway failure —
+            those need very different words to the patient.
         """
+        from app.services.tenant import cancellation_window_hours
+
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
         # ── Look up booking ──
         booking_result = (
@@ -1228,31 +1237,56 @@ class PaymentService:
         )
 
         if not booking_result.data:
-            return {"success": False, "reason": "booking_not_found"}
+            return {
+                "success": False,
+                "reason": "booking_not_found",
+                "refund_id": "",
+                "amount_inr": 0.0,
+                "is_late": False,
+            }
 
         booking = booking_result.data[0]
+        amount_inr = round((booking.get("amount_paise") or 0) / 100, 2)
 
         if booking["status"] not in ("confirmed", "pending_review"):
             return {
                 "success": False,
                 "reason": f"cannot_refund_status_{booking['status']}",
+                "refund_id": "",
+                "amount_inr": amount_inr,
+                "is_late": False,
             }
 
         if not booking.get("payment_id"):
-            return {"success": False, "reason": "no_payment_to_refund"}
+            return {
+                "success": False,
+                "reason": "no_payment_to_refund",
+                "refund_id": "",
+                "amount_inr": amount_inr,
+                "is_late": False,
+            }
 
         # ── Refund eligibility check ──
         slot_datetime = self._parse_slot_datetime(
             booking["appointment_date"], booking["appointment_time"]
         )
+        # The cutoff is per-clinic (clinics.config.cancellation_window_hours),
+        # falling back to the platform default. Resolved through the same
+        # helper the booking confirmation quotes to the patient, so what they
+        # were promised and what is enforced here cannot drift apart.
+        window_hours = cancellation_window_hours(clinic)
         if slot_datetime:
             hours_until_slot = (
                 slot_datetime - datetime.now(timezone.utc)
             ).total_seconds() / 3600
-            if hours_until_slot < settings.refund_window_hours:
+            if hours_until_slot < window_hours:
                 return {
                     "success": False,
-                    "reason": f"refund_window_closed_need_{settings.refund_window_hours}h_before_slot",
+                    "reason": f"refund_window_closed_need_{window_hours}h_before_slot",
+                    "refund_id": "",
+                    "amount_inr": amount_inr,
+                    "is_late": True,
+                    "window_hours": window_hours,
                 }
 
         # ── Deterministic idempotency key (stable across all retries) ──
@@ -1310,7 +1344,15 @@ class PaymentService:
             )
 
             logger.info(f"✅ Refund completed for booking {booking_id}: {refund_id}")
-            return {"success": True, "refund_id": refund_id, "status": "completed"}
+            return {
+                "success": True,
+                "refund_id": refund_id,
+                "status": "completed",
+                "amount_inr": amount_inr,
+                "is_late": False,
+                "reason": "",
+                "window_hours": window_hours,
+            }
 
         except Exception as e:
             logger.error(f"Refund failed for booking {booking_id}: {e}")
@@ -1322,7 +1364,14 @@ class PaymentService:
                     "payment_id": booking["payment_id"],
                 },
             )
-            return {"success": False, "reason": f"razorpay_error: {str(e)[:200]}"}
+            return {
+                "success": False,
+                "reason": f"razorpay_error: {str(e)[:200]}",
+                "refund_id": "",
+                "amount_inr": amount_inr,
+                "is_late": False,
+                "window_hours": window_hours,
+            }
 
     async def _refund_payment_id(
         self,
@@ -1564,6 +1613,9 @@ class PaymentService:
                 "reason": f"can_only_cancel_confirmed_not_{booking['status']}",
             }
 
+        clinic = None
+        refund_result = None
+
         if booking.get("payment_id"):
             from app.services.tenant import get_clinic_by_id
 
@@ -1572,7 +1624,29 @@ class PaymentService:
                 booking_id, reason=admin_notes or "Cancelled by admin", clinic=clinic
             )
             if not refund_result["success"]:
-                return refund_result
+                # A refund that cannot be issued is not a reason to refuse the
+                # cancellation. Returning early here left the admin unable to
+                # cancel a paid booking at all once its refund window had
+                # closed — the slot stayed blocked and the patient was never
+                # told. Cancel it, then tell the patient the truth about the
+                # money: too late for a refund, or refund needs a human.
+                # unscoped: unique_row_key
+                await sb(supabase.table("appointments").update(
+                    {"status": "cancelled"}
+                ).eq("id", booking_id))
+                self._log_payment_event(
+                    booking_id,
+                    "admin_cancel_without_refund",
+                    {"admin_notes": admin_notes, "refund_reason": refund_result.get("reason")},
+                )
+                await self.notify_cancellation_outcome(booking, refund_result, clinic=clinic)
+                return {
+                    "success": True,
+                    "cancelled": True,
+                    "refunded": False,
+                    "refund": refund_result,
+                    "reason": refund_result.get("reason", ""),
+                }
         else:
             # unscoped: unique_row_key
             await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
@@ -1582,10 +1656,19 @@ class PaymentService:
                 booking_id, "admin_cancel", {"admin_notes": admin_notes}
             )
 
-        await self._notify_booking_cancelled(
-            booking, refunded=bool(booking.get("payment_id"))
-        )
-        return {"success": True}
+        if refund_result and refund_result.get("success"):
+            # Itemised refund receipt (amount + Razorpay reference) instead of
+            # the generic "a refund has been initiated" line.
+            await self.notify_cancellation_outcome(booking, refund_result, clinic=clinic)
+        else:
+            await self._notify_booking_cancelled(booking, refunded=False)
+
+        return {
+            "success": True,
+            "cancelled": True,
+            "refunded": bool(refund_result and refund_result.get("success")),
+            "refund": refund_result,
+        }
 
     # ─────────────────────────────────────────────────────────────────────
     # 7. RECONCILIATION
@@ -1999,7 +2082,13 @@ class PaymentService:
         clinic_id_val = booking.get("clinic_id") or "default"
         try:
             from app.services.whatsapp import whatsapp_service
-            from app.services.tenant import get_clinic_by_id, get_clinic_contact, get_branch_by_id
+            from app.services.tenant import (
+                cancellation_window_hours,
+                get_branch_by_id,
+                get_clinic_by_id,
+                get_clinic_contact,
+            )
+            from app.templates.whatsapp_templates import cancellation_policy_line
 
             clinic = await get_clinic_by_id(clinic_id_val)
 
@@ -2030,7 +2119,16 @@ class PaymentService:
             amount_rupees = (booking.get("amount_paise") or 0) / 100
             slot_time_display = format_slot_time(booking.get("appointment_time")) or "N/A"
             ref_code = booking.get("booking_ref", "N/A")
-            refund_window = getattr(settings, "refund_window_hours", 4)
+            # Per-clinic cutoff, and the exact deadline computed from it. The
+            # same helper the refund gate uses, so the promise made here is
+            # the promise enforced there.
+            window_hours = cancellation_window_hours(clinic)
+            policy_line = cancellation_policy_line(
+                lang,
+                window_hours,
+                booking.get("appointment_date", ""),
+                booking.get("appointment_time", ""),
+            )
 
             if booking.get("booking_type") == "lab_test":
                 test_name = booking.get("lab_test_name", "N/A")
@@ -2042,7 +2140,6 @@ class PaymentService:
                         f"📅 *सैंपल संग्रह तिथि:* {date_display}\n"
                         f"💰 *भुगतान राशि:* ₹{amount_rupees:.0f}\n\n"
                         f"📌 कृपया वैध पहचान पत्र के साथ हमारे सैंपल संग्रह समय के दौरान पहुंचें।\n\n"
-                        f"_सैंपल संग्रह तिथि से {refund_window} घंटे पहले तक पूर्ण रिफंड के साथ रद्दीकरण उपलब्ध है।_"
                     )
                 elif lang == "te":
                     msg = (
@@ -2052,7 +2149,6 @@ class PaymentService:
                         f"📅 *సేకరణ తేదీ:* {date_display}\n"
                         f"💰 *చెల్లించిన మొత్తం:* ₹{amount_rupees:.0f}\n\n"
                         f"📌 దయచేసి చెల్లుబాటు అయ్యే ఐడీతో మా శాంపిల్ సేకరణ వేళల్లో రండి.\n\n"
-                        f"_సేకరణ తేదీకి {refund_window} గంటల ముందు వరకు పూర్తి రీఫండ్‌తో రద్దు చేసుకునే అవకాశం ఉంది._"
                     )
                 else:
                     msg = (
@@ -2062,7 +2158,6 @@ class PaymentService:
                         f"📅 *Collection Date:* {date_display}\n"
                         f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
                         f"📌 Please arrive during our sample collection hours with a valid ID.\n\n"
-                        f"_Cancellation with full refund available up to {refund_window} hours before your collection date._"
                     )
             else:
                 doc_name = booking.get("doctor_name", "N/A")
@@ -2077,8 +2172,7 @@ class PaymentService:
                         f"🕐 *समय:* {slot_time_display}\n"
                         f"💰 *भुगतान राशि:* ₹{amount_rupees:.0f}\n\n"
                         f"📌 कृपया प्रासंगिक मेडिकल रिकॉर्ड के साथ 15 मिनट पहले पहुंचें।\n\n"
-                        f"_अपॉइंटमेंट से {refund_window} घंटे पहले तक पूर्ण रिफंड के साथ रद्दीकरण उपलब्ध है। "
-                        f"नो-शो बुकिंग गैर-वापसी योग्य हैं।_"
+                        f"_नो-शो बुकिंग गैर-वापसी योग्य हैं।_"
                     )
                 elif lang == "te":
                     msg = (
@@ -2090,8 +2184,7 @@ class PaymentService:
                         f"🕐 *సమయం:* {slot_time_display}\n"
                         f"💰 *చెల్లించిన మొత్తం:* ₹{amount_rupees:.0f}\n\n"
                         f"📌 దయచేసి సంబంధిత మెడికల్ రికార్డులతో 15 నిమిషాల ముందుగా రండి.\n\n"
-                        f"_అపాయింట్‌మెంట్‌కు {refund_window} గంటల ముందు వరకు పూర్తి రీఫండ్‌తో రద్దు చేసుకునే అవకాశం ఉంది. "
-                        f"నో-షో బుకింగ్‌లకు రీఫండ్ ఉండదు._"
+                        f"_నో-షో బుకింగ్‌లకు రీఫండ్ ఉండదు._"
                     )
                 else:
                     msg = (
@@ -2103,9 +2196,11 @@ class PaymentService:
                         f"🕐 *Time:* {slot_time_display}\n"
                         f"💰 *Paid:* ₹{amount_rupees:.0f}\n\n"
                         f"📌 Please arrive 15 minutes early with any relevant medical records.\n\n"
-                        f"_Cancellation with full refund available up to {refund_window} hours before your appointment. "
-                        f"No-show bookings are non-refundable._"
+                        f"_No-show bookings are non-refundable._"
                     )
+
+            if policy_line:
+                msg += "\n\n" + policy_line
 
             # Append location details
             if booking.get("branch_id"):
@@ -2147,7 +2242,7 @@ class PaymentService:
             for attempt in range(2):
                 try:
                     await whatsapp_service.send_text(
-                        clinic, patient_phone, msg, _source="payment"
+                        clinic, patient_phone, msg, _source="booking_confirmation"
                     )
                     patient_notified = True
                     logger.info(
@@ -2312,6 +2407,101 @@ class PaymentService:
 
         except Exception as e:
             logger.error(f"Failed in _notify_payment_confirmed: {e}")
+
+    async def resolve_patient_language(self, clinic_id: str, phone: str) -> str:
+        """Patient's chosen language, defaulting to English on any failure."""
+        try:
+            from app.database import get_patient_by_phone
+
+            if not phone:
+                return "en"
+            patient = get_patient_by_phone(clinic_id, phone)
+            if hasattr(patient, "__await__"):
+                patient = await patient
+            if isinstance(patient, dict):
+                lang = patient.get("language")
+                if lang in ("en", "hi", "te"):
+                    return lang
+        except Exception as e:
+            logger.warning(f"Could not resolve patient language: {e}")
+        return "en"
+
+    async def notify_cancellation_outcome(
+        self,
+        booking: dict,
+        refund: Optional[dict],
+        clinic: Optional[dict] = None,
+    ) -> None:
+        """Tell the patient what actually happened to their money.
+
+        THE single place a cancellation outcome is worded, used by both the
+        patient's own cancel in the bot and an admin cancel in the panel — so
+        the two can never tell the same patient different stories.
+
+        Three outcomes, three different messages:
+          refunded  -> itemised refund receipt with the Razorpay reference
+          too late  -> the clinic's non-refundable policy, quoting its window
+          failed    -> cancelled, refund needs a human; says so plainly rather
+                       than implying money is on its way
+
+        Never raises: a notification failure must not roll back a cancellation
+        the patient already asked for.
+        """
+        try:
+            from app.services.whatsapp import whatsapp_service
+            from app.services.tenant import get_clinic_by_id, cancellation_window_hours
+            from app.templates.whatsapp_templates import get_message
+
+            phone = booking.get("patient_phone")
+            if not phone:
+                return
+
+            clinic_id_val = booking.get("clinic_id") or "default"
+            if clinic is None:
+                clinic = await get_clinic_by_id(clinic_id_val)
+            lang = await self.resolve_patient_language(clinic_id_val, phone)
+
+            date_display = booking.get("appointment_date", "")
+            try:
+                date_display = datetime.strptime(date_display, "%Y-%m-%d").strftime("%d %b %Y")
+            except (ValueError, TypeError):
+                pass
+
+            if refund and refund.get("success"):
+                amount = refund.get("amount_inr")
+                if amount is None:
+                    amount = (booking.get("amount_paise") or 0) / 100
+                msg = get_message(
+                    "refund_receipt",
+                    lang,
+                    doctor=booking.get("doctor_name") or "N/A",
+                    date=date_display or "N/A",
+                    amount=f"{float(amount):.0f}",
+                    refund_id=refund.get("refund_id") or "pending",
+                )
+            elif refund and refund.get("is_late"):
+                hours = refund.get("window_hours")
+                if hours is None:
+                    hours = cancellation_window_hours(clinic)
+                # A 0-hour ("anytime") window can only be late once the slot has
+                # already started; "within 0 hours of the slot" reads as a bug.
+                msg = (
+                    get_message("refund_late_slot_started", lang)
+                    if not hours
+                    else get_message("refund_late_no_refund", lang, hours=hours)
+                )
+            elif refund:
+                msg = get_message("refund_failed_manual_review", lang)
+            else:
+                return
+
+            await whatsapp_service.send_text(clinic, phone, msg, _source="payment")
+            logger.info(
+                f"Sent cancellation outcome ({'refunded' if refund.get('success') else refund.get('reason')}) "
+                f"to {phone[:6]}*** for booking {booking.get('id')}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send cancellation outcome notification: {e}")
 
     async def _notify_booking_cancelled(self, booking: dict, refunded: bool) -> None:
         """Send WhatsApp notice to the patient after an admin cancels their booking."""

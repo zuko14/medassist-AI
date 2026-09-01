@@ -295,6 +295,50 @@ def get_clinic_contact(clinic: dict, key: str, fallback: str) -> str:
     return (clinic.get("config") or {}).get(key) or fallback
 
 
+#: The only cancellation cutoff windows a clinic may pick, in hours before the
+#: slot. 0 means "any time before the appointment starts". Anything outside
+#: this list is a typo or a stale client, and is refused rather than stored:
+#: a bad window here silently changes who gets their money back.
+CANCELLATION_WINDOW_CHOICES = (0, 2, 4, 6, 12, 24)
+
+
+def cancellation_window_hours(clinic: Optional[dict]) -> int:
+    """Hours before the slot up to which a cancellation is still refundable.
+
+    Per-clinic (clinics.config.cancellation_window_hours), falling back to the
+    platform default. This is the SINGLE place the window is resolved — the
+    refund gate, the booking-confirmation notice and the admin panel all read
+    it here, so what the patient was promised and what the refund check
+    enforces cannot drift apart.
+
+    An unparseable or off-list stored value falls back to the platform default
+    rather than being honoured: a clinic whose config was hand-edited to `-1`
+    must not end up refunding no one.
+    """
+    from app.config import settings
+
+    default = getattr(settings, "refund_window_hours", 4)
+    raw = (clinic or {}).get("config") or {}
+    value = raw.get("cancellation_window_hours")
+    if value is None:
+        return default
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"Ignoring non-numeric cancellation_window_hours={value!r} for clinic "
+            f"{(clinic or {}).get('id')}"
+        )
+        return default
+    if value not in CANCELLATION_WINDOW_CHOICES:
+        logger.warning(
+            f"Ignoring off-list cancellation_window_hours={value} for clinic "
+            f"{(clinic or {}).get('id')}"
+        )
+        return default
+    return value
+
+
 def invalidate_tenant_cache(whatsapp_number: str = None, phone_number_id: str = None):
     """Call after /admin clinic update to clear stale cache for both phone and phone_number_id."""
     if whatsapp_number or phone_number_id:

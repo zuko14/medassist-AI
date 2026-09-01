@@ -72,6 +72,99 @@ def resolve_category(message_type: str, template_name: Optional[str] = None) -> 
     return "utility"
 
 
+# ── Outbound Classification ──────────────────────────────────────────────────
+# `source_service` records WHICH CODE PATH sent a message; the six classes
+# below record WHAT KIND of message it was. Both matter: the raw source is what
+# an on-call engineer greps for, the class is what the owner audit feed groups
+# by. Rather than overwrite one with the other, the class is DERIVED, which
+# also retro-classifies every ledger row written before this existed.
+
+LAB_REPORT = "LAB_REPORT"
+PRESCRIPTION = "PRESCRIPTION"
+APPOINTMENT_REMINDER = "APPOINTMENT_REMINDER"
+FOLLOW_UP = "FOLLOW_UP"
+BOOKING_CONFIRMATION = "BOOKING_CONFIRMATION"
+BROADCAST = "BROADCAST"
+OTHER = "OTHER"
+
+OUTBOUND_CLASSES = (
+    LAB_REPORT,
+    PRESCRIPTION,
+    APPOINTMENT_REMINDER,
+    FOLLOW_UP,
+    BOOKING_CONFIRMATION,
+    BROADCAST,
+    OTHER,
+)
+
+#: Human labels for the owner console. Keep in sync with OUTBOUND_CLASSES.
+OUTBOUND_CLASS_LABELS = {
+    LAB_REPORT: "Lab Report",
+    PRESCRIPTION: "Prescription",
+    APPOINTMENT_REMINDER: "Appointment Reminder",
+    FOLLOW_UP: "Follow-Up",
+    BOOKING_CONFIRMATION: "Booking Confirmation",
+    BROADCAST: "Broadcast",
+    OTHER: "Other",
+}
+
+#: Exact `source_service` values a sender may pass. Legacy module-name values
+#: (lab_reports, scheduler, …) are kept so historical rows still classify.
+_SOURCE_TO_CLASS = {
+    # Diagnostream PDFs + AI summaries
+    "lab_report": LAB_REPORT,
+    "lab_reports": LAB_REPORT,
+    "lab_reports_retry": LAB_REPORT,
+    # Doctor prescription PDFs + medication reminders
+    "prescription": PRESCRIPTION,
+    "prescriptions": PRESCRIPTION,
+    # 24h / 2h appointment reminders
+    "appointment_reminder": APPOINTMENT_REMINDER,
+    # Post-consultation follow-ups and health check-ins
+    "follow_up": FOLLOW_UP,
+    "followup": FOLLOW_UP,
+    # Slot confirmations and live queue tokens
+    "booking_confirmation": BOOKING_CONFIRMATION,
+    # Announcements / camps
+    "broadcast": BROADCAST,
+}
+
+#: Template-name fallback. Rows written before the granular `_source` values
+#: existed all say "scheduler"; their template name still says what they were.
+_TEMPLATE_PREFIX_TO_CLASS = (
+    ("appointment_reminder", APPOINTMENT_REMINDER),
+    ("reminder_", APPOINTMENT_REMINDER),
+    ("followup_", FOLLOW_UP),
+    ("follow_up", FOLLOW_UP),
+    ("checkin_", FOLLOW_UP),
+    ("health_checkin", FOLLOW_UP),
+    ("lab_report", LAB_REPORT),
+    ("appointment_confirm", BOOKING_CONFIRMATION),
+    ("booking_", BOOKING_CONFIRMATION),
+)
+
+
+def classify_source(
+    source_service: Optional[str], template_name: Optional[str] = None
+) -> str:
+    """Map a ledger row to one of OUTBOUND_CLASSES.
+
+    Resolution order: exact source_service match, then template-name prefix
+    (which is what rescues pre-existing rows), then OTHER.
+    """
+    key = (source_service or "").strip().lower()
+    if key in _SOURCE_TO_CLASS:
+        return _SOURCE_TO_CLASS[key]
+
+    tpl = (template_name or "").strip().lower()
+    if tpl:
+        for prefix, cls in _TEMPLATE_PREFIX_TO_CLASS:
+            if tpl.startswith(prefix):
+                return cls
+
+    return OTHER
+
+
 # ── In-memory pricing cache ─────────────────────────────────────────────────
 # Meta pricing changes infrequently (quarterly at most). Cache with 5-min TTL
 # to avoid a DB query on every message send.
@@ -234,6 +327,19 @@ async def log_outbound(
             f"Ledger: logged {message_type} ({category}) to {recipient_phone[:6]}*** "
             f"for clinic {clinic_id[:8]}... success={send_success}"
         )
+
+        # Daily usage counters advance HERE, in the one place every Meta API
+        # call already funnels through, so no sender can be added later and
+        # forget to count itself. It runs AFTER the ledger insert on purpose:
+        # the ledger is the billing source of truth and must never be dropped
+        # because a derived counter failed. mark_read is a bookkeeping call,
+        # not a message, and a failed send consumed no quota — neither counts.
+        if send_success and message_type != "mark_read":
+            from app.services.subscription import record_outbound_usage
+
+            await record_outbound_usage(
+                clinic_id, classify_source(source_service, template_name)
+            )
     except Exception as e:
         # NEVER raise — fire-and-forget safety for healthcare
         logger.error(f"Ledger write failed (non-fatal): {e}")
@@ -486,4 +592,147 @@ async def get_platform_usage(days: int = 30) -> dict:
             "service_inr": round(pricing.get("service_paise", 0) / 100, 2),
         },
         "clinics": clinics_table,
+    }
+
+
+# ── Granular Outbound Audit Feed ─────────────────────────────────────────────
+
+
+async def get_outbound_audit_feed(
+    clinic_id: Optional[str] = None,
+    source_class: Optional[str] = None,
+    days: int = 7,
+    limit: int = 200,
+) -> dict:
+    """Per-message audit feed for the platform owner.
+
+    OWNER-ONLY: returns estimated Meta cost per message. Never expose from a
+    clinic-facing route.
+
+    Each row carries recipient phone, patient name (resolved from `patients`
+    within the SAME clinic — a phone number alone is not an audit trail),
+    delivery status, timestamp and estimated cost in paise.
+
+    Patient names are looked up in one batched query per clinic rather than
+    per row; a 200-row feed must not be 200 round-trips.
+    """
+    from app.database import supabase
+    from datetime import timedelta
+
+    days = max(1, min(int(days or 7), 90))
+    limit = max(1, min(int(limit or 200), 1000))
+    start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    pricing = await _get_pricing()
+    _cost_for = {
+        "utility": pricing.get("utility_paise", 12),
+        "marketing": pricing.get("marketing_paise", 75),
+        "authentication": pricing.get("authentication_paise", 10),
+        "service": pricing.get("service_paise", 0),
+    }
+
+    try:
+        query = (
+            # unscoped: platform_admin
+            supabase.table("outbound_message_ledger")
+            .select(
+                "id, clinic_id, recipient_phone, message_type, template_name, "
+                "category, send_success, source_service, meta_message_id, sent_at"
+            )
+            .neq("message_type", "mark_read")
+            .gte("sent_at", start_date)
+            .order("sent_at", desc=True)
+        )
+        # The owner may scope the feed to one clinic; when they do, the
+        # predicate is applied unconditionally rather than skipped on a
+        # sentinel value.
+        from app.tenancy import is_valid_clinic_scope
+
+        if clinic_id is not None:
+            if not is_valid_clinic_scope(clinic_id):
+                return {"success": True, "entries": [], "totals": {}, "period_days": days}
+            query = query.eq("clinic_id", str(clinic_id))
+
+        # Class filtering is post-hoc because the class is derived, not stored.
+        # Over-fetch so a narrow class filter still fills the page.
+        fetch_limit = limit if not source_class else min(limit * 10, 5000)
+        rows = (await sb(query.limit(fetch_limit))).data or []
+    except Exception as e:
+        logger.error(f"Failed to read outbound audit feed: {e}")
+        return {"success": False, "error": str(e), "entries": [], "totals": {}}
+
+    # ── Resolve clinic names (one query) ──
+    clinic_names: dict = {}
+    try:
+        # unscoped: platform_admin
+        cres = await sb(supabase.table("clinics").select("id, name"))
+        clinic_names = {c["id"]: c.get("name") for c in (cres.data or [])}
+    except Exception as e:
+        logger.warning(f"Audit feed: clinic name lookup failed: {e}")
+
+    # ── Resolve patient names, batched per clinic ──
+    phones_by_clinic: dict = {}
+    for r in rows:
+        cid = r.get("clinic_id")
+        phone = r.get("recipient_phone")
+        if cid and phone:
+            phones_by_clinic.setdefault(cid, set()).add(phone)
+
+    patient_names: dict = {}
+    for cid, phones in phones_by_clinic.items():
+        try:
+            pres = (
+                await sb(supabase.table("patients")
+                .select("phone, name")
+                .eq("clinic_id", cid)
+                .in_("phone", list(phones)))
+            )
+            for p in pres.data or []:
+                patient_names[(cid, p.get("phone"))] = p.get("name")
+        except Exception as e:
+            logger.warning(f"Audit feed: patient name lookup failed for {cid}: {e}")
+
+    entries = []
+    totals = {cls: {"count": 0, "cost_paise": 0} for cls in OUTBOUND_CLASSES}
+
+    for r in rows:
+        cls = classify_source(r.get("source_service"), r.get("template_name"))
+        if source_class and cls != source_class:
+            continue
+
+        cid = r.get("clinic_id")
+        phone = r.get("recipient_phone")
+        cost_paise = _cost_for.get(r.get("category", "utility"), 0) if r.get("send_success") else 0
+
+        bucket = totals.setdefault(cls, {"count": 0, "cost_paise": 0})
+        bucket["count"] += 1
+        bucket["cost_paise"] += cost_paise
+
+        if len(entries) < limit:
+            entries.append({
+                "id": r.get("id"),
+                "clinic_id": cid,
+                "clinic_name": clinic_names.get(cid),
+                "source_class": cls,
+                "source_class_label": OUTBOUND_CLASS_LABELS.get(cls, cls),
+                "source_service": r.get("source_service"),
+                "recipient_phone": phone,
+                "patient_name": patient_names.get((cid, phone)),
+                "message_type": r.get("message_type"),
+                "template_name": r.get("template_name"),
+                "category": r.get("category"),
+                "delivery_status": "delivered" if r.get("send_success") else "failed",
+                "meta_message_id": r.get("meta_message_id"),
+                "sent_at": r.get("sent_at"),
+                "estimated_cost_paise": cost_paise,
+            })
+
+    return {
+        "success": True,
+        "period_days": days,
+        "entries": entries,
+        "totals": totals,
+        "total_cost_paise": sum(b["cost_paise"] for b in totals.values()),
+        "classes": list(OUTBOUND_CLASSES),
+        "class_labels": OUTBOUND_CLASS_LABELS,
     }

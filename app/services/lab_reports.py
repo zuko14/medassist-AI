@@ -13,6 +13,7 @@ from app.utils.pdf_reader import extract_text_from_pdf
 from app.services.report_summarizer import ReportSummarizer
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
+from app.services.subscription import next_ist_midnight, report_dispatch_allowed
 from app.utils.validators import mask_phone
 from app.database import sb  # T5.1: off-loop query execution
 
@@ -94,6 +95,18 @@ def report_template_and_params(
     if summary_template and summary_text:
         return summary_template, params + [{"type": "text", "text": summary_text}], True
     return template_name_for(clinic), params, False
+
+
+class ReportDispatchDeferred(Exception):
+    """The send was deliberately held back, not attempted and not failed.
+
+    Raised when a clinic has hit its daily report limit or its subscription is
+    suspended. The PDF is already in storage by the time this fires, so the
+    report is parked as `pending_retry` and the existing retry worker
+    redelivers it once the Asia/Kolkata day rolls over or the clinic renews.
+    Distinct from a Meta failure so the ops dashboard does not read a policy
+    hold as an outage.
+    """
 
 
 class LabReportService:
@@ -333,8 +346,17 @@ class LabReportService:
         error_message = None
         capture = {}
         clinic = None
+        deferred_reason = None
         try:
             clinic = await get_clinic_by_id(clinic_id)
+
+            # Daily report limit / subscription gate. Checked AFTER storage so a
+            # held-back report is fully recoverable, and BEFORE the phone lock so
+            # a blocked clinic never serialises behind one.
+            dispatch_ok, gate_reason = await report_dispatch_allowed(clinic)
+            if not dispatch_ok:
+                raise ReportDispatchDeferred(gate_reason)
+
             from app.services.message_queue import (
                 acquire_phone_lock_with_timeout,
                 release_phone_lock_acquired,
@@ -529,6 +551,17 @@ class LabReportService:
             finally:
                 await release_phone_lock_acquired(patient_phone)
             logger.info(f"Report sent successfully to {mask_phone(patient_phone)}")
+        except ReportDispatchDeferred as e:
+            deferred_reason = str(e)
+            logger.warning(
+                f"Report delivery held for clinic {clinic_id} ({deferred_reason}) — "
+                f"queued for {mask_phone(patient_phone)}, will redeliver automatically"
+            )
+            error_message = (
+                "Daily report limit reached — queued until the next day (Asia/Kolkata)"
+                if deferred_reason == "daily_limit_reached"
+                else "Subscription suspended — queued until the clinic is renewed"
+            )
         except Exception as e:
             logger.error(f"WhatsApp send failed for {mask_phone(patient_phone)}: {e}")
             error_message = str(e)
@@ -597,6 +630,17 @@ class LabReportService:
         }
         if sent_ok:
             row["sent_at"] = datetime.now(timezone.utc).isoformat()
+        elif deferred_reason:
+            # A policy hold is not a delivery attempt: leave retry_count alone
+            # so the 12-attempt Meta budget is not spent waiting for midnight.
+            row["next_retry_at"] = (
+                next_ist_midnight()
+                if deferred_reason == "daily_limit_reached"
+                else datetime.now(timezone.utc) + timedelta(hours=6)
+            ).isoformat()
+            logger.info(
+                f"Report queued ({deferred_reason}) — next attempt at {row['next_retry_at']}"
+            )
         elif is_transient_meta_error:
             # Schedule retry: exponential backoff — 2 min, 8 min, 32 min
             retry_count = 1  # This is the first attempt
@@ -974,17 +1018,38 @@ class LabReportService:
                 processed += 1
                 continue
 
-            logger.info(
-                f"Retry worker: attempting delivery {retry_count}/{MAX_RETRIES} "
-                f"for report {report_id} to {mask_phone(patient_phone)}"
-            )
-
             retry_capture: dict = {}
             try:
+                clinic = await get_clinic_by_id(report.get("clinic_id", "default"))
+
+                # Re-check the policy gate BEFORE downloading the PDF. At the
+                # Asia/Kolkata reset a whole backlog becomes due at once and
+                # would otherwise blow straight past the new day's limit.
+                dispatch_ok, gate_reason = await report_dispatch_allowed(clinic)
+                if not dispatch_ok:
+                    # A policy hold is not a delivery attempt — retry_count is
+                    # left alone so the MAX_RETRIES budget is not spent waiting.
+                    # unscoped: unique_row_key
+                    await sb(supabase.table("lab_reports").update({
+                        "next_retry_at": (
+                            next_ist_midnight()
+                            if gate_reason == "daily_limit_reached"
+                            else datetime.now(timezone.utc) + timedelta(hours=6)
+                        ).isoformat(),
+                    }).eq("id", report_id))
+                    logger.info(
+                        f"Retry worker: report {report_id} still held ({gate_reason})"
+                    )
+                    continue
+
+                logger.info(
+                    f"Retry worker: attempting delivery {retry_count}/{MAX_RETRIES} "
+                    f"for report {report_id} to {mask_phone(patient_phone)}"
+                )
+
                 # Download PDF from Supabase Storage
                 file_bytes = supabase.storage.from_("lab-reports").download(file_path)
                 filename = file_path.split("/")[-1]
-                clinic = await get_clinic_by_id(report.get("clinic_id", "default"))
 
                 # Generate fresh signed URL
                 pdf_signed_url = None

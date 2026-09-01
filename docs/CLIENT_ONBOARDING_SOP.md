@@ -236,42 +236,184 @@ Every clinic that enables **Patient Follow-ups** (via Hospital Profile → Patie
 | `followup_message_template_name` | Custom-message template name | `followup_custom_message_v1` |
 | `followup_message` | Admin's custom message text | *(set via Admin Panel textarea)* |
 
-#### 1-Click Automated Creation Script (Terminal):
+---
+
+### Step 10C: Automated Appointment Reminder Templates (24-Hour & 2-Hour)
+Appointment reminders are automatically scheduled by `SchedulerService` (`app/services/scheduler.py`) and sent proactively before the patient's slot. Because they land outside the customer-initiated window, they strictly require approved `UTILITY` templates.
+
+#### Template A: 24-Hour Appointment Reminder (`appointment_reminder_24h`)
+* **Template Name:** `appointment_reminder_24h`
+* **Category:** `UTILITY`
+* **Language:** `en` (or `en_US`)
+* **Body Text:**
+  ```text
+  Reminder: Your appointment with {{1}} is tomorrow at {{2}}. Please arrive 10 mins early. Reply CANCEL if you can't make it.
+  ```
+* **Variables:**
+  - `{{1}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
+  - `{{2}}` → Slot Time (e.g., `10:30 AM`)
+
+#### Template B: 2-Hour Appointment Reminder (`appointment_reminder_2h`)
+* **Template Name:** `appointment_reminder_2h`
+* **Category:** `UTILITY`
+* **Language:** `en` (or `en_US`)
+* **Body Text:**
+  ```text
+  Your appointment at {{1}} is in 2 hours with {{2}}. Reply CANCEL to cancel.
+  ```
+* **Variables:**
+  - `{{1}}` → Clinic / Hospital Name (e.g., `City Care Hospital`)
+  - `{{2}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
+
+---
+
+### Step 10D: Appointment Confirmation & Doctor Cancellation Templates
+
+#### Template A: Outbound Appointment Confirmation (`appointment_confirmation`)
+* **Template Name:** `appointment_confirmation`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Your appointment with {{1}} ({{2}}) is confirmed for {{3}} at {{4}}. Reply CANCEL to cancel. - {{5}}
+  ```
+* **Variables:**
+  - `{{1}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
+  - `{{2}}` → Department (e.g., `Cardiology`)
+  - `{{3}}` → Date (e.g., `05 Sep 2026`)
+  - `{{4}}` → Slot Time (e.g., `10:30 AM`)
+  - `{{5}}` → Hospital / Clinic Name (e.g., `City Care Hospital`)
+
+#### Template B: Emergency Doctor Cancellation / Leave (`appointment_cancelled_doctor_leave`)
+* **Template Name:** `appointment_cancelled_doctor_leave`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  We're sorry, your appointment with {{1}} on {{2}} has been cancelled as the doctor is unavailable. Reply REBOOK to reschedule. We apologise for the inconvenience.
+  ```
+* **Variables:**
+  - `{{1}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
+  - `{{2}}` → Date & Time (e.g., `Tomorrow at 10:30 AM`)
+
+---
+
+### Step 10E: DPDP Act 2023 & Compliance Templates
+
+#### Template A: Opt-Out Confirmation (`opt_out_confirmation`)
+* **Template Name:** `opt_out_confirmation`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  You've been unsubscribed from {{1}} WhatsApp reminders. Message us anytime to re-subscribe. For urgent help call {{2}}.
+  ```
+
+#### Template B: Data Deletion Receipt (`data_deletion_confirmation`)
+* **Template Name:** `data_deletion_confirmation`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Your data has been deleted from {{1}} systems as requested. Reference: {{2}}. For records, contact {{3}}.
+  ```
+
+---
+
+### Step 10F: 1-Click Master Template Setup Script (Registers ALL Templates)
+Run this single terminal script to upload sample media and register **every required template** on the client's WABA automatically in 15 seconds:
+
 ```bash
 python -c "
 import httpx
+
 token = '<META_ADMIN_SYSTEM_USER_TOKEN>'
+app_id = '946290901317238'
 waba_id = '<CLIENT_WABA_ID>'
 clinic_name = '<CLINIC_NAME>'
 
-# Template A: Built-in default follow-up
-t1 = {
-    'name': 'post_appointment_followup',
-    'category': 'UTILITY',
-    'language': 'en',
-    'components': [{
-        'type': 'BODY',
-        'text': f'Dear patient {{{{1}}}}, we hope you are feeling better after your recent visit to {clinic_name}. Your health and recovery are important to us. If you need a follow-up appointment, please reply YES or call us at {{{{2}}}} to schedule. Wishing you good health!',
-        'example': {'body_text': [['Ravi Kumar', '+919490386668']]}
-    }]
-}
-r1 = httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=t1)
-print(f'post_appointment_followup: {r1.status_code} -> {r1.json()}')
+headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
-# Template B: Custom message follow-up
-t2 = {
-    'name': 'followup_custom_message_v1',
-    'category': 'UTILITY',
-    'language': 'en',
-    'components': [{
-        'type': 'BODY',
-        'text': f'Dear patient {{{{1}}}}, this is a follow-up message from {clinic_name} regarding your recent visit.\n\n{{{{2}}}}\n\nIf you have any concerns, please do not hesitate to reach out. We wish you good health and a speedy recovery.',
-        'example': {'body_text': [['Ravi Kumar', 'We hope your recovery is going well. Please continue the prescribed medication and attend your next check-up as scheduled.']]}
-    }]
-}
-r2 = httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, json=t2)
-print(f'followup_custom_message_v1: {r2.status_code} -> {r2.json()}')
-print('Follow-up Templates Submitted for Review!')
+# 1. Upload sample PDF for document headers
+pdf_bytes = b'%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n'
+r1 = httpx.post(f'https://graph.facebook.com/v22.0/{app_id}/uploads', headers={'Authorization': f'Bearer {token}'}, params={'file_length': len(pdf_bytes), 'file_type': 'application/pdf'}).json()
+r2 = httpx.post(f'https://graph.facebook.com/v22.0/{r1[\"id\"]}', headers={'Authorization': f'OAuth {token}', 'file_offset': '0'}, content=pdf_bytes).json()
+h = r2['h']
+
+templates = [
+    # 1. Lab Report Standard
+    {
+        'name': 'lab_report_ready_v1',
+        'category': 'UTILITY',
+        'language': 'en_US',
+        'components': [
+            {'type': 'HEADER', 'format': 'DOCUMENT', 'example': {'header_handle': [h]}},
+            {'type': 'BODY', 'text': 'Dear {{1}}, your medical lab report for {{2}} is ready and attached above. Please consult your physician for interpretation.', 'example': {'body_text': [['Mrs. P. Kalyani', 'Lipid Profile']]}}
+        ]
+    },
+    # 2. Lab Report with AI Summary
+    {
+        'name': 'lab_report_summary_v1',
+        'category': 'UTILITY',
+        'language': 'en_US',
+        'components': [
+            {'type': 'HEADER', 'format': 'DOCUMENT', 'example': {'header_handle': [h]}},
+            {'type': 'BODY', 'text': 'Dear {{1}}, your medical lab report for {{2}} is ready and attached above.\n\nSummary: {{3}}\n\nPlease consult your physician for interpretation.', 'example': {'body_text': [['Mrs. P. Kalyani', 'Lipid Profile', 'All tested parameters are within normal reference ranges.']]}}
+        ]
+    },
+    # 3. 24-Hour Reminder
+    {
+        'name': 'appointment_reminder_24h',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'Reminder: Your appointment with {{1}} is tomorrow at {{2}}. Please arrive 10 mins early. Reply CANCEL if you can\'t make it.', 'example': {'body_text': [['Dr. Ramesh Sharma', '10:30 AM']]}}
+        ]
+    },
+    # 4. 2-Hour Reminder
+    {
+        'name': 'appointment_reminder_2h',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': f'Your appointment at {clinic_name} is in 2 hours with {{{{1}}}}. Reply CANCEL to cancel.', 'example': {'body_text': [['Dr. Ramesh Sharma']]}}
+        ]
+    },
+    # 5. Outbound Booking Confirmation
+    {
+        'name': 'appointment_confirmation',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'Your appointment with {{1}} ({{2}}) is confirmed for {{3}} at {{4}}. Reply CANCEL to cancel. - {{5}}', 'example': {'body_text': [['Dr. Ramesh Sharma', 'Cardiology', '05 Sep 2026', '10:30 AM', clinic_name]]}}
+        ]
+    },
+    # 6. Post-Visit Follow-up Default
+    {
+        'name': 'post_appointment_followup',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': f'Dear patient {{{{1}}}}, we hope you are feeling better after your recent visit to {clinic_name}. Your health and recovery are important to us. If you need a follow-up appointment, please reply YES or call us at {{{{2}}}} to schedule. Wishing you good health!', 'example': {'body_text': [['Ravi Kumar', '+919490386668']]}}
+        ]
+    },
+    # 7. Doctor Cancellation / Emergency Leave
+    {
+        'name': 'appointment_cancelled_doctor_leave',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'We\'re sorry, your appointment with {{1}} on {{2}} has been cancelled as the doctor is unavailable. Reply REBOOK to reschedule. We apologise for the inconvenience.', 'example': {'body_text': [['Dr. Ramesh Sharma', 'Tomorrow at 10:30 AM']]}}
+        ]
+    }
+]
+
+for t in templates:
+    res = httpx.post(f'https://graph.facebook.com/v22.0/{waba_id}/message_templates', headers=headers, json=t)
+    status = 'CREATED' if res.status_code in [200, 201] else f'FAILED ({res.status_code}): {res.text}'
+    print(f'Template [{t[\"name\"]}]: {status}')
+
+print('\nAll Core Templates Submitted for Meta Review Successfully!')
 "
 ```
 

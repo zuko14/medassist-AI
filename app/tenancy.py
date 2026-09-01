@@ -49,6 +49,7 @@ TENANT_OWNED_TABLES = frozenset({
     "prescriptions", "prescription_reminder_sends", "broadcasts",
     "admin_notifications", "outbound_message_ledger", "connector_audit_log",
     "integration_processed_reports", "analytics_events",
+    "clinic_daily_usage",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

@@ -23,6 +23,13 @@ from app.routers.admin import (
 from app.routers.clinics import CreateClinicRequest, provision_clinic
 from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
+from app.services.subscription import (
+    DAILY_REPORT_LIMIT_TIERS,
+    compute_subscription_state,
+    ist_today,
+    limit_state,
+    renewal_window,
+)
 from app.services.tenant import invalidate_branch_cache, invalidate_tenant_cache
 from app.utils.security import login_rate_limiter
 from app.database import sb  # T5.1: off-loop query execution
@@ -622,6 +629,28 @@ async def get_platform_branch_changes(
         raise HTTPException(status_code=500, detail=f"Failed to fetch branch changes: {e}")
 
 
+async def _fetch_daily_usage_map(usage_date=None) -> dict:
+    """{clinic_id: usage row} for one Asia/Kolkata day, whole fleet, one query.
+
+    Returns {} on failure: the leaderboard renders without today's counters
+    rather than 500-ing the owner's home page over a usage widget.
+    """
+    day = (usage_date or ist_today()).isoformat()
+    try:
+        res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinic_daily_usage")
+            .select("clinic_id, usage_date, reports_delivered_count, "
+                    "prescriptions_sent_count, reminders_sent_count, "
+                    "followups_sent_count, total_outbound_count")
+            .eq("usage_date", day))
+        )
+        return {r["clinic_id"]: r for r in (res.data or []) if r.get("clinic_id")}
+    except Exception as e:
+        logger.warning(f"Daily usage map lookup failed for {day}: {e}")
+        return {}
+
+
 @router.get("/clinics")
 async def get_platform_clinics_leaderboard(
     request: Request,
@@ -641,10 +670,17 @@ async def get_platform_clinics_leaderboard(
         clinics_res = (
             # unscoped: platform_admin
             await sb(supabase.table("clinics")
-            .select("id, name, whatsapp_number, plan, is_active, created_at"))
+            .select("id, name, whatsapp_number, plan, is_active, created_at, "
+                    "daily_report_limit, subscription_start_date, subscription_end_date, "
+                    "grace_period_days, subscription_status, last_renewed_at"))
         )
         clinics = clinics_res.data or []
         start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+        # Today's report counters for the whole fleet in ONE query. Per-clinic
+        # reads here would be one extra round-trip per hospital on the busiest
+        # page in the console.
+        usage_today = await _fetch_daily_usage_map()
 
         # Roster snapshot: active doctors + distinct departments per clinic.
         # One paginated scan of `doctors` rather than two extra queries per
@@ -699,6 +735,10 @@ async def get_platform_clinics_leaderboard(
             branches = branch_census.get(clinic_id) or {}
             active_branches = branches.get("active", 0)
 
+            reports_today = (usage_today.get(clinic_id) or {}).get(
+                "reports_delivered_count", 0
+            )
+
             return {
                 "id": clinic_id,
                 "name": c.get("name"),
@@ -706,6 +746,8 @@ async def get_platform_clinics_leaderboard(
                 "plan": c.get("plan"),
                 "is_active": c.get("is_active", True),
                 "created_at": c.get("created_at"),
+                "subscription": compute_subscription_state(c),
+                "daily_reports": limit_state(c.get("daily_report_limit"), reports_today),
                 "doctors_count": clinic_roster.get("doctors", 0),
                 "departments_count": len(clinic_departments),
                 "departments": clinic_departments,
@@ -755,7 +797,9 @@ async def get_platform_clinic_detail(
         clinic_res = (
             # unscoped: platform_admin
             await sb(supabase.table("clinics")
-            .select("id, name, whatsapp_number, plan, features, is_active, created_at")
+            .select("id, name, whatsapp_number, plan, features, is_active, created_at, "
+                    "daily_report_limit, subscription_start_date, subscription_end_date, "
+                    "grace_period_days, subscription_status, last_renewed_at")
             .eq("id", clinic_id))
         )
         if not clinic_res.data:
@@ -764,10 +808,13 @@ async def get_platform_clinic_detail(
         clinic = clinic_res.data[0]
         stats = await analytics_service.get_dashboard_stats(clinic_id=clinic_id, days=30)
 
+        from app.services.subscription import get_clinic_status
+
         return {
             "success": True,
             "clinic": clinic,
             "analytics": stats,
+            "lifecycle": await get_clinic_status(clinic),
         }
 
     except HTTPException:
@@ -1839,3 +1886,331 @@ async def delete_clinic(
     except Exception as e:
         logger.error(f"Error during soft-delete of clinic {clinic_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete clinic: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Subscription lifecycle & daily report limits (OWNER ONLY)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class SubscriptionUpdate(BaseModel):
+    """Owner-side edit of a clinic limit tier and subscription window.
+
+    Every field is optional; only what is sent is written. daily_report_limit
+    is a fixed tier, enforced here AND by a CHECK constraint in migration 068.
+    """
+
+    daily_report_limit: Optional[Literal[0, 50, 100, 200, 300, 500]] = None
+    subscription_start_date: Optional[str] = None  # ISO-8601
+    grace_period_days: Optional[int] = Field(default=None, ge=0, le=30)
+    subscription_status: Optional[Literal["active", "grace_period", "suspended", "trial"]] = None
+
+
+async def _load_clinic_lifecycle_row(clinic_id: str) -> dict:
+    """Fetch the columns the lifecycle needs, or 404. Explicit projection only."""
+    try:
+        res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinics")
+            .select("id, name, plan, is_active, daily_report_limit, "
+                    "subscription_start_date, subscription_end_date, "
+                    "grace_period_days, subscription_status, last_renewed_at, "
+                    "whatsapp_number, phone_number_id")
+            .eq("id", clinic_id))
+        )
+    except Exception as e:
+        logger.error(f"Failed to load clinic {clinic_id} for lifecycle: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load clinic")
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    return res.data[0]
+
+
+def _invalidate_clinic(clinic: dict) -> None:
+    """Drop the tenant cache so new limits apply within this process.
+
+    The cache is process-local with a 30s TTL, so the other production workers
+    converge on their own inside that window — the propagation delay already
+    documented in app/services/tenant.py, not a new one.
+    """
+    try:
+        invalidate_tenant_cache(
+            whatsapp_number=clinic.get("whatsapp_number"),
+            phone_number_id=clinic.get("phone_number_id"),
+        )
+    except Exception as e:
+        logger.warning(f"Tenant cache invalidation failed after lifecycle edit: {e}")
+
+
+@router.get("/clinics/{clinic_id}/subscription")
+async def get_clinic_subscription(
+    clinic_id: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Effective subscription state + today report-limit state for one clinic."""
+    from app.services.subscription import get_clinic_status
+
+    clinic = await _load_clinic_lifecycle_row(clinic_id)
+    return {
+        "success": True,
+        "clinic_id": clinic_id,
+        "clinic_name": clinic.get("name"),
+        "daily_report_limit_tiers": list(DAILY_REPORT_LIMIT_TIERS),
+        **await get_clinic_status(clinic),
+    }
+
+
+@router.patch("/clinics/{clinic_id}/subscription")
+async def update_clinic_subscription(
+    clinic_id: str,
+    body: SubscriptionUpdate,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Set the daily report tier and/or re-date a subscription window.
+
+    Changing subscription_start_date recomputes the end date as start + 30
+    days, so the owner never has to keep the two in sync by hand.
+    """
+    from app.services.subscription import (
+        SUBSCRIPTION_PERIOD_DAYS,
+        get_clinic_status,
+        parse_timestamp,
+    )
+
+    clinic = await _load_clinic_lifecycle_row(clinic_id)
+    client_ip = request.client.host if request.client else "unknown"
+
+    updates: dict = {}
+    if body.daily_report_limit is not None:
+        updates["daily_report_limit"] = body.daily_report_limit
+    if body.grace_period_days is not None:
+        updates["grace_period_days"] = body.grace_period_days
+    if body.subscription_status is not None:
+        updates["subscription_status"] = body.subscription_status
+    if body.subscription_start_date is not None:
+        start = parse_timestamp(body.subscription_start_date)
+        if start is None:
+            raise HTTPException(
+                status_code=422,
+                detail="subscription_start_date must be an ISO-8601 timestamp",
+            )
+        updates["subscription_start_date"] = start.isoformat()
+        updates["subscription_end_date"] = (
+            start + timedelta(days=SUBSCRIPTION_PERIOD_DAYS)
+        ).isoformat()
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+
+    try:
+        # unscoped: unique_row_key
+        res = await sb(supabase.table("clinics").update(updates).eq("id", clinic_id))
+    except Exception as e:
+        logger.error(f"Failed to update subscription for {clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update subscription")
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    merged = {**clinic, **res.data[0]}
+    _invalidate_clinic(merged)
+
+    await log_admin_action(
+        user=owner,
+        action="update_clinic_subscription",
+        resource_type="clinic",
+        resource_id=clinic_id,
+        details=updates,
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "clinic_id": clinic_id,
+        "updated": updates,
+        **await get_clinic_status(merged),
+    }
+
+
+@router.post("/clinics/{clinic_id}/renew")
+async def renew_clinic_subscription(
+    clinic_id: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Renew for 30 days, backdated to the previous expiry.
+
+    The new window starts at the OLD end date, not at now, so any grace days
+    already consumed come out of the period being paid for — the platform is
+    always paid for a full 30 days. Renewal also clears a suspension, which is
+    the only thing that does.
+    """
+    from app.services.subscription import STATUS_ACTIVE, get_clinic_status
+
+    clinic = await _load_clinic_lifecycle_row(clinic_id)
+    client_ip = request.client.host if request.client else "unknown"
+    now = datetime.now(timezone.utc)
+
+    before = compute_subscription_state(clinic, now=now)
+    start, end = renewal_window(clinic, now=now)
+
+    updates = {
+        "subscription_start_date": start.isoformat(),
+        "subscription_end_date": end.isoformat(),
+        "subscription_status": STATUS_ACTIVE,
+        "last_renewed_at": now.isoformat(),
+    }
+
+    try:
+        # unscoped: unique_row_key
+        res = await sb(supabase.table("clinics").update(updates).eq("id", clinic_id))
+    except Exception as e:
+        logger.error(f"Failed to renew clinic {clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to renew subscription")
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    merged = {**clinic, **res.data[0]}
+    _invalidate_clinic(merged)
+
+    await log_admin_action(
+        user=owner,
+        action="renew_clinic_subscription",
+        resource_type="clinic",
+        resource_id=clinic_id,
+        details={
+            "previous_status": before["status"],
+            "previous_end": before["subscription_end_date"],
+            "grace_days_consumed": before["grace_day"],
+            "new_start": updates["subscription_start_date"],
+            "new_end": updates["subscription_end_date"],
+        },
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "clinic_id": clinic_id,
+        "previous_status": before["status"],
+        "grace_days_consumed": before["grace_day"],
+        **await get_clinic_status(merged, now=now),
+    }
+
+
+@router.get("/subscriptions")
+async def get_platform_subscriptions(
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Fleet-wide lifecycle board: who is in grace, who is suspended, and who
+    is at or near their daily report limit. The owner alert surface."""
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_platform_subscriptions",
+        resource_type="platform",
+        ip_address=client_ip,
+    )
+
+    try:
+        res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinics")
+            .select("id, name, plan, is_active, whatsapp_number, daily_report_limit, "
+                    "subscription_start_date, subscription_end_date, grace_period_days, "
+                    "subscription_status, last_renewed_at"))
+        )
+        clinics = res.data or []
+    except Exception as e:
+        logger.error(f"Failed to fetch clinics for subscription board: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch subscriptions")
+
+    usage = await _fetch_daily_usage_map()
+
+    rows = []
+    counts = {"active": 0, "grace_period": 0, "suspended": 0, "trial": 0}
+    alerts: dict = {"grace": [], "suspended": [], "limit_warning": [], "limit_blocked": []}
+
+    for c in clinics:
+        state = compute_subscription_state(c)
+        used = (usage.get(c["id"]) or {}).get("reports_delivered_count", 0)
+        limits = limit_state(c.get("daily_report_limit"), used)
+
+        counts[state["status"]] = counts.get(state["status"], 0) + 1
+
+        row = {
+            "clinic_id": c["id"],
+            "clinic_name": c.get("name"),
+            "plan": c.get("plan"),
+            "whatsapp_number": c.get("whatsapp_number"),
+            "is_active": c.get("is_active", True),
+            "last_renewed_at": c.get("last_renewed_at"),
+            "subscription": state,
+            "daily_reports": limits,
+        }
+        rows.append(row)
+
+        if state["status"] == "grace_period":
+            alerts["grace"].append(row)
+        elif state["status"] == "suspended":
+            alerts["suspended"].append(row)
+        if limits["level"] == "blocked":
+            alerts["limit_blocked"].append(row)
+        elif limits["level"] == "warning":
+            alerts["limit_warning"].append(row)
+
+    # Most urgent first: suspended, then grace by days left, then by usage.
+    rank = {"suspended": 0, "grace_period": 1, "trial": 2, "active": 3}
+    rows.sort(key=lambda r: (
+        rank.get(r["subscription"]["status"], 9),
+        r["subscription"].get("grace_days_left") or 99,
+        -(r["daily_reports"]["percent"] or 0),
+    ))
+
+    return {
+        "success": True,
+        "usage_date": ist_today().isoformat(),
+        "counts": counts,
+        "alerts": alerts,
+        "daily_report_limit_tiers": list(DAILY_REPORT_LIMIT_TIERS),
+        "clinics": rows,
+    }
+
+
+@router.get("/outbound-audit")
+async def get_outbound_audit(
+    request: Request,
+    clinic_id: Optional[str] = None,
+    source_class: Optional[str] = None,
+    days: int = 7,
+    limit: int = 200,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Granular per-message outbound audit feed.
+
+    OWNER-ONLY — carries estimated Meta cost per message. Each entry names the
+    recipient phone, the patient, what kind of message it was, whether Meta
+    accepted it, and when.
+    """
+    from app.services.message_accounting import OUTBOUND_CLASSES, get_outbound_audit_feed
+
+    if source_class and source_class not in OUTBOUND_CLASSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"source_class must be one of {', '.join(OUTBOUND_CLASSES)}",
+        )
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_outbound_audit",
+        resource_type="platform",
+        resource_id=clinic_id,
+        details={"source_class": source_class, "days": days},
+        ip_address=client_ip,
+    )
+
+    return await get_outbound_audit_feed(
+        clinic_id=clinic_id, source_class=source_class, days=days, limit=limit
+    )

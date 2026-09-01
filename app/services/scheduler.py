@@ -13,6 +13,7 @@ from app.services.whatsapp import whatsapp_service
 from app.templates.whatsapp_templates import TEMPLATES
 from app.utils.helpers import format_slot_time
 from app.services.tenant import get_clinic_by_id
+from app.services.subscription import automated_outbound_allowed
 from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
@@ -513,6 +514,10 @@ class SchedulerService:
                         clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                         if not has_feature(clinic, "reminders"):
                             continue
+                        # A suspended clinic stops sending; a clinic in its
+                        # 5-day grace period keeps sending.
+                        if not automated_outbound_allowed(clinic):
+                            continue
 
                         components = TEMPLATES["reminder_24h"]["components_builder"](
                             appt["doctor_name"],
@@ -524,7 +529,7 @@ class SchedulerService:
                             appt["patient_phone"],
                             "appointment_reminder_24h",
                             components=components,
-                            _source="scheduler",
+                            _source="appointment_reminder",
                         )
 
                         # Mark as sent
@@ -572,6 +577,8 @@ class SchedulerService:
                             )
                             if not has_feature(clinic, "reminders"):
                                 continue
+                            if not automated_outbound_allowed(clinic):
+                                continue
 
                             # Use branch name if available (multi-branch), else clinic name
                             location_name = appt.get("branch_name") or clinic["name"]
@@ -585,7 +592,7 @@ class SchedulerService:
                                 appt["patient_phone"],
                                 "appointment_reminder_2h",
                                 components=components,
-                                _source="scheduler",
+                                _source="appointment_reminder",
                             )
 
                             # Mark as sent
@@ -706,6 +713,11 @@ class SchedulerService:
                             # up naturally once the feature is enabled.
                             continue
 
+                        # Suspended: skip WITHOUT burning followup_sent, so the
+                        # lookback window redelivers once the clinic renews.
+                        if not automated_outbound_allowed(clinic):
+                            continue
+
                         cfg = followup_config(clinic)
                         if not cfg["enabled"]:
                             self._burn_followup(appt["id"])
@@ -753,7 +765,7 @@ class SchedulerService:
                             appt["patient_phone"],
                             template,
                             components=components,
-                            _source="scheduler",
+                            _source="follow_up",
                         )
 
                         if not sent:
@@ -854,6 +866,8 @@ class SchedulerService:
                     for appt in appointments.data:
                         try:
                             clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                            if not automated_outbound_allowed(clinic):
+                                continue
                             lang = "en"
 
                             from app.services.consent import consent_service
@@ -890,7 +904,7 @@ class SchedulerService:
                                     {"id": "checkin_ok", "title": "Feeling fine"},
                                     {"id": "checkin_concern", "title": "Still have symptoms"},
                                 ],
-                                _source="scheduler",
+                                _source="follow_up",
                             )
 
                             if not sent:

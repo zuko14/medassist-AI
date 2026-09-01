@@ -7,6 +7,9 @@ Category: UTILITY (not MARKETING) for healthcare use cases.
 Language: en (English) - can add hi, te variants later.
 """
 
+from datetime import datetime, timedelta, timezone as _dt_timezone
+from typing import Optional
+
 from app.config import settings
 
 # META_TEMPLATE_APPROVAL_NOTE: Submit these templates to Meta Business Manager
@@ -197,6 +200,14 @@ MESSAGES = {
         "queue_status_not_checked_in": "You have an appointment today with *{doctor}*, but have not checked in yet.\n\nPlease visit the reception desk to collect your OPD token number.",
         "queue_your_turn": "🔔 *It's your turn now!*\n\nToken Number: *#{token}*\nDoctor: *{doctor}*\n\nPlease proceed to the consultation room.",
         "queue_status_none": "You don't have a confirmed appointment scheduled for today.\n\nType *book* to schedule an appointment.",
+        "cancellation_policy_note": "ℹ️ Cancellation Policy: Free cancellation with full refund is available up to {hours} hours before your slot (before {cutoff}).",
+        "cancellation_policy_note_anytime": "ℹ️ Cancellation Policy: Free cancellation with full refund is available any time before your appointment starts (before {cutoff}).",
+        "cancellation_cutoff_note": "ℹ️ Cancellation Policy: Please cancel at least {hours} hours before your slot (before {cutoff}) so we can offer it to another patient.",
+        "cancellation_cutoff_note_anytime": "ℹ️ Cancellation Policy: You can cancel any time before your appointment starts (before {cutoff}).",
+        "refund_receipt": "✅ *Appointment Cancelled & Refund Initiated*\n--------------------------------\nDoctor: {doctor}\nDate: {date}\nRefund Amount: ₹{amount}\nRefund Reference: {refund_id}\nPayment Gateway: Razorpay\nStatus: Refund has been initiated back to your original payment method (UPI / Card). Amount will be credited within 2 to 5 business days.",
+        "refund_late_no_refund": "⚠️ Your appointment has been cancelled. As per clinic policy, cancellations made within {hours} hours of the slot are non-refundable.",
+        "refund_failed_manual_review": "⚠️ Your appointment has been cancelled. We could not start the refund automatically — our team has been notified and will process it manually. Please contact us at {phone} if you do not hear back within 2 business days.",
+        "refund_late_slot_started": "⚠️ Your appointment has been cancelled. As per clinic policy, cancellations made after the appointment start time are non-refundable.",
     },
     "hi": {
         "welcome": "{hospital_name} में आपका स्वागत है 🏥\nमैं Kriya AI हूं, आपका AI सहायक।",
@@ -237,6 +248,14 @@ MESSAGES = {
         "queue_your_turn": "🔔 *अब आपकी बारी है!*\n\nटोकन नंबर: *#{token}*\nडॉक्टर: *{doctor}*\n\nकृपया परामर्श कक्ष में जाएं।",
         "queue_status_not_checked_in": "आज आपका *{doctor}* के साथ अपॉइंटमेंट है, लेकिन आपने अभी तक चेक-इन नहीं किया है।\n\nकृपया अपना ओपीडी टोकन लेने के लिए रिसेप्शन पर संपर्क करें।",
         "queue_status_none": "आज के लिए आपका कोई कन्फर्म अपॉइंटमेंट नहीं है।\n\nअपॉइंटमेंट बुक करने के लिए *book* लिखें।",
+        "cancellation_policy_note": "ℹ️ रद्दीकरण नीति: आपके स्लॉट से {hours} घंटे पहले ({cutoff} से पहले) तक पूर्ण रिफंड के साथ रद्दीकरण उपलब्ध है।",
+        "cancellation_policy_note_anytime": "ℹ️ रद्दीकरण नीति: अपॉइंटमेंट शुरू होने से पहले ({cutoff} से पहले) कभी भी पूर्ण रिफंड के साथ रद्द कर सकते हैं।",
+        "cancellation_cutoff_note": "ℹ️ रद्दीकरण नीति: कृपया अपने स्लॉट से कम से कम {hours} घंटे पहले ({cutoff} से पहले) रद्द करें ताकि हम यह स्लॉट किसी और मरीज़ को दे सकें।",
+        "cancellation_cutoff_note_anytime": "ℹ️ रद्दीकरण नीति: आप अपॉइंटमेंट शुरू होने से पहले ({cutoff} से पहले) कभी भी रद्द कर सकते हैं।",
+        "refund_receipt": "✅ *अपॉइंटमेंट रद्द — रिफंड शुरू किया गया*\n--------------------------------\nडॉक्टर: {doctor}\nदिनांक: {date}\nरिफंड राशि: ₹{amount}\nरिफंड रेफरेंस: {refund_id}\nभुगतान गेटवे: Razorpay\nस्थिति: रिफंड आपके मूल भुगतान माध्यम (UPI / कार्ड) में भेज दिया गया है। राशि 2 से 5 कार्यदिवसों में आपके खाते में जमा हो जाएगी।",
+        "refund_late_no_refund": "⚠️ आपका अपॉइंटमेंट रद्द कर दिया गया है। क्लिनिक की नीति के अनुसार, स्लॉट से {hours} घंटे के भीतर किए गए रद्दीकरण पर रिफंड नहीं मिलता।",
+        "refund_failed_manual_review": "⚠️ आपका अपॉइंटमेंट रद्द कर दिया गया है। रिफंड स्वचालित रूप से शुरू नहीं हो पाया — हमारी टीम को सूचित कर दिया गया है और इसे मैन्युअल रूप से प्रोसेस किया जाएगा। 2 कार्यदिवसों में जवाब न मिलने पर {phone} पर संपर्क करें।",
+        "refund_late_slot_started": "⚠️ आपका अपॉइंटमेंट रद्द कर दिया गया है। क्लिनिक की नीति के अनुसार, अपॉइंटमेंट का समय शुरू होने के बाद किए गए रद्दीकरण पर रिफंड नहीं मिलता।",
     },
     "te": {
         "welcome": "{hospital_name} కు స్వాగతం 🏥\nనేను Kriya AI, మీ AI సహాయకుడిని.",
@@ -277,6 +296,14 @@ MESSAGES = {
         "queue_your_turn": "🔔 *ఇప్పుడు మీ వంతు వచ్చింది!*\n\nటోకెన్ నంబర్: *#{token}*\nడాక్టర్: *{doctor}*\n\nదయచేసి కన్సల్టేషన్ గదికి వెళ్లండి.",
         "queue_status_not_checked_in": "ఈరోజు మీకు *{doctor}* తో అపాయింట్‌మెంట్ ఉంది, కానీ మీరు ఇంకా చెక్-ఇన్ చేయలేదు.\n\nదయచేసి మీ ఓపీడీ టోకెన్ తీసుకోవడానికి రిసెప్షన్ డెస్క్‌ను సంప్రదించండి.",
         "queue_status_none": "ఈరోజు కోసం మీకు ఎటువంటి అపాయింట్‌మెంట్ షెడ్యూల్ చేయబడలేదు.\n\nఅపాయింట్‌మెంట్ బుక్ చేసుకోవడానికి *book* అని టైప్ చేయండి.",
+        "cancellation_policy_note": "ℹ️ రద్దు విధానం: మీ స్లాట్‌కు {hours} గంటల ముందు వరకు ({cutoff} లోపు) పూర్తి వాపసుతో రద్దు అందుబాటులో ఉంది.",
+        "cancellation_policy_note_anytime": "ℹ️ రద్దు విధానం: అపాయింట్‌మెంట్ ప్రారంభం కాకముందు ({cutoff} లోపు) ఎప్పుడైనా పూర్తి వాపసుతో రద్దు చేసుకోవచ్చు.",
+        "cancellation_cutoff_note": "ℹ️ రద్దు విధానం: దయచేసి మీ స్లాట్‌కు కనీసం {hours} గంటల ముందు ({cutoff} లోపు) రద్దు చేయండి, దానివల్ల ఆ స్లాట్ మరొక రోగికి ఇవ్వగలుగుతాము.",
+        "cancellation_cutoff_note_anytime": "ℹ️ రద్దు విధానం: అపాయింట్‌మెంట్ ప్రారంభం కాకముందు ({cutoff} లోపు) మీరు ఎప్పుడైనా రద్దు చేసుకోవచ్చు.",
+        "refund_receipt": "✅ *అపాయింట్‌మెంట్ రద్దు — రీఫండ్ ప్రారంభమైంది*\n--------------------------------\nడాక్టర్: {doctor}\nతేదీ: {date}\nరీఫండ్ మొత్తం: ₹{amount}\nరీఫండ్ రిఫరెన్స్: {refund_id}\nచెల్లింపు గేట్వే: Razorpay\nస్థితి: రీఫండ్ మీ అసలైన చెల్లింపు పద్ధతికి (UPI / కార్డ్) తిరిగి పంపబడింది. మొత్తం 2 నుండి 5 పని దినాల్లో జమ అవుతుంది.",
+        "refund_late_no_refund": "⚠️ మీ అపాయింట్‌మెంట్ రద్దు చేయబడింది. క్లినిక్ విధానం ప్రకారం, స్లాట్‌కు {hours} గంటలలోపు చేసిన రద్దులకు రీఫండ్ ఉండదు.",
+        "refund_failed_manual_review": "⚠️ మీ అపాయింట్‌మెంట్ రద్దు చేయబడింది. రీఫండ్ ఆటోమెటిక్‌గా ప్రారంభం కాలేదు — మా బృందానికి సమాచారం అందింది, వారు దీనిని మాన్యువల్‌గా పూర్తి చేస్తారు. 2 పని దినాల్లో సమాధానం రాకపోతే {phone} నకు కాల్ చేయండి.",
+        "refund_late_slot_started": "⚠️ మీ అపాయింట్‌మెంట్ రద్దు చేయబడింది. క్లినిక్ విధానం ప్రకారం, అపాయింట్‌మెంట్ ప్రారంభమైన తర్వాత చేసిన రద్దులకు రీఫండ్ ఉండదు.",
     },
 }
 
@@ -299,3 +326,57 @@ def get_message(key: str, lang: str = "en", **kwargs) -> str:
     }
 
     return template.format(**format_kwargs)
+
+
+# ── Cancellation & refund policy lines ──────────────────────────────────────
+# The window itself is resolved by app.services.tenant.cancellation_window_hours()
+# and passed in, so this module keeps its single `settings` dependency and the
+# policy has exactly one source of truth.
+
+#: Asia/Kolkata. Every clinic on this platform quotes local time to patients,
+#: so a cutoff rendered in UTC would be 5.5 hours wrong on every message.
+_IST = _dt_timezone(timedelta(hours=5, minutes=30))
+
+
+def cancellation_cutoff(
+    appointment_date: str, appointment_time: str, window_hours: int
+) -> Optional[datetime]:
+    """The last IST moment at which a cancellation is still refundable.
+
+    Returns None when the appointment date/time cannot be parsed — callers
+    then omit the policy line rather than print a wrong deadline, which is
+    worse than printing none.
+    """
+    try:
+        slot = datetime.strptime(
+            f"{appointment_date} {(appointment_time or '')[:5]}", "%Y-%m-%d %H:%M"
+        ).replace(tzinfo=_IST)
+    except (ValueError, TypeError):
+        return None
+    return slot - timedelta(hours=max(0, int(window_hours or 0)))
+
+
+def cancellation_policy_line(
+    lang: str,
+    window_hours: int,
+    appointment_date: str,
+    appointment_time: str,
+    refundable: bool = True,
+) -> str:
+    """One-line cancellation policy for a booking confirmation.
+
+    `refundable` must be False for a booking no money was taken for. Promising
+    "full refund" on an unpaid appointment is a promise the clinic cannot keep,
+    and the patient reads it as one.
+
+    Returns "" when the cutoff cannot be computed, so callers can append it
+    unconditionally.
+    """
+    cutoff = cancellation_cutoff(appointment_date, appointment_time, window_hours)
+    if cutoff is None:
+        return ""
+
+    formatted = cutoff.strftime("%d %b %Y, %I:%M %p")
+    family = "cancellation_policy_note" if refundable else "cancellation_cutoff_note"
+    key = family if window_hours else f"{family}_anytime"
+    return get_message(key, lang, hours=window_hours, cutoff=formatted)

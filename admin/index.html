@@ -883,6 +883,11 @@
     <!-- Main Content -->
     <main class="main">
 
+        <!-- Subscription lifecycle + daily report limit status strip.
+             Rendered by loadSubscriptionStatus(); stays hidden while a clinic
+             is active and under 80% of its daily report limit. -->
+        <div id="subscriptionStrip" style="display:none"></div>
+
         <!-- ─── DASHBOARD ─── -->
         <!-- ─── HOSPITAL PROFILE ─── -->
         <div id="pg-profile" class="sec">
@@ -1503,6 +1508,31 @@
                 </div>
 
                 <button class="btn btn-accent" onclick="savePaymentSettings()">Save Payment Settings</button>
+            </div>
+
+            <div class="form-card">
+                <h3>↩️ Appointment Cancellation &amp; Refund Policy</h3>
+                <div id="cancelPolicyMsg"></div>
+                <p style="color:var(--text3);font-size:0.88rem;margin:0 0 14px">
+                    How long before their slot a patient can still cancel and get a full refund.
+                    This exact deadline is quoted to every patient in their booking confirmation,
+                    and it is what the refund check enforces — the two always match.
+                </p>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Cancellation &amp; Refund Cutoff Window</label>
+                        <select id="f-cancelWindow" onchange="renderCancelPolicyPreview()">
+                            <option value="2">2 Hours before slot</option>
+                            <option value="4">4 Hours before slot (Default)</option>
+                            <option value="6">6 Hours before slot</option>
+                            <option value="12">12 Hours before slot</option>
+                            <option value="24">24 Hours before slot</option>
+                            <option value="0">Anytime before appointment start (0 Hours)</option>
+                        </select>
+                    </div>
+                </div>
+                <p id="cancelPolicyPreview" style="color:var(--text3);font-size:0.85rem;margin:0 0 14px"></p>
+                <button class="btn btn-accent" onclick="saveCancellationPolicy()">Save Cancellation Policy</button>
             </div>
         </div>
 
@@ -2332,6 +2362,7 @@ async function login() {
     document.getElementById('app').classList.add('open');
     applyFeatureVisibility();
     renderClinicScopeBanner();
+    loadSubscriptionStatus();
 
     try {
         renderDashboard(await api('/admin/stats?days=30'));
@@ -2805,6 +2836,7 @@ async function loadDashboard() {
         renderDashboard(stats);
         renderDashAppts(appts);
         loadMessagingUsage();  // fire-and-forget, don't block dashboard
+        loadSubscriptionStatus();  // fire-and-forget, don't block dashboard
     } catch (e) { console.error('Dashboard:', e); }
 }
 
@@ -2869,6 +2901,74 @@ function animateNum(el, target) {
         if (current >= target) { current = target; clearInterval(timer); }
         el.textContent = current;
     }, 30);
+}
+
+// ═══════ SUBSCRIPTION LIFECYCLE + DAILY REPORT LIMIT (customer-safe) ═══════
+// One strip renders both signals. It is additive and fail-quiet: if the
+// endpoint is unreachable the panel behaves exactly as it did before.
+
+async function loadSubscriptionStatus() {
+    const strip = document.getElementById('subscriptionStrip');
+    if (!strip) return;
+    try {
+        const data = await api('/admin/subscription');
+        renderSubscriptionStrip(data);
+    } catch (e) {
+        console.warn('Subscription status unavailable:', e);
+        strip.style.display = 'none';
+    }
+}
+
+function renderSubscriptionStrip(d) {
+    const strip = document.getElementById('subscriptionStrip');
+    if (!strip || !d || !d.subscription) { if (strip) strip.style.display = 'none'; return; }
+
+    const sub = d.subscription;
+    const rep = d.daily_reports || {};
+    const parts = [];
+
+    const card = (bg, border, fg, icon, title, body) => `
+        <div style="background:${bg}; border:1px solid ${border}; border-left:4px solid ${border};
+                    color:${fg}; padding:12px 16px; border-radius:8px; margin-bottom:14px;
+                    display:flex; gap:12px; align-items:flex-start; font-size:0.9rem;">
+            <span style="font-size:1.15rem; line-height:1.2">${icon}</span>
+            <div style="flex:1; min-width:0">
+                <div style="font-weight:700; margin-bottom:2px">${esc(title)}</div>
+                <div style="opacity:.92">${esc(body)}</div>
+            </div>
+        </div>`;
+
+    // ── Subscription lifecycle ──
+    if (sub.status === 'grace_period') {
+        parts.push(card('rgba(245,158,11,.12)', '#f59e0b', '#f59e0b', '\u23F3',
+            `Grace period \u2014 Day ${sub.grace_day} of ${sub.grace_period_days}`,
+            sub.banner || ''));
+    } else if (sub.status === 'suspended') {
+        parts.push(card('rgba(239,68,68,.12)', '#ef4444', '#ef4444', '\u26D4',
+            'Subscription suspended',
+            sub.banner || ''));
+    } else if (sub.days_remaining !== null && sub.days_remaining <= 5) {
+        parts.push(card('rgba(245,158,11,.10)', '#f59e0b', '#f59e0b', '\u{1F4C5}',
+            `Subscription renews in ${sub.days_remaining} day(s)`,
+            'Contact the administrator to renew before the 30-day period ends.'));
+    }
+
+    // ── Daily report limit ──
+    if (!rep.is_unlimited && rep.limit) {
+        if (rep.level === 'blocked') {
+            parts.push(card('rgba(239,68,68,.12)', '#ef4444', '#ef4444', '\u{1F6D1}',
+                `Daily report limit reached \u2014 ${rep.used} of ${rep.limit}`,
+                'Further automated report dispatches are queued and will send automatically after midnight (IST).'));
+        } else if (rep.level === 'warning') {
+            parts.push(card('rgba(245,158,11,.12)', '#f59e0b', '#f59e0b', '\u26A0\uFE0F',
+                `${rep.percent}% of today's report limit used \u2014 ${rep.used} of ${rep.limit}`,
+                `${rep.remaining} report(s) remaining today. The counter resets at midnight (IST).`));
+        }
+    }
+
+    if (!parts.length) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+    strip.innerHTML = parts.join('');
+    strip.style.display = 'block';
 }
 
 // ═══════ MESSAGING USAGE (customer-safe) ═══════
@@ -2962,6 +3062,25 @@ function renderUsageCard(d) {
 }
 
 // ═══════ APPOINTMENTS ═══════
+// A refunded booking carries its Razorpay reference; showing it here is what
+// lets front-desk staff answer "where is my money?" without opening Razorpay.
+function refundCell(a) {
+    if (a.refund_id) {
+        return '<span title="Razorpay refund reference" '
+            + 'style="background:rgba(16,185,129,.14);color:#10b981;padding:3px 8px;'
+            + 'border-radius:4px;font-weight:600;font-size:11px;font-family:monospace">'
+            + '↩ ' + esc(a.refund_id) + '</span>';
+    }
+    if (a.status === 'refunded') {
+        return '<span style="color:#10b981;font-size:11px;font-weight:600">Refunded</span>';
+    }
+    if (a.status === 'cancelled' && a.payment_id) {
+        return '<span title="Cancelled after the refund cutoff, or the refund needs a human" '
+            + 'style="color:#f59e0b;font-size:11px;font-weight:600">Not refunded</span>';
+    }
+    return '<span style="color:var(--text-muted,#9ca3af)">—</span>';
+}
+
 async function loadAppointments() {
     const el = document.getElementById('apptList');
     el.innerHTML = loading();
@@ -2972,7 +3091,7 @@ async function loadAppointments() {
             <thead><tr>
                 <th>Ref</th><th>Token</th><th>Patient</th><th>Doctor</th>
                 <th>Department</th><th>Date</th><th>Time</th>
-                <th>Status</th><th>Action</th>
+                <th>Status</th><th>Refund</th><th>Action</th>
             </tr></thead>
             <tbody>${data.map(a => `<tr>
                 <td style="color:var(--accent2);font-weight:600;font-family:monospace">${esc(a.booking_ref) || '—'}</td>
@@ -2983,6 +3102,7 @@ async function loadAppointments() {
                 <td>${a.appointment_date || '—'}</td>
                 <td>${a.appointment_time || '—'}</td>
                 <td>${badge(a.status)}</td>
+                <td>${refundCell(a)}</td>
                 <td>${a.status === 'confirmed' ?
                     `<div style="display:flex;gap:6px;align-items:center;">
                         ${!a.token_number ? `
@@ -4704,6 +4824,15 @@ async function loadPaymentSettings() {
         document.getElementById('f-payMode' + mode.charAt(0).toUpperCase() + mode.slice(1)).checked = true;
         document.getElementById('f-payPercent').value = data.payment_deposit_percent || '';
         document.getElementById('f-payPercentRow').style.display = mode === 'partial' ? 'block' : 'none';
+
+        const cancelSel = document.getElementById('f-cancelWindow');
+        if (cancelSel) {
+            // The server resolves this (clinic override, else platform default),
+            // so the panel always shows the window that is actually enforced.
+            const hours = data.cancellation_window_hours;
+            cancelSel.value = String(hours === undefined || hours === null ? 4 : hours);
+            renderCancelPolicyPreview();
+        }
     } catch (e) {
         msg('paySettingsMsg', 'Error loading payment settings: ' + e.message, true);
     }
@@ -4737,6 +4866,38 @@ async function savePaymentSettings() {
         loadPaymentSettings();
     } catch (e) {
         msg('paySettingsMsg', 'Error: ' + e.message, true);
+    }
+}
+
+
+// ═══════ CANCELLATION & REFUND POLICY ═══════
+// Stored in the same clinic config as the Razorpay settings, through the same
+// endpoint, so everything that decides what a patient pays or gets back lives
+// in one place.
+
+function renderCancelPolicyPreview() {
+    const el = document.getElementById('cancelPolicyPreview');
+    const sel = document.getElementById('f-cancelWindow');
+    if (!el || !sel) return;
+    const hours = parseInt(sel.value, 10);
+    el.textContent = hours === 0
+        ? 'Patients get a full refund if they cancel any time before the appointment starts.'
+        : `Full refund up to ${hours} hour${hours === 1 ? '' : 's'} before the slot. `
+          + `Cancellations inside the last ${hours} hour${hours === 1 ? '' : 's'} are non-refundable.`;
+}
+
+async function saveCancellationPolicy() {
+    const hours = parseInt(document.getElementById('f-cancelWindow').value, 10);
+    if (![0, 2, 4, 6, 12, 24].includes(hours)) {
+        msg('cancelPolicyMsg', 'Choose one of the listed cutoff windows.', true);
+        return;
+    }
+    try {
+        await apiPut('/admin/settings/payment', { cancellation_window_hours: hours });
+        msg('cancelPolicyMsg', '✅ Cancellation policy saved. New bookings will quote this deadline.');
+        loadPaymentSettings();
+    } catch (e) {
+        msg('cancelPolicyMsg', 'Error: ' + e.message, true);
     }
 }
 

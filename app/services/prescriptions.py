@@ -7,6 +7,7 @@ from datetime import datetime, date, timezone
 from app.database import scoped_query, supabase
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import get_clinic_by_id
+from app.services.subscription import automated_outbound_allowed
 from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,11 @@ class PrescriptionService:
 
                         try:
                             clinic = await get_clinic_by_id(rx_clinic_id)
+                            # Suspended clinics pause automated messaging. No
+                            # dedup row is written, so reminders resume on
+                            # renewal rather than being silently lost.
+                            if not automated_outbound_allowed(clinic):
+                                break
                             message = (
                                 f"⏰ Medication Reminder\n"
                                 f"Hi {rx['patient_name']}, time to take your medicine!\n"

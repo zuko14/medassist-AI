@@ -27,9 +27,11 @@ from app.services.ai_engine import (
     EMERGENCY_KEYWORDS,
 )
 from app.services.whatsapp import whatsapp_service
-from app.templates.whatsapp_templates import get_message
+from app.templates.whatsapp_templates import cancellation_policy_line, get_message
 from app.utils.validators import mask_phone
 from app.utils.helpers import format_slot_time
+
+from app.services.tenant import cancellation_window_hours
 
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
@@ -579,19 +581,19 @@ class ConversationManager:
             elif button_id.startswith("cancel_"):
                 appointment_id = button_id.replace("cancel_", "")
                 lang = await get_lang(clinic, phone)
+                cancelled, refund = await self._cancel_with_refund(
+                    clinic, phone, appointment_id
+                )
 
-                # Cancel in database
-                from app.database import cancel_appointment as db_cancel
-
-                success = await db_cancel(clinic["id"], appointment_id)
-
-                if success:
-                    cancel_msg = {
-                        "en": "Your appointment has been cancelled successfully.",
-                        "hi": "आपका अपॉइंटमेंट सफलतापूर्वक रद्द कर दिया गया है।",
-                        "te": "మీ అపాయింట్మెంట్ విజయవంతంగా రద్దు చేయబడింది.",
-                    }.get(lang, "Appointment cancelled.")
-                    await self.whatsapp.send_text(clinic, phone, cancel_msg)
+                if cancelled:
+                    if refund is None:
+                        # Nothing was paid — plain confirmation, no money talk.
+                        cancel_msg = {
+                            "en": "Your appointment has been cancelled successfully.",
+                            "hi": "आपका अपॉइंटमेंट सफलतापूर्वक रद्द कर दिया गया है।",
+                            "te": "మీ అపాయింట్మెంట్ విజయవంతంగా రద్దు చేయబడింది.",
+                        }.get(lang, "Appointment cancelled.")
+                        await self.whatsapp.send_text(clinic, phone, cancel_msg)
                 else:
                     await self.whatsapp.send_text(
                         clinic,
@@ -3310,17 +3312,34 @@ class ConversationManager:
                         context["appointment_date"], "%Y-%m-%d"
                     ).strftime("%d %b %Y")
 
+                    confirm_text = get_message(
+                        "booking_confirmed",
+                        lang,
+                        ref=appointment["booking_ref"],
+                        doctor=context["doctor_name"],
+                        date=date_display,
+                        time=context["appointment_time"],
+                    )
+                    # State the cancellation deadline at the moment of booking,
+                    # computed from this clinic's own window. `refundable` keys
+                    # off payment_id: this branch is the no-Razorpay direct
+                    # booking, so promising a "full refund" would promise money
+                    # the patient never paid.
+                    policy_line = cancellation_policy_line(
+                        lang,
+                        cancellation_window_hours(clinic),
+                        context["appointment_date"],
+                        context["appointment_time"],
+                        refundable=bool(appointment.get("payment_id")),
+                    )
+                    if policy_line:
+                        confirm_text += "\n\n" + policy_line
+
                     await self.whatsapp.send_text(
                         clinic,
                         phone,
-                        get_message(
-                            "booking_confirmed",
-                            lang,
-                            ref=appointment["booking_ref"],
-                            doctor=context["doctor_name"],
-                            date=date_display,
-                            time=context["appointment_time"],
-                        ),
+                        confirm_text,
+                        _source="booking_confirmation",
                     )
 
                     # Send location — use branch-specific info for multi-branch,
@@ -3907,6 +3926,61 @@ class ConversationManager:
             ),
             sections=sections,
         )
+
+    async def _cancel_with_refund(self, clinic: dict, phone: str, appointment_id: str):
+        """Cancel one appointment and settle the money in the same step.
+
+        Returns (cancelled, refund) where `refund` is None when the booking was
+        never paid for, and otherwise the initiate_refund() result — the caller
+        stays silent about money in the first case and lets
+        notify_cancellation_outcome() do the talking in the second.
+
+        ORDER MATTERS: the refund runs BEFORE the cancel. initiate_refund()
+        only accepts a booking in 'confirmed'/'pending_review', so flipping the
+        status first would make every refund fail with
+        cannot_refund_status_cancelled and silently keep the patient's money.
+
+        The refund itself already moves the row to 'refunded', so db_cancel()
+        is called only on the paths where no refund landed.
+        """
+        from app.database import cancel_appointment as db_cancel, supabase
+        from app.services.payment import payment_service
+
+        booking = None
+        try:
+            res = (
+                await sb(supabase.table("appointments")
+                .select("*")
+                .eq("clinic_id", clinic["id"])
+                .eq("id", appointment_id))
+            )
+            if res.data:
+                booking = res.data[0]
+        except Exception as e:
+            logger.warning(f"Could not load appointment {appointment_id} for cancel: {e}")
+
+        # Unpaid (or unreadable) booking: the original behaviour, unchanged.
+        if not booking or not booking.get("payment_id"):
+            return await db_cancel(clinic["id"], appointment_id), None
+
+        refund = await payment_service.initiate_refund(
+            appointment_id, reason="patient_cancelled", clinic=clinic
+        )
+
+        if refund.get("success"):
+            # initiate_refund() already set status='refunded'.
+            cancelled = True
+        else:
+            # Too late for a refund, or the gateway refused: the patient still
+            # asked to cancel, so cancel. Never leave a slot blocked because
+            # the money could not be moved.
+            cancelled = await db_cancel(clinic["id"], appointment_id)
+
+        if cancelled:
+            await payment_service.notify_cancellation_outcome(
+                booking, refund, clinic=clinic
+            )
+        return cancelled, refund
 
     async def _handle_cancel_request(
         self, clinic: dict, phone: str, patient: dict, lang: str

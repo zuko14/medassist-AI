@@ -39,6 +39,8 @@ from app.database import (
 )
 from app.services.tenant import (
     ALL_FEATURES,
+    CANCELLATION_WINDOW_CHOICES,
+    cancellation_window_hours,
     get_clinic_by_id,
     has_feature,
     invalidate_tenant_cache,
@@ -1257,6 +1259,10 @@ class PaymentSettingsUpdate(BaseModel):
     razorpay_webhook_secret: Optional[str] = None
     payment_mode: Optional[Literal["full", "partial", "none"]] = None
     payment_deposit_percent: Optional[int] = None
+    #: Hours before the slot up to which a cancellation is still refundable.
+    #: 0 = refundable any time before the appointment starts. Fixed tiers only,
+    #: so a stray value can never quietly change who gets their money back.
+    cancellation_window_hours: Optional[Literal[0, 2, 4, 6, 12, 24]] = None
 
     @field_validator("payment_deposit_percent")
     @classmethod
@@ -3495,6 +3501,11 @@ async def get_payment_settings(
         "razorpay_webhook_secret_masked": _mask(cfg.get("razorpay_webhook_secret")),
         "payment_mode": cfg.get("payment_mode", default_mode),
         "payment_deposit_percent": cfg.get("payment_deposit_percent"),
+        # Resolved through the same helper the refund gate and the booking
+        # confirmation use, so the panel shows what is actually enforced —
+        # including the platform default when the clinic has never set one.
+        "cancellation_window_hours": cancellation_window_hours(clinic),
+        "cancellation_window_choices": list(CANCELLATION_WINDOW_CHOICES),
     }
 
 
@@ -3531,6 +3542,11 @@ async def update_payment_settings(
         and updates["payment_deposit_percent"] is not None
     ):
         cfg["payment_deposit_percent"] = updates["payment_deposit_percent"]
+    if (
+        "cancellation_window_hours" in updates
+        and updates["cancellation_window_hours"] is not None
+    ):
+        cfg["cancellation_window_hours"] = updates["cancellation_window_hours"]
 
     final_mode = cfg.get("payment_mode", "full")
     final_percent = cfg.get("payment_deposit_percent")
@@ -3564,6 +3580,7 @@ async def update_payment_settings(
         details={
             "payment_mode": cfg.get("payment_mode"),
             "razorpay_configured": bool(cfg.get("razorpay_key_id")),
+            "cancellation_window_hours": cfg.get("cancellation_window_hours"),
         },
         ip_address=client_ip,
     )
@@ -5244,3 +5261,32 @@ async def mark_all_admin_notifications_read(
         "message": f"Marked {updated_count} notifications as read",
         "updated_count": updated_count,
     }
+
+
+# ═══════ SUBSCRIPTION & DAILY LIMITS (CUSTOMER-SAFE) ═══════
+# Same hard boundary as /admin/messaging-usage: volumetric and lifecycle only.
+# No cost, price, rate, markup or Meta economics field may ever appear here.
+
+
+@router.get("/subscription")
+async def get_subscription_status(
+    clinic_id: Optional[str] = None,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Subscription banner state + today report dispatch budget for this clinic.
+
+    Backs the grace-period banner and the 80% / 100% daily-limit badges in the
+    clinic admin panel. Read-only: a clinic admin can see their own lifecycle
+    but only the platform owner can change it.
+    """
+    from app.services.subscription import get_clinic_status
+
+    try:
+        effective_clinic_id = enforce_clinic_access(user, clinic_id)
+        clinic = await get_clinic_by_id(effective_clinic_id)
+        return {"success": True, "clinic_id": effective_clinic_id, **await get_clinic_status(clinic)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching subscription status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch subscription status")

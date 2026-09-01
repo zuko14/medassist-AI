@@ -16,6 +16,7 @@ from app.services.tenant import (
     invalidate_branch_cache,
     get_clinic_by_id,
 )
+from app.services.subscription import DAILY_REPORT_LIMIT_TIERS
 from app.services.whatsapp import whatsapp_service
 from app.database import sb  # T5.1: off-loop query execution
 
@@ -78,6 +79,10 @@ class CreateClinicRequest(BaseModel):
     razorpay_key_id: Optional[str] = None  # e.g. "rzp_live_xxxxxx"
     razorpay_key_secret: Optional[str] = None  # Keep this secret
     razorpay_webhook_secret: Optional[str] = None  # From Razorpay Dashboard → Webhooks
+    # Reports dispatchable per Asia/Kolkata day. Fixed tiers only — 0 is
+    # unlimited (enterprise). Mirrors the CHECK constraint in migration 068,
+    # so a bad value is a 422 here rather than a 500 from PostgREST.
+    daily_report_limit: Literal[0, 50, 100, 200, 300, 500] = 100
     # Branches — optional, for polyclinic/multi-branch onboarding
     branches: Optional[list[BranchSeed]] = None
 
@@ -126,6 +131,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         "whatsapp_number": req.whatsapp_number,
         "plan": req.plan,
         "config": config,
+        "daily_report_limit": req.daily_report_limit,
     }
     if req.meta_phone_number_id:
         clinic_insert_payload["phone_number_id"] = str(req.meta_phone_number_id)
@@ -240,6 +246,7 @@ class UpdateClinicRequest(BaseModel):
     meta_phone_number_id: Optional[str] = None
     meta_access_token: Optional[str] = None
     meta_waba_id: Optional[str] = None
+    daily_report_limit: Optional[Literal[0, 50, 100, 200, 300, 500]] = None
 
 
 @router.patch("/{clinic_id}", dependencies=[Depends(verify_admin_secret)])
@@ -256,6 +263,17 @@ async def update_clinic(clinic_id: str, req: UpdateClinicRequest | dict):
 
     if not updates:
         raise HTTPException(400, "No fields provided to update")
+
+    # The `dict` branch above skips Pydantic entirely, so the tier has to be
+    # re-validated here or a raw dict caller could write an off-tier limit and
+    # take a 500 from the CHECK constraint instead of a 422.
+    if "daily_report_limit" in updates:
+        if updates["daily_report_limit"] not in DAILY_REPORT_LIMIT_TIERS:
+            raise HTTPException(
+                422,
+                "daily_report_limit must be one of "
+                f"{', '.join(str(t) for t in DAILY_REPORT_LIMIT_TIERS)} (0 = unlimited)",
+            )
 
     # Guard payment_mode/payment_deposit_percent invariant
     incoming_config = updates.get("config")
