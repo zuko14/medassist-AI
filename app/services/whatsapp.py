@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 # reject the entire message, so the patient sees nothing at all.
 MAX_LIST_ROWS = 10
 MAX_LIST_SECTIONS = 10
+#: Meta rejects an interactive list whose body exceeds this, and rejection means
+#: the patient receives nothing at all — so anything appended to a body has to
+#: fit inside it rather than simply be added on.
+MAX_LIST_BODY_CHARS = 1024
 
 WHATSAPP_API_BASE = f"https://graph.facebook.com/{settings.whatsapp_api_version}"
 
@@ -610,6 +614,19 @@ class WhatsAppService:
                 f"allows {MAX_LIST_ROWS}. Showed the first {MAX_LIST_ROWS} — the "
                 f"rest are unreachable in this flow and need pagination."
             )
+            # Backstop for a caller that has not adopted _page_rows(). The log
+            # line above only ever reached us, never the patient: a clinic with
+            # 14 doctors saw 10 with nothing to indicate the list was partial,
+            # which reads as the bot having lost the other four. A truncating
+            # list should at minimum admit it and offer a way through.
+            hidden = rows_offered - MAX_LIST_ROWS
+            notice = (
+                f"\n\n(Showing {MAX_LIST_ROWS} of {rows_offered}. "
+                f"{hidden} more — reply with a name to search, or type Menu.)"
+            )
+            # Meta caps the list body at 1024 characters and rejects the whole
+            # message if it is exceeded, so make room rather than append blindly.
+            body = body[: max(0, MAX_LIST_BODY_CHARS - len(notice))] + notice
 
         interactive = {
             "type": "list",

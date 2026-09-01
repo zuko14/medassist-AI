@@ -62,6 +62,13 @@ async def get_lang(clinic: dict, phone: str) -> str:
         return "en"
 
 
+#: Row id for the "more doctors" pager in the "Our Doctors" browse list. The
+#: next page number is appended (view_doc_more_1, _2, ...) so paging carries no
+#: stored state. It deliberately shares the "view_doc_" namespace, which means
+#: the button dispatch in handle_message MUST test this prefix FIRST.
+_MORE_DOCTORS_ID = "view_doc_more"
+
+
 class ConversationState(str, Enum):
     IDLE = "idle"
     SELECTING_LANGUAGE = "selecting_language"
@@ -492,6 +499,13 @@ class ConversationManager:
                 # IDs are formatted as doc_{index}_{name}, extract just the name
                 parts = button_id.split("_", 2)
                 message = parts[2] if len(parts) > 2 else button_id.replace("doc_", "")
+            elif button_id.startswith(_MORE_DOCTORS_ID + "_"):
+                # MUST precede the "view_doc_" branch below: "view_doc_more_2"
+                # also starts with "view_doc_", and falling through would look
+                # up a doctor whose id is "more_2", find nothing, and re-show
+                # page 0 - an endless loop on the first ten doctors.
+                intent = "view_doctors_page"
+                message = button_id[len(_MORE_DOCTORS_ID) + 1:]
             elif button_id.startswith("view_doc_"):
                 intent = "view_doctor"
                 message = button_id.replace("view_doc_", "")
@@ -676,6 +690,15 @@ class ConversationManager:
             return
 
         # Handle global views (interactive buttons from _show_doctors and _show_services)
+        if intent == "view_doctors_page":
+            lang = await get_lang(clinic, phone)
+            try:
+                next_page = int(message)
+            except (TypeError, ValueError):
+                next_page = 0
+            await self._show_doctors(clinic, phone, lang, page=next_page)
+            return
+
         if intent == "view_doctor":
             from app.database import supabase
 
@@ -1589,7 +1612,9 @@ class ConversationManager:
             )
         else:
             rows = []
-            for b in branches[:10]:
+            # Full list: send_interactive_list caps at 10 and reports the
+            # overflow, rather than us dropping branches 11+ in silence.
+            for b in branches:
                 binfo = b.get("branches") or {}
                 bname = binfo.get("short_name") or binfo.get("name", "Branch")
                 sess = b.get("session", "both")
@@ -3557,7 +3582,7 @@ class ConversationManager:
                             "title": doc["name"][:24],
                             "description": f"Available {doc['next_date']}"[:72],
                         }
-                        for i, doc in enumerate(available[:10])
+                        for i, doc in enumerate(available)
                     ],
                 }
             ]
@@ -3718,8 +3743,10 @@ class ConversationManager:
         """Show bookable services by delegating to dynamic department list (OQ-3 Unification)."""
         await self._show_department_list(clinic, phone, context={}, lang=lang)
 
-    async def _show_doctors(self, clinic: dict, phone: str, lang: str) -> None:
-        """Show available doctors grouped by canonical identity with branch annotations."""
+    async def _show_doctors(
+        self, clinic: dict, phone: str, lang: str, page: int = 0
+    ) -> None:
+        """Show available doctors grouped by department, one page at a time."""
         from app.database import supabase
 
         response = (
@@ -3764,21 +3791,21 @@ class ConversationManager:
                 }
             )
 
-        sections = []
         dept_groups = {}
         for doc in doctors:
             dept = doc.get("department", "General Medicine")
-            if dept not in dept_groups:
-                dept_groups[dept] = []
-            dept_groups[dept].append(doc)
+            dept_groups.setdefault(dept, []).append(doc)
 
-        # WhatsApp interactive lists allow max 10 rows TOTAL across all sections combined.
-        remaining_rows = 10
+        # Build a row for EVERY doctor first, then page. This used to cap at
+        # `remaining_rows = 10` and simply stop: a clinic with 14 doctors showed
+        # 10 and the other 4 were unreachable from WhatsApp entirely, with no
+        # "more" row and nothing in the message to say anything had been left
+        # out. The doctors existed in the admin panel, so it read as the bot
+        # losing them.
+        all_rows = []
+        row_dept = {}
         for dept, docs in dept_groups.items():
-            if remaining_rows <= 0:
-                break
-            rows = []
-            for doc in docs[:remaining_rows]:
+            for doc in docs:
                 branches = doc_branches.get(doc["id"], [])
                 if branches:
                     branch_label = ", ".join(
@@ -3793,17 +3820,38 @@ class ConversationManager:
                     desc_parts.append(branch_label)
                 desc_parts.append(f"₹{doc['consultation_fee']}")
 
-                rows.append(
+                row_id = f"view_doc_{doc['id']}"
+                all_rows.append(
                     {
-                        "id": f"view_doc_{doc['id']}",
+                        "id": row_id,
                         "title": doc["name"][:24],
                         "description": " · ".join(desc_parts)[:72],
                     }
                 )
-                remaining_rows -= 1
+                row_dept[row_id] = dept
 
-            if rows:
-                sections.append({"title": dept[:24], "rows": rows})
+        rows, page = self._page_rows(all_rows, page, _MORE_DOCTORS_ID, lang)
+
+        # Stateless paging: the next page number rides on the button id rather
+        # than the conversation context. "Our Doctors" is reachable from several
+        # states, and writing a page counter into whichever one the patient
+        # happens to be in risks clobbering a booking in progress.
+        for row in rows:
+            if row["id"] == _MORE_DOCTORS_ID:
+                row["id"] = f"{_MORE_DOCTORS_ID}_{page + 1}"
+
+        # Re-group the paged rows back under their department headings.
+        sections = []
+        for row in rows:
+            title = (
+                {"en": "More", "hi": "और", "te": "మరిన్ని"}.get(lang, "More")
+                if row["id"].startswith(_MORE_DOCTORS_ID)
+                else row_dept.get(row["id"], "Doctors")
+            )[:24]
+            if sections and sections[-1]["title"] == title:
+                sections[-1]["rows"].append(row)
+            else:
+                sections.append({"title": title, "rows": [row]})
 
         await self.whatsapp.send_interactive_list(
             clinic,
@@ -3817,7 +3865,7 @@ class ConversationManager:
             button_text={"en": "Select", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(
                 lang, "Select"
             ),
-            sections=sections[:10],
+            sections=sections,
         )
 
     async def _handle_cancel_request(
@@ -3854,7 +3902,8 @@ class ConversationManager:
 
         # Build interactive list with improved date labels
         rows = []
-        for appt in appointments[:10]:
+        # Full list; the send path caps and reports any overflow.
+        for appt in appointments:
             appt_date = appt.get("appointment_date", "")
             date_label = "Today" if appt_date == today else appt_date
             status_label = (appt.get("status") or "").replace("_", " ").title()
@@ -3941,9 +3990,22 @@ class ConversationManager:
             await self.update_state(clinic, phone, "main_menu")
             return
 
-        # Show up to 5 most recent reports
-        recent = reports[:5]
-        lines = ["📋 *Your Lab Reports*\n\nHere are your available reports:\n"]
+        # This is a text message, not an interactive list, so Meta's 10-row
+        # cap does not apply here - the limit is only about readability. It
+        # used to show 5 and say "here are your available reports", with
+        # nothing to indicate that a regular patient's older reports existed.
+        RECENT_REPORT_LIMIT = 10
+        recent = reports[:RECENT_REPORT_LIMIT]
+        hidden = len(reports) - len(recent)
+        heading = (
+            "📋 *Your Lab Reports*\n\nHere are your available reports:\n"
+            if not hidden
+            else (
+                f"📋 *Your Lab Reports*\n\nShowing your {len(recent)} most "
+                f"recent of {len(reports)}:\n"
+            )
+        )
+        lines = [heading]
         for i, r in enumerate(recent, 1):
             date_str = ""
             if r.get("uploaded_at"):
@@ -3959,6 +4021,10 @@ class ConversationManager:
         lines.append(
             "\nReply with the report number to download it. Reply 0 to go back to main menu."
         )
+        if hidden:
+            lines.append(
+                f"For the {hidden} older report(s), please contact reception."
+            )
         await self.whatsapp.send_text(clinic, phone, "\n".join(lines))
 
         # Save reports list in context
