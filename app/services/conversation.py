@@ -68,6 +68,14 @@ async def get_lang(clinic: dict, phone: str) -> str:
 #: the button dispatch in handle_message MUST test this prefix FIRST.
 _MORE_DOCTORS_ID = "view_doc_more"
 
+#: Typed words that always mean "take me back to the main menu", from any
+#: state. Kept at module level so state handlers that consume free text (lab
+#: test search, for one) can exclude them instead of swallowing the patient's
+#: only way out.
+NAV_KEYWORDS = frozenset(
+    {"menu", "main menu", "home", "start over", "reset", "मेनू", "మెనూ"}
+)
+
 
 class ConversationState(str, Enum):
     IDLE = "idle"
@@ -850,6 +858,38 @@ class ConversationManager:
             await self.update_state(clinic, phone, "selecting_language")
             return
 
+        # A patient typing while browsing the test catalogue is searching it.
+        # Placed ahead of the global menu intents because a bare test name
+        # ("thyroid", "urine sodium") classifies as view_services /
+        # doctor_availability, and at a diagnostics-only clinic both call
+        # _start_lab_booking -- which would reset the search to page 1 of the
+        # unfiltered catalogue and make search impossible to use.
+        # Emergency, opt-out, escalation and language change are all handled
+        # above this point, so they still win.
+        if (
+            state == "browsing_lab_tests"
+            and not interactive_data
+            and (message or "").strip()
+            # "book test" and friends are handled a few lines below; the exit
+            # words are handled by _handle_browsing_lab_tests itself.
+            and message.strip().lower()
+            not in {"book test", "book lab test", "booktest"}
+            # Intents no test name is plausibly confused with; leaving them to
+            # the handlers below keeps every escape hatch reachable.
+            and intent
+            not in {
+                "greeting",
+                "book_appointment",
+                "cancel_appointment",
+                "reschedule_appointment",
+                "view_reports",
+            }
+        ):
+            await self._handle_browsing_lab_tests(
+                clinic, phone, message, intent, context, lang, interactive_data
+            )
+            return
+
         # Global handlers for top-level menu intents (escape hatches from selection states)
         if state not in ["selecting_language", "awaiting_consent"]:
             if intent == "doctor_availability":
@@ -881,7 +921,7 @@ class ConversationManager:
             }
             msg_lower = message.strip().lower()
             if (
-                msg_lower in ["menu", "main menu", "home", "start over", "reset", "मेनू", "మెనూ"]
+                msg_lower in NAV_KEYWORDS
                 or (intent == "greeting" and state in CHOICE_STATES and state != "main_menu")
             ):
                 await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
@@ -4097,8 +4137,56 @@ class ConversationManager:
             )
             return
 
+    #: Above this many tests, paging 9-at-a-time is unusable (a 1000-test
+    #: catalogue is 110 taps deep), so the list is introduced as searchable.
+    LAB_SEARCH_HINT_THRESHOLD = 20
+
+    #: Typed while browsing the catalogue, these mean "show me everything
+    #: again", not "search for this". Everything else typed is a search term.
+    LAB_SEARCH_RESET_WORDS = frozenset(
+        {"all", "all tests", "list", "show all", "सभी", "पूरी सूची", "అన్నీ"}
+    )
+
+    #: ...and these mean "get me out of here". Without them a patient typing
+    #: "cancel" would be searched for a test named "cancel" and land back on
+    #: the very list they were trying to leave.
+    LAB_SEARCH_EXIT_WORDS = NAV_KEYWORDS | {"cancel", "back", "exit", "stop"}
+
+    @staticmethod
+    def _match_lab_tests(tests: list[dict], query: str) -> list[dict]:
+        """Tests whose name contains every whitespace-separated term in `query`.
+
+        All-terms-contained rather than the raw phrase, so "thyroid profile"
+        finds "PROFILE - THYROID T3 T4 TSH" and "urine sodium" still finds
+        "24 Hrs URINE SODIUM". Best matches are ordered first so the answer
+        lands on page 1 instead of behind a "More options" tap.
+        """
+        terms = [t for t in query.strip().lower().split() if t]
+        if not terms:
+            return list(tests)
+        joined = " ".join(terms)
+        matched = [
+            t
+            for t in tests
+            if all(term in (t.get("name") or "").lower() for term in terms)
+        ]
+        matched.sort(
+            key=lambda t: (
+                not (t.get("name") or "").lower().startswith(joined),
+                len(t.get("name") or ""),
+                (t.get("name") or "").lower(),
+            )
+        )
+        return matched
+
     async def _show_lab_test_list(
-        self, clinic: dict, phone: str, context: dict, lang: str, page: int = 0
+        self,
+        clinic: dict,
+        phone: str,
+        context: dict,
+        lang: str,
+        page: int = 0,
+        query: Optional[str] = None,
     ) -> None:
         """Fetch active lab tests for this clinic/branch and display as interactive list."""
         from app.database import get_lab_tests
@@ -4116,8 +4204,29 @@ class ConversationManager:
             await self._send_main_menu(clinic, phone, lang)
             return
 
+        # Capped because the query is echoed back into the list body, and
+        # Meta rejects the whole message over 1024 characters -- a pasted
+        # paragraph would otherwise take the patient's list away entirely.
+        query = (query or "").strip()[:60].strip() or None
+        shown = tests
+        if query:
+            shown = self._match_lab_tests(tests, query)
+            if not shown:
+                # Falling back to the unfiltered catalogue is the only exit
+                # that does not dead-end a patient who mistyped a test name.
+                await self.whatsapp.send_text(
+                    clinic,
+                    phone,
+                    {
+                        "en": f'No test matched "{query}". Showing the full list — try a shorter word, like "thyroid" or "urine".',
+                        "hi": f'"{query}" से कोई टेस्ट नहीं मिला। पूरी सूची दिखा रहे हैं — छोटा शब्द आज़माएँ, जैसे "thyroid"।',
+                        "te": f'"{query}" కి పరీక్ష దొరకలేదు. పూర్తి జాబితా చూపిస్తున్నాం — చిన్న పదం ప్రయత్నించండి, ఉదా. "thyroid".',
+                    }.get(lang, f'No test matched "{query}". Showing the full list.'),
+                )
+                shown, query, page = tests, None, 0
+
         all_rows = []
-        for t in tests:
+        for t in shown:
             price_str = f"₹{t['price_paise'] // 100}"
             sample_str = f" • {t['sample_type']}" if t.get("sample_type") else ""
             desc = f"{price_str}{sample_str}"[:72]
@@ -4129,11 +4238,24 @@ class ConversationManager:
 
         rows, page = self._page_rows(all_rows, page, "labtest_more", lang)
 
-        body = {
-            "en": "Select a lab test to book your sample collection:",
-            "hi": "सैंपल कलेक्शन बुक करने के लिए लैब टेस्ट चुनें:",
-            "te": "శాంపిల్ కలెక్షన్ బుక్ చేసుకోవడానికి ల్యాబ్ పరీక్షను ఎంచుకోండి:",
-        }.get(lang, "Select a lab test:")
+        if query:
+            body = {
+                "en": f'🔍 {len(shown)} test(s) matching "{query}".\n\nTap below to pick one, type another name to search again, or send "all" for the full list.',
+                "hi": f'🔍 "{query}" से मिलते {len(shown)} टेस्ट।\n\nनीचे टैप करके चुनें, दूसरा नाम टाइप करके फिर खोजें, या पूरी सूची के लिए "all" भेजें।',
+                "te": f'🔍 "{query}" కి సరిపోయే {len(shown)} పరీక్షలు.\n\nక్రింద ట్యాప్ చేసి ఎంచుకోండి, మళ్లీ వెతకడానికి మరో పేరు టైప్ చేయండి, లేదా పూర్తి జాబితాకు "all" పంపండి.',
+            }.get(lang, f'{len(shown)} test(s) matching "{query}".')
+        elif len(tests) > self.LAB_SEARCH_HINT_THRESHOLD:
+            body = {
+                "en": f'We offer {len(tests)} tests.\n\n🔍 *Type the test name to search* — e.g. "thyroid" or "urine sodium".\nOr tap below to browse the full list.',
+                "hi": f'हम {len(tests)} टेस्ट करते हैं।\n\n🔍 *खोजने के लिए टेस्ट का नाम टाइप करें* — जैसे "thyroid"।\nया पूरी सूची देखने के लिए नीचे टैप करें।',
+                "te": f'మేము {len(tests)} పరీక్షలు అందిస్తాము.\n\n🔍 *వెతకడానికి పరీక్ష పేరు టైప్ చేయండి* — ఉదా. "thyroid".\nలేదా పూర్తి జాబితా కోసం క్రింద ట్యాప్ చేయండి.',
+            }.get(lang, f"We offer {len(tests)} tests. Type the test name to search.")
+        else:
+            body = {
+                "en": "Select a lab test to book your sample collection:",
+                "hi": "सैंपल कलेक्शन बुक करने के लिए लैब टेस्ट चुनें:",
+                "te": "శాంపిల్ కలెక్షన్ బుక్ చేసుకోవడానికి ల్యాబ్ పరీక్షను ఎంచుకోండి:",
+            }.get(lang, "Select a lab test:")
 
         button_text = {
             "en": "View Tests",
@@ -4146,9 +4268,17 @@ class ConversationManager:
             phone,
             body=body,
             button_text=button_text,
-            sections=[{"title": "Available Tests", "rows": rows}],
+            sections=[
+                {
+                    "title": ("Search Results" if query else "Available Tests")[:24],
+                    "rows": rows,
+                }
+            ],
         )
         context["lab_test_page"] = page
+        # Persisted so "More options" pages within the search result set
+        # instead of silently jumping back to the full catalogue.
+        context["lab_test_query"] = query
         await self.update_state(clinic, phone, "browsing_lab_tests", context)
 
     def _next_collection_dates(self, allowed_days_str: str, count: int = 3) -> list[str]:
@@ -4186,6 +4316,7 @@ class ConversationManager:
             await self._show_lab_test_list(
                 clinic, phone, context, lang,
                 page=int(context.get("lab_test_page") or 0) + 1,
+                query=context.get("lab_test_query"),
             )
             return
 
@@ -4194,9 +4325,20 @@ class ConversationManager:
             selected_id = button_id.removeprefix("labtest_")
 
         if not selected_id:
-            # Fallback: patient typed something instead of tapping a list row
-            # Re-present the list
-            await self._show_lab_test_list(clinic, phone, context, lang)
+            # Patient typed instead of tapping a row. Re-presenting the same
+            # first page was a dead end for a catalogue of hundreds of tests
+            # ("More options" 100+ times), so the text is a search query.
+            typed = (message or "").strip()
+            typed_lower = typed.lower()
+            if typed_lower in self.LAB_SEARCH_EXIT_WORDS:
+                await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+                await self._send_main_menu(clinic, phone, lang)
+            elif typed and typed_lower not in self.LAB_SEARCH_RESET_WORDS:
+                await self._show_lab_test_list(
+                    clinic, phone, context, lang, query=typed
+                )
+            else:
+                await self._show_lab_test_list(clinic, phone, context, lang)
             return
 
         test = await get_lab_test_by_id(clinic["id"], selected_id)

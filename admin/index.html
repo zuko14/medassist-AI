@@ -1944,11 +1944,11 @@
         </div>
         <div class="field">
             <label>Select CSV File</label>
-            <input type="file" id="f-labCsvFile" accept=".csv">
+            <input type="file" id="f-labCsvFile" accept=".csv" onchange="onLabCsvFileChosen()">
         </div>
         <div id="labCsvResults" style="display:none; margin-top:12px; font-size:0.85rem; max-height:180px; overflow-y:auto;"></div>
         <div class="modal-actions" style="margin-top:16px;">
-            <button class="btn btn-ghost" onclick="closeLabCsvModal()">Close</button>
+            <button class="btn btn-ghost" id="btnCloseLabCsv" onclick="closeLabCsvModal()">Close</button>
             <button class="btn btn-accent" id="btnUploadLabCsv" onclick="submitLabTestCsv()">Upload & Import</button>
         </div>
     </div>
@@ -3708,6 +3708,7 @@ function openLabCsvModal() {
     const modal = document.getElementById('labCsvModal');
     if (modal) {
         modal.classList.add('open');
+        _labCsvBusy(false);
         document.getElementById('f-labCsvFile').value = '';
         const resEl = document.getElementById('labCsvResults');
         if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
@@ -3739,10 +3740,56 @@ async function downloadLabCsvTemplate() {
     }
 }
 
+// A catalogue import runs long enough that a silently disabled button reads
+// as "nothing happened" — staff re-click or give up. Every phase reports
+// itself: file selected, uploading %, processing, then the outcome.
+function _labCsvStatus(html) {
+    const resEl = document.getElementById('labCsvResults');
+    if (!resEl) return;
+    resEl.style.display = 'block';
+    resEl.innerHTML = html;
+}
+
+function _labCsvBusy(busy, label) {
+    const btn = document.getElementById('btnUploadLabCsv');
+    if (btn) {
+        btn.disabled = busy;
+        btn.textContent = busy ? (label || 'Uploading…') : 'Upload & Import';
+    }
+    const closeBtn = document.getElementById('btnCloseLabCsv');
+    if (closeBtn) closeBtn.disabled = busy;
+    const fileInput = document.getElementById('f-labCsvFile');
+    if (fileInput) fileInput.disabled = busy;
+}
+
+function _labCsvProgressBar(pct, caption) {
+    const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+    return `<div style="font-weight:600; color:var(--accent, #38bdf8); margin-bottom:6px;">${esc(caption)}</div>
+        <div style="height:8px; background:rgba(255,255,255,0.08); border-radius:99px; overflow:hidden;">
+            <div style="height:100%; width:${clamped}%; background:var(--accent, #38bdf8); transition:width .15s linear;"></div>
+        </div>
+        <div style="color:var(--text3); font-size:0.75rem; margin-top:4px;">Please keep this window open.</div>`;
+}
+
+function _labCsvFileSize(bytes) {
+    return bytes < 1024 * 1024
+        ? (bytes / 1024).toFixed(0) + ' KB'
+        : (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+// Confirms the browser actually took the file, before any upload starts.
+function onLabCsvFileChosen() {
+    const fileInput = document.getElementById('f-labCsvFile');
+    if (!fileInput || !fileInput.files || !fileInput.files.length) return;
+    const f = fileInput.files[0];
+    _labCsvStatus(`<div style="color:var(--text2, #cbd5e1);">📄 Selected: <b>${esc(f.name)}</b> (${_labCsvFileSize(f.size)}). Click <b>Upload &amp; Import</b> to begin.</div>`);
+}
+
 async function submitLabTestCsv() {
     const fileInput = document.getElementById('f-labCsvFile');
     if (!fileInput || !fileInput.files || !fileInput.files.length) {
         toast('Please select a CSV file', true);
+        _labCsvStatus(`<div style="color:var(--red, #f87171); font-weight:600;">❌ No file selected. Choose a .csv file first.</div>`);
         return;
     }
     const file = fileInput.files[0];
@@ -3750,63 +3797,87 @@ async function submitLabTestCsv() {
     // Client-side 5 MB file size guard
     if (file.size > 5 * 1024 * 1024) {
         toast('File exceeds maximum size limit of 5 MB', true);
+        _labCsvStatus(`<div style="color:var(--red, #f87171); font-weight:600;">❌ "${esc(file.name)}" is ${_labCsvFileSize(file.size)} — the limit is 5 MB.</div>`);
         return;
     }
 
     const formData = new FormData();
     formData.append('file', file);
 
-    const btn = document.getElementById('btnUploadLabCsv');
-    if (btn) btn.disabled = true;
-    const resEl = document.getElementById('labCsvResults');
+    _labCsvBusy(true, 'Uploading…');
+    _labCsvStatus(_labCsvProgressBar(0, `⏳ Uploading ${file.name}…`));
+    toast('Upload started — importing your catalogue…');
 
     try {
-        const resp = await fetch(API + withScope('/admin/lab-tests/import-csv'), {
-            method: 'POST',
-            headers: authHeaders(),
-            body: formData,
+        // XHR rather than fetch: fetch cannot report upload progress, and a
+        // large catalogue on a slow link is exactly when staff need to see
+        // the bar move instead of guessing whether the click registered.
+        const { status, data } = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', API + withScope('/admin/lab-tests/import-csv'), true);
+            const headers = authHeaders();
+            for (const k of Object.keys(headers)) xhr.setRequestHeader(k, headers[k]);
+
+            xhr.upload.onprogress = (ev) => {
+                if (!ev.lengthComputable) return;
+                const pct = (ev.loaded / ev.total) * 100;
+                _labCsvStatus(_labCsvProgressBar(pct, `⏳ Uploading ${file.name}… ${Math.round(pct)}%`));
+            };
+            xhr.upload.onload = () => {
+                // Bytes are on the server; the import itself still has to run.
+                _labCsvBusy(true, 'Processing…');
+                _labCsvStatus(_labCsvProgressBar(100, '⚙️ Uploaded. Validating and importing rows…'));
+            };
+            xhr.onload = () => {
+                let parsed = {};
+                try { parsed = JSON.parse(xhr.responseText || '{}'); } catch (_) { parsed = {}; }
+                resolve({ status: xhr.status, data: parsed });
+            };
+            xhr.onerror = () => reject(new Error('Network error — the file did not reach the server. Check your connection and try again.'));
+            xhr.ontimeout = () => reject(new Error('Upload timed out. Try again, or split the file into smaller batches.'));
+            xhr.onabort = () => reject(new Error('Upload cancelled.'));
+            xhr.send(formData);
         });
-        const data = await resp.json();
+
+        const resp = { status: status, ok: status >= 200 && status < 300 };
 
         if (resp.status === 422) {
             // Validation errors occurred (zero changes made)
-            if (resEl) {
-                resEl.style.display = 'block';
-                let html = `<div style="color:var(--red, #f87171); font-weight:600; margin-bottom:6px;">❌ ${esc(data.message || 'Import Rejected')}</div>`;
-                if (data.errors && data.errors.length) {
-                    html += `<table style="width:100%; border-collapse:collapse; font-size:0.75rem; text-align:left;">`;
-                    html += `<tr style="border-bottom:1px solid var(--border);"><th>Row</th><th>Column</th><th>Problem</th><th>Expected</th></tr>`;
-                    for (const err of data.errors.slice(0, 50)) {
-                        html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">`;
-                        html += `<td>${err.row}</td><td><code>${esc(err.column)}</code></td><td>${esc(err.problem)}</td><td>${esc(err.expected)}</td>`;
-                        html += `</tr>`;
-                    }
-                    if (data.errors.length > 50) {
-                        html += `<tr><td colspan="4" style="color:var(--text3); font-style:italic;">...and ${data.errors.length - 50} more errors</td></tr>`;
-                    }
-                    html += `</table>`;
+            let html = `<div style="color:var(--red, #f87171); font-weight:600; margin-bottom:6px;">❌ ${esc(data.message || 'Import Rejected')} — nothing was saved.</div>`;
+            if (data.errors && data.errors.length) {
+                html += `<table style="width:100%; border-collapse:collapse; font-size:0.75rem; text-align:left;">`;
+                html += `<tr style="border-bottom:1px solid var(--border);"><th>Row</th><th>Column</th><th>Problem</th><th>Expected</th></tr>`;
+                for (const err of data.errors.slice(0, 50)) {
+                    html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">`;
+                    html += `<td>${esc(String(err.row))}</td><td><code>${esc(err.column)}</code></td><td>${esc(err.problem)}</td><td>${esc(err.expected)}</td>`;
+                    html += `</tr>`;
                 }
-                resEl.innerHTML = html;
+                if (data.errors.length > 50) {
+                    html += `<tr><td colspan="4" style="color:var(--text3); font-style:italic;">...and ${data.errors.length - 50} more errors</td></tr>`;
+                }
+                html += `</table>`;
             }
+            _labCsvStatus(html);
             toast('Import rejected due to validation errors. Zero records modified.', true);
             return;
         }
 
         if (!resp.ok) {
-            throw new Error(data.detail || 'Import failed');
+            // A 401/413/502 returns no JSON body, so name the status rather
+            // than showing a bare "Import failed" with nothing to act on.
+            throw new Error(data.detail || data.message || `Import failed (HTTP ${resp.status})`);
         }
 
-        if (resEl) {
-            resEl.style.display = 'block';
-            let html = `<div style="color:var(--green, #4ade80); font-weight:600;">✅ Success: ${data.created} created, ${data.updated} updated (Total: ${data.total_imported})</div>`;
-            resEl.innerHTML = html;
-        }
+        _labCsvStatus(`<div style="color:var(--green, #4ade80); font-weight:600;">✅ Import complete — ${data.created} created, ${data.updated} updated (total ${data.total_imported}).</div>
+            <div style="color:var(--text3); font-size:0.78rem; margin-top:4px;">The catalogue below has been refreshed. Patients can book these tests on WhatsApp right away.</div>`);
         toast(`Import successful: ${data.created} created, ${data.updated} updated`);
         loadLabTests();
     } catch (e) {
+        _labCsvStatus(`<div style="color:var(--red, #f87171); font-weight:600;">❌ ${esc(e.message || 'Import failed')}</div>
+            <div style="color:var(--text3); font-size:0.78rem; margin-top:4px;">No records were changed. You can safely retry.</div>`);
         toast(e.message || 'Import failed', true);
     } finally {
-        if (btn) btn.disabled = false;
+        _labCsvBusy(false);
     }
 }
 
