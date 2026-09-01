@@ -118,3 +118,8 @@ GRANT EXECUTE ON FUNCTION increment_clinic_daily_usage(UUID, DATE, INTEGER, INTE
 -- window; without this it is a full scan of an append-only table.
 CREATE INDEX IF NOT EXISTS idx_oml_clinic_source_sent
     ON outbound_message_ledger(clinic_id, source_service, sent_at DESC);
+
+-- ── Record Migration ────────────────────────────────────────────────────────
+INSERT INTO schema_migrations (name, applied_at)
+VALUES ('068_subscription_lifecycle_and_daily_limits.sql', now())
+ON CONFLICT (name) DO NOTHING;
