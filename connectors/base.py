@@ -27,6 +27,8 @@ class ReportMetadata:
         vam_id: Optional[str] = None,
         report_no: Optional[str] = None,
         sample_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        routed_recipient: Optional[str] = None,
     ):
         self.patient_name = patient_name
         self.patient_phone = patient_phone
@@ -36,6 +38,13 @@ class ReportMetadata:
         self.vam_id = vam_id
         self.report_no = report_no
         self.sample_id = sample_id
+        # Insurance/TPA panel this report was booked under, as printed by the
+        # source system. Blank for ordinary self-pay patients.
+        self.provider = provider
+        # Set when `provider` matches the clinic's provider-routing rule: the
+        # report goes to this desk number and NOT to the patient. patient_phone
+        # is rewritten to it, so this field is what records *why*.
+        self.routed_recipient = routed_recipient
 
     def __repr__(self) -> str:
         return (
@@ -120,6 +129,13 @@ class HospitalConnector(ABC):
             "external_report_id": meta.external_report_id,
             "connector_type": self.connector_type,
         }
+        if meta.provider:
+            post_data["provider"] = meta.provider
+        if meta.routed_recipient:
+            # Tells the API this destination is a configured TPA desk, not a
+            # patient — it re-verifies the claim against the clinic's own
+            # connector config before honouring it.
+            post_data["recipient_routed"] = "true"
         if match_confidence is not None:
             post_data["match_confidence"] = match_confidence
         if match_source:

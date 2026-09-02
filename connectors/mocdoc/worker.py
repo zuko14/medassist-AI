@@ -24,6 +24,7 @@ from connectors.base import HospitalConnector, ReportMetadata
 from connectors.mocdoc import selectors as S
 from app.config import settings
 from app.utils.pii_sanitizer import sanitize_report_text
+from app.services.report_routing import route_recipient_for_provider
 from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,8 @@ class MocDocConnector(HospitalConnector):
         {"key": "password", "label": "Password", "type": "password", "placeholder": "Leave blank to keep existing", "required": True},
         {"key": "clinic_slug", "label": "Clinic Slug", "type": "text", "placeholder": "e.g. visakha-multispeciality-clinics", "required": False},
         {"key": "base_url", "label": "Base URL", "type": "text", "placeholder": "https://mocdoc.com", "required": False},
+        {"key": "report_routing_providers", "label": "TPA / Insurance Providers (reports go to the desk number, not the patient)", "type": "text", "placeholder": "e.g. VMSC MEDIBUDDY, MD INDIA TPA, HEALTH ASSURE TPA", "required": False},
+        {"key": "report_routing_phone", "label": "TPA Desk WhatsApp Number", "type": "text", "placeholder": "e.g. 9052024418 — leave blank to send every report to the patient", "required": False},
     ]
 
     def __init__(self, clinic_id: str, config: dict, medassist_url: str,
@@ -721,6 +724,42 @@ class MocDocConnector(HospitalConnector):
         except Exception as e_p:
             logger.warning(f"Could not preload processed report IDs: {e_p}")
 
+        # Locate the "Provider" column by its header text. Reports booked
+        # under an insurance/TPA panel go to the clinic's TPA desk instead of
+        # the patient (see app/services/report_routing.py), and that decision
+        # is only as good as reading the right cell.
+        provider_idx = S.PROVIDER_COLUMN_FALLBACK_INDEX
+        try:
+            # Scope to the report table itself: querying th's document-wide
+            # would count the headers of any other DataTable on the page and
+            # shift the index.
+            _PROVIDER_COL_JS = (
+                "(args) => {"
+                "  const table = document.querySelector(args[0]);"
+                "  if (!table) return -1;"
+                "  const ths = table.querySelectorAll(args[1]);"
+                "  for (let i = 0; i < ths.length; i++) {"
+                "    const t = (ths[i].innerText || '').trim().toLowerCase();"
+                "    if (t.startsWith(args[2])) return i;"
+                "  }"
+                "  return -1;"
+                "}"
+            )
+            found_idx = await self._page.evaluate(
+                _PROVIDER_COL_JS,
+                [S.REPORT_TABLE, S.REPORT_HEADER_CELLS, S.PROVIDER_COLUMN_HEADER],
+            )
+            # bool is a subclass of int — a JS `false` must not read as column 0.
+            if isinstance(found_idx, int) and not isinstance(found_idx, bool) and found_idx >= 0:
+                provider_idx = found_idx
+            else:
+                logger.warning(
+                    f"Provider column header not found — falling back to index "
+                    f"{S.PROVIDER_COLUMN_FALLBACK_INDEX}"
+                )
+        except Exception as e_hdr:
+            logger.warning(f"Provider column lookup failed ({e_hdr}) — using fallback index")
+
         # Parse table rows across pages (with pagination support)
         max_pages = 5
         for page_idx in range(max_pages):
@@ -767,7 +806,25 @@ class MocDocConnector(HospitalConnector):
                     first_cell_text = await cells.first.inner_text()
                     parsed = _parse_patient_cell(first_cell_text)
 
-                    if not parsed["phone"]:
+                    provider_text = ""
+                    if cell_count > provider_idx:
+                        try:
+                            provider_text = (
+                                await cells.nth(provider_idx).inner_text()
+                            ).strip()
+                        except Exception as e_prov:
+                            logger.warning(
+                                f"Could not read provider cell for "
+                                f"{parsed['vam_id']}: {e_prov}"
+                            )
+
+                    routed_recipient = route_recipient_for_provider(
+                        self.config, provider_text
+                    )
+
+                    # A TPA report is delivered to the clinic's own desk, so a
+                    # missing patient mobile is not a reason to drop it.
+                    if not parsed["phone"] and not routed_recipient:
                         logger.warning(
                             f"No phone number for {parsed['patient_name']} "
                             f"(VAM: {parsed['vam_id']}) — skipping"
@@ -780,19 +837,34 @@ class MocDocConnector(HospitalConnector):
                         )
                         continue
 
+                    delivery_phone = routed_recipient or parsed["phone"]
+
                     meta = ReportMetadata(
                         patient_name=parsed["patient_name"],
-                        patient_phone=parsed["phone"],
+                        patient_phone=delivery_phone,
                         report_name="",       # filled during download
                         report_type="Laboratory",
                         external_report_id=parsed["vam_id"],  # preliminary
                         vam_id=parsed["vam_id"],
+                        provider=provider_text or None,
+                        routed_recipient=routed_recipient,
                     )
                     reports.append(meta)
-                    logger.info(
-                        f"Parsed: {parsed['patient_name']} | "
-                        f"{parsed['vam_id']} | ***{parsed['phone'][-4:]}"
-                    )
+                    if routed_recipient:
+                        provider_label = (
+                            provider_text.splitlines()[0] if provider_text else "?"
+                        )
+                        logger.info(
+                            f"Parsed: {parsed['patient_name']} | "
+                            f"{parsed['vam_id']} | TPA provider {provider_label} "
+                            f"— routed to desk ***{routed_recipient[-4:]} "
+                            f"(patient number withheld)"
+                        )
+                    else:
+                        logger.info(
+                            f"Parsed: {parsed['patient_name']} | "
+                            f"{parsed['vam_id']} | ***{delivery_phone[-4:]}"
+                        )
 
                 except Exception as e:
                     logger.warning(f"Failed to parse row {i} on page {page_idx + 1}: {e}")

@@ -133,6 +133,30 @@ If the lab uses MocDoc:
    python -m connectors.runner --connector mocdoc --clinic-id <CLINIC_UUID> --once --dry-run
    ```
 
+### Step 2b: (Optional) Route Insurance / TPA Reports to a Desk Number
+Some centres run insurance panels where the **patient must NOT receive the PDF** —
+the report goes to the centre's own TPA desk, which files the claim.
+
+Admin Panel → **Connectors** → set both fields, then Save:
+
+| Field | Value |
+|---|---|
+| TPA / Insurance Providers | `VMSC MEDIBUDDY, MD INDIA TPA, MDINDIA TPA, VMSC VISIT HEALTH TPA, ASSURE TPA, HEALTH ASSURE TPA, QUANTUM CORP HEALTH MUMBAI, VMSC MD INDIA LIC TPA` |
+| TPA Desk WhatsApp Number | `9052024418` |
+
+- Matching is against MocDoc's **Provider** column, case- and punctuation-insensitive
+  substring — `MD INDIA TPA` also catches `VMSC MD INDIA TPA` and `MDINDIA TPA`.
+- A key only matches cells that CONTAIN it, so list the shortest form a provider
+  can appear as. `ASSURE TPA` covers `HEALTH ASSURE TPA` and `VMSC ASSURE TPA`;
+  `HEALTH ASSURE TPA` alone would miss a cell that just says `ASSURE TPA`.
+- Both fields are required. Clearing either one turns routing off and every report
+  goes back to the patient.
+- Reports for any other provider (or none) are unaffected.
+- Verify with a dry run — routed rows log `TPA provider ... — routed to desk ***4418`:
+  ```bash
+  python -m connectors.runner --connector mocdoc --clinic-id <CLINIC_UUID> --once --dry-run
+  ```
+
 ### Step 3: Test Manual Lab Report Delivery (If not using MocDoc)
 Upload a test report to send via WhatsApp:
 ```bash

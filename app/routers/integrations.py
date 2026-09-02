@@ -20,6 +20,7 @@ from app.database import supabase, scoped_query
 from app.services.lab_reports import LabReportService
 from app.services.tenant import get_clinic_by_id
 from app.database import sb  # T5.1: off-loop query execution
+from app.utils.validators import normalize_phone
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,8 @@ async def receive_lab_report(
     report_type: str = Form(default="Laboratory"),
     external_report_id: str = Form(...),
     connector_type: str = Form(default="mocdoc"),
+    provider: Optional[str] = Form(default=None),
+    recipient_routed: Optional[str] = Form(default=None),
     match_confidence: Optional[float] = Form(default=None),
     match_source: Optional[str] = Form(default=None),
     matched_patient_id: Optional[str] = Form(default=None),
@@ -210,12 +213,47 @@ async def receive_lab_report(
     )
 
     # Step 3: Server-side Patient Matching Verification (P1-2)
-    from app.services.patient_match import patient_match_service
-    match_res = await patient_match_service.match(
-        clinic_id=clinic_id,
-        scraped_name=patient_name,
-        scraped_phone=patient_phone,
-    )
+    from app.services.patient_match import MatchResult, patient_match_service
+
+    # A provider-routed report (insurance/TPA panel) is addressed to a desk
+    # number the clinic configured on its own connector row, not to a number
+    # scraped off the HMIS — so there is nothing for the patient-match gate to
+    # verify, and the patient is deliberately NOT a recipient. The connector's
+    # claim is re-checked here against the clinic's stored config so a stale or
+    # tampered connector cannot use this path to reach an arbitrary number.
+    routed = str(recipient_routed or "").strip().lower() in ("1", "true", "yes")
+    if routed:
+        from app.services.report_routing import is_routing_recipient
+
+        if await is_routing_recipient(clinic_id, connector_type, patient_phone):
+            logger.info(
+                f"Report {external_report_id} routed to configured TPA desk "
+                f"***{patient_phone[-4:]} (provider={provider!r}) — "
+                f"patient-match gate not applicable"
+            )
+        else:
+            logger.error(
+                f"REJECTED provider-routing claim for {external_report_id}: "
+                f"***{patient_phone[-4:]} is not a configured routing recipient "
+                f"for clinic {clinic_id} — falling back to patient matching"
+            )
+            routed = False
+
+    if routed:
+        match_res = MatchResult(
+            status="matched",
+            is_safe_to_send=True,
+            match_source="provider_routing",
+            match_confidence=1.0,
+            normalized_phone=normalize_phone(patient_phone),
+            patient_name=patient_name,
+        )
+    else:
+        match_res = await patient_match_service.match(
+            clinic_id=clinic_id,
+            scraped_name=patient_name,
+            scraped_phone=patient_phone,
+        )
     effective_match_confidence = match_res.match_confidence
     effective_match_source = match_res.match_source
     effective_matched_patient_id = match_res.matched_patient_id

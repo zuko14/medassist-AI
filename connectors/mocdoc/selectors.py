@@ -47,6 +47,16 @@ SHOW_ENTRIES_SELECT = "select[name$='_length'], .dataTables_length select"
 REPORT_TABLE_BODY = "#example tbody, table.dataTable tbody"
 REPORT_ROWS = "#example tbody tr, table.dataTable tbody tr"
 
+# Table header cells — used to locate the "Provider" column by name rather
+# than by a hardcoded index, so an added/reordered MocDoc column cannot make
+# the connector read the wrong cell.
+REPORT_TABLE = "#example, table.dataTable"
+REPORT_HEADER_CELLS = "thead th"
+PROVIDER_COLUMN_HEADER = "provider"
+# Column order as of Sep 2026: Patient | Referred By | Provider | Type | Date |
+# Status | actions. Used only if the header lookup finds nothing.
+PROVIDER_COLUMN_FALLBACK_INDEX = 2
+
 # The "View" button on each row (green button, right-most column)
 VIEW_BUTTON = "button:has-text('View'), a:has-text('View'), .btn:has-text('View')"
 HIDE_BUTTON = "button:has-text('Hide'), a:has-text('Hide'), .btn:has-text('Hide')"

@@ -5034,7 +5034,10 @@ async function saveConnectorCredentials() {
         } else if (f.key === 'username') {
             if (val) body.username = val;
         } else {
-            body[f.key] = val || null;
+            // Send the raw trimmed value, not null, so a schema field can be
+            // cleared. Fields that must never be blanked (base_url, clinic_slug)
+            // ignore an empty string server-side.
+            body[f.key] = val;
         }
     });
 

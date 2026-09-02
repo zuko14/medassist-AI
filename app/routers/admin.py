@@ -1360,6 +1360,11 @@ class ConnectorCredentialsUpdate(BaseModel):
     admin_alert_phone: Optional[str] = None
     poll_interval_minutes: Optional[int] = None
     is_enabled: Optional[bool] = None
+    # Insurance/TPA panels whose reports go to the clinic's desk number instead
+    # of the patient. Empty string clears the rule (unlike the credential
+    # fields above, where empty means "keep what is stored").
+    report_routing_providers: Optional[str] = None
+    report_routing_phone: Optional[str] = None
 
 
 class PrescriptionCreate(BaseModel):
@@ -3724,6 +3729,34 @@ async def upsert_connector_credentials(
         cfg["admin_alert_phone"] = body.admin_alert_phone.strip()
     if body.poll_interval_minutes is not None:
         cfg["poll_interval_minutes"] = body.poll_interval_minutes
+
+    # Provider routing. Both halves are clearable — a stale desk number left
+    # behind after the providers are removed would keep diverting reports away
+    # from patients, so an empty value deletes the key rather than keeping it.
+    if body.report_routing_phone is not None:
+        routing_phone = body.report_routing_phone.strip()
+        if routing_phone:
+            from app.utils.validators import normalize_phone, validate_phone
+
+            normalized_routing_phone = normalize_phone(routing_phone)
+            if not validate_phone(normalized_routing_phone):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"TPA desk number '{routing_phone}' is not a valid phone "
+                        f"number — reports for the listed providers would silently "
+                        f"go back to patients"
+                    ),
+                )
+            cfg["report_routing_phone"] = normalized_routing_phone
+        else:
+            cfg.pop("report_routing_phone", None)
+    if body.report_routing_providers is not None:
+        routing_providers = body.report_routing_providers.strip()
+        if routing_providers:
+            cfg["report_routing_providers"] = routing_providers
+        else:
+            cfg.pop("report_routing_providers", None)
 
     now = datetime.now().isoformat()
     try:

@@ -64,7 +64,7 @@ from app.utils.connector_crypto import (
     describe_decrypt_failure,
     encrypt_password,
 )
-from app.services.patient_match import patient_match_service
+from app.services.patient_match import MatchResult, patient_match_service
 from app.services.distributed_lock import distributed_job_lock
 from connectors.mocdoc.worker import MocDocConnector
 from app.database import sb  # T5.1: off-loop query execution
@@ -794,13 +794,31 @@ async def _run_connector(
             if connector_id:
                 await renew_connector_lock(connector_id)
             try:
-                # Step 1: Patient matching safety gate
-                match_result = await patient_match_service.match(
-                    clinic_id=clinic_id,
-                    scraped_name=meta.patient_name,
-                    scraped_phone=meta.patient_phone,
-                    branch_id=branch_id,
-                )
+                # Step 1: Patient matching safety gate.
+                #
+                # Skipped for a provider-routed report. The gate exists to catch
+                # a receptionist typo in the PATIENT's mobile before a medical
+                # PDF reaches a stranger; a TPA report goes to a number the
+                # clinic itself configured in the connector, so there is no
+                # scraped number to verify and no patient to disclose to.
+                if meta.routed_recipient:
+                    match_result = MatchResult(
+                        status="matched",
+                        is_safe_to_send=True,
+                        match_source="provider_routing",
+                        match_confidence=1.0,
+                        matched_patient_id=None,
+                        normalized_phone=meta.routed_recipient,
+                        patient_name=meta.patient_name,
+                        review_reason=None,
+                    )
+                else:
+                    match_result = await patient_match_service.match(
+                        clinic_id=clinic_id,
+                        scraped_name=meta.patient_name,
+                        scraped_phone=meta.patient_phone,
+                        branch_id=branch_id,
+                    )
 
                 if match_result.normalized_phone:
                     meta.patient_phone = match_result.normalized_phone

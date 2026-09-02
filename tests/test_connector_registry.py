@@ -15,7 +15,7 @@ def test_mocdoc_connector_config_schema_has_required_fields():
     from connectors.mocdoc.worker import MocDocConnector
 
     keys = [f["key"] for f in MocDocConnector.CONFIG_SCHEMA]
-    assert keys == ["username", "password", "clinic_slug", "base_url"]
+    assert keys == ["username", "password", "clinic_slug", "base_url", "report_routing_providers", "report_routing_phone"]
     for field in MocDocConnector.CONFIG_SCHEMA:
         assert REQUIRED_SCHEMA_KEYS <= set(field.keys())
 

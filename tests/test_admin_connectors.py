@@ -529,7 +529,7 @@ async def test_get_connector_types_returns_mocdoc_schema():
     assert "mocdoc" in types_by_key
     assert types_by_key["mocdoc"]["display_name"] == "MocDoc"
     schema_keys = [f["key"] for f in types_by_key["mocdoc"]["schema"]]
-    assert schema_keys == ["username", "password", "clinic_slug", "base_url"]
+    assert schema_keys == ["username", "password", "clinic_slug", "base_url", "report_routing_providers", "report_routing_phone"]
 
 
 
