@@ -385,6 +385,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "clinical_firewall",
         "admin_dashboard",
         "roster_management",
+        "holiday_calendar",
         "compliance_dpdp",
         "compliance_nmc",
         "payments_razorpay",  # WhatsApp-native checkout for solo doctors
@@ -401,6 +402,10 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "pii_sanitization",
         "multi_branch",  # Diagnostic centers can also run multiple branches
         "lab_test_booking",
+        # A lab closes on public holidays like any clinic. Doctor LEAVE has no
+        # meaning without doctors, which is exactly why the holiday calendar is
+        # its own feature and not part of roster_management.
+        "holiday_calendar",
     },
     "essential": {
         "booking",
@@ -410,6 +415,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "clinical_firewall",
         "admin_dashboard",
         "roster_management",
+        "holiday_calendar",
         "compliance_dpdp",
         "compliance_nmc",
         "lab_reports",
@@ -429,6 +435,7 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "clinical_firewall",
         "admin_dashboard",
         "roster_management",
+        "holiday_calendar",
         "compliance_dpdp",
         "compliance_nmc",
         "lab_reports",
@@ -473,6 +480,7 @@ FEATURE_LABELS: dict[str, str] = {
     "diagnostic_reports": "Diagnostic Report Delivery",
     "emergency_escalation": "Emergency Escalation",
     "feedback": "Patient Feedback Collection",
+    "holiday_calendar": "Clinic Holiday Calendar",
     "lab_reports": "Lab Report Delivery",
     "lab_test_booking": "Lab Test Booking",
     "multi_branch": "Multi-Branch Support",

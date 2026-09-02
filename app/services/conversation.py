@@ -3785,10 +3785,17 @@ class ConversationManager:
         self, clinic: dict, phone: str, lang: str
     ) -> None:
         """Handle human escalation request."""
-        contact_phone = (
+        from app.services.tenant import get_clinic_contact
+
+        # The clinic's own reception line, set in Hospital Profile -> Staff /
+        # Reception Phone. Falls back to the WhatsApp/contact number so clinics
+        # that never set one keep the previous behaviour.
+        contact_phone = get_clinic_contact(
+            clinic,
+            "staff_phone",
             clinic.get("whatsapp_number")
             or clinic.get("phone")
-            or settings.hospital_phone
+            or settings.hospital_phone,
         )
         await self.whatsapp.send_text(
             clinic,

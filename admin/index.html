@@ -830,7 +830,7 @@
             <div class="nav-link" tabindex="0" data-page="leaves" data-feature="roster_management" data-role="admin" onclick="go('leaves',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1"></rect></svg></span> Leaves
             </div>
-            <div class="nav-link" tabindex="0" data-page="holidays" data-feature="roster_management" data-role="admin" onclick="go('holidays',this)">
+            <div class="nav-link" tabindex="0" data-page="holidays" data-feature="holiday_calendar" data-role="admin" onclick="go('holidays',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></span> Holidays
             </div>
             <div class="nav-link" tabindex="0" data-page="patients" data-feature="booking" onclick="go('patients',this)">
@@ -908,6 +908,13 @@
                 <div class="form-row">
                     <div class="field"><label>Google Maps Link</label><input type="text" id="f-profileMaps" placeholder="https://maps.google.com/..."></div>
                     <div class="field"><label>Emergency Desk Phone</label><input type="text" id="f-profileEmergency" placeholder="e.g. +91XXXXXXXXXX"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Staff / Reception Phone</label>
+                        <input type="text" id="f-profileStaffPhone" placeholder="e.g. +91XXXXXXXXXX">
+                        <small style="color:var(--text3)">Quoted when a patient taps "Talk to Staff". Leave blank to use your WhatsApp business number.</small>
+                    </div>
                 </div>
                 <button class="btn btn-accent" onclick="saveProfile()">Save Profile</button>
             </div>
@@ -1672,6 +1679,7 @@
                         <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                        <label><input type="checkbox" class="staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
@@ -1936,6 +1944,7 @@
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                <label><input type="checkbox" class="edit-staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
@@ -2253,14 +2262,25 @@ function hasPermission(perm) {
     return Boolean(myPermissions && myPermissions.includes(perm));
 }
 
+function planAllowsFeature(feature) {
+    if (!feature) return true;
+    return myFeatures === null || myFeatures.includes(feature);
+}
+
 function applyFeatureVisibility() {
     document.querySelectorAll('[data-feature]').forEach(el => {
-        const feature = el.dataset.feature;
-        const visible = myFeatures === null || myFeatures.includes(feature);
-        el.style.display = visible ? '' : 'none';
+        el.style.display = planAllowsFeature(el.dataset.feature) ? '' : 'none';
     });
     document.querySelectorAll('[data-role="admin"]').forEach(el => {
         const page = el.dataset.page;
+        // This loop runs AFTER the feature loop and assigns display outright, so
+        // without re-checking the plan a granted permission would re-show a tab
+        // the tenant's plan does not include — e.g. Doctor Leaves reappearing on
+        // a diagnostics-only clinic for any staff holding DOCTOR_LEAVES_CREATE.
+        if (!planAllowsFeature(el.dataset.feature)) {
+            el.style.display = 'none';
+            return;
+        }
         if (myRole === 'staff') {
             if (page === 'doctors') {
                 el.style.display = (hasPermission('DOCTORS_CREATE') || hasPermission('DOCTORS_UPDATE') || hasPermission('DOCTORS_DELETE')) ? '' : 'none';
@@ -2269,7 +2289,7 @@ function applyFeatureVisibility() {
             } else if (page === 'holidays') {
                 el.style.display = (hasPermission('HOLIDAYS_CREATE') || hasPermission('HOLIDAYS_DELETE')) ? '' : 'none';
             } else if (page === 'branches') {
-                el.style.display = hasPermission('DOCTOR_BRANCH_ASSIGN') ? '' : 'none';
+                el.style.display = (hasPermission('DOCTOR_BRANCH_ASSIGN') || hasPermission('BRANCHES_MANAGE')) ? '' : 'none';
             } else if (page === 'staff') {
                 el.style.display = (hasPermission('STAFF_VIEW') || hasPermission('STAFF_CREATE') || hasPermission('STAFF_UPDATE')) ? '' : 'none';
             } else {
@@ -2293,6 +2313,8 @@ function applyFeatureVisibility() {
     if (holForm) holForm.style.display = hasPermission('HOLIDAYS_CREATE') ? '' : 'none';
     const staffForm = document.getElementById('staffFormCard');
     if (staffForm) staffForm.style.display = hasPermission('STAFF_CREATE') ? '' : 'none';
+    const branchForm = document.getElementById('branchFormCard');
+    if (branchForm) branchForm.style.display = hasPermission('BRANCHES_MANAGE') ? '' : 'none';
 }
 
 async function login() {
@@ -2356,6 +2378,7 @@ async function login() {
         if (!picked) { auth = ''; return; }
         CLINIC_SCOPE = picked;
         try { sessionStorage.setItem('kriya_clinic_scope', picked); } catch (e) {}
+        await adoptClinicPlan();
     }
 
     document.getElementById('loginScreen').style.display = 'none';
@@ -2372,7 +2395,7 @@ async function login() {
     loadDoctorsSilent();
     fetchNotificationCount();
     startNotificationPolling();
-    if (myPlan === 'diagstream') loadDiagnosticDashboard();
+    applyDashboardForPlan();
 }
 
 // Blocking clinic chooser for accounts with no clinic of their own.
@@ -2453,11 +2476,46 @@ function renderClinicScopeBanner() {
         'cursor:pointer; font:inherit; flex:0 0 auto;">Switch</button>';
 }
 
+// Switching tenants can move BETWEEN a diagnostics plan and a clinic plan, so
+// the diagnostic dashboard needs an inverse. Without one, moving from a
+// diagstream tenant to a booking tenant left the diagnostics panel on screen
+// with the clinic dashboard still hidden.
+function applyDashboardForPlan() {
+    if (myPlan === 'diagstream') {
+        loadDiagnosticDashboard();
+        return;
+    }
+    const clinicDash = document.getElementById('clinicDashboardContent');
+    const diagDash = document.getElementById('diagDashboardContent');
+    if (diagDash) diagDash.style.display = 'none';
+    if (clinicDash) clinicDash.style.display = '';
+}
+
+// A super-admin has no clinic of their own, so /admin/me returns features=null
+// and every sidebar tab shows — including Doctor Leaves on a diagnostics-only
+// tenant. Once they have picked a tenant, adopt THAT tenant's plan so the panel
+// shows what the clinic actually has. Best-effort: on failure we keep the
+// see-everything default rather than locking the owner out of their own panel.
+async function adoptClinicPlan() {
+    if (!CLINIC_SCOPE || CLINIC_SCOPE === 'default') return;
+    try {
+        const scoped = await api('/admin/me?clinic_id=' + encodeURIComponent(CLINIC_SCOPE));
+        if (scoped && Array.isArray(scoped.features)) {
+            myPlan = scoped.plan;
+            myFeatures = scoped.features;
+        }
+    } catch (e) {
+        console.warn('Could not resolve plan for clinic', CLINIC_SCOPE, e);
+    }
+    applyFeatureVisibility();
+}
+
 async function switchClinic() {
     const picked = await promptForClinic();
     if (!picked || picked === CLINIC_SCOPE) return;
     CLINIC_SCOPE = picked;
     try { sessionStorage.setItem('kriya_clinic_scope', picked); } catch (e) {}
+    await adoptClinicPlan();
     renderClinicScopeBanner();
     doctorCache = [];
     try {
@@ -2467,7 +2525,7 @@ async function switchClinic() {
     }
     loadDoctorsSilent();
     fetchNotificationCount();
-    if (myPlan === 'diagstream') loadDiagnosticDashboard();
+    applyDashboardForPlan();
 }
 
 function logout() {
@@ -4361,9 +4419,9 @@ async function loadBranches() {
                 <td>${status}</td>
                 <td>${b.display_order}</td>
                 <td>
-                    ${myRole !== 'staff' ? `<button class="btn btn-ghost btn-sm" onclick="editBranch('${b.id}')">✏️</button>` : ''}
+                    ${hasPermission('BRANCHES_MANAGE') ? `<button class="btn btn-ghost btn-sm" onclick="editBranch('${b.id}')">✏️</button>` : ''}
                     ${(myRole !== 'staff' || hasPermission('DOCTOR_BRANCH_ASSIGN')) ? `<button class="btn btn-ghost btn-sm" data-id="${esc(b.id)}" data-name="${esc(b.short_name || b.name)}" onclick="manageBranchDoctors(this.dataset.id, this.dataset.name)">👨‍⚕️</button>` : ''}
-                    ${myRole !== 'staff' ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBranch('${b.id}')">🗑️</button>` : ''}
+                    ${hasPermission('BRANCHES_MANAGE') ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBranch('${b.id}')">🗑️</button>` : ''}
                 </td>
             </tr>`;
         });
@@ -4745,6 +4803,7 @@ async function loadProfile() {
         document.getElementById('f-profileAddress').value = data.hospital_address || '';
         document.getElementById('f-profileMaps').value = data.hospital_maps_link || '';
         document.getElementById('f-profileEmergency').value = data.hospital_emergency_number || '';
+        document.getElementById('f-profileStaffPhone').value = data.hospital_staff_phone || '';
 
         document.getElementById('f-followupEnabled').checked = !!data.followup_enabled;
         document.getElementById('f-followupDays').value = data.followup_days || 1;
@@ -4801,6 +4860,7 @@ async function saveProfile() {
         hospital_address: document.getElementById('f-profileAddress').value.trim(),
         hospital_maps_link: document.getElementById('f-profileMaps').value.trim(),
         hospital_emergency_number: document.getElementById('f-profileEmergency').value.trim(),
+        hospital_staff_phone: document.getElementById('f-profileStaffPhone').value.trim(),
     };
 
     try {

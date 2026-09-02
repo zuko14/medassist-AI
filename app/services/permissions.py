@@ -15,6 +15,10 @@ PERMISSIONS = frozenset({
     "DOCTORS_UPDATE",
     "DOCTORS_DELETE",
     "DOCTOR_BRANCH_ASSIGN",
+    # Create/edit/deactivate the branches themselves. Deliberately NOT in any
+    # role preset: a clinic_admin has to grant it per account, because a branch
+    # is what patients are offered in WhatsApp.
+    "BRANCHES_MANAGE",
     "DOCTOR_LEAVES_CREATE",
     "DOCTOR_LEAVES_DELETE",
     "HOLIDAYS_CREATE",

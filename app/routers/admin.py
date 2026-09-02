@@ -626,7 +626,10 @@ async def list_admin_clinics(
 
 
 @router.get("/me")
-async def get_current_admin(user: AdminUser = Depends(verify_credentials)):
+async def get_current_admin(
+    clinic_id: Optional[str] = None,
+    user: AdminUser = Depends(verify_credentials),
+):
     """Return the caller's identity plus their clinic's plan and resolved
     feature set, so the admin panel frontend can show/hide tabs without
     duplicating the PLAN_FEATURES registry in JS."""
@@ -642,14 +645,22 @@ async def get_current_admin(user: AdminUser = Depends(verify_credentials)):
         # rather than offering a button that can only ever return a 400.
         "env_account": user.user_id in ("super_admin_env", "platform_owner_env"),
     }
-    if user.role == "super_admin" or not user.clinic_id:
+    # A super_admin has no clinic of their own, but the panel makes them pick
+    # one to act on. Without a scope they get features=None and the sidebar
+    # shows every tab — including Doctor Leaves on a diagnostics-only tenant.
+    # When they name the tenant, answer for that tenant.
+    scoped_clinic_id = user.clinic_id
+    if not scoped_clinic_id and clinic_id and is_valid_clinic_scope(clinic_id):
+        scoped_clinic_id = enforce_clinic_access(user, clinic_id)
+
+    if not scoped_clinic_id:
         return {
             **base_response,
             "plan": None,
             "features": None,
         }
 
-    clinic = await get_clinic_by_id(user.clinic_id)
+    clinic = await get_clinic_by_id(scoped_clinic_id)
     plan = clinic.get("plan", "soloclinic")
     features = (
         list(ALL_FEATURES)
@@ -1283,6 +1294,10 @@ class ClinicProfileUpdate(BaseModel):
     hospital_address: Optional[str] = None
     hospital_maps_link: Optional[str] = None
     hospital_emergency_number: Optional[str] = None
+    # Reception / front-desk line quoted when a patient picks "Talk to Staff".
+    # Distinct from the emergency desk: one is a callback, the other is a
+    # medical emergency, and clinics routinely staff them differently.
+    hospital_staff_phone: Optional[str] = None
     phone_number_id: Optional[str] = None      # Meta WhatsApp phone_number_id for dual-key routing
     is_sandbox: Optional[bool] = None           # Mark as test/sandbox clinic for demo number routing
 
@@ -3363,6 +3378,10 @@ async def get_clinic_profile(
         "hospital_address": cfg.get("address") or settings.hospital_address,
         "hospital_maps_link": cfg.get("maps_link") or settings.hospital_maps_link,
         "hospital_emergency_number": cfg.get("emergency_number") or settings.hospital_emergency_number,
+        # Blank means "fall back to the clinic's WhatsApp/contact number", which
+        # is what _handle_human_escalation does — so show it blank rather than
+        # pre-filling a number the clinic never chose.
+        "hospital_staff_phone": cfg.get("staff_phone") or "",
         # Patient follow-ups. Resolved the same way followup_config() resolves
         # them at send time, so the panel shows what will actually happen
         # rather than a blank field that reads as "off".
@@ -3410,6 +3429,13 @@ async def update_clinic_profile(
         cfg["maps_link"] = updates["hospital_maps_link"].strip()
     if "hospital_emergency_number" in updates and updates["hospital_emergency_number"] is not None:
         cfg["emergency_number"] = updates["hospital_emergency_number"].strip()
+    if "hospital_staff_phone" in updates and updates["hospital_staff_phone"] is not None:
+        staff_phone = updates["hospital_staff_phone"].strip()
+        if staff_phone:
+            cfg["staff_phone"] = staff_phone
+        else:
+            # Clearing restores the WhatsApp-number fallback.
+            cfg.pop("staff_phone", None)
     # Patient follow-up settings. Read back by followup_config() in
     # app/services/scheduler.py; stored in clinics.config like every other
     # per-clinic override (e.g. lab_report_template_name).
@@ -4777,9 +4803,17 @@ async def get_admin_audit_logs(
 @router.get("/branches")
 async def get_branches(
     clinic_id: str = "default",
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(verify_credentials),
 ):
-    """Get all branches for a clinic."""
+    """Get all branches for a clinic.
+
+    Readable by any authenticated account in the clinic, like GET /doctors.
+    Branch names and addresses are what the bot reads out to patients, so this
+    is not privileged data — and gating it behind require_admin made the whole
+    Branches page 403 for staff who legitimately hold DOCTOR_BRANCH_ASSIGN,
+    hiding the doctor-assignment UI they had been granted. Writes below stay
+    permission-gated.
+    """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
@@ -4798,9 +4832,14 @@ async def create_branch(
     branch: BranchCreate,
     clinic_id: str = "default",
     request: Request = None,
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("BRANCHES_MANAGE")),
 ):
     """Create a new branch."""
+    if user.role not in ("super_admin", "clinic_admin") and getattr(user, "branch_id", None):
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is pinned to a single branch and cannot create new branches.",
+        )
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
 
@@ -4875,10 +4914,15 @@ async def update_branch(
     branch: BranchUpdate,
     clinic_id: str = "default",
     request: Request = None,
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("BRANCHES_MANAGE")),
 ):
     """Update a branch."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    # Delegated BRANCHES_MANAGE staff can be pinned to one branch. Verify this
+    # branch belongs to the active clinic AND is theirs to touch before any
+    # mutation — enforce_clinic_access alone would let a pinned staff edit a
+    # sibling branch.
+    resolve_owned_branch(user, branch_id, effective_clinic_id)
     try:
         update_data = branch.dict(exclude_unset=True)
         if not update_data:
@@ -4932,13 +4976,14 @@ async def delete_branch(
     branch_id: str,
     clinic_id: str = "default",
     request: Request = None,
-    user: AdminUser = Depends(require_admin),
+    user: AdminUser = Depends(require_permission("BRANCHES_MANAGE")),
 ):
     """Permanently delete a branch if nothing references it (appointments,
     doctor assignments, connectors, staff accounts). Otherwise deactivate
     it and report why, so duplicate/unused branches can actually be
     removed instead of accumulating forever as inactive clutter."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    resolve_owned_branch(user, branch_id, effective_clinic_id)
     try:
         from app.services.tenant import invalidate_branch_cache
 
