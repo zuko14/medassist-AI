@@ -299,11 +299,13 @@ async def test_c7_resolve_owned_branch_idor_and_scope():
     
     mock_sb = MagicMock()
     # Branch belongs to c-2 (different clinic)
-    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+    foreign_branch_res = MagicMock(
         data=[{"id": "br-foreign", "clinic_id": "c-2"}]
     )
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = foreign_branch_res
     
-    with patch("app.database.supabase", mock_sb):
+    with patch("app.database.supabase", mock_sb), \
+         patch("app.database.sb", AsyncMock(return_value=foreign_branch_res)):
         
         # Cross-tenant IDOR -> 404
         with pytest.raises(HTTPException) as exc:

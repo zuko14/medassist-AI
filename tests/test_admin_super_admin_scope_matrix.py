@@ -48,8 +48,14 @@ SUPER = AdminUser(
 
 
 def _admin_routes():
-    seen = []
+    all_routes = []
     for r in app.routes:
+        if hasattr(r, "original_router"):
+            all_routes.extend(getattr(r.original_router, "routes", []))
+        else:
+            all_routes.append(r)
+    seen = []
+    for r in all_routes:
         path = getattr(r, "path", "")
         methods = getattr(r, "methods", set()) or set()
         if not path.startswith("/admin"):

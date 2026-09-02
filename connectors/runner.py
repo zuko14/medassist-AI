@@ -30,6 +30,7 @@ import re
 import signal
 import sys
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -118,8 +119,13 @@ LOCK_LEASE = timedelta(minutes=5)
 # process doesn't leave a stale lock blocking the next Test Connection.
 _locks_held_by_this_process: set[str] = set()
 
+#: Identifies THIS process as a lock owner. The previous default was the
+#: literal "worker-1" for every process, so locked_by named nobody and an
+#: ownership check was impossible.
+CONNECTOR_WORKER_ID = f"conn_{os.getpid()}_{uuid.uuid4().hex[:8]}"
 
-async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1") -> tuple[bool, int]:
+
+async def acquire_connector_lock(connector_id: str, worker_id: str = None) -> tuple[bool, int]:
     """Acquire distributed advisory lock on connector record (5 min lease).
 
     KA-10: Uses CAS-style atomic UPDATE to prevent TOCTOU race.
@@ -129,6 +135,7 @@ async def acquire_connector_lock(connector_id: str, worker_id: str = "worker-1")
     acquired; otherwise it's the lock's remaining TTL rounded up to the
     nearest minute (minimum 1), for surfacing "retry in ~Nm" to the admin UI.
     """
+    worker_id = worker_id or CONNECTOR_WORKER_ID
     try:
         now_str = datetime.now(timezone.utc).isoformat()
         lease_cutoff = (datetime.now(timezone.utc) - LOCK_LEASE).isoformat()
@@ -188,22 +195,51 @@ async def renew_connector_lock(connector_id: str) -> None:
     if connector_id not in _locks_held_by_this_process:
         return
     try:
+        # Renew only OUR lease. Without the locked_by predicate a process whose
+        # lease had already been taken over would keep pushing the new owner's
+        # expiry forward, hiding the takeover from the TTL that is supposed to
+        # surface it.
         # unscoped: unique_row_key
-        await sb(supabase.table("integration_connectors").update({
+        renewed = await sb(supabase.table("integration_connectors").update({
             "locked_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", connector_id))
+        }).eq("id", connector_id).eq("locked_by", CONNECTOR_WORKER_ID))
+        if not renewed.data:
+            logger.warning(
+                f"Lease lost for connector {connector_id} — another process owns "
+                f"it now; this run will stop renewing"
+            )
+            _locks_held_by_this_process.discard(connector_id)
     except Exception as e:
         logger.warning(f"Could not renew lock for connector {connector_id}: {e}")
 
 
 async def release_connector_lock(connector_id: str) -> None:
-    """Release distributed advisory lock on connector record."""
+    """Release the advisory lock — ONLY if this process actually holds it.
+
+    This used to clear locked_at unconditionally. _run_connector() sets
+    connector_id BEFORE attempting the lock, and its finally-block released on
+    every exit path — including the early return taken when the lock could NOT
+    be acquired. So a worker that lost the race freed the WINNER's lock on its
+    way out, and the next tick walked straight in. Observed in production as
+    seven concurrent runs of one connector, each ~6 minutes, all scraping the
+    same MocDoc account at once.
+
+    Two guards, because either alone is insufficient:
+      - the in-process set stops us releasing a lock we never took;
+      - the locked_by predicate stops us releasing one a DIFFERENT process took
+        (our set would be empty after a restart, but so would our ownership).
+    """
+    if connector_id not in _locks_held_by_this_process:
+        logger.debug(
+            f"Not releasing connector {connector_id}: not held by this process"
+        )
+        return
     try:
         # unscoped: unique_row_key
         await sb(supabase.table("integration_connectors").update({
             "locked_at": None,
             "locked_by": None,
-        }).eq("id", connector_id))
+        }).eq("id", connector_id).eq("locked_by", CONNECTOR_WORKER_ID))
     except Exception as e:
         logger.warning(f"Could not release lock for connector {connector_id}: {e}")
     finally:
@@ -726,13 +762,17 @@ async def _run_connector(
         session_dir = os.path.join(PROJECT_ROOT, ".connector_sessions")
         os.makedirs(session_dir, exist_ok=True)
 
-        connector_id = connector_row.get("id")
-        if connector_id:
-            locked, remaining = await acquire_connector_lock(connector_id)
+        candidate_id = connector_row.get("id")
+        if candidate_id:
+            locked, remaining = await acquire_connector_lock(candidate_id)
             if not locked:
                 summary["run_status"] = "locked"
                 summary["error_message"] = f"Connector is busy — retry in ~{remaining}m"
                 return summary
+            # Only now is this run the lock OWNER. connector_id drives the
+            # finally-block release, so binding it before the acquisition is
+            # what let a losing worker release the winner's lock.
+            connector_id = candidate_id
 
         # Instantiate connector via registry
         connector_cls = CONNECTOR_REGISTRY.get(connector_type)
