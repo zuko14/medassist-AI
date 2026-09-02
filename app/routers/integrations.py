@@ -169,6 +169,20 @@ async def receive_lab_report(
             .eq("clinic_id", clinic_id)
             .eq("external_report_id", external_report_id))
         )
+        # A needs_review row means the patient-match gate HELD the report: no
+        # WhatsApp message was sent and no PDF was stored (file_path is the
+        # "pending_review/<id>" placeholder). Treating it as "already
+        # delivered" is what stranded 52 Accumx reports for three days — the
+        # connector re-offered each one and this guard silently swallowed it,
+        # forever. Re-processing a held report cannot double-send, because
+        # nothing was ever sent.
+        HELD_NEVER_DELIVERED = {"needs_review"}
+        if existing_lr.data and existing_lr.data[0].get("status") in HELD_NEVER_DELIVERED:
+            logger.info(
+                f"Report {external_report_id} is held for review and was never "
+                f"delivered — reprocessing instead of skipping"
+            )
+            existing_lr.data = []
         if existing_lr.data:
             lr_row = existing_lr.data[0]
             logger.info(

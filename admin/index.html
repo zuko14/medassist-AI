@@ -1675,19 +1675,22 @@
                 <div class="field" style="margin-top:10px;">
                     <label>Extra / Delegated Permissions</label>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; background:var(--surface2); padding:12px; border-radius:10px; border:1px solid var(--border);">
-                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
+                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
+                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
+                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
+                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                        <label data-perm-feature="multi_branch"><input type="checkbox" class="staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
+                        <label data-perm-feature="roster_management"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
+                        <label data-perm-feature="roster_management"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
+                        <label data-perm-feature="holiday_calendar"><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
+                        <label data-perm-feature="holiday_calendar"><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                        <label data-perm-feature="lab_test_booking"><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                        <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
+                        <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
+                        <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -1940,19 +1943,22 @@
         <div class="field" style="margin-top:10px;">
             <label>Extra / Delegated Permissions</label>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; background:var(--surface2); padding:12px; border-radius:10px; border:1px solid var(--border);">
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
+                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
+                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
+                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
+                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                <label data-perm-feature="multi_branch"><input type="checkbox" class="edit-staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
+                <label data-perm-feature="roster_management"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
+                <label data-perm-feature="roster_management"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
+                <label data-perm-feature="holiday_calendar"><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
+                <label data-perm-feature="holiday_calendar"><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                <label data-perm-feature="lab_test_booking"><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
+                <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
+                <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
             </div>
         </div>
         <div class="modal-actions">
@@ -2315,6 +2321,25 @@ function applyFeatureVisibility() {
     if (staffForm) staffForm.style.display = hasPermission('STAFF_CREATE') ? '' : 'none';
     const branchForm = document.getElementById('branchFormCard');
     if (branchForm) branchForm.style.display = hasPermission('BRANCHES_MANAGE') ? '' : 'none';
+
+    applyPermissionVisibility();
+}
+
+// A diagnostics-only tenant was offered eight doctor permissions it can never
+// use, and NONE of the three that describe the work its staff actually does
+// (REPORTS_VIEW / REPORTS_RESOLVE / CONNECTOR_MANAGE were missing from the
+// picker entirely). Each checkbox now declares the plan feature that gives it
+// meaning, and one that the plan lacks is hidden AND un-ticked — leaving it
+// ticked would submit a grant the tenant can never exercise.
+function applyPermissionVisibility() {
+    document.querySelectorAll('[data-perm-feature]').forEach(el => {
+        const allowed = planAllowsFeature(el.dataset.permFeature);
+        el.style.display = allowed ? '' : 'none';
+        if (!allowed) {
+            const cb = el.querySelector('input[type="checkbox"]');
+            if (cb) cb.checked = false;
+        }
+    });
 }
 
 async function login() {
@@ -2747,9 +2772,49 @@ function withScope(path) {
         'clinic_id=' + encodeURIComponent(CLINIC_SCOPE);
 }
 
+// One place where every API failure is turned into something a human can act
+// on. Three defects lived here:
+//   1. api() threw the bare status code, so a read failure surfaced as
+//      "Error: 403" with the server's explanation discarded.
+//   2. FastAPI returns a 422 `detail` as a LIST of objects, so `data.detail`
+//      stringified to "[object Object]". detailText() already existed for this
+//      but only the two hand-written password/username handlers used it.
+//   3. Nothing handled 401. Sessions expire (migration 067), and when one did
+//      the panel stayed open and every subsequent click failed silently.
+async function apiFail(r) {
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+        forceRelogin('Your session expired. Please sign in again.');
+        throw new Error('Session expired');
+    }
+    // Tenant-boundary 403. The panel keys the clinic scope to a per-tab
+    // variable but identity to an ORIGIN-WIDE cookie, so signing into a second
+    // tenant in another tab silently re-identifies every open tab while each
+    // keeps sending its own clinic_id. The result is this 403 on every scoped
+    // call, with the stale tab still showing the previous tenant's data. Ask
+    // the server who we actually are and, if it disagrees with what this tab
+    // believes, stop rather than keep firing cross-tenant requests.
+    const msg = detailText(data) || data.detail || '';
+    if (r.status === 403 && /Access to clinic .* is restricted/.test(String(msg))) {
+        try {
+            const who = await (await fetch(API + '/admin/me', { headers: authHeaders() })).json();
+            if (who && who.username && who.username !== myUsername) {
+                forceRelogin(
+                    'You are now signed in as "' + who.username + '" (signed in from ' +
+                    'another tab). This tab was showing a different clinic. Please sign in again.'
+                );
+                throw new Error('Signed in as a different user');
+            }
+        } catch (e) {
+            if (e && e.message === 'Signed in as a different user') throw e;
+        }
+    }
+    throw new Error(msg || 'Request failed (' + r.status + ')');
+}
+
 async function api(path) {
     const r = await fetch(API + withScope(path), { headers: authHeaders() });
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) await apiFail(r);
     return r.json();
 }
 
@@ -2759,9 +2824,8 @@ async function apiPost(path, body) {
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
     });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || r.status);
-    return data;
+    if (!r.ok) await apiFail(r);
+    return r.json().catch(() => ({}));
 }
 
 async function apiPut(path, body) {
@@ -2770,14 +2834,13 @@ async function apiPut(path, body) {
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
     });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || r.status);
-    return data;
+    if (!r.ok) await apiFail(r);
+    return r.json().catch(() => ({}));
 }
 
 async function apiDel(path) {
     const r = await fetch(API + withScope(path), { method: 'DELETE', headers: authHeaders() });
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) await apiFail(r);
 }
 
 function badge(status) {
@@ -4574,6 +4637,7 @@ function onStaffRoleChange() {
     document.querySelectorAll('.staff-perm-cb').forEach(cb => {
         cb.checked = defaults.includes(cb.value);
     });
+    applyPermissionVisibility();
 }
 
 function onEditStaffRoleChange() {
@@ -4582,6 +4646,7 @@ function onEditStaffRoleChange() {
     document.querySelectorAll('.edit-staff-perm-cb').forEach(cb => {
         cb.checked = defaults.includes(cb.value);
     });
+    applyPermissionVisibility();
 }
 
 let _staffCache = [];
@@ -4616,7 +4681,8 @@ async function loadStaff() {
                 <td>${esc((s.created_at || '').slice(0, 10))}</td>
                 <td>
                     ${hasPermission('STAFF_UPDATE') ? `<button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; margin-right:4px;" onclick="openEditStaff('${s.id}')">Edit</button>
-                    <button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem;" onclick="toggleStaff('${s.id}')">${s.is_active ? 'Deactivate' : 'Activate'}</button>` : ''}
+                    <button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; margin-right:4px;" onclick="toggleStaff('${s.id}')">${s.is_active ? 'Deactivate' : 'Activate'}</button>
+                    <button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; color:var(--red)" data-u="${esc(s.username)}" onclick="deleteStaff('${s.id}', this.dataset.u)">Delete</button>` : ''}
                 </td>
             </tr>`;
         });
@@ -4707,6 +4773,25 @@ async function submitEditStaff() {
 async function toggleStaff(staffId) {
     try {
         await apiPut('/admin/staff/' + staffId + '/toggle', {});
+        loadStaff();
+    } catch (e) {
+        toast('Error: ' + e.message, true);
+    }
+}
+
+// Deactivation keeps the row, so an offboarded account stayed in the list
+// forever. Delete removes it outright and revokes any live session server-side.
+async function deleteStaff(staffId, username) {
+    const ok = await confirmDialog(
+        'Permanently delete the staff login "' + username + '"? Their session is ' +
+        'revoked immediately and the account is removed. The audit trail is kept. ' +
+        'This cannot be undone.',
+        { okText: 'Delete permanently', danger: true }
+    );
+    if (!ok) return;
+    try {
+        await apiDel('/admin/staff/' + staffId);
+        toast('✅ Staff account "' + username + '" deleted');
         loadStaff();
     } catch (e) {
         toast('Error: ' + e.message, true);

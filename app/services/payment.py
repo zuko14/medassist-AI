@@ -277,7 +277,7 @@ class PaymentService:
                 {"razorpay_payment_link_id": payment_link_id}
             ).eq("id", booking_id))
 
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "payment_link_created",
                 {
@@ -304,7 +304,7 @@ class PaymentService:
                 await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
                     "id", booking_id
                 ))
-                self._log_payment_event(
+                await self._log_payment_event(
                     booking_id, "payment_link_creation_failed", {"error": str(e)[:500]}
                 )
             except Exception:
@@ -373,7 +373,7 @@ class PaymentService:
         if not self.verify_webhook_signature(
             raw_body, signature, webhook_secret=webhook_secret
         ):
-            self._log_payment_event_raw(
+            await self._log_payment_event_raw(
                 None,
                 "signature_failed",
                 {
@@ -597,7 +597,7 @@ class PaymentService:
                 f"UNMATCHED_PAYMENT clinic_id={clinic_id} payment_id={payment_id} "
                 f"link_id={payment_link_id} — no clinic-scoped booking found"
             )
-            self._log_payment_event_raw(
+            await self._log_payment_event_raw(
                 None,
                 "webhook_received",
                 {
@@ -630,7 +630,7 @@ class PaymentService:
         booking_id = booking["id"]
 
         # Log webhook received
-        self._log_payment_event(
+        await self._log_payment_event(
             booking_id,
             "webhook_received",
             {
@@ -642,7 +642,7 @@ class PaymentService:
             provider_event_id=rz_event_id,
         )
 
-        self._log_payment_event(
+        await self._log_payment_event(
             booking_id,
             "signature_verified",
             {
@@ -659,7 +659,7 @@ class PaymentService:
                 f"⚠️ Amount mismatch: expected {expected_amount}, got {amount_paid} "
                 f"for booking {booking_id}"
             )
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "mismatch_flagged",
                 {
@@ -746,7 +746,7 @@ class PaymentService:
                 f"LATE_PAYMENT booking={booking_id} ref={booking.get('booking_ref')} "
                 f"payment_id={payment_id} — hold already expired, auto-refunding"
             )
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "late_payment_after_expiry",
                 {"payment_id": payment_id, "amount_paise": amount_paid},
@@ -799,7 +799,7 @@ class PaymentService:
                     f"TERMINAL_STATE_GUARD booking={booking_id} status={current_status} "
                     f"payment_id={payment_id} — refusing to overwrite terminal state"
                 )
-                self._log_payment_event(
+                await self._log_payment_event(
                     booking_id,
                     "terminal_state_blocked",
                     {
@@ -816,7 +816,7 @@ class PaymentService:
             logger.warning(
                 f"Booking {booking_id} in unexpected state '{current_status}' during webhook"
             )
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "mismatch_flagged",
                 {
@@ -857,7 +857,7 @@ class PaymentService:
             )
             return {"status": "ok", "code": 200, "reason": "already_confirmed"}
 
-        self._log_payment_event(
+        await self._log_payment_event(
             booking_id,
             "confirmed",
             {
@@ -976,7 +976,7 @@ class PaymentService:
                             )
                             continue
 
-                        self._log_payment_event(
+                        await self._log_payment_event(
                             booking_id,
                             "recovery_confirmed",
                             {
@@ -1019,7 +1019,7 @@ class PaymentService:
                     "id", booking_id
                 ).eq("status", "pending_payment"))
 
-                self._log_payment_event(
+                await self._log_payment_event(
                     booking_id,
                     "hold_expired",
                     {
@@ -1152,7 +1152,7 @@ class PaymentService:
                     f"ref={booking.get('booking_ref')} via payment_link polling"
                 )
 
-                self._log_payment_event(
+                await self._log_payment_event(
                     booking_id,
                     "confirmed",
                     {
@@ -1299,7 +1299,7 @@ class PaymentService:
         )
 
         # ── Log refund_initiated IMMEDIATELY (before gateway call) ──
-        self._log_payment_event(
+        await self._log_payment_event(
             booking_id,
             "refund_initiated",
             {
@@ -1333,7 +1333,7 @@ class PaymentService:
             }).eq("id", booking_id))
 
             # Log refund_completed only after gateway confirms
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "refund_completed",
                 {
@@ -1356,7 +1356,7 @@ class PaymentService:
 
         except Exception as e:
             logger.error(f"Refund failed for booking {booking_id}: {e}")
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "refund_failed",
                 {
@@ -1400,7 +1400,7 @@ class PaymentService:
                 )
                 resp.raise_for_status()
                 data = resp.json()
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "auto_refund_issued",
                 {"payment_id": payment_id, "refund_id": data.get("id"), "reason": reason},
@@ -1408,7 +1408,7 @@ class PaymentService:
             return {"success": True, "refund_id": data.get("id")}
         except Exception as e:
             logger.error(f"AUTO_REFUND_FAILED payment={payment_id}: {e}")
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id,
                 "auto_refund_failed",
                 {"payment_id": payment_id, "error": str(e)[:500], "reason": reason},
@@ -1452,7 +1452,7 @@ class PaymentService:
             "id", booking_id
         ))
 
-        self._log_payment_event(
+        await self._log_payment_event(
             booking_id,
             "manual_confirm",
             {
@@ -1531,7 +1531,7 @@ class PaymentService:
                     f"REFUND_FAILED_ON_REJECT booking={booking_id} "
                     f"reason={refund_result.get('reason')}"
                 )
-                self._log_payment_event(
+                await self._log_payment_event(
                     booking_id, "reject_aborted_refund_failed", refund_result
                 )
                 await self._alert_admin(
@@ -1563,7 +1563,7 @@ class PaymentService:
         )
         await sb(update_query)
 
-        self._log_payment_event(
+        await self._log_payment_event(
             booking_id,
             "manual_reject",
             {
@@ -1634,7 +1634,7 @@ class PaymentService:
                 await sb(supabase.table("appointments").update(
                     {"status": "cancelled"}
                 ).eq("id", booking_id))
-                self._log_payment_event(
+                await self._log_payment_event(
                     booking_id,
                     "admin_cancel_without_refund",
                     {"admin_notes": admin_notes, "refund_reason": refund_result.get("reason")},
@@ -1652,7 +1652,7 @@ class PaymentService:
             await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
                 "id", booking_id
             ))
-            self._log_payment_event(
+            await self._log_payment_event(
                 booking_id, "admin_cancel", {"admin_notes": admin_notes}
             )
 
@@ -1977,7 +1977,7 @@ class PaymentService:
             response.raise_for_status()
             return response.json()
 
-    def _log_payment_event(
+    async def _log_payment_event(
         self,
         booking_id: str,
         event_type: str,
@@ -1997,7 +1997,7 @@ class PaymentService:
             if provider_event_id:
                 event_row["provider_event_id"] = provider_event_id
             # unscoped: insert_scoped_by_payload
-            supabase.table("payment_events").insert(event_row).execute()
+            await sb(supabase.table("payment_events").insert(event_row))
         except Exception as e:
             # If audit logging fails, that is itself a bug — log loudly
             logger.error(f"CRITICAL: Failed to write payment_event ({event_type}): {e}")
@@ -2033,7 +2033,7 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Failed to increment patient visit_count: {e}")
 
-    def _log_payment_event_raw(
+    async def _log_payment_event_raw(
         self,
         booking_id: Optional[str],
         event_type: str,
@@ -2060,14 +2060,14 @@ class PaymentService:
                 if provider_event_id:
                     event_row["provider_event_id"] = provider_event_id
                 # unscoped: insert_scoped_by_payload
-                supabase.table("payment_events").insert(event_row).execute()
+                await sb(supabase.table("payment_events").insert(event_row))
             else:
-                supabase.table("webhook_security_events").insert(
+                await sb(supabase.table("webhook_security_events").insert(
                     {
                         "event_type": event_type,
                         "raw_payload": json.dumps(payload, default=str),
                     }
-                ).execute()
+                ))
         except Exception as e:
             logger.error(
                 f"CRITICAL: Failed to write raw payment_event ({event_type}): {e}"
@@ -2392,7 +2392,7 @@ class PaymentService:
             # Log confirmation dispatched event
             if booking.get("id"):
                 try:
-                    self._log_payment_event(
+                    await self._log_payment_event(
                         booking["id"],
                         "confirmation_dispatched",
                         {

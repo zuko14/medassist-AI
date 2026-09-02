@@ -160,12 +160,13 @@ async def test_doctor_delete_always_carries_a_clinic_predicate():
     )
 
 
-def test_super_admin_cannot_reach_another_tenants_branch():
+@pytest.mark.asyncio
+async def test_super_admin_cannot_reach_another_tenants_branch():
     """resolve_owned_branch() used to skip its IDOR check for super_admin."""
     sb, _ = _chain_mock([{"id": "br-1", "clinic_id": CLINIC_B}])
     with patch("app.database.supabase", sb):
         with pytest.raises(HTTPException) as exc:
-            resolve_owned_branch(SUPER, "br-1", CLINIC_A)
+            await resolve_owned_branch(SUPER, "br-1", CLINIC_A)
     assert exc.value.status_code == 404
 
 

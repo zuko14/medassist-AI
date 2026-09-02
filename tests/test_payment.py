@@ -391,7 +391,8 @@ class TestPaymentWebhookProcessing:
 
 
 class TestOrphanWebhookEventPersistence:
-    def test_log_payment_event_raw_persists_orphan_events(self):
+    @pytest.mark.asyncio
+    async def test_log_payment_event_raw_persists_orphan_events(self):
         """Events with no booking_id (e.g. signature failures) must now be
         written to webhook_security_events, not just logged."""
         from app.services.payment import PaymentService
@@ -402,7 +403,7 @@ class TestOrphanWebhookEventPersistence:
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
 
-            service._log_payment_event_raw(
+            await service._log_payment_event_raw(
                 None, "signature_failed", {"body_length": 42}
             )
 
@@ -410,7 +411,8 @@ class TestOrphanWebhookEventPersistence:
             inserted = mock_table.insert.call_args[0][0]
             assert inserted["event_type"] == "signature_failed"
 
-    def test_log_payment_event_raw_still_uses_payment_events_when_booking_id_present(self):
+    @pytest.mark.asyncio
+    async def test_log_payment_event_raw_still_uses_payment_events_when_booking_id_present(self):
         from app.services.payment import PaymentService
 
         service = PaymentService()
@@ -419,7 +421,7 @@ class TestOrphanWebhookEventPersistence:
             mock_table = MagicMock()
             mock_sb.table.return_value = mock_table
 
-            service._log_payment_event_raw(
+            await service._log_payment_event_raw(
                 "booking-1", "webhook_received", {"payment_id": "pay_1"}
             )
 

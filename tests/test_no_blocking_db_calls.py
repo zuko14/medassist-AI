@@ -32,16 +32,16 @@ SCANNED_DIRS = ("app", "connectors")
 # event loop. That is why _all_offloaded_names() has to look tree-wide: the
 # methods are defined in one module and offloaded in four others.
 #
-# Remaining, ranked by how often they run:
-#   app/services/payment.py     — _log_payment_event / _log_payment_event_raw,
-#                                 audit-ledger writes on the payment webhook path
-#   app/services/permissions.py — resolve_owned_branch, per branch-scoped request
-#   app/services/scheduler.py   — _burn_followup, per follow-up row (off the
-#                                 request path entirely)
+# Now zero. The three that were grandfathered here have been converted to
+# async and their callers awaited:
+#   app/services/payment.py     — _log_payment_event / _log_payment_event_raw
+#                                 (25 call sites, all on the payment webhook path)
+#   app/services/permissions.py — resolve_owned_branch (6 admin endpoints)
+#   app/services/scheduler.py   — _burn_followup (3 sites)
+# plus the _count closure in app/routers/admin.py's diagnostic stats.
 #
-# These are lower-frequency than the limiter and each needs its callers changed,
-# so they are held rather than rushed. This number may go DOWN, never up.
-KNOWN_SYNC_BLOCKING = 6
+# This number may go DOWN, never up.
+KNOWN_SYNC_BLOCKING = 0
 
 
 def _parent_map(tree):

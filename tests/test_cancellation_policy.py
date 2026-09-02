@@ -574,7 +574,7 @@ async def _admin_cancel(booking, refund_result):
          patch.object(PaymentService, "initiate_refund", new=AsyncMock(return_value=refund_result)), \
          patch.object(PaymentService, "notify_cancellation_outcome", new=fake_notify_outcome), \
          patch.object(PaymentService, "_notify_booking_cancelled", new=fake_notify_generic), \
-         patch.object(PaymentService, "_log_payment_event", new=MagicMock()):
+         patch.object(PaymentService, "_log_payment_event", new=AsyncMock()):
         sb_mod.table.side_effect = table
         result = await svc.admin_cancel_confirmed_booking(
             "booking-1", clinic_id=CLINIC_ID, admin_notes="Cancelled by admin"

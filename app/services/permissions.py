@@ -153,7 +153,7 @@ def enforce_branch_scope(user: "AdminUser", resource_branch_id: Optional[str]) -
 assert_staff_not_pinned_elsewhere = enforce_branch_scope
 
 
-def resolve_owned_branch(
+async def resolve_owned_branch(
     user: "AdminUser", branch_id: str, clinic_id: Optional[str] = None
 ) -> dict:
     """Verify branch_id exists inside the caller's ACTIVE clinic scope, then
@@ -173,7 +173,7 @@ def resolve_owned_branch(
     # 1. Branch-pinning check for branch-scoped staff (fail fast before DB call)
     enforce_branch_scope(user, branch_id)
 
-    from app.database import supabase, is_valid_clinic_scope
+    from app.database import sb, supabase, is_valid_clinic_scope
 
     scope = clinic_id if is_valid_clinic_scope(clinic_id) else getattr(user, "clinic_id", None)
     if not is_valid_clinic_scope(scope):
@@ -182,8 +182,10 @@ def resolve_owned_branch(
             detail="No clinic selected. Pass ?clinic_id=<clinic id> for this action.",
         )
 
+    # Off the event loop: this runs on six admin endpoints, and a blocking
+    # PostgREST round-trip here froze every other request in the worker.
     # unscoped: unique_row_key
-    result = supabase.table("branches").select("*").eq("id", branch_id).execute()
+    result = await sb(supabase.table("branches").select("*").eq("id", branch_id))
     if not result.data:
         raise HTTPException(status_code=404, detail="Branch not found")
 

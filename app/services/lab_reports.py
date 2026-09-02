@@ -276,7 +276,35 @@ class LabReportService:
                     claim_id = claim_result.data[0]["id"]
             except Exception as e:
                 error_str = str(e).lower()
-                if "unique" in error_str or "duplicate" in error_str or "23505" in error_str:
+                is_dup = (
+                    "unique" in error_str or "duplicate" in error_str or "23505" in error_str
+                )
+                # A held (needs_review) row is a placeholder for a report that
+                # was NEVER sent. Claim it by CAS instead of colliding with it,
+                # so a re-offered report can finally be delivered. The
+                # .eq("status", "needs_review") predicate is what makes this
+                # safe under concurrency: exactly one worker can win the row.
+                if is_dup:
+                    try:
+                        takeover = await sb(
+                            supabase.table("lab_reports")
+                            .update({"status": "processing", "delivery_status": "processing"})
+                            .eq("clinic_id", clinic_id)
+                            .eq("external_report_id", external_report_id)
+                            .eq("status", "needs_review")
+                        )
+                        if takeover.data:
+                            claim_id = takeover.data[0]["id"]
+                            logger.info(
+                                f"Claimed previously-held report {external_report_id} "
+                                f"for delivery (was needs_review)"
+                            )
+                            is_dup = False
+                    except Exception as takeover_err:
+                        logger.warning(
+                            f"Could not claim held report {external_report_id}: {takeover_err}"
+                        )
+                if is_dup:
                     logger.info(
                         f"Report {external_report_id} for clinic {clinic_id} already claimed/delivered — skipping duplicate send"
                     )

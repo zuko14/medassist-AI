@@ -720,7 +720,7 @@ class SchedulerService:
 
                         cfg = followup_config(clinic)
                         if not cfg["enabled"]:
-                            self._burn_followup(appt["id"])
+                            await self._burn_followup(appt["id"])
                             continue
 
                         try:
@@ -735,7 +735,7 @@ class SchedulerService:
                             continue  # not due yet for this clinic's offset
                         if age_days > cfg["days"] + FOLLOWUP_LOOKBACK_DAYS:
                             # Past the retry window — stop rescanning it forever.
-                            self._burn_followup(appt["id"])
+                            await self._burn_followup(appt["id"])
                             continue
 
                         # Opt-out suppresses engagement. Burn the flag so an
@@ -752,7 +752,7 @@ class SchedulerService:
                                 f"Skipping follow-up for appointment {appt['id']} — "
                                 f"patient has opted out of engagement messages"
                             )
-                            self._burn_followup(appt["id"])
+                            await self._burn_followup(appt["id"])
                             continue
 
                         first_name = (appt.get("patient_name") or "there").split()[0]
@@ -792,7 +792,7 @@ class SchedulerService:
                 logger.error(f"Error in followup job: {e}")
 
     @staticmethod
-    def _burn_followup(appointment_id: str) -> None:
+    async def _burn_followup(appointment_id: str) -> None:
         """Mark an appointment as followed up without sending.
 
         Only for deliberate suppression (feature off, clinic disabled it, or
@@ -800,9 +800,9 @@ class SchedulerService:
         """
         try:
             # unscoped: unique_row_key
-            supabase.table("appointments").update({"followup_sent": True}).eq(
+            await sb(supabase.table("appointments").update({"followup_sent": True}).eq(
                 "id", appointment_id
-            ).execute()
+            ))
         except Exception as e:
             logger.error(f"Failed to mark followup_sent for {appointment_id}: {e}")
 

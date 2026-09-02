@@ -12,6 +12,7 @@ Safety Design:
 """
 
 import difflib
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -168,17 +169,37 @@ class PatientMatchService:
                 review_reason=f"Invalid phone number format: {scraped_phone}",
             )
 
-        # Step 2: Query clinic patients by phone
-        try:
-            query = (
-                supabase.table("patients")
-                .select("id, name, phone, clinic_id")
-                .eq("clinic_id", clinic_id)
-                .eq("phone", norm_phone)
-            )
-            res = await sb(query)
-            records = res.data if isinstance(res.data, list) else []
-        except Exception as e:
+        # Step 2: Query clinic patients by phone.
+        #
+        # Retried, because failing closed here is PERMANENT: the caller parks
+        # the report in needs_review, and a held report is never re-offered.
+        # A DNS blip ([Errno 11001] getaddrinfo failed) or a dropped PostgREST
+        # connection therefore stranded real lab reports forever — 9 of them at
+        # one clinic over three days. The lookup is a cheap idempotent read, so
+        # retrying it is strictly safer than holding on a transient fault.
+        last_error: Optional[Exception] = None
+        records = None
+        for attempt in range(3):
+            try:
+                query = (
+                    supabase.table("patients")
+                    .select("id, name, phone, clinic_id")
+                    .eq("clinic_id", clinic_id)
+                    .eq("phone", norm_phone)
+                )
+                res = await sb(query)
+                records = res.data if isinstance(res.data, list) else []
+                break
+            except Exception as e:
+                last_error = e
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+                    logger.warning(
+                        f"Patient lookup failed (attempt {attempt + 1}/3), retrying: {e}"
+                    )
+
+        if records is None:
+            e = last_error
             logger.error(f"Failed to query patients for match (failing closed): {e}")
             return MatchResult(
                 status="needs_review",

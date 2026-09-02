@@ -262,6 +262,14 @@ async def test_c6_duplicate_lab_report_atomic_claim_halts():
     mock_sb.table.return_value.insert.return_value.execute.side_effect = Exception(
         "duplicate key value violates unique constraint 'idx_lab_reports_clinic_external_report'"
     )
+    # The colliding row is an ALREADY-DELIVERED report, so the needs_review
+    # takeover CAS in upload_and_send matches zero rows and the duplicate must
+    # still halt. (A held row WOULD match and be claimed — that is the separate
+    # held-report recovery path, covered in
+    # tests/test_held_report_recovery_and_staff_delete.py.)
+    mock_sb.table.return_value.update.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[]
+    )
     
     with patch("app.database.supabase", mock_sb), \
          patch("app.services.lab_reports.supabase", mock_sb):
@@ -283,7 +291,8 @@ async def test_c6_duplicate_lab_report_atomic_claim_halts():
 # ═══════════════════════════════════════════════════════════════════════════
 # C7 + M6: Cross-Tenant Branch-Doctor IDOR Prevention
 # ═══════════════════════════════════════════════════════════════════════════
-def test_c7_resolve_owned_branch_idor_and_scope():
+@pytest.mark.asyncio
+async def test_c7_resolve_owned_branch_idor_and_scope():
     """resolve_owned_branch raises 404 for branch of another clinic, and 403 for branch pinned elsewhere."""
     admin_c1 = AdminUser("adm", role="clinic_admin", clinic_id="c-1", user_id="u-1")
     staff_pinned = AdminUser("staff", role="staff", clinic_id="c-1", user_id="u-2", branch_id="br-1")
@@ -298,12 +307,12 @@ def test_c7_resolve_owned_branch_idor_and_scope():
         
         # Cross-tenant IDOR -> 404
         with pytest.raises(HTTPException) as exc:
-            resolve_owned_branch(admin_c1, "br-foreign")
+            await resolve_owned_branch(admin_c1, "br-foreign")
         assert exc.value.status_code == 404
 
         # Staff pinned to br-1 attempting to access br-2 -> 403
         with pytest.raises(HTTPException) as exc:
-            resolve_owned_branch(staff_pinned, "br-2")
+            await resolve_owned_branch(staff_pinned, "br-2")
         assert exc.value.status_code == 403
 
 

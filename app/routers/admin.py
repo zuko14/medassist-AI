@@ -537,14 +537,34 @@ def enforce_clinic_access(
     """
     if isinstance(user, AdminUser):
         if not user.can_access_clinic(requested_clinic_id):
-            logger.warning(
-                f"Tenant boundary violation attempt: user '{user.username}' (role={user.role}, clinic_id={user.clinic_id}) "
-                f"attempted to access clinic_id='{requested_clinic_id}'"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Forbidden: Access to clinic '{requested_clinic_id}' is restricted",
-            )
+            # can_access_clinic() fails for two very different reasons and used
+            # to report both with one identical sentence, which made a live
+            # incident impossible to diagnose from the panel alone: an operator
+            # signed in to their OWN clinic saw the same words as someone
+            # reaching across tenants. Name the actual cause, and name both
+            # sides of the comparison, so the message diagnoses itself.
+            own = getattr(user, "clinic_id", None)
+            if not own and user.role != "super_admin":
+                logger.error(
+                    f"TENANT_SCOPE_DENIED user='{user.username}' role={user.role} "
+                    f"target='{requested_clinic_id}' — account has no clinic assigned"
+                )
+                detail = (
+                    f"Forbidden: your account '{user.username}' has no clinic assigned, "
+                    f"so it cannot act on clinic '{requested_clinic_id}'. Ask an "
+                    f"administrator to re-link the account."
+                )
+            else:
+                logger.warning(
+                    f"Tenant boundary violation attempt: user '{user.username}' (role={user.role}, clinic_id={own}) "
+                    f"attempted to access clinic_id='{requested_clinic_id}'"
+                )
+                detail = (
+                    f"Forbidden: Access to clinic '{requested_clinic_id}' is restricted — "
+                    f"you are signed in as '{user.username}' for clinic '{own}'. "
+                    f"This page is showing a different clinic; sign in again."
+                )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
         if not is_valid_clinic_scope(requested_clinic_id) and user.clinic_id:
             requested_clinic_id = user.clinic_id
 
@@ -1157,6 +1177,86 @@ async def toggle_staff(
         ip_address=client_ip,
     )
     return {"success": True, "is_active": new_status}
+
+
+@router.delete("/staff/{staff_id}")
+async def delete_staff(
+    staff_id: str,
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("STAFF_UPDATE")),
+):
+    """Permanently delete a staff account.
+
+    Deactivation keeps the row, so the account stayed visible in the panel
+    forever. This removes it outright: the login is gone, any live session is
+    revoked, and the person's in-app notifications cascade away.
+
+    The audit trail survives — admin_audit_log.user_id is ON DELETE SET NULL,
+    and the deletion itself is logged with the username below, so "who was
+    removed, by whom, when" remains answerable after the row is gone.
+    """
+    res = (
+        # Lookup by primary key; ownership enforced immediately below.
+        # unscoped: unique_row_key
+        await sb(supabase.table("clinic_admins")
+        .select("id, clinic_id, role, branch_id, username, staff_role")
+        .eq("id", staff_id))
+    )
+    if not res.data or res.data[0]["role"] != "staff":
+        # Only staff accounts are deletable here. A clinic_admin or
+        # super_admin must never be removable from a tenant-facing surface.
+        raise HTTPException(status_code=404, detail="Staff account not found")
+    target = res.data[0]
+    enforce_clinic_access(user, target["clinic_id"])
+
+    if user.role == "staff":
+        if str(target["id"]) == str(getattr(user, "user_id", "")):
+            raise HTTPException(
+                status_code=403, detail="You cannot delete your own account."
+            )
+        if user.branch_id and str(target.get("branch_id")) != str(user.branch_id):
+            raise HTTPException(
+                status_code=403,
+                detail="You cannot delete staff outside your assigned branch.",
+            )
+
+    # Kill the session BEFORE removing the row: a deleted account holding a
+    # live cookie would otherwise keep working until the lease expired.
+    if target.get("username"):
+        await revoke_sessions_for_user(target["username"])
+
+    try:
+        deleted = (
+            # Row ownership (clinic + role) is verified above.
+            # unscoped: unique_row_key
+            await sb(supabase.table("clinic_admins")
+            .delete()
+            .eq("id", staff_id)
+            .eq("clinic_id", target["clinic_id"])
+            .eq("role", "staff"))
+        )
+    except Exception as e:
+        logger.error(f"Failed to delete staff {staff_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Could not delete staff account: {e}"
+        )
+
+    if not deleted.data:
+        raise HTTPException(status_code=404, detail="Staff account not found")
+
+    client_ip = request.client.host if (request and request.client) else "unknown"
+    await log_admin_action(
+        user=user,
+        action="delete_staff",
+        resource_type="clinic_admin",
+        resource_id=staff_id,
+        details={
+            "deleted_username": target.get("username"),
+            "staff_role": target.get("staff_role"),
+        },
+        ip_address=client_ip,
+    )
+    return {"success": True, "deleted": True, "username": target.get("username")}
 
 
 class LeaveCreate(BaseModel):
@@ -4638,13 +4738,13 @@ async def get_diagnostic_stats(
         # Open triage queues are deliberately all-time, not today-only: a report
         # stuck since yesterday still needs a human. Counted server-side so they
         # are not truncated by the row cap above.
-        def _count(table: str, apply) -> int:
+        async def _count(table: str, apply) -> int:
             # unscoped: tenant-scoped operation with verified clinic authorization
             q = supabase.table(table).select("id", count="exact")
             q = q.eq("clinic_id", effective_clinic_id)
-            return apply(q).limit(1).execute().count or 0
+            return (await sb(apply(q).limit(1))).count or 0
 
-        needs_review_total = _count(
+        needs_review_total = await _count(
             "lab_reports", lambda q: q.eq("status", "needs_review")
         )
         # "Delivery Failures" must agree with the Failed Deliveries Queue below
@@ -4652,15 +4752,15 @@ async def get_diagnostic_stats(
         # failed, name conflict, WhatsApp send rejected); the tile counted only
         # lab_reports.status == 'failed', which those never produce — so the
         # dashboard showed "0 failures" directly above a list of 51 of them.
-        connector_failures_open = _count(
+        connector_failures_open = await _count(
             "connector_failed_reports",
             lambda q: q.is_("resolved_at", "null") if not target_branch
             else q.is_("resolved_at", "null").eq("branch_id", target_branch),
         )
-        lab_failures_open = _count("lab_reports", lambda q: q.eq("status", "failed"))
+        lab_failures_open = await _count("lab_reports", lambda q: q.eq("status", "failed"))
         delivery_failures_open = connector_failures_open + lab_failures_open
 
-        expiring_soon = _count(
+        expiring_soon = await _count(
             "lab_reports",
             lambda q: q.lte("uploaded_at", retention_cutoff).not_.is_("file_path", "null"),
         )
@@ -4922,7 +5022,7 @@ async def update_branch(
     # branch belongs to the active clinic AND is theirs to touch before any
     # mutation — enforce_clinic_access alone would let a pinned staff edit a
     # sibling branch.
-    resolve_owned_branch(user, branch_id, effective_clinic_id)
+    await resolve_owned_branch(user, branch_id, effective_clinic_id)
     try:
         update_data = branch.dict(exclude_unset=True)
         if not update_data:
@@ -4983,7 +5083,7 @@ async def delete_branch(
     it and report why, so duplicate/unused branches can actually be
     removed instead of accumulating forever as inactive clutter."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
-    resolve_owned_branch(user, branch_id, effective_clinic_id)
+    await resolve_owned_branch(user, branch_id, effective_clinic_id)
     try:
         from app.services.tenant import invalidate_branch_cache
 
@@ -5042,7 +5142,7 @@ async def get_branch_doctors(
 ):
     """Get doctors assigned to a specific branch."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
-    resolve_owned_branch(user, branch_id, effective_clinic_id)
+    await resolve_owned_branch(user, branch_id, effective_clinic_id)
     try:
         result = (
         # unscoped: doctor branch association
@@ -5068,7 +5168,7 @@ async def assign_doctor_to_branch(
 ):
     """Assign a doctor to a branch with session control."""
     branch_clinic_id = enforce_clinic_access(user, clinic_id)
-    resolve_owned_branch(user, branch_id, branch_clinic_id)
+    await resolve_owned_branch(user, branch_id, branch_clinic_id)
 
     # Verify doctor exists and belongs to the branch's clinic
     # unscoped: tenant-scoped operation with verified clinic authorization
@@ -5124,7 +5224,7 @@ async def remove_doctor_from_branch(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Remove a doctor from a branch."""
-    branch = resolve_owned_branch(user, branch_id, enforce_clinic_access(user, clinic_id))
+    branch = await resolve_owned_branch(user, branch_id, enforce_clinic_access(user, clinic_id))
     try:
         # unscoped: doctor branch association
         await sb(supabase.table("doctor_branches").delete().eq("branch_id", branch_id).eq(
@@ -5161,7 +5261,7 @@ async def update_doctor_branch_session(
     user: AdminUser = Depends(require_permission("DOCTOR_BRANCH_ASSIGN")),
 ):
     """Update a doctor's session assignment at a branch."""
-    branch = resolve_owned_branch(user, branch_id, enforce_clinic_access(user, clinic_id))
+    branch = await resolve_owned_branch(user, branch_id, enforce_clinic_access(user, clinic_id))
     try:
         result = (
         # unscoped: doctor branch association
