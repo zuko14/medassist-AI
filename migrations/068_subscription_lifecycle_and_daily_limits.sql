@@ -120,6 +120,5 @@ CREATE INDEX IF NOT EXISTS idx_oml_clinic_source_sent
     ON outbound_message_ledger(clinic_id, source_service, sent_at DESC);
 
 -- ── Record Migration ────────────────────────────────────────────────────────
-INSERT INTO schema_migrations (name, applied_at)
-VALUES ('068_subscription_lifecycle_and_daily_limits.sql', now())
-ON CONFLICT (name) DO NOTHING;
+-- Recorded by scripts/migrate.py
+

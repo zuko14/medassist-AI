@@ -329,6 +329,75 @@ async def update_patient(clinic_id: str, phone: str, updates: dict) -> bool:
         return False
 
 
+async def get_genuine_patients(clinic_id: str) -> list[dict]:
+    """Get list of genuine patients with clinical engagement.
+    
+    Excludes transient, unengaged WhatsApp contacts (visit_count == 0, name is null/placeholder,
+    and no appointments, lab reports, or prescriptions).
+    """
+    try:
+        import asyncio
+        p_task = sb(
+            supabase.table("patients")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .order("phone")
+            .limit(2000)
+        )
+        a_task = sb(
+            supabase.table("appointments")
+            .select("patient_phone")
+            .eq("clinic_id", clinic_id)
+            .limit(2000)
+        )
+        r_task = sb(
+            supabase.table("lab_reports")
+            .select("patient_phone")
+            .eq("clinic_id", clinic_id)
+            .limit(2000)
+        )
+        pr_task = sb(
+            supabase.table("prescriptions")
+            .select("patient_phone")
+            .eq("clinic_id", clinic_id)
+            .limit(2000)
+        )
+
+        p_res, a_res, r_res, pr_res = await asyncio.gather(
+            p_task, a_task, r_task, pr_task
+        )
+        raw_patients = p_res.data or []
+        appt_phones = {x["patient_phone"] for x in (a_res.data or []) if x.get("patient_phone")}
+        lab_phones = {x["patient_phone"] for x in (r_res.data or []) if x.get("patient_phone")}
+        presc_phones = {x["patient_phone"] for x in (pr_res.data or []) if x.get("patient_phone")}
+        clinical_phones = appt_phones | lab_phones | presc_phones
+
+        disallowed_names = {
+            "our services", "services", "book appointment", "cancel appointment",
+            "menu", "main menu", "check reports", "lab test", "test", "admin", "user"
+        }
+
+        def is_genuine(p: dict) -> bool:
+            if (p.get("visit_count") or 0) > 0:
+                return True
+            if p.get("phone") in clinical_phones:
+                return True
+            name = (p.get("name") or "").strip().lower()
+            if name and name not in disallowed_names and len(name) >= 3:
+                return True
+            return False
+
+        return [p for p in raw_patients if is_genuine(p)]
+    except Exception as e:
+        logger.error(f"Error getting genuine patients for clinic {clinic_id}: {e}")
+        # Fallback to basic query if any subquery fails
+        try:
+            res = await sb(supabase.table("patients").select("*").eq("clinic_id", clinic_id).limit(2000))
+            return [p for p in (res.data or []) if (p.get("visit_count") or 0) > 0 or p.get("name")]
+        except Exception:
+            return []
+
+
 async def get_conversation(clinic_id: str, phone: str) -> Optional[dict]:
     """Get conversation session for phone."""
     try:

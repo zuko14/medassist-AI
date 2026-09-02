@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from app.database import log_analytics_event, supabase
+from app.database import log_analytics_event, supabase, get_genuine_patients
 from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
@@ -64,14 +64,11 @@ class AnalyticsService:
                 reverse=True,
             )
 
-            # Patients
-            pat_query = supabase.table("patients").select("created_at")
-            pat_query = pat_query.eq("clinic_id", clinic_id)
-            all_patients = await sb(pat_query)
-            patients = all_patients.data or []
-            total_patients = len(patients)
+            # Genuine Patients (only patients with confirmed clinical engagement)
+            genuine_patients = await get_genuine_patients(clinic_id)
+            total_patients = len(genuine_patients)
             new_patients = sum(
-                1 for p in patients if p.get("created_at", "") >= from_date
+                1 for p in genuine_patients if p.get("created_at", "") >= from_date
             )
 
             return {

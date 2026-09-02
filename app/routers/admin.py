@@ -34,6 +34,7 @@ from app.database import (
     check_in_appointment,
     call_next_patient,
     get_patient_queue_status,
+    get_genuine_patients,
     invalidate_doctor_cache,
     invalidate_holiday_cache,
 )
@@ -2957,30 +2958,11 @@ async def get_patients(
     """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        result = await sb(supabase.rpc(
-            "get_patients_with_counts",
-            {"p_clinic_id": effective_clinic_id},
-        ))
-        if result.data:
-            return {"patients": result.data}
-        patients = (
-            await sb(supabase.table("patients")
-            .select("*")
-            .eq("clinic_id", effective_clinic_id)
-            .order("phone")
-            .limit(2000))
-        )
-        return {"patients": patients.data or []}
-    except Exception:
-        # Fallback if the RPC doesn't exist in this deployment.
-        patients = (
-            await sb(supabase.table("patients")
-            .select("*")
-            .eq("clinic_id", effective_clinic_id)
-            .order("phone")
-            .limit(2000))
-        )
-        return {"patients": patients.data or []}
+        patients = await get_genuine_patients(effective_clinic_id)
+        return {"patients": patients}
+    except Exception as e:
+        logger.error(f"Error loading genuine patients: {e}")
+        return {"patients": []}
 
 
 # ═══════ PRESCRIPTIONS ═══════
