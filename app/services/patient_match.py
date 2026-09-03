@@ -129,6 +129,20 @@ class PatientMatchService:
             value = config.get("hold_unknown_phone_reports")
             if isinstance(value, bool):
                 return value
+
+            # Clinic-type aware safety check:
+            # Diagnostic labs/centers rely on walk-ins whose phone numbers are entered at the desk.
+            # Consultation clinics and hospitals pre-register patients during booking/consultation;
+            # an unknown phone number on a consultation clinic represents high risk of PHI misdirection.
+            clinic_type = (config.get("clinic_type") or (clinic or {}).get("clinic_type") or "").strip().lower()
+            if clinic_type == "diagnostic" or config.get("allow_walkin_delivery") is True:
+                return False
+
+            if settings.hold_unknown_phone_reports:
+                return True
+
+            if clinic_type in ("consultation", "hospital", "clinic"):
+                return True
         except Exception as e:
             logger.warning(
                 f"Could not read hold_unknown_phone_reports for clinic {clinic_id}; "

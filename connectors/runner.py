@@ -1135,54 +1135,60 @@ async def run_all_connectors() -> None:
     per branch for multi-branch diagnostic centers.
 
     Respects each connector's configured poll_interval_minutes dynamically.
+    Guarded by distributed lock to prevent duplicate sweeps across multiple workers.
     """
-    logger.info("=== Polling all enabled connectors ===")
+    async with distributed_job_lock("connector_polling_sweep", lease_seconds=120) as acquired:
+        if not acquired:
+            logger.debug("Connector sweep skipped: lock currently held by another worker instance")
+            return
 
-    # unscoped: platform_sweep
-    result = await sb(supabase.table("integration_connectors") \
-        .select("clinic_id, connector_type, branch_id, config, last_run_at") \
-        .eq("is_enabled", True))
+        logger.info("=== Polling all enabled connectors ===")
 
-    connectors = result.data or []
+        # unscoped: platform_sweep
+        result = await sb(supabase.table("integration_connectors") \
+            .select("clinic_id, connector_type, branch_id, config, last_run_at") \
+            .eq("is_enabled", True))
 
-    if not connectors:
-        logger.info("No enabled connectors found")
-        return
+        connectors = result.data or []
 
-    now = datetime.now(timezone.utc)
-    for conn in connectors:
-        config = conn.get("config") or {}
-        poll_interval = config.get("poll_interval_minutes", 10)
-        last_run_at = conn.get("last_run_at")
-        if last_run_at:
+        if not connectors:
+            logger.info("No enabled connectors found")
+            return
+
+        now = datetime.now(timezone.utc)
+        for conn in connectors:
+            config = conn.get("config") or {}
+            poll_interval = config.get("poll_interval_minutes", 10)
+            last_run_at = conn.get("last_run_at")
+            if last_run_at:
+                try:
+                    last_dt = datetime.fromisoformat(last_run_at.replace("Z", "+00:00"))
+                    if (now - last_dt) < timedelta(minutes=poll_interval - 0.5):
+                        logger.debug(
+                            f"Skipping {conn['clinic_id']} branch={conn.get('branch_id')} — "
+                            f"poll interval {poll_interval}m not elapsed since {last_run_at}"
+                        )
+                        continue
+                except Exception:
+                    pass
+
             try:
-                last_dt = datetime.fromisoformat(last_run_at.replace("Z", "+00:00"))
-                if (now - last_dt) < timedelta(minutes=poll_interval - 0.5):
-                    logger.debug(
-                        f"Skipping {conn['clinic_id']} branch={conn.get('branch_id')} — "
-                        f"poll interval {poll_interval}m not elapsed since {last_run_at}"
-                    )
-                    continue
-            except Exception:
-                pass
+                # Reinstall child watcher before EACH connector to prevent stale
+                # watcher after the previous connector's Playwright cleanup.
+                _ensure_subprocess_support()
 
-        try:
-            # Reinstall child watcher before EACH connector to prevent stale
-            # watcher after the previous connector's Playwright cleanup.
-            _ensure_subprocess_support()
+                await run_connector(
+                    clinic_id=conn["clinic_id"],
+                    connector_type=conn["connector_type"],
+                    branch_id=conn.get("branch_id"),
+                )
+            except Exception as e:
+                logger.error(
+                    f"Connector run failed for {conn['clinic_id']} (branch={conn.get('branch_id')}): {e}"
+                )
 
-            await run_connector(
-                clinic_id=conn["clinic_id"],
-                connector_type=conn["connector_type"],
-                branch_id=conn.get("branch_id"),
-            )
-        except Exception as e:
-            logger.error(
-                f"Connector run failed for {conn['clinic_id']} (branch={conn.get('branch_id')}): {e}"
-            )
-
-        # Small delay between clinics
-        await asyncio.sleep(2)
+            # Small delay between clinics
+            await asyncio.sleep(2)
 
 
 async def cleanup_expired_storage() -> None:

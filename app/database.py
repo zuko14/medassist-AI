@@ -191,6 +191,30 @@ async def sb(builder):
 
     Retries once on a stale pooled connection — see _RETRYABLE_METHODS.
     """
+    # Runtime Tenant Scoping Inspection (Defense-in-depth)
+    try:
+        req = getattr(builder, "request", None)
+        if req and hasattr(req, "path"):
+            path_str = str(req.path or "")
+            table_name = path_str.rstrip("/").split("/")[-1].split("?")[0]
+            if table_name in TENANT_OWNED_TABLES and not getattr(builder, "_allow_unscoped", False):
+                params_str = str(getattr(req, "params", "") or "")
+                json_payload = getattr(req, "json", None)
+                has_clinic = "clinic_id" in params_str
+                has_pk = "id=eq." in params_str
+                has_payload_clinic = False
+                if isinstance(json_payload, dict):
+                    has_payload_clinic = "clinic_id" in json_payload
+                elif isinstance(json_payload, list) and len(json_payload) > 0:
+                    has_payload_clinic = all("clinic_id" in row for row in json_payload if isinstance(row, dict))
+                if not (has_clinic or has_pk or has_payload_clinic):
+                    logger.warning(
+                        f"QUERY_TENANT_SCOPE_AUDIT: Query on tenant table '{table_name}' without explicit clinic_id "
+                        f"params='{params_str[:120]}'"
+                    )
+    except Exception:
+        pass
+
     loop = asyncio.get_running_loop()
     try:
         return await loop.run_in_executor(_DB_EXECUTOR, builder.execute)
@@ -258,8 +282,9 @@ def scoped_query(
     if table_name in TENANT_OWNED_TABLES and not scoped and not allow_unscoped:
         raise TenantIsolationError(
             f"Refusing to build an unscoped query on tenant-owned table "
-            f"'{table_name}' (clinic_id={clinic_id!r}). Pass a valid clinic_id, "
-            f"or allow_unscoped=True if this cross-tenant read is intended."
+            f"'{table_name}': clinic_id={clinic_id!r} is not a valid scope. "
+            f"If this is a deliberate cross-tenant read (platform reporting, "
+            f"tenant-resolution bootstrap), pass allow_unscoped=True."
         )
 
     q = supabase.table(table_name).select(select_fields)
@@ -291,6 +316,9 @@ async def create_patient(
     language: Optional[str] = None,
 ) -> dict:
     """Create a new patient in a race-safe manner."""
+    if not is_valid_clinic_scope(clinic_id):
+        raise TenantIsolationError(f"Refusing create_patient on invalid clinic_id: {clinic_id!r}")
+
     try:
         from datetime import datetime, timezone
 
@@ -319,6 +347,9 @@ async def create_patient(
 
 async def update_patient(clinic_id: str, phone: str, updates: dict) -> bool:
     """Update patient data."""
+    if not is_valid_clinic_scope(clinic_id):
+        raise TenantIsolationError(f"Refusing update_patient on invalid clinic_id: {clinic_id!r}")
+
     try:
         await sb(supabase.table("patients").update(updates).eq("clinic_id", clinic_id).eq(
             "phone", phone
@@ -335,6 +366,9 @@ async def get_genuine_patients(clinic_id: str) -> list[dict]:
     Excludes transient, unengaged WhatsApp contacts (visit_count == 0, name is null/placeholder,
     and no appointments, lab reports, or prescriptions).
     """
+    if not is_valid_clinic_scope(clinic_id):
+        raise TenantIsolationError(f"Refusing get_genuine_patients on invalid clinic_id: {clinic_id!r}")
+
     try:
         import asyncio
         p_task = sb(

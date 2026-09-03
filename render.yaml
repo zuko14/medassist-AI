@@ -8,43 +8,29 @@ services:
     numInstances: 2
     preDeployCommand: python scripts/migrate.py
     envVars:
-      # Connector polling runs IN this web service.
-      #
-      # KA-P2-20 set this to "false" to keep Playwright/Chromium out of the
-      # process that must acknowledge Meta webhooks within 20s, with the worker
-      # below doing the polling instead. That split only ever existed on paper:
-      # the running service has no RUN_CONNECTORS_IN_WEB set, so it defaulted to
-      # true and web has been polling all along while this file claimed
-      # otherwise. Meanwhile a leftover worker on stale code kept overwriting
-      # connector health with errors, which cost several deploys to diagnose.
-      #
-      # Declaring the real topology beats a split that is not actually running.
-      # The KA-P2-20 risk is accepted, not disproved: Chromium's memory is spiky
-      # and an OOM here takes request handling with it. run_connector() gives the
-      # browser its own thread and event loop, and each poll opens and closes one
-      # browser. If webhook latency or OOM kills appear, re-split — set this back
-      # to "false" AND deploy the worker below in the SAME change.
+      # Connector polling is isolated in the dedicated worker process below.
+      # Setting RUN_CONNECTORS_IN_WEB to false ensures Playwright/Chromium does not run
+      # inside the web container that must acknowledge Meta webhooks within 20s.
       - key: RUN_CONNECTORS_IN_WEB
-        value: "true"
+        value: "false"
 
-  # OPTIONAL. The web service above now polls connectors itself, so this worker
-  # is redundant and is NOT required for lab reports to flow. It is kept as the
-  # ready-made escape hatch for re-splitting if Chromium destabilises web.
-  #
-  # Running both is safe but pointless: run_connector() takes a per-connector CAS
-  # advisory lock on integration_connectors with a 5-minute lease
-  # (connectors/runner.py), so two processes can never poll the same connector
-  # concurrently — they just take turns.
-  #
-  # If you deploy this worker, keep its image current. A worker left running on
-  # an old image still wins the lock on its turn and writes ITS results to
-  # last_error, so stale code silently masks a fixed web service.
+  # Dedicated Background Worker for Integration Connectors (MocDoc/Playwright)
+  # Completely isolates browser memory profile and scraping CPU from webhook handling.
   - type: worker
     name: mediassist-connector-worker
     env: docker
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m connectors.runner --all
     autoDeploy: false
+    envVars:
+      - key: MEDASSIST_URL
+        value: "http://mediassist-ai:8000"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "/app/.playwright"
+      - key: TZ
+        value: "Asia/Kolkata"
 
   # Staging environment (W6.5)
   - type: web

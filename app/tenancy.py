@@ -57,7 +57,7 @@ TENANT_OWNED_TABLES = frozenset({
 #: caused the 2026-09-01 cross-tenant incident, where `if clinic_id !=
 #: "default"` skipped the tenant predicate entirely and a super_admin read —
 #: and deleted — every tenant's doctors from one clinic's admin panel.
-_NON_SCOPES = ("default", "none", "null", "")
+_NON_SCOPES = ("default", "none", "null", "", "all", "system", "*", "undefined")
 
 
 def is_valid_clinic_scope(clinic_id: Optional[str]) -> bool:
