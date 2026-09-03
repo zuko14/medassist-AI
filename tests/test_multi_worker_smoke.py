@@ -29,6 +29,23 @@ async def test_multi_worker_concurrency_smoke():
     env = os.environ.copy()
     env["PYTHONPATH"] = os.path.abspath(".")
     env["PYTHONUNBUFFERED"] = "1"
+    # Outside "development" the app refuses to boot on placeholder secrets — a
+    # deliberate production guard. The conftest defaults are placeholders, so a
+    # spawned server inherits them and dies during lifespan startup, which this
+    # test could only report as "failed to start within 15 seconds". Hand the
+    # child real-looking secrets; this test is about worker concurrency, not
+    # about secret validation (main.py's guard is covered elsewhere).
+    env.update(
+        {
+            "ADMIN_USERNAME": "smoke_admin",
+            "ADMIN_PASSWORD": "smoke_admin_password_12345",
+            "OWNER_USERNAME": "smoke_owner",
+            "OWNER_PASSWORD": "smoke_owner_password_12345",
+            "META_APP_SECRET": "smoke_meta_app_secret_12345",
+            "INTEGRATION_SECRET": "smoke_integration_secret_12345",
+            "CALLMEDEX_BEARER_TOKEN": "smoke_callmedex_bearer_12345",
+        }
+    )
 
     # Start uvicorn with 2 worker processes
     cmd = [

@@ -37,9 +37,20 @@ def test_w5_1_correlation_id_middleware_and_header(client):
     assert res2.headers["X-Correlation-ID"].startswith("cid_")
 
 
-def test_w5_2_prometheus_metrics_endpoint(client):
-    """W5.2: /metrics returns valid Prometheus formatted plain text."""
+def test_w5_2_metrics_endpoint_rejects_unauthenticated_scrapes(client):
+    """T3.1/KRIYA-009: /metrics is not public — it exposes clinic traffic volumes."""
     res = client.get("/metrics")
+    assert res.status_code == 401
+
+
+def test_w5_2_prometheus_metrics_endpoint(client, monkeypatch):
+    """W5.2: /metrics returns valid Prometheus formatted plain text."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "metrics_token", "scrape_token_for_test")
+    res = client.get(
+        "/metrics", headers={"Authorization": "Bearer scrape_token_for_test"}
+    )
     assert res.status_code == 200
     assert "text/plain" in res.headers["content-type"]
     text = res.text

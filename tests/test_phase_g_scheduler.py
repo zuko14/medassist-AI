@@ -22,7 +22,7 @@ def scheduler_service():
 
 
 @pytest.mark.asyncio
-async def test_send_24h_reminders_idempotency_and_update(scheduler_service):
+async def test_send_24h_reminders_idempotency_and_update(scheduler_service, granted_job_lock):
     """P1-Scheduler: send_24h_reminders marks reminder_24h_sent=True and does not re-send."""
     fake_appointments = [
         {

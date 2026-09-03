@@ -43,7 +43,10 @@ def test_release_frees_distributed_lease_and_refcount():
     released: list[str] = []
 
     class FakeDistributedLock:
-        async def acquire(self, job_name, lease_seconds=300):
+        async def acquire(self, job_name, lease_seconds=300, raise_on_error=False):
+            # raise_on_error is part of the real signature; accepting it here
+            # keeps this double exercising genuine contention instead of
+            # collapsing into the caller's fail-open TypeError handler.
             if job_name in outstanding:
                 return False
             outstanding.add(job_name)
@@ -211,3 +214,72 @@ def test_summary_param_is_capped():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# ── 5. A database outage must not look like a lock conflict ───────────────────
+
+def test_unreachable_lock_backend_fails_open_to_the_local_lock():
+    """A Supabase blip must not send every inbound message to the DLQ.
+
+    acquire() reports a genuine conflict as False and, by default, an
+    unreachable database as False too. The per-phone lock documents the
+    opposite policy — proceed on the local asyncio.Lock, because the UNIQUE
+    claim on processed_messages still catches true duplicates — so it asks
+    for the error to be raised. When acquire() swallowed the error instead,
+    every message during an outage was deferred and never answered.
+    """
+    phone = "+919494780491"
+    saw_raise_on_error = {}
+
+    class OutageDistributedLock:
+        async def acquire(self, job_name, lease_seconds=300, raise_on_error=False):
+            saw_raise_on_error["value"] = raise_on_error
+            if raise_on_error:
+                raise ConnectionError("supabase unreachable")
+            return False
+
+        async def release(self, job_name):
+            return True
+
+    async def scenario():
+        with patch(
+            "app.services.distributed_lock.distributed_lock_manager",
+            OutageDistributedLock(),
+        ):
+            acquired = await mq.acquire_phone_lock_with_timeout(phone, timeout=1)
+            assert acquired, (
+                "an unreachable lock backend was treated as a held lease — "
+                "the message would be deferred instead of answered"
+            )
+            await mq.release_phone_lock_acquired(phone)
+
+    asyncio.run(scenario())
+
+    assert saw_raise_on_error["value"] is True, (
+        "the phone lock must ask acquire() to distinguish an outage from a conflict"
+    )
+    assert phone not in mq._phone_locks, "phone lock entry leaked"
+
+
+def test_scheduler_jobs_still_fail_closed_on_an_outage():
+    """The default policy must stay fail-CLOSED for scheduler singletons.
+
+    Acquiring on error there would let all four production processes run the
+    same reminder sweep at once.
+    """
+    from app.services.distributed_lock import DistributedJobLock
+
+    async def scenario():
+        manager = DistributedJobLock(instance_id="inst_test")
+        # distributed_lock does `from app.database import sb`, so it holds its
+        # own reference — patching app.database.sb would miss it.
+        with patch(
+            "app.services.distributed_lock.sb",
+            new=AsyncMock(side_effect=ConnectionError("down")),
+        ):
+            assert await manager.acquire("24h_reminders") is False
+
+            with pytest.raises(ConnectionError):
+                await manager.acquire("24h_reminders", raise_on_error=True)
+
+    asyncio.run(scenario())

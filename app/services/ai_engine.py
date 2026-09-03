@@ -8,6 +8,7 @@ sanitization, clinical firewall guards, and localized safety fallbacks.
 import asyncio
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
@@ -279,6 +280,14 @@ INTENT_KEYWORDS = {
         "book doctor",
         "book visit",
         "book slot",
+        # A patient asking to *see* a clinician wants a slot, not the roster.
+        # Without these the bare "doctor" in doctor_availability claimed them.
+        "see a doctor",
+        "see doctor",
+        "meet a doctor",
+        "meet doctor",
+        "need a doctor",
+        "consult a doctor",
         "book",
         "appointment",
         "slot",
@@ -648,20 +657,113 @@ SECURITY RULES (NEVER VIOLATE):
     return base_prompt.strip()
 
 
-def keyword_intent_fallback(message: str) -> str:
-    """Fallback intent detection using keywords when OpenRouter fails."""
-    msg = message.lower().strip()
+# Precedence for the keyword fallback, most decisive first. Plain dict order
+# used to decide this, which let a generic noun outrank an explicit action:
+# "cancel my appointment" matched book_appointment's "appointment" and pushed a
+# patient trying to cancel into a NEW booking. Acting on an existing booking
+# (cancel/reschedule/follow-up) therefore outranks making one, and every
+# compliance intent outranks all of it.
+_FALLBACK_INTENT_PRIORITY = (
+    "data_deletion_request",
+    "opt_out",
+    "queue_status",
+    "cancel_appointment",
+    "reschedule_appointment",
+    "followup_booking",
+    "view_reports",
+    "book_appointment",
+    "doctor_availability",
+    "view_services",
+    "human_escalation",
+    "greeting",
+)
 
-    # Emergency check first — always
+_FALLBACK_PRIORITY_INDEX = {
+    intent: rank for rank, intent in enumerate(_FALLBACK_INTENT_PRIORITY)
+}
+
+_keyword_pattern_cache: Dict[str, "re.Pattern[str]"] = {}
+
+
+def _keyword_pattern(keyword: str) -> "re.Pattern[str]":
+    """Whole-word matcher for one keyword, compiled once.
+
+    Bare `in` matching fired on fragments of unrelated words: "fits" inside
+    "benefits" raised an emergency, "move" inside "remove my information"
+    stole the DPDP deletion request, and "hi" inside "this" was a greeting.
+    The lookarounds are Unicode-aware, so Hindi and Telugu keywords keep
+    matching as whole words too.
+    """
+    pattern = _keyword_pattern_cache.get(keyword)
+    if pattern is None:
+        pattern = re.compile(rf"(?<!\w){re.escape(keyword)}(?!\w)")
+        _keyword_pattern_cache[keyword] = pattern
+    return pattern
+
+
+def normalize_for_keywords(text: str) -> str:
+    """Lowercase and fold the apostrophes phone keyboards actually produce.
+
+    A WhatsApp keyboard types U+2019, so "can't breathe" never matched the
+    emergency keyword spelled with a straight quote.
+    """
+    return (
+        text.lower()
+        .replace("’", "'")
+        .replace("ʼ", "'")
+        .replace("´", "'")
+        .strip()
+    )
+
+
+def matches_keyword(keyword: str, normalized_message: str) -> bool:
+    """True when `keyword` appears as a whole word in an already-normalized message."""
+    return _keyword_pattern(keyword).search(normalized_message) is not None
+
+
+def is_emergency_message(message: str) -> bool:
+    """Whole-word emergency screen, shared by every fallback path."""
+    msg = normalize_for_keywords(message)
+    return any(matches_keyword(kw, msg) for kw in EMERGENCY_KEYWORDS)
+
+
+def keyword_intent_fallback(message: str) -> str:
+    """Deterministic intent detection for when the LLM is unavailable.
+
+    Two passes, because neither specificity nor precedence alone is right:
+    a multi-word phrase is strong evidence regardless of which intent owns it
+    ("stop booking" is a cancellation, not an opt-out), while single generic
+    words must defer to the precedence order above.
+    """
+    msg = normalize_for_keywords(message)
+
+    # Emergency check first — always.
     for kw in EMERGENCY_KEYWORDS:
-        if kw in msg:
+        if matches_keyword(kw, msg):
             return "emergency"
 
-    # Check other intents
-    for intent, keywords in INTENT_KEYWORDS.items():
-        for kw in keywords:
-            if kw in msg:
-                return intent
+    def _best(want_phrase: bool, key):
+        best = None
+        for intent, keywords in INTENT_KEYWORDS.items():
+            rank = _FALLBACK_PRIORITY_INDEX.get(intent, len(_FALLBACK_INTENT_PRIORITY))
+            for kw in keywords:
+                if (" " in kw) is not want_phrase:
+                    continue
+                if matches_keyword(kw, msg):
+                    candidate = key(rank, kw)
+                    if best is None or candidate < best[0]:
+                        best = (candidate, intent)
+        return best[1] if best else None
+
+    # Pass 1: multi-word phrases — longest wins, precedence breaks ties.
+    phrase_intent = _best(True, lambda rank, kw: (-len(kw), rank))
+    if phrase_intent:
+        return phrase_intent
+
+    # Pass 2: single words — precedence wins, longest breaks ties.
+    word_intent = _best(False, lambda rank, kw: (rank, -len(kw)))
+    if word_intent:
+        return word_intent
 
     return "unknown"
 
@@ -713,23 +815,18 @@ async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
     Security: Input is sanitized for prompt injection before LLM processing.
     Output is strictly validated against a whitelist of known intents.
     """
-    msg_clean = message.lower().strip()
-
     # Fast-path 1: Emergency triggers immediately — zero latency, patient safety first
-    for kw in EMERGENCY_KEYWORDS:
-        if kw in msg_clean:
-            return "emergency"
+    if is_emergency_message(message):
+        return "emergency"
 
-    # Fast-path 2: Check high-precision exact keywords (queue, opt-out, deletion)
-    for kw in INTENT_KEYWORDS.get("queue_status", []):
-        if kw in msg_clean:
-            return "queue_status"
-    for kw in INTENT_KEYWORDS.get("opt_out", []):
-        if kw in msg_clean:
-            return "opt_out"
-    for kw in INTENT_KEYWORDS.get("data_deletion_request", []):
-        if kw in msg_clean:
-            return "data_deletion_request"
+    # Fast-path 2: high-precision intents answered deterministically, with no
+    # LLM round-trip. Routed through the shared precedence rules so this path
+    # and the fallback cannot disagree — matching keywords ad hoc here made
+    # "stop booking" an opt_out that silenced the patient's notifications,
+    # while the fallback read the same words as a cancellation.
+    deterministic_intent = keyword_intent_fallback(message)
+    if deterministic_intent in ("queue_status", "opt_out", "data_deletion_request"):
+        return deterministic_intent
 
     # ── Security: Sanitize input ──
     sanitized_message, is_suspicious = sanitize_user_input(message)

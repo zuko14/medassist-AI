@@ -7,7 +7,7 @@ from app.services.scheduler import SchedulerService
 
 
 @pytest.mark.asyncio
-async def test_send_health_checkins_sends_3day_and_marks_flag():
+async def test_send_health_checkins_sends_3day_and_marks_flag(granted_job_lock):
     service = SchedulerService()
     mock_appt = {
         "id": "appt-1",

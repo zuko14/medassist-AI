@@ -20,7 +20,7 @@ from app.routers.health import readiness_check
 
 
 @pytest.mark.asyncio
-async def test_alert_01_failed_messages_triggers_with_context():
+async def test_alert_01_failed_messages_triggers_with_context(granted_job_lock):
     """Alert 1: Failed messages in dead-letter queue trigger admin alert with count and clinic details."""
     scheduler = SchedulerService()
     mock_whatsapp = AsyncMock()

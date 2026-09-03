@@ -691,8 +691,11 @@ async def acquire_phone_lock_with_timeout(
     try:
         from app.services.distributed_lock import distributed_lock_manager
         dist_job_name = f"phone_{phone[-10:]}"  # Normalize to last 10 digits
+        # raise_on_error=True keeps a database outage out of the "conflict"
+        # branch below — without it acquire() reports an unreachable Supabase
+        # as False and the fail-open handler underneath is dead code.
         dist_acquired = await distributed_lock_manager.acquire(
-            dist_job_name, lease_seconds=20
+            dist_job_name, lease_seconds=20, raise_on_error=True
         )
         if not dist_acquired:
             logger.info(

@@ -198,10 +198,16 @@ async def lifespan(app: FastAPI):
             )
         except RuntimeError:
             raise
-        except (httpx.TimeoutException, httpx.ConnectError, OSError) as e:
+        except (httpx.TransportError, OSError) as e:
             # Transient connectivity issue (Supabase outage, DNS failure,
             # read timeout).  Crashing here would cause infinite restart
             # loops on the deployment platform while the DB is unreachable.
+            # TransportError is the whole family, not just ConnectError and
+            # TimeoutException: behind an egress proxy — the norm on hospital
+            # networks — a hiccup surfaces as ProxyError, and a dropped
+            # connection as ReadError or RemoteProtocolError. Those fell
+            # through to the fatal branch below and crash-looped the app on
+            # exactly the outage this handler exists to ride out.
             # Log critically so alerts fire, but let the app start — it
             # will serve 503s on DB-dependent routes until connectivity
             # recovers, which is strictly better than being fully down.

@@ -32,12 +32,26 @@ class DistributedJobLock:
         self.instance_id = instance_id
         self.worker_id = instance_id
 
-    async def acquire(self, job_name: str, lease_seconds: int = 300) -> bool:
+    async def acquire(
+        self,
+        job_name: str,
+        lease_seconds: int = 300,
+        raise_on_error: bool = False,
+    ) -> bool:
         """Atomic acquire via the RPC defined in migration 048.
 
         The previous Python read-modify-write compared expiry as an ISO STRING
         and had no lease renewal, so a job outliving its lease could be taken
         over and run concurrently across the 4 production processes (KRIYA-008).
+
+        `raise_on_error` separates "someone else holds the lease" (False) from
+        "we could not reach the database to find out" (raises). Collapsing both
+        into False is right for scheduler jobs, which must fail CLOSED, but it
+        silently disabled the fail-OPEN path the per-phone lock documents: a
+        Supabase blip made every inbound patient message look like a genuine
+        conflict and sent it to the dead-letter queue instead of answering it.
+        Callers that can safely proceed without the lease pass True and handle
+        the exception themselves.
         """
         from app.database import supabase
 
@@ -52,9 +66,12 @@ class DistributedJobLock:
             ))
             return bool(res.data)
         except Exception as e:
-            # Fail CLOSED: not acquiring means the job is skipped this tick,
-            # which is safe. Acquiring on error would allow concurrent runs.
+            # Fail CLOSED by default: not acquiring means the job is skipped
+            # this tick, which is safe. Acquiring on error would allow
+            # concurrent runs.
             logger.error(f"Lock acquire failed for {job_name}: {e}")
+            if raise_on_error:
+                raise
             return False
 
     async def renew(self, job_name: str, lease_seconds: int = 300) -> bool:
