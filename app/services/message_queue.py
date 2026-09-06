@@ -44,6 +44,74 @@ _phone_locks_mutex = asyncio.Lock()
 # Set below Meta's 20s webhook timeout to prevent cascading stalls.
 PHONE_LOCK_TIMEOUT_SECONDS = 15
 
+# Lease length for the CROSS-PROCESS half of the phone lock. Renewed by
+# _renew_phone_lease() for as long as the handler runs, so this is a
+# crash-recovery window, not a handler deadline.
+PHONE_LEASE_SECONDS = 20
+
+# Live renewal tasks for held phone leases, keyed by lock name.
+_phone_lease_renewals: dict[str, asyncio.Task] = {}
+
+
+def phone_lock_name(phone: str) -> str:
+    """Distributed lock name for a phone. Normalized to the last 10 digits."""
+    return f"phone_{phone[-10:]}"
+
+
+async def _renew_phone_lease(job_name: str) -> None:
+    """Keep a held phone lease alive for as long as the handler is running.
+
+    Without renewal the 20s lease simply lapsed mid-handler, and a second
+    message from the same patient landing on another process acquired the
+    expired lease and ran concurrently — the exact FSM interleaving the lock
+    exists to prevent. A handler outliving 20s is ordinary, not pathological:
+    the OpenRouter retry budget alone is ~12s before any Supabase round-trip
+    or Meta send.
+
+    Mirrors the heartbeat in distributed_lock.distributed_job_lock(), which
+    this call path bypassed by calling acquire() directly.
+
+    renew() raises on a transport failure and returns False ONLY when the row
+    is no longer ours, so a dropped packet is not mistaken for theft.
+
+    ponytail: logs on theft rather than cancelling the handler. Renewal makes
+    theft unreachable except during a database outage, and cancelling a
+    part-delivered lab report would trade a rare race for a new partial-state
+    bug. Escalate to cancellation if PHONE_LEASE_LOST ever appears in logs.
+    """
+    from app.services.distributed_lock import distributed_lock_manager
+
+    while True:
+        await asyncio.sleep(PHONE_LEASE_SECONDS / 3)
+        try:
+            renewed = await distributed_lock_manager.renew(
+                job_name, PHONE_LEASE_SECONDS
+            )
+        except Exception as e:
+            logger.warning(
+                f"PHONE_LEASE_RENEW_TRANSIENT job={job_name} — renewal failed but "
+                f"the lease has not necessarily lapsed; continuing: {e}"
+            )
+            continue
+        if not renewed:
+            logger.error(
+                f"PHONE_LEASE_LOST job={job_name} — another process now owns this "
+                f"phone lease; this handler may be running concurrently with it"
+            )
+            return
+
+
+async def _stop_phone_lease_renewal(job_name: str) -> None:
+    """Cancel the renewal task for a lease we are about to release.
+
+    Must run BEFORE the release: a renewal landing after the release would
+    resurrect a lease nobody holds and block that patient for a full window.
+    """
+    task = _phone_lease_renewals.pop(job_name, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
 _fail_closed_count = 0
 
 
@@ -652,9 +720,14 @@ async def release_phone_lock_acquired(phone: str) -> None:
 
     await release_phone_lock(phone)
 
+    # Stop the heartbeat first: a renewal landing after the release below would
+    # resurrect a lease nobody holds and lock that patient out for a full window.
+    dist_job_name = phone_lock_name(phone)
+    await _stop_phone_lease_renewal(dist_job_name)
+
     try:
         from app.services.distributed_lock import distributed_lock_manager
-        await distributed_lock_manager.release(f"phone_{phone[-10:]}")
+        await distributed_lock_manager.release(dist_job_name)
     except Exception as e:
         # Worst case the 20s lease expires on its own; never mask the caller's error.
         logger.warning(
@@ -687,14 +760,16 @@ async def acquire_phone_lock_with_timeout(
         True  → Lock acquired. Caller MUST release it via the lock's context.
         False → Timed out. Caller should defer or queue the message.
     """
+    dist_job_name = phone_lock_name(phone)
+    holds_lease = False
+
     # Layer 1: Distributed lock (cross-process)
     try:
         from app.services.distributed_lock import distributed_lock_manager
-        dist_job_name = f"phone_{phone[-10:]}"  # Normalize to last 10 digits
-        dist_acquired = await distributed_lock_manager.acquire(
-            dist_job_name, lease_seconds=20
+        holds_lease = await distributed_lock_manager.acquire(
+            dist_job_name, lease_seconds=PHONE_LEASE_SECONDS
         )
-        if not dist_acquired:
+        if not holds_lease:
             logger.info(
                 f"Distributed phone lock held by another process for {phone[:6]}*** — deferring"
             )
@@ -709,22 +784,37 @@ async def acquire_phone_lock_with_timeout(
     lock = await get_phone_lock(phone)
     try:
         await asyncio.wait_for(lock.acquire(), timeout=timeout)
-        return True
     except asyncio.TimeoutError:
         logger.warning(
             f"Phone lock timeout ({timeout}s) for {phone[:6]}*** — "
             f"previous message still processing. Deferring."
         )
         # Release distributed lock since we won't be using it
-        try:
-            from app.services.distributed_lock import distributed_lock_manager
-            dist_job_name = f"phone_{phone[-10:]}"
-            await distributed_lock_manager.release(dist_job_name)
-        except Exception:
-            pass
+        if holds_lease:
+            try:
+                from app.services.distributed_lock import distributed_lock_manager
+                await distributed_lock_manager.release(dist_job_name)
+            except Exception:
+                pass
         # Release our refcount since we won't be using the lock
         await release_phone_lock(phone)
         return False
+
+    # Both layers held. Start the heartbeat that keeps the lease alive for as
+    # long as the handler runs — without it the lease lapsed at 20s and another
+    # process could pick up the same patient mid-handler (see _renew_phone_lease).
+    #
+    # Deliberately asyncio.create_task, NOT spawn_background_task: the heartbeat
+    # is an infinite loop, and the shutdown drain in app/main.py awaits every
+    # task the supervised helper registers. Registering it there would stall
+    # each deploy by the drain timeout. Its own lifetime is bounded by the
+    # paired release, and a hard kill just lets the lease lapse.
+    if holds_lease:
+        await _stop_phone_lease_renewal(dist_job_name)  # defensive: never stack two
+        _phone_lease_renewals[dist_job_name] = asyncio.create_task(
+            _renew_phone_lease(dist_job_name)
+        )
+    return True
 
 
 # Global instance

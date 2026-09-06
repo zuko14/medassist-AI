@@ -322,11 +322,11 @@ class SchedulerService:
         # container that must acknowledge Meta webhooks within 20s; an OOM kill
         # there takes down request handling and every in-flight BackgroundTask.
         #
-        # settings.run_connectors_in_web defaults to True, so behaviour is
-        # unchanged for any deployment that has not provisioned the dedicated
-        # worker — connectors keep polling rather than silently stopping.
-        # render.yaml sets it false on the web services and runs
-        # `python -m connectors.runner --all` in its own worker.
+        # settings.run_connectors_in_web defaults to True, so these jobs ARE
+        # registered unless a deployment explicitly opts out. Opting out with
+        # no worker running stops report delivery dead, which on a live client
+        # is worse than the OOM risk this isolation exists to avoid — see the
+        # migration order in app/config.py before changing it.
         if settings.run_connectors_in_web:
             # Each connector respects its own poll_interval_minutes before
             # re-running, so the 1-minute tick is the evaluation frequency,

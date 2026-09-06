@@ -59,6 +59,7 @@ from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
 from app.utils.validators import normalize_phone, validate_phone
 from app.database import sb  # T5.1: off-loop query execution
+from app.utils.async_tasks import spawn_background_task
 
 logger = logging.getLogger(__name__)
 
@@ -4003,6 +4004,82 @@ async def _load_connector_for_action(connector_id: str, user: "AdminUser", clini
     return connector
 
 
+async def _dispatch_connector_run(
+    connector: dict, connector_id: str, dry_run: bool
+) -> dict:
+    """Start a connector run, in the worker or in-process, and say which.
+
+    KA-P0-A: these endpoints used to call asyncio.ensure_future() on the
+    connector unconditionally, which launches Playwright/Chromium inside the
+    web container — the one that must acknowledge Meta webhooks within 20s.
+    That defeated the process isolation render.yaml sets up, and it did so on
+    an operator button press during onboarding, i.e. exactly when a new client
+    is watching.
+
+    When connectors are owned by the dedicated worker
+    (settings.run_connectors_in_web is False) this hands the job over by
+    stamping the request on the connector row. The worker evaluates every
+    minute and treats a pending request as immediately due, so the button
+    keeps working — it just stops running a browser in the wrong process.
+
+    connector_id is taken from the request, not from connector["id"]: it is the
+    key GET /connectors/{id}/test-status polls with, and the writer and the
+    reader must not depend on those two values happening to agree.
+    """
+    if settings.run_connectors_in_web:
+        _clean_stale_tasks()
+        _connector_tasks[connector_id] = {
+            "status": "running",
+            "mode": "test" if dry_run else "run",
+            "started_at": datetime.now(timezone.utc),
+        }
+        spawn_background_task(
+            _run_connector_background(
+                connector_id=connector_id,
+                clinic_id=connector["clinic_id"],
+                connector_type=connector.get("connector_type", "mocdoc"),
+                dry_run=dry_run,
+                branch_id=connector.get("branch_id"),
+            ),
+            name=f"connector_{'test' if dry_run else 'run'}_{connector_id}",
+        )
+        return {
+            "success": True,
+            "status": "running",
+            "dispatched_to": "web",
+            "message": (
+                "Test started — this takes 1-2 minutes. Polling for result..."
+                if dry_run
+                else "Run started — this takes 2-5 minutes. Polling for result..."
+            ),
+        }
+
+    # Owned by the worker: record the request and let it pick the job up.
+    config = dict(connector.get("config") or {})
+    config["run_requested_at"] = datetime.now(timezone.utc).isoformat()
+    config["run_requested_mode"] = "test" if dry_run else "run"
+    # unscoped: unique_row_key
+    await sb(
+        supabase.table("integration_connectors")
+        .update({"config": config})
+        .eq("id", connector_id)
+        .eq("clinic_id", connector["clinic_id"])
+    )
+    logger.info(
+        f"Connector {connector_id} {'test' if dry_run else 'run'} queued for the "
+        f"dedicated worker (run_connectors_in_web=False)"
+    )
+    return {
+        "success": True,
+        "status": "queued",
+        "dispatched_to": "worker",
+        "message": (
+            "Queued for the connector worker — it picks this up within a minute. "
+            "Polling for result..."
+        ),
+    }
+
+
 # ── In-memory connector task tracker ──────────────────────────────
 # Stores results for fire-and-forget test/run operations.
 # Keyed by connector_id.  Auto-cleaned after 10 minutes.
@@ -4064,25 +4141,65 @@ async def test_connector(
     Poll GET /connectors/{connector_id}/test-status for the result.
     """
     connector = await _load_connector_for_action(connector_id, user, clinic_id)
+    return await _dispatch_connector_run(connector, connector_id, dry_run=True)
 
-    _clean_stale_tasks()
-    _connector_tasks[connector_id] = {
-        "status": "running",
-        "mode": "test",
-        "started_at": datetime.now(timezone.utc),
-    }
 
-    asyncio.ensure_future(
-        _run_connector_background(
-            connector_id=connector_id,
-            clinic_id=connector["clinic_id"],
-            connector_type=connector.get("connector_type", "mocdoc"),
-            dry_run=True,
-            branch_id=connector.get("branch_id"),
+async def _recent_connector_outcome(connector: dict, within_minutes: int = 15) -> Optional[dict]:
+    """The outcome of a just-finished run, from durable state rather than memory.
+
+    _connector_tasks is per-process. When the run happens in the dedicated
+    connector worker, the web process polling for its result can never see it
+    there, so the result has to come from connector_audit_log.
+
+    Bounded by `within_minutes` so an old run is not replayed as the result of
+    a new request.
+    """
+    try:
+        query = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            supabase.table("connector_audit_log")
+            .select("run_status, reports_found, reports_uploaded, reports_failed, error_message, created_at")
+            .eq("clinic_id", connector["clinic_id"])
+            .eq("connector_type", connector.get("connector_type", "mocdoc"))
         )
-    )
+        branch_id = connector.get("branch_id")
+        query = query.eq("branch_id", branch_id) if branch_id else query.is_("branch_id", "null")
+        rows = await sb(query.order("created_at", desc=True).limit(1))
+    except Exception as e:
+        logger.warning(f"Could not read connector outcome for {connector.get('id')}: {e}")
+        return None
 
-    return {"success": True, "status": "running", "message": "Test started — this takes 1-2 minutes. Polling for result..."}
+    if not rows.data:
+        return None
+
+    row = rows.data[0]
+    try:
+        created = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+        # created_at is TIMESTAMPTZ, but a naive value would make the comparison
+        # below raise TypeError and 500 the endpoint the browser polls every 5s.
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - created > timedelta(minutes=within_minutes):
+            return None
+    except Exception as e:
+        logger.warning(f"Unparseable connector audit timestamp {row.get('created_at')!r}: {e}")
+        return None
+
+    run_status = row.get("run_status", "")
+    success = run_status in ("success", "partial", "dry_run")
+    return {
+        "status": "done" if success else "error",
+        "success": success,
+        "result": {
+            "run_status": run_status,
+            "reports_found": row.get("reports_found") or 0,
+            "reports_uploaded": row.get("reports_uploaded") or 0,
+            "reports_failed": row.get("reports_failed") or 0,
+            "error_message": row.get("error_message"),
+        },
+        "finished_at": row.get("created_at"),
+        "source": "audit_log",
+    }
 
 
 @router.get("/connectors/{connector_id}/test-status")
@@ -4097,6 +4214,19 @@ async def test_connector_status(
     task = _connector_tasks.get(connector_id)
     if task:
         return task
+
+    # Handed to the worker and not picked up yet. Without this the endpoint
+    # answered "idle" for up to a minute after the operator pressed Test,
+    # which reads as "the button did nothing" during a client onboarding.
+    if (connector.get("config") or {}).get("run_requested_at"):
+        mode = (connector.get("config") or {}).get("run_requested_mode", "run")
+        return {
+            "status": "running",
+            "mode": mode,
+            "message": (
+                "Queued for the connector worker - it starts within a minute..."
+            ),
+        }
 
     # No in-process task record — either genuinely idle, or a prior run
     # was interrupted by a server restart (deploy/OOM) and the in-memory
@@ -4123,6 +4253,16 @@ async def test_connector_status(
             "result": {"error_message": "Previous test was interrupted (server restarted mid-run). Please try again."},
         }
 
+    # Ran to completion in ANOTHER process (the connector worker, or a web
+    # worker that has since restarted), so _connector_tasks here is empty.
+    # Without this the browser polls until its 300s ceiling and reports
+    # "timed out" on every successful worker run — the operator would conclude
+    # the connector is broken while it is in fact working. connector_audit_log
+    # is the durable record of the outcome, so read it.
+    finished = await _recent_connector_outcome(connector)
+    if finished:
+        return finished
+
     return {"status": "idle", "message": "No test in progress"}
 
 
@@ -4137,25 +4277,7 @@ async def run_connector_now(
     Poll GET /connectors/{connector_id}/test-status for the result.
     """
     connector = await _load_connector_for_action(connector_id, user, clinic_id)
-
-    _clean_stale_tasks()
-    _connector_tasks[connector_id] = {
-        "status": "running",
-        "mode": "run",
-        "started_at": datetime.now(timezone.utc),
-    }
-
-    asyncio.ensure_future(
-        _run_connector_background(
-            connector_id=connector_id,
-            clinic_id=connector["clinic_id"],
-            connector_type=connector.get("connector_type", "mocdoc"),
-            dry_run=False,
-            branch_id=connector.get("branch_id"),
-        )
-    )
-
-    return {"success": True, "status": "running", "message": "Run started — this takes 2-5 minutes. Polling for result..."}
+    return await _dispatch_connector_run(connector, connector_id, dry_run=False)
 
 
 @router.get("/connectors/{connector_id}/audit-log")

@@ -62,7 +62,18 @@ def test_w5_3_metrics_registry_recording():
 
 
 def test_w6_3_and_w6_4_render_deployment_config():
-    """W6.3 & W6.4: render.yaml specifies preDeployCommand migrations and disables un-gated autoDeploy."""
+    """W6.3 & W6.4: migrations run before traffic, and deploys are not silently skipped.
+
+    This used to assert autoDeploy is False, on the reasoning that a red build
+    should not reach production un-gated. KA-P0-B reversed that decision: with
+    autoDeploy off, a push deployed NOTHING, so a fix could sit unshipped while
+    everyone believed it was live, and the web service and the connector worker
+    could run different commits against one database indefinitely. Deploying
+    stale code is the more dangerous of the two failures.
+
+    The migration gate is what actually protects a bad deploy, and it is still
+    asserted here: preDeployCommand runs migrations before traffic shifts.
+    """
     render_yaml_path = Path(__file__).parent.parent / "render.yaml"
     config = yaml.safe_load(render_yaml_path.read_text())
 
@@ -70,5 +81,8 @@ def test_w6_3_and_w6_4_render_deployment_config():
     assert "mediassist-ai" in services
     web = services["mediassist-ai"]
 
-    assert web.get("autoDeploy") is False, "autoDeploy must be false to prevent un-gated red builds reaching prod"
+    assert web.get("autoDeploy") is True, (
+        "autoDeploy must be true so a push actually ships and the web service "
+        "cannot drift onto a different commit than the connector worker"
+    )
     assert web.get("preDeployCommand") == "python scripts/migrate.py", "preDeployCommand must run schema migrations"

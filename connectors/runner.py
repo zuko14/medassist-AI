@@ -1146,7 +1146,7 @@ async def run_all_connectors() -> None:
 
         # unscoped: platform_sweep
         result = await sb(supabase.table("integration_connectors") \
-            .select("clinic_id, connector_type, branch_id, config, last_run_at") \
+            .select("id, clinic_id, connector_type, branch_id, config, last_run_at") \
             .eq("is_enabled", True))
 
         connectors = result.data or []
@@ -1158,9 +1158,42 @@ async def run_all_connectors() -> None:
         now = datetime.now(timezone.utc)
         for conn in connectors:
             config = conn.get("config") or {}
+            # KA-P0-A: an operator pressed Test / Run now in the admin panel.
+            # That endpoint no longer spawns Chromium inside the web container
+            # that must acknowledge Meta webhooks within 20s; it stamps the
+            # request here and this worker owns the browser.
+            #
+            # The request is cleared BEFORE the run, not after: clearing after
+            # would leave a crashed run re-requesting itself on every tick.
+            requested = config.get("run_requested_at")
+            dry_run = config.get("run_requested_mode") == "test"
+            if requested:
+                cleared = {
+                    k: v
+                    for k, v in config.items()
+                    if k not in ("run_requested_at", "run_requested_mode")
+                }
+                try:
+                    # unscoped: unique_row_key
+                    await sb(
+                        supabase.table("integration_connectors")
+                        .update({"config": cleared})
+                        .eq("id", conn["id"])
+                    )
+                except Exception as e:
+                    # Never run on a request we could not clear.
+                    logger.error(
+                        f"Could not clear run request for {conn['id']}: {e} - skipping"
+                    )
+                    continue
+                logger.info(
+                    f"Operator-requested {'test' if dry_run else 'run'} for "
+                    f"{conn['clinic_id']} branch={conn.get('branch_id')} - running now"
+                )
+
             poll_interval = config.get("poll_interval_minutes", 10)
             last_run_at = conn.get("last_run_at")
-            if last_run_at:
+            if last_run_at and not requested:
                 try:
                     last_dt = datetime.fromisoformat(last_run_at.replace("Z", "+00:00"))
                     if (now - last_dt) < timedelta(minutes=poll_interval - 0.5):
@@ -1181,6 +1214,7 @@ async def run_all_connectors() -> None:
                     clinic_id=conn["clinic_id"],
                     connector_type=conn["connector_type"],
                     branch_id=conn.get("branch_id"),
+                    dry_run=dry_run,
                 )
             except Exception as e:
                 logger.error(

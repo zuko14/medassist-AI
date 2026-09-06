@@ -131,10 +131,27 @@ class Settings(BaseSettings):
     # 20s. Chromium's memory profile is spiky; an OOM kill takes the web process
     # down and every in-flight BackgroundTask with it.
     #
-    # Default True preserves existing behaviour exactly — a deployment that has
-    # not provisioned the dedicated worker keeps polling rather than silently
-    # stopping. render.yaml sets this to false on the web services and runs
-    # `python -m connectors.runner --all` in its own worker instead.
+    # Default True (KA-P0-A). render.yaml sets this false and declares a
+    # dedicated worker, but render.yaml only applies as a Blueprint — on a
+    # dashboard-created service the variable is simply absent and this default
+    # decides where Chromium runs.
+    #
+    # Weighing the two failures the default has to choose between:
+    #   True  -> an OOM kill in the web container takes down PATIENT MESSAGING
+    #            for every clinic, and every in-flight BackgroundTask with it.
+    #   False -> with no worker provisioned, report polling stops dead.
+    #
+    # The default was briefly flipped to False on that reasoning, then REVERTED
+    # (2026-09-06) after checking live production: Accumx Diagnostics is a
+    # paying client whose reports flow through the web process today, and no
+    # verified connector worker is running. Flipping the default would have
+    # turned a LATENT risk (a possible OOM) into a CERTAIN outage (report
+    # delivery stops on deploy). Never make that trade on a live client.
+    #
+    # Migration path, in this order, and not on a launch day:
+    #   1. Provision the worker service and watch it actually poll.
+    #   2. Set RUN_CONNECTORS_IN_WEB=false on the web service explicitly.
+    #   3. Only then consider changing this default.
     #
     # Safe either way: run_connector() takes a per-connector CAS advisory lock
     # with a 5-minute lease (connectors/runner.py), so a worker and a stale web

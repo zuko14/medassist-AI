@@ -4,7 +4,13 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
-    autoDeploy: false
+    # KA-P0-B: was false. A push then did NOT deploy, so "I fixed it" and
+    # "it is live" were different facts, and the web service could sit on a
+    # different commit than the connector worker indefinitely. Both main-branch
+    # services now auto-deploy together, so they can never diverge.
+    # Consequence: every push to main is a production release. Work on a
+    # branch and merge deliberately.
+    autoDeploy: true
     numInstances: 2
     preDeployCommand: python scripts/migrate.py
     envVars:
@@ -21,7 +27,12 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m connectors.runner --all
-    autoDeploy: false
+    # KA-P0-B: must match the web service. A worker pinned on an older commit
+    # runs stale connector code against a schema the web service already
+    # migrated. It has no preDeployCommand of its own, so on a migrating
+    # deploy it may error for a poll cycle or two until the web service's
+    # preDeploy migration lands; run_all_connectors retries every minute.
+    autoDeploy: true
     envVars:
       - key: MEDASSIST_URL
         value: "http://mediassist-ai:8000"

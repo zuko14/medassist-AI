@@ -386,7 +386,12 @@ async def test_test_connector_calls_dry_run():
 
     fake_summary = {"run_status": "dry_run", "reports_found": 3, "error_message": None}
 
-    with patch("app.routers.admin.supabase", mock_sb), \
+    # KA-P0-A: connectors now default to the dedicated worker, so this test
+    # must say which path it is exercising. It asserts on the in-process
+    # branch; the worker-handoff branch is covered by
+    # tests/test_connector_process_isolation.py.
+    with patch("app.routers.admin.settings.run_connectors_in_web", True), \
+         patch("app.routers.admin.supabase", mock_sb), \
          patch("connectors.runner.run_connector", new_callable=AsyncMock, return_value=fake_summary) as mock_run:
         result = await test_connector(connector_id="conn-1", clinic_id="default", user=admin)
         # Endpoint returns immediately with "running" status
@@ -417,7 +422,12 @@ async def test_run_connector_now_calls_run_connector_not_dry_run():
 
     fake_summary = {"run_status": "success", "reports_uploaded": 2, "error_message": None}
 
-    with patch("app.routers.admin.supabase", mock_sb), \
+    # KA-P0-A: connectors now default to the dedicated worker, so this test
+    # must say which path it is exercising. It asserts on the in-process
+    # branch; the worker-handoff branch is covered by
+    # tests/test_connector_process_isolation.py.
+    with patch("app.routers.admin.settings.run_connectors_in_web", True), \
+         patch("app.routers.admin.supabase", mock_sb), \
          patch("connectors.runner.run_connector", new_callable=AsyncMock, return_value=fake_summary) as mock_run:
         result = await run_connector_now(connector_id="conn-1", clinic_id="default", user=admin)
         # Endpoint returns immediately with "running" status
