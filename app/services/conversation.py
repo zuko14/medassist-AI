@@ -78,6 +78,40 @@ NAV_KEYWORDS = frozenset(
     {"menu", "main menu", "home", "start over", "reset", "मेनू", "మెనూ"}
 )
 
+#: Ephemeral booking and branch context keys that must not bleed across distinct sessions or bookings
+BOOKING_CONTEXT_KEYS = frozenset({
+    "doctor",
+    "doctor_id",
+    "doctor_name",
+    "selected_doctor_id",
+    "department",
+    "branch_id",
+    "branch_name",
+    "branch_address",
+    "branch_landmark",
+    "branch_maps_link",
+    "branch_session",
+    "appointment_date",
+    "appointment_time",
+    "booking_name",
+    "booking_id",
+    "booking_ref",
+    "symptoms",
+    "last_symptom",
+    "for_self",
+    "asked_for_whom",
+    "razorpay_payment_link_id",
+    "suggested_department",
+    "suggestion_reasoning",
+    "doctor_page",
+    "department_page",
+    "branch_page",
+    "lab_test_id",
+    "lab_test_name",
+    "collection_date",
+    "lab_flow",
+})
+
 
 class ConversationState(str, Enum):
     IDLE = "idle"
@@ -184,12 +218,50 @@ def extract_clean_message_content(message: str) -> str:
 class ConversationManager:
     """Manages conversation state and flow."""
 
+    def _set_branch_context(
+        self,
+        context: dict,
+        branch: Optional[dict] = None,
+        session_val: Optional[str] = None,
+    ) -> dict:
+        """Atomically set or clear branch fields in conversation context.
+        
+        Ensures branch_id, branch_name, branch_address, branch_landmark,
+        branch_maps_link, and branch_session are always updated together,
+        preventing mixed-branch fields from leaking across sessions.
+        """
+        if branch:
+            context["branch_id"] = branch.get("id") or branch.get("branch_id")
+            context["branch_name"] = branch.get("short_name") or branch.get("name", "")
+            context["branch_address"] = branch.get("address", "")
+            context["branch_landmark"] = branch.get("landmark", "")
+            context["branch_maps_link"] = branch.get("maps_link", "")
+            if session_val is not None:
+                context["branch_session"] = session_val
+            elif "branch_session" not in context:
+                context["branch_session"] = "both"
+        else:
+            context.pop("branch_id", None)
+            context.pop("branch_name", None)
+            context.pop("branch_address", None)
+            context.pop("branch_landmark", None)
+            context.pop("branch_maps_link", None)
+            context.pop("branch_session", None)
+        return context
+
+    def _clear_booking_context(self, context: dict) -> dict:
+        """Clear all appointment/booking-specific fields from context to prevent state leakage."""
+        for key in BOOKING_CONTEXT_KEYS:
+            context.pop(key, None)
+        return context
+
     async def update_state(
         self,
         clinic: dict,
         phone: str,
         new_state: str,
         new_context: Optional[dict] = None,
+        reset_context: bool = False,
     ) -> None:
         if new_context is None:
             new_context = {}
@@ -214,7 +286,11 @@ class ConversationManager:
         if new_state == "main_menu" and session_state != "main_menu":
             new_context["menu_shown"] = False
 
-        merged = {**existing, **new_context}
+        if reset_context:
+            merged = new_context
+        else:
+            merged = {**existing, **new_context}
+
         update_payload = {
             "state": new_state,
             "context": merged,
@@ -736,7 +812,7 @@ class ConversationManager:
             # Fetch branch assignments for hierarchical display
             branch_res = (
                 await sb(supabase.table("doctor_branches")
-                .select("branch_id, session, branches(name, short_name, address)")
+                .select("branch_id, session, branches(id, name, short_name, address, landmark, maps_link)")
                 .eq("doctor_id", doc["id"]))
             )
             branches = branch_res.data or []
@@ -775,17 +851,30 @@ class ConversationManager:
             context["department"] = doc["department"]
             context["selected_doctor_id"] = message
 
-            # If multi-branch doctor and no branch pre-selected, ask patient to pick branch
-            if len(branches) > 1 and not context.get("branch_id"):
+            # If multi-branch doctor, verify whether pre-selected branch belongs to this doctor
+            doctor_branch_ids = {b["branch_id"] for b in branches if b.get("branch_id")}
+            current_branch_id = context.get("branch_id")
+
+            if len(branches) > 1 and (not current_branch_id or current_branch_id not in doctor_branch_ids):
                 await self._send_doctor_branch_selection(clinic, phone, doc, branches, lang)
                 await self.update_state(clinic, phone, "selecting_branch", context)
                 return
             elif len(branches) == 1 and branches[0].get("branch_id"):
-                # Single branch assigned — auto-attach
-                binfo = branches[0].get("branches") or {}
-                context["branch_id"] = branches[0]["branch_id"]
-                context["branch_name"] = binfo.get("short_name") or binfo.get("name", "")
-                context["branch_session"] = branches[0].get("session", "both")
+                # Single branch assigned — auto-attach all branch fields atomically
+                binfo = dict(branches[0].get("branches") or {})
+                binfo["id"] = binfo.get("id") or branches[0]["branch_id"]
+                self._set_branch_context(
+                    context, binfo, session_val=branches[0].get("session", "both")
+                )
+            elif len(branches) > 1 and current_branch_id in doctor_branch_ids:
+                # Valid branch already picked — refresh all fields from this doctor's branch row to ensure consistency
+                match = next((b for b in branches if b["branch_id"] == current_branch_id), None)
+                if match:
+                    binfo = dict(match.get("branches") or {})
+                    binfo["id"] = binfo.get("id") or match["branch_id"]
+                    self._set_branch_context(
+                        context, binfo, session_val=match.get("session", "both")
+                    )
 
             await self._show_date_picker(clinic, phone, context, lang)
             await self.update_state(clinic, phone, "selecting_date", context)
@@ -1517,24 +1606,20 @@ class ConversationManager:
                 await self._send_branch_selection(
                     clinic, phone, bookable_branches, lang
                 )
-                await self.update_state(clinic, phone, "selecting_branch", {})
+                await self.update_state(clinic, phone, "selecting_branch", {}, reset_context=True)
                 return
             elif len(bookable_branches) == 1:
                 # Only one bookable branch — auto-select it
                 branch = bookable_branches[0]
-                context = {
-                    "branch_id": branch["id"],
-                    "branch_name": branch.get("short_name") or branch["name"],
-                    "branch_address": branch.get("address", ""),
-                    "branch_landmark": branch.get("landmark", ""),
-                    "branch_maps_link": branch.get("maps_link", ""),
-                }
+                context = self._set_branch_context({}, branch)
+                await self.update_state(clinic, phone, "selecting_family_member", context, reset_context=True)
                 await self._continue_booking_after_branch(
                     clinic, phone, patient, lang, context
                 )
                 return
         # ── End Multi-Branch Check ──────────────────────────────────────────
 
+        await self.update_state(clinic, phone, "selecting_family_member", {}, reset_context=True)
         await self._continue_booking_after_branch(clinic, phone, patient, lang, {})
 
     async def _continue_booking_after_branch(
@@ -1773,15 +1858,8 @@ class ConversationManager:
             branch = await get_branch_by_id(branch_id)
 
             if branch:
-                # Store branch context for the entire booking flow
-                new_context = {
-                    **context,
-                    "branch_id": branch["id"],
-                    "branch_name": branch.get("short_name") or branch["name"],
-                    "branch_address": branch.get("address", ""),
-                    "branch_landmark": branch.get("landmark", ""),
-                    "branch_maps_link": branch.get("maps_link", ""),
-                }
+                # Store branch context for the entire booking flow atomically
+                new_context = self._set_branch_context({**context}, branch)
 
                 # Lab flow: the patient is choosing a collection centre, so show
                 # that centre's catalogue. Checked BEFORE the is_diagnostic
@@ -2635,6 +2713,40 @@ class ConversationManager:
             context["doctor_id"] = doctor["id"]
             context["selected_doctor_id"] = doctor["id"]
 
+            # If doctor has assigned branch(es), validate or auto-attach
+            try:
+                from app.database import supabase
+                d_branch_res = (
+                    await sb(supabase.table("doctor_branches")
+                    .select("branch_id, session, branches(id, name, short_name, address, landmark, maps_link)")
+                    .eq("doctor_id", doctor["id"]))
+                )
+                d_branches = d_branch_res.data or []
+                d_branch_ids = {b["branch_id"] for b in d_branches if b.get("branch_id")}
+                current_bid = context.get("branch_id")
+
+                if len(d_branches) == 1 and d_branches[0].get("branch_id"):
+                    # Auto-attach the single branch for this doctor
+                    binfo = dict(d_branches[0].get("branches") or {})
+                    binfo["id"] = binfo.get("id") or d_branches[0]["branch_id"]
+                    self._set_branch_context(
+                        context, binfo, session_val=d_branches[0].get("session", "both")
+                    )
+                elif len(d_branches) > 1 and (not current_bid or current_bid not in d_branch_ids):
+                    await self._send_doctor_branch_selection(clinic, phone, doctor, d_branches, lang)
+                    await self.update_state(clinic, phone, "selecting_branch", context)
+                    return
+                elif len(d_branches) > 1 and current_bid in d_branch_ids:
+                    match = next((b for b in d_branches if b["branch_id"] == current_bid), None)
+                    if match:
+                        binfo = dict(match.get("branches") or {})
+                        binfo["id"] = binfo.get("id") or match["branch_id"]
+                        self._set_branch_context(
+                            context, binfo, session_val=match.get("session", "both")
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to check doctor branch assignment: {e}")
+
         # Ask for date — two-step flow: date picker → slot list
         merged_context = {**context}
 
@@ -3029,9 +3141,22 @@ class ConversationManager:
             context["appointment_date"], "%Y-%m-%d"
         ).strftime("%d %b %Y")
 
-        # Build confirmation body — include branch info when present
-        branch_name = context.get("branch_name")  # Now stores locality (short_name)
+        # Build confirmation body — resolve branch authoritatively when branch_id is present
+        branch_id = context.get("branch_id")
+        branch_name = context.get("branch_name")
         branch_landmark = context.get("branch_landmark", "")
+
+        if branch_id:
+            from app.services.tenant import get_branch_by_id
+            try:
+                auth_branch = await get_branch_by_id(branch_id)
+                if auth_branch:
+                    branch_name = auth_branch.get("short_name") or auth_branch.get("name", "")
+                    branch_landmark = auth_branch.get("landmark", "")
+                    # Sync back into context to guarantee downstream steps have exact values
+                    self._set_branch_context(context, auth_branch, session_val=context.get("branch_session"))
+            except Exception as e:
+                logger.warning(f"Error resolving branch for confirmation: {e}")
 
         if branch_name:
             # Multi-branch: include locality in confirmation
@@ -3346,10 +3471,24 @@ class ConversationManager:
                     # or clinic-level info for single-branch bookings
                     if context.get("branch_id"):
                         # Multi-branch: send branch-specific address + Google Maps
-                        branch_name = context.get("branch_name", "")
-                        branch_address = context.get("branch_address", "")
-                        branch_landmark = context.get("branch_landmark", "")
-                        branch_maps = context.get("branch_maps_link", "")
+                        from app.services.tenant import get_branch_by_id
+                        branch = None
+                        try:
+                            branch = await get_branch_by_id(context["branch_id"])
+                        except Exception as e:
+                            logger.warning(f"Error fetching branch for confirmation location: {e}")
+
+                        if branch:
+                            branch_name = branch.get("short_name") or branch.get("name", "")
+                            branch_address = branch.get("address", "")
+                            branch_landmark = branch.get("landmark", "")
+                            branch_maps = branch.get("maps_link", "")
+                        else:
+                            branch_name = context.get("branch_name", "")
+                            branch_address = context.get("branch_address", "")
+                            branch_landmark = context.get("branch_landmark", "")
+                            branch_maps = context.get("branch_maps_link", "")
+
                         if branch_address or branch_maps or branch_landmark:
                             location_lines = [
                                 f"📍 Location: {branch_name}"
@@ -3423,7 +3562,7 @@ class ConversationManager:
                         ],
                     )
 
-                    await self.update_state(clinic, phone, "main_menu")
+                    await self.update_state(clinic, phone, "main_menu", reset_context=True)
                 else:
                     if result.get("reason") == "slot_taken":
                         await self.whatsapp.send_text(
@@ -3454,7 +3593,7 @@ class ConversationManager:
                                 "booking_failed", lang, phone=clinic["whatsapp_number"]
                             ),
                         )
-                        await self.update_state(clinic, phone, "main_menu")
+                        await self.update_state(clinic, phone, "main_menu", reset_context=True)
                         await self._send_main_menu(clinic, phone, lang)
         else:
             # Edit booking - go back to doctor selection
