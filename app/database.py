@@ -860,9 +860,13 @@ async def get_available_slots(
 
 
 async def find_next_available_date(
-    clinic_id: str, doctor_name: str, from_date_str: str
+    clinic_id: str,
+    doctor_name: str,
+    from_date_str: str,
+    branch_id: Optional[str] = None,
+    branch_session: Optional[str] = None,
 ) -> tuple:
-    """Find next available date with slots for a doctor."""
+    """Find next available date with slots for a doctor, respecting branch and shift session."""
     from datetime import datetime, timedelta
 
     try:
@@ -882,7 +886,13 @@ async def find_next_available_date(
             if holiday.data:
                 continue
 
-            slots, _ = await get_available_slots(clinic_id, doctor_name, check_date_str)
+            slots, _ = await get_available_slots(
+                clinic_id,
+                doctor_name,
+                check_date_str,
+                branch_id=branch_id,
+                branch_session=branch_session,
+            )
             if slots:
                 return check_date_str, slots, None
 

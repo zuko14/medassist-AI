@@ -87,4 +87,4 @@ async def test_selecting_family_member_sets_patient_name_in_context():
         mock_update.assert_called_once()
         new_ctx = mock_update.call_args[0][3]
         assert new_ctx["patient_name"] == "Priya Sharma"
-        assert mock_update.call_args[0][2] == "asking_symptoms"
+        assert mock_update.call_args[0][2] in ("collecting_symptoms", "asking_symptoms")

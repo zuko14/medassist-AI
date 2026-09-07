@@ -368,3 +368,163 @@ class TestDoctorSelectionBranchIntegrity:
             )
 
         mock_send_branch_sel.assert_awaited_once()
+
+
+class TestProductionHardeningFixes:
+    """Verifies the 4 production fixes across dispatcher, slots, lab context, and admin unassign."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("test_state", ["collecting_symptoms", "asking_symptoms"])
+    async def test_dispatcher_routes_both_symptom_states(self, test_state):
+        """Incoming messages in either collecting_symptoms or asking_symptoms route to _handle_collecting_symptoms."""
+        cm = conversation_manager
+        clinic = {"id": "9d9e9f12-c775-49c0-a326-98a59cdcc2e4", "name": "Dispatch Clinic", "is_active": True}
+        phone = "+919876543210"
+
+        with patch("app.services.conversation.get_or_create_conversation", new_callable=AsyncMock) as mock_get_conv, \
+             patch("app.services.conversation.get_patient_by_phone", new_callable=AsyncMock) as mock_get_patient, \
+             patch("app.services.conversation.get_lang", new_callable=AsyncMock) as mock_get_lang, \
+             patch("app.services.conversation.update_conversation", new_callable=AsyncMock), \
+             patch.object(cm, "_handle_collecting_symptoms", new_callable=AsyncMock) as mock_symptoms_handler, \
+             patch("app.services.conversation.detect_intent", new_callable=AsyncMock) as mock_detect:
+
+            mock_get_conv.return_value = {
+                "state": test_state,
+                "context": {"patient_name": "Test Patient"},
+            }
+            mock_patient = {"name": "Test", "language": "en", "opted_in": True, "data_consent": True}
+            mock_get_patient.return_value = mock_patient
+            mock_get_lang.return_value = "en"
+            mock_detect.return_value = "general"
+
+            await cm.handle_message(clinic, phone, "I have severe fever", message_type="text")
+
+            mock_symptoms_handler.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_date_selection_passes_branch_and_session(self):
+        """_handle_selecting_date passes branch_id and branch_session into get_available_slots."""
+        cm = conversation_manager
+        clinic = {"id": "clinic-slots", "name": "Slots Clinic"}
+        phone = "+919876543210"
+        context = {
+            "doctor_name": "Dr. Naidu",
+            "branch_id": "branch-madv",
+            "branch_session": "morning",
+        }
+
+        with patch("app.services.conversation.get_available_slots", new_callable=AsyncMock) as mock_get_slots, \
+             patch.object(cm, "_show_slot_list", new_callable=AsyncMock):
+
+            mock_get_slots.return_value = (["09:00", "09:30"], None)
+
+            await cm._handle_selecting_date(clinic, phone, "tomorrow", context, "en")
+
+            mock_get_slots.assert_awaited_once()
+            _, kwargs = mock_get_slots.call_args
+            assert kwargs.get("branch_id") == "branch-madv"
+            assert kwargs.get("branch_session") == "morning"
+
+    @pytest.mark.asyncio
+    async def test_suggest_other_doctors_scopes_by_branch(self):
+        """_suggest_other_doctors queries doctors and slots with branch_id and branch_session."""
+        cm = conversation_manager
+        clinic = {"id": "clinic-slots", "name": "Slots Clinic"}
+        phone = "+919876543210"
+        context = {
+            "doctor_name": "Dr. Unavailable",
+            "department": "Cardiology",
+            "branch_id": "branch-madv",
+            "branch_session": "morning",
+        }
+
+        alt_doc = {
+            "name": "Dr. Alternate",
+            "department": "Cardiology",
+            "specialization": "Cardiologist",
+            "session": "morning",
+        }
+
+        with patch("app.services.conversation.get_doctors", new_callable=AsyncMock) as mock_get_doctors, \
+             patch("app.services.conversation.get_available_slots", new_callable=AsyncMock) as mock_get_slots, \
+             patch.object(cm.whatsapp, "send_text", new_callable=AsyncMock):
+
+            mock_get_doctors.return_value = [alt_doc]
+            mock_get_slots.return_value = (["10:00"], None)
+
+            await cm._suggest_other_doctors(clinic, phone, context, "en")
+
+            # Check that get_doctors was filtered by branch_id
+            mock_get_doctors.assert_awaited_once_with("clinic-slots", "Cardiology", branch_id="branch-madv")
+
+            # Check that get_available_slots received branch_id and branch_session
+            assert mock_get_slots.call_count >= 1
+            _, slot_kwargs = mock_get_slots.call_args
+            assert slot_kwargs.get("branch_id") == "branch-madv"
+            assert slot_kwargs.get("branch_session") == "morning"
+
+    @pytest.mark.asyncio
+    async def test_start_lab_booking_atomically_sets_context_and_resets(self):
+        """_start_lab_booking for single branch sets atomic branch context and calls update_state with reset_context=True."""
+        cm = conversation_manager
+        clinic = {"id": "clinic-lab", "name": "Lab Clinic"}
+        phone = "+919876543210"
+
+        with patch("app.services.tenant.get_clinic_branches", new_callable=AsyncMock) as mock_branches, \
+             patch.object(cm, "update_state", new_callable=AsyncMock) as mock_update_state, \
+             patch.object(cm, "_show_lab_test_list", new_callable=AsyncMock):
+
+            mock_branches.return_value = [MADHURAWADA_BRANCH]
+
+            await cm._start_lab_booking(clinic, phone, "en")
+
+            mock_update_state.assert_awaited_once()
+            call_args = mock_update_state.call_args
+            assert call_args[0][2] == "browsing_lab_tests"
+            ctx = call_args[0][3]
+            assert ctx.get("branch_id") == MADHURAWADA_BRANCH["id"]
+            assert ctx.get("branch_name") == MADHURAWADA_BRANCH["short_name"]
+            assert ctx.get("branch_address") == MADHURAWADA_BRANCH["address"]
+            assert call_args[1].get("reset_context") is True
+
+    @pytest.mark.asyncio
+    async def test_admin_update_doctor_explicit_unassign(self):
+        """Passing branch_id='' to update_doctor unassigns the doctor from branches."""
+        from app.routers.admin import update_doctor, DoctorUpdate
+        from app.routers.admin import AdminUser
+
+        admin_user = AdminUser(
+            username="admin",
+            role="admin",
+            clinic_id="clinic-test",
+            permissions=["DOCTORS_UPDATE"],
+        )
+
+        existing_doc = {
+            "id": "doc-123",
+            "name": "Dr. Test",
+            "clinic_id": "clinic-test",
+        }
+
+        with patch("app.routers.admin.sb", new_callable=AsyncMock) as mock_sb, \
+             patch("app.routers.admin.log_admin_action", new_callable=AsyncMock), \
+             patch("app.routers.admin.invalidate_doctor_cache") as mock_inval:
+
+            # Mock responses: 1. owner_query, 2. delete doctor_branches
+            mock_sb.side_effect = [
+                MagicMock(data=[existing_doc]),  # owner query
+                MagicMock(data=[]),              # delete doctor_branches
+            ]
+
+            update_payload = DoctorUpdate(branch_id="")
+            result = await update_doctor(
+                doctor_id="doc-123",
+                doctor=update_payload,
+                clinic_id="clinic-test",
+                user=admin_user,
+            )
+
+            assert result["branch_id"] is None
+            assert result["branch_session"] is None
+            mock_inval.assert_called_once_with(clinic_id="clinic-test")
+

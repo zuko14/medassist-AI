@@ -1074,7 +1074,7 @@ class ConversationManager:
             await self._handle_confirming_save_family_member(
                 clinic, phone, message, context, lang
             )
-        elif state == "collecting_symptoms":
+        elif state in ("collecting_symptoms", "asking_symptoms"):
             await self._handle_collecting_symptoms(
                 clinic, phone, message, context, patient, lang
             )
@@ -1556,21 +1556,16 @@ class ConversationManager:
         if len(active) >= 2:
             await self._send_branch_selection(clinic, phone, active, lang)
             await self.update_state(
-                clinic, phone, "selecting_branch", {"lab_flow": True}
+                clinic, phone, "selecting_branch", {"lab_flow": True}, reset_context=True
             )
             return
 
         context = {}
         if len(active) == 1:
             branch = active[0]
-            context = {
-                "branch_id": branch["id"],
-                "branch_name": branch.get("short_name") or branch["name"],
-                "branch_address": branch.get("address", ""),
-                "branch_landmark": branch.get("landmark", ""),
-                "branch_maps_link": branch.get("maps_link", ""),
-            }
+            context = self._set_branch_context({}, branch)
 
+        await self.update_state(clinic, phone, "browsing_lab_tests", context, reset_context=True)
         await self._show_lab_test_list(clinic, phone, context, lang)
 
     async def _start_booking(
@@ -1929,7 +1924,7 @@ class ConversationManager:
         if msg_clean in ["fam_self", "self", "for me", "me", "for myself", "myself"]:
             p_name = (patient or {}).get("name") or "there"
             new_ctx = {**context, "patient_name": p_name, "for_self": True}
-            await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+            await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
             return
 
@@ -1959,7 +1954,7 @@ class ConversationManager:
                 "relationship": member.get("relationship"),
                 "is_family": True,
             }
-            await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+            await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
             return
 
@@ -1972,14 +1967,14 @@ class ConversationManager:
                     "relationship": m.get("relationship"),
                     "is_family": True,
                 }
-                await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+                await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
                 await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
                 return
 
         # Fallback: Treat typed input as new name if 2+ words, or prompt again
         if len(msg_clean.split()) >= 2:
             new_ctx = {**context, "patient_name": message.strip(), "is_family": True}
-            await self.update_state(clinic, phone, "asking_symptoms", new_ctx)
+            await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
         else:
             await self.whatsapp.send_text(
@@ -2805,9 +2800,13 @@ class ConversationManager:
 
         context["appointment_date"] = date_str
 
-        # Get available slots
+        # Get available slots respecting branch and session
         slots, reason = await get_available_slots(
-            clinic["id"], context["doctor_name"], date_str
+            clinic["id"],
+            context["doctor_name"],
+            date_str,
+            branch_id=context.get("branch_id"),
+            branch_session=context.get("branch_session"),
         )
 
         if not slots:
@@ -2848,6 +2847,8 @@ class ConversationManager:
                 (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime(
                     "%Y-%m-%d"
                 ),
+                branch_id=context.get("branch_id"),
+                branch_session=context.get("branch_session"),
             )
 
             if next_reason == "no_availability_14_days" or not next_date:
@@ -2897,7 +2898,11 @@ class ConversationManager:
         candidates = [today + timedelta(days=i) for i in range(7)]
         results = await asyncio.gather(*[
             get_available_slots(
-                clinic["id"], context["doctor_name"], d.strftime("%Y-%m-%d")
+                clinic["id"],
+                context["doctor_name"],
+                d.strftime("%Y-%m-%d"),
+                branch_id=context.get("branch_id"),
+                branch_session=context.get("branch_session"),
             )
             for d in candidates
         ])
@@ -2928,6 +2933,8 @@ class ConversationManager:
                 clinic["id"],
                 context["doctor_name"],
                 (today + timedelta(days=7)).strftime("%Y-%m-%d"),
+                branch_id=context.get("branch_id"),
+                branch_session=context.get("branch_session"),
             )
             if next_date and next_slots:
                 d = datetime.strptime(next_date, "%Y-%m-%d").date()
@@ -2991,7 +2998,11 @@ class ConversationManager:
             date_str = d.strftime("%Y-%m-%d")
 
             slots, _reason = await get_available_slots(
-                clinic["id"], context["doctor_name"], date_str
+                clinic["id"],
+                context["doctor_name"],
+                date_str,
+                branch_id=context.get("branch_id"),
+                branch_session=context.get("branch_session"),
             )
             if not slots:
                 continue
@@ -3387,6 +3398,8 @@ class ConversationManager:
                         clinic["id"],
                         context["doctor_name"],
                         context["appointment_date"],
+                        branch_id=context.get("branch_id"),
+                        branch_session=context.get("branch_session"),
                     )
                     if slots:
                         await self._show_slot_list(
@@ -3576,6 +3589,8 @@ class ConversationManager:
                             clinic["id"],
                             context["doctor_name"],
                             context["appointment_date"],
+                            branch_id=context.get("branch_id"),
+                            branch_session=context.get("branch_session"),
                         )
                         if slots:
                             await self._show_slot_list(
@@ -3714,9 +3729,10 @@ class ConversationManager:
         import asyncio
         from datetime import datetime, timedelta
 
+        branch_id = context.get("branch_id")
         doctors = [
             d
-            for d in await get_doctors(clinic["id"], department)
+            for d in await get_doctors(clinic["id"], department, branch_id=branch_id)
             if d["name"] != exclude_doctor
         ]
 
@@ -3733,7 +3749,13 @@ class ConversationManager:
             )
             results = await asyncio.gather(
                 *[
-                    get_available_slots(clinic["id"], d["name"], check_date)
+                    get_available_slots(
+                        clinic["id"],
+                        d["name"],
+                        check_date,
+                        branch_id=branch_id,
+                        branch_session=d.get("session") or d.get("branch_session"),
+                    )
                     for d in pending
                 ]
             )

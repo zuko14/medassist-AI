@@ -1654,6 +1654,10 @@ def _apply_slot_config(data: dict) -> dict:
             return time_type(int(parts[0]), int(parts[1]))
         return val
 
+    shift_keys = ("morning_start", "morning_end", "evening_start", "evening_end", "morning_slots", "evening_slots")
+    if not any(k in data for k in shift_keys):
+        return data
+
     duration = data.get("slot_duration_minutes") or 30
 
     morning_start = _parse_time(data.get("morning_start"))
@@ -1902,8 +1906,13 @@ async def update_doctor(
             # unscoped cross-tenant read in KA-P1-05.
             updated_doctor = existing_doctor
 
-        # ── Branch assignment upsert ──
-        if requested_branch_id is not None:
+        # ── Branch assignment upsert / unassign ──
+        if requested_branch_id in ("", False):
+            # scoped: clear doctor branch associations when explicitly unassigned
+            await sb(supabase.table("doctor_branches").delete().eq("doctor_id", doctor_id))
+            updated_doctor["branch_id"] = None
+            updated_doctor["branch_session"] = None
+        elif requested_branch_id is not None:
             doc_clinic_id = updated_doctor.get("clinic_id") or effective_clinic_id
 
             branch_check = (

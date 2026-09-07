@@ -3357,10 +3357,11 @@ async function submitDoctor() {
             slot_duration_minutes: parseInt(document.getElementById('f-docDuration').value) || 30,
         };
 
-        // Include branch_id if the dropdown is visible and has a value
+        // Include branch_id if the dropdown is visible (supports explicit unassignment when empty)
         const branchSel = document.getElementById('f-docBranch');
-        if (branchSel && branchSel.value) {
-            payload.branch_id = branchSel.value;
+        const branchRow = document.getElementById('docBranchRow');
+        if (branchSel && branchRow && branchRow.style.display !== 'none') {
+            payload.branch_id = branchSel.value || "";
         }
 
         if (id) {
