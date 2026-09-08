@@ -1419,7 +1419,12 @@ class ConversationManager:
             # discovered they could book a test here.
             if has_feature(clinic, "lab_test_booking"):
                 rows.append({"id": "menu_lab_tests", "title": "🧪 Book Lab Test"[:24], "description": ""})
-        rows.append({"id": "menu_reports", "title": "📋 My Reports"[:24], "description": ""})
+        # Only offer reports where they can actually be delivered. Without this
+        # gate a soloclinic or booking-only diagnostic centre showed the row and
+        # then declined it in _handle_view_reports — a dead option in a list
+        # WhatsApp caps at 10 rows.
+        if has_feature(clinic, "lab_reports"):
+            rows.append({"id": "menu_reports", "title": "📋 My Reports"[:24], "description": ""})
         rows.append({"id": "menu_emergency", "title": t[1][:24], "description": ""})
         rows.append({"id": "menu_human", "title": t[2][:24], "description": ""})
 

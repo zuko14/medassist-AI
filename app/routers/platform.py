@@ -356,6 +356,7 @@ async def get_platform_overview(
         clinics_by_plan = {
             "soloclinic": 0,
             "diagstream": 0,
+            "diagbooking": 0,
             "essential": 0,
             "polyclinic": 0,
             "enterprise": 0,
@@ -1599,7 +1600,10 @@ async def update_plan_tier(
     OWNER-ONLY. Allows updating included_messages_month, overage_price_paise,
     monthly_price_paise, and display_name without code changes.
     """
-    valid_plans = {"soloclinic", "diagstream", "essential", "polyclinic", "enterprise"}
+    valid_plans = {
+        "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
+        "enterprise",
+    }
     if plan_name not in valid_plans:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_name}")
 

@@ -1184,14 +1184,18 @@ delete_patient = delete_patient_data
 
 
 async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[dict]:
-    """Assign the next sequential token number for this appointment's doctor+date.
+    """Assign the next sequential token number for this appointment's queue.
 
-    Race-safe: relies on the UNIQUE partial index idx_unique_queue_token
-    (migration 021) to reject collisions, and retries with the next number
-    on conflict instead of allowing duplicate tokens under concurrent check-ins.
+    The queue key is doctor+date for a consultation, and branch+date for a
+    lab-test booking (which carries doctor_name = NULL by design).
+
+    Race-safe: relies on the UNIQUE partial indexes idx_unique_queue_token
+    (migration 021, consultations) and idx_unique_lab_queue_token (migration
+    073, lab tests) to reject collisions, and retries with the next number on
+    conflict instead of allowing duplicate tokens under concurrent check-ins.
     """
     appt_result = (
-        await sb(scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, appointment_date, token_number, queue_status")
+        await sb(scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, branch_id, appointment_date, token_number, queue_status")
         .eq("id", appointment_id))
     )
     if not appt_result.data:
@@ -1207,14 +1211,30 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
         return appt_result.data[0]
 
     doctor_name = appt_result.data[0]["doctor_name"]
+    branch_id = appt_result.data[0].get("branch_id")
     appointment_date = appt_result.data[0]["appointment_date"]
+
+    # A lab-test booking has doctor_name = NULL by design (migration 039). The
+    # doctor queue key is therefore meaningless for it, and `.eq(col, None)`
+    # never matches a NULL row in PostgREST — so the max-token lookup returned
+    # nothing and EVERY sample-collection walk-in was handed token #1. Lab rows
+    # get their own queue key instead: the collection centre (branch) for the
+    # day, which is the queue a patient actually stands in.
+    def _apply_queue_key(query):
+        query = query.eq("appointment_date", appointment_date)
+        if doctor_name is None:
+            query = query.is_("doctor_name", "null")
+            if branch_id is None:
+                query = query.is_("branch_id", "null")
+            else:
+                query = query.eq("branch_id", branch_id)
+            return query
+        return query.eq("doctor_name", doctor_name)
 
     max_retries = 5
     for attempt in range(max_retries):
         max_result = (
-            await sb(scoped_query("appointments", clinic_id, "token_number")
-            .eq("doctor_name", doctor_name)
-            .eq("appointment_date", appointment_date)
+            await sb(_apply_queue_key(scoped_query("appointments", clinic_id, "token_number"))
             .order("token_number", desc=True)
             .limit(1))
         )

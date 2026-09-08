@@ -3167,27 +3167,99 @@ async def deactivate_prescription(
 # ═══════ PAYMENTS & BOOKINGS ═══════
 
 
+async def _annotate_refund_state(bookings: list[dict]) -> None:
+    """Attach a `refund_state` to each booking, in place.
+
+    A refund that was started but never confirmed by Razorpay leaves NO trace
+    on the appointments row — initiate_refund() only writes refund_id/status
+    once the gateway returns. The evidence lives in payment_events, so the
+    admin panel could not tell "refund in flight" from "never refunded", which
+    is exactly the question a front desk gets asked. One batched query over the
+    page of bookings answers it without an N+1.
+
+    States: 'refunded' | 'initiated' | 'failed' | 'not_refunded' | 'none'.
+    Best-effort — a failure here must not take down the bookings list.
+    """
+    if not bookings:
+        return
+
+    # Rows that already carry a refund reference need no event lookup.
+    unresolved = [b for b in bookings if not b.get("refund_id")]
+    for b in bookings:
+        if b.get("refund_id"):
+            b["refund_state"] = "refunded"
+
+    ids = [b["id"] for b in unresolved if b.get("id")]
+    events_by_booking: dict[str, set] = {}
+    if ids:
+        try:
+            ev = (
+                # unscoped: unique_row_key
+                # booking_id is the appointments UUID, and every id here came
+                # out of the clinic_id-filtered query above.
+                await sb(supabase.table("payment_events")
+                .select("booking_id, event_type")
+                .in_("booking_id", ids)
+                .in_("event_type", ["refund_initiated", "refund_completed", "refund_failed"]))
+            )
+            for row in ev.data or []:
+                events_by_booking.setdefault(row["booking_id"], set()).add(row["event_type"])
+        except Exception as e:
+            logger.warning(f"Refund-state lookup failed; falling back to row data: {e}")
+
+    for b in unresolved:
+        types = events_by_booking.get(b.get("id"), set())
+        if "refund_completed" in types:
+            b["refund_state"] = "refunded"
+        elif "refund_failed" in types:
+            b["refund_state"] = "failed"
+        elif "refund_initiated" in types:
+            b["refund_state"] = "initiated"
+        elif b.get("payment_id") and b.get("status") in ("cancelled", "expired", "refunded"):
+            b["refund_state"] = "not_refunded"
+        else:
+            b["refund_state"] = "none"
+
+
 @router.get("/bookings")
 async def get_bookings(
     clinic_id: str = "default",
     status: Optional[str] = None,
+    booking_type: Optional[str] = None,
     limit: int = 50,
     user: AdminUser = Depends(verify_credentials),
 ):
-    """Get all bookings with payment information."""
+    """Get all bookings with payment information.
+
+    booking_type filters 'consultation' vs 'lab_test'. A diagnostic centre's
+    rows carry doctor_name = NULL by design (migration 039), so lab_test_name
+    is what identifies the booking there — it must be selected explicitly or
+    the panel renders an empty row.
+    """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    if booking_type is not None and booking_type not in ("consultation", "lab_test"):
+        raise HTTPException(
+            status_code=422,
+            detail="booking_type must be 'consultation' or 'lab_test'",
+        )
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("appointments").select(
             "id, clinic_id, patient_phone, patient_name, department, doctor_name, "
             "appointment_date, appointment_time, status, razorpay_payment_link_id, "
-            "payment_id, amount_paise, hold_expires_at, booking_ref, created_at, updated_at"
+            "payment_id, amount_paise, hold_expires_at, booking_ref, created_at, updated_at, "
+            "booking_type, lab_test_id, lab_test_name, "
+            "refund_id, refund_reason, refunded_at"
         )
         query = query.eq("clinic_id", effective_clinic_id)
         if status:
             query = query.eq("status", status)
+        if booking_type:
+            query = query.eq("booking_type", booking_type)
         result = await sb(query.order("created_at", desc=True).limit(limit))
-        return {"bookings": result.data or []}
+        bookings = result.data or []
+        await _annotate_refund_state(bookings)
+        return {"bookings": bookings}
     except Exception as e:
         logger.error(f"Error getting bookings: {e}")
         raise HTTPException(status_code=500, detail="Failed to get bookings")
@@ -3641,8 +3713,10 @@ async def update_payment_settings(
 ):
     """Self-service update of a clinic's own Razorpay keys and payment mode.
     A clinic_admin may only update their own clinic (enforced via
-    enforce_clinic_access); diagstream clinics are rejected — they don't
-    take bookings, so payments_razorpay isn't in their feature set."""
+    enforce_clinic_access); a plan without payments_razorpay is rejected.
+    Lab-test-booking plans (diagstream, diagbooking) DO hold that feature —
+    create_booking_with_payment charges the patient through Razorpay for a
+    lab test exactly as it does for a consultation."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     clinic = await get_clinic_by_id(effective_clinic_id)
     require_feature(clinic, "payments_razorpay")

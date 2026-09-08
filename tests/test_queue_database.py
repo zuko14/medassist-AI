@@ -116,3 +116,89 @@ async def test_call_next_patient_advances_queue():
         result = await db.call_next_patient("clinic-1", "Dr. Rao", "2026-08-09")
 
     assert result["id"] == "appt-2"
+
+
+# ── Lab-test check-in ────────────────────────────────────────────────────────
+# A lab-test booking carries doctor_name = NULL by design (migration 039).
+# `.eq("doctor_name", None)` never matches a NULL row in PostgREST, so the
+# max-token lookup found nothing and every sample-collection walk-in was
+# handed token #1. The queue key for these rows is branch+date instead.
+
+
+def _lab_mocks(appt_row, max_rows, updated_row):
+    mock_sb = MagicMock()
+    mock_select = mock_sb.table.return_value.select.return_value
+    for chained in ("eq", "is_", "order", "limit"):
+        getattr(mock_select, chained).return_value = mock_select
+    mock_select.execute.side_effect = [
+        MagicMock(data=appt_row),
+        MagicMock(data=max_rows),
+    ]
+    mock_update = mock_sb.table.return_value.update.return_value
+    mock_update.eq.return_value = mock_update
+    mock_update.execute.return_value = MagicMock(data=updated_row)
+    return mock_sb, mock_select
+
+
+@pytest.mark.asyncio
+async def test_lab_check_in_continues_the_branch_queue_not_restarting_at_one():
+    import app.database as db
+
+    mock_sb, mock_select = _lab_mocks(
+        [{"doctor_name": None, "branch_id": "branch-1", "appointment_date": "2026-09-08"}],
+        [{"token_number": 7}],
+        [{"id": "lab-1", "token_number": 8, "queue_status": "waiting"}],
+    )
+
+    with patch.object(db, "supabase", mock_sb):
+        result = await db.check_in_appointment("clinic-1", "lab-1")
+
+    assert result["token_number"] == 8, "lab tokens must continue the branch queue"
+    # The NULL doctor must be matched with is_(), never eq(None).
+    assert ("doctor_name", "null") in [c.args for c in mock_select.is_.call_args_list]
+    assert ("doctor_name", None) not in [c.args for c in mock_select.eq.call_args_list]
+    assert ("branch_id", "branch-1") in [c.args for c in mock_select.eq.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_lab_check_in_single_branch_clinic_matches_null_branch():
+    """A single-centre clinic leaves branch_id NULL; the queue lookup has to
+    match those rows too or it degrades to the same token-#1 bug."""
+    import app.database as db
+
+    mock_sb, mock_select = _lab_mocks(
+        [{"doctor_name": None, "branch_id": None, "appointment_date": "2026-09-08"}],
+        [{"token_number": 2}],
+        [{"id": "lab-2", "token_number": 3, "queue_status": "waiting"}],
+    )
+
+    with patch.object(db, "supabase", mock_sb):
+        result = await db.check_in_appointment("clinic-1", "lab-2")
+
+    assert result["token_number"] == 3
+    is_calls = [c.args for c in mock_select.is_.call_args_list]
+    assert ("doctor_name", "null") in is_calls
+    assert ("branch_id", "null") in is_calls
+
+
+@pytest.mark.asyncio
+async def test_consultation_check_in_still_keys_on_the_doctor():
+    """Regression guard: the lab branch must not change consultation queues."""
+    import app.database as db
+
+    mock_sb, mock_select = _lab_mocks(
+        [{"doctor_name": "Dr. Rao", "branch_id": "branch-1", "appointment_date": "2026-09-08"}],
+        [{"token_number": 4}],
+        [{"id": "appt-9", "token_number": 5, "queue_status": "waiting"}],
+    )
+
+    with patch.object(db, "supabase", mock_sb):
+        result = await db.check_in_appointment("clinic-1", "appt-9")
+
+    assert result["token_number"] == 5
+    eq_calls = [c.args for c in mock_select.eq.call_args_list]
+    assert ("doctor_name", "Dr. Rao") in eq_calls
+    # branch_id must NOT narrow a doctor queue — a doctor's token run is per
+    # doctor per day regardless of which room they sit in.
+    assert ("branch_id", "branch-1") not in eq_calls
+    assert mock_select.is_.call_args_list == []

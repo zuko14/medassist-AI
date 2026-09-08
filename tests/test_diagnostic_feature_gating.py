@@ -14,11 +14,19 @@ def test_diagstream_plan_features():
     assert "ai_report_summary" in diag_features
     assert "multilingual" in diag_features
 
-    # Gated out from pure diagnostic centers
+    # A diagnostic centre books LAB TESTS, and a lab test is priced from
+    # lab_tests.price_paise and paid through Razorpay
+    # (create_booking_with_payment). The payment feature is therefore part of
+    # the plan; withholding it only stopped these centres entering their own
+    # Razorpay keys for money they were already collecting.
+    assert "lab_test_booking" in diag_features
+    assert "payments_razorpay" in diag_features
+
+    # Gated out from pure diagnostic centers: no doctors, hence no doctor
+    # consultation booking, no roster and no prescriptions.
     assert "booking" not in diag_features
     assert "roster_management" not in diag_features
     assert "prescriptions" not in diag_features
-    assert "payments_razorpay" not in diag_features
 
 
 def test_polyclinic_plan_features():

@@ -60,7 +60,10 @@ async def test_me_diagstream_admin_gets_diagstream_features():
     assert result["plan"] == "diagstream"
     assert "lab_reports" in result["features"]
     assert "booking" not in result["features"]
-    assert "payments_razorpay" not in result["features"]
+    # A diagnostic centre takes paid lab-test bookings, so the panel must show
+    # it the Payment Settings tab.
+    assert "lab_test_booking" in result["features"]
+    assert "payments_razorpay" in result["features"]
 
 
 @pytest.mark.asyncio
@@ -149,9 +152,19 @@ async def test_update_payment_settings_cross_tenant_forbidden():
 
 
 @pytest.mark.asyncio
-async def test_update_payment_settings_rejects_diagstream_clinic():
+async def test_update_payment_settings_rejects_clinic_without_the_feature():
+    """Every current plan bundles payments_razorpay, so the gate is now
+    exercised by the owner's per-clinic override (clinics.features) — the
+    mechanism the platform panel uses to switch a bundled feature off for one
+    tenant. The gate itself must still refuse."""
     admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
-    fake_clinic = {"id": "clinic-2", "plan": "diagstream", "whatsapp_number": "+912222222222", "config": {}}
+    fake_clinic = {
+        "id": "clinic-2",
+        "plan": "diagstream",
+        "whatsapp_number": "+912222222222",
+        "config": {},
+        "features": {"payments_razorpay": False},
+    }
     body = PaymentSettingsUpdate(payment_mode="full")
 
     with patch(

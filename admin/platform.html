@@ -553,6 +553,7 @@
         .badge-polyclinic { background: var(--purple-bg); color: var(--purple); }
         .badge-enterprise { background: var(--accent-glow); color: var(--accent-light); }
         .badge-diagstream { background: var(--amber-bg); color: var(--amber); }
+        .badge-diagbooking { background: rgba(56,189,248,0.12); color: #38bdf8; }
 
         .status-active { background: var(--green-bg); color: var(--green); }
         .status-dormant { background: var(--red-bg); color: var(--red); }
@@ -845,6 +846,7 @@
                             <option value="polyclinic">Polyclinic</option>
                             <option value="enterprise">Enterprise</option>
                             <option value="diagstream">DiagStream</option>
+                            <option value="diagbooking">Diagnostic Test Booking</option>
                         </select>
                         <select class="filter-select" id="statusFilter" onchange="filterLeaderboard()">
                             <option value="ALL">All Statuses</option>
@@ -1309,15 +1311,16 @@
                 </div>
                 <div class="form-group">
                     <label>Plan *</label>
-                    <select class="form-control" id="ccPlan">
+                    <select class="form-control" id="ccPlan" onchange="applyPlanFieldVisibility()">
                         <option value="soloclinic">SoloClinic — single doctor practice</option>
                         <option value="essential">Essential — small clinic, core booking</option>
                         <option value="diagstream">DiagStream — diagnostic / lab center</option>
+                        <option value="diagbooking">Diagnostic Test Booking — lab-test booking &amp; payments only</option>
                         <option value="polyclinic" selected>Polyclinic — multi-department hospital</option>
                         <option value="enterprise">Enterprise — large multi-branch hospital</option>
                     </select>
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="ccDailyLimitGroup">
                     <label>Daily Report Limit *</label>
                     <select class="form-control" id="ccDailyLimit">
                         <option value="50">50 reports / day</option>
@@ -1951,6 +1954,22 @@
 
         // Plans that bundle lab_reports by default (mirrors PLAN_FEATURES in app/services/tenant.py)
         const PLANS_WITH_LAB_REPORTS = ['diagstream', 'essential', 'polyclinic', 'enterprise'];
+
+        function planHasReportAutomation(plan) {
+            return PLANS_WITH_LAB_REPORTS.includes((plan || '').toLowerCase());
+        }
+
+        // A plan with no lab_reports never dispatches a report, so its daily
+        // report limit is a dead control — report_dispatch_allowed() is only
+        // reached from app/services/lab_reports.py. Asking the owner to pick a
+        // tier for SoloClinic or Diagnostic Test Booking implied an automation
+        // those plans do not have. The clinics row still gets the schema
+        // default (100, migration 068); it is simply never consulted.
+        function applyPlanFieldVisibility() {
+            const plan = document.getElementById('ccPlan').value;
+            const group = document.getElementById('ccDailyLimitGroup');
+            if (group) group.style.display = planHasReportAutomation(plan) ? '' : 'none';
+        }
         let _modalClinicId = null;
 
         async function openModal(clinicId) {
@@ -2554,6 +2573,7 @@
             document.getElementById('ccTimezone').value = 'Asia/Kolkata';
             document.getElementById('createClinicError').style.display = 'none';
             document.getElementById('createClinicFormView').style.display = 'block';
+            applyPlanFieldVisibility();
             document.getElementById('createClinicResultView').style.display = 'none';
             document.getElementById('ccResultAdminBlock').style.display = 'none';
             document.getElementById('createClinicModal').classList.add('active');
@@ -2586,8 +2606,12 @@
                 return;
             }
 
-            const daily_report_limit = parseInt(document.getElementById('ccDailyLimit').value, 10);
-            const body = { name, whatsapp_number, plan, meta_phone_number_id, meta_access_token, daily_report_limit };
+            const body = { name, whatsapp_number, plan, meta_phone_number_id, meta_access_token };
+            // Omitted for plans without report automation — the server applies the
+            // schema default rather than storing a tier the plan cannot use.
+            if (planHasReportAutomation(plan)) {
+                body.daily_report_limit = parseInt(document.getElementById('ccDailyLimit').value, 10);
+            }
 
             const optionalFields = {
                 meta_waba_id: 'ccMetaWabaId',
@@ -2716,6 +2740,7 @@
             tbody.innerHTML = rows.map(r => {
                 const rep = r.daily_reports;
                 const limitLabel = rep.is_unlimited ? 'Unlimited' : rep.limit;
+                const hasReports = planHasReportAutomation(r.plan);
                 return `
                     <tr>
                         <td>
@@ -2727,11 +2752,11 @@
                         <td>${subStatusBadge(r.subscription)}</td>
                         <td style="font-size:0.85rem; color:var(--text2)">${fmtDate(r.subscription.subscription_end_date)}</td>
                         <td style="font-weight:700">${rep.used}</td>
-                        <td>${limitBadge(rep)}<div class="clinic-phone" style="font-weight:400">of ${limitLabel}</div></td>
+                        <td>${hasReports ? limitBadge(rep) + '<div class="clinic-phone" style="font-weight:400">of ' + limitLabel + '</div>' : '<span style="color:var(--text3)">n/a</span>'}</td>
                         <td style="font-size:0.85rem; color:var(--text2)">${fmtDate(r.last_renewed_at)}</td>
                         <td style="white-space:nowrap;">
                             <button class="action-btn" onclick="renewClinic('${r.clinic_id}', '${escapeHtml(r.clinic_name || 'Hospital')}')">Renew 30 Days</button>
-                            <button class="action-btn" onclick="openLimitEditor('${r.clinic_id}', ${rep.limit})">Set Limit</button>
+                            ${hasReports ? `<button class="action-btn" onclick="openLimitEditor('${r.clinic_id}', ${rep.limit})">Set Limit</button>` : ''}
                         </td>
                     </tr>`;
             }).join('');

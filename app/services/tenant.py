@@ -372,6 +372,10 @@ def invalidate_tenant_cache(whatsapp_number: str = None, phone_number_id: str = 
 #   soloclinic  — Solo doctor / small clinic (booking + payments only)
 #   diagstream  — Diagnostics / lab-only centres (lab reports + lab-test
 #                 booking; no *doctor* booking)
+#   diagbooking — Diagnostic centres that ONLY take lab-test bookings and
+#                 payments over WhatsApp. Inbound-driven: no connector, no
+#                 report delivery, no reminders — therefore no proactive
+#                 outbound templates and no daily report limit.
 #   essential   — Full-service hospital (everything except enterprise wildcard)
 #   polyclinic  — Multi-branch hospital / polyclinic + diagnostics (essential + multi_branch)
 #   enterprise  — Unlimited (all current + future features via wildcard)
@@ -402,10 +406,32 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "pii_sanitization",
         "multi_branch",  # Diagnostic centers can also run multiple branches
         "lab_test_booking",
+        # lab_test_booking IS a paid flow — create_booking_with_payment prices
+        # it from lab_tests.price_paise and issues a Razorpay link. Granting
+        # the booking without the payment feature left these centres unable to
+        # enter their own Razorpay keys (PUT /admin/settings/payment 403s) for
+        # money they were already collecting.
+        "payments_razorpay",
         # A lab closes on public holidays like any clinic. Doctor LEAVE has no
         # meaning without doctors, which is exactly why the holiday calendar is
         # its own feature and not part of roster_management.
         "holiday_calendar",
+    },
+    "diagbooking": {
+        # Lab-test booking + payment ONLY. Deliberately excludes lab_reports,
+        # diagnostic_reports, ai_report_summary (no connector, nothing to
+        # dispatch) and reminders — this plan sends no proactive template, so
+        # every outbound message is a free in-session reply to the patient.
+        "lab_test_booking",
+        "payments_razorpay",
+        "admin_dashboard",
+        "holiday_calendar",
+        "multi_branch",
+        "multilingual",
+        "emergency_escalation",
+        "clinical_firewall",
+        "compliance_dpdp",
+        "compliance_nmc",
     },
     "essential": {
         "booking",

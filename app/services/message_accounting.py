@@ -261,6 +261,7 @@ async def _get_plan_tiers() -> dict:
     fallback = {
         "soloclinic": {"included_messages_month": 500, "display_name": "Solo Clinic"},
         "diagstream": {"included_messages_month": 1000, "display_name": "DiagStream"},
+        "diagbooking": {"included_messages_month": 1000, "display_name": "Diagnostic Test Booking"},
         "essential": {"included_messages_month": 2500, "display_name": "Essential"},
         "polyclinic": {"included_messages_month": 5000, "display_name": "PolyClinic"},
         "enterprise": {"included_messages_month": 0, "display_name": "Enterprise"},
