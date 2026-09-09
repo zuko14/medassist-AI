@@ -62,12 +62,23 @@ async def assert_clinic_integration_secret(
 ) -> None:
     """Pin an integration caller to ONE clinic, when that clinic has its own key.
 
-    Mirrors the per-clinic Razorpay credential pattern
-    (app/services/payment.py: `cfg.get(...) or settings....`): a clinic that
-    sets `integration_secret` in its `clinics.config` can only be written to
-    with that value. Clinics that have not set one keep working on the global
-    INTEGRATION_SECRET exactly as before, so this is safe to deploy against
-    live connectors without touching them.
+    A clinic that sets `integration_secret` in its `clinics.config` can only be
+    written to with that value. A clinic that has not set one still accepts the
+    global INTEGRATION_SECRET, so this stays safe to deploy against live
+    connectors without touching them.
+
+    That last part is a migration window, not the finished state: until every
+    active clinic is pinned, any holder of the global secret can post lab
+    reports into any unpinned tenant and have them WhatsApp'd to that tenant's
+    patients. Each unpinned write is logged below so the remaining clinics can
+    be found and pinned; once none are left, delete the early `return` and this
+    becomes mandatory.
+
+    NOTE: an earlier version of this docstring cited
+    `payment.py: cfg.get(...) or settings....` as the model to follow. That
+    pattern WAS the platform-wide Razorpay credential vulnerability, and
+    get_razorpay_creds() no longer has any global fallback. Do not restore it
+    here or anywhere else.
 
     To pin a clinic, set config.integration_secret on its clinics row.
     """
@@ -80,7 +91,16 @@ async def assert_clinic_integration_secret(
 
     clinic_secret = (clinic.get("config") or {}).get("integration_secret")
     if not clinic_secret:
-        return  # not pinned; the global gate above already applied
+        # Not pinned; the global gate above already applied. Say so loudly —
+        # this is the one remaining path by which a holder of the shared secret
+        # can write into a tenant that never issued it a key.
+        logger.warning(
+            "UNPINNED_INTEGRATION_WRITE clinic_id=%s — accepted on the global "
+            "INTEGRATION_SECRET because this clinic has no config."
+            "integration_secret of its own. Set one to pin it to its connector.",
+            clinic_id,
+        )
+        return
 
     if not presented_secret or not secrets.compare_digest(
         str(presented_secret), str(clinic_secret)

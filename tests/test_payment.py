@@ -51,9 +51,26 @@ os.environ.setdefault("REFUND_WINDOW_HOURS", "4")
 
 # ── Mock out app.database BEFORE any app module import ──
 # The supabase client tries to connect at module-load time.
+import inspect
+
 mock_supabase = MagicMock()
 mock_db_module = MagicMock()
 mock_db_module.supabase = mock_supabase
+
+
+async def _fake_sb(builder):
+    if hasattr(builder, "execute"):
+        res = builder.execute()
+        if inspect.isawaitable(res):
+            return await res
+        return res
+    return MagicMock(data=[])
+
+
+mock_db_module.sb = _fake_sb
+mock_db_module.is_valid_clinic_scope = lambda c: bool(
+    c and str(c).strip().lower() not in ("default", "none", "null", "*", "system", "all", "")
+)
 sys.modules["app.database"] = mock_db_module
 
 
@@ -469,7 +486,13 @@ class TestOrphanWebhookEventPersistence:
                 "booking-1", "webhook_received", {"payment_id": "pay_1"}
             )
 
-            mock_sb.table.assert_called_once_with("payment_events")
+            # KA-A-17: the logger now also reads appointments to resolve the
+            # owning clinic, so this is no longer a single table call. The
+            # invariant under test is unchanged: a booking_id routes the event
+            # to payment_events, not webhook_security_events.
+            tables = [c.args[0] for c in mock_sb.table.call_args_list]
+            assert "payment_events" in tables
+            assert "webhook_security_events" not in tables
 
 
 class TestBookingCreation:

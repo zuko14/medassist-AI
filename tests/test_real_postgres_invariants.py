@@ -161,14 +161,15 @@ def test_05_payment_events_immutability_trigger(real_pg_conn, clean_db):
     """, (clinic_id,))
     booking_id = cur.fetchone()[0]
 
-    # Insert payment event
+    # Insert payment event. clinic_id is mandatory since migration 074
+    # (KA-A-17) — payment_events rows must name the tenant that owns them.
     cur.execute("""
     INSERT INTO payment_events (
-        booking_id, event_type, raw_payload
+        booking_id, clinic_id, event_type, raw_payload
     ) VALUES (
-        %s, 'payment.captured', '{"test": true}'::jsonb
+        %s, %s, 'payment.captured', '{"test": true}'::jsonb
     ) RETURNING id;
-    """, (booking_id,))
+    """, (booking_id, clinic_id))
     event_id = cur.fetchone()[0]
 
     # Attempt UPDATE -> trigger must raise exception
@@ -607,3 +608,110 @@ def test_17_force_row_level_security_tenant_isolation(real_pg_conn, clean_db):
         # Reset role to superuser for teardown
         cur.execute("RESET ROLE;")
 
+
+
+def test_18_payment_events_tenant_column_is_mandatory_and_isolating(real_pg_conn, clean_db):
+    """Invariant 18 (KA-A-17): the ledger's own clinic_id is trustworthy.
+
+    Three things have to hold together for that column to be worth querying:
+    the database refuses a tenant-less ledger row, migration 074's backfill
+    repairs the rows written before it, and a tenant role sees only its own.
+
+    Note on scope: the shipped RLS policy resolves the tenant by joining to
+    appointments via booking_id, so isolation never depended on this column.
+    What depended on it was any aggregation that groups or filters by it —
+    those silently undercounted while 14 call sites wrote NULL.
+    """
+    import uuid
+
+    cur = real_pg_conn.cursor()
+    suffix = uuid.uuid4().hex[:6]
+
+    def _clinic(name, phone):
+        cur.execute(
+            "INSERT INTO clinics (name, whatsapp_number, plan, is_active) "
+            "VALUES (%s, %s, 'essential', true) RETURNING id;",
+            (name, phone),
+        )
+        return str(cur.fetchone()[0])
+
+    def _appointment(clinic_id, phone, doctor, at):
+        cur.execute(
+            "INSERT INTO appointments (clinic_id, patient_phone, department, "
+            "doctor_name, appointment_date, appointment_time, status) "
+            "VALUES (%s, %s, 'Cardiology', %s, '2026-09-11', %s, 'confirmed') "
+            "RETURNING id;",
+            (clinic_id, phone, doctor, at),
+        )
+        return str(cur.fetchone()[0])
+
+    clinic_a = _clinic("Ledger Alpha", f"+9195{suffix}")
+    clinic_b = _clinic("Ledger Beta", f"+9196{suffix}")
+    appt_a = _appointment(clinic_a, f"+9197{suffix}", "Dr. Alpha", "09:00:00")
+    appt_b = _appointment(clinic_b, f"+9198{suffix}", "Dr. Beta", "09:30:00")
+
+    # ── 1. A tenant-less ledger row is refused ──
+    with pytest.raises(psycopg2.Error) as exc:
+        cur.execute(
+            "INSERT INTO payment_events (booking_id, event_type, raw_payload) "
+            "VALUES (%s, 'refund_completed', '{}'::jsonb);",
+            (appt_a,),
+        )
+    assert "chk_payment_events_clinic_id_present" in str(exc.value)
+
+    # ── 2. Migration 074's backfill repairs pre-existing orphans ──
+    # Recreate the defect exactly as it shipped: constraint absent, trigger
+    # bypassed, clinic_id NULL. Then run the migration's own UPDATE.
+    cur.execute(
+        "ALTER TABLE payment_events "
+        "DROP CONSTRAINT chk_payment_events_clinic_id_present;"
+    )
+    cur.execute(
+        "ALTER TABLE payment_events DISABLE TRIGGER trg_payment_events_no_update;"
+    )
+    try:
+        cur.execute(
+            "INSERT INTO payment_events (booking_id, event_type, raw_payload) "
+            "VALUES (%s, 'manual_reject', '{}'::jsonb) RETURNING id;",
+            (appt_a,),
+        )
+        orphan_id = str(cur.fetchone()[0])
+
+        cur.execute(
+            "UPDATE payment_events pe SET clinic_id = a.clinic_id "
+            "FROM appointments a "
+            "WHERE pe.booking_id = a.id AND pe.clinic_id IS NULL "
+            "  AND a.clinic_id IS NOT NULL;"
+        )
+        cur.execute("SELECT clinic_id FROM payment_events WHERE id = %s;", (orphan_id,))
+        assert str(cur.fetchone()[0]) == clinic_a, "backfill did not resolve the owner"
+    finally:
+        cur.execute(
+            "ALTER TABLE payment_events ENABLE TRIGGER trg_payment_events_no_update;"
+        )
+        cur.execute(
+            "ALTER TABLE payment_events "
+            "ADD CONSTRAINT chk_payment_events_clinic_id_present "
+            "CHECK (clinic_id IS NOT NULL);"
+        )
+
+    # ── 3. Each clinic's ledger rows stay its own ──
+    cur.execute(
+        "INSERT INTO payment_events (booking_id, clinic_id, event_type, raw_payload) "
+        "VALUES (%s, %s, 'confirmed', '{}'::jsonb);",
+        (appt_b, clinic_b),
+    )
+
+    cur.execute("SET ROLE kriya_app;")
+    try:
+        cur.execute("SET app.clinic_id = %s;", (clinic_a,))
+        cur.execute("SELECT clinic_id FROM payment_events;")
+        seen = {str(r[0]) for r in cur.fetchall()}
+        assert seen == {clinic_a}, f"Alpha saw foreign ledger rows: {seen}"
+
+        cur.execute("SET app.clinic_id = %s;", (clinic_b,))
+        cur.execute("SELECT clinic_id FROM payment_events;")
+        seen = {str(r[0]) for r in cur.fetchall()}
+        assert seen == {clinic_b}, f"Beta saw foreign ledger rows: {seen}"
+    finally:
+        cur.execute("RESET ROLE;")

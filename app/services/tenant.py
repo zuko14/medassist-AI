@@ -104,8 +104,15 @@ async def resolve_tenant(
       4. Single-tenant fallback (only if exactly 1 active clinic)
       5. Zero-clinic env-var fallback (initial setup bootstrap)
 
-    For single-tenant mode (no clinics table), returns a
-    synthetic clinic dict from environment variables.
+    Fails closed. Raises TenantNotFound when the number is unknown and the
+    deployment has more than one active clinic, and also when the query that
+    decides how many clinics exist cannot be answered — an unanswerable
+    question about tenancy is never resolved by picking a tenant.
+
+    Strategy 5 returns a synthetic clinic built from environment variables and
+    is reached only when the clinics table read SUCCEEDS and finds zero active
+    clinics, i.e. a deployment that has not been provisioned yet. A missing or
+    unreadable clinics table raises from Strategy 1/2 long before that.
     """
     phone = _normalize_e164(display_phone_number)
 
@@ -226,9 +233,22 @@ async def resolve_tenant(
     except TenantNotFound:
         raise
     except Exception as e:
-        logger.warning(f"Fallback clinic count lookup failed: {e}")
+        # KA-A-02: this used to warn and fall through to Strategy 5, which
+        # returns the synthetic env-var clinic. A transient error on the very
+        # query that decides "am I multi-tenant?" therefore routed an unknown
+        # phone number into the default tenant — the guessing branch, reached
+        # exactly when the database is least trustworthy. Fail closed instead.
+        logger.error(
+            f"TENANT_COUNT_CHECK_FAILED phone={phone}: {e} — "
+            "refusing to fall back to the default tenant"
+        )
+        raise TenantNotFound(
+            f"Cannot verify tenant count for {phone}; refusing to guess a clinic."
+        ) from e
 
     # ── Strategy 5: Zero-clinic env-var fallback (initial setup) ──
+    # Only reachable when the count query SUCCEEDED and returned zero active
+    # clinics, i.e. a genuinely unconfigured deployment.
     clinic = _build_fallback_clinic()
     _set_cached_item(_tenant_cache, clinic.get("whatsapp_number", phone), clinic)
     return clinic
@@ -255,21 +275,53 @@ def _build_fallback_clinic() -> dict:
 
 
 async def get_clinic_by_id(clinic_id: Optional[str]) -> dict:
-    """Get clinic by its UUID or fallback to the primary active clinic."""
+    """Get a clinic by its UUID. With no id, resolve one only if it is unambiguous.
+
+    Called with None or a sentinel ("default", "none", "null", ""), this used to
+    return the OLDEST active clinic. That is a guess, and nine call sites reach
+    it holding a possibly-null clinic_id and then send a patient-facing WhatsApp
+    message: scheduler reminders, lab report delivery, prescriptions and payment
+    notifications. The patient received a different hospital's name, address and
+    emergency number, sent from that hospital's number.
+
+    Same rule as resolve_tenant(): one active clinic means there is nothing to
+    guess between, so return it. More than one means refuse. Zero means the
+    deployment is not provisioned yet, which is what the synthetic clinic is for.
+    """
     if not clinic_id or str(clinic_id).strip().lower() in ("default", "none", "null", ""):
         try:
-            fallback = (
+            active = (
                 await sb(supabase.table("clinics")
                 .select("*")
                 .eq("is_active", True)
                 .neq("status", "DELETED")
                 .order("created_at")
-                .limit(1))
+                .limit(2))
             )
-            if fallback.data:
-                return fallback.data[0]
         except Exception as e:
-            logger.warning(f"Fallback clinic lookup failed: {e}")
+            # Fail closed: an unanswerable question about tenancy is never
+            # answered by picking a tenant.
+            logger.error(
+                f"CLINIC_LOOKUP_COUNT_FAILED: {e} — refusing to resolve an "
+                "unspecified clinic_id"
+            )
+            raise TenantNotFound(
+                "Cannot resolve an unspecified clinic_id; refusing to guess."
+            ) from e
+
+        rows = active.data or []
+        if len(rows) > 1:
+            logger.error(
+                "AMBIGUOUS_CLINIC_REFUSED: get_clinic_by_id() was called without a "
+                "clinic_id in a deployment with multiple active clinics. Refusing "
+                "to attribute this to the oldest one. The caller must pass the "
+                "clinic_id of the row it is acting on."
+            )
+            raise TenantNotFound(
+                "clinic_id is required when more than one clinic is active."
+            )
+        if len(rows) == 1:
+            return rows[0]
         return _build_fallback_clinic()
 
     try:

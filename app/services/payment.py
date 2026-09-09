@@ -526,14 +526,21 @@ class PaymentService:
                 idemp_query = idemp_query.eq("clinic_id", use_clinic_scope)
             existing_confirmed = await sb(idemp_query)
         except Exception as idemp_err:
-            logger.warning(f"Scoped idempotency check failed ({idemp_err}) — retrying global check")
-            existing_confirmed = (
-                # unscoped: meta_callback_by_unique_id
-                await sb(supabase.table("appointments")
-                .select("id")
-                .eq("payment_id", payment_id)
-                .eq("status", "confirmed"))
+            # KA-A-02: the retry here used to drop the clinic predicate and
+            # scan every tenant's appointments. Widening scope on error is the
+            # guessing branch in miniature — a transient failure could match
+            # another clinic's row and report this payment "already processed".
+            # Non-2xx makes Razorpay redeliver, which is the correct answer to
+            # a transient database error.
+            logger.error(
+                f"IDEMPOTENCY_CHECK_FAILED clinic={use_clinic_scope} "
+                f"payment_id={payment_id}: {idemp_err} — refusing unscoped retry"
             )
+            return {
+                "status": "error",
+                "code": 503,
+                "reason": "idempotency_check_failed",
+            }
 
         if existing_confirmed.data:
             logger.info(
@@ -1985,6 +1992,52 @@ class PaymentService:
             response.raise_for_status()
             return response.json()
 
+    async def _resolve_event_clinic_id(
+        self, booking_id: Optional[str], clinic_id: Optional[str]
+    ) -> Optional[str]:
+        """Resolve the owning clinic for a payment_events row.
+
+        KA-A-17: most callers of the two event loggers had the booking in hand
+        but never passed clinic_id, so 14 of 25 call sites wrote NULL-tenant
+        audit rows.
+
+        What that did and did not break, checked rather than assumed: the RLS
+        policy in migration 049 resolves the tenant by joining appointments on
+        booking_id, and every shipped read filters by booking_id too, so no
+        current query was returning wrong rows. What was broken is the column
+        itself — payment_events.clinic_id is indexed and listed in
+        TENANT_OWNED_TABLES, so it reads as trustworthy, and the first
+        aggregation to group or filter by it would have quietly undercounted.
+
+        Fixing it here rather than at each call site is deliberate: booking_id
+        is a NOT NULL FK to appointments, so the booking determines exactly one
+        clinic. This is a lookup, not a guess — and it also covers every future
+        caller that forgets the kwarg.
+        """
+        if is_valid_clinic_scope(clinic_id):
+            return clinic_id
+        if not booking_id:
+            return None
+        try:
+            # Resolving the owner OF this row, addressed by its own primary key.
+            # unscoped: unique_row_key
+            res = await sb(
+                supabase.table("appointments")
+                .select("clinic_id")
+                .eq("id", booking_id)
+                .limit(1)
+            )
+            if res.data:
+                resolved = res.data[0].get("clinic_id")
+                if is_valid_clinic_scope(resolved):
+                    return resolved
+        except Exception as e:
+            logger.error(
+                f"Failed to resolve clinic_id for payment_event "
+                f"booking={booking_id}: {e}"
+            )
+        return None
+
     async def _log_payment_event(
         self,
         booking_id: str,
@@ -1994,21 +2047,9 @@ class PaymentService:
         provider_event_id: Optional[str] = None,
     ) -> None:
         """Log to payment_events audit table. NEVER skip this (T4.1)."""
-        try:
-            event_row = {
-                "booking_id": booking_id,
-                "event_type": event_type,
-                "raw_payload": json.dumps(payload, default=str),
-            }
-            if clinic_id:
-                event_row["clinic_id"] = clinic_id
-            if provider_event_id:
-                event_row["provider_event_id"] = provider_event_id
-            # unscoped: insert_scoped_by_payload
-            await sb(supabase.table("payment_events").insert(event_row))
-        except Exception as e:
-            # If audit logging fails, that is itself a bug — log loudly
-            logger.error(f"CRITICAL: Failed to write payment_event ({event_type}): {e}")
+        await self._log_payment_event_raw(
+            booking_id, event_type, payload, clinic_id, provider_event_id
+        )
 
     async def _increment_patient_visit_count(
         self, clinic_id: Optional[str], patient_phone: Optional[str]
@@ -2055,25 +2096,50 @@ class PaymentService:
         of payment_events, since payment_events.booking_id is a required FK —
         this keeps signature-failure/spoofing-attempt events queryable in the
         DB for forensic replay instead of only living in rotated app logs.
+
+        An event whose clinic cannot be resolved takes that same route.
+        Migration 074 makes payment_events.clinic_id mandatory, so writing one
+        there would simply raise and lose the event — and this is an audit
+        trail, where a dropped row is the worst outcome. Routing it to
+        webhook_security_events keeps the record and keeps the ledger's tenant
+        column trustworthy, instead of trading one for the other.
         """
         try:
-            if booking_id:
+            resolved_clinic_id = (
+                await self._resolve_event_clinic_id(booking_id, clinic_id)
+                if booking_id
+                else None
+            )
+            if booking_id and resolved_clinic_id:
                 event_row = {
                     "booking_id": booking_id,
+                    "clinic_id": resolved_clinic_id,
                     "event_type": event_type,
                     "raw_payload": json.dumps(payload, default=str),
                 }
-                if clinic_id:
-                    event_row["clinic_id"] = clinic_id
                 if provider_event_id:
                     event_row["provider_event_id"] = provider_event_id
                 # unscoped: insert_scoped_by_payload
                 await sb(supabase.table("payment_events").insert(event_row))
             else:
+                if booking_id:
+                    logger.error(
+                        f"UNRESOLVED_EVENT_TENANT booking={booking_id} "
+                        f"event={event_type}: no clinic could be resolved — "
+                        "recording in webhook_security_events instead"
+                    )
+                # Signature failures (no booking_id) keep their original
+                # payload shape; only the tenant-unresolved case carries the
+                # extra booking_id, which is the one thing needed to chase it.
+                orphan_payload = (
+                    {"booking_id": booking_id, "payload": payload}
+                    if booking_id
+                    else payload
+                )
                 await sb(supabase.table("webhook_security_events").insert(
                     {
                         "event_type": event_type,
-                        "raw_payload": json.dumps(payload, default=str),
+                        "raw_payload": json.dumps(orphan_payload, default=str),
                     }
                 ))
         except Exception as e:

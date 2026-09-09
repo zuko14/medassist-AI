@@ -45,8 +45,13 @@ def test_payment_audit_writers_are_offloaded(name):
     fn = _payment_service_method(name)
     assert inspect.iscoroutinefunction(fn), f"{name} must be async"
     src = inspect.getsource(fn)
-    assert "await sb(" in src, f"{name} must execute off the loop"
     assert ".execute()" not in src, f"{name} still blocks the loop"
+    # KA-A-17 made _log_payment_event a thin delegate to _log_payment_event_raw
+    # so both share one tenant-resolving insert. Awaiting the other writer keeps
+    # the work off the loop just as directly as calling sb() here would; the
+    # delegate is itself covered by this same parametrised test.
+    offloaded = "await sb(" in src or "await self._log_payment_event_raw(" in src
+    assert offloaded, f"{name} must execute off the loop"
 
 
 def test_burn_followup_is_offloaded():

@@ -76,7 +76,9 @@ class CreateClinicRequest(BaseModel):
     hospital_address: Optional[str] = None
     hospital_maps_link: Optional[str] = None
     hospital_emergency_number: Optional[str] = None  # Clinic's own emergency desk line
-    # Per-clinic Razorpay credentials (optional — falls back to global settings if omitted)
+    # Per-clinic Razorpay credentials. There is NO global fallback: a clinic
+    # without its own keys takes payment at the counter instead of collecting
+    # into the platform's account (see get_razorpay_creds).
     razorpay_key_id: Optional[str] = None  # e.g. "rzp_live_xxxxxx"
     razorpay_key_secret: Optional[str] = None  # Keep this secret
     razorpay_webhook_secret: Optional[str] = None  # From Razorpay Dashboard → Webhooks
@@ -84,6 +86,11 @@ class CreateClinicRequest(BaseModel):
     # unlimited (enterprise). Mirrors the CHECK constraint in migration 068,
     # so a bad value is a 422 here rather than a 500 from PostgREST.
     daily_report_limit: Literal[0, 50, 100, 200, 300, 500] = 100
+    # Pins this clinic's lab-report connector to its own key. Without one the
+    # clinic stays writable by any holder of the global INTEGRATION_SECRET, so
+    # set it here whenever the connector can be configured with a matching
+    # value. See assert_clinic_integration_secret().
+    integration_secret: Optional[str] = None
     # Branches — optional, for polyclinic/multi-branch onboarding
     branches: Optional[list[BranchSeed]] = None
 
@@ -125,6 +132,8 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         config["razorpay_key_secret"] = req.razorpay_key_secret
     if req.razorpay_webhook_secret:
         config["razorpay_webhook_secret"] = req.razorpay_webhook_secret
+    if req.integration_secret:
+        config["integration_secret"] = req.integration_secret
 
     # Also persist phone_number_id at root level for dual-key index resolution (Migration 043)
     clinic_insert_payload = {
@@ -215,10 +224,32 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
 
     except Exception as e:
         logger.error(f"Error creating clinic: {e}")
-        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
-            raise HTTPException(
-                409, "A clinic with this WhatsApp number already exists"
-            )
+        err = str(e).lower()
+        if "duplicate" in err or "unique" in err:
+            # Name the field that actually collided. This used to blame the
+            # WhatsApp number for every conflict, including a duplicate
+            # phone_number_id — which sent the operator to check a field that
+            # was already correct.
+            #
+            # A repeated phone_number_id is the likelier mistake and the more
+            # dangerous one: the Meta access token is an app-level credential
+            # reused across clinics, so phone_number_id is the ONLY thing
+            # separating one tenant's messages from another's. Two clinics on
+            # one number would both send as it, and Meta would report no error
+            # because the shared token covers both.
+            if "phone_number_id" in err:
+                raise HTTPException(
+                    409,
+                    "Another clinic is already using this Meta Phone Number ID. "
+                    "Each clinic must have its own — it is what routes messages "
+                    "to the right tenant. Check you have not pasted the previous "
+                    "clinic's ID.",
+                )
+            if "whatsapp_number" in err:
+                raise HTTPException(
+                    409, "A clinic with this WhatsApp number already exists"
+                )
+            raise HTTPException(409, f"A uniqueness constraint rejected this clinic: {e}")
         raise HTTPException(500, f"Failed to create clinic: {e}")
 
 

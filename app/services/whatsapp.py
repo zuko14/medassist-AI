@@ -135,27 +135,47 @@ class WhatsAppService:
         return "XXXX"
 
     def _get_credentials(self, clinic: dict) -> tuple[str, str]:
-        """Extract Meta API credentials from clinic config with global settings fallback.
+        """Extract a clinic's own Meta API credentials. There is NO global fallback.
+
+        These two values decide which WhatsApp number a patient's message is
+        sent FROM, and therefore which number their reply comes back to. A
+        platform-wide fallback meant a clinic that had not entered its own
+        credentials silently sent as the PLATFORM's number — so its patients'
+        replies landed on whichever clinic owns that number, filing one
+        tenant's patient into another tenant's conversation.
+
+        Same rule, and the same reasoning, as get_razorpay_creds() in
+        app/services/payment.py: shared credentials erase the tenant boundary.
+
+        Single-tenant deployments are unaffected. _build_fallback_clinic()
+        puts the env-var token and phone id into the synthetic clinic's own
+        config, so that clinic still resolves here through the normal path.
 
         Checks multiple key names to handle clinics onboarded via different
         code paths (admin API uses ``meta_phone_number_id``, manual inserts
-        may use ``phone_number_id``).  The top-level ``clinic["phone_number_id"]``
-        column is the final clinic-scoped fallback before global env vars.
+        may use ``phone_number_id``). The top-level ``clinic["phone_number_id"]``
+        column is the last clinic-scoped source.
         """
         config = clinic.get("config", {}) if isinstance(clinic, dict) else {}
-        token = config.get("meta_access_token") or settings.whatsapp_token
+        token = config.get("meta_access_token")
         # Resolve phone_id: config.meta_phone_number_id → config.phone_number_id
-        #   → clinic.phone_number_id (top-level column) → global env var
+        #   → clinic.phone_number_id (top-level column). All clinic-scoped.
         phone_id = (
             config.get("meta_phone_number_id")
             or config.get("phone_number_id")
             or (clinic.get("phone_number_id") if isinstance(clinic, dict) else None)
-            or settings.whatsapp_phone_number_id
         )
 
         if not token or not phone_id:
+            clinic_id = clinic.get("id") if isinstance(clinic, dict) else "unknown"
+            missing = ", ".join(
+                n for n, v in (("meta_access_token", token), ("phone_number_id", phone_id))
+                if not v
+            )
             logger.error(
-                f"Missing WhatsApp credentials for clinic {clinic.get('id') if isinstance(clinic, dict) else 'unknown'}"
+                f"MISSING_CLINIC_WHATSAPP_CREDENTIALS clinic={clinic_id} "
+                f"missing={missing} — refusing to send with platform credentials. "
+                "Set these in the clinic's config; they are not inherited."
             )
             raise ValueError("Missing WhatsApp credentials")
 

@@ -1,0 +1,800 @@
+<title>Kriya Launch Gate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --ground:#F7F8F9;
+  --panel:#FFFFFF;
+  --sunk:#EFF1F3;
+  --ink:#15181C;
+  --ink-2:#3A414B;
+  --muted:#697180;
+  --rule:#DFE3E8;
+  --rule-strong:#C6CCD4;
+  --accent:#25567F;
+  --accent-soft:#E7EEF5;
+  --p0:#A0142A;
+  --p1:#B4531A;
+  --p2:#846213;
+  --p3:#5C6572;
+  --ok:#1F6B4B;
+  --ok-soft:#E4F0EA;
+  --warn-soft:#FBF0DE;
+  --bad-soft:#F8E4E7;
+  --chip-text:#FFFFFF;
+  --shadow:0 1px 2px rgba(21,24,28,.05), 0 8px 24px -18px rgba(21,24,28,.35);
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#111418;
+    --panel:#181C21;
+    --sunk:#1F242A;
+    --ink:#E9ECEF;
+    --ink-2:#BFC6CF;
+    --muted:#8D96A3;
+    --rule:#2B3138;
+    --rule-strong:#3C444D;
+    --accent:#8FB8DC;
+    --accent-soft:#1C2A38;
+    --p0:#F0879A;
+    --p1:#EDA173;
+    --p2:#D9BB6B;
+    --p3:#9AA3B0;
+    --ok:#79C8A3;
+    --ok-soft:#182922;
+    --warn-soft:#2A2417;
+    --bad-soft:#2C1A1E;
+    --chip-text:#111418;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#111418;
+  --panel:#181C21;
+  --sunk:#1F242A;
+  --ink:#E9ECEF;
+  --ink-2:#BFC6CF;
+  --muted:#8D96A3;
+  --rule:#2B3138;
+  --rule-strong:#3C444D;
+  --accent:#8FB8DC;
+  --accent-soft:#1C2A38;
+  --p0:#F0879A;
+  --p1:#EDA173;
+  --p2:#D9BB6B;
+  --p3:#9AA3B0;
+  --ok:#79C8A3;
+  --ok-soft:#182922;
+  --warn-soft:#2A2417;
+  --bad-soft:#2C1A1E;
+  --chip-text:#111418;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--serif);
+  font-size:16.5px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px;margin:0 auto;padding:0 28px 96px}
+@media(max-width:640px){.wrap{padding:0 16px 64px}}
+
+h1,h2,h3,h4,.eyebrow,.chip,th,.verd,.gate-state,.find dt,.phase-h h3{font-family:var(--sans)}
+h1{font-size:clamp(2rem,4.4vw,3.05rem);line-height:1.06;letter-spacing:-.022em;font-weight:800;margin:0;text-wrap:balance}
+h2{font-size:1.42rem;line-height:1.2;letter-spacing:-.012em;font-weight:700;margin:0;text-wrap:balance}
+h3{font-size:1.06rem;line-height:1.3;font-weight:700;margin:0;letter-spacing:-.005em;text-wrap:balance}
+p{margin:0}
+code,.mono{font-family:var(--mono);font-size:.855em;font-variant-ligatures:none}
+code{background:var(--sunk);border:1px solid var(--rule);border-radius:3px;padding:.08em .34em;color:var(--ink-2)}
+
+.eyebrow{
+  font-size:.685rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);
+}
+
+header.mast{border-bottom:2px solid var(--ink);padding:44px 0 22px;display:flex;flex-direction:column;gap:20px}
+.mast-title{display:flex;flex-direction:column;gap:10px}
+.mast-meta{display:flex;gap:26px;flex-wrap:wrap;font-family:var(--mono);font-size:.76rem;color:var(--muted)}
+.mast-meta b{color:var(--ink-2);font-weight:500}
+.deck{font-size:1.11rem;color:var(--ink-2);max-width:66ch}
+
+.verdict{
+  margin-top:30px;background:var(--panel);border:1px solid var(--rule);
+  border-left:5px solid var(--p1);border-radius:4px;box-shadow:var(--shadow);
+  display:grid;grid-template-columns:minmax(0,1fr) 250px;
+}
+@media(max-width:760px){.verdict{grid-template-columns:1fr}}
+.verdict-body{padding:26px 30px;display:flex;flex-direction:column;gap:14px}
+.verdict-body p{max-width:70ch}
+.verdict-score{
+  border-left:1px solid var(--rule);padding:26px 24px;display:flex;flex-direction:column;
+  gap:6px;justify-content:center;background:var(--sunk);
+}
+@media(max-width:760px){.verdict-score{border-left:none;border-top:1px solid var(--rule)}}
+.score-num{font-family:var(--sans);font-size:3.5rem;font-weight:800;line-height:.95;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.score-num span{font-size:1.3rem;font-weight:600;color:var(--muted)}
+.status-pill{
+  display:inline-block;font-family:var(--sans);font-size:.74rem;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;padding:.4em .8em;border-radius:3px;
+  background:var(--warn-soft);color:var(--p1);border:1px solid currentColor;width:fit-content;
+}
+.score-note{font-size:.83rem;color:var(--muted);font-family:var(--sans);line-height:1.5;margin-top:6px}
+
+nav.index{margin:36px 0 0;padding:18px 20px;background:var(--panel);border:1px solid var(--rule);border-radius:4px}
+nav.index ol{margin:12px 0 0;padding:0;list-style:none;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:2px 20px}
+nav.index a{
+  display:flex;gap:9px;align-items:baseline;text-decoration:none;color:var(--ink-2);
+  font-family:var(--sans);font-size:.845rem;padding:3px 0;border-bottom:1px solid transparent;
+}
+nav.index a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+nav.index a b{font-family:var(--mono);font-size:.76rem;color:var(--muted);font-weight:500;min-width:1.15em}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+section{margin-top:56px;scroll-margin-top:20px}
+.sec-head{display:flex;gap:14px;align-items:baseline;border-bottom:1px solid var(--rule-strong);padding-bottom:9px;margin-bottom:20px}
+.sec-letter{font-family:var(--mono);font-size:.95rem;font-weight:600;color:var(--accent);min-width:1.5em}
+.prose{display:flex;flex-direction:column;gap:14px;max-width:70ch}
+
+.ev{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.ev li{
+  display:grid;grid-template-columns:98px minmax(0,1fr);gap:16px;
+  padding:11px 0;border-bottom:1px solid var(--rule);align-items:start;
+}
+.ev li:first-child{border-top:1px solid var(--rule)}
+@media(max-width:520px){.ev li{grid-template-columns:1fr;gap:7px}}
+.verd{
+  font-size:.665rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  padding:.3em .5em;border-radius:2px;text-align:center;margin-top:3px;width:fit-content;
+}
+.v-ok{background:var(--ok-soft);color:var(--ok)}
+.v-part{background:var(--warn-soft);color:var(--p2)}
+.v-no{background:var(--sunk);color:var(--muted);border:1px solid var(--rule)}
+.ev p{font-size:.95rem}
+.ev .src{display:block;font-family:var(--mono);font-size:.755rem;color:var(--muted);margin-top:3px;word-break:break-word}
+
+.docket{display:flex;flex-direction:column;gap:14px}
+.find{
+  background:var(--panel);border:1px solid var(--rule);border-left:4px solid var(--p3);
+  border-radius:4px;padding:18px 20px;display:flex;flex-direction:column;gap:11px;
+}
+.find.sev-p0{border-left-color:var(--p0)}
+.find.sev-p1{border-left-color:var(--p1)}
+.find.sev-p2{border-left-color:var(--p2)}
+.find.sev-p3{border-left-color:var(--p3)}
+.find-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chip{font-size:.665rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:.28em .55em;border-radius:2px}
+.chip-sev{color:var(--chip-text)}
+.sev-p0 .chip-sev{background:var(--p0)}
+.sev-p1 .chip-sev{background:var(--p1)}
+.sev-p2 .chip-sev{background:var(--p2)}
+.sev-p3 .chip-sev{background:var(--p3)}
+.chip-id{font-family:var(--mono);font-size:.735rem;font-weight:600;color:var(--ink-2);background:var(--sunk);border:1px solid var(--rule);text-transform:none;letter-spacing:0}
+.chip-area{background:var(--accent-soft);color:var(--accent)}
+.find h3{max-width:66ch}
+.find dl{margin:0;display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px 16px;font-size:.925rem}
+@media(max-width:560px){.find dl{grid-template-columns:1fr;gap:2px}.find dt{margin-top:8px}}
+.find dt{font-size:.685rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:.42em}
+.find dd{margin:0;color:var(--ink-2)}
+.find dd.loc{font-family:var(--mono);font-size:.775rem;line-height:1.75;word-break:break-word}
+
+.tw{overflow-x:auto;border:1px solid var(--rule);border-radius:4px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:520px}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-size:.685rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--sunk);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bar{display:block;height:5px;border-radius:2px;background:var(--rule);position:relative;min-width:70px;margin-top:8px}
+.bar i{position:absolute;top:0;bottom:0;left:0;border-radius:2px;background:var(--accent);display:block}
+.bar.low i{background:var(--p0)}
+.bar.mid i{background:var(--p1)}
+.bar.good i{background:var(--ok)}
+
+.phase{border:1px solid var(--rule);border-radius:4px;background:var(--panel);margin-bottom:12px;overflow:hidden}
+.phase-h{display:flex;gap:12px;align-items:baseline;padding:13px 18px;background:var(--sunk);border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.phase-n{font-family:var(--mono);font-size:.78rem;font-weight:600;color:var(--accent)}
+.phase-h h3{font-size:.98rem}
+.phase-h .gate{margin-left:auto;font-family:var(--mono);font-size:.72rem;color:var(--muted)}
+.phase ul{margin:0;padding:14px 18px 16px 34px;display:flex;flex-direction:column;gap:9px;font-size:.925rem}
+.phase li{color:var(--ink-2)}
+.phase li b{color:var(--ink);font-family:var(--mono);font-size:.79rem;font-weight:600}
+
+.gate-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.gate-list li{display:grid;grid-template-columns:22px minmax(0,1fr) 132px;gap:12px;padding:9px 0;border-bottom:1px solid var(--rule);align-items:baseline;font-size:.94rem}
+.gate-list li:first-child{border-top:1px solid var(--rule)}
+@media(max-width:520px){.gate-list li{grid-template-columns:22px minmax(0,1fr);gap:6px 12px}.gate-state{grid-column:2;text-align:left}}
+.box{font-family:var(--mono);font-size:1rem;color:var(--muted);line-height:1}
+.box.pass{color:var(--ok)}
+.gate-state{font-size:.665rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;text-align:right;color:var(--muted)}
+.gate-state.pass{color:var(--ok)}
+.gate-state.fail{color:var(--p0)}
+.gate-state.unk{color:var(--p2)}
+
+.callout{
+  background:var(--sunk);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  border-radius:3px;padding:14px 18px;font-size:.94rem;color:var(--ink-2);max-width:74ch;
+}
+footer{margin-top:64px;padding-top:20px;border-top:2px solid var(--ink);font-family:var(--mono);font-size:.76rem;color:var(--muted);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="mast-title">
+    <span class="eyebrow">Independent forensic production-readiness review</span>
+    <h1>Kriya AI Launch Gate</h1>
+  </div>
+  <p class="deck">A source-of-truth audit of the MediAssist AI v2.0.0 repository against the claims in the existing forensic report. Every conclusion below is traced to a file, a migration, or an executed command. Where evidence is absent, it says so.</p>
+  <div class="mast-meta">
+    <span>DATE <b>2026-09-09</b></span>
+    <span>BRANCH <b>main @ 2de7a1e</b></span>
+    <span>SCOPE <b>314 py · 80 sql · 171 test files</b></span>
+    <span>METHOD <b>static trace + executed suite</b></span>
+  </div>
+</header>
+
+<div class="verdict">
+  <div class="verdict-body">
+    <span class="eyebrow">A. Executive verdict</span>
+    <p>Kriya AI is <b>not ready for multi-tenant commercial launch</b>, and it is closer than most systems at this stage. The transaction-critical layers are genuinely well built: slot uniqueness is enforced by a partial unique index that the application deliberately refuses to bypass, every payment status write is a compare-and-swap, the payment webhook refuses to guess a tenant, and the inbound message path is durable with a dead-letter queue and a reaper. Those are real engineering, and they hold up under reading.</p>
+    <p>What does not hold up is the layer beneath them and the evidence on top of them. The database cannot enforce the platform's most basic invariant, because <code>clinic_id</code> is nullable on all nine core tenant tables — the <code>SET NOT NULL</code> statements were written and then commented out, and never applied since. A row that loses its tenant is then resolved by a helper that silently returns the oldest active clinic, which is how a report or reminder would be sent through another hospital's WhatsApp number. Separately, the test suite is not hermetic: settings load the repository's <code>.env</code> at import time, three production clinic identifiers are hard-coded into assertions, and a run with the database unreachable produces 16 failures. The "438 passed, 0 failed" figure in the prior report was obtained against the production database and cannot be reproduced in continuous integration.</p>
+    <p>The right next step is a supervised single-tenant or two-tenant pilot while Phase 0 and Phase 1 are executed. Opening the platform to many tenants before the schema enforces tenancy is taking a risk the code cannot see.</p>
+  </div>
+  <div class="verdict-score">
+    <span class="eyebrow">Overall</span>
+    <div class="score-num">65<span>/100</span></div>
+    <span class="status-pill">Ready for limited pilot</span>
+    <p class="score-note">0 launch-blocking P0 confirmed. 5 P1 open. 8 P2 open.</p>
+  </div>
+</div>
+
+<nav class="index" aria-label="Report sections">
+  <span class="eyebrow">Contents</span>
+  <ol>
+    <li><a href="#b"><b>B</b> What was verified</a></li>
+    <li><a href="#c"><b>C</b> What was not verified</a></li>
+    <li><a href="#d"><b>D</b> Critical findings</a></li>
+    <li><a href="#ef"><b>E–F</b> Security &amp; multi-tenancy</a></li>
+    <li><a href="#gh"><b>G–H</b> Booking &amp; payment</a></li>
+    <li><a href="#ij"><b>I–J</b> WhatsApp &amp; connectors</a></li>
+    <li><a href="#kl"><b>K–L</b> Database &amp; wiring</a></li>
+    <li><a href="#mn"><b>M–N</b> Admin &amp; scalability</a></li>
+    <li><a href="#op"><b>O–P</b> Reliability &amp; silent failure</a></li>
+    <li><a href="#qr"><b>Q–R</b> Observability &amp; AI safety</a></li>
+    <li><a href="#st"><b>S–T</b> Privacy &amp; deployment</a></li>
+    <li><a href="#u"><b>U</b> Test coverage gaps</a></li>
+    <li><a href="#v"><b>V</b> Capacity model</a></li>
+    <li><a href="#w"><b>W</b> Scorecard</a></li>
+    <li><a href="#x"><b>X</b> Remediation plan</a></li>
+    <li><a href="#y"><b>Y</b> Required regression tests</a></li>
+    <li><a href="#z"><b>Z</b> Final launch gate</a></li>
+  </ol>
+</nav>
+
+<section id="b">
+  <div class="sec-head"><span class="sec-letter">B</span><h2>What was verified</h2></div>
+  <div class="prose" style="margin-bottom:20px">
+    <p>Each item below was traced from the claim to the implementation, then to its callers and its error paths. Verdicts are assigned only where the code supports them.</p>
+  </div>
+  <ul class="ev">
+    <li><span class="verd v-ok">Verified</span><div><p>Meta webhook signatures are HMAC-SHA256 checked against the raw body before any parsing, and verification fails closed when the app secret is missing. The only bypass requires both a development environment and an explicit opt-in flag.</p><span class="src">app/utils/security.py:27–89 · app/routers/webhook.py:53–65</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>One active appointment per physician per minute is enforced by a partial unique index, not by application code. A companion index covers legacy rows with no doctor assigned, and the booking function refuses outright to insert a consultation whose doctor could not be resolved, because such a row would be unguarded.</p><span class="src">migrations/064_fix_slot_uniqueness_key.sql · app/database.py:939–1050</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>Every appointment status transition in the payment path is a compare-and-swap that also names the expected prior status, including the amount-mismatch and unexpected-state branches. Terminal states are explicitly refused rather than overwritten.</p><span class="src">app/services/payment.py:700–870</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>Razorpay webhook secrets are strictly per clinic with no platform fallback, and a webhook arriving on the shared unsuffixed endpoint is refused outright whenever more than one active clinic exists. A payment that cannot be matched inside its own clinic is never widened to a global search.</p><span class="src">app/services/payment.py:46–69, 477–630 · app/routers/razorpay_webhook.py</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>Inbound messages are persisted before the webhook returns 200, claimed atomically, moved to a processing state so a crash is detectable, dead-lettered on permanent failure, and swept by a reaper plus a recovery job that both run under a distributed lease.</p><span class="src">app/routers/webhook.py:106–210 · app/services/message_queue.py · migrations/047, 048</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>The distributed job lock acquires through a database function rather than a read-modify-write, renews on a heartbeat, and cancels the running job body when the lease is lost instead of merely setting a flag. 22 of 23 registered scheduler jobs run inside it.</p><span class="src">app/services/distributed_lock.py · app/services/scheduler.py</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>Tenant scope fails closed at two layers. The query builder refuses to construct an unscoped read of a tenant-owned table, and the admin resolver never returns a sentinel — an unspecified scope is a 400, not a wildcard. 83 of 86 admin routes carry an explicit scope call; the three that do not are login, a static CSV template, and a connector type list.</p><span class="src">app/database.py:253–296 · app/routers/admin.py:505–605 · app/tenancy.py</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>The AI layer is not authoritative. A deterministic clinical firewall intercepts medication, dosage and diagnosis requests before any model call; intent output is validated against a fixed whitelist with a keyword fallback; and prompt-injection detection routes straight to the deterministic path.</p><span class="src">app/services/clinical_firewall.py · app/services/ai_engine.py:710–807</span></div></li>
+    <li><span class="verd v-ok">Verified</span><div><p>Boot refuses to start on placeholder secrets in any non-development environment, and refuses to serve on a stale schema by comparing the highest applied migration against the highest file on disk.</p><span class="src">app/main.py:109–217</span></div></li>
+    <li><span class="verd v-part">Partial</span><div><p>Real-PostgreSQL invariant tests exist and do run, including a 50-thread contention test against the slot index. They are excluded from the main continuous-integration job and gated behind a separate one, so their result is not part of the everyday signal.</p><span class="src">tests/test_real_postgres_invariants.py · tests/conftest_db.py · .github/workflows/test.yml</span></div></li>
+    <li><span class="verd v-part">Partial</span><div><p>The connector runs in a dedicated worker service so the headless browser never shares a container with webhook acknowledgement, and the image uses tini as process 1 to reap browser zombies. Whether the deployed infrastructure matches this declaration is unconfirmed.</p><span class="src">render.yaml · Dockerfile</span></div></li>
+  </ul>
+</section>
+
+<section id="c">
+  <div class="sec-head"><span class="sec-letter">C</span><h2>What was not verified</h2></div>
+  <div class="prose" style="margin-bottom:20px"><p>These are evidence gaps, not findings. Nothing below should be reported to a customer as working until it is demonstrated.</p></div>
+  <ul class="ev">
+    <li><span class="verd v-no">Not verified</span><div><p>The real production topology. The deployment file declares two web instances at two workers each plus one connector worker, and the code's concurrency reasoning is written against those four processes. Whether the live tier actually provisions them was not confirmed from this repository, and every capacity statement depends on it.</p></div></li>
+    <li><span class="verd v-no">Not verified</span><div><p>Row-level security as an effective control. Policies exist and are forced on the tenant tables, but the application connects as the Supabase service role, which bypasses them. The isolation that actually runs in production is the application-layer guard, and no test exercises the policies under a non-privileged role.</p></div></li>
+    <li><span class="verd v-ok">Now verified</span><div><p>Null-tenant census executed against the live project on 2026-09-09, after the first draft of this report. All nine core tenant tables hold <b>zero</b> orphan rows, so the KA-A-02 disclosure path is latent rather than live. Three later tables do carry orphans — see the census in section D.</p><span class="src">read-only exact counts · project holds 3 active clinics</span></div></li>
+    <li><span class="verd v-no">Not verified</span><div><p>Behaviour across a rolling deploy, an autoscale event, or a mid-transaction container restart. No drill evidence exists in the repository.</p></div></li>
+    <li><span class="verd v-no">Not verified</span><div><p>Backup, restore and migration rollback. There are 73 forward migrations and 3 down-migrations, and no record of a restore ever being exercised.</p></div></li>
+    <li><span class="verd v-no">Not verified</span><div><p>Real throughput and latency. See section V — the existing load-test report measures an in-process test harness, not deployed infrastructure.</p></div></li>
+    <li><span class="verd v-no">Not verified</span><div><p>Provider behaviour at limits: Meta messaging tiers, Razorpay throughput, and model rate limits or token exhaustion under sustained load.</p></div></li>
+  </ul>
+</section>
+
+<section id="d">
+  <div class="sec-head"><span class="sec-letter">D</span><h2>Critical findings</h2></div>
+  <div class="prose" style="margin-bottom:20px">
+    <p>No P0 was confirmed. The classic P0 candidates — concurrent double booking, cross-tenant payment confirmation, duplicate message processing, authentication bypass — were each traced to a working control. The five P1 findings below are what stand between this system and a defensible multi-tenant launch.</p>
+  </div>
+
+  <div class="docket">
+
+    <article class="find sev-p1">
+      <div class="find-head"><span class="chip chip-sev">P1</span><span class="chip chip-id">KA-A-01</span><span class="chip chip-area">Database · Multi-tenancy</span></div>
+      <h3>The tenant key is nullable on every core table, so the database cannot enforce tenancy</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">migrations/004_seed_first_clinic.sql:37–46 — all nine <code>ALTER … SET NOT NULL</code> lines are commented out. No later migration applies them; a repository-wide search for <code>SET NOT NULL</code> returns only those comments.</dd>
+        <dt>Affects</dt><dd>patients, appointments, conversations, lab_reports, prescriptions, analytics_events, doctors, doctor_leaves, hospital_holidays.</dd>
+        <dt>Failure</dt><dd>Any insert path that omits the tenant key produces a row belonging to no clinic. Every row-level security policy is written as <code>clinic_id IS NOT NULL AND clinic_id = …</code>, so such a row is invisible to every tenant under those policies while remaining fully visible to the application, which connects with the bypassing service role. The strong application-layer guards therefore rest on a schema that permits exactly the state they are designed to prevent.</dd>
+        <dt>Why tests miss it</dt><dd>Every test constructs rows with a clinic identifier, so no test observes the column's nullability. The real-PostgreSQL suite asserts on indexes and constraints but never on column nullability.</dd>
+        <dt>Fix</dt><dd>A migration that reports orphans, quarantines or backfills them, then applies <code>SET NOT NULL</code> to all nine columns. Pair it with a check constraint forbidding the literal string <code>default</code> wherever the column is text.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p1">
+      <div class="find-head"><span class="chip chip-sev">P1</span><span class="chip chip-id">KA-A-02</span><span class="chip chip-area">Multi-tenancy</span></div>
+      <h3>A missing tenant identifier silently resolves to the oldest active clinic</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/services/tenant.py:256–270 — <code>get_clinic_by_id</code> treats <code>None</code>, an empty string, <code>"default"</code>, <code>"none"</code> and <code>"null"</code> as a request for the first active clinic ordered by creation date.</dd>
+        <dt>Callers</dt><dd class="loc">Roughly a dozen sites pass a row's own key straight through, written as <code>get_clinic_by_id(row.get("clinic_id", "default"))</code>: scheduler.py:519, 718, 887 · lab_reports.py:836, 1051 · payment.py:767, 1630 · prescriptions.py:156.</dd>
+        <dt>Failure</dt><dd>Chained with KA-A-01: a prescription, appointment or lab report whose tenant key is null is attributed to a different hospital. The clinic object returned carries that hospital's Meta access token, phone number identifier and display name, so the outbound reminder or report is sent from the wrong hospital's WhatsApp number, to a patient who never contacted it. This is a cross-tenant disclosure with no log line that names it as one.</dd>
+        <dt>Census</dt><dd><b>Latent, not live.</b> The 2026-09-09 census found zero null-tenant rows across all nine core tables, so no row currently takes this path. The severity stays P1 because nothing prevents the state — the guard is absent, not merely unused.</dd>
+        <dt>Why tests miss it</dt><dd>The sentinel path is only reachable when a row is already malformed, and no test constructs a null-tenant row — the schema is what would have made that impossible.</dd>
+        <dt>Fix</dt><dd>Make the sentinel branch raise <code>TenantNotFound</code>. Where a genuine bootstrap needs the sole clinic, add an explicit <code>get_primary_clinic()</code> that refuses when more than one active clinic exists, mirroring the rule already applied in tenant resolution and in the payment webhook.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-17</span><span class="chip chip-area">Payment ledger</span></div>
+      <h3>Fourteen payment-event write paths omit the tenant key, including every refund and admin action</h3>
+      <dl>
+        <dt>Found by</dt><dd>The T0.1 census, which was run to test KA-A-02 and surfaced this instead.</dd>
+        <dt>Location</dt><dd class="loc">app/services/payment.py — calls at lines 286, 313, 987, 1030, 1310, 1344, 1367, 1411, 1419, 1463, 1542, 1574, 1645, 1663 pass no <code>clinic_id</code>. Covered events: payment_link_created, payment_link_creation_failed, recovery_confirmed, hold_expired, refund_initiated, refund_completed, refund_failed, auto_refund_issued, auto_refund_failed, manual_confirm, manual_reject, admin_cancel and two more.</dd>
+        <dt>Measured</dt><dd>28 of 129 live rows (22%) carry a null tenant, dated 2026-08-27 through 2026-09-09 — this is ongoing, not historical. All 28 retain a booking reference, so the tenant is recoverable by join.</dd>
+        <dt>Blast radius today</dt><dd>Contained. Every read path fetches events by booking, and the admin endpoint verifies the booking's tenant before returning them, so nothing is currently hidden from a clinic. The defect is latent in two ways: the row-level security policy on this table is written as <code>clinic_id IS NOT NULL AND clinic_id = …</code>, so 22% of the money ledger would vanish the moment anything reads it without the service role; and any future clinic-scoped aggregate over this table silently undercounts.</dd>
+        <dt>Fix</dt><dd>Pass the clinic through at all fourteen sites, backfill the 28 rows from their bookings, then make the column not-null so the omission cannot recur.</dd>
+      </dl>
+    </article>
+
+    <div class="tw" style="margin-top:4px">
+      <table>
+        <thead><tr><th>T0.1 census — 2026-09-09, live project, 3 active clinics</th><th style="width:80px">Rows</th><th style="width:110px">Null tenant</th><th>Assessment</th></tr></thead>
+        <tbody>
+          <tr><td>Nine core tenant tables</td><td class="num">2,926</td><td class="num">0</td><td>Clean. KA-A-02 is latent.</td></tr>
+          <tr><td>payment_events</td><td class="num">129</td><td class="num">28</td><td>Live defect — KA-A-17.</td></tr>
+          <tr><td>processed_messages</td><td class="num">703</td><td class="num">145</td><td>Benign. All predate migration 015; dedup keys on the message id, not the tenant.</td></tr>
+          <tr><td>admin_audit_logs</td><td class="num">1,425</td><td class="num">1,248</td><td>Benign by design — all are platform-owner cross-tenant read actions, which belong to no clinic. Worth filtering out of the security audit trail they dilute.</td></tr>
+          <tr><td>Eight other clinic-scoped tables</td><td class="num">13,255</td><td class="num">0</td><td>Clean.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <article class="find sev-p1">
+      <div class="find-head"><span class="chip chip-sev">P1</span><span class="chip chip-id">KA-A-03</span><span class="chip chip-area">Test integrity</span></div>
+      <h3>The test suite runs against the production database, and its green result is not reproducible</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/config.py:214 loads <code>.env</code> and instantiates settings at import time, which happens during collection — before the session-scoped fixture in tests/conftest.py can set its defaults. The repository's <code>.env</code> holds live Supabase credentials. tests/test_patient_metrics_production.py:8–10 hard-codes three production clinic identifiers and asserts on their live row counts.</dd>
+        <dt>Observed</dt><dd>Executed with the database made unreachable: <b>1785 passed, 16 failed, 2 skipped</b> in 196 seconds. Three failures are network errors on staff routes; the rest are assertion failures spanning conversation dispatch, scheduler reminders, health check-ins, report dispatch gating and dashboard patient metrics.</dd>
+        <dt>Impact</dt><dd>Three separate problems. The prior report's "438 passed, 0 failed" was produced against production and is not evidence a reviewer can re-derive. The continuous-integration workflow supplies dummy credentials, so it cannot be green on the same tests. And a routine test run reaches production with a service-role key, which is the documented mechanism behind the scheduler-lock incident that starved the live connector.</dd>
+        <dt>Fix</dt><dd>Make settings lazy, or force the test environment before import through a root-level conftest. Replace hard-coded production identifiers with fixtures. Add a guard that aborts collection if the resolved database host is not a test host.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p1">
+      <div class="find-head"><span class="chip chip-sev">P1</span><span class="chip chip-id">KA-A-04</span><span class="chip chip-area">Admin correctness</span></div>
+      <h3>Dashboard reads truncate at 2,000 rows and then filter in Python, silently</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/routers/admin.py:930, 1570, 1581, 2050, 2563, 2726, 3314, 3858, 4458, 4832–4846 · 4960 (5,000) · app/database.py:379–429.</dd>
+        <dt>Failure</dt><dd>The report delivery log fetches the newest 2,000 rows and then applies the day-window filter in Python. A clinic past 2,000 lifetime reports sees a window that quietly excludes anything the cap cut off, and the counts derived from it are wrong rather than merely partial. No response carries a truncation flag, so neither the operator nor the front end can tell. The same shape appears in patients, doctors, leaves, holidays, staff and connector failure lists.</dd>
+        <dt>Business impact</dt><dd>Revenue, appointment and report figures shown to a hospital become understated as it grows, with no visible symptom. That is the failure mode a dashboard must never have.</dd>
+        <dt>Fix</dt><dd>Push date and status filters into the query, return keyset pagination with a cursor, and have every capped response carry an explicit truncation flag the panel renders.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p1">
+      <div class="find-head"><span class="chip chip-sev">P1</span><span class="chip chip-id">KA-A-05</span><span class="chip chip-area">Admin security</span></div>
+      <h3>The platform owner console is protected by HTTP Basic alone</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/routers/platform.py:43–90 — <code>verify_owner_credentials</code>, applied to every one of the console's 30-plus endpoints.</dd>
+        <dt>Failure</dt><dd>This is the highest-privilege surface in the system: cross-hospital revenue, patient activity, clinic provisioning, connector configuration and admin password resets. It has no session, no server-side revocation, no multi-factor step and no per-account lockout. The password comes from an environment variable and may be stored in plain text — the hashed branch is optional and chosen by prefix. Credentials travel on every request and sit in the browser's credential cache. By contrast the clinic console, which is strictly less privileged, already has revocable sessions and an audit log.</dd>
+        <dt>Also</dt><dd>Brute-force accounting is keyed on client address and shares one global limiter with the clinic login, so attempts against either surface consume the other's budget from the same address.</dd>
+        <dt>Fix</dt><dd>Give the platform console the same session mechanism the clinic console already has, add a time-based one-time-password step, add per-account lockout distinct from per-address throttling, and require a hashed password rather than accepting plaintext.</dd>
+      </dl>
+    </article>
+
+  </div>
+</section>
+
+<section id="ef">
+  <div class="sec-head"><span class="sec-letter">E–F</span><h2>Security and multi-tenant findings</h2></div>
+  <div class="docket">
+
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-12</span><span class="chip chip-area">Operational safety</span></div>
+      <h3>Two tracked scripts delete every patient and conversation across all tenants</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">reset_db.py · temp_reset.py — both import the service-role client and issue an unfiltered delete on <code>conversations</code> and <code>patients</code>.</dd>
+        <dt>Failure</dt><dd>They are not copied into the container image, so production cannot run them. They are in the repository and they read <code>.env</code>, so any developer machine holding production credentials is one command away from wiping every tenant's patients. There is no confirmation prompt and no environment check.</dd>
+        <dt>Fix</dt><dd>Delete both. If a reset utility is genuinely needed, put it under <code>scripts/</code>, require an explicit clinic identifier, and refuse to run when the resolved environment is production.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p3">
+      <div class="find-head"><span class="chip chip-sev">P3</span><span class="chip chip-id">KA-A-16</span><span class="chip chip-area">Auth hardening</span></div>
+      <h3>No multi-factor step, no account lockout, and Basic auth retained beside sessions</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/routers/admin.py:396–435 and 200–290.</dd>
+        <dt>Failure</dt><dd>Brute-force accounting is per source address at five attempts a minute, with no per-username counter, so a distributed attempt against one known administrator is unthrottled. There is no lockout and no notification on repeated failure. The Basic fallback is retained for scripts, which keeps cached browser credentials available to any cross-site form post that a JSON endpoint happens to accept.</dd>
+        <dt>Mitigating</dt><dd>The session cookie is HttpOnly, strictly same-site and secure in production, and only its hash is stored. Sessions are revocable and every admin action is written to an audit log.</dd>
+        <dt>Fix</dt><dd>Add per-username attempt accounting and lockout with an operator unlock path. Scope the Basic fallback to a header-only interface, or retire it once the panel no longer needs it.</dd>
+      </dl>
+    </article>
+
+  </div>
+  <div class="callout" style="margin-top:16px"><b>Not found:</b> no committed secrets — a scan for provider key shapes across every tracked file returned nothing, and <code>.env</code> is correctly ignored. No SQL string interpolation: all database access goes through the query builder. The security header set, including a restrictive content security policy, is applied to every response.</div>
+</section>
+
+<section id="gh">
+  <div class="sec-head"><span class="sec-letter">G–H</span><h2>Booking, concurrency and payment findings</h2></div>
+  <div class="prose" style="margin-bottom:18px">
+    <p>This is the strongest area of the system, and the two findings here are about capacity and coverage rather than correctness. The core invariant — one physician, one clinic, one minute, at most one active appointment — is enforced in the database, tested against real PostgreSQL under 50-way contention, and the application refuses to write rows the index could not guard.</p>
+  </div>
+  <div class="docket">
+
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-09</span><span class="chip chip-area">Payment · Capacity</span></div>
+      <h3>The hold-expiry sweep can outlive its own lease</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/services/payment.py:905–1040, registered with a 60-second lease on a one-minute interval.</dd>
+        <dt>Failure</dt><dd>The sweep selects up to 200 stale holds and, for each one that carries a payment link, makes a sequential call to Razorpay before deciding whether to expire it. At a few hundred milliseconds per call the job exceeds its lease, the heartbeat detects the loss and cancels the body, and the tail of the batch is never processed. Those slots stay held and unsellable until a later tick happens to reach them.</dd>
+        <dt>Also</dt><dd>The 200-row cap sets the ceiling on how fast held slots return to inventory. A clinic generating more than 200 expiries a minute accumulates a permanent backlog.</dd>
+        <dt>Fix</dt><dd>Bound the batch by remaining lease time rather than row count, issue the provider checks concurrently under a semaphore, and raise the lease to match the worst-case batch. Emit a counter for unprocessed remainder so the backlog is visible.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-10</span><span class="chip chip-area">Booking logic</span></div>
+      <h3>Lab-test bookings have no uniqueness and no capacity limit</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">migrations/064 — both uniqueness indexes are predicated on consultation bookings; app/database.py:995–1000 skips the pre-check for lab rows.</dd>
+        <dt>Failure</dt><dd>This is deliberate and documented: a lab test reserves a collection day, not a minute, so slot uniqueness would be the wrong constraint. But nothing replaces it. No per-day, per-branch collection capacity is enforced anywhere, so an unbounded number of patients can be confirmed for the same collection day at the same centre, and the centre discovers the overbooking when they arrive.</dd>
+        <dt>Fix</dt><dd>Add a configurable daily collection capacity per branch, checked in the booking transaction and backed by a counter the database maintains, not by a read-then-write in application code.</dd>
+      </dl>
+    </article>
+
+  </div>
+</section>
+
+<section id="ij">
+  <div class="sec-head"><span class="sec-letter">I–J</span><h2>WhatsApp and connector findings</h2></div>
+  <div class="docket">
+
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-08</span><span class="chip chip-area">WhatsApp reliability</span></div>
+      <h3>The per-patient lock fails open, so two messages can interleave across processes</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/services/message_queue.py:766–782 — a failure to acquire the database lease is caught and processing continues with only the process-local lock.</dd>
+        <dt>Failure</dt><dd>The comment justifies this by pointing at the message-identifier uniqueness guard, but that guard prevents the same message being processed twice; it does nothing about two <i>different</i> messages from the same patient landing on two different workers. With four web processes, a database blip during a burst lets both run the conversation handler concurrently and interleave writes to the same conversation state, which is precisely the corruption the lock exists to prevent.</dd>
+        <dt>Reproduce</dt><dd>Make the lock call fail, then deliver two distinct messages for one phone number to two workers within the same second, and observe the resulting state and context.</dd>
+        <dt>Fix</dt><dd>Fail closed and defer to the retry queue, which already exists and already handles the 15-second timeout case. Emit a counter so the degraded window is visible rather than inferred.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-07</span><span class="chip chip-area">Connector reliability</span></div>
+      <h3>Report delivery is at-least-once, and its idempotency pre-check fails open</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/routers/integrations.py:141–200 for the pre-check, 306–360 for the dedup insert after delivery · connectors/runner.py:944–961 repeats the same ordering.</dd>
+        <dt>Failure</dt><dd>The processed-report row is written after the send has already delivered the report on WhatsApp, and a failure of that write is logged and swallowed. Worse, the pre-check itself is wrapped in a handler that logs "idempotency check failed (proceeding)" — so a database blip during a connector poll does not skip the batch, it re-delivers every report in it to patients who already received them.</dd>
+        <dt>Guarantee</dt><dd>The honest classification is at-least-once. A secondary cross-path check against the report table narrows the window but is subject to the same fail-open handler.</dd>
+        <dt>Fix</dt><dd>Claim the external report identifier before delivery by inserting a row in a claimed state and promoting it afterwards, so a crash leaves a claim rather than a gap. Make the pre-check fail closed and defer the batch.</dd>
+      </dl>
+    </article>
+
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-11</span><span class="chip chip-area">Patient safety</span></div>
+      <h3>Wrong-patient delivery is not structurally prevented for diagnostic centres</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/services/patient_match.py:113–145 — the hold decision returns false for clinics typed as diagnostic or flagged for walk-in delivery.</dd>
+        <dt>Failure</dt><dd>For those tenants a report clears delivery with no corroboration from Kriya's own patient registry, so the recipient is whatever phone number the external system holds. A transposed digit at the reception desk sends a stranger's laboratory results to an uninvolved person. The only control is an advisory flag on the delivery and an administrator notification raised after the message has gone.</dd>
+        <dt>Assessment</dt><dd>The reasoning is sound — a walk-in centre has no registry to check against, and holding every report would block the whole pipeline. But the invariant "a patient's report is never delivered to another patient" is delegated to the third-party system, and that should be stated in the contract rather than implied by the architecture diagram.</dd>
+        <dt>Fix</dt><dd>Where the source supplies one, verify a second identifier — date of birth or a report reference — before automated send. Otherwise make the unverified state explicit to the clinic and require an operator to release the first delivery to any phone number the tenant has not seen before.</dd>
+      </dl>
+    </article>
+
+  </div>
+</section>
+
+<section id="kl">
+  <div class="sec-head"><span class="sec-letter">K–L</span><h2>Database and front-end wiring findings</h2></div>
+  <div class="prose">
+    <p>Beyond KA-A-01, the schema is in good shape. Seventy-three ordered migrations are checksummed and tracked; the destructive ones carry pre-flight reports that name the rows they will quarantine before they change anything; and the slot re-keying migration in particular reads as work done by someone who had already been burned once. Three tables have down-migrations, which is the main gap.</p>
+    <p>Two unbounded tables need an archival policy before they become a problem: the outbound message ledger writes one row per Meta API call with the recipient's phone number and has no purge job at all, and the connector audit log grows one row per poll per connector per minute.</p>
+    <p>Front-end wiring was checked by extracting every request the admin panel makes and matching it against the router. All 58 call sites resolve to real endpoints with matching methods, the shared helper appends the tenant scope to every path so the panel cannot accidentally issue an unscoped call, and the failure handler distinguishes an expired session from a tenant-boundary rejection — including the case where a second browser tab has re-authenticated as a different user, which it detects and stops rather than continuing to fire cross-tenant requests. That is unusually careful. The gap is the same one as KA-A-04: no endpoint returns pagination metadata, so the panel cannot show that a list was truncated.</p>
+  </div>
+</section>
+
+<section id="mn">
+  <div class="sec-head"><span class="sec-letter">M–N</span><h2>Admin, platform and scalability findings</h2></div>
+  <div class="prose" style="margin-bottom:18px">
+    <p>Role separation is real: staff accounts are gated out of finance, roster and integration actions, permissions are checked server-side per route rather than by hiding controls, branch scope is enforced separately from clinic scope, and every mutation is written to an audit log. The weaknesses are KA-A-05 above and the query shapes below.</p>
+  </div>
+  <div class="docket">
+    <article class="find sev-p3">
+      <div class="find-head"><span class="chip chip-sev">P3</span><span class="chip chip-id">KA-A-13</span><span class="chip chip-area">Scheduler</span></div>
+      <h3>One scheduler job runs without a distributed lease</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/services/scheduler.py:1219 — the message-queue fail-open alert, registered on a ten-minute interval, is the only job body with no distributed lock.</dd>
+        <dt>Failure</dt><dd>Every process runs it, so a genuine queue degradation raises one alert per process. Alert duplication trains operators to ignore the channel, which is how the next real alert gets missed.</dd>
+        <dt>Fix</dt><dd>Wrap it like the other 22 jobs.</dd>
+      </dl>
+    </article>
+  </div>
+  <div class="prose" style="margin-top:18px">
+    <p><b>Scalability.</b> The binding constraints are structural rather than tuning. Per-process database concurrency is capped at 16 worker threads, deliberately reduced from 64 after a cascading-timeout incident, and the comment is explicit that raising it again is unverified. Above that sit the 2,000-row query caps with client-side filtering, sequential external API calls inside scheduler sweeps, and two tables with no archival. There is no partitioning anywhere. None of this is wrong for a handful of tenants; all of it becomes the first thing to break at a hundred.</p>
+  </div>
+</section>
+
+<section id="op">
+  <div class="sec-head"><span class="sec-letter">O–P</span><h2>Reliability and silent-failure findings</h2></div>
+  <div class="prose">
+    <p>A scan of the application and connector packages found no bare except clauses, and roughly 50 broad exception handlers that end in a pass or an equivalent. Most are deliberate and carry a comment explaining the choice. Three fail-open handlers are load-bearing enough to matter, and all three are already recorded above: the connector idempotency pre-check, the per-phone distributed lock, and the prescription reminder dedup insert, whose failure is logged and lets the reminder resend on the next five-minute tick.</p>
+    <p>The general pattern is good. Failures that would lose a patient message raise rather than return; the webhook re-raises after logging so the dead-letter path can see it; and the codebase distinguishes a transient database error from a permanent tenant-resolution failure and routes them to different retry budgets. The place the pattern breaks is the erasure path, which is section S.</p>
+    <p>Failure injection has not been exercised against the deployed system. Every claim about behaviour during a database outage, a Meta timeout or a container restart is derived from reading the handlers, not from watching them run.</p>
+  </div>
+</section>
+
+<section id="qr">
+  <div class="sec-head"><span class="sec-letter">Q–R</span><h2>Observability and AI safety findings</h2></div>
+  <div class="prose">
+    <p><b>Observability.</b> Sixteen named counters cover the failure modes that matter — dead letters, fail-open windows, lock theft, unmatched payments, slot contention, refund failures, reaped claims, unreconstructable recoveries. Correlation identifiers are threaded through requests and returned on the response. The metrics endpoint is authenticated. Phone numbers are masked in logs at every site checked. What is missing is everything downstream: no dashboard definitions, no alert routing, and no service-level objectives are present in the repository, so whether anyone is actually paged when the dead-letter counter climbs is unknown. The alerting that does exist sends WhatsApp messages to an administrator, which is a notification channel, not a monitoring system.</p>
+    <p><b>AI safety.</b> This is the cleanest area in the audit. The model is never authoritative: a deterministic clinical firewall intercepts medication, dosage and diagnosis requests before any model call, so the model is not even consulted on the questions that carry medical liability. Intent classification output is validated against a fixed whitelist and falls back to keywords on anything unexpected, on malformed output, and on provider failure. Prompt-injection detection routes straight to the deterministic path rather than to a sanitised prompt. Nothing in the model's output reaches a booking, a payment amount, a tenant selection or an authorisation decision.</p>
+  </div>
+</section>
+
+<section id="st">
+  <div class="sec-head"><span class="sec-letter">S–T</span><h2>Privacy and deployment findings</h2></div>
+  <div class="docket">
+    <article class="find sev-p2">
+      <div class="find-head"><span class="chip chip-sev">P2</span><span class="chip chip-id">KA-A-06</span><span class="chip chip-area">Privacy · Data lifecycle</span></div>
+      <h3>Erasure leaves named copies of the patient's phone number, and reports success regardless</h3>
+      <dl>
+        <dt>Location</dt><dd class="loc">app/services/data_retention.py:174–380 · app/database.py:1179–1220.</dd>
+        <dt>What works</dt><dd>The tiered design is sound and unusually complete for its stage: clinical rows are anonymised rather than deleted to satisfy medical retention, conversations and analytics are deleted outright, stored report files are removed from object storage before the row is redacted, the durable inbound queue is pseudonymised while keeping the message identifier as an anti-replay tombstone, and the whole operation is written to an audit log.</dd>
+        <dt>What remains</dt><dd>Four named copies survive. The patient row keeps its phone number — only the name and consent flags are cleared, and the phone number is the identifier. The outbound message ledger stores the recipient phone as a non-null column, is never touched by erasure, and has no purge job of any kind. The failed-message queue retains the phone and the message payload, purged on a 30-day timer but not on request. And the admin audit log's detail payloads are not reviewed for patient content.</dd>
+        <dt>Worse</dt><dd>The deletion entry point returns success whenever no exception escapes, without inspecting the per-table error list the anonymisation function carefully collects. A patient can be told their data is gone while the lab-report redaction silently failed.</dd>
+        <dt>Fix</dt><dd>Redact or hash the patient phone; pseudonymise the outbound ledger and give it a retention job; include the failed-message queue in erasure; propagate the error list and return failure so the patient is told the truth and an operator is alerted.</dd>
+      </dl>
+    </article>
+  </div>
+  <div class="prose" style="margin-top:18px">
+    <p><b>Deployment.</b> The image is sound: non-root user, tini as process 1 to reap browser zombies, the timezone pinned to the one every naive datetime in the codebase assumes, the browser path fixed so the runtime user finds what the build user installed, health and readiness probes wired, migrations run as a pre-deploy step, and a bounded drain of in-flight background work on shutdown. Both main-branch services auto-deploy together so the web service and the connector worker cannot sit on different commits.</p>
+    <p>Two things need attention. Test tooling ships in the production image because pytest and its asyncio plugin are in the runtime requirements file. And the audit could not confirm that the declared topology matches the provisioned tier — the concurrency reasoning throughout the code is written for four web processes, and if the live tier runs one, several of the distributed-correctness arguments are being tested for the first time on the day it scales.</p>
+  </div>
+</section>
+
+<section id="u">
+  <div class="sec-head"><span class="sec-letter">U</span><h2>Test coverage gaps</h2></div>
+  <div class="prose" style="margin-bottom:18px"><p>1,803 tests were collected across 171 files. The volume is real and much of it is behavioural rather than mock-shaped. These are the gaps that matter.</p></div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Gap</th><th>Consequence</th></tr></thead>
+      <tbody>
+        <tr><td>No hermetic run</td><td>The suite's green state depends on production credentials, so the result is neither reproducible nor safe to run. See KA-A-03.</td></tr>
+        <tr><td>No schema-nullability assertions</td><td>KA-A-01 is invisible to every test because all of them supply a tenant identifier.</td></tr>
+        <tr><td>Real-PostgreSQL tests excluded from the main job</td><td>The concurrency evidence that matters most is not part of the everyday signal.</td></tr>
+        <tr><td>No multi-process test</td><td>Distributed lock behaviour is tested within one process. The one multi-worker test boots a real server and is the known cause of a production incident; it is excluded rather than fixed.</td></tr>
+        <tr><td>No failure-injection tests</td><td>Nothing exercises a database outage, a Meta timeout or a mid-transaction restart against running code.</td></tr>
+        <tr><td>Cross-tenant tests that need a database</td><td>Three staff-route isolation tests fail as network errors instead of asserting a rejection, so they prove nothing when the database is absent.</td></tr>
+        <tr><td>No erasure-completeness test</td><td>Nothing asserts that every table holding the phone number was actually redacted.</td></tr>
+        <tr><td>Test module resolution leaks across repositories</td><td>One failure traceback resolved to a file in a sibling project directory, which means the collected module was not the one in this repository.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="v">
+  <div class="sec-head"><span class="sec-letter">V</span><h2>Capacity model</h2></div>
+  <div class="prose" style="margin-bottom:18px">
+    <p>The existing load-test report states a 95th-percentile latency of 0.17 milliseconds for 200 concurrent webhook requests. That figure is not a load test. Its own header names the harness as a pytest file, and sub-millisecond latency is only achievable in-process with the transport mocked. A Locust file exists and is well written, but no results from it are recorded anywhere in the repository. <b>Deployed capacity is unmeasured.</b></p>
+    <p>What can be derived from the code is a ceiling, not a throughput. Per-process database concurrency is capped at 16 worker threads. At the declared four web processes that is 32 concurrent database calls platform-wide. A single booking turn makes roughly 15 sequential database round-trips plus one model call, so at 50 milliseconds per round-trip a turn occupies a thread for close to a second.</p>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Scale</th><th>Structural verdict</th><th>First constraint to bind</th></tr></thead>
+      <tbody>
+        <tr><td><b>1–10 tenants</b></td><td>Architecture appears adequate. Row counts stay under the 2,000 caps and the sweeps stay inside their leases.</td><td>None expected</td></tr>
+        <tr><td><b>10–100 tenants</b></td><td>Requires load test. Dashboard truncation begins to distort figures for the larger tenants.</td><td>KA-A-04 query caps</td></tr>
+        <tr><td><b>100–1,000 tenants</b></td><td>Not supported without change. Platform-wide scheduler sweeps are single-lease and single-threaded across all tenants.</td><td>KA-A-09 sweep leases; database thread pool</td></tr>
+        <tr><td><b>1,000+ tenants</b></td><td>Not supported. Requires per-tenant job sharding, table partitioning and an archival policy, none of which exist.</td><td>Unbounded ledger and audit tables</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout" style="margin-top:16px">Any statement to a customer about supporting large tenant counts or message volumes is <b>unverified</b> today. The honest formulation is that the architecture appears capable and the capacity is unproven.</div>
+</section>
+
+<section id="w">
+  <div class="sec-head"><span class="sec-letter">W</span><h2>Production readiness scorecard</h2></div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Domain</th><th style="width:118px">Score</th><th>Basis</th></tr></thead>
+      <tbody>
+        <tr><td>AI safety</td><td class="num">85<span class="bar good"><i style="width:85%"></i></span></td><td>Deterministic firewall ahead of the model, output whitelist, keyword fallback. The model is never authoritative.</td></tr>
+        <tr><td>Booking integrity</td><td class="num">84<span class="bar good"><i style="width:84%"></i></span></td><td>Database-enforced uniqueness, real-PostgreSQL contention test, application refuses unguardable rows. Lab bookings uncapped.</td></tr>
+        <tr><td>Payment integrity</td><td class="num">82<span class="bar good"><i style="width:82%"></i></span></td><td>Compare-and-swap throughout, per-tenant secrets with no fallback, refuses to guess a tenant, auto-refunds late payments. Expiry sweep is capacity-bound.</td></tr>
+        <tr><td>Front-end integration</td><td class="num">78<span class="bar good"><i style="width:78%"></i></span></td><td>All 58 call sites resolve; scope appended centrally; session and tenant-boundary errors distinguished. No pagination metadata.</td></tr>
+        <tr><td>WhatsApp reliability</td><td class="num">76<span class="bar"><i style="width:76%"></i></span></td><td>Durable ingestion, dead-letter queue, reaper, recovery job. Per-phone lock fails open.</td></tr>
+        <tr><td>Functional correctness</td><td class="num">72<span class="bar"><i style="width:72%"></i></span></td><td>Core flows implemented with care. 16 tests fail in a hermetic run; several conversation and report paths unproven.</td></tr>
+        <tr><td>Observability</td><td class="num">70<span class="bar"><i style="width:70%"></i></span></td><td>Sixteen well-chosen counters, correlation identifiers, masked phone numbers, authenticated metrics. No dashboards, alerts or objectives.</td></tr>
+        <tr><td>Security</td><td class="num">68<span class="bar mid"><i style="width:68%"></i></span></td><td>Strong webhook and payment cryptography, no committed secrets, fail-closed boot. Platform console on Basic auth alone.</td></tr>
+        <tr><td>Deployment readiness</td><td class="num">66<span class="bar mid"><i style="width:66%"></i></span></td><td>Well-built image, pre-deploy migrations, graceful drain, coupled auto-deploy. Declared topology unconfirmed; test tooling in the runtime image.</td></tr>
+        <tr><td>Multi-tenancy</td><td class="num">65<span class="bar mid"><i style="width:65%"></i></span></td><td>Excellent application-layer discipline resting on a schema that cannot enforce it, plus a resolver that guesses on a missing key.</td></tr>
+        <tr><td>Admin security</td><td class="num">62<span class="bar mid"><i style="width:62%"></i></span></td><td>Revocable sessions, server-side permission checks, branch scope, audit log. No multi-factor, no lockout, weakest control on the most privileged surface.</td></tr>
+        <tr><td>Database integrity</td><td class="num">62<span class="bar mid"><i style="width:62%"></i></span></td><td>Checksummed migrations with pre-flight reports, well-chosen partial indexes. Tenant key nullable; two unbounded tables; three down-migrations for 73 forward.</td></tr>
+        <tr><td>Data privacy</td><td class="num">60<span class="bar mid"><i style="width:60%"></i></span></td><td>Thorough tiered erasure including object storage. Four named residual copies; success reported regardless of partial failure.</td></tr>
+        <tr><td>Connector reliability</td><td class="num">58<span class="bar mid"><i style="width:58%"></i></span></td><td>Correct external-identifier uniqueness and per-connector leasing. At-least-once delivery with a fail-open idempotency pre-check.</td></tr>
+        <tr><td>Operational maturity</td><td class="num">50<span class="bar low"><i style="width:50%"></i></span></td><td>Runbooks and onboarding documents exist. Destructive scripts tracked in the repository; no drill evidence.</td></tr>
+        <tr><td>Test maturity</td><td class="num">48<span class="bar low"><i style="width:48%"></i></span></td><td>1,803 tests, much of it behavioural, undermined by a non-hermetic harness coupled to production data.</td></tr>
+        <tr><td>Scalability</td><td class="num">45<span class="bar low"><i style="width:45%"></i></span></td><td>Row caps with client-side filtering, sequential external calls in sweeps, no partitioning or archival, no measured throughput.</td></tr>
+        <tr><td>Disaster recovery</td><td class="num">35<span class="bar low"><i style="width:35%"></i></span></td><td>No restore drill, no rollback test, almost no down-migrations. This is the least-evidenced domain in the audit.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout" style="margin-top:16px"><b>Overall 65 / 100 — ready for limited pilot.</b> The score is held up by the transaction-critical layers and held down by the schema beneath them, the evidence above them, and disaster recovery beside them. It is not a conditionally-ready system, because the conditions are not cosmetic: two of the five P1 findings compound into a cross-tenant disclosure path, and a third means the launch evidence cannot currently be re-derived by anyone.</div>
+</section>
+
+<section id="x">
+  <div class="sec-head"><span class="sec-letter">X</span><h2>Prioritized remediation plan</h2></div>
+  <div class="prose" style="margin-bottom:18px">
+    <p>Ordered by dependency, not by severity. The database invariant comes first because the application fixes above it are only meaningful once the schema can no longer produce the state they handle. Do not add retries to compensate for a transactional gap.</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 0</span><h3>Establish the tenant invariant in the database</h3><span class="gate">gate: zero orphan rows</span></div>
+    <ul>
+      <li><b>T0.1</b> <s>Null-tenant census</s> — DONE 2026-09-09. Nine core tables clean; KA-A-02 latent. Surfaced KA-A-17: backfill the 28 payment_events rows from their bookings.</li>
+      <li><b>T0.2</b> New migration: pre-flight orphan report, backfill or quarantine, then set the tenant column not-null on all nine tables. Follow the pattern migration 064 already established. Ship a matching down-migration.</li>
+      <li><b>T0.3</b> Change the clinic lookup so the sentinel branch raises. Add an explicit primary-clinic helper for genuine bootstrap that refuses when more than one active clinic exists. Update the twelve call sites to pass a real identifier or handle the exception.</li>
+      <li><b>T0.4</b> Real-PostgreSQL test asserting not-null on every one of the nine columns, plus a unit test that the sentinel raises.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 1</span><h3>Make the evidence reproducible</h3><span class="gate">gate: CI green with no production credentials</span></div>
+    <ul>
+      <li><b>T1.1</b> Root-level conftest that forces test environment variables before the config module is imported, or make settings lazily constructed.</li>
+      <li><b>T1.2</b> Abort collection when the resolved database host is not a recognised test host. This is the guard that stops a test run reaching production.</li>
+      <li><b>T1.3</b> Replace the three hard-coded production clinic identifiers in the patient-metrics tests with fixtures.</li>
+      <li><b>T1.4</b> Triage the 16 hermetic failures individually. Each is either a real regression or fixture drift; both need to be named.</li>
+      <li><b>T1.5</b> Fix or delete the multi-worker smoke test so it can never boot a server against production credentials.</li>
+      <li><b>T1.6</b> Move the real-PostgreSQL suite into the required continuous-integration path.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 2</span><h3>Close the admin and platform security gaps</h3><span class="gate">gate: owner console has sessions and a second factor</span></div>
+    <ul>
+      <li><b>T2.1</b> Give the platform console the session mechanism the clinic console already has: revocable, hashed, HttpOnly, strictly same-site.</li>
+      <li><b>T2.2</b> Add a one-time-password second factor to the platform console and to clinic super-admin accounts.</li>
+      <li><b>T2.3</b> Per-username attempt accounting and lockout, separate from the per-address limiter, with an operator unlock path.</li>
+      <li><b>T2.4</b> Require a hashed owner password; refuse to boot on a plaintext value in production.</li>
+      <li><b>T2.5</b> Delete the two unfiltered reset scripts.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 3</span><h3>Correct the fail-open paths</h3><span class="gate">gate: every degraded window emits a counter</span></div>
+    <ul>
+      <li><b>T3.1</b> Per-phone lock fails closed and defers to the existing retry queue. Emit a phone-lock-degraded counter.</li>
+      <li><b>T3.2</b> Connector idempotency pre-check fails closed and defers the batch.</li>
+      <li><b>T3.3</b> Claim the external report identifier before delivery, promote after; a crash then leaves a claim, not a gap.</li>
+      <li><b>T3.4</b> Propagate the erasure error list; return failure and alert when any table's redaction failed.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 4</span><h3>Complete the privacy lifecycle</h3><span class="gate">gate: no phone number survives erasure</span></div>
+    <ul>
+      <li><b>T4.1</b> Redact or hash the patient phone on erasure.</li>
+      <li><b>T4.2</b> Pseudonymise the outbound message ledger's recipient phone on erasure, and add a retention job for the table.</li>
+      <li><b>T4.3</b> Include the failed-message queue in erasure rather than relying on its 30-day timer.</li>
+      <li><b>T4.4</b> Audit the admin audit log's detail payloads for patient content and redact at write time.</li>
+      <li><b>T4.5</b> Erasure-completeness test that scans every table with a phone column and asserts none holds the erased number.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 5</span><h3>Make dashboards honest at scale</h3><span class="gate">gate: no silently truncated response</span></div>
+    <ul>
+      <li><b>T5.1</b> Push date and status filters into the query for every endpoint that currently filters in Python.</li>
+      <li><b>T5.2</b> Keyset pagination with a cursor and an explicit truncation flag on every capped response; render it in the panel.</li>
+      <li><b>T5.3</b> Reconcile each displayed metric against a direct database query and record the comparison.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 6</span><h3>Booking and sweep capacity</h3><span class="gate">gate: sweeps finish inside their lease under load</span></div>
+    <ul>
+      <li><b>T6.1</b> Bound the expiry sweep by remaining lease time rather than row count; issue provider checks concurrently under a semaphore; emit unprocessed remainder as a counter.</li>
+      <li><b>T6.2</b> Per-branch daily collection capacity for lab bookings, enforced in the booking transaction.</li>
+      <li><b>T6.3</b> Wrap the unlocked scheduler job.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 7</span><h3>Operations</h3><span class="gate">gate: a human is paged on each named counter</span></div>
+    <ul>
+      <li><b>T7.1</b> Dashboards and alert routing for the sixteen existing counters; define objectives for booking failure, payment mismatch, delivery failure and dead-letter depth.</li>
+      <li><b>T7.2</b> Archival policy for the outbound ledger and the connector audit log.</li>
+      <li><b>T7.3</b> Confirm and document the real production topology; reconcile the deployment file with it.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="phase-n">Phase 8</span><h3>Load, failure injection and recovery</h3><span class="gate">gate: measured numbers replace estimates</span></div>
+    <ul>
+      <li><b>T8.1</b> Run the Locust suite against staging on production-shaped infrastructure. Record real latency percentiles, error rate, database connections and queue depth. Retract the current load-test report.</li>
+      <li><b>T8.2</b> Failure injection against staging: database unavailable, Meta timing out, payment provider unavailable, worker killed mid-booking, deploy during an active sweep.</li>
+      <li><b>T8.3</b> Restore drill from backup, and one migration rollback exercised end to end.</li>
+      <li><b>T8.4</b> Multi-instance test proving the distributed locks hold across processes, replacing the smoke test that was excluded.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="y">
+  <div class="sec-head"><span class="sec-letter">Y</span><h2>Required regression tests</h2></div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Invariant</th><th>Test that must exist</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Every row belongs to one clinic</td><td>Real-PostgreSQL assertion that the tenant column is not-null on all nine tables</td><td>Missing</td></tr>
+        <tr><td>A missing tenant identifier is never guessed</td><td>Sentinel values raise rather than resolving to the oldest clinic</td><td>Missing</td></tr>
+        <tr><td>Tenant A cannot read or write tenant B</td><td>Route matrix asserting rejection without any database round-trip, so it holds in CI</td><td>Partial — 3 staff routes fail without a database</td></tr>
+        <tr><td>One doctor, one slot, one active appointment</td><td>Concurrent same-slot insert under real PostgreSQL</td><td>Present</td></tr>
+        <tr><td>One payment confirms one appointment</td><td>Duplicate and reordered webhook delivery against one booking</td><td>Present</td></tr>
+        <tr><td>One inbound message is processed once</td><td>Duplicate message identifier across two processes</td><td>Partial — single-process only</td></tr>
+        <tr><td>One source report reaches one patient once</td><td>Crash between delivery and the dedup write, then re-poll</td><td>Missing</td></tr>
+        <tr><td>One appointment, one queue token</td><td>Concurrent check-in under real PostgreSQL, consultation and lab</td><td>Present</td></tr>
+        <tr><td>Erasure leaves no phone number</td><td>Scan every table with a phone column after erasure</td><td>Missing</td></tr>
+        <tr><td>Sweeps finish inside their lease</td><td>Expiry sweep with a slow payment provider, asserting no lease loss</td><td>Missing</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="z">
+  <div class="sec-head"><span class="sec-letter">Z</span><h2>Final launch gate</h2></div>
+  <div class="prose" style="margin-bottom:18px"><p>A release may be called production ready only when every line below reads pass. Anything not demonstrated is marked not verified, not assumed.</p></div>
+  <ul class="gate-list">
+    <li><span class="box pass">✓</span><span>No unresolved P0</span><span class="gate-state pass">Pass</span></li>
+    <li><span class="box pass">✓</span><span>No booking race producing duplicate active bookings</span><span class="gate-state pass">Pass</span></li>
+    <li><span class="box pass">✓</span><span>No payment consistency defect</span><span class="gate-state pass">Pass</span></li>
+    <li><span class="box pass">✓</span><span>No authentication or authorization bypass</span><span class="gate-state pass">Pass</span></li>
+    <li><span class="box pass">✓</span><span>Webhook idempotency verified</span><span class="gate-state pass">Pass</span></li>
+    <li><span class="box pass">✓</span><span>Front-end and back-end contracts verified</span><span class="gate-state pass">Pass</span></li>
+    <li><span class="box pass">✓</span><span>Admin authorization verified</span><span class="gate-state pass">Pass</span></li>
+    <li><span class="box">□</span><span>No unresolved cross-tenant vulnerability</span><span class="gate-state fail">Fail — KA-A-01, 02</span></li>
+    <li><span class="box">□</span><span>No unresolved wrong-patient delivery risk</span><span class="gate-state fail">Fail — KA-A-11</span></li>
+    <li><span class="box">□</span><span>No unresolved silent critical failure</span><span class="gate-state fail">Fail — KA-A-06, 07, 08</span></li>
+    <li><span class="box">□</span><span>Critical migrations verified</span><span class="gate-state fail">Fail — tenant key nullable</span></li>
+    <li><span class="box">□</span><span>Rollback tested</span><span class="gate-state unk">Not verified</span></li>
+    <li><span class="box">□</span><span>Failure recovery tested</span><span class="gate-state unk">Not verified</span></li>
+    <li><span class="box">□</span><span>Concurrency tested across processes</span><span class="gate-state unk">Not verified</span></li>
+    <li><span class="box">□</span><span>Production-like load tested</span><span class="gate-state unk">Not verified</span></li>
+    <li><span class="box">□</span><span>Monitoring and alerts operational</span><span class="gate-state unk">Not verified</span></li>
+    <li><span class="box">□</span><span>Connector failure behaviour verified</span><span class="gate-state unk">Not verified</span></li>
+    <li><span class="box">□</span><span>Distributed worker behaviour verified</span><span class="gate-state unk">Not verified</span></li>
+  </ul>
+  <div class="callout" style="margin-top:22px"><b>Gate result: not passed.</b> Phase 0 and Phase 1 are the shortest path to a defensible position, and both are small pieces of work — one migration, one resolver change, and a test harness that stops reaching production. Phases 2 through 4 should complete before the platform takes on tenants who do not know each other. Phases 5 through 8 are what turn "appears capable" into "measured".</div>
+</section>
+
+<footer>
+  <span>Kriya AI / MediAssist AI v2.0.0 · main @ 2de7a1e</span>
+  <span>KA-A-01 … KA-A-17 · 0 P0 · 5 P1 · 8 P2 · 4 P3</span>
+</footer>
+
+</div>
