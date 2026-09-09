@@ -4417,7 +4417,14 @@ async function loadPayments() {
         data.bookings.forEach(b => {
             const badge = PAY_STATUS_BADGE[b.status] || b.status;
             const amt = b.amount_paise ? '₹' + (b.amount_paise / 100).toFixed(0) : '—';
-            const payId = b.payment_id ? `<small>${b.payment_id.substring(0, 16)}...</small>` : '—';
+            // A centre with no Razorpay keys books the test and collects at the
+            // counter, so there is money owed but no payment_id. An empty cell
+            // read as "free booking" and the desk collected nothing.
+            const payId = b.payment_id
+                ? `<small>${b.payment_id.substring(0, 16)}...</small>`
+                : (b.payment_state === 'pending'
+                    ? '<span title="Not paid online — collect at the counter" style="color:#f59e0b;font-size:11px;font-weight:600">⏳ Pending</span>'
+                    : '—');
             let actions = `<button class="btn" style="padding:4px 10px;font-size:0.75rem" onclick="showPaymentEvents('${b.id}')">📋 Trail</button>`;
             if (b.status === 'confirmed' && b.payment_id) {
                 actions += ` <button class="btn" style="padding:4px 10px;font-size:0.75rem;color:var(--pink)" onclick="refundBooking('${b.id}')">💸 Refund</button>`;

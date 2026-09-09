@@ -147,7 +147,7 @@ class TestShowList:
             await m._show_lab_test_list(CLINIC, PHONE, {}, "en")
 
         rows, body = _sent_rows(m)
-        assert "Type the test name to search" in body
+        assert "Type the test name" in body
         assert str(len(CATALOGUE)) in body
         assert rows[-1]["title"] == "More options"  # browsing still works
 

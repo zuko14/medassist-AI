@@ -3898,14 +3898,25 @@ class ConversationManager:
             )
             return
 
+        # A sample collection has no doctor, so it gets its own wording. The
+        # .get() default below never fired for a lab booking either: the key
+        # was present with a None value, so the patient was told their
+        # appointment was with "None".
+        is_lab_test = bool(status.get("is_lab_test"))
+        label = status.get("doctor_name") or (
+            "your test" if is_lab_test else "your doctor"
+        )
+
         if not status.get("checked_in"):
             await self.whatsapp.send_text(
                 clinic,
                 phone,
                 get_message(
-                    "queue_status_not_checked_in",
+                    "queue_status_not_checked_in_lab"
+                    if is_lab_test
+                    else "queue_status_not_checked_in",
                     lang,
-                    doctor=status.get("doctor_name", "your doctor"),
+                    **({"test": label} if is_lab_test else {"doctor": label}),
                 ),
             )
             return
@@ -3914,12 +3925,12 @@ class ConversationManager:
             clinic,
             phone,
             get_message(
-                "queue_status_waiting",
+                "queue_status_waiting_lab" if is_lab_test else "queue_status_waiting",
                 lang,
                 token=status["token_number"],
-                doctor=status["doctor_name"],
                 current=status["currently_serving"],
                 ahead=status["patients_ahead"],
+                **({"test": label} if is_lab_test else {"doctor": label}),
             ),
         )
         await log_analytics_event(clinic["id"], phone, "queue_status_checked")
@@ -4474,13 +4485,25 @@ class ConversationManager:
 
         all_rows = []
         for t in shown:
+            name = t["name"]
             price_str = f"₹{t['price_paise'] // 100}"
-            sample_str = f" • {t['sample_type']}" if t.get("sample_type") else ""
-            desc = f"{price_str}{sample_str}"[:72]
+            # Meta truncates a row title at 24 characters. 57 groups in a real
+            # 1,392-test catalogue share their first 24, and 21 of those match
+            # on price and sample type too -- so the patient saw the same row
+            # twice ("17-HYDROXYPROGESTERONE (") with nothing to choose
+            # between them. The cut-off tail is exactly what tells them apart,
+            # so it leads the description, which Meta allows 72 characters for.
+            if len(name) > 24:
+                detail = f"…{name[24:]}"
+            elif t.get("sample_type"):
+                detail = t["sample_type"]
+            else:
+                detail = ""
+            desc = f"{price_str} • {detail}" if detail else price_str
             all_rows.append({
                 "id": f"labtest_{t['id']}",
-                "title": t["name"][:24],
-                "description": desc,
+                "title": name[:24],
+                "description": desc[:72],
             })
 
         rows, page = self._page_rows(all_rows, page, "labtest_more", lang)
@@ -4492,11 +4515,19 @@ class ConversationManager:
                 "te": f'🔍 "{query}" కి సరిపోయే {len(shown)} పరీక్షలు.\n\nక్రింద ట్యాప్ చేసి ఎంచుకోండి, మళ్లీ వెతకడానికి మరో పేరు టైప్ చేయండి, లేదా పూర్తి జాబితాకు "all" పంపండి.',
             }.get(lang, f'{len(shown)} test(s) matching "{query}".')
         elif len(tests) > self.LAB_SEARCH_HINT_THRESHOLD:
+            # Lead with the question, not the catalogue size. A 1,392-test
+            # menu is 155 taps deep at 9 rows a page, so browsing is the
+            # fallback here and typing is the path: the button below says so
+            # too, rather than inviting a tap that cannot finish the job.
             body = {
-                "en": f'We offer {len(tests)} tests.\n\n🔍 *Type the test name to search* — e.g. "thyroid" or "urine sodium".\nOr tap below to browse the full list.',
-                "hi": f'हम {len(tests)} टेस्ट करते हैं।\n\n🔍 *खोजने के लिए टेस्ट का नाम टाइप करें* — जैसे "thyroid"।\nया पूरी सूची देखने के लिए नीचे टैप करें।',
-                "te": f'మేము {len(tests)} పరీక్షలు అందిస్తాము.\n\n🔍 *వెతకడానికి పరీక్ష పేరు టైప్ చేయండి* — ఉదా. "thyroid".\nలేదా పూర్తి జాబితా కోసం క్రింద ట్యాప్ చేయండి.',
-            }.get(lang, f"We offer {len(tests)} tests. Type the test name to search.")
+                "en": f'🧪 *Which test would you like to book?*\n\nType the test name — e.g. "thyroid", "widal" or "vitamin d".\nWe offer {len(tests)} tests, so searching is quicker than browsing.',
+                "hi": f'🧪 *आप कौन सा टेस्ट बुक करना चाहते हैं?*\n\nटेस्ट का नाम टाइप करें — जैसे "thyroid", "widal" या "vitamin d"।\nहमारे पास {len(tests)} टेस्ट हैं, इसलिए खोजना ज़्यादा आसान है।',
+                "te": f'🧪 *మీరు ఏ పరీక్ష బుక్ చేయాలనుకుంటున్నారు?*\n\nపరీక్ష పేరు టైప్ చేయండి — ఉదా. "thyroid", "widal" లేదా "vitamin d".\nమా వద్ద {len(tests)} పరీక్షలు ఉన్నాయి, కాబట్టి వెతకడం సులభం.',
+            }.get(
+                lang,
+                f"Which test would you like to book? Type the test name. "
+                f"We offer {len(tests)} tests.",
+            )
         else:
             body = {
                 "en": "Select a lab test to book your sample collection:",
@@ -4504,11 +4535,27 @@ class ConversationManager:
                 "te": "శాంపిల్ కలెక్షన్ బుక్ చేసుకోవడానికి ల్యాబ్ పరీక్షను ఎంచుకోండి:",
             }.get(lang, "Select a lab test:")
 
-        button_text = {
-            "en": "View Tests",
-            "hi": "टेस्ट देखें",
-            "te": "పరీక్షలు చూడండి",
-        }.get(lang, "View Tests")
+        # Meta caps the button label at 20 characters. "Browse all tests" tells
+        # a patient facing a four-figure catalogue that the tap is the long way
+        # round, where the old "View Tests" implied it was the only way.
+        if query:
+            button_text = {
+                "en": "View results",
+                "hi": "परिणाम देखें",
+                "te": "ఫలితాలు చూడండి",
+            }.get(lang, "View results")
+        elif len(tests) > self.LAB_SEARCH_HINT_THRESHOLD:
+            button_text = {
+                "en": "Browse all tests",
+                "hi": "सभी टेस्ट देखें",
+                "te": "అన్ని పరీక్షలు",
+            }.get(lang, "Browse all tests")
+        else:
+            button_text = {
+                "en": "View Tests",
+                "hi": "टेस्ट देखें",
+                "te": "పరీక్షలు చూడండి",
+            }.get(lang, "View Tests")
 
         await self.whatsapp.send_interactive_list(
             clinic,
@@ -4656,8 +4703,8 @@ class ConversationManager:
         lang: str,
         interactive_data: Optional[dict] = None,
     ) -> None:
-        """Handle patient selecting a collection date and initialize payment-gated booking."""
-        from app.services.payment import payment_service
+        """Handle patient selecting a collection date and create the booking."""
+        from app.services.payment import payment_service, resolve_payment_mode
 
         selected_date = None
         if interactive_data and interactive_data.get("id", "").startswith("labdate_"):
@@ -4673,6 +4720,21 @@ class ConversationManager:
             return
 
         patient_name = (patient or {}).get("name") or context.get("patient_name") or "Patient"
+
+        # A diagnostic centre with no Razorpay keys used to reach
+        # create_booking_with_payment anyway, which asked Razorpay for a payment
+        # link with empty credentials, took a 401, cancelled the row it had just
+        # written and told the patient "We couldn't initialize your booking."
+        # Every lab booking at such a centre died there. Consultations have
+        # always consulted resolve_payment_mode() and booked directly when a
+        # clinic collects at the counter; the lab flow simply never did.
+        payment_mode, _deposit_percent = resolve_payment_mode(clinic)
+
+        if payment_mode == "none":
+            await self._book_lab_test_without_payment(
+                clinic, phone, context, patient, lang, selected_date, patient_name
+            )
+            return
 
         result = await payment_service.create_booking_with_payment(
             # clinic_id and department are required positionally. Omitting them
@@ -4697,7 +4759,14 @@ class ConversationManager:
         )
 
         if not result.get("success"):
-            logger.error(f"Failed to create lab test booking: {result.get('error')}")
+            # create_booking_with_payment reports its cause in "reason"; it has
+            # no "error" key, so this line logged a bare None for every failure
+            # and the Razorpay 401 behind them was only visible in the
+            # payment_events table.
+            logger.error(
+                f"Failed to create lab test booking for clinic {clinic['id']}: "
+                f"{result.get('reason')}"
+            )
             err_msg = {
                 "en": "We couldn't initialize your booking. Please try again or contact the center.",
                 "hi": "हम आपकी बुकिंग शुरू नहीं कर सके। कृपया पुनः प्रयास करें।",
@@ -4726,6 +4795,115 @@ class ConversationManager:
         context["hold_expires_at"] = result["hold_expires_at"]
 
         await self.update_state(clinic, phone, "awaiting_payment", context)
+
+    async def _book_lab_test_without_payment(
+        self,
+        clinic: dict,
+        phone: str,
+        context: dict,
+        patient: Optional[dict],
+        lang: str,
+        selected_date: str,
+        patient_name: str,
+    ) -> None:
+        """Confirm a lab test at a centre that collects payment at the counter.
+
+        The counterpart of the consultation flow's direct-booking path, for a
+        centre whose payment mode resolves to "none". The test is confirmed
+        immediately and the price is quoted as payable on arrival.
+        """
+        from app.database import get_lab_collection_window, format_collection_window
+
+        appointment_data = {
+            "patient_id": (patient or {}).get("id"),
+            "patient_phone": phone,
+            "patient_name": patient_name,
+            "department": "Lab Test",
+            "doctor_name": None,
+            "appointment_date": selected_date,
+            "appointment_time": None,
+            "status": "confirmed",
+            "booking_type": "lab_test",
+            "lab_test_id": context.get("lab_test_id"),
+            "lab_test_name": context.get("lab_test_name"),
+            "amount_paise": context.get("lab_test_price_paise"),
+        }
+        if context.get("branch_id"):
+            appointment_data["branch_id"] = context["branch_id"]
+            appointment_data["branch_name"] = context.get("branch_name") or ""
+
+        result = await book_appointment(clinic["id"], appointment_data)
+
+        if not result.get("success"):
+            logger.error(
+                f"Direct lab test booking failed for clinic {clinic['id']}: "
+                f"{result.get('reason')}"
+            )
+            err_msg = {
+                "en": "We couldn't complete your booking. Please try again or contact the center.",
+                "hi": "हम आपकी बुकिंग पूरी नहीं कर सके। कृपया पुनः प्रयास करें या केंद्र से संपर्क करें।",
+                "te": "మేము మీ బుకింగ్‌ను పూర్తి చేయలేకపోయాము. దయచేసి మళ్లీ ప్రయత్నించండి లేదా కేంద్రాన్ని సంప్రదించండి.",
+            }.get(lang, "We couldn't complete your booking. Please try again.")
+            await self.whatsapp.send_text(clinic, phone, err_msg)
+            await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+            await self._send_main_menu(clinic, phone, lang)
+            return
+
+        appointment = result["appointment"]
+        date_display = datetime.strptime(selected_date, "%Y-%m-%d").strftime("%a, %d %b %Y")
+
+        price_line = ""
+        if context.get("lab_test_price_paise"):
+            rupees = context["lab_test_price_paise"] // 100
+            price_line = {
+                "en": f"\n💰 ₹{rupees} — payable at the centre",
+                "hi": f"\n💰 ₹{rupees} — केंद्र पर देय",
+                "te": f"\n💰 ₹{rupees} — కేంద్రంలో చెల్లించాలి",
+            }.get(lang, f"\n💰 ₹{rupees} — payable at the centre")
+
+        window_line = ""
+        try:
+            window = await get_lab_collection_window(
+                clinic, branch_id=context.get("branch_id")
+            )
+            window_line = f"\n🏠 {format_collection_window(window)}"
+        except Exception as e:
+            # The booking is already written; a missing window must not turn a
+            # confirmed test into an error message.
+            logger.warning(f"Could not render collection window for confirmation: {e}")
+
+        prep_line = ""
+        if context.get("lab_test_fasting_required"):
+            prep_line = {
+                "en": "\n\n⚠️ *Fasting required:* 10-12 hours before collection.",
+                "hi": "\n\n⚠️ *उपवास आवश्यक:* सैंपल से 10-12 घंटे पहले।",
+                "te": "\n\n⚠️ *ఉపవాసం అవసరం:* శాంపిల్‌కు 10-12 గంటల ముందు.",
+            }.get(lang, "\n\n⚠️ *Fasting required:* 10-12 hours before collection.")
+
+        header = {
+            "en": "✅ *Lab Test Booked*",
+            "hi": "✅ *लैब टेस्ट बुक हो गया*",
+            "te": "✅ *ల్యాబ్ పరీక్ష బుక్ అయింది*",
+        }.get(lang, "✅ *Lab Test Booked*")
+
+        ref_label = {"en": "Ref", "hi": "संदर्भ", "te": "రెఫ్"}.get(lang, "Ref")
+
+        confirm_text = (
+            f"{header}\n\n"
+            f"🧪 {context.get('lab_test_name')}\n"
+            f"📅 {date_display}"
+            f"{price_line}"
+            f"{window_line}"
+            f"{prep_line}\n\n"
+            f"{ref_label}: `{appointment['booking_ref']}`"
+        )
+
+        await self.whatsapp.send_text(
+            clinic, phone, confirm_text, _source="booking_confirmation"
+        )
+
+        await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+        await self._send_main_menu(clinic, phone, lang)
 
 
 # Global instance

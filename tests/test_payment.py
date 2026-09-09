@@ -43,9 +43,8 @@ os.environ.setdefault("APP_PORT", "8000")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 os.environ.setdefault("ADMIN_USERNAME", "admin")
 os.environ.setdefault("ADMIN_PASSWORD", "admin")
-os.environ.setdefault("RAZORPAY_KEY_ID", "rzp_test_key123")
-os.environ.setdefault("RAZORPAY_KEY_SECRET", "rzp_test_secret456")
-os.environ.setdefault("RAZORPAY_WEBHOOK_SECRET", "test_webhook_secret_789")
+# No RAZORPAY_* env vars: Razorpay credentials are per-clinic only, so an
+# environment variable would configure nothing. Tests pass keys explicitly.
 os.environ.setdefault("BOOKING_FEE_PAISE", "50000")
 os.environ.setdefault("BOOKING_HOLD_MINUTES", "10")
 os.environ.setdefault("REFUND_WINDOW_HOURS", "4")
@@ -124,13 +123,10 @@ class TestResolvePaymentMode:
     def test_defaults_to_none_when_no_keys_and_no_mode_set(self):
         from app.services.payment import resolve_payment_mode
 
-        with patch("app.services.payment.settings.razorpay_key_id", ""), patch(
-            "app.services.payment.settings.razorpay_key_secret", ""
-        ):
-            clinic = {"config": {}}
-            mode, percent = resolve_payment_mode(clinic)
-            assert mode == "none"
-            assert percent == 100
+        clinic = {"config": {}}
+        mode, percent = resolve_payment_mode(clinic)
+        assert mode == "none"
+        assert percent == 100
 
     def test_explicit_none_with_keys_configured_stays_none(self):
         from app.services.payment import resolve_payment_mode
@@ -164,26 +160,65 @@ class TestResolvePaymentMode:
     def test_full_mode_without_keys_fails_safe_to_none(self):
         from app.services.payment import resolve_payment_mode
 
-        with patch("app.services.payment.settings.razorpay_key_id", ""), patch(
-            "app.services.payment.settings.razorpay_key_secret", ""
-        ):
-            clinic = {"config": {"payment_mode": "full"}}
-            mode, percent = resolve_payment_mode(clinic)
-            assert mode == "none"
-            assert percent == 100
+        clinic = {"config": {"payment_mode": "full"}}
+        mode, percent = resolve_payment_mode(clinic)
+        assert mode == "none"
+        assert percent == 100
 
     def test_partial_mode_without_keys_fails_safe_to_none(self):
         from app.services.payment import resolve_payment_mode
 
-        with patch("app.services.payment.settings.razorpay_key_id", ""), patch(
-            "app.services.payment.settings.razorpay_key_secret", ""
+        clinic = {"config": {"payment_mode": "partial", "payment_deposit_percent": 20}}
+        mode, percent = resolve_payment_mode(clinic)
+        assert mode == "none"
+        assert percent == 100
+
+
+class TestPlatformWideKeysAreNotAFallback:
+    """A platform-wide Razorpay key silently routes a keyless clinic's money
+    into the PLATFORM's own Razorpay account, and its webhook secret lets one
+    tenant's webhook verify against another's booking. A clinic's Razorpay
+    identity is its own or it has none.
+    """
+
+    def test_a_clinic_without_its_own_keys_gets_no_credentials(self):
+        from app.services.payment import get_razorpay_creds
+
+        assert get_razorpay_creds({"config": {}}) == ("", "", "")
+        assert get_razorpay_creds({}) == ("", "", "")
+
+    def test_settings_expose_no_platform_wide_razorpay_credentials(self):
+        from app.config import settings
+
+        for attr in (
+            "razorpay_key_id",
+            "razorpay_key_secret",
+            "razorpay_webhook_secret",
         ):
-            clinic = {
-                "config": {"payment_mode": "partial", "payment_deposit_percent": 20}
-            }
-            mode, percent = resolve_payment_mode(clinic)
-            assert mode == "none"
-            assert percent == 100
+            assert not hasattr(settings, attr), (
+                f"settings.{attr} still exists — every clinic without its own "
+                f"keys would collect into the platform's Razorpay account"
+            )
+
+    def test_no_helper_reaches_for_a_global_key(self):
+        """Nine helpers re-applied `key_id or settings.razorpay_key_id`, so
+        fixing get_razorpay_creds alone would not have closed this."""
+        import pathlib
+        import re
+
+        src = pathlib.Path("app/services/payment.py").read_text(encoding="utf-8")
+        offenders = re.findall(r".*settings\.razorpay_.*", src)
+        assert not offenders, offenders
+
+    def test_webhook_signature_fails_closed_without_a_clinic_secret(self):
+        from app.services.payment import PaymentService
+
+        assert (
+            PaymentService().verify_webhook_signature(
+                b'{"event":"payment.captured"}', "deadbeef", webhook_secret=""
+            )
+            is False
+        )
 
 
 class TestWebhookSignatureVerification:
@@ -198,9 +233,12 @@ class TestWebhookSignatureVerification:
         payload = b'{"event":"payment.captured"}'
         signature = _sign_payload(payload)
 
-        with patch("app.services.payment.settings") as mock_settings:
-            mock_settings.razorpay_webhook_secret = WEBHOOK_SECRET
-            assert service.verify_webhook_signature(payload, signature) is True
+        assert (
+            service.verify_webhook_signature(
+                payload, signature, webhook_secret=WEBHOOK_SECRET
+            )
+            is True
+        )
 
     def test_invalid_signature_rejected(self):
         """Tampered signature should be rejected."""
@@ -231,9 +269,10 @@ class TestWebhookSignatureVerification:
         payload = b'{"event":"payment.captured"}'
         signature = _sign_payload(payload)
 
-        with patch("app.services.payment.settings") as mock_settings:
-            mock_settings.razorpay_webhook_secret = ""
-            assert service.verify_webhook_signature(payload, signature) is False
+        assert (
+            service.verify_webhook_signature(payload, signature, webhook_secret="")
+            is False
+        )
 
     def test_tampered_body_detected(self):
         """Signature for original body should not match tampered body."""
@@ -245,9 +284,12 @@ class TestWebhookSignatureVerification:
         tampered = b'{"event":"payment.captured","amount":99999}'
 
         signature = _sign_payload(original)
-        with patch("app.services.payment.settings") as mock_settings:
-            mock_settings.razorpay_webhook_secret = WEBHOOK_SECRET
-            assert service.verify_webhook_signature(tampered, signature) is False
+        assert (
+            service.verify_webhook_signature(
+                tampered, signature, webhook_secret=WEBHOOK_SECRET
+            )
+            is False
+        )
 
 
 class TestPaymentWebhookProcessing:
@@ -282,9 +324,9 @@ class TestPaymentWebhookProcessing:
         payload = json.dumps(payload_dict).encode()
         signature = _sign_payload(payload)
 
-        with patch("app.services.payment.settings") as mock_settings:
-            mock_settings.razorpay_webhook_secret = WEBHOOK_SECRET
-            result = await service.process_payment_webhook(payload, signature)
+        result = await service.process_payment_webhook(
+            payload, signature, webhook_secret=WEBHOOK_SECRET
+        )
 
         assert result["code"] == 200
         assert result["status"] == "ignored"
@@ -343,7 +385,9 @@ class TestPaymentWebhookProcessing:
             mock_table.update.return_value = mock_update
             mock_update.eq.return_value.execute.return_value = MagicMock(data=[])
 
-            result = await service.process_payment_webhook(payload, signature)
+            result = await service.process_payment_webhook(
+                payload, signature, webhook_secret=WEBHOOK_SECRET
+            )
 
         assert result["reason"] == "amount_mismatch"
 
@@ -1068,7 +1112,9 @@ class TestHoldExpiry:
                 MagicMock(data=[])
             )
 
-            res = await service.process_payment_webhook(payload, signature)
+            res = await service.process_payment_webhook(
+                payload, signature, webhook_secret=WEBHOOK_SECRET
+            )
 
             assert res["status"] == "ok"
             assert res["reason"] == "already_confirmed"

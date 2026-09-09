@@ -209,7 +209,16 @@ class TestHandleConfirmingCollectionDate:
     @pytest.mark.asyncio
     async def test_selecting_date_creates_payment_gated_booking(self):
         manager = ConversationManager()
-        clinic = {"id": "clinic-1", "whatsapp_number": "+911111111111"}
+        # Razorpay keys present, so resolve_payment_mode() returns "full". A
+        # centre without them books directly and collects at the counter.
+        clinic = {
+            "id": "clinic-1",
+            "whatsapp_number": "+911111111111",
+            "config": {
+                "razorpay_key_id": "rzp_test_key",
+                "razorpay_key_secret": "rzp_test_secret",
+            },
+        }
         patient = {"id": "patient-1", "name": "Test Patient"}
         context = {"lab_test_id": "t1", "lab_test_name": "CBC", "branch_id": None, "branch_name": None}
 

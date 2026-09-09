@@ -44,22 +44,28 @@ logger = logging.getLogger(__name__)
 
 
 def get_razorpay_creds(clinic: dict) -> tuple[str, str, str]:
-    """Extract Razorpay credentials from a clinic config with global settings fallback.
+    """Extract a clinic's own Razorpay credentials. There is NO global fallback.
 
-    Resolution order (per credential):
-      1. clinic["config"]["razorpay_key_id"]       — per-clinic override
-      2. settings.razorpay_key_id                   — global env-var fallback
+    These keys decide which Razorpay account receives this clinic's patients'
+    money. A platform-wide fallback would mean every clinic that has not
+    entered its own keys silently collects into the PLATFORM's account, and a
+    shared webhook secret would let one tenant's webhook verify against
+    another tenant's booking (the hazard already noted in
+    process_payment_webhook's KA-P2-08 guard).
+
+    A clinic with no keys therefore gets empty strings, resolve_payment_mode()
+    returns "none", and its bookings are confirmed with payment due at the
+    counter instead of being gated behind a gateway it cannot reach.
 
     Returns:
-        (key_id, key_secret, webhook_secret)
+        (key_id, key_secret, webhook_secret) — any of them "" if unconfigured.
     """
     cfg: dict = clinic.get("config") or {}
-    key_id = cfg.get("razorpay_key_id") or settings.razorpay_key_id
-    key_secret = cfg.get("razorpay_key_secret") or settings.razorpay_key_secret
-    webhook_secret = (
-        cfg.get("razorpay_webhook_secret") or settings.razorpay_webhook_secret
+    return (
+        cfg.get("razorpay_key_id") or "",
+        cfg.get("razorpay_key_secret") or "",
+        cfg.get("razorpay_webhook_secret") or "",
     )
-    return key_id, key_secret, webhook_secret
 
 
 def resolve_payment_mode(clinic: dict) -> tuple[str, int]:
@@ -326,10 +332,12 @@ class PaymentService:
         MUST be called BEFORE parsing or trusting any field in the payload.
 
         Args:
-            webhook_secret: Per-clinic webhook secret. Falls back to
-                            settings.razorpay_webhook_secret if None/empty.
+            webhook_secret: This clinic's own webhook secret. There is no
+                            platform-wide fallback: an unconfigured clinic
+                            fails verification closed rather than trusting
+                            a secret shared with other tenants.
         """
-        secret = webhook_secret or settings.razorpay_webhook_secret
+        secret = webhook_secret
         if not signature or not secret:
             return False
 
@@ -1387,8 +1395,8 @@ class PaymentService:
         bypassing booking status checks.
         """
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
-        effective_key_id = key_id or settings.razorpay_key_id
-        effective_key_secret = key_secret or settings.razorpay_key_secret
+        effective_key_id = key_id
+        effective_key_secret = key_secret
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -1788,11 +1796,11 @@ class PaymentService:
         """Create a Razorpay Order via their API.
 
         Args:
-            key_id:     Per-clinic key ID (or global fallback).
-            key_secret: Per-clinic key secret (or global fallback).
+            key_id:     This clinic's own key ID.
+            key_secret: This clinic's own key secret.
         """
-        effective_key_id = key_id or settings.razorpay_key_id
-        effective_key_secret = key_secret or settings.razorpay_key_secret
+        effective_key_id = key_id
+        effective_key_secret = key_secret
 
         if not effective_key_id or not effective_key_secret:
             raise ValueError("Razorpay API credentials not configured")
@@ -1836,8 +1844,8 @@ class PaymentService:
         page), this returns a short_url (rzp.io/i/xxxxx) that works when
         tapped directly from a WhatsApp message on a mobile browser.
         """
-        effective_key_id = key_id or settings.razorpay_key_id
-        effective_key_secret = key_secret or settings.razorpay_key_secret
+        effective_key_id = key_id
+        effective_key_secret = key_secret
 
         # Razorpay requires expire_by >= now + 15 min. Our internal hold is
         # settings.booking_hold_minutes, so use max(hold, 16 min).
@@ -1874,8 +1882,8 @@ class PaymentService:
         key_secret: str = "",
     ) -> str:
         """Check order status from Razorpay (for recovery/expiry path)."""
-        effective_key_id = key_id or settings.razorpay_key_id
-        effective_key_secret = key_secret or settings.razorpay_key_secret
+        effective_key_id = key_id
+        effective_key_secret = key_secret
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -1903,8 +1911,8 @@ class PaymentService:
         recovery check — _check_razorpay_order_status/_get_razorpay_order_payments
         below operate on Orders and never match a real booking.
         """
-        effective_key_id = key_id or settings.razorpay_key_id
-        effective_key_secret = key_secret or settings.razorpay_key_secret
+        effective_key_id = key_id
+        effective_key_secret = key_secret
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -1928,8 +1936,8 @@ class PaymentService:
         key_secret: str = "",
     ) -> dict:
         """Get payment details for a Razorpay order."""
-        effective_key_id = key_id or settings.razorpay_key_id
-        effective_key_secret = key_secret or settings.razorpay_key_secret
+        effective_key_id = key_id
+        effective_key_secret = key_secret
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -1956,8 +1964,8 @@ class PaymentService:
         key_secret: str = "",
     ) -> dict:
         """Call Razorpay Refund API."""
-        effective_key_id = key_id or settings.razorpay_key_id
-        effective_key_secret = key_secret or settings.razorpay_key_secret
+        effective_key_id = key_id
+        effective_key_secret = key_secret
         refund_data = {
             "amount": amount_paise,
             "speed": "normal",

@@ -81,6 +81,9 @@ class TestGetLabTests:
         mock_select = MagicMock()
         mock_select.eq.return_value = mock_select
         mock_select.order.return_value = mock_select
+        # The catalogue read is paged so it can get past PostgREST's 1000-row
+        # response cap; a short page ends the loop.
+        mock_select.range.return_value = mock_select
         mock_select.execute.return_value = mock_result
         
         with patch.object(supabase, "table") as mock_table:

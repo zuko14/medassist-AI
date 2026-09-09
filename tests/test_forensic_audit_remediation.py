@@ -137,7 +137,9 @@ async def test_c2_razorpay_webhook_clinic_scoping():
          patch("hmac.compare_digest", return_value=True):
         
         mock_settings.razorpay_webhook_secret = "secret"
-        res = await service.process_payment_webhook(payload, "valid_sig", clinic_id="clinic-legit")
+        res = await service.process_payment_webhook(
+            payload, "valid_sig", webhook_secret="secret", clinic_id="clinic-legit"
+        )
         # Booking not found under clinic-legit scope
         assert res["status"] == "unmatched"
         assert res["reason"] == "booking_not_found"
@@ -191,7 +193,9 @@ async def test_c3_late_payment_auto_refund_on_expired_hold():
         mock_settings.razorpay_webhook_secret = "secret"
         mock_refund_id.return_value = {"id": "rfd_late_123", "refund_id": "rfd_late_123"}
         
-        res = await service.process_payment_webhook(payload, "valid_sig")
+        res = await service.process_payment_webhook(
+            payload, "valid_sig", webhook_secret="secret"
+        )
         assert res["status"] == "ok"
         assert res["reason"] == "expired_hold_refunded"
         mock_refund_id.assert_called_once()

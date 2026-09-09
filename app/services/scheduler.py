@@ -506,6 +506,11 @@ class SchedulerService:
                     .select("*")
                     .eq("appointment_date", tomorrow)
                     .eq("status", "confirmed")
+                    # Both reminder templates are built from a doctor name and
+                    # a slot time. A lab test has neither -- it reserves a
+                    # collection day at a centre with no doctor -- so it must
+                    # not be swept up here.
+                    .eq("booking_type", "consultation")
                     .eq("reminder_24h_sent", False))
                 )
 
@@ -564,11 +569,25 @@ class SchedulerService:
                     .select("*")
                     .eq("appointment_date", today)
                     .eq("status", "confirmed")
+                    # See send_24h_reminders: lab-test bookings carry no doctor
+                    # and no slot time, so they are not reminder material.
+                    .eq("booking_type", "consultation")
                     .eq("reminder_2h_sent", False))
                 )
 
                 for appt in appointments.data:
-                    appt_time = appt["appointment_time"]
+                    # Second layer behind the booking_type filter above. This
+                    # slice sits OUTSIDE the per-appointment try below, so a
+                    # single row with a NULL appointment_time raised TypeError
+                    # and aborted the sweep for every clinic on the platform,
+                    # not just for that one booking.
+                    appt_time = appt.get("appointment_time")
+                    if not appt_time:
+                        logger.warning(
+                            f"Skipping 2h reminder for appointment {appt.get('id')}: "
+                            f"no appointment_time"
+                        )
+                        continue
                     # Check if appointment is in ~2 hours
                     if appt_time[:5] <= in_2h[:5]:
                         try:

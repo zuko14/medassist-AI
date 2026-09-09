@@ -203,7 +203,17 @@ async def test_lab_test_booking_reaches_the_payment_service():
     """
     from app.services.conversation import conversation_manager
 
-    clinic = {"id": "clinic-1", "name": "Test Clinic"}
+    # Razorpay keys present, so resolve_payment_mode() returns "full" and the
+    # flow takes the payment-gated path this test exists to guard. A centre
+    # with no keys books directly instead, which is its own test.
+    clinic = {
+        "id": "clinic-1",
+        "name": "Test Clinic",
+        "config": {
+            "razorpay_key_id": "rzp_test_key",
+            "razorpay_key_secret": "rzp_test_secret",
+        },
+    }
     context = {
         "lab_test_id": "test-1",
         "lab_test_name": "Lipid Profile",

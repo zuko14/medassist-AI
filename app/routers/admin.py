@@ -2889,13 +2889,19 @@ async def _notify_patient_checked_in(clinic_id: str, appointment: dict) -> None:
         if not status or not status.get("checked_in"):
             return
         clinic = await get_clinic_by_id(clinic_id)
+        # Sample collections have no doctor; the consultation template would
+        # render "Doctor: *None*" for them.
+        is_lab_test = bool(status.get("is_lab_test"))
+        label = status.get("doctor_name") or (
+            "your test" if is_lab_test else "your doctor"
+        )
         msg = get_message(
-            "queue_status_waiting",
+            "queue_status_waiting_lab" if is_lab_test else "queue_status_waiting",
             "en",
             token=status["token_number"],
-            doctor=status["doctor_name"],
             current=status["currently_serving"],
             ahead=status["patients_ahead"],
+            **({"test": label} if is_lab_test else {"doctor": label}),
         )
         await whatsapp_service.send_text(clinic, phone, msg, _source="admin")
     except Exception as e:
@@ -3221,6 +3227,32 @@ async def _annotate_refund_state(bookings: list[dict]) -> None:
             b["refund_state"] = "none"
 
 
+def _annotate_payment_state(bookings: list[dict]) -> None:
+    """Attach a `payment_state` to each booking, in place.
+
+    Derived, not stored: the appointments table has no payment_status column
+    and does not need one, since payment_id plus amount_paise already say
+    everything.
+
+    A centre with no Razorpay keys books the test and collects at the counter,
+    so the row carries an amount but no payment_id. The list rendered that as
+    an empty Payment ID cell, which looks exactly like a free booking — the
+    front desk could not see there was money still to collect.
+
+    States: 'paid' | 'pending' | 'not_required'.
+    """
+    live = ("confirmed", "pending_payment", "pending_review")
+    for b in bookings:
+        if b.get("payment_id"):
+            b["payment_state"] = "paid"
+        elif (b.get("amount_paise") or 0) > 0 and b.get("status") in live:
+            b["payment_state"] = "pending"
+        else:
+            # Nothing owed, or the booking is cancelled/expired so nobody is
+            # going to collect it.
+            b["payment_state"] = "not_required"
+
+
 @router.get("/bookings")
 async def get_bookings(
     clinic_id: str = "default",
@@ -3259,6 +3291,7 @@ async def get_bookings(
         result = await sb(query.order("created_at", desc=True).limit(limit))
         bookings = result.data or []
         await _annotate_refund_state(bookings)
+        _annotate_payment_state(bookings)
         return {"bookings": bookings}
     except Exception as e:
         logger.error(f"Error getting bookings: {e}")

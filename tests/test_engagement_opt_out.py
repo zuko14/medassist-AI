@@ -220,10 +220,16 @@ async def test_opted_out_patient_still_gets_appointment_reminders():
     """Silencing a reminder would make an opted-out patient miss their slot."""
     db = MagicMock()
     table = MagicMock()
-    (table.select.return_value.eq.return_value.eq.return_value
-        .eq.return_value.execute.return_value) = MagicMock(
-            data=[_appt(status="confirmed", doctor_name="Dr. Rao",
-                        appointment_time="10:00", reminder_24h_sent=False)])
+    # Self-returning .eq so the fixture does not pin the exact number of
+    # filters the sweep applies -- it grew one (booking_type) and this test
+    # went quiet rather than failing on anything it actually asserts.
+    select = MagicMock()
+    select.eq.return_value = select
+    select.execute.return_value = MagicMock(
+        data=[_appt(status="confirmed", doctor_name="Dr. Rao",
+                    appointment_time="10:00", reminder_24h_sent=False,
+                    booking_type="consultation")])
+    table.select.return_value = select
     db.table.return_value = table
     send = AsyncMock(return_value=True)
 

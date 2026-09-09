@@ -169,9 +169,16 @@ class Settings(BaseSettings):
     conversation_purge_days: int = 30  # DPDP minimization: 30-day chat log purge
 
     # Razorpay Payment Gateway
-    razorpay_key_id: str = ""  # From Razorpay Dashboard → Settings → API Keys
-    razorpay_key_secret: str = ""  # Keep this secret — never expose in frontend
-    razorpay_webhook_secret: str = ""  # From Razorpay Dashboard → Webhooks → Secret
+    #
+    # There are deliberately NO platform-wide Razorpay credentials here. A
+    # clinic's keys decide which Razorpay account receives its patients' money,
+    # so a global key would mean every clinic that has not entered its own
+    # silently collects into the PLATFORM's account, and a global webhook
+    # secret would let one tenant's webhook verify against another tenant's
+    # booking. Keys live in clinics.config and are read only through
+    # app/services/payment.py:get_razorpay_creds(). A clinic with none simply
+    # does not collect online — resolve_payment_mode() returns "none" and the
+    # booking is confirmed with payment due at the counter.
     booking_fee_paise: int = (
         50000  # Fallback fee (₹500) if doctor has no consultation_fee
     )

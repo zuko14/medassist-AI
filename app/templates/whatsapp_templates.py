@@ -199,6 +199,10 @@ MESSAGES = {
         "queue_status_waiting": "🎫 *Live OPD Token Status*\n\nYour Token Number: *#{token}*\nDoctor: *{doctor}*\nCurrently Serving: *#{current}*\nPatients Ahead of You: *{ahead}*\n\nPlease be near the OPD waiting area when your token is close.",
         "queue_status_not_checked_in": "You have an appointment today with *{doctor}*, but have not checked in yet.\n\nPlease visit the reception desk to collect your OPD token number.",
         "queue_your_turn": "🔔 *It's your turn now!*\n\nToken Number: *#{token}*\nDoctor: *{doctor}*\n\nPlease proceed to the consultation room.",
+        # A sample-collection queue has no doctor, so the consultation wording
+        # rendered "Doctor: *None*" at a diagnostics centre.
+        "queue_status_waiting_lab": "🎫 *Sample Collection Token*\n\nYour Token Number: *#{token}*\nTest: *{test}*\nCurrently Serving: *#{current}*\nPeople Ahead of You: *{ahead}*\n\nPlease stay near the collection area when your token is close.",
+        "queue_status_not_checked_in_lab": "You have a sample collection booked today for *{test}*, but have not checked in yet.\n\nPlease visit the reception desk to collect your token.",
         "queue_status_none": "You don't have a confirmed appointment scheduled for today.\n\nType *book* to schedule an appointment.",
         "cancellation_policy_note": "ℹ️ Cancellation Policy: Free cancellation with full refund is available up to {hours} hours before your slot (before {cutoff}).",
         "cancellation_policy_note_anytime": "ℹ️ Cancellation Policy: Free cancellation with full refund is available any time before your appointment starts (before {cutoff}).",
@@ -247,6 +251,8 @@ MESSAGES = {
         "queue_status_waiting": "🎫 *ओपीडी टोकन स्थिति*\n\nआपका टोकन नंबर: *#{token}*\nडॉक्टर: *{doctor}*\nवर्तमान टोकन: *#{current}*\nआपसे आगे मरीज: *{ahead}*\n\nकृपया टोकन पास आने पर प्रतीक्षा क्षेत्र में उपस्थित रहें।",
         "queue_your_turn": "🔔 *अब आपकी बारी है!*\n\nटोकन नंबर: *#{token}*\nडॉक्टर: *{doctor}*\n\nकृपया परामर्श कक्ष में जाएं।",
         "queue_status_not_checked_in": "आज आपका *{doctor}* के साथ अपॉइंटमेंट है, लेकिन आपने अभी तक चेक-इन नहीं किया है।\n\nकृपया अपना ओपीडी टोकन लेने के लिए रिसेप्शन पर संपर्क करें।",
+        "queue_status_waiting_lab": "🎫 *सैंपल कलेक्शन टोकन*\n\nआपका टोकन नंबर: *#{token}*\nटेस्ट: *{test}*\nवर्तमान टोकन: *#{current}*\nआपसे आगे: *{ahead}*\n\nकृपया टोकन पास आने पर कलेक्शन क्षेत्र में उपस्थित रहें।",
+        "queue_status_not_checked_in_lab": "आज आपका *{test}* के लिए सैंपल कलेक्शन बुक है, लेकिन आपने अभी तक चेक-इन नहीं किया है।\n\nकृपया अपना टोकन लेने के लिए रिसेप्शन पर संपर्क करें।",
         "queue_status_none": "आज के लिए आपका कोई कन्फर्म अपॉइंटमेंट नहीं है।\n\nअपॉइंटमेंट बुक करने के लिए *book* लिखें।",
         "cancellation_policy_note": "ℹ️ रद्दीकरण नीति: आपके स्लॉट से {hours} घंटे पहले ({cutoff} से पहले) तक पूर्ण रिफंड के साथ रद्दीकरण उपलब्ध है।",
         "cancellation_policy_note_anytime": "ℹ️ रद्दीकरण नीति: अपॉइंटमेंट शुरू होने से पहले ({cutoff} से पहले) कभी भी पूर्ण रिफंड के साथ रद्द कर सकते हैं।",
@@ -295,6 +301,8 @@ MESSAGES = {
         "queue_status_waiting": "🎫 *లైవ్ ఓపీడీ టోకెన్ స్థితి*\n\nమీ టోకెన్ నంబర్: *#{token}*\nడాక్టర్: *{doctor}*\nప్రస్తుతం చూస్తున్న టోకెన్: *#{current}*\nమీ ముందున్న రోగులు: *{ahead}*\n\nదయచేసి మీ టోకెన్ దగ్గరకు వచ్చినప్పుడు వెయిటింగ్ ఏరియాలో ఉండండి.",
         "queue_your_turn": "🔔 *ఇప్పుడు మీ వంతు వచ్చింది!*\n\nటోకెన్ నంబర్: *#{token}*\nడాక్టర్: *{doctor}*\n\nదయచేసి కన్సల్టేషన్ గదికి వెళ్లండి.",
         "queue_status_not_checked_in": "ఈరోజు మీకు *{doctor}* తో అపాయింట్‌మెంట్ ఉంది, కానీ మీరు ఇంకా చెక్-ఇన్ చేయలేదు.\n\nదయచేసి మీ ఓపీడీ టోకెన్ తీసుకోవడానికి రిసెప్షన్ డెస్క్‌ను సంప్రదించండి.",
+        "queue_status_waiting_lab": "🎫 *శాంపిల్ కలెక్షన్ టోకెన్*\n\nమీ టోకెన్ నంబర్: *#{token}*\nపరీక్ష: *{test}*\nప్రస్తుతం చూస్తున్న టోకెన్: *#{current}*\nమీ ముందు ఉన్నవారు: *{ahead}*\n\nదయచేసి మీ టోకెన్ దగ్గరకు వచ్చినప్పుడు కలెక్షన్ ఏరియాలో ఉండండి.",
+        "queue_status_not_checked_in_lab": "ఈరోజు మీకు *{test}* కోసం శాంపిల్ కలెక్షన్ బుక్ చేయబడింది, కానీ మీరు ఇంకా చెక్-ఇన్ చేయలేదు.\n\nదయచేసి మీ టోకెన్ కోసం రిసెప్షన్‌ను సంప్రదించండి.",
         "queue_status_none": "ఈరోజు కోసం మీకు ఎటువంటి అపాయింట్‌మెంట్ షెడ్యూల్ చేయబడలేదు.\n\nఅపాయింట్‌మెంట్ బుక్ చేసుకోవడానికి *book* అని టైప్ చేయండి.",
         "cancellation_policy_note": "ℹ️ రద్దు విధానం: మీ స్లాట్‌కు {hours} గంటల ముందు వరకు ({cutoff} లోపు) పూర్తి వాపసుతో రద్దు అందుబాటులో ఉంది.",
         "cancellation_policy_note_anytime": "ℹ️ రద్దు విధానం: అపాయింట్‌మెంట్ ప్రారంభం కాకముందు ({cutoff} లోపు) ఎప్పుడైనా పూర్తి వాపసుతో రద్దు చేసుకోవచ్చు.",

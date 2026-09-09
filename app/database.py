@@ -538,6 +538,14 @@ async def get_doctors(
         return []
 
 
+# One page of a lab-test catalogue read. Matches PostgREST's own default cap,
+# so a catalogue that fits in one response still costs exactly one round trip.
+_CATALOG_PAGE_ROWS = 1000
+# Refuse to page forever if a misconfigured filter ever matches unboundedly.
+# The largest real catalogue on the platform is ~1,400 tests.
+_CATALOG_MAX_ROWS = 20000
+
+
 async def get_lab_tests(
     clinic_id: str, branch_id: Optional[str] = None, active_only: bool = True
 ) -> list:
@@ -547,11 +555,36 @@ async def get_lab_tests(
     the branch_id filter (mirrors the catalog's "unset = all branches" rule).
     """
     try:
-        query = scoped_query("lab_tests", clinic_id)
-        if active_only:
-            query = query.eq("is_active", True)
-        result = await sb(query.order("name"))
-        tests = result.data or []
+        # PostgREST caps any single response at 1000 rows. A diagnostics client
+        # with a 1392-test catalogue therefore lost its last 392 tests, and
+        # because the search filters THIS list in Python rather than in the
+        # database, those tests were unfindable as well as unbookable: 7 of the
+        # 10 "thyroid" tests -- the very example the bot prints as a hint -- and
+        # both "widal" tests were past the cut. Nothing logged; the catalogue
+        # simply ended early. Page until the server stops returning rows.
+        tests: list = []
+        while True:
+            query = scoped_query("lab_tests", clinic_id)
+            if active_only:
+                query = query.eq("is_active", True)
+            page = await sb(
+                query.order("name").range(len(tests), len(tests) + _CATALOG_PAGE_ROWS - 1)
+            )
+            rows = page.data or []
+            tests.extend(rows)
+            # A short page means the catalogue is exhausted, so a clinic under
+            # the cap still costs exactly one round trip. This reads a full page
+            # as "there may be more" precisely because _CATALOG_PAGE_ROWS is set
+            # to the server's own cap -- keep the two equal, or a short first
+            # page becomes ambiguous and the tail is silently dropped again.
+            if len(rows) < _CATALOG_PAGE_ROWS:
+                break
+            if len(tests) >= _CATALOG_MAX_ROWS:
+                logger.error(
+                    f"lab_tests catalogue for clinic {clinic_id} hit the "
+                    f"{_CATALOG_MAX_ROWS}-row ceiling — results are truncated"
+                )
+                break
         if branch_id:
             tests = [
                 t for t in tests if not t.get("branch_id") or t["branch_id"] == branch_id
@@ -957,22 +990,30 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
         # reports "free" for a slot the index will reject, and it hid the
         # KA-P0-01 double-booking because a branch-carrying booking could not
         # see a conflicting branch-less one.
-        conflict_query = (
-            supabase.table("appointments")
-            .select("id")
-            .eq("clinic_id", clinic_id)
-            .eq("appointment_date", data["appointment_date"])
-            .eq("appointment_time", data["appointment_time"])
-            .eq("doctor_id", data["doctor_id"])
-        )
+        # Consultations only. A lab test carries no doctor_id and no
+        # appointment_time -- it reserves a collection DAY, not a minute -- so
+        # indexing data["doctor_id"] here raised KeyError and the caller
+        # reported a generic booking failure to the patient. Skipping the
+        # pre-check loses nothing either: both uniqueness indexes from
+        # migration 064 are predicated on booking_type = 'consultation', so
+        # there is no constraint for a lab row to pre-empt.
+        if data.get("booking_type", "consultation") == "consultation":
+            conflict_query = (
+                supabase.table("appointments")
+                .select("id")
+                .eq("clinic_id", clinic_id)
+                .eq("appointment_date", data["appointment_date"])
+                .eq("appointment_time", data["appointment_time"])
+                .eq("doctor_id", data["doctor_id"])
+            )
 
-        conflict = (
-            await sb(conflict_query
-            .in_("status", ["confirmed", "pending_payment", "pending_review"]))
-        )
+            conflict = (
+                await sb(conflict_query
+                .in_("status", ["confirmed", "pending_payment", "pending_review"]))
+            )
 
-        if conflict.data:
-            return {"success": False, "reason": "slot_taken"}
+            if conflict.data:
+                return {"success": False, "reason": "slot_taken"}
 
         # Bounded retry: a booking_ref collision must NOT be reported to the
         # patient as "slot_taken" (KRIYA-001). Only the partial slot unique
@@ -1183,6 +1224,29 @@ async def delete_patient_data(clinic_id: str, phone: str) -> bool:
 delete_patient = delete_patient_data
 
 
+def apply_queue_key(query, doctor_name: Optional[str], branch_id: Optional[str], appointment_date: str):
+    """Narrow `query` to the one queue a patient actually stands in that day.
+
+    A lab-test booking has doctor_name = NULL by design (migration 039), and
+    `.eq(col, None)` never matches a NULL row in PostgREST. Keying such a row
+    on the doctor therefore matched nothing: check-in handed EVERY
+    sample-collection walk-in token #1, and the queue-position lookup told
+    every one of them nobody was ahead. Lab rows are keyed on the collection
+    centre instead.
+
+    Shared by check_in_appointment() and get_patient_queue_status() because the
+    two must agree on what a queue is — they did not, and only one of them had
+    been taught about lab bookings.
+    """
+    query = query.eq("appointment_date", appointment_date)
+    if doctor_name is not None:
+        return query.eq("doctor_name", doctor_name)
+    query = query.is_("doctor_name", "null")
+    if branch_id is None:
+        return query.is_("branch_id", "null")
+    return query.eq("branch_id", branch_id)
+
+
 async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[dict]:
     """Assign the next sequential token number for this appointment's queue.
 
@@ -1214,27 +1278,15 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     branch_id = appt_result.data[0].get("branch_id")
     appointment_date = appt_result.data[0]["appointment_date"]
 
-    # A lab-test booking has doctor_name = NULL by design (migration 039). The
-    # doctor queue key is therefore meaningless for it, and `.eq(col, None)`
-    # never matches a NULL row in PostgREST — so the max-token lookup returned
-    # nothing and EVERY sample-collection walk-in was handed token #1. Lab rows
-    # get their own queue key instead: the collection centre (branch) for the
-    # day, which is the queue a patient actually stands in.
-    def _apply_queue_key(query):
-        query = query.eq("appointment_date", appointment_date)
-        if doctor_name is None:
-            query = query.is_("doctor_name", "null")
-            if branch_id is None:
-                query = query.is_("branch_id", "null")
-            else:
-                query = query.eq("branch_id", branch_id)
-            return query
-        return query.eq("doctor_name", doctor_name)
-
     max_retries = 5
     for attempt in range(max_retries):
         max_result = (
-            await sb(_apply_queue_key(scoped_query("appointments", clinic_id, "token_number"))
+            await sb(apply_queue_key(
+                scoped_query("appointments", clinic_id, "token_number"),
+                doctor_name,
+                branch_id,
+                appointment_date,
+            )
             .order("token_number", desc=True)
             .limit(1))
         )
@@ -1323,13 +1375,26 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
             return None
 
         appt = result.data[0]
+        # A lab booking carries no doctor. Passing its NULL doctor_name
+        # straight back rendered "Doctor: *None*" to the patient, so the
+        # caller gets the test name and a flag to pick the right wording.
+        is_lab_test = appt.get("booking_type") == "lab_test"
+        label = appt.get("lab_test_name") if is_lab_test else appt.get("doctor_name")
+
         if not appt.get("token_number"):
-            return {"checked_in": False, "doctor_name": appt.get("doctor_name")}
+            return {
+                "checked_in": False,
+                "is_lab_test": is_lab_test,
+                "doctor_name": label,
+            }
 
         serving_result = (
-            await sb(scoped_query("appointments", clinic_id, "token_number")
-            .eq("doctor_name", appt["doctor_name"])
-            .eq("appointment_date", date_str)
+            await sb(apply_queue_key(
+                scoped_query("appointments", clinic_id, "token_number"),
+                appt.get("doctor_name"),
+                appt.get("branch_id"),
+                date_str,
+            )
             .in_("queue_status", ["waiting", "in_consultation"])
             .order("token_number")
             .limit(1))
@@ -1341,10 +1406,11 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
 
         return {
             "checked_in": True,
+            "is_lab_test": is_lab_test,
             "token_number": appt["token_number"],
             "currently_serving": currently_serving,
             "patients_ahead": patients_ahead,
-            "doctor_name": appt["doctor_name"],
+            "doctor_name": label,
         }
     except Exception as e:
         logger.error(f"Error getting patient queue status: {e}")
