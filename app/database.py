@@ -568,7 +568,13 @@ async def get_lab_tests(
             if active_only:
                 query = query.eq("is_active", True)
             page = await sb(
-                query.order("name").range(len(tests), len(tests) + _CATALOG_PAGE_ROWS - 1)
+                # .order("id") is the tiebreak, not decoration: name is not
+                # unique, and per-branch catalogues make same-name rows normal.
+                # Two rows tied on the sort key can otherwise land in a
+                # different order on each page request, repeating one and
+                # dropping the other at the page boundary.
+                query.order("name").order("id")
+                .range(len(tests), len(tests) + _CATALOG_PAGE_ROWS - 1)
             )
             rows = page.data or []
             tests.extend(rows)
@@ -589,24 +595,74 @@ async def get_lab_tests(
             tests = [
                 t for t in tests if not t.get("branch_id") or t["branch_id"] == branch_id
             ]
+            # A branch row sharing a name with an all-branches row is an
+            # OVERRIDE, not a second test. A chain imports one shared catalogue
+            # for every centre, then re-imports one centre's own prices;
+            # without this the patient sees that name twice, at two prices,
+            # with no way to tell which row they are about to book.
+            overridden = {
+                (t.get("name") or "").strip().lower()
+                for t in tests
+                if t.get("branch_id")
+            }
+            if overridden:
+                tests = [
+                    t
+                    for t in tests
+                    if t.get("branch_id")
+                    or (t.get("name") or "").strip().lower() not in overridden
+                ]
         return tests
     except Exception as e:
         logger.error(f"Error getting lab tests: {e}")
         return []
 
 
-async def get_lab_test_by_id(clinic_id: str, lab_test_id: str) -> Optional[dict]:
-    """Get a single active lab test by id, scoped to the clinic."""
+async def get_lab_test_by_id(
+    clinic_id: str, lab_test_id: str, branch_id: Optional[str] = None
+) -> Optional[dict]:
+    """Get a single active lab test by id, scoped to the clinic.
+
+    `branch_id` rejects a test belonging to a DIFFERENT branch. A WhatsApp
+    list stays tappable indefinitely, so a row from the Kukatpally catalogue
+    can arrive after the patient has restarted and chosen Madhapur -- without
+    this check that tap books a test the chosen centre does not offer, at a
+    price it never quoted. A test with no branch_id is offered everywhere and
+    always passes.
+    """
     try:
         result = (
             await sb(scoped_query("lab_tests", clinic_id)
             .eq("id", lab_test_id)
             .eq("is_active", True))
         )
-        return result.data[0] if result.data else None
+        test = result.data[0] if result.data else None
+        if (
+            test
+            and branch_id
+            and test.get("branch_id")
+            and str(test["branch_id"]) != str(branch_id)
+        ):
+            logger.warning(
+                f"Lab test {lab_test_id} is scoped to branch {test['branch_id']} "
+                f"but the patient chose branch {branch_id} -- rejected"
+            )
+            return None
+        return test
     except Exception as e:
         logger.error(f"Error getting lab test {lab_test_id}: {e}")
         return None
+
+
+#: Used when neither the branch nor the clinic has configured hours. Shared
+#: with the admin panel's read endpoint so the hours an admin is shown are the
+#: hours a patient would actually be quoted, rather than a second copy that
+#: can drift.
+DEFAULT_LAB_COLLECTION_WINDOW = {
+    "start": "07:00",
+    "end": "11:00",
+    "days": "Mon,Tue,Wed,Thu,Fri,Sat",
+}
 
 
 async def get_lab_collection_window(clinic: dict, branch_id: Optional[str] = None) -> dict:
@@ -615,13 +671,21 @@ async def get_lab_collection_window(clinic: dict, branch_id: Optional[str] = Non
     Branch-level config takes priority; falls back to clinic-level config
     for single-location clinics; falls back to a hardcoded default if
     neither is configured.
+
+    A chain whose centres keep different hours relies on the first step: the
+    branch the patient chose decides both the hours quoted and, through
+    `days`, which dates are offered at all.
     """
-    default = {"start": "07:00", "end": "11:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat"}
+    default = dict(DEFAULT_LAB_COLLECTION_WINDOW)
     try:
         if branch_id:
             result = (
-                # unscoped: unique_row_key
-                await sb(supabase.table("branches").select("config").eq("id", branch_id))
+                # Scoped by clinic as well as id: branch_id reaches here from
+                # conversation context, and a primary-key read alone would
+                # resolve another tenant's branch config if one ever leaked in.
+                await sb(supabase.table("branches").select("config")
+                .eq("id", branch_id)
+                .eq("clinic_id", clinic["id"]))
             )
             if result.data:
                 window = (result.data[0].get("config") or {}).get("lab_collection")

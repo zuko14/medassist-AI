@@ -44,7 +44,7 @@ HARNESS = textwrap.dedent(
     """
     // ---- minimal DOM ----
     const els = {};
-    for (const id of ['labCsvResults', 'btnUploadLabCsv', 'btnCloseLabCsv', 'f-labCsvFile']) {
+    for (const id of ['labCsvResults', 'btnUploadLabCsv', 'btnCloseLabCsv', 'f-labCsvFile', 'f-labCsvBranch']) {
         els[id] = { id, style: {}, innerHTML: '', textContent: '', disabled: false, value: '', files: [] };
     }
     globalThis.document = { getElementById: (id) => els[id] || null };
@@ -57,16 +57,21 @@ HARNESS = textwrap.dedent(
     globalThis.authHeaders = () => ({ Authorization: 'Basic xxx' });
     let loadCalls = 0;
     globalThis.loadLabTests = () => { loadCalls++; };
+    // Multi-branch chains scope an import to one collection centre; a
+    // single-location clinic leaves the select empty and sends no branch_id.
+    globalThis.labTestBranchName = (id) => 'Branch ' + id;
     globalThis.FormData = class { constructor() { this.parts = []; } append(k, v) { this.parts.push([k, v]); } };
 
     // ---- scripted XHR ----
     let SCRIPT = {};
+    let sentBody = null;
     const seen = [];   // status markup captured at each phase, in order
     globalThis.XMLHttpRequest = class {
         constructor() { this.upload = {}; this.status = 0; this.responseText = ''; }
         open(method, url) { this.method = method; this.url = url; }
         setRequestHeader(k, v) { (this.headers = this.headers || {})[k] = v; }
-        send() {
+        send(body) {
+            sentBody = body;
             setTimeout(() => {
                 if (SCRIPT.progress) {
                     for (const [loaded, total] of SCRIPT.progress) {
@@ -95,6 +100,8 @@ HARNESS = textwrap.dedent(
         els.btnUploadLabCsv.textContent = 'Upload & Import';
         els['f-labCsvFile'].disabled = false;
         els['f-labCsvFile'].files = [{ name: 'catalogue.csv', size: 204800 }];
+        els['f-labCsvBranch'].value = '';
+        sentBody = null;
     }
 
     const failures = [];
@@ -271,6 +278,43 @@ def test_status_text_is_escaped_so_a_filename_cannot_inject_markup():
         els['f-labCsvFile'].files = [{ name: '<img src=x onerror=alert(1)>.csv', size: 1024 }];
         onLabCsvFileChosen();
         check('filename injected raw markup', !/<img /.test(els.labCsvResults.innerHTML),
+              els.labCsvResults.innerHTML);
+        """
+    )
+    _assert_ok(proc)
+
+
+def test_a_single_location_clinic_sends_no_branch_id():
+    """The two live clients post exactly the request they always have."""
+    proc = _run(
+        """
+        reset({ status: 200, responseText: JSON.stringify({ created: 2, updated: 0, total_imported: 2 }) });
+        await submitLabTestCsv();
+        const keys = sentBody.parts.map(p => p[0]);
+        check('branch_id sent by a single-location clinic', !keys.includes('branch_id'), keys.join(','));
+        check('file not sent', keys.includes('file'), keys.join(','));
+        check('scope not named', /all branches/i.test(els.labCsvResults.innerHTML),
+              els.labCsvResults.innerHTML);
+        """
+    )
+    _assert_ok(proc)
+
+
+def test_a_chosen_branch_scopes_the_import_and_is_named_back():
+    proc = _run(
+        """
+        reset({
+            status: 200,
+            responseText: JSON.stringify({
+                created: 12, updated: 3, total_imported: 15, branch_id: 'kpl-uuid', scope: 'branch',
+            }),
+        });
+        els['f-labCsvBranch'].value = 'kpl-uuid';
+        await submitLabTestCsv();
+        const sent = sentBody.parts.find(p => p[0] === 'branch_id');
+        check('branch_id not sent', !!sent, sentBody.parts.map(p => p[0]).join(','));
+        check('wrong branch_id sent', sent && sent[1] === 'kpl-uuid', sent && sent[1]);
+        check('branch not named in the outcome', /Branch kpl-uuid/.test(els.labCsvResults.innerHTML),
               els.labCsvResults.innerHTML);
         """
     )

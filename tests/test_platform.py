@@ -1,6 +1,7 @@
 """Unit & Integration tests for Platform Owner / Super-Admin router and endpoints."""
 
 import base64
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -269,10 +270,18 @@ def test_callmedex_centers_success(mock_supabase, mock_log_action):
         }
     ]
 
+    # reports_delivered_30d counts against a ROLLING window computed at
+    # request time, so absolute timestamps rot: these were fixed August dates
+    # and the "recent" one silently aged out of the window, leaving the test
+    # asserting 1 against a real 0. Anchor them to now instead.
+    now = datetime.now(timezone.utc)
+    recent = (now - timedelta(days=5)).isoformat()
+    stale = (now - timedelta(days=400)).isoformat()
+
     mock_reports = MagicMock()
     mock_reports.execute.return_value.data = [
-        {"clinic_id": "clinic-A", "uploaded_at": "2026-08-05T00:00:00Z"},
-        {"clinic_id": "clinic-A", "uploaded_at": "2025-01-01T00:00:00Z"},
+        {"clinic_id": "clinic-A", "uploaded_at": recent},
+        {"clinic_id": "clinic-A", "uploaded_at": stale},
     ]
 
     def table_router(table_name):

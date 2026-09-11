@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import settings
 from app.database import (
+    DEFAULT_LAB_COLLECTION_WINDOW,
     is_valid_clinic_scope,
     supabase,
     check_in_appointment,
@@ -1306,6 +1307,22 @@ class DoctorUpdate(BaseModel):
 
 class LabTestCreate(BaseModel):
     name: str
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        """Padding is invisible in the panel but not to the catalogue.
+
+        The branch-override rule and the CSV importer both compare on the
+        stripped, lowercased name, and migration 076 keys its unique index the
+        same way. A name stored with padding would therefore be treated as
+        that name everywhere except in its own row.
+        """
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("name must not be empty")
+        return v
+
     sample_type: Optional[str] = None
     prep_instructions: Optional[str] = None
     fasting_required: bool = False
@@ -1324,6 +1341,18 @@ class LabTestCreate(BaseModel):
 
 class LabTestUpdate(BaseModel):
     name: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, v: Optional[str]) -> Optional[str]:
+        """Same rule as LabTestCreate -- see the note there."""
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("name must not be empty")
+        return v
+
     sample_type: Optional[str] = None
     prep_instructions: Optional[str] = None
     fasting_required: Optional[bool] = None
@@ -1655,6 +1684,14 @@ def _friendly_db_error(e: Exception, default: str) -> str:
     """
     msg = str(e).lower()
     if "duplicate" in msg or "unique" in msg:
+        # Keyed on the index name (migration 076): this helper is shared with
+        # the doctor routes, and a catalogue conflict used to be reported as
+        # "A doctor with this name already exists."
+        if "lab_test" in msg:
+            return (
+                "A test with this name already exists in the selected branch. "
+                "Rename it, or edit the existing entry instead."
+            )
         return "A doctor with this name already exists."
     if "foreign key" in msg:
         return "This clinic account isn't linked to a valid clinic. Contact support."
@@ -1663,6 +1700,12 @@ def _friendly_db_error(e: Exception, default: str) -> str:
     if "value too long" in msg:
         return "One of the fields is too long — please shorten it."
     return default
+
+
+def _is_duplicate_error(e: Exception) -> bool:
+    """A unique-constraint violation is the caller's problem, not a 500."""
+    msg = str(e).lower()
+    return "duplicate" in msg or "unique" in msg or "23505" in msg
 
 
 def _apply_slot_config(data: dict) -> dict:
@@ -2064,22 +2107,79 @@ async def delete_doctor(
         raise HTTPException(status_code=500, detail="Failed to delete doctor")
 
 
+#: PostgREST caps ANY single response at this many rows, and a real
+#: diagnostics catalogue runs to ~1,400 tests. A plain .limit(2000) is
+#: therefore silently truncated at 1,000 -- the tail is invisible to the
+#: admin AND invisible to the CSV importer's duplicate check, which then
+#: re-creates every test past the cut. Page instead.
+_LAB_CATALOG_PAGE_ROWS = 1000
+_LAB_CATALOG_MAX_ROWS = 20000
+
+
+async def _fetch_all_lab_tests(build_query, label: str) -> list:
+    """Run `build_query()` repeatedly, paging until the server runs short.
+
+    `build_query` must return a FRESH query each call -- a supabase-py builder
+    accumulates its filters, so reusing one would stack range() headers.
+    """
+    rows: list = []
+    while True:
+        page = await sb(
+            # .order("id") is the tiebreak: name is not unique, and the
+            # branch view unions a branch's rows with the all-branches rows,
+            # so identical names across a page boundary are expected.
+            build_query().order("name").order("id").range(
+                len(rows), len(rows) + _LAB_CATALOG_PAGE_ROWS - 1
+            )
+        )
+        batch = page.data or []
+        rows.extend(batch)
+        if len(batch) < _LAB_CATALOG_PAGE_ROWS:
+            break
+        if len(rows) >= _LAB_CATALOG_MAX_ROWS:
+            logger.error(
+                f"{label} hit the {_LAB_CATALOG_MAX_ROWS}-row ceiling -- truncated"
+            )
+            break
+    return rows
+
+
 @router.get("/lab-tests")
 async def get_lab_tests_admin(
     clinic_id: str = "default",
     branch_id: Optional[str] = None,
     user: AdminUser = Depends(verify_credentials),
 ):
-    """Get the clinic's lab test catalog."""
+    """Get the clinic's lab test catalog.
+
+    With `branch_id`, returns what a patient standing at that centre actually
+    sees: the tests assigned to that branch PLUS the all-branches tests,
+    assembled the same way database.get_lab_tests() assembles the WhatsApp
+    catalogue. Returning only rows tagged with the branch would tell the admin
+    a centre offers nothing while the bot was offering the shared catalogue
+    there -- the two views have to agree or the admin edits the wrong row.
+    """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        # unscoped: tenant-scoped operation with verified clinic authorization
-        query = supabase.table("lab_tests").select("*")
-        query = query.eq("clinic_id", effective_clinic_id)
+        resolved_branch_id = None
         if branch_id:
-            query = query.eq("branch_id", branch_id)
-        result = await sb(query.order("name").limit(2000))
-        return result.data or []
+            # Ownership-checked BEFORE the id reaches a PostgREST filter
+            # string: 404 if it is not this clinic's branch, 403 if the caller
+            # is staff pinned elsewhere. The value used below is the UUID read
+            # back off the row, never the caller's raw text.
+            branch = await resolve_owned_branch(user, branch_id, effective_clinic_id)
+            resolved_branch_id = str(branch["id"])
+
+        def _q():
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            q = supabase.table("lab_tests").select("*").eq("clinic_id", effective_clinic_id)
+            if resolved_branch_id:
+                q = q.or_(f"branch_id.eq.{resolved_branch_id},branch_id.is.null")
+            return q
+
+        return await _fetch_all_lab_tests(_q, f"lab_tests catalogue for clinic {effective_clinic_id}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching lab tests for clinic_id={effective_clinic_id}: {e}")
         raise HTTPException(status_code=500, detail=_friendly_db_error(e, "Failed to fetch lab tests"))
@@ -2139,7 +2239,8 @@ async def create_lab_test(
             f"Error creating lab test for clinic_id={effective_clinic_id}: {e}", exc_info=True
         )
         raise HTTPException(
-            status_code=500, detail=_friendly_db_error(e, "Failed to create lab test")
+            status_code=409 if _is_duplicate_error(e) else 500,
+            detail=_friendly_db_error(e, "Failed to create lab test"),
         )
 
 
@@ -2156,6 +2257,21 @@ async def update_lab_test(
     try:
         if test.branch_id:
             enforce_branch_scope(user, test.branch_id)
+            # create_lab_test has always verified this; the edit path did not,
+            # so a test could be reassigned to another tenant's branch UUID and
+            # then match no branch here -- invisible in every branch view and
+            # unbookable, with nothing to explain why.
+            branch_check = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
+                await sb(supabase.table("branches")
+                .select("id")
+                .eq("id", test.branch_id)
+                .eq("clinic_id", effective_clinic_id))
+            )
+            if not branch_check.data:
+                raise HTTPException(
+                    status_code=400, detail="Selected branch does not belong to your clinic."
+                )
 
         try:
             update_data = test.model_dump(exclude_unset=True, exclude={"price_rupees"})
@@ -2188,7 +2304,8 @@ async def update_lab_test(
     except Exception as e:
         logger.error(f"Error updating lab test {test_id}: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=_friendly_db_error(e, "Failed to update lab test")
+            status_code=409 if _is_duplicate_error(e) else 500,
+            detail=_friendly_db_error(e, "Failed to update lab test"),
         )
 
 
@@ -2275,10 +2392,25 @@ def _normalize_csv_headers(fieldnames: list[str]) -> dict[str, str]:
 @router.post("/lab-tests/import-csv")
 async def import_lab_tests_csv(
     file: UploadFile = File(...),
+    branch_id: Optional[str] = Form(None),
     clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
 ):
     """Atomic bulk-import lab tests from a CSV file.
+
+    `branch_id` chooses the import's scope, and a chain with three collection
+    centres needs both settings:
+
+      omitted  -- the file is the ALL-BRANCHES catalogue (branch_id NULL).
+                  Every centre offers it. This is the only behaviour that
+                  existed before, and stays the default.
+      set      -- the file is that ONE centre's catalogue. A test here
+                  overrides an all-branches test of the same name for that
+                  centre only (see database.get_lab_tests).
+
+    So a chain whose centres share a menu imports once; a chain whose menus
+    differ imports once per centre; a chain that mostly shares imports the
+    common file to all branches and then a small per-centre file on top.
 
     Pipeline:
       1. File size check (max 5MB)
@@ -2286,9 +2418,21 @@ async def import_lab_tests_csv(
       3. Header presence & canonical column resolution (name, price_rupees required)
       4. Complete in-memory pre-flight row validation (max 25k rows, ranges, types, intra-file duplicates)
       5. Rejection gate: if any validation error, return 422 with structured error list and mutate 0 records
-      6. Database upsert phase for validated rows
+      6. Database upsert phase for validated rows, keyed on (name, branch)
     """
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+    # Resolved before a single byte is parsed: a bad branch must fail the
+    # whole import, not half of it. resolve_owned_branch 404s on another
+    # tenant's branch and 403s on a branch this staff account is not pinned to.
+    # isinstance guard, not a cosmetic one: this coroutine is also called
+    # directly (unit tests, internal reuse) without FastAPI's form parsing, and
+    # the parameter then still holds the raw Form() default object.
+    branch_id = (branch_id.strip() or None) if isinstance(branch_id, str) else None
+    if branch_id:
+        branch = await resolve_owned_branch(user, branch_id, effective_clinic_id)
+        branch_id = str(branch["id"])
+
     raw = await file.read()
 
     # 1. File size guard
@@ -2448,6 +2592,7 @@ async def import_lab_tests_csv(
         validated_rows.append(
             {
                 "clinic_id": effective_clinic_id,
+                "branch_id": branch_id,
                 "name": name,
                 "price_paise": int(round(price_rupees_val * 100)),
                 "sample_type": sample_type,
@@ -2472,9 +2617,24 @@ async def import_lab_tests_csv(
     if not validated_rows:
         raise HTTPException(status_code=400, detail="CSV contains no valid data rows.")
 
-    # unscoped: fetching existing lab test names within verified clinic scope for upsert matching
-    existing_result = await sb(supabase.table("lab_tests").select("id, name").eq("clinic_id", effective_clinic_id))
-    existing_map = {r["name"].lower(): r["id"] for r in (existing_result.data or [])}
+    # Existing rows are matched WITHIN the import's own scope. Keying on name
+    # alone made an all-branches re-import pick one same-named branch row at
+    # random and rewrite it, leaving the other centres' rows stale; it also
+    # made a per-branch import impossible, since the first centre's row
+    # swallowed every later centre's. Scope the lookup and both go away.
+    #
+    # Paged, because a 1,392-test catalogue read through a single un-ranged
+    # select came back capped at 1,000: tests 1,001+ looked absent and were
+    # re-CREATED on every re-import, duplicating the tail of the catalogue.
+    def _existing_q():
+        # unscoped: fetching existing lab test names within verified clinic scope for upsert matching
+        q = supabase.table("lab_tests").select("id, name").eq("clinic_id", effective_clinic_id)
+        return q.eq("branch_id", branch_id) if branch_id else q.is_("branch_id", "null")
+
+    existing_rows = await _fetch_all_lab_tests(
+        _existing_q, f"lab_tests upsert lookup for clinic {effective_clinic_id}"
+    )
+    existing_map = {r["name"].strip().lower(): r["id"] for r in existing_rows}
 
     created, updated = 0, 0
     for test_data in validated_rows:
@@ -2493,13 +2653,21 @@ async def import_lab_tests_csv(
         action="import_lab_tests_csv",
         resource_type="lab_test",
         resource_id=None,
-        details={"created": created, "updated": updated, "total": len(validated_rows)},
+        details={
+            "created": created,
+            "updated": updated,
+            "total": len(validated_rows),
+            "branch_id": branch_id,
+            "scope": "branch" if branch_id else "all_branches",
+        },
         ip_address="unknown",
     )
     return {
         "created": created,
         "updated": updated,
         "total_imported": len(validated_rows),
+        "branch_id": branch_id,
+        "scope": "branch" if branch_id else "all_branches",
         "errors": [],
     }
 
@@ -2524,6 +2692,110 @@ async def download_lab_test_csv_template(
             "Content-Disposition": 'attachment; filename="lab_tests_template.csv"'
         },
     )
+
+
+@router.get("/lab-collection-window")
+async def get_lab_collection_window_admin(
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Read the saved sample collection window for a branch, or the clinic.
+
+    There was no way to READ this, so the panel's form always rendered its
+    hardcoded 07:00-11:00 placeholders. An admin who opened the page to change
+    only the operating days saved those placeholders over whatever hours were
+    really configured, and nothing said so.
+
+    `source` tells the panel whether the returned window is the branch's own
+    ("branch"), inherited from the clinic ("clinic"), or the built-in fallback
+    ("default") -- so it can say that saving will create a branch override
+    rather than edit the shared hours.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        window = None
+        source = "default"
+
+        if branch_id:
+            branch = await resolve_owned_branch(user, branch_id, effective_clinic_id)
+            window = (branch.get("config") or {}).get("lab_collection")
+            if window:
+                source = "branch"
+
+        if not window:
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            clinic_res = await sb(
+                supabase.table("clinics").select("config").eq("id", effective_clinic_id)
+            )
+            if not clinic_res.data:
+                raise HTTPException(status_code=404, detail="Clinic not found")
+            window = (clinic_res.data[0].get("config") or {}).get("lab_collection")
+            if window:
+                source = "clinic"
+
+        return {
+            "lab_collection": window or dict(DEFAULT_LAB_COLLECTION_WINDOW),
+            "source": source,
+            "branch_id": branch_id or None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reading lab collection window: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to read collection window")
+        )
+
+
+@router.delete("/lab-collection-window")
+async def clear_lab_collection_window(
+    clinic_id: str = "default",
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Drop a branch's own collection hours so it inherits the shared ones.
+
+    Setting hours for a branch was a one-way door: the only way back was to
+    retype the clinic's hours into the branch, which is not the same thing --
+    the branch then stops tracking later changes to the shared hours.
+
+    Branch-scoped deliberately. A clinic has nothing to inherit FROM, so
+    clearing its record would silently swap in the built-in default rather
+    than restore anything, and no screen offers that.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    if not branch_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Choose a branch to clear. The shared hours can be changed "
+                "but not removed."
+            ),
+        )
+    try:
+        branch = await resolve_owned_branch(user, branch_id, effective_clinic_id)
+        config = branch.get("config") or {}
+        if "lab_collection" not in config:
+            # Already inheriting. Idempotent rather than a 404, so a double
+            # click or a stale panel cannot turn into an error the admin has
+            # to interpret.
+            return {"success": True, "cleared": False}
+
+        config.pop("lab_collection", None)
+        # unscoped: unique_row_key
+        await sb(
+            supabase.table("branches").update({"config": config}).eq("id", branch["id"])
+        )
+        return {"success": True, "cleared": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error clearing lab collection window: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=_friendly_db_error(e, "Failed to clear collection window"),
+        )
 
 
 @router.put("/lab-collection-window")

@@ -1921,6 +1921,14 @@
                 <div style="padding:16px;">
                     <p style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;">Patients will be offered collection on days and hours specified below.</p>
                     <form id="collection-window-form" onsubmit="submitCollectionWindow(event)">
+                        <div class="form-row" id="cwBranchField" style="display:none;">
+                            <div class="field">
+                                <label>Hours for</label>
+                                <select id="f-cwBranch" onchange="changeCollectionWindowBranch()">
+                                    <option value="">All branches (shared hours)</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="form-row">
                             <div class="field"><label>Start Time</label><input type="time" id="cw-start" required value="07:00"></div>
                             <div class="field"><label>End Time</label><input type="time" id="cw-end" required value="11:00"></div>
@@ -1931,8 +1939,10 @@
                             <div class="field"><label>Sunday End (optional override)</label><input type="time" id="cw-sunday-end"></div>
                         </div>
                         <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Leave the Sunday fields blank if Sunday uses the same hours as your other operating days.</p>
+                        <p id="cwScopeNote" style="color:var(--text3); font-size:0.78rem; margin-top:6px;"></p>
                         <div style="margin-top:12px;">
-                            <button type="submit" class="btn btn-accent">Save Window</button>
+                            <button type="submit" class="btn btn-accent" id="btnSaveCollectionWindow">Save Window</button>
+                            <button type="button" class="btn btn-ghost" id="btnClearCollectionWindow" style="display:none; margin-left:8px;" onclick="clearCollectionWindowOverride()">Use shared hours</button>
                         </div>
                     </form>
                 </div>
@@ -1940,7 +1950,10 @@
 
             <div class="top-row">
                 <input type="text" class="search-bar" id="labTestSearch" placeholder="Search lab tests by name or sample type..." oninput="filterLabTests()">
-                <div style="display:flex; gap:10px;">
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <select id="labTestBranchFilter" class="search-bar" style="display:none; max-width:200px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="changeLabTestBranch()" aria-label="Filter catalog by branch">
+                        <option value="">All branches</option>
+                    </select>
                     <button class="btn btn-ghost" onclick="openLabCsvModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Import CSV</button>
                     <button class="btn btn-accent" onclick="openAddLabTestModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Add Lab Test</button>
                 </div>
@@ -1968,6 +1981,15 @@
                 <div class="form-row">
                     <div class="field"><label>Price (₹) *</label><input type="number" id="f-ltPriceRupees" min="1" step="1" placeholder="e.g. 500"></div>
                     <div class="field"><label>Turnaround (hours)</label><input type="number" id="f-ltTurnaround" min="1" step="1" placeholder="e.g. 24"></div>
+                </div>
+                <div class="form-row" id="labTestBranchField" style="display:none;">
+                    <div class="field">
+                        <label>Offered At</label>
+                        <select id="f-ltBranch">
+                            <option value="">All branches</option>
+                        </select>
+                        <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Pick one branch if only that branch offers this test, or if its price differs there. A branch entry overrides an "All branches" entry of the same name, at that branch only.</p>
+                    </div>
                 </div>
                 <div class="field" style="margin-top:8px;">
                     <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer;">
@@ -2571,6 +2593,13 @@
                 Download CSV Template
             </button>
         </div>
+        <div class="field" id="labCsvBranchField" style="display:none; margin-bottom:12px;">
+            <label>Apply this file to</label>
+            <select id="f-labCsvBranch" onchange="onLabCsvBranchChanged()">
+                <option value="">All branches — every branch offers these tests</option>
+            </select>
+            <p id="labCsvBranchHint" style="color:var(--text3); font-size:0.78rem; margin-top:4px;"></p>
+        </div>
         <div class="field">
             <label>Select CSV File</label>
             <input type="file" id="f-labCsvFile" accept=".csv" onchange="onLabCsvFileChosen()">
@@ -3147,6 +3176,15 @@ async function switchClinic() {
     await adoptClinicPlan();
     renderClinicScopeBanner();
     doctorCache = [];
+    // Branch pickers are tenant-specific. Left cached across a switch they
+    // keep the PREVIOUS tenant's branch names and ids, so the catalogue could
+    // be filtered -- or a CSV import aimed -- at a branch belonging to another
+    // clinic. The server refuses it, but the panel should never offer it.
+    resetLabTestBranchState();
+    resetConnectorBranchState();
+    insightsBranchesLoaded = false;
+    insightsBranchId = null;
+
     try {
         renderDashboard(await api('/admin/stats?days=30'));
     } catch (e) {
@@ -3176,6 +3214,11 @@ function logout() {
     myStaffRole = null;
     myUsername = '';
     doctorCache = [];
+    // Tenant-specific branch caches; see switchClinic().
+    resetLabTestBranchState();
+    resetConnectorBranchState();
+    insightsBranchesLoaded = false;
+    insightsBranchId = null;
     document.getElementById('app').classList.remove('open');
     document.getElementById('loginScreen').style.display = '';
     document.getElementById('loginUser').value = '';
@@ -3270,6 +3313,11 @@ function forceRelogin(message) {
     if (scopeBanner) scopeBanner.remove();
     myUsername = '';
     doctorCache = [];
+    // Tenant-specific branch caches; see switchClinic().
+    resetLabTestBranchState();
+    resetConnectorBranchState();
+    insightsBranchesLoaded = false;
+    insightsBranchId = null;
     document.getElementById('app').classList.remove('open');
     document.getElementById('loginScreen').style.display = '';
     document.getElementById('loginUser').value = '';
@@ -5061,14 +5109,146 @@ async function resendReport(id) {
 // ═══════ LAB TESTS ═══════
 let labTestsCache = [];
 
+// A chain with three collection centres rarely offers the same menu at all
+// three. A test carries a branch when only that branch offers it (or prices
+// it differently); a test with no branch is offered everywhere. The WhatsApp
+// catalogue applies exactly that rule, so this page has to show it too --
+// otherwise staff edit an "All branches" row believing it belongs to the
+// branch they are looking at, and change the price at every centre.
+let labTestBranches = [];
+let labTestBranchesLoaded = false;
+let labTestBranchId = null;
+let labTestShowBranchCol = false;
+//: Which branch's collection hours the form is editing. Independent of the
+//: catalog filter: an admin can be reading Kukatpally's tests while setting
+//: the shared hours, and conflating the two would edit the wrong record.
+let cwBranchId = null;
+//: 'branch' when this branch keeps its own hours, 'clinic'/'default' when it
+//: is inheriting. Decides whether the override can be cleared.
+let cwSource = null;
+
+function resetConnectorBranchState() {
+    _connectorBranchesLoaded = false;
+    _connectorId = null;
+    const select = document.getElementById('f-connectorBranch');
+    // Cleared here as well as on reload: the page may not be revisited before
+    // the admin opens a dialog that reads this select's value.
+    if (select) select.innerHTML = '<option value="">Main / No branch</option>';
+}
+
+function resetLabTestBranchState() {
+    cwBranchId = null;
+    labTestBranches = [];
+    labTestBranchesLoaded = false;
+    labTestBranchId = null;
+    labTestShowBranchCol = false;
+    labTestsCache = [];
+}
+
+function labTestMultiBranch() {
+    return myFeatures === null || (myFeatures && myFeatures.includes('multi_branch'));
+}
+
+function labTestBranchName(id) {
+    const b = labTestBranches.find(x => x.id === id);
+    return b ? (b.short_name || b.name || 'Branch') : 'Unknown branch';
+}
+
+function labTestBranchLabel(t) {
+    if (!t.branch_id) return '<span style="color:var(--text3); font-size:0.8rem">All branches</span>';
+    return `<span style="color:var(--accent); font-size:0.8rem">${esc(labTestBranchName(t.branch_id))}</span>`;
+}
+
+function _fillBranchSelect(sel, allLabel) {
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = '';
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = allLabel;
+    sel.appendChild(all);
+    labTestBranches.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.short_name || b.name || 'Branch';
+        sel.appendChild(opt);
+    });
+    sel.value = keep;
+}
+
+async function setupLabTestBranches() {
+    const multi = labTestMultiBranch();
+    const filter = document.getElementById('labTestBranchFilter');
+    const formField = document.getElementById('labTestBranchField');
+    const csvField = document.getElementById('labCsvBranchField');
+
+    // Single-location clinics -- the common case -- never see any of this.
+    if (!multi) {
+        if (filter) filter.style.display = 'none';
+        if (formField) formField.style.display = 'none';
+        if (csvField) csvField.style.display = 'none';
+        labTestShowBranchCol = false;
+        return;
+    }
+
+    if (!labTestBranchesLoaded) {
+        try {
+            const res = await api('/admin/branches');
+            labTestBranches = ((res && res.branches) || []).filter(b => b.is_active !== false);
+            labTestBranchesLoaded = true;
+        } catch (e) {
+            console.debug('Failed to load branches for lab test catalog:', e);
+            return;
+        }
+        // A clinic on a multi-branch plan that has only ever created one
+        // location is single-location in practice; showing a one-option
+        // picker is noise.
+        if (labTestBranches.length < 2) {
+            if (filter) filter.style.display = 'none';
+            if (formField) formField.style.display = 'none';
+            if (csvField) csvField.style.display = 'none';
+            labTestShowBranchCol = false;
+            return;
+        }
+        // Staff pinned to one branch open on that branch; the server rejects
+        // anything else anyway.
+        if (myBranchId && labTestBranches.some(b => b.id === myBranchId)) {
+            labTestBranchId = myBranchId;
+        }
+    }
+    if (labTestBranches.length < 2) return;
+
+    _fillBranchSelect(filter, 'All branches');
+    _fillBranchSelect(document.getElementById('f-ltBranch'), 'All branches');
+    _fillBranchSelect(document.getElementById('f-labCsvBranch'), 'All branches — every branch offers these tests');
+    if (filter) { filter.value = labTestBranchId || ''; filter.style.display = 'inline-block'; }
+    if (formField) formField.style.display = 'flex';
+    if (csvField) csvField.style.display = 'block';
+    labTestShowBranchCol = true;
+}
+
+function changeLabTestBranch() {
+    const sel = document.getElementById('labTestBranchFilter');
+    labTestBranchId = (sel && sel.value) ? sel.value : null;
+    loadLabTests();
+}
+
 async function loadLabTests() {
     const el = document.getElementById('labTestList');
     if (!el) return;
     el.innerHTML = loading();
     try {
-        labTestsCache = await api('/admin/lab-tests') || [];
+        await setupLabTestBranches();
+        loadCollectionWindow();
+        const path = labTestBranchId
+            ? '/admin/lab-tests?branch_id=' + encodeURIComponent(labTestBranchId)
+            : '/admin/lab-tests';
+        labTestsCache = await api(path) || [];
         const countEl = document.getElementById('labTestCount');
-        if (countEl) countEl.textContent = `${labTestsCache.length} test${labTestsCache.length !== 1 ? 's' : ''}`;
+        if (countEl) {
+            const scope = labTestBranchId ? ` offered at ${labTestBranchName(labTestBranchId)}` : '';
+            countEl.textContent = `${labTestsCache.length} test${labTestsCache.length !== 1 ? 's' : ''}${scope}`;
+        }
         renderLabTestsTable(labTestsCache);
     } catch (e) {
         el.innerHTML = emptyState('warning', 'Failed to load lab tests');
@@ -5086,6 +5266,7 @@ function renderLabTestsTable(tests) {
         <thead>
             <tr>
                 <th>Test Name</th>
+                ${labTestShowBranchCol ? '<th>Branch</th>' : ''}
                 <th>Sample Type</th>
                 <th>Price</th>
                 <th>Turnaround</th>
@@ -5096,6 +5277,7 @@ function renderLabTestsTable(tests) {
         </thead>
         <tbody>${tests.map(t => `<tr>
             <td style="font-weight:600; color:var(--text-strong)">${esc(t.name)}</td>
+            ${labTestShowBranchCol ? `<td>${labTestBranchLabel(t)}</td>` : ''}
             <td>${esc(t.sample_type) || '—'}</td>
             <td>₹${t.price_paise / 100}</td>
             <td>${t.turnaround_hours ? t.turnaround_hours + 'h' : '—'}</td>
@@ -5145,6 +5327,11 @@ function resetLabTestForm() {
     document.getElementById('f-ltTurnaround').value = '';
     document.getElementById('f-ltFasting').checked = false;
     document.getElementById('f-ltPrep').value = '';
+    // Adding while filtered to one branch means "add it at this branch" far
+    // more often than "add it everywhere"; defaulting the other way silently
+    // publishes the test to every centre.
+    const branchSel = document.getElementById('f-ltBranch');
+    if (branchSel) branchSel.value = labTestBranchId || '';
     document.getElementById('labTestFormTitle').textContent = 'Add Lab Test';
     const msgEl = document.getElementById('labTestMsg');
     if (msgEl) msgEl.innerHTML = '';
@@ -5160,7 +5347,12 @@ window.editLabTest = function(id) {
     document.getElementById('f-ltTurnaround').value = test.turnaround_hours || '';
     document.getElementById('f-ltFasting').checked = !!test.fasting_required;
     document.getElementById('f-ltPrep').value = test.prep_instructions || '';
+    const editBranchSel = document.getElementById('f-ltBranch');
+    if (editBranchSel) editBranchSel.value = test.branch_id || '';
     document.getElementById('labTestFormTitle').textContent = 'Edit Lab Test';
+    if (labTestShowBranchCol && !test.branch_id) {
+        msg('labTestMsg', 'This test is offered at all branches — changes here apply to every branch.');
+    }
     const card = document.getElementById('labTestFormCard');
     if (card) {
         card.style.display = 'block';
@@ -5209,6 +5401,11 @@ async function submitLabTest(e) {
         fasting_required: fasting,
         prep_instructions: prep,
     };
+    // Only sent by multi-branch clinics. A single-location clinic keeps
+    // posting exactly the payload it always has, so branch_id stays NULL.
+    if (labTestShowBranchCol) {
+        payload.branch_id = document.getElementById('f-ltBranch').value || null;
+    }
 
     const btn = document.getElementById('btnSaveLabTest');
     if (btn) btn.disabled = true;
@@ -5230,15 +5427,30 @@ async function submitLabTest(e) {
     }
 }
 
-function openLabCsvModal() {
+async function openLabCsvModal() {
     const modal = document.getElementById('labCsvModal');
-    if (modal) {
-        modal.classList.add('open');
-        _labCsvBusy(false);
-        document.getElementById('f-labCsvFile').value = '';
-        const resEl = document.getElementById('labCsvResults');
-        if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
-    }
+    if (!modal) return;
+    modal.classList.add('open');
+    _labCsvBusy(false);
+    document.getElementById('f-labCsvFile').value = '';
+    const resEl = document.getElementById('labCsvResults');
+    if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
+    await setupLabTestBranches();
+    const sel = document.getElementById('f-labCsvBranch');
+    // Opens on whatever branch the catalogue is filtered to, so "look at
+    // Kukatpally, then import" does not quietly publish to every centre.
+    if (sel) sel.value = labTestBranchId || '';
+    onLabCsvBranchChanged();
+}
+
+function onLabCsvBranchChanged() {
+    const sel = document.getElementById('f-labCsvBranch');
+    const hint = document.getElementById('labCsvBranchHint');
+    if (!hint) return;
+    const bid = sel ? sel.value : '';
+    hint.textContent = bid
+        ? `Only ${labTestBranchName(bid)} will offer these tests. Where a name here also exists under "All branches", this file's price and details win at ${labTestBranchName(bid)} and nowhere else.`
+        : 'Every branch will offer these tests. Import once per branch instead if your branches run different menus.';
 }
 
 function closeLabCsvModal() {
@@ -5329,6 +5541,12 @@ async function submitLabTestCsv() {
 
     const formData = new FormData();
     formData.append('file', file);
+    // The select is only ever populated with a branch for a multi-branch
+    // clinic; everywhere else it holds the empty "all branches" option, so
+    // the request goes out byte-for-byte as it always has.
+    const csvBranchSel = document.getElementById('f-labCsvBranch');
+    const csvBranchId = csvBranchSel ? csvBranchSel.value : '';
+    if (csvBranchId) formData.append('branch_id', csvBranchId);
 
     _labCsvBusy(true, 'Uploading…');
     _labCsvStatus(_labCsvProgressBar(0, `⏳ Uploading ${file.name}…`));
@@ -5394,7 +5612,8 @@ async function submitLabTestCsv() {
             throw new Error(data.detail || data.message || `Import failed (HTTP ${resp.status})`);
         }
 
-        _labCsvStatus(`<div style="color:var(--green, #4ade80); font-weight:600;">Import complete — ${data.created} created, ${data.updated} updated (total ${data.total_imported}).</div>
+        const scopeLabel = data.branch_id ? labTestBranchName(data.branch_id) : 'all branches';
+        _labCsvStatus(`<div style="color:var(--green, #4ade80); font-weight:600;">Import complete — ${data.created} created, ${data.updated} updated (total ${data.total_imported}) for ${esc(scopeLabel)}.</div>
             <div style="color:var(--text3); font-size:0.78rem; margin-top:4px;">The catalogue below has been refreshed. Patients can book these tests on WhatsApp right away.</div>`);
         toast(`Import successful: ${data.created} created, ${data.updated} updated`);
         loadLabTests();
@@ -5405,6 +5624,111 @@ async function submitLabTestCsv() {
     } finally {
         _labCsvBusy(false);
     }
+}
+
+// ═══════ SAMPLE COLLECTION WINDOW ═══════
+// A chain's centres keep different hours: the main lab opens 07:00-21:00, the
+// satellite 08:00-14:00. The booking flow has always read the chosen branch's
+// hours (database.get_lab_collection_window), and the days in that window
+// decide which dates the patient is even offered -- but the panel could only
+// ever write the clinic-wide record, so the branch rows were unreachable.
+
+function _cwScopeText(source) {
+    if (!cwBranchId) {
+        return labTestShowBranchCol
+            ? 'These hours apply at every branch that has no hours of its own.'
+            : '';
+    }
+    const name = labTestBranchName(cwBranchId);
+    return source === 'branch'
+        ? `${name} has its own hours. Saving changes them at ${name} only.`
+        : `${name} currently follows the shared hours shown above. Saving gives ${name} its own hours.`;
+}
+
+function _cwFormEnabled(enabled) {
+    const btn = document.getElementById('btnSaveCollectionWindow');
+    if (btn) btn.disabled = !enabled;
+}
+
+async function loadCollectionWindow() {
+    const field = document.getElementById('cwBranchField');
+    const sel = document.getElementById('f-cwBranch');
+    const note = document.getElementById('cwScopeNote');
+
+    if (labTestShowBranchCol) {
+        _fillBranchSelect(sel, 'All branches (shared hours)');
+        if (sel) sel.value = cwBranchId || '';
+        if (field) field.style.display = 'flex';
+    } else {
+        cwBranchId = null;
+        if (field) field.style.display = 'none';
+    }
+
+    try {
+        const path = cwBranchId
+            ? '/admin/lab-collection-window?branch_id=' + encodeURIComponent(cwBranchId)
+            : '/admin/lab-collection-window';
+        const data = await api(path);
+        const w = (data && data.lab_collection) || {};
+        document.getElementById('cw-start').value = w.start || '07:00';
+        document.getElementById('cw-end').value = w.end || '11:00';
+        document.getElementById('cw-days').value = w.days || 'Mon,Tue,Wed,Thu,Fri,Sat';
+        document.getElementById('cw-sunday-start').value = w.sunday_start || '';
+        document.getElementById('cw-sunday-end').value = w.sunday_end || '';
+        cwSource = (data && data.source) || null;
+        if (note) { note.textContent = _cwScopeText(cwSource); note.style.color = 'var(--text3)'; }
+        _cwFormEnabled(true);
+        _cwClearButton(cwBranchId && cwSource === 'branch');
+    } catch (e) {
+        // Saving is blocked rather than left armed over placeholder values.
+        // The form's markup carries 07:00-11:00 as its static default, so an
+        // admin who saved after a failed read would silently overwrite the
+        // real hours with those placeholders -- the exact defect this loader
+        // exists to fix.
+        if (note) {
+            note.textContent = 'Could not load the saved hours (' + (e.message || 'request failed')
+                + '). Saving is disabled so the times below cannot overwrite your real settings. Reload to try again.';
+            note.style.color = 'var(--red)';
+        }
+        _cwFormEnabled(false);
+        _cwClearButton(false);
+    }
+}
+
+// Setting branch hours used to be a one-way door: retyping the shared hours
+// into the branch is not the same thing, because the branch then stops
+// tracking later changes to them. Only offered where there is something to
+// clear -- the shared record has nothing to fall back to.
+function _cwClearButton(show) {
+    const btn = document.getElementById('btnClearCollectionWindow');
+    if (btn) btn.style.display = show ? 'inline-flex' : 'none';
+}
+
+async function clearCollectionWindowOverride() {
+    if (!cwBranchId) return;
+    const name = labTestBranchName(cwBranchId);
+    const ok = await confirmDialog(
+        `Remove ${name}'s own collection hours? It will follow the shared hours again, including any future changes to them.`,
+        { title: 'Use shared hours', okText: 'Use shared hours' }
+    );
+    if (!ok) return;
+    const btn = document.getElementById('btnClearCollectionWindow');
+    if (btn) btn.disabled = true;
+    try {
+        await apiDel('/admin/lab-collection-window?branch_id=' + encodeURIComponent(cwBranchId));
+        toast(`${name} now follows the shared collection hours`);
+        await loadCollectionWindow();
+    } catch (e) {
+        toast(e.message || 'Failed to clear branch hours', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+function changeCollectionWindowBranch() {
+    const sel = document.getElementById('f-cwBranch');
+    cwBranchId = (sel && sel.value) ? sel.value : null;
+    loadCollectionWindow();
 }
 
 async function submitCollectionWindow(e) {
@@ -5426,11 +5750,22 @@ async function submitCollectionWindow(e) {
         payload.sunday_end = sundayEnd;
     }
 
+    const btn = document.getElementById('btnSaveCollectionWindow');
+    if (btn) btn.disabled = true;
     try {
-        await apiPut('/admin/lab-collection-window', payload);
-        toast('Sample collection window saved');
+        const path = cwBranchId
+            ? '/admin/lab-collection-window?branch_id=' + encodeURIComponent(cwBranchId)
+            : '/admin/lab-collection-window';
+        await apiPut(path, payload);
+        toast(cwBranchId
+            ? 'Collection hours saved for ' + labTestBranchName(cwBranchId)
+            : 'Sample collection window saved');
+        // Re-read so the note flips from "follows the shared hours" to "has
+        // its own hours" the moment an override is created.
+        await loadCollectionWindow();
     } catch (e) {
         toast(e.message || 'Failed to save collection window', true);
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -6370,6 +6705,11 @@ async function loadConnectorsPage() {
             const data = await api('/admin/branches');
             const select = document.getElementById('f-connectorBranch');
             const branches = (data.branches || []).filter(b => b.is_active);
+            // Rebuilt, not appended to. Appending was safe only because this
+            // ran exactly once per page load; a tenant switch now reloads it,
+            // and appending would stack the new clinic's branches under the
+            // previous clinic's.
+            select.innerHTML = '<option value="">Main / No branch</option>';
             branches.forEach(b => {
                 const opt = document.createElement('option');
                 opt.value = b.id;

@@ -1,0 +1,33 @@
+-- Rollback 076: drop the per-branch catalogue name uniqueness.
+--
+-- Dropping the index restores the pre-076 state exactly: duplicate test names
+-- become possible again within a branch.
+--
+-- Step 1 of the forward migration is NOT undone automatically, on purpose.
+-- It renamed and deactivated duplicate rows rather than deleting them, so
+-- nothing was lost, but reversing it blindly would resurrect the very
+-- duplicates the index forbids and re-break the CSV importer's name matching.
+-- Restore them deliberately, one at a time, using the queries below.
+
+DROP INDEX IF EXISTS idx_unique_lab_test_name_per_branch;
+
+-- Rows the forward migration retired, if any:
+--
+--   SELECT id, clinic_id, branch_id, name, price_paise, is_active
+--   FROM lab_tests
+--   WHERE is_active = false AND name LIKE '% [duplicate %]';
+--
+-- To restore one of them (strips the suffix and reactivates):
+--
+--   UPDATE lab_tests
+--   SET name = btrim(regexp_replace(name, ' \[duplicate [0-9a-f]{8}\]$', '')),
+--       is_active = true,
+--       updated_at = now()
+--   WHERE id = '<the id>';
+--
+-- Appointments that pointed at a retired row were repointed onto the
+-- surviving test of the same name. That is not reversed either: the original
+-- lab_test_id is not recorded anywhere, and the link is cosmetic -- every
+-- appointment stores its own lab_test_name and amount_paise at booking time,
+-- so no money or booking history depends on which of two identically named
+-- rows it references.

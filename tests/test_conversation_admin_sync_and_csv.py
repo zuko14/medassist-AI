@@ -399,10 +399,15 @@ async def test_csv_upsert_existing():
     mock_supabase = MagicMock()
     mock_table = MagicMock()
     
-    # Mock existing CBC
-    mock_table.select.return_value.eq.return_value.execute.return_value = MagicMock(
-        data=[{"id": "test-uuid-1", "name": "CBC"}]
-    )
+    # Mock existing CBC. The upsert lookup is scoped to the import's branch
+    # (here: unset, so the all-branches rows) and paged, so it chains
+    # .is_().order().order().range(). A self-returning stub keeps this test
+    # about the upsert outcome rather than about the builder's exact shape.
+    mock_query = MagicMock()
+    for method in ("select", "eq", "is_", "or_", "order", "range"):
+        getattr(mock_query, method).return_value = mock_query
+    mock_query.execute.return_value = MagicMock(data=[{"id": "test-uuid-1", "name": "CBC"}])
+    mock_table.select.return_value = mock_query
     mock_supabase.table.return_value = mock_table
 
     with patch("app.routers.admin.supabase", mock_supabase), \

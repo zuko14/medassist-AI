@@ -4531,7 +4531,9 @@ class ConversationManager:
                 await self._show_lab_test_list(clinic, phone, context, lang)
             return
 
-        test = await get_lab_test_by_id(clinic["id"], selected_id)
+        test = await get_lab_test_by_id(
+            clinic["id"], selected_id, branch_id=context.get("branch_id")
+        )
         if not test or not test.get("is_active"):
             msg = {
                 "en": "That test is no longer available. Please pick another.",
