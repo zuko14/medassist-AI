@@ -78,6 +78,15 @@ NAV_KEYWORDS = frozenset(
     {"menu", "main menu", "home", "start over", "reset", "मेनू", "మెనూ"}
 )
 
+#: Whole messages that mean "start booking a lab test". Matched on the exact
+#: message, never as a substring, so "cancel my lab test" is not a booking.
+#: The intent classifier has no lab-booking intent to return, so these words
+#: have to be routed before any intent check or they arrive as
+#: book_appointment (the doctor flow) or view_reports (the reports answer).
+LAB_BOOKING_KEYWORDS = frozenset(
+    {"book test", "book lab test", "booktest", "lab test", "lab tests"}
+)
+
 #: Ephemeral booking and branch context keys that must not bleed across distinct sessions or bookings
 BOOKING_CONTEXT_KEYS = frozenset({
     "doctor",
@@ -963,8 +972,7 @@ class ConversationManager:
             and (message or "").strip()
             # "book test" and friends are handled a few lines below; the exit
             # words are handled by _handle_browsing_lab_tests itself.
-            and message.strip().lower()
-            not in {"book test", "book lab test", "booktest"}
+            and message.strip().lower() not in LAB_BOOKING_KEYWORDS
             # Intents no test name is plausibly confused with; leaving them to
             # the handlers below keeps every escape hatch reachable.
             and intent
@@ -983,6 +991,21 @@ class ConversationManager:
 
         # Global handlers for top-level menu intents (escape hatches from selection states)
         if state not in ["selecting_language", "awaiting_consent"]:
+            msg_lower = message.strip().lower()
+
+            # Ahead of every intent check: see LAB_BOOKING_KEYWORDS for why the
+            # classifier cannot be trusted with these words. The lab report
+            # caption tells patients to reply "BOOK TEST" and the report
+            # template's quick-reply button carries the same words, so a patient
+            # arriving here is rarely sitting in main_menu. Clinics without lab
+            # booking fall through to the intent handlers below.
+            if msg_lower in LAB_BOOKING_KEYWORDS:
+                from app.services.tenant import has_feature
+
+                if has_feature(clinic, "lab_test_booking"):
+                    await self._start_lab_booking(clinic, phone, lang)
+                    return
+
             if intent == "doctor_availability":
                 if await self._is_diagnostics_only(clinic):
                     await self._start_lab_booking(clinic, phone, lang)
@@ -1010,7 +1033,6 @@ class ConversationManager:
                 "selecting_date",
                 "selecting_slot",
             }
-            msg_lower = message.strip().lower()
             if (
                 msg_lower in NAV_KEYWORDS
                 or (intent == "greeting" and state in CHOICE_STATES and state != "main_menu")
@@ -1018,17 +1040,6 @@ class ConversationManager:
                 await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
                 await self._send_main_menu(clinic, phone, lang)
                 return
-
-            # The lab report caption tells patients to reply "BOOK TEST", and the
-            # report template's quick-reply button carries the same words. Handled
-            # here, beside the other from-any-state navigation words, because a
-            # patient who just received a report is rarely sitting in main_menu.
-            if msg_lower in ("book test", "book lab test", "booktest"):
-                from app.services.tenant import has_feature
-
-                if has_feature(clinic, "lab_test_booking"):
-                    await self._start_lab_booking(clinic, phone, lang)
-                    return
 
             if (
                 intent == "book_appointment"
@@ -1112,8 +1123,9 @@ class ConversationManager:
             await self._handle_confirming_collection_date(
                 clinic, phone, message, intent, context, patient, lang, interactive_data
             )
-        elif state == "viewing_reports":
-            await self._handle_viewing_reports(clinic, phone, message, session, lang)
+        # "viewing_reports" is no longer entered — the report archive is gone.
+        # Sessions still parked in it from before this change fall to the
+        # unknown-state branch below, which resets them to the main menu.
         elif state == "emergency":
             # Patient was in emergency state — process their new message normally
             # Reset to main_menu and handle as a main_menu interaction
@@ -1419,12 +1431,11 @@ class ConversationManager:
             # discovered they could book a test here.
             if has_feature(clinic, "lab_test_booking"):
                 rows.append({"id": "menu_lab_tests", "title": "🧪 Book Lab Test"[:24], "description": ""})
-        # Only offer reports where they can actually be delivered. Without this
-        # gate a soloclinic or booking-only diagnostic centre showed the row and
-        # then declined it in _handle_view_reports — a dead option in a list
-        # WhatsApp caps at 10 rows.
-        if has_feature(clinic, "lab_reports"):
-            rows.append({"id": "menu_reports", "title": "📋 My Reports"[:24], "description": ""})
+        # No "My Reports" row. Kriya delivers each report the moment the lab
+        # releases it; it is not an archive patients browse. A self-service list
+        # would force us to hold every PDF for as long as any patient might ask
+        # for it — storage we deliberately do not own. Older reports come from
+        # the facility's own system, via reception.
         rows.append({"id": "menu_emergency", "title": t[1][:24], "description": ""})
         rows.append({"id": "menu_human", "title": t[2][:24], "description": ""})
 
@@ -4237,163 +4248,48 @@ class ConversationManager:
         await self._send_main_menu(clinic, phone, lang)
 
     async def _handle_view_reports(self, clinic: dict, phone: str, lang: str) -> None:
-        """Handle 'My Reports' menu selection."""
+        """Answer a report request without offering a report archive.
+
+        Kriya pushes each report the moment the lab releases it; patients have
+        no self-service list to browse. The handler stays because the removed
+        "My Reports" row remains tappable in every patient's chat history, and
+        because "my reports" / "lab report" still classify as view_reports —
+        both must land somewhere honest instead of falling through to the LLM.
+        """
         from app.services.tenant import has_feature
 
-        if not has_feature(clinic, "lab_reports"):
-            await self.whatsapp.send_text(
-                clinic,
-                phone,
+        if has_feature(clinic, "lab_reports"):
+            en = (
+                "📋 Your lab reports are sent to you here on WhatsApp "
+                "automatically, as soon as the lab releases them — there is "
+                "nothing to request.\n\nFor an older report, please contact "
+                "the reception."
+            )
+            body = {
+                "en": en,
+                "hi": (
+                    "📋 आपकी लैब रिपोर्ट लैब से जारी होते ही अपने आप यहीं WhatsApp "
+                    "पर भेज दी जाती है — आपको कुछ मांगने की ज़रूरत नहीं।\n\n"
+                    "पुरानी रिपोर्ट के लिए कृपया रिसेप्शन से संपर्क करें।"
+                ),
+                "te": (
+                    "📋 మీ ల్యాబ్ రిపోర్టులు ల్యాబ్ విడుదల చేసిన వెంటనే ఇక్కడే "
+                    "WhatsAppలో మీకు ఆటోమేటిక్‌గా పంపబడతాయి — మీరు అడగాల్సిన అవసరం "
+                    "లేదు.\n\nపాత రిపోర్ట్ కోసం దయచేసి రిసెప్షన్‌ను సంప్రదించండి."
+                ),
+            }.get(lang, en)
+        else:
+            body = (
                 "Lab report delivery is not available at this facility via WhatsApp. "
-                "Please visit the hospital reception to collect your reports.",
+                "Please visit the hospital reception to collect your reports."
             )
-            await self._send_main_menu(clinic, phone, lang)
-            return
 
-        from app.services.lab_reports import LabReportService
-
-        # get_reports_by_phone refuses an unscoped call: phone numbers are not
-        # unique across tenants, so without a real clinic id it could hand this
-        # patient another clinic's reports. That happens when tenant resolution
-        # fell back to the synthetic clinic (id "default"), i.e. we do not know
-        # which facility this message belongs to. Decline politely rather than
-        # letting the ValueError escape into the webhook handler.
-        try:
-            reports = await LabReportService().get_reports_by_phone(
-                phone, clinic.get("id")
-            )
-        except ValueError:
-            logger.error(
-                "LAB_REPORTS_UNSCOPED_CLINIC phone=%s clinic_id=%r — refusing to "
-                "list reports without a resolved tenant",
-                mask_phone(phone),
-                clinic.get("id"),
-            )
-            await self.whatsapp.send_text(
-                clinic,
-                phone,
-                "Sorry, we couldn't look up your reports right now. "
-                "Please contact reception and they'll share them with you.",
-            )
-            await self._send_main_menu(clinic, phone, lang)
-            return
-
-        if not reports:
-            await self.whatsapp.send_text(
-                clinic,
-                phone,
-                "📋 No reports found for your number. Please visit the hospital or contact reception.",
-            )
-            await self._send_main_menu(clinic, phone, lang)
-            await self.update_state(clinic, phone, "main_menu")
-            return
-
-        # This is a text message, not an interactive list, so Meta's 10-row
-        # cap does not apply here - the limit is only about readability. It
-        # used to show 5 and say "here are your available reports", with
-        # nothing to indicate that a regular patient's older reports existed.
-        RECENT_REPORT_LIMIT = 10
-        recent = reports[:RECENT_REPORT_LIMIT]
-        hidden = len(reports) - len(recent)
-        heading = (
-            "📋 *Your Lab Reports*\n\nHere are your available reports:\n"
-            if not hidden
-            else (
-                f"📋 *Your Lab Reports*\n\nShowing your {len(recent)} most "
-                f"recent of {len(reports)}:\n"
-            )
-        )
-        lines = [heading]
-        for i, r in enumerate(recent, 1):
-            date_str = ""
-            if r.get("uploaded_at"):
-                try:
-                    from datetime import datetime
-
-                    dt = datetime.fromisoformat(r["uploaded_at"].replace("Z", "+00:00"))
-                    date_str = f" — {dt.strftime('%d %b %Y')}"
-                except Exception:
-                    pass
-            lines.append(f"{i}. {r['report_name']}{date_str}")
-
-        lines.append(
-            "\nReply with the report number to download it. Reply 0 to go back to main menu."
-        )
-        if hidden:
-            lines.append(
-                f"For the {hidden} older report(s), please contact reception."
-            )
-        await self.whatsapp.send_text(clinic, phone, "\n".join(lines))
-
-        # Save reports list in context
-        await self.update_state(
-            clinic, phone, "viewing_reports", {"available_reports": recent}
-        )
-
-    async def _handle_viewing_reports(
-        self, clinic: dict, phone: str, message: str, session: dict, lang: str
-    ) -> None:
-        """Handle report selection in VIEWING_REPORTS state."""
-        context = session.get("context", {})
-        available = context.get("available_reports", [])
-        msg_stripped = message.strip()
-
-        if msg_stripped == "0":
-            await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
-            await self._send_main_menu(clinic, phone, lang)
-            return
-
-        # Check for "menu" keyword
-        if msg_stripped.lower() in ["menu", "main menu"]:
-            await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
-            await self._send_main_menu(clinic, phone, lang)
-            return
-
-        try:
-            choice = int(msg_stripped)
-            if 1 <= choice <= len(available):
-                selected = available[choice - 1]
-                await self.whatsapp.send_text(
-                    clinic, phone, "📤 Sending your report now..."
-                )
-
-                from app.services.lab_reports import LabReportService
-
-                try:
-                    await LabReportService().resend_report(
-                        selected["id"], clinic_id=clinic.get("id")
-                    )
-                    await self.whatsapp.send_text(
-                        clinic,
-                        phone,
-                        "✅ Report sent! You can save it directly from WhatsApp. Need anything else? Reply with *Menu* to return.",
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to resend report: {e}")
-                    await self.whatsapp.send_text(
-                        clinic,
-                        phone,
-                        "Sorry, we could not send the report right now. Please try again later or contact the hospital.",
-                    )
-
-                await self.update_state(
-                    clinic, phone, "main_menu", {"menu_shown": False}
-                )
-                return
-            else:
-                await self.whatsapp.send_text(
-                    clinic,
-                    phone,
-                    "Please reply with a number from the list, or reply 0 to go back.",
-                )
-                return
-        except ValueError:
-            await self.whatsapp.send_text(
-                clinic,
-                phone,
-                "Please reply with a number from the list, or reply 0 to go back.",
-            )
-            return
+        await self.whatsapp.send_text(clinic, phone, body)
+        # Reached from the global escape hatch, so the patient may have been
+        # mid-booking. Reset before showing the menu, or their next tap is
+        # routed by a state that no longer matches what is on their screen.
+        await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+        await self._send_main_menu(clinic, phone, lang)
 
     #: Above this many tests, paging 9-at-a-time is unusable (a 1000-test
     #: catalogue is 110 taps deep), so the list is introduced as searchable.

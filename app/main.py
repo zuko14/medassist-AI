@@ -403,6 +403,24 @@ async def admin_panel():
     )
 
 
+@app.get("/panel-assets/chart.umd.min.js")
+async def admin_panel_chartjs():
+    """Serve self-hosted Chart.js to the clinic admin panel's Insights page.
+
+    Same vendored file the owner console already serves — one copy, two routes.
+    CSP script-src is 'self' only, so a CDN URL would be blocked.
+
+    Deliberately NOT under /admin-panel/*. Two security matrices enumerate
+    every route whose path starts with "/admin" and assert it refuses an
+    unscoped super_admin (tests/test_admin_super_admin_scope_matrix.py and
+    tests/test_phase2_route_adversarial_matrix.py). A static third-party file
+    has no tenant to scope to, so putting it there would mean adding it to both
+    allowlists — and every entry in those lists is permanent surface a later
+    change can hide behind. Keep the lists minimal; move the asset instead.
+    """
+    return FileResponse("admin/vendor/chart.umd.min.js", media_type="application/javascript")
+
+
 # NOTE: /admin-panel/admin.js is gone. admin/admin.js was a second copy of the
 # panel that admin/index.html never loaded, and the two drifted apart more than
 # once — session handling was fixed in one and not the other, and it still held

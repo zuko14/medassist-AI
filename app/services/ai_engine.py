@@ -264,7 +264,8 @@ INTENT_KEYWORDS = {
         "test reports",
         "reports",
         "report",
-        "lab test",
+        # "lab test" deliberately absent: it is a request to BOOK a test, not to
+        # see a result. LAB_BOOKING_KEYWORDS in conversation.py routes it.
         "blood report",
         "मेरी रिपोर्ट",
         "लैब रिपोर्ट",
@@ -625,7 +626,12 @@ SECURITY RULES (NEVER VIOLATE):
         base_prompt += f"\nEmergency Helpline: {emergency_num}"
 
     if has_feature(clinic_dict, "lab_reports"):
-        base_prompt += "\nYou can also help patients retrieve their lab reports. Ask for their registered phone number to look up results."
+        base_prompt += (
+            "\nLab reports are delivered to the patient on WhatsApp automatically the "
+            "moment the lab releases them. You CANNOT look up, list, resend or attach a "
+            "report, and you must never ask for a phone number to find one. If asked, say "
+            "reports arrive here automatically and older ones are available from reception."
+        )
 
     if has_feature(clinic_dict, "feedback"):
         base_prompt += "\nAfter appointments, you may ask patients for brief feedback about their visit."

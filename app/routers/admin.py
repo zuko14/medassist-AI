@@ -1553,6 +1553,37 @@ async def get_popular_departments(
     return await analytics_service.get_popular_departments(effective_clinic_id, days)
 
 
+@router.get("/insights")
+async def get_insights(
+    clinic_id: str = "default",
+    days: int = 30,
+    branch_id: Optional[str] = None,
+    user: AdminUser = Depends(require_admin),
+):
+    """Chart series behind the admin panel's Insights page.
+
+    Admin-only, like Payments, because the payload carries collected revenue.
+    Read-only: it aggregates rows the panel can already list, and writes nothing.
+
+    The report-delivery section is computed only for a plan that actually
+    dispatches lab reports — asking a booking-only clinic to pay for a
+    lab_reports scan would buy it an empty chart.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    if branch_id:
+        await resolve_owned_branch(user, branch_id, effective_clinic_id)
+    clinic = await get_clinic_by_id(effective_clinic_id) or {}
+    include_reports = has_feature(clinic, "lab_reports") or has_feature(
+        clinic, "diagnostic_reports"
+    )
+    return await analytics_service.get_insights(
+        effective_clinic_id,
+        days=days,
+        branch_id=branch_id,
+        include_reports=include_reports,
+    )
+
+
 @router.get("/doctors")
 async def get_doctors(
     clinic_id: str = "default",
@@ -3514,12 +3545,12 @@ async def get_payment_stats(
         def _scope(query):
             return query.eq("clinic_id", effective_clinic_id)
 
-        # scoped: total confirmed with payments
+        # scoped: total confirmed + completed with payments
         confirmed = await sb(_scope(
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments")
             .select("id, amount_paise", count="exact")
-            .eq("status", "confirmed")
+            .in_("status", ["confirmed", "completed"])
             .not_.is_("payment_id", "null")
             .gte("created_at", cutoff)
         ))

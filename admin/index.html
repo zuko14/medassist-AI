@@ -7,6 +7,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Self-hosted Chart.js, the same build the owner console already loads.
+         CSP script-src is 'self' only (app/utils/security.py), so a CDN copy
+         would be blocked silently. Deferred: Insights is not the landing page,
+         so nothing waits on this to paint, and the panel still works without
+         it — renderInsights() degrades to a notice if Chart never arrives. -->
+    <script defer src="/panel-assets/chart.umd.min.js"></script>
     <style>
         :root {
             /* ══ Kriya AI · "Clinical Depth" ═══════════════════════════════
@@ -1006,6 +1012,101 @@
 
         /* Last row keeps a hairline that then floats above the card padding. */
         tbody tr:last-child td { border-bottom: none; }
+
+        /* --- 10. Insights -------------------------------------------------
+           Charts reuse .card, so a panel on this page is the same glass, rim
+           and radius as every other panel. Only what a canvas needs is new:
+           a fixed-height box (Chart.js with maintainAspectRatio:false grows
+           without one) and a two-column grid that collapses before the
+           sidebar breakpoint. Nothing here restyles an existing class. */
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+        .chart-grid > .card { margin-bottom: 0; }
+        .chart-grid.one-up { grid-template-columns: minmax(0, 1fr); }
+        @media (max-width: 1100px) {
+            .chart-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+
+        /* height is the contract with Chart.js; width comes from the grid. */
+        .chart-box { position: relative; height: 260px; width: 100%; }
+        .chart-box.tall { height: 320px; }
+        .chart-box canvas { max-width: 100%; }
+
+        .card-head .chart-sub {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 400;
+            color: var(--text3);
+            margin-top: 3px;
+            letter-spacing: 0;
+        }
+
+        /* Segmented range picker. Built from .btn so it inherits the panel's
+           focus ring, radius and hover timing rather than inventing its own. */
+        .range-pick { display: flex; gap: 6px; flex-wrap: wrap; }
+        .range-pick .btn-sm { min-width: 62px; justify-content: center; }
+        .range-pick .btn-sm.on {
+            background: var(--accent-soft2);
+            border-color: var(--accent-border);
+            color: var(--accent2);
+            font-weight: 600;
+        }
+
+        /* An empty canvas reads as a broken chart. Say so instead. */
+        .chart-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text3);
+            font-size: 0.84rem;
+            text-align: center;
+            padding: 0 16px;
+        }
+
+        .insight-note {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            padding: 12px 16px;
+            margin-bottom: 18px;
+            border-radius: var(--radius);
+            background: var(--amber-bg);
+            border: 1px solid var(--border);
+            color: var(--text2);
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+        .insight-note svg { flex-shrink: 0; color: var(--amber); }
+
+        /* The shared .stats flex packs from the left, which leaves the sixth
+           KPI alone on a second row here. Six is a deliberate number on this
+           page, so give it an explicit grid: one band of six, then three, two,
+           one. Scoped to #pg-insights — every other page keeps the flex. */
+        #pg-insights .stats {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 16px;
+        }
+        #pg-insights .stats > .stat { max-width: none; }
+        #pg-insights .stat .num {
+            font-size: 1.55rem;
+            overflow-wrap: anywhere;
+        }
+        @media (max-width: 1400px) {
+            #pg-insights .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            #pg-insights .stat .num { font-size: 1.8rem; }
+        }
+        @media (max-width: 900px) {
+            #pg-insights .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 560px) {
+            #pg-insights .stats { grid-template-columns: minmax(0, 1fr); }
+        }
     </style>
 </head>
 <body>
@@ -1131,6 +1232,12 @@
         <div class="nav-links">
             <div class="nav-link on" tabindex="0" data-page="dashboard" onclick="go('dashboard',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span> Dashboard
+            </div>
+            <!-- No data-feature: every plan gets Insights. data-role="admin"
+                 because the payload carries collected revenue, exactly like
+                 the Payments tab. -->
+            <div class="nav-link" tabindex="0" data-page="insights" data-role="admin" onclick="go('insights',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"></path><polyline points="7 14 11 9 15 13 21 6"></polyline></svg></span> Insights
             </div>
             <div class="nav-link" tabindex="0" data-page="profile" data-role="admin" onclick="go('profile',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></span> Hospital Profile
@@ -1414,6 +1521,163 @@
                             <div id="diagRetentionExpiringNotice" style="margin-top:6px; font-size:0.8rem; color:var(--amber); display:none;"><span id="diagExpiringCount">0</span> reports approaching the 90-day retention window.</div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── INSIGHTS ───────────────────────────────────────────────────
+             Every panel below is fed by ONE call to GET /admin/insights, so no
+             two charts on this page can disagree with each other. Cards carry
+             data-feature and are therefore shown or hidden by the SAME
+             applyFeatureVisibility() pass that gates the sidebar — a lab-only
+             centre never sees a doctor chart, and nothing here needs its own
+             plan logic in JS. -->
+        <div id="pg-insights" class="sec">
+            <div class="page-head" style="display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+                <div>
+                    <h2>Insights</h2>
+                    <p id="insightsCaption">Bookings, services and revenue — last 30 days</p>
+                </div>
+                <div class="range-pick" role="group" aria-label="Reporting period" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <select id="insightsBranchFilter" class="search-bar" style="display:none; max-width:180px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="changeInsightsBranch()">
+                        <option value="">All Branches</option>
+                    </select>
+                    <button type="button" class="btn btn-ghost btn-sm" data-days="7" onclick="setInsightsRange(7, this)">7 days</button>
+                    <button type="button" class="btn btn-ghost btn-sm on" data-days="30" onclick="setInsightsRange(30, this)">30 days</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-days="90" onclick="setInsightsRange(90, this)">90 days</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="exportInsightsCSV()" aria-label="Export CSV" title="Export CSV"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Export CSV</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="loadInsights()" aria-label="Refresh insights" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button>
+                </div>
+            </div>
+
+            <div id="insightsNote" class="insight-note" style="display:none">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                <span id="insightsNoteText"></span>
+            </div>
+
+            <div class="stats">
+                <div class="stat"><div class="glow"></div><div class="label">Total Bookings</div><div class="num" id="i-total">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Completed</div><div class="num" id="i-completed">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Cancellation Rate</div><div class="num" id="i-cancelrate">—</div></div>
+                <div class="stat" data-feature="payments_razorpay"><div class="glow"></div><div class="label">Revenue Collected</div><div class="num" id="i-revenue">—</div></div>
+                <div class="stat" data-feature="payments_razorpay"><div class="glow"></div><div class="label">Average Booking Value</div><div class="num" id="i-avgticket">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Patients Served</div><div class="num" id="i-patients">—</div></div>
+            </div>
+
+            <div class="chart-grid one-up">
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Booking Volume</h3>
+                            <span class="chart-sub">Bookings taken each day, and how many were completed</span>
+                        </div>
+                    </div>
+                    <div class="chart-box tall" id="box-volume"><canvas id="ch-volume"></canvas></div>
+                </div>
+            </div>
+
+            <div class="chart-grid">
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Booking Outcomes</h3>
+                            <span class="chart-sub">Where every booking in the period ended up</span>
+                        </div>
+                    </div>
+                    <div class="chart-box" id="box-status"><canvas id="ch-status"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Peak Booking Hours</h3>
+                            <span class="chart-sub">When patients message you, by hour (IST)</span>
+                        </div>
+                    </div>
+                    <div class="chart-box" id="box-hours"><canvas id="ch-hours"></canvas></div>
+                </div>
+            </div>
+
+            <div class="chart-grid">
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Service Mix</h3>
+                            <span class="chart-sub">Most booked services — consultations by department, lab work by test</span>
+                        </div>
+                    </div>
+                    <div class="chart-box tall" id="box-service"><canvas id="ch-service"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Visits by Weekday</h3>
+                            <span class="chart-sub">Appointment days across the period — what to staff for</span>
+                        </div>
+                    </div>
+                    <div class="chart-box tall" id="box-weekday"><canvas id="ch-weekday"></canvas></div>
+                </div>
+            </div>
+
+            <div class="chart-grid" data-feature="payments_razorpay">
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Revenue Collected</h3>
+                            <span class="chart-sub">Paid online each day, against refunds issued</span>
+                        </div>
+                    </div>
+                    <div class="chart-box tall" id="box-revenue"><canvas id="ch-revenue"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Revenue by Service</h3>
+                            <span class="chart-sub">Which services earn the most</span>
+                        </div>
+                    </div>
+                    <div class="chart-box tall" id="box-revservice"><canvas id="ch-revservice"></canvas></div>
+                </div>
+            </div>
+
+            <div class="chart-grid" data-feature="booking">
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Department Load</h3>
+                            <span class="chart-sub">Consultation bookings per department</span>
+                        </div>
+                    </div>
+                    <div class="chart-box" id="box-dept"><canvas id="ch-dept"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Busiest Doctors</h3>
+                            <span class="chart-sub">Bookings per doctor in the period</span>
+                        </div>
+                    </div>
+                    <div class="chart-box" id="box-doctors"><canvas id="ch-doctors"></canvas></div>
+                </div>
+            </div>
+
+            <div class="chart-grid" data-feature="lab_reports diagnostic_reports">
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Report Delivery</h3>
+                            <span class="chart-sub" id="reportDeliverySub">Reports dispatched to patients each day</span>
+                        </div>
+                    </div>
+                    <div class="chart-box tall" id="box-reports"><canvas id="ch-reports"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Delivery Outcomes</h3>
+                            <span class="chart-sub" id="reportOutcomeSub">Every report handled in the period</span>
+                        </div>
+                    </div>
+                    <div class="chart-box tall" id="box-reportmix"><canvas id="ch-reportmix"></canvas></div>
                 </div>
             </div>
         </div>
@@ -1754,7 +2018,7 @@
             </div>
 
             <div class="stats" id="paymentStats">
-                <div class="stat"><div class="glow"></div><div class="label">Confirmed (Paid)</div><div class="num" id="s-pay-confirmed">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Collected (Paid)</div><div class="num" id="s-pay-confirmed">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Revenue</div><div class="num" id="s-pay-revenue">—</div></div>
                 <div class="stat" style="border-color: var(--amber)"><div class="glow" style="background: var(--amber)"></div><div class="label">Pending Review</div><div class="num" id="s-pay-review" style="color: var(--amber)">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Refunded</div><div class="num" id="s-pay-refunded">—</div></div>
@@ -1773,6 +2037,7 @@
                 <select class="search-bar" id="payStatusFilter" onchange="loadPayments()" style="max-width:220px">
                     <option value="">All Statuses</option>
                     <option value="confirmed">Confirmed</option>
+                    <option value="completed">Completed</option>
                     <option value="pending_payment">Pending Payment</option>
                     <option value="pending_review">Pending Review</option>
                     <option value="expired">Expired</option>
@@ -2534,15 +2799,13 @@ function toggleTheme() {
     const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
     localStorage.setItem('mediassist_theme', next);
     applyTheme(next);
+    // Chart.js paints to a canvas, so it cannot inherit a CSS variable change.
+    // Repaint from the data already in hand — only while the page is on
+    // screen, since a hidden .sec has no height to measure a canvas against.
+    if (insightsData && typeof insightsVisible === 'function' && insightsVisible()) {
+        renderInsights(insightsData);
+    }
 }
-
-// Restore saved theme on load. Defaults to dark (no data-theme attribute) if
-// nothing is stored — never auto-applies prefers-color-scheme, so existing
-// users see zero visual change unless they explicitly opt into light mode.
-(function initTheme() {
-    const saved = localStorage.getItem('mediassist_theme');
-    if (saved === 'light') applyTheme('light');
-})();
 
 // ═══════ ICONS (inline SVG, stroke-based, theme-able via currentColor) ═══════
 const ICONS = {
@@ -2573,6 +2836,22 @@ function icon(name, size = 20) {
 }
 
 const icon_ = icon; // alias so the toast() function's local `icon` element var doesn't shadow the helper
+
+// Restore saved theme on load. Defaults to dark (no data-theme attribute) if
+// nothing is stored — never auto-applies prefers-color-scheme, so existing
+// users see zero visual change unless they explicitly opt into light mode.
+//
+// MUST stay below `const ICONS`. This call used to sit directly above it, and
+// applyTheme() reaches ICONS through icon() to swap the sun/moon glyph — so for
+// anyone who had chosen Light Mode it threw "Cannot access 'ICONS' before
+// initialization" during script evaluation. That aborts the whole inline
+// script: every `let`/`const` below stayed in the temporal dead zone and no
+// handler was ever bound, leaving those admins a dead panel that could not
+// even log in. Dark-mode users never hit it, which is why it survived review.
+(function initTheme() {
+    const saved = localStorage.getItem('mediassist_theme');
+    if (saved === 'light') applyTheme('light');
+})();
 
 // ═══════ AUTH ═══════
 let myPlan = null;
@@ -3066,7 +3345,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
     if (loaders[page]) loaders[page]();
 }
 
@@ -3347,6 +3626,644 @@ function animateNum(el, target) {
         if (current >= target) { current = target; clearInterval(timer); }
         el.textContent = current;
     }, 30);
+}
+
+// ═══════ INSIGHTS ═════════════════════════════════════════════════════════
+// Read-only page. One GET /admin/insights call feeds every chart, so no two
+// panels here can disagree, and nothing on this page writes anything.
+//
+// Colours are read from the CSS custom properties at render time rather than
+// hard-coded, which is what makes the charts follow the light/dark toggle. The
+// owner console hard-codes its palette and its charts stay dark in light mode;
+// do not copy that here.
+
+let insightsDays = 30;
+let insightsBranchId = null;
+let insightsBranchesLoaded = false;
+let insightsData = null;
+let insightsLoading = false;
+const insightCharts = {};
+
+//: Semantic colours. Green is delivered/paid, red is failed/refunded, amber is
+//: waiting on a human. Categorical series deliberately do NOT use these — a
+//: department tinted red would read as a problem.
+const INSIGHT_STATUS_TOKEN = {
+    confirmed: 'accent', completed: 'green', cancelled: 'red', no_show: 'amber',
+    refunded: 'pink', pending_payment: 'cyan', pending_review: 'amber',
+    expired: 'tick', rescheduled: 'accent2',
+    sent: 'green', failed: 'red', needs_review: 'amber', pending: 'cyan',
+    unknown: 'tick'
+};
+
+function chartTokens() {
+    const s = getComputedStyle(document.documentElement);
+    const v = n => (s.getPropertyValue(n) || '').trim();
+    return {
+        grid: v('--border'), tick: v('--text3'), label: v('--text2'),
+        strong: v('--text-strong'), surface: v('--surface-solid'), rim: v('--border2'),
+        accent: v('--accent'), accent2: v('--accent2'), green: v('--green'),
+        red: v('--red'), amber: v('--amber'), cyan: v('--cyan'),
+        pink: v('--pink'), mint: v('--mint')
+    };
+}
+
+// Tokens are hex; Chart.js fills need alpha. Handles rgb()/rgba() too so a
+// future token change from hex to rgb does not silently produce opaque fills.
+function withAlpha(color, alpha) {
+    const c = String(color || '').trim();
+    if (c.charAt(0) === '#') {
+        const hex = c.length === 4 ? c.slice(1).split('').map(x => x + x).join('') : c.slice(1);
+        const n = parseInt(hex, 16);
+        if (isNaN(n)) return c;
+        return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+    }
+    const m = c.match(/^rgba?\(([^)]+)\)$/);
+    if (m) {
+        const p = m[1].split(',').map(x => x.trim());
+        return 'rgba(' + p[0] + ',' + p[1] + ',' + p[2] + ',' + alpha + ')';
+    }
+    return c;
+}
+
+function statusColor(t, name) {
+    return t[INSIGHT_STATUS_TOKEN[name] || 'accent'] || t.accent;
+}
+
+function prettyStatus(s) {
+    const x = String(s || '').replace(/_/g, ' ').trim();
+    return x ? x.charAt(0).toUpperCase() + x.slice(1) : '—';
+}
+
+function inr(n) {
+    return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
+// A ranked list is ordered data, so it gets ONE hue fading down the ranks —
+// not a rainbow, which implies the categories are unrelated.
+function rankRamp(color, n) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        out.push(withAlpha(color, n <= 1 ? 0.9 : 0.9 - (i / (n - 1)) * 0.5));
+    }
+    return out;
+}
+
+function tooltipStyle(t, opts) {
+    return Object.assign({
+        backgroundColor: t.surface, borderColor: t.rim, borderWidth: 1,
+        titleColor: t.strong, bodyColor: t.label, padding: 10,
+        cornerRadius: 10, boxPadding: 4, displayColors: true
+    }, opts || {});
+}
+
+function valueAxis(t, fmt) {
+    return {
+        beginAtZero: true,
+        grid: { color: t.grid, drawBorder: false },
+        border: { display: false },
+        ticks: { color: t.tick, precision: 0, callback: fmt }
+    };
+}
+
+function categoryAxis(t, maxTicks) {
+    return {
+        grid: { display: false, drawBorder: false },
+        border: { display: false },
+        ticks: { color: t.tick, maxRotation: 0, autoSkip: true, maxTicksLimit: maxTicks || 8 }
+    };
+}
+
+function areaFill(canvas, color) {
+    const g = canvas.getContext('2d').createLinearGradient(0, 0, 0, canvas.clientHeight || 260);
+    g.addColorStop(0, withAlpha(color, 0.30));
+    g.addColorStop(1, withAlpha(color, 0.01));
+    return g;
+}
+
+// Draws into a canvas, or replaces it with a sentence. An empty canvas reads
+// as a broken chart, which is worse than saying there is nothing to show.
+function drawChart(boxId, canvasId, config, emptyText) {
+    const box = document.getElementById(boxId);
+    const canvas = document.getElementById(canvasId);
+    if (!box || !canvas) return;
+
+    let note = box.querySelector('.chart-empty');
+    if (!note) {
+        note = document.createElement('div');
+        note.className = 'chart-empty';
+        box.appendChild(note);
+    }
+
+    if (insightCharts[canvasId]) {
+        insightCharts[canvasId].destroy();
+        delete insightCharts[canvasId];
+    }
+
+    // A card the plan hides (data-feature) has no layout box, and so does the
+    // whole page if the admin navigated away mid-fetch. Building a chart into
+    // a zero-size container renders nothing and costs a ResizeObserver; the
+    // next visit calls loadInsights() again, so skipping is self-healing.
+    if (!box.clientWidth || !box.clientHeight) return;
+
+    const hasData = !!config && (config.data.datasets || []).some(
+        ds => (ds.data || []).some(v => Number(v) > 0)
+    );
+    if (!window.Chart || !hasData) {
+        canvas.style.display = 'none';
+        note.textContent = window.Chart
+            ? (emptyText || 'No data for this period yet')
+            : 'Charts could not load. Refresh the page to try again.';
+        note.style.display = 'flex';
+        return;
+    }
+
+    canvas.style.display = '';
+    note.style.display = 'none';
+    insightCharts[canvasId] = new Chart(canvas.getContext('2d'), config);
+}
+
+function insightsVisible() {
+    const el = document.getElementById('pg-insights');
+    return !!el && el.classList.contains('on');
+}
+
+function showInsightsNote(text) {
+    const note = document.getElementById('insightsNote');
+    const body = document.getElementById('insightsNoteText');
+    if (!note || !body) return;
+    if (!text) { note.style.display = 'none'; return; }
+    body.textContent = text;
+    note.style.display = 'flex';
+}
+
+function setInsightsRange(days, btn) {
+    insightsDays = days;
+    document.querySelectorAll('#pg-insights .range-pick .btn[data-days]')
+        .forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    loadInsights();
+}
+
+// Chart.js is deferred, so a very fast click could arrive before it does.
+// Wait briefly rather than telling the admin their charts are unavailable.
+function chartLibReady() {
+    if (window.Chart) return Promise.resolve(true);
+    return new Promise(resolve => {
+        let waited = 0;
+        const poll = setInterval(() => {
+            waited += 100;
+            if (window.Chart || waited >= 5000) { clearInterval(poll); resolve(!!window.Chart); }
+        }, 100);
+    });
+}
+
+async function setupInsightsBranches() {
+    const sel = document.getElementById('insightsBranchFilter');
+    if (!sel) return;
+    const isMultiBranch = myFeatures && myFeatures.includes('multi_branch');
+    if (!isMultiBranch) {
+        sel.style.display = 'none';
+        return;
+    }
+    sel.style.display = 'inline-block';
+    if (insightsBranchesLoaded) return;
+    try {
+        const res = await api('/admin/branches');
+        const branches = (res && res.branches) || [];
+        sel.innerHTML = '<option value="">All Branches</option>';
+        branches.forEach(b => {
+            if (b.is_active !== false) {
+                const opt = document.createElement('option');
+                opt.value = b.id;
+                opt.textContent = b.short_name || b.name || 'Branch';
+                sel.appendChild(opt);
+            }
+        });
+        if (insightsBranchId) {
+            sel.value = insightsBranchId;
+        }
+        insightsBranchesLoaded = true;
+    } catch (e) {
+        console.debug('Failed to load branches for insights filter:', e);
+    }
+}
+
+function changeInsightsBranch() {
+    const sel = document.getElementById('insightsBranchFilter');
+    insightsBranchId = (sel && sel.value) ? sel.value : null;
+    loadInsights();
+}
+
+async function loadInsights() {
+    if (insightsLoading) return;
+    insightsLoading = true;
+    showInsightsNote('');
+    try {
+        await chartLibReady();
+        await setupInsightsBranches();
+        let url = '/admin/insights?days=' + insightsDays;
+        if (insightsBranchId) {
+            url += '&branch_id=' + encodeURIComponent(insightsBranchId);
+        }
+        const data = await api(url);
+        insightsData = data;
+        renderInsights(data);
+    } catch (e) {
+        console.error('Insights:', e);
+        insightsData = null;
+        // Server `detail` strings may or may not end in a full stop; strip
+        // whatever is there so the sentence never reads "unavailable..".
+        const reason = String((e && e.message) || 'the request failed').replace(/[.\s]+$/, '');
+        showInsightsNote('Could not load insights — ' + reason + '.');
+    } finally {
+        insightsLoading = false;
+    }
+}
+
+function exportInsightsCSV() {
+    if (!insightsData || !insightsData.dates || !insightsData.dates.length) {
+        toast('No insights data available to export', true);
+        return;
+    }
+    const d = insightsData;
+    const b = d.bookings ? (d.bookings.series || {}) : {};
+    const rev = d.revenue ? (d.revenue.series || {}) : {};
+    const rep = d.reports ? (d.reports.series || {}) : {};
+    const hasRevenue = !!d.revenue;
+    const hasReports = !!d.reports;
+
+    const headers = ['Date', 'New Bookings', 'Confirmed', 'Completed', 'Cancelled'];
+    if (hasRevenue) {
+        headers.push('Revenue Collected (INR)', 'Refunds (INR)');
+    }
+    if (hasReports) {
+        headers.push('Reports Delivered', 'Reports Needs Review', 'Reports Failed');
+    }
+
+    const rows = [headers.join(',')];
+    for (let i = 0; i < d.dates.length; i++) {
+        const row = [
+            d.dates[i],
+            (b.created && b.created[i]) || 0,
+            (b.confirmed && b.confirmed[i]) || 0,
+            (b.completed && b.completed[i]) || 0,
+            (b.cancelled && b.cancelled[i]) || 0,
+        ];
+        if (hasRevenue) {
+            row.push(
+                ((rev.collected_rupees && rev.collected_rupees[i]) || 0).toFixed(2),
+                ((rev.refunded_rupees && rev.refunded_rupees[i]) || 0).toFixed(2)
+            );
+        }
+        if (hasReports) {
+            row.push(
+                (rep.delivered && rep.delivered[i]) || 0,
+                (rep.needs_review && rep.needs_review[i]) || 0,
+                (rep.failed && rep.failed[i]) || 0
+            );
+        }
+        rows.push(row.join(','));
+    }
+
+    const csvContent = rows.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const branchSuffix = insightsBranchId ? '_branch' : '';
+    a.download = `kriya_insights_${d.start_date}_to_${d.end_date}${branchSuffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    toast('Insights exported to CSV');
+}
+
+function renderInsights(d) {
+    const t = chartTokens();
+    if (window.Chart) {
+        Chart.defaults.font.family = "'IBM Plex Sans', system-ui, -apple-system, sans-serif";
+        Chart.defaults.font.size = 11.5;
+        Chart.defaults.color = t.tick;
+    }
+
+    const b = d.bookings || {};
+    const rev = d.revenue || {};
+    const rep = d.reports;
+    const totals = b.totals || {};
+    const labels = d.labels || [];
+    const put = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+
+    const caption = document.getElementById('insightsCaption');
+    if (caption) {
+        const branchEl = document.getElementById('insightsBranchFilter');
+        const branchLabel = (d.branch_id && branchEl && branchEl.selectedOptions && branchEl.selectedOptions[0])
+            ? ' (' + branchEl.selectedOptions[0].text + ')'
+            : '';
+        caption.textContent = 'Bookings, services and revenue — ' +
+            d.period_days + ' days to ' + (d.end_date || 'today') + branchLabel;
+    }
+
+    if (rep && rep.is_centralized) {
+        showInsightsNote('Branch filter applied to bookings and revenue. Diagnostic report delivery metrics reflect centralized lab operations.');
+    } else if ((d.errors || []).length) {
+        showInsightsNote(
+            'Some panels could not be loaded (' + d.errors.join(', ') +
+            '). Everything else on this page is current.'
+        );
+    }
+
+    put('i-total', totals.total ?? 0);
+    put('i-completed', totals.completed ?? 0);
+    put('i-cancelrate', (b.cancellation_rate ?? 0) + '%');
+    put('i-revenue', inr(rev.collected_inr));
+    put('i-avgticket', inr(rev.avg_ticket_inr));
+    put('i-patients', b.unique_patients ?? 0);
+
+    // ── Booking volume ──────────────────────────────────────────────────
+    const volumeCanvas = document.getElementById('ch-volume');
+    drawChart('box-volume', 'ch-volume', volumeCanvas && {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Booked', data: (b.series || {}).created || [],
+                    borderColor: t.accent, backgroundColor: areaFill(volumeCanvas, t.accent),
+                    borderWidth: 2, fill: true, tension: 0.35,
+                    pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: t.accent
+                },
+                {
+                    label: 'Completed', data: (b.series || {}).completed || [],
+                    borderColor: t.green, backgroundColor: 'transparent',
+                    borderWidth: 2, borderDash: [5, 4], fill: false, tension: 0.35,
+                    pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: t.green
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true, position: 'top', align: 'end',
+                    labels: { color: t.label, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'circle' }
+                },
+                tooltip: tooltipStyle(t)
+            },
+            scales: { x: categoryAxis(t, 10), y: valueAxis(t) }
+        }
+    }, 'No bookings in this period');
+
+    // ── Booking outcomes ────────────────────────────────────────────────
+    const mix = b.status_mix || [];
+    drawChart('box-status', 'ch-status', {
+        type: 'doughnut',
+        data: {
+            labels: mix.map(x => prettyStatus(x.name)),
+            datasets: [{
+                data: mix.map(x => x.count),
+                backgroundColor: mix.map(x => withAlpha(statusColor(t, x.name), 0.85)),
+                borderColor: t.surface, borderWidth: 2, hoverOffset: 6
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '62%',
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: { color: t.label, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'circle', padding: 12 }
+                },
+                tooltip: tooltipStyle(t)
+            }
+        }
+    }, 'No bookings in this period');
+
+    // ── Peak booking hours ──────────────────────────────────────────────
+    const hours = b.peak_hours || [];
+    drawChart('box-hours', 'ch-hours', {
+        type: 'bar',
+        data: {
+            labels: hours.map(h => String(h.hour).padStart(2, '0')),
+            datasets: [{
+                label: 'Bookings', data: hours.map(h => h.count),
+                backgroundColor: withAlpha(t.cyan, 0.72), hoverBackgroundColor: t.cyan,
+                borderRadius: 3, borderSkipped: false, barPercentage: 0.85, categoryPercentage: 0.9
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: tooltipStyle(t) },
+            scales: { x: categoryAxis(t, 12), y: valueAxis(t) }
+        }
+    }, 'No bookings in this period');
+
+    // ── Service mix ─────────────────────────────────────────────────────
+    const services = b.by_service || [];
+    drawChart('box-service', 'ch-service', {
+        type: 'bar',
+        data: {
+            labels: services.map(s => s.name),
+            datasets: [{
+                label: 'Bookings', data: services.map(s => s.count),
+                backgroundColor: rankRamp(t.accent, services.length),
+                borderRadius: 4, borderSkipped: false, barPercentage: 0.8
+            }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: tooltipStyle(t) },
+            scales: { x: valueAxis(t), y: categoryAxis(t, 10) }
+        }
+    }, 'No services booked yet');
+
+    // ── Visits by weekday ───────────────────────────────────────────────
+    const weekdays = b.by_weekday || [];
+    drawChart('box-weekday', 'ch-weekday', {
+        type: 'bar',
+        data: {
+            labels: weekdays.map(w => w.name),
+            datasets: [{
+                label: 'Appointments', data: weekdays.map(w => w.count),
+                backgroundColor: withAlpha(t.pink, 0.7), hoverBackgroundColor: t.pink,
+                borderRadius: 5, borderSkipped: false, barPercentage: 0.62
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: tooltipStyle(t) },
+            scales: { x: categoryAxis(t, 7), y: valueAxis(t) }
+        }
+    }, 'No appointments scheduled yet');
+
+    // ── Revenue ─────────────────────────────────────────────────────────
+    const money = v => inr(v);
+    drawChart('box-revenue', 'ch-revenue', {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Collected', data: (rev.series || {}).collected || [],
+                    backgroundColor: withAlpha(t.green, 0.78), hoverBackgroundColor: t.green,
+                    borderRadius: 3, borderSkipped: false
+                },
+                {
+                    label: 'Refunded', data: (rev.series || {}).refunded || [],
+                    backgroundColor: withAlpha(t.red, 0.72), hoverBackgroundColor: t.red,
+                    borderRadius: 3, borderSkipped: false
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true, position: 'top', align: 'end',
+                    labels: { color: t.label, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'circle' }
+                },
+                tooltip: tooltipStyle(t, {
+                    callbacks: { label: c => c.dataset.label + ': ' + money(c.parsed.y) }
+                })
+            },
+            scales: {
+                x: categoryAxis(t, 10),
+                y: Object.assign(valueAxis(t, money), { ticks: { color: t.tick, callback: money } })
+            }
+        }
+    }, 'No online payments in this period');
+
+    const revServices = rev.by_service || [];
+    drawChart('box-revservice', 'ch-revservice', {
+        type: 'bar',
+        data: {
+            labels: revServices.map(s => s.name),
+            datasets: [{
+                label: 'Revenue', data: revServices.map(s => s.inr),
+                backgroundColor: rankRamp(t.green, revServices.length),
+                borderRadius: 4, borderSkipped: false, barPercentage: 0.8
+            }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: tooltipStyle(t, { callbacks: { label: c => money(c.parsed.x) } })
+            },
+            scales: {
+                x: Object.assign(valueAxis(t), { ticks: { color: t.tick, callback: money } }),
+                y: categoryAxis(t, 10)
+            }
+        }
+    }, 'No online payments in this period');
+
+    // ── Departments and doctors (doctor-booking plans only) ─────────────
+    const depts = b.by_department || [];
+    drawChart('box-dept', 'ch-dept', {
+        type: 'bar',
+        data: {
+            labels: depts.map(x => x.name),
+            datasets: [{
+                label: 'Bookings', data: depts.map(x => x.count),
+                backgroundColor: rankRamp(t.accent2, depts.length),
+                borderRadius: 4, borderSkipped: false, barPercentage: 0.78
+            }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: tooltipStyle(t) },
+            scales: { x: valueAxis(t), y: categoryAxis(t, 8) }
+        }
+    }, 'No consultations booked yet');
+
+    const docs = b.top_doctors || [];
+    drawChart('box-doctors', 'ch-doctors', {
+        type: 'bar',
+        data: {
+            labels: docs.map(x => x.name),
+            datasets: [{
+                label: 'Bookings', data: docs.map(x => x.count),
+                backgroundColor: rankRamp(t.cyan, docs.length),
+                borderRadius: 4, borderSkipped: false, barPercentage: 0.78
+            }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: tooltipStyle(t) },
+            scales: { x: valueAxis(t), y: categoryAxis(t, 8) }
+        }
+    }, 'No doctor bookings yet');
+
+    // ── Report delivery (report-dispatching plans only) ──────────────────
+    const repSeries = (rep && rep.series) || {};
+    const deliverySub = document.getElementById('reportDeliverySub');
+    if (deliverySub) {
+        deliverySub.textContent = rep && rep.total
+            ? rep.delivery_rate + '% delivered' + (
+                rep.median_turnaround_minutes !== null && rep.median_turnaround_minutes !== undefined
+                    ? ' · typically ' + rep.median_turnaround_minutes + ' min from upload to send'
+                    : '')
+            : 'Reports dispatched to patients each day';
+    }
+    const outcomeSub = document.getElementById('reportOutcomeSub');
+    if (outcomeSub && rep) {
+        outcomeSub.textContent = rep.total + ' report' + (rep.total === 1 ? '' : 's') +
+            ' handled · ' + rep.abnormal_total + ' flagged abnormal';
+    }
+
+    drawChart('box-reports', 'ch-reports', {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                { label: 'Delivered', data: repSeries.delivered || [], backgroundColor: withAlpha(t.green, 0.8), borderRadius: 3, borderSkipped: false },
+                { label: 'Needs review', data: repSeries.needs_review || [], backgroundColor: withAlpha(t.amber, 0.8), borderRadius: 3, borderSkipped: false },
+                { label: 'Failed', data: repSeries.failed || [], backgroundColor: withAlpha(t.red, 0.8), borderRadius: 3, borderSkipped: false }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true, position: 'top', align: 'end',
+                    labels: { color: t.label, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'circle' }
+                },
+                tooltip: tooltipStyle(t)
+            },
+            scales: {
+                x: Object.assign(categoryAxis(t, 10), { stacked: true }),
+                y: Object.assign(valueAxis(t), { stacked: true })
+            }
+        }
+    }, 'No reports handled in this period');
+
+    const repMix = (rep && rep.outcome_mix) || [];
+    drawChart('box-reportmix', 'ch-reportmix', {
+        type: 'doughnut',
+        data: {
+            labels: repMix.map(x => prettyStatus(x.name === 'sent' ? 'delivered' : x.name)),
+            datasets: [{
+                data: repMix.map(x => x.count),
+                backgroundColor: repMix.map(x => withAlpha(statusColor(t, x.name), 0.85)),
+                borderColor: t.surface, borderWidth: 2, hoverOffset: 6
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '62%',
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: { color: t.label, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'circle', padding: 12 }
+                },
+                tooltip: tooltipStyle(t)
+            }
+        }
+    }, 'No reports handled in this period');
 }
 
 // ═══════ SUBSCRIPTION LIFECYCLE + DAILY REPORT LIMIT (customer-safe) ═══════
@@ -4669,6 +5586,7 @@ async function deactivateRx(id) {
 
 const PAY_STATUS_BADGE = {
     confirmed: '<span style="color:var(--green);background:var(--green-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">Confirmed</span>',
+    completed: '<span style="color:var(--green);background:var(--green-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">Completed</span>',
     pending_payment: '<span style="color:var(--blue);background:var(--blue-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">⏳ Pending Payment</span>',
     pending_review: '<span style="color:var(--amber);background:var(--amber-bg);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">Pending Review</span>',
     expired: '<span style="color:var(--text3);background:var(--surface2);padding:3px 10px;border-radius:8px;font-size:0.78rem;font-weight:600">⏰ Expired</span>',
@@ -4740,7 +5658,7 @@ async function loadPayments() {
                     ? '<span title="Not paid online — collect at the counter" style="color:#f59e0b;font-size:11px;font-weight:600">⏳ Pending</span>'
                     : '—');
             let actions = `<button class="btn" style="padding:4px 10px;font-size:0.75rem" onclick="showPaymentEvents('${b.id}')"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-list"/></svg> Trail</button>`;
-            if (b.status === 'confirmed' && b.payment_id) {
+            if ((b.status === 'confirmed' || b.status === 'completed') && b.payment_id) {
                 actions += ` <button class="btn" style="padding:4px 10px;font-size:0.75rem;color:var(--pink)" onclick="refundBooking('${b.id}')">Refund</button>`;
             }
             // Same endpoint the Appointments page uses: DELETE /admin/appointments/{id}
