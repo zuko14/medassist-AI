@@ -16,6 +16,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     Request,
     Response,
     status,
@@ -1571,6 +1572,78 @@ async def get_upcoming_appointments(
     """Get upcoming appointments."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     return await analytics_service.get_upcoming_appointments(effective_clinic_id, days)
+
+
+#: Longest window the Appointments page may ask for — bounds the count scan.
+_APPOINTMENT_LIST_MAX_SPAN_DAYS = 366
+_APPOINTMENT_STATUS_RE = re.compile(r"[a-z_]{1,32}")
+
+
+@router.get("/appointments")
+async def list_appointments(
+    clinic_id: str = "default",
+    date_basis: Literal["visit", "booked"] = "visit",
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    period_days: Optional[int] = Query(None, ge=1, le=365),
+    status: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=100000),
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Appointments for a date, month or range — past as well as upcoming.
+
+    Read-only. date_basis "visit" filters on the appointment date, "booked" on
+    the day the booking was made (clinic calendar). period_days is the
+    dashboard tiles' own "last N days" window, so a tile and the list it opens
+    agree. Same audience as /appointments/upcoming, which this supersedes in
+    the panel.
+
+    limit is capped at 100 because the refund-state lookup puts every row's id
+    into one query string.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    if period_days is not None:
+        if date_from or date_to or date_basis != "booked":
+            raise HTTPException(
+                status_code=422,
+                detail="period_days is a booked-on window and cannot be combined with dates",
+            )
+    else:
+        if not date_from or not date_to:
+            raise HTTPException(
+                status_code=422, detail="date_from and date_to are required"
+            )
+        if date_to < date_from:
+            raise HTTPException(
+                status_code=422, detail="date_to cannot be earlier than date_from"
+            )
+        if (date_to - date_from).days + 1 > _APPOINTMENT_LIST_MAX_SPAN_DAYS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Choose a range of at most {_APPOINTMENT_LIST_MAX_SPAN_DAYS} days",
+            )
+    if status is not None and not _APPOINTMENT_STATUS_RE.fullmatch(status):
+        raise HTTPException(status_code=422, detail="Invalid status filter")
+
+    try:
+        result = await analytics_service.list_appointments(
+            effective_clinic_id,
+            basis=date_basis,
+            date_from=date_from,
+            date_to=date_to,
+            period_days=period_days,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+        # Same Refund column as the Payments page: an in-flight or failed
+        # refund is only visible in payment_events. Best-effort by design.
+        await _annotate_refund_state(result["appointments"])
+        return result
+    except Exception as e:
+        logger.error(f"Error listing appointments: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load appointments")
 
 
 @router.get("/departments/popular")
@@ -4801,6 +4874,11 @@ class ResendReportRequest(BaseModel):
     new_phone: Optional[str] = None
 
 
+class DismissReportsBatchRequest(BaseModel):
+    report_ids: Optional[list[str]] = None
+    dismiss_all_needs_review: bool = False
+
+
 @router.get("/reports/queue")
 async def get_diagnostic_reports_queue(
     clinic_id: str = "default",
@@ -4946,6 +5024,137 @@ async def resolve_report_match(
         "report_id": report_id,
         "status": update_payload["status"],
         "patient_phone": norm_phone,
+    }
+
+
+@router.post("/reports/{report_id}/dismiss")
+async def dismiss_lab_report(
+    report_id: str,
+    clinic_id: str = "default",
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("REPORTS_RESOLVE")),
+):
+    """Dismiss a report from the triage queue.
+
+    Sets status='dismissed', records resolved_at and resolved_by for audit.
+    Preserves the row in the database for NMC record retention compliance
+    and external_report_id deduplication.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+
+    # scoped: tenant-scoped operation with verified clinic authorization
+    existing = await sb(
+        supabase.table("lab_reports")
+        .select("id, status, patient_name, patient_phone, report_name")
+        .eq("id", report_id)
+        .eq("clinic_id", effective_clinic_id)
+    )
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report = existing.data[0]
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # scoped: tenant-scoped operation with verified clinic authorization
+    await sb(
+        supabase.table("lab_reports")
+        .update({
+            "status": "dismissed",
+            "resolved_at": now_iso,
+            "resolved_by": user.username,
+            "error_message": "Dismissed by staff",
+        })
+        .eq("id", report_id)
+        .eq("clinic_id", effective_clinic_id)
+    )
+
+    client_ip = request.client.host if request and request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="dismiss_lab_report",
+        resource_type="lab_report",
+        resource_id=report_id,
+        details={
+            "previous_status": report.get("status"),
+            "patient_name": report.get("patient_name"),
+            "patient_phone": report.get("patient_phone"),
+            "report_name": report.get("report_name"),
+        },
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "report_id": report_id,
+        "status": "dismissed",
+        "message": "Report dismissed from triage queue",
+    }
+
+
+@router.post("/reports/dismiss-batch")
+async def dismiss_lab_reports_batch(
+    body: DismissReportsBatchRequest,
+    clinic_id: str = "default",
+    request: Request = None,
+    user: AdminUser = Depends(require_permission("REPORTS_RESOLVE")),
+):
+    """Dismiss multiple reports from the triage queue in bulk.
+
+    Accepts either an explicit list of report_ids or dismiss_all_needs_review=True.
+    Strictly scoped to the tenant clinic.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    update_payload = {
+        "status": "dismissed",
+        "resolved_at": now_iso,
+        "resolved_by": user.username,
+        "error_message": "Dismissed by staff (bulk)",
+    }
+
+    if body.dismiss_all_needs_review:
+        # scoped: tenant-scoped operation with verified clinic authorization
+        query = (
+            supabase.table("lab_reports")
+            .update(update_payload)
+            .eq("clinic_id", effective_clinic_id)
+            .eq("status", "needs_review")
+        )
+    elif body.report_ids:
+        # scoped: tenant-scoped operation with verified clinic authorization
+        query = (
+            supabase.table("lab_reports")
+            .update(update_payload)
+            .eq("clinic_id", effective_clinic_id)
+            .in_("id", body.report_ids[:500])
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Must provide report_ids or set dismiss_all_needs_review=True",
+        )
+
+    res = await sb(query)
+    dismissed_count = len(res.data) if res.data else 0
+
+    client_ip = request.client.host if request and request.client else "unknown"
+    await log_admin_action(
+        user=user,
+        action="dismiss_lab_reports_batch",
+        resource_type="lab_report",
+        resource_id=None,
+        details={
+            "dismissed_count": dismissed_count,
+            "dismiss_all": body.dismiss_all_needs_review,
+        },
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "dismissed_count": dismissed_count,
+        "message": f"Successfully dismissed {dismissed_count} report(s) from triage queue",
     }
 
 

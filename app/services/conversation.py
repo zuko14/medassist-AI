@@ -3423,6 +3423,18 @@ class ConversationManager:
                         )
                     else:
                         await self._suggest_other_doctors(clinic, phone, context, lang)
+                elif result.get("reason") == "razorpay_error":
+                    error_msg = {
+                        "en": "We're having trouble connecting to the payment gateway right now. Please try again in a few minutes or contact the clinic.",
+                        "hi": "भुगतान गेटवे से जुड़ने में समस्या आ रही है। कृपया कुछ समय बाद पुनः प्रयास करें या क्लिनिक से संपर्क करें।",
+                        "te": "పేమెంట్ గేట్‌వే కనెక్ట్ చేయడంలో సమస్య ఉంది. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి లేదా క్లినిక్‌ని సంప్రదించండి.",
+                    }.get(
+                        lang,
+                        "Payment gateway is temporarily unavailable. Please try again later.",
+                    )
+                    await self.whatsapp.send_text(clinic, phone, error_msg)
+                    await self.update_state(clinic, phone, "main_menu")
+                    await self._send_main_menu(clinic, phone, lang)
                 else:
                     error_msg = {
                         "en": "Sorry, we couldn't process your booking right now. Please try again.",

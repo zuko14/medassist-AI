@@ -85,6 +85,47 @@ async def _fetch_window(
     return rows
 
 
+def dashboard_period_start(days: int) -> str:
+    """First day of the dashboard's rolling window, exactly as its tiles filter it.
+
+    Shared with list_appointments() so a tile's number and the list it opens
+    are cut on the same boundary. It is the server's calendar rather than IST
+    on purpose: that is what the tiles have always counted, and moving it would
+    shift every live dashboard's numbers.
+    """
+    return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _appointment_window(
+    query,
+    basis: str,
+    date_from: Optional[date],
+    date_to: Optional[date],
+    period_days: Optional[int],
+):
+    """Apply the Appointments page's date filter to an appointments query.
+
+    One function for both the status-count scan and the page query, so the
+    chips, the pager total and the rows can never disagree about the window.
+    """
+    if period_days is not None:
+        return query.gte("created_at", dashboard_period_start(period_days))
+    if date_from is None or date_to is None:
+        # Fail closed: an unbounded window would scan the clinic's whole history.
+        raise ValueError("date_from and date_to are required unless period_days is given")
+    if basis == "booked":
+        # created_at is a UTC timestamptz; "booked on 5 Sep" means 5 Sep in
+        # the clinic's calendar, i.e. from 4 Sep 18:30 UTC.
+        start = datetime.combine(date_from, time.min, tzinfo=CLINIC_TZ)
+        end = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=CLINIC_TZ)
+        return query.gte("created_at", start.astimezone(timezone.utc).isoformat()).lt(
+            "created_at", end.astimezone(timezone.utc).isoformat()
+        )
+    return query.gte("appointment_date", date_from.isoformat()).lte(
+        "appointment_date", date_to.isoformat()
+    )
+
+
 def _ist_day(value) -> Optional[date]:
     """Bucket a Supabase timestamptz into the clinic's own calendar day."""
     dt = parse_timestamp(value)
@@ -333,7 +374,7 @@ class AnalyticsService:
     async def get_dashboard_stats(self, clinic_id: str, days: int = 30) -> dict:
         """Get dashboard statistics."""
         try:
-            from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            from_date = dashboard_period_start(days)
 
             # Fetch all appointments in period and count in Python
             query = (
@@ -371,6 +412,9 @@ class AnalyticsService:
 
             return {
                 "period_days": days,
+                # The Patients page filters "new" on this exact string, so the
+                # New Patients tile and the list it opens always agree.
+                "period_start": from_date,
                 "total_appointments": total_appointments,
                 "confirmed": confirmed,
                 "cancelled": cancelled,
@@ -433,6 +477,87 @@ class AnalyticsService:
         except Exception as e:
             logger.error(f"Error getting upcoming appointments: {e}")
             return []
+
+    async def list_appointments(
+        self,
+        clinic_id: str,
+        *,
+        basis: str = "visit",
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        period_days: Optional[int] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """One page of the admin Appointments list, with per-status counts.
+
+        basis "visit" filters on appointment_date, "booked" on created_at in
+        the clinic's calendar. period_days is the dashboard tiles' own window
+        (booked basis only), so a tile and the list it opens show one number.
+
+        Raises on a database failure instead of returning an empty page: "no
+        appointments on 5 Sep" must never be what an outage looks like.
+        """
+        # Counts cover the whole window, ignoring the status filter, so every
+        # chip keeps its number while one is selected. Only `status` is read,
+        # and it is paged because PostgREST caps a response at 1000 rows.
+        # ponytail: Python-side count, a GROUP BY RPC if windows reach _INSIGHTS_MAX_ROWS.
+        summary: dict = {}
+        scanned = 0
+        truncated = False
+        while True:
+            page = await sb(
+                _appointment_window(
+                    scoped_query("appointments", clinic_id, "status"),
+                    basis, date_from, date_to, period_days,
+                )
+                .order("id")
+                .range(scanned, scanned + _INSIGHTS_PAGE_ROWS - 1)
+            )
+            got = page.data or []
+            for row in got:
+                if row.get("status"):
+                    summary[row["status"]] = summary.get(row["status"], 0) + 1
+            scanned += len(got)
+            if len(got) < _INSIGHTS_PAGE_ROWS:
+                break
+            if scanned >= _INSIGHTS_MAX_ROWS:
+                truncated = True
+                logger.error(
+                    f"Appointments list hit the {_INSIGHTS_MAX_ROWS}-row ceiling "
+                    f"for clinic {clinic_id} — counts are truncated"
+                )
+                break
+
+        total = summary.get(status, 0) if status else scanned
+        rows: list = []
+        if truncated or offset < total:
+            query = _appointment_window(
+                scoped_query("appointments", clinic_id, "*"),
+                basis, date_from, date_to, period_days,
+            )
+            if status:
+                query = query.eq("status", status)
+            if period_days is not None or basis == "booked":
+                query = query.order("created_at", desc=True).order("id", desc=True)
+            else:
+                query = (
+                    query.order("appointment_date")
+                    .order("appointment_time")
+                    .order("id")
+                )
+            rows = (await sb(query.range(offset, offset + limit - 1))).data or []
+
+        return {
+            "appointments": rows,
+            "total": total,
+            "window_total": scanned,
+            "summary": summary,
+            "limit": limit,
+            "offset": offset,
+            "truncated": truncated,
+        }
 
     async def get_popular_departments(self, clinic_id: str, days: int = 30) -> list:
         """Get most popular departments."""

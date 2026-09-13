@@ -1873,14 +1873,26 @@ class PaymentService:
             "notes": {"booking_id": booking_id, "booking_ref": booking_ref},
         }
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self._razorpay_base}/payment_links",
-                json=link_data,
-                auth=(effective_key_id, effective_key_secret),
-                timeout=15.0,
-            )
-            response.raise_for_status()
-            return response.json()
+            try:
+                response = await client.post(
+                    f"{self._razorpay_base}/payment_links",
+                    json=link_data,
+                    auth=(effective_key_id, effective_key_secret),
+                    timeout=15.0,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                err_text = ""
+                try:
+                    err_json = e.response.json()
+                    err_text = err_json.get("error", {}).get("description") or e.response.text
+                except Exception:
+                    err_text = e.response.text
+                logger.error(
+                    f"Razorpay payment link creation failed HTTP {e.response.status_code}: {err_text}"
+                )
+                raise RuntimeError(f"Razorpay error ({e.response.status_code}): {err_text}") from e
 
     async def _check_razorpay_order_status(
         self,

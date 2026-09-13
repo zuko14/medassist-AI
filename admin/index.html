@@ -1056,6 +1056,63 @@
             font-weight: 600;
         }
 
+        /* Appointments filter bar. Reuses .range-pick and .toggle-group so it
+           shares the Insights page's look, focus ring and theme tokens. */
+        #pg-appointments [hidden], #pg-patients [hidden] { display: none !important; }
+        .appt-filters { display: flex; flex-direction: column; gap: 14px; }
+        .appt-filters > :empty { display: none; }
+        .appt-filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .appt-filter-row .toggle-group { margin-bottom: 0; }
+        .appt-filter-row .toggle-btn:disabled,
+        .appt-pager .btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+        .appt-date-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text3); }
+        .appt-date-field input, .appt-date-field select {
+            min-height: 34px;
+            padding: 6px 10px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font: inherit;
+            font-size: 0.82rem;
+            color-scheme: light;
+        }
+        :root:not([data-theme="light"]) .appt-date-field input,
+        :root:not([data-theme="light"]) .appt-date-field select { color-scheme: dark; }
+        .appt-date-field input:hover, .appt-date-field select:hover { border-color: var(--border2); }
+        .appt-date-field input:focus, .appt-date-field select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .appt-date-field .btn-sm { min-width: 34px; padding: 6px 10px; justify-content: center; }
+        .appt-chip .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 7px; flex-shrink: 0; }
+        .appt-chip .count { margin-left: 7px; font-variant-numeric: tabular-nums; opacity: 0.75; }
+        .appt-pager {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 10px; flex-wrap: wrap;
+            padding-top: 14px; margin-top: 4px;
+            border-top: 1px solid var(--border);
+            font-size: 0.8rem; color: var(--text3);
+        }
+        .appt-active-filter {
+            display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+            padding: 10px 14px; margin-bottom: 16px;
+            background: var(--accent-glow); border: 1px solid var(--accent-border); border-radius: 10px;
+            font-size: 0.84rem; color: var(--text);
+        }
+
+        /* Dashboard tiles that open the list behind their number. */
+        .stat-link { cursor: pointer; }
+        .stat-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .stat-link .label::after {
+            content: '→'; margin-left: 6px; display: inline-block;
+            opacity: 0; transform: translateX(-3px);
+            transition: opacity var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
+        }
+        .stat-link:hover .label::after, .stat-link:focus-visible .label::after { opacity: 1; transform: none; }
+        @media (hover: none) { .stat-link .label::after { opacity: 0.6; transform: none; } }
+
         /* An empty canvas reads as a broken chart. Say so instead. */
         .chart-empty {
             display: flex;
@@ -1381,12 +1438,12 @@
                 </div>
 
                 <div class="stats stagger-in">
-                    <div class="stat"><div class="glow"></div><div class="label">Total Appointments</div><div class="num" id="s-total">—</div></div>
-                    <div class="stat"><div class="glow"></div><div class="label">Confirmed</div><div class="num" id="s-confirmed">—</div></div>
-                    <div class="stat"><div class="glow"></div><div class="label">Cancelled</div><div class="num" id="s-cancelled">—</div></div>
-                    <div class="stat"><div class="glow"></div><div class="label">Completed</div><div class="num" id="s-completed">—</div></div>
-                    <div class="stat"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-patients">—</div></div>
-                    <div class="stat"><div class="glow"></div><div class="label">New Patients</div><div class="num" id="s-new">—</div></div>
+                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard(null)"><div class="glow"></div><div class="label">Total Appointments</div><div class="num" id="s-total">—</div></div>
+                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('confirmed')"><div class="glow"></div><div class="label">Confirmed</div><div class="num" id="s-confirmed">—</div></div>
+                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('cancelled')"><div class="glow"></div><div class="label">Cancelled</div><div class="num" id="s-cancelled">—</div></div>
+                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('completed')"><div class="glow"></div><div class="label">Completed</div><div class="num" id="s-completed">—</div></div>
+                    <div class="stat stat-link" role="button" tabindex="0" title="View patients" onclick="openPatientsFromDashboard(false)"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-patients">—</div></div>
+                    <div class="stat stat-link" role="button" tabindex="0" title="View new patients" onclick="openPatientsFromDashboard(true)"><div class="glow"></div><div class="label">New Patients</div><div class="num" id="s-new">—</div></div>
                 </div>
 
                 <div class="card">
@@ -1468,6 +1525,12 @@
                                     onclick="releaseHeldWalkins()"
                                     title="Send all walk-in reports that were held because the phone number was not in your patient list">
                                 Send held walk-ins
+                            </button>
+                            <button class="btn btn-sm btn-ghost" id="dismissAllReviewBtn"
+                                    onclick="dismissAllReviewReports()"
+                                    style="color:var(--text3); border:1px solid rgba(255,255,255,0.15);"
+                                    title="Dismiss all unresolved reports from the triage queue">
+                                Dismiss All
                             </button>
                             <span id="diagReviewCountBadge" class="badge badge-pending">0 Pending</span>
                         </div>
@@ -1686,12 +1749,52 @@
         <div id="pg-appointments" class="sec">
             <div class="page-head">
                 <h2>Appointments</h2>
-                <p>Upcoming appointments in the next 30 days</p>
+                <p id="apptCaption">Upcoming appointments in the next 30 days</p>
+            </div>
+            <div class="card appt-filters">
+                <div class="appt-filter-row">
+                    <div class="range-pick" id="apptPresets" role="group" aria-label="Period">
+                        <button type="button" class="btn btn-ghost btn-sm on" data-preset="upcoming" aria-pressed="true" onclick="setApptPreset('upcoming')">Upcoming</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-preset="today" aria-pressed="false" onclick="setApptPreset('today')">Today</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-preset="last30" aria-pressed="false" onclick="setApptPreset('last30')">Last 30 days</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-preset="date" aria-pressed="false" onclick="setApptPreset('date')">Specific date</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-preset="month" aria-pressed="false" onclick="setApptPreset('month')">Month</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-preset="range" aria-pressed="false" onclick="setApptPreset('range')">Date range</button>
+                    </div>
+                </div>
+                <div class="appt-filter-row">
+                    <div class="toggle-group" id="apptBasis" role="group" aria-label="Filter by">
+                        <button type="button" class="toggle-btn on" data-basis="visit" aria-pressed="true" onclick="setApptBasis('visit')">Appointment date</button>
+                        <button type="button" class="toggle-btn" data-basis="booked" aria-pressed="false" onclick="setApptBasis('booked')">Booked on</button>
+                    </div>
+                    <div class="appt-date-field" id="apptDateField" hidden>
+                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Previous day" onclick="shiftAppt(-1)">‹</button>
+                        <input type="date" id="apptDate" aria-label="Date" onchange="applyApptInputs()">
+                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Next day" onclick="shiftAppt(1)">›</button>
+                    </div>
+                    <div class="appt-date-field" id="apptMonthField" hidden>
+                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Previous month" onclick="shiftAppt(-1)">‹</button>
+                        <select id="apptMonth" aria-label="Month" onchange="applyApptInputs()"></select>
+                        <select id="apptYear" aria-label="Year" onchange="applyApptInputs()"></select>
+                        <button type="button" class="btn btn-ghost btn-sm" aria-label="Next month" onclick="shiftAppt(1)">›</button>
+                    </div>
+                    <div class="appt-date-field" id="apptRangeField" hidden>
+                        <label for="apptFrom">From</label>
+                        <input type="date" id="apptFrom" onchange="applyApptInputs()">
+                        <label for="apptTo">To</label>
+                        <input type="date" id="apptTo" onchange="applyApptInputs()">
+                    </div>
+                    <button type="button" class="btn btn-ghost btn-sm" id="apptReset" onclick="resetApptFilters()" hidden>Reset</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="loadAppointments()" aria-label="Refresh appointments" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button>
+                </div>
+                <div class="range-pick" id="apptStatusChips" role="group" aria-label="Status"></div>
+                <div id="apptFilterMsg" role="status" aria-live="polite"></div>
             </div>
             <div class="card">
                 <div class="tbl-wrap" id="apptList">
                     <div class="loader"><div class="spin"></div>Loading appointments...</div>
                 </div>
+                <div class="appt-pager" id="apptPager" hidden></div>
             </div>
         </div>
 
@@ -1851,6 +1954,10 @@
                 <p>Manage and view registered patients</p>
             </div>
             <input type="text" class="search-bar" id="patientSearch" placeholder="Search by name or phone number..." oninput="filterPatients()">
+            <div class="appt-active-filter" id="patientNewNote" role="status" hidden>
+                <span id="patientNewNoteText"></span>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="clearPatientNewFilter()">Show all patients</button>
+            </div>
             <div class="stats" id="patientStats">
                 <div class="stat"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-pat-total">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Opted In</div><div class="num" id="s-pat-opted">—</div></div>
@@ -3402,7 +3509,7 @@ function toggleSidebar() {
     document.getElementById('overlay').classList.toggle('show');
 }
 
-document.querySelectorAll('.nav-link[tabindex]').forEach(link => {
+document.querySelectorAll('.nav-link[tabindex], .stat-link').forEach(link => {
     link.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -3613,7 +3720,12 @@ async function loadDashboard() {
     } catch (e) { console.error('Dashboard:', e); }
 }
 
+// First day of the tiles' window, straight from /admin/stats. The New Patients
+// tile opens the Patients page filtered on this exact value, so they agree.
+let dashPeriodStart = null;
+
 function renderDashboard(d) {
+    dashPeriodStart = d.period_start || null;
     document.getElementById('s-total').textContent = d.total_appointments ?? 0;
     document.getElementById('s-confirmed').textContent = d.confirmed ?? 0;
     document.getElementById('s-cancelled').textContent = d.cancelled ?? 0;
@@ -4517,19 +4629,348 @@ function bookingSubjectCell(b) {
     return esc(b.doctor_name) || '—';
 }
 
+// Filter state for the Appointments page. It survives navigation, so a
+// cancellation or check-in reloads the same view the admin was looking at.
+// "Upcoming" is the page's original view and stays the default.
+const APPT_PAGE_SIZE = 50;
+const APPT_MAX_SPAN_DAYS = 366;  // mirrors _APPOINTMENT_LIST_MAX_SPAN_DAYS
+const APPT_FILTER_DEFAULT = { preset: 'upcoming', basis: 'visit', date: null, month: null, from: null, to: null, status: null, offset: 0 };
+const apptFilter = { ...APPT_FILTER_DEFAULT };
+let apptLoadSeq = 0;
+
+const APPT_STATUS_ORDER = ['confirmed', 'completed', 'cancelled', 'no_show', 'pending_payment', 'pending_review', 'rescheduled', 'refunded', 'expired'];
+const APPT_STATUS_DOT = {
+    confirmed: 'green', completed: 'blue', cancelled: 'red', no_show: 'amber',
+    pending_payment: 'cyan', pending_review: 'amber', rescheduled: 'accent', refunded: 'pink', expired: 'text3',
+};
+
+// The clinic's calendar, whatever timezone the admin's browser is in.
+function istToday() {
+    const p = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
+        .formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
+    return `${p.year}-${p.month}-${p.day}`;
+}
+
+// YYYY-MM-DD arithmetic in UTC, so no DST or local offset can move a day.
+function addDaysIso(iso, n) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+}
+
+function shiftMonthIso(ym, n) {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
+}
+
+function monthBounds(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return [`${ym}-01`, `${ym}-${String(last).padStart(2, '0')}`];
+}
+
+// Spelled out rather than toLocaleString(): browsers disagree on short month
+// names ("Sep" vs "Sept,"), and a date filter's caption should read the same everywhere.
+const APPT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const APPT_MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const APPT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function fmtApptDate(iso) {
+    const d = new Date(iso + 'T00:00:00Z');
+    return `${APPT_WEEKDAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${APPT_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+function fmtApptMonth(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    return `${APPT_MONTHS_LONG[m - 1]} ${y}`;
+}
+
+function fmtBookedAt(ts) {
+    const d = ts ? new Date(ts) : null;
+    if (!d || isNaN(d)) return '—';
+    const p = {};
+    new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+        .formatToParts(d).forEach(x => { p[x.type] = x.value; });
+    return `${p.day} ${APPT_MONTHS[Number(p.month) - 1]} ${p.year}, ${p.hour}:${p.minute} ${String(p.dayPeriod || '').toLowerCase()}`;
+}
+
+function apptStatusLabel(s) {
+    const t = String(s || '').replace(/_/g, ' ');
+    return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+// Turns the filter into the /admin/appointments query, or an error to show.
+// "Last 30 days" by booking date sends period_days, which the server cuts on
+// the dashboard tiles' own boundary — that is what makes a tile's number and
+// this list agree.
+function apptQuery(f, today) {
+    const q = new URLSearchParams();
+    const basis = f.preset === 'upcoming' ? 'visit' : f.basis;
+    let from = null, to = null;
+    if (f.preset === 'upcoming') { from = today; to = addDaysIso(today, 30); }
+    else if (f.preset === 'today') { from = today; to = today; }
+    else if (f.preset === 'last30') {
+        if (basis === 'booked') q.set('period_days', '30');
+        else { from = addDaysIso(today, -30); to = today; }
+    }
+    else if (f.preset === 'date') { from = f.date; to = f.date; }
+    else if (f.preset === 'month') { if (f.month) [from, to] = monthBounds(f.month); }
+    else { from = f.from; to = f.to; }
+
+    if (!q.has('period_days')) {
+        if (!from || !to) return { error: 'Choose a start and an end date.' };
+        if (to < from) return { error: 'The end date is before the start date.' };
+        if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1 > APPT_MAX_SPAN_DAYS) {
+            return { error: `Choose a range of at most ${APPT_MAX_SPAN_DAYS} days.` };
+        }
+        q.set('date_from', from);
+        q.set('date_to', to);
+    }
+    q.set('date_basis', basis);
+    if (f.status) q.set('status', f.status);
+    q.set('limit', String(APPT_PAGE_SIZE));
+    q.set('offset', String(f.offset || 0));
+    return { qs: q.toString() };
+}
+
+function apptCaptionText(f, today) {
+    const booked = f.preset !== 'upcoming' && f.basis === 'booked';
+    const lead = booked ? 'Bookings made' : 'Appointments scheduled';
+    switch (f.preset) {
+        case 'upcoming': return 'Upcoming appointments in the next 30 days';
+        case 'today': return `${lead} today · ${fmtApptDate(today)}`;
+        case 'last30': return `${lead} in the last 30 days`;
+        case 'date': return `${lead} on ${fmtApptDate(f.date)}`;
+        case 'month': return `${lead} in ${fmtApptMonth(f.month)}`;
+        default: return `${lead} from ${fmtApptDate(f.from)} to ${fmtApptDate(f.to)}`;
+    }
+}
+
+// Statuses that occur in the window, in a fixed order, plus the selected one
+// even at zero — so opening "Confirmed · 0" from the dashboard still shows it.
+function apptStatusChipList(summary, active) {
+    const keys = Object.keys(summary || {}).filter(k => summary[k] > 0);
+    if (active && !keys.includes(active)) keys.push(active);
+    const rank = k => { const i = APPT_STATUS_ORDER.indexOf(k); return i === -1 ? APPT_STATUS_ORDER.length : i; };
+    return keys.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+function syncApptControls() {
+    const f = apptFilter;
+    const upcoming = f.preset === 'upcoming';
+    document.querySelectorAll('#apptPresets [data-preset]').forEach(b => {
+        const on = b.dataset.preset === f.preset;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
+    document.querySelectorAll('#apptBasis [data-basis]').forEach(b => {
+        const on = b.dataset.basis === (upcoming ? 'visit' : f.basis);
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+        b.disabled = upcoming;
+        b.title = upcoming ? 'Upcoming always lists by appointment date' : '';
+    });
+    document.getElementById('apptDateField').hidden = f.preset !== 'date';
+    document.getElementById('apptMonthField').hidden = f.preset !== 'month';
+    document.getElementById('apptRangeField').hidden = f.preset !== 'range';
+    if (f.preset === 'date') document.getElementById('apptDate').value = f.date || '';
+    if (f.preset === 'range') {
+        document.getElementById('apptFrom').value = f.from || '';
+        document.getElementById('apptTo').value = f.to || '';
+    }
+    if (f.preset === 'month' && f.month) {
+        const [y, m] = f.month.split('-').map(Number);
+        const monthSel = document.getElementById('apptMonth');
+        if (!monthSel.options.length) {
+            monthSel.innerHTML = APPT_MONTHS_LONG.map((name, i) =>
+                `<option value="${String(i + 1).padStart(2, '0')}">${name}</option>`
+            ).join('');
+        }
+        monthSel.value = String(m).padStart(2, '0');
+        const thisYear = Number(istToday().slice(0, 4));
+        const years = [];
+        for (let yr = Math.min(thisYear - 5, y); yr <= Math.max(thisYear + 1, y); yr++) years.push(yr);
+        const yearSel = document.getElementById('apptYear');
+        yearSel.innerHTML = years.map(yr => `<option value="${yr}">${yr}</option>`).join('');
+        yearSel.value = String(y);
+    }
+    document.getElementById('apptReset').hidden = upcoming && !f.status;
+}
+
+function setApptPreset(preset) {
+    const today = istToday();
+    apptFilter.preset = preset;
+    if (preset === 'date' && !apptFilter.date) apptFilter.date = today;
+    if (preset === 'month' && !apptFilter.month) apptFilter.month = today.slice(0, 7);
+    if (preset === 'range' && !(apptFilter.from && apptFilter.to)) {
+        apptFilter.from = today.slice(0, 8) + '01';
+        apptFilter.to = today;
+    }
+    apptFilter.offset = 0;
+    loadAppointments();
+}
+
+function setApptBasis(basis) {
+    if (apptFilter.preset === 'upcoming' || apptFilter.basis === basis) return;
+    apptFilter.basis = basis;
+    apptFilter.offset = 0;
+    loadAppointments();
+}
+
+function setApptStatus(status) {
+    apptFilter.status = status || null;
+    apptFilter.offset = 0;
+    loadAppointments();
+}
+
+function applyApptInputs() {
+    const f = apptFilter;
+    if (f.preset === 'date') {
+        const v = document.getElementById('apptDate').value;
+        if (!v) return;  // a half-typed date is not a filter yet
+        f.date = v;
+    } else if (f.preset === 'month') {
+        f.month = `${document.getElementById('apptYear').value}-${document.getElementById('apptMonth').value}`;
+    } else if (f.preset === 'range') {
+        f.from = document.getElementById('apptFrom').value || null;
+        f.to = document.getElementById('apptTo').value || null;
+    }
+    f.offset = 0;
+    loadAppointments();
+}
+
+function shiftAppt(n) {
+    if (apptFilter.preset === 'date' && apptFilter.date) apptFilter.date = addDaysIso(apptFilter.date, n);
+    else if (apptFilter.preset === 'month' && apptFilter.month) apptFilter.month = shiftMonthIso(apptFilter.month, n);
+    else return;
+    apptFilter.offset = 0;
+    loadAppointments();
+}
+
+function resetApptFilters() {
+    Object.assign(apptFilter, APPT_FILTER_DEFAULT);
+    loadAppointments();
+}
+
+function pageAppts(dir) {
+    apptFilter.offset = Math.max(0, (apptFilter.offset || 0) + dir * APPT_PAGE_SIZE);
+    loadAppointments();
+    document.getElementById('apptList').scrollIntoView({ block: 'nearest' });
+}
+
+// A tile only links to a page this plan actually shows in the sidebar.
+function pageAvailable(page) {
+    const link = document.querySelector(`.nav-link[data-page="${page}"]`);
+    return !!link && link.style.display !== 'none';
+}
+
+function openApptsFromDashboard(status) {
+    if (!pageAvailable('appointments')) return;
+    Object.assign(apptFilter, { preset: 'last30', basis: 'booked', status: status || null, offset: 0 });
+    go('appointments', null);
+}
+
+function renderApptChips(data) {
+    const summary = data.summary || {};
+    const chip = (key, label, count, dot) => {
+        const on = (apptFilter.status || '') === key;
+        return `<button type="button" class="btn btn-ghost btn-sm appt-chip${on ? ' on' : ''}" aria-pressed="${on}" data-status="${esc(key)}" onclick="setApptStatus(this.dataset.status)">`
+            + (dot ? `<span class="dot" style="background:var(--${dot})"></span>` : '')
+            + `${esc(label)}<span class="count">${Number(count) || 0}</span></button>`;
+    };
+    document.getElementById('apptStatusChips').innerHTML = chip('', 'All', data.window_total, null)
+        + apptStatusChipList(summary, apptFilter.status)
+            .map(k => chip(k, apptStatusLabel(k), summary[k], APPT_STATUS_DOT[k] || 'text3')).join('');
+}
+
+function renderApptPager(data, shown) {
+    const el = document.getElementById('apptPager');
+    const total = Number(data.total) || 0;
+    if (!total || !shown) { el.hidden = true; el.innerHTML = ''; return; }
+    const offset = Number(data.offset) || 0;
+    const end = offset + shown;
+    const more = data.truncated ? '+' : '';
+    let html = `<span>Showing ${offset + 1}–${end} of ${total}${more} appointment${total === 1 ? '' : 's'}</span>`;
+    if (offset > 0 || end < total || data.truncated) {
+        html += `<div class="range-pick">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="pageAppts(-1)" ${offset > 0 ? '' : 'disabled'}>‹ Previous</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="pageAppts(1)" ${end < total || (data.truncated && shown === APPT_PAGE_SIZE) ? '' : 'disabled'}>Next ›</button>
+        </div>`;
+    }
+    el.innerHTML = html;
+    el.hidden = false;
+}
+
 async function loadAppointments() {
     const el = document.getElementById('apptList');
+    const msgEl = document.getElementById('apptFilterMsg');
+    const today = istToday();
+    const seq = ++apptLoadSeq;
+    syncApptControls();
+
+    const query = apptQuery(apptFilter, today);
+    if (query.error) {
+        msgEl.innerHTML = `<div class="alert alert-err">${esc(query.error)}</div>`;
+        document.getElementById('apptStatusChips').innerHTML = '';
+        document.getElementById('apptPager').hidden = true;
+        el.innerHTML = emptyState('calendar', 'Adjust the dates to see appointments');
+        return;
+    }
+    msgEl.innerHTML = '';
+    document.getElementById('apptCaption').textContent = apptCaptionText(apptFilter, today);
     el.innerHTML = loading();
+
+    let data;
     try {
-        const data = await api('/admin/appointments/upcoming?days=30');
-        if (!data?.length) { el.innerHTML = emptyState('calendar', 'No upcoming appointments'); return; }
-        el.innerHTML = `<table>
+        data = await api('/admin/appointments?' + query.qs);
+    } catch (e) {
+        if (seq !== apptLoadSeq) return;  // a newer filter already owns the table
+        document.getElementById('apptStatusChips').innerHTML = '';
+        document.getElementById('apptPager').hidden = true;
+        el.innerHTML = emptyState('warning', 'Failed to load appointments');
+        return;
+    }
+    if (seq !== apptLoadSeq) return;
+
+    const rows = Array.isArray(data?.appointments) ? data.appointments : [];
+    // A cancellation or a clinic switch can leave the page past the last row.
+    if (!rows.length && apptFilter.offset > 0 && Number(data.total) > 0) {
+        apptFilter.offset = 0;
+        return loadAppointments();
+    }
+    try {
+        renderAppointments(data, rows, today);
+    } catch (e) {
+        console.error('Appointments render:', e);
+        document.getElementById('apptPager').hidden = true;
+        el.innerHTML = emptyState('warning', 'Failed to load appointments');
+    }
+}
+
+function renderAppointments(data, rows, today) {
+    const el = document.getElementById('apptList');
+    renderApptChips(data);
+    renderApptPager(data, rows.length);
+    if (data.truncated) {
+        document.getElementById('apptFilterMsg').innerHTML = '<div class="alert alert-err">This period has too many bookings to count exactly. Narrow the dates for precise totals.</div>';
+    }
+    if (!rows.length) {
+        const what = apptFilter.status ? `${apptStatusLabel(apptFilter.status).toLowerCase()} appointments` : 'appointments';
+        el.innerHTML = emptyState('calendar', apptFilter.preset === 'upcoming' && !apptFilter.status
+            ? 'No upcoming appointments'
+            : `No ${esc(what)} for this period`);
+        return;
+    }
+    // Actions only on today's and future bookings — the rows the original
+    // upcoming-only list offered them on. A past booking is history.
+    el.innerHTML = `<table>
             <thead><tr>
                 <th>Ref</th><th>Token</th><th>Patient</th><th>Doctor / Test</th>
                 <th>Department</th><th>Date</th><th>Time</th>
-                <th>Status</th><th>Refund</th><th>Action</th>
+                <th>Status</th><th>Refund</th><th>Booked On</th><th>Action</th>
             </tr></thead>
-            <tbody>${data.map(a => `<tr>
+            <tbody>${rows.map(a => `<tr>
                 <td style="color:var(--accent2);font-weight:600;font-family:monospace">${esc(a.booking_ref) || '—'}</td>
                 <td>${a.token_number ? `<span style="background:var(--card-bg, #f3f4f6);padding:3px 8px;border-radius:4px;font-weight:700;color:var(--accent,#0ea5e9);">#${a.token_number}</span>` : '<span style="color:var(--text-muted,#9ca3af);">—</span>'}</td>
                 <td>${esc(a.patient_name || a.patient_phone) || '—'}</td>
@@ -4539,7 +4980,8 @@ async function loadAppointments() {
                 <td>${a.appointment_time || '—'}</td>
                 <td>${badge(a.status)}</td>
                 <td>${refundCell(a)}</td>
-                <td>${a.status === 'confirmed' ?
+                <td style="white-space:nowrap;color:var(--text2);font-size:0.8rem">${fmtBookedAt(a.created_at)}</td>
+                <td>${a.status === 'confirmed' && String(a.appointment_date || '') >= today ?
                     `<div style="display:flex;gap:6px;align-items:center;">
                         ${!a.token_number ? `
                             <button
@@ -4563,7 +5005,6 @@ async function loadAppointments() {
 
             </tr>`).join('')}</tbody>
         </table>`;
-    } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load appointments'); }
 }
 
 // ═══════ DOCTORS ═══════
@@ -4920,8 +5361,27 @@ async function loadPatients() {
         document.getElementById('s-pat-total').textContent = total;
         document.getElementById('s-pat-opted').textContent = optedIn;
         document.getElementById('s-pat-out').textContent = optedOut;
-        renderPatientTable(patientCache);
+        filterPatients();
     } catch (e) { el.innerHTML = emptyState('warning', 'Failed to load patients'); }
+}
+
+// Set only by the dashboard's New Patients tile: the tile's own period_start,
+// compared exactly as get_dashboard_stats() compares it.
+let patientNewSince = null;
+
+function openPatientsFromDashboard(onlyNew) {
+    if (!pageAvailable('patients')) return;
+    patientNewSince = onlyNew ? dashPeriodStart : null;
+    go('patients', null);
+}
+
+function clearPatientNewFilter() {
+    patientNewSince = null;
+    filterPatients();
+}
+
+function isNewPatient(p) {
+    return !patientNewSince || String(p.created_at || '') >= patientNewSince;
 }
 
 function renderPatientTable(list) {
@@ -4942,10 +5402,17 @@ function renderPatientTable(list) {
 
 function filterPatients() {
     const q = document.getElementById('patientSearch').value.toLowerCase();
-    const filtered = patientCache.filter(p =>
+    const filtered = patientCache.filter(p => isNewPatient(p) && (
         (p.name || '').toLowerCase().includes(q) ||
         (p.phone || '').includes(q)
-    );
+    ));
+    const note = document.getElementById('patientNewNote');
+    note.hidden = !patientNewSince;
+    if (patientNewSince) {
+        const n = patientCache.filter(isNewPatient).length;
+        document.getElementById('patientNewNoteText').textContent =
+            `Showing ${n} new patient${n === 1 ? '' : 's'} from the last 30 days`;
+    }
     renderPatientTable(filtered);
 }
 
@@ -7150,7 +7617,10 @@ function renderDiagReviewQueue(items) {
             <td>${esc(r.report_name || r.report_type || 'Report')}</td>
             <td><span style="color:var(--amber); font-size:0.82rem;">${esc(reason)}</span></td>
             <td>
-                <button class="btn btn-accent btn-sm" data-id="${esc(r.id)}" data-name="${esc(name)}" data-phone="${esc(phone)}" data-report="${esc(r.report_name || '')}" onclick="openResolveMatchModal(this.dataset.id, this.dataset.name, this.dataset.phone, this.dataset.report)">Resolve & Send</button>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <button class="btn btn-accent btn-sm" data-id="${esc(r.id)}" data-name="${esc(name)}" data-phone="${esc(phone)}" data-report="${esc(r.report_name || '')}" onclick="openResolveMatchModal(this.dataset.id, this.dataset.name, this.dataset.phone, this.dataset.report)">Resolve & Send</button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--text3);" onclick="dismissReviewReport('${esc(r.id)}')">Dismiss</button>
+                </div>
             </td>
         </tr>`;
     });
@@ -7386,7 +7856,7 @@ function renderDiagQueuePageTable(queue) {
 
         if (r._queue_type === 'needs_review') {
             statusHtml = `<span class="badge badge-pending">Needs Review</span><br><small style="color:var(--amber)">${esc(r.error_message || 'Name mismatch')}</small>`;
-            actionHtml = `<button class="btn btn-accent btn-sm" data-id="${esc(r.id)}" data-name="${esc(name)}" data-phone="${esc(phone)}" data-report="${esc(report)}" onclick="openResolveMatchModal(this.dataset.id, this.dataset.name, this.dataset.phone, this.dataset.report)">Resolve & Send</button>`;
+            actionHtml = `<div style="display:flex; gap:6px; align-items:center;"><button class="btn btn-accent btn-sm" data-id="${esc(r.id)}" data-name="${esc(name)}" data-phone="${esc(phone)}" data-report="${esc(report)}" onclick="openResolveMatchModal(this.dataset.id, this.dataset.name, this.dataset.phone, this.dataset.report)">Resolve & Send</button><button class="btn btn-ghost btn-sm" style="color:var(--text3);" onclick="dismissReviewReport('${esc(r.id)}')">Dismiss</button></div>`;
         } else if (r._queue_type === 'failed_report') {
             statusHtml = `<span class="badge badge-failed">Delivery Failed</span><br><small style="color:var(--red)">${esc(r.error_message || 'Rejected')}</small>`;
             actionHtml = `<button class="btn btn-ghost btn-sm" onclick="retryFailedReport('${r.id}')"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Retry</button>`;
@@ -7493,6 +7963,51 @@ async function retryFailedReport(reportId) {
         loadDiagnosticQueuePage();
     } catch (e) {
         toast('Retry error: ' + (e.message || 'Delivery rejected'), true);
+    }
+}
+
+async function dismissReviewReport(reportId) {
+    const ok = await confirmDialog('Dismiss this report from the triage queue? It will be marked as dismissed and removed from the active dashboard.', { okText: 'Dismiss Report' });
+    if (!ok) return;
+
+    try {
+        await apiPost(`/admin/reports/${encodeURIComponent(reportId)}/dismiss`, {});
+        toast('Report dismissed');
+        if (typeof loadDiagnosticDashboard === 'function') {
+            loadDiagnosticDashboard();
+        }
+        if (typeof loadDiagnosticQueuePage === 'function') {
+            loadDiagnosticQueuePage();
+        }
+    } catch (e) {
+        toast('Error dismissing report: ' + (e.message || 'Failed'), true);
+    }
+}
+
+async function dismissAllReviewReports() {
+    const badge = document.getElementById('diagReviewCountBadge');
+    const countText = badge ? badge.textContent : '';
+    const ok = await confirmDialog(`Dismiss all pending reports from the triage queue (${countText})? They will be marked as dismissed and cleared from the dashboard.`, { okText: 'Dismiss All' });
+    if (!ok) return;
+
+    const btn = document.getElementById('dismissAllReviewBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Dismissing...'; }
+
+    try {
+        const r = await apiPost('/admin/reports/dismiss-batch', {
+            dismiss_all_needs_review: true
+        });
+        toast(r.message || 'All pending reports dismissed');
+        if (typeof loadDiagnosticDashboard === 'function') {
+            loadDiagnosticDashboard();
+        }
+        if (typeof loadDiagnosticQueuePage === 'function') {
+            loadDiagnosticQueuePage();
+        }
+    } catch (e) {
+        toast('Error dismissing reports: ' + (e.message || 'Failed'), true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Dismiss All'; }
     }
 }
 
