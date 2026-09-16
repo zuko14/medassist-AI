@@ -17,7 +17,7 @@
 
 ---
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_admin_ui.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_admin_ui.py`:
 
 ```python
 """Static and route checks for the specialty admin UI."""
@@ -97,14 +97,14 @@ def test_ai_draft_is_labelled_as_a_draft():
     assert "AI text is a draft" in INDEX
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 ```bash
 pytest tests/test_specialty_admin_ui.py -q
 ```
 Expected: FAIL (404 for `/derma-panel`, missing nav, etc.).
 
-- [ ] **Step 3: `app/main.py`, specialty URLs.** Insert directly **before** the line `@app.get("/panel-assets/chart.umd.min.js")`:
+- [x] **Step 3: `app/main.py`, specialty URLs.** Insert directly **before** the line `@app.get("/panel-assets/chart.umd.min.js")`:
 
 ```python
 @app.get("/derma-panel")
@@ -122,7 +122,7 @@ async def specialty_admin_panel():
     return await admin_panel()
 ```
 
-- [ ] **Step 4: `admin/index.html`, sidebar nav.** Find the nav item that opens with:
+- [x] **Step 4: `admin/index.html`, sidebar nav.** Find the nav item that opens with:
 ```html
             <div class="nav-link" tabindex="0" data-page="labtests" data-feature="lab_test_booking" onclick="go('labtests',this)">
 ```
@@ -135,7 +135,7 @@ Directly after **that item's closing `</div>`**, insert:
 ```
 If the neighbouring nav items use a label element other than `<span class="txt">`, copy their exact label markup instead.
 
-- [ ] **Step 5: `admin/index.html`, page section.** Insert directly **before** `<div id="pg-labtests" class="sec">`:
+- [x] **Step 5: `admin/index.html`, page section.** Insert directly **before** `<div id="pg-labtests" class="sec">`:
 
 ```html
         <div id="pg-treatments" class="sec">
@@ -229,7 +229,7 @@ If the neighbouring nav items use a label element other than `<span class="txt">
 
 ```
 
-- [ ] **Step 6: `admin/index.html`, auth state.** Replace exactly:
+- [x] **Step 6: `admin/index.html`, auth state.** Replace exactly:
 ```js
 let myStaffRole = null;
 ```
@@ -240,7 +240,7 @@ let mySpecialty = null;
 let mySpecialtyEnabled = false;
 ```
 
-- [ ] **Step 7: `admin/index.html`, login.** Replace exactly:
+- [x] **Step 7: `admin/index.html`, login.** Replace exactly:
 ```js
     myStaffRole = me.staff_role || null;
 ```
@@ -251,7 +251,7 @@ with:
     mySpecialtyEnabled = !!me.specialty_enabled;
 ```
 
-- [ ] **Step 8: `admin/index.html`, super-admin clinic switch.** In `adoptClinicPlan`, replace exactly:
+- [x] **Step 8: `admin/index.html`, super-admin clinic switch.** In `adoptClinicPlan`, replace exactly:
 ```js
             myPlan = scoped.plan;
             myFeatures = scoped.features;
@@ -264,7 +264,7 @@ with:
             mySpecialtyEnabled = !!scoped.specialty_enabled;
 ```
 
-- [ ] **Step 9: `admin/index.html`, visibility.** In `applyFeatureVisibility`, replace exactly:
+- [x] **Step 9: `admin/index.html`, visibility.** In `applyFeatureVisibility`, replace exactly:
 ```js
     document.querySelectorAll('[data-feature]').forEach(el => {
         el.style.display = planAllowsFeature(el.dataset.feature) ? '' : 'none';
@@ -283,7 +283,7 @@ with:
     });
 ```
 
-- [ ] **Step 10: `admin/index.html`, page loader.** In `go()`, replace exactly:
+- [x] **Step 10: `admin/index.html`, page loader.** In `go()`, replace exactly:
 ```js
 labtests: loadLabTests,
 ```
@@ -292,7 +292,7 @@ with:
 labtests: loadLabTests, treatments: loadTreatments,
 ```
 
-- [ ] **Step 11: `admin/index.html`, booking chip.** Replace the whole function:
+- [x] **Step 11: `admin/index.html`, booking chip.** Replace the whole function:
 ```js
 function bookingSubjectCell(b) {
     if (b.booking_type === 'lab_test') {
@@ -319,14 +319,14 @@ function bookingSubjectCell(b) {
 }
 ```
 
-- [ ] **Step 12: `admin/index.html`, staff permission checkboxes.** There are exactly two lines containing `value="LAB_TESTS_MANAGE"`: one with `class="staff-perm-cb"` (Create Staff) and one with `class="edit-staff-perm-cb"` (Edit Staff). Directly after **each** line, add the same line with these three substitutions:
+- [x] **Step 12: `admin/index.html`, staff permission checkboxes.** There are exactly two lines containing `value="LAB_TESTS_MANAGE"`: one with `class="staff-perm-cb"` (Create Staff) and one with `class="edit-staff-perm-cb"` (Edit Staff). Directly after **each** line, add the same line with these three substitutions:
 - `data-perm-feature="lab_test_booking"` → `data-perm-feature="specialty_treatments"`
 - `value="LAB_TESTS_MANAGE"` → `value="TREATMENTS_MANAGE"`
 - `Manage Lab Tests` → `Manage Treatments`
 
 Keep the class and every other character identical.
 
-- [ ] **Step 13: `admin/index.html`, JS block.** Insert directly **before** the line `async function openLabCsvModal() {`:
+- [x] **Step 13: `admin/index.html`, JS block.** Insert directly **before** the line `async function openLabCsvModal() {`:
 
 ```js
 // ═══════ TREATMENTS (specialty plans, migration 077) ═══════
@@ -665,7 +665,7 @@ async function setSelectedTreatmentsActive(active) {
 
 ```
 
-- [ ] **Step 14: Syntax-check the panel's inline JavaScript**
+- [x] **Step 14: Syntax-check the panel's inline JavaScript**
 
 ```bash
 python - <<'PY'
@@ -680,14 +680,14 @@ PY
 ```
 Expected: `returncode=0`. If Node is not installed, skip this step and say so in the session doc.
 
-- [ ] **Step 15: Run tests**
+- [x] **Step 15: Run tests**
 
 ```bash
 pytest tests/test_specialty_admin_ui.py tests/test_diagbooking_admin_visibility.py tests/test_admin_panel_appointments_filter.py tests/test_security.py tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q
 ```
 Expected: all PASS. Run the orphan check.
 
-- [ ] **Step 16: Manual browser check (local, no production data)**
+- [x] **Step 16: Manual browser check (local, no production data)**
    1. Open `admin/index.html` served locally.
    2. Log in with a test clinic on plan `derma`, pointed at a **non-production** database.
    3. Check at 1280px and at 400px width, in dark and light themes:
@@ -698,7 +698,7 @@ Expected: all PASS. Run the orphan check.
 
    If no non-production database is available, skip the browser check and record that in the session doc. **Never** run the app locally against the production `.env`.
 
-- [ ] **Step 17: Commit**
+- [x] **Step 17: Commit**
 
 ```bash
 git add admin/index.html app/main.py tests/test_specialty_admin_ui.py

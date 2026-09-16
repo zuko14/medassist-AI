@@ -23,7 +23,7 @@ Starter treatments are inserted **hidden** (`is_active=false`, `source='starter'
 
 ---
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_catalog.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_catalog.py`:
 
 ```python
 """Starter treatment lists are safe to show patients, and seeding never
@@ -175,16 +175,16 @@ Notes for the implementer:
 - `meta_phone_number_id=""` skips the Meta auto-registration HTTP call in `provision_clinic`.
 - If `provision_clinic` makes more `sb` calls than mocked (e.g. branches), extend the `side_effect` list. Never change production code for a test.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 ```bash
 pytest tests/test_specialty_catalog.py -q
 ```
 Expected: `ModuleNotFoundError: No module named 'app.services.specialty_catalog'`.
 
-- [ ] **Step 3: `app/database.py`, import.** If `import uuid` is not present among the top-level imports, add it next to `import time`.
+- [x] **Step 3: `app/database.py`, import.** If `import uuid` is not present among the top-level imports, add it next to `import time`.
 
-- [ ] **Step 4: `app/database.py`, helpers.** Insert directly after the end of `get_lab_test_by_id` (after its `return None` inside the final `except`) and before `#: Used when neither the branch nor the clinic has configured hours.`:
+- [x] **Step 4: `app/database.py`, helpers.** Insert directly after the end of `get_lab_test_by_id` (after its `return None` inside the final `except`) and before `#: Used when neither the branch nor the clinic has configured hours.`:
 
 ```python
 # ── Specialty treatments (migration 077) ─────────────────────────────────────
@@ -270,7 +270,7 @@ async def get_treatment_doctor_ids(clinic_id: str, treatment_id) -> set:
 
 ```
 
-- [ ] **Step 5: Create `app/services/specialty_catalog.py`** (exact content):
+- [x] **Step 5: Create `app/services/specialty_catalog.py`** (exact content):
 
 ```python
 """Starter treatment lists for specialty plans (migration 077).
@@ -646,14 +646,14 @@ async def seed_starter_treatments(clinic_id: str, specialty: str) -> dict:
     return {"added": len(rows), "skipped": len(starters) - len(rows)}
 ```
 
-- [ ] **Step 6: `app/routers/clinics.py`, imports.** Add near the other `app.services` imports at the top of the file:
+- [x] **Step 6: `app/routers/clinics.py`, imports.** Add near the other `app.services` imports at the top of the file:
 ```python
 from app.services.specialty_catalog import seed_starter_treatments
 from app.services.tenant import SPECIALTY_BY_PLAN
 ```
 If `app.services.tenant` is already imported with a `from … import (…)` list (it provides `invalidate_branch_cache`), add `SPECIALTY_BY_PLAN` to that list instead of adding a second import line.
 
-- [ ] **Step 7: `app/routers/clinics.py`, seed during provisioning.** In `provision_clinic`, replace exactly:
+- [x] **Step 7: `app/routers/clinics.py`, seed during provisioning.** In `provision_clinic`, replace exactly:
 ```python
         return {
             "success": True,
@@ -684,7 +684,7 @@ with:
         }
 ```
 
-- [ ] **Step 8: Run tests**
+- [x] **Step 8: Run tests**
 
 ```bash
 pytest tests/test_specialty_catalog.py tests/test_specialty_plans.py tests/test_lint_unscoped_queries.py tests/test_phase2_unscoped_query_linter.py tests/test_clinic_settings.py -q
@@ -695,7 +695,7 @@ Expected: all PASS.
 
 Run the orphan check.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add app/database.py app/services/specialty_catalog.py app/routers/clinics.py tests/test_specialty_catalog.py

@@ -20,7 +20,7 @@
 
 ---
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_booking_payment.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_booking_payment.py`:
 
 ```python
 """A treatment booking is an ordinary consultation with a tag: same payment,
@@ -167,14 +167,14 @@ def test_insights_service_mix_uses_treatment_names():
     assert 'a.get("treatment_name")' in block
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 ```bash
 pytest tests/test_specialty_booking_payment.py -q
 ```
 Expected: `TypeError: create_booking_with_payment() got an unexpected keyword argument 'treatment_id'`, among other failures.
 
-- [ ] **Step 3: `payment.py`, signature.** In `create_booking_with_payment`, replace exactly:
+- [x] **Step 3: `payment.py`, signature.** In `create_booking_with_payment`, replace exactly:
 ```python
         lab_test_name: Optional[str] = None,
         doctor_id: Optional[str] = None,
@@ -189,7 +189,7 @@ with:
     ) -> dict:
 ```
 
-- [ ] **Step 4: `payment.py`, row payload.** Replace exactly:
+- [x] **Step 4: `payment.py`, row payload.** Replace exactly:
 ```python
         if booking_type == "lab_test":
             booking_data["lab_test_id"] = lab_test_id
@@ -208,7 +208,7 @@ with:
             booking_data["treatment_name"] = treatment_name
 ```
 
-- [ ] **Step 5: `payment.py`, prep note after the paid confirmation.** In `_notify_payment_confirmed`, replace exactly:
+- [x] **Step 5: `payment.py`, prep note after the paid confirmation.** In `_notify_payment_confirmed`, replace exactly:
 ```python
             if not patient_notified:
                 logger.error(
@@ -224,7 +224,7 @@ with:
                 logger.error(
 ```
 
-- [ ] **Step 6: `payment.py`, treatment on the admin WhatsApp alert.** Replace exactly:
+- [x] **Step 6: `payment.py`, treatment on the admin WhatsApp alert.** Replace exactly:
 ```python
                         f"💰 *Paid:* ₹{amount_rupees:.0f}\n"
                         f"🆔 *Payment ID:* {booking.get('payment_id', 'N/A')}"
@@ -242,7 +242,7 @@ with:
 ```
 (This matches only the consultation branch, because the lab branch's `)` is followed by `else:`, not by `await self._alert_admin`.)
 
-- [ ] **Step 7: `payment.py`, treatment on the in-app notification.** Replace exactly:
+- [x] **Step 7: `payment.py`, treatment on the in-app notification.** Replace exactly:
 ```python
                     notif_row = {
                         "clinic_id": clinic_id_val,
@@ -255,7 +255,7 @@ with:
                         "clinic_id": clinic_id_val,
 ```
 
-- [ ] **Step 8: `conversation.py`, confirmation screen.** In `_show_booking_confirmation`, replace exactly:
+- [x] **Step 8: `conversation.py`, confirmation screen.** In `_show_booking_confirmation`, replace exactly:
 ```python
         await self.whatsapp.send_interactive_buttons(
             clinic,
@@ -276,7 +276,7 @@ with:
             body=confirm_body,
 ```
 
-- [ ] **Step 9: `conversation.py`, revalidate before writing.** In `_handle_confirming_booking`, replace exactly:
+- [x] **Step 9: `conversation.py`, revalidate before writing.** In `_handle_confirming_booking`, replace exactly:
 ```python
             # ── Resolve this clinic's payment mode: full / partial / none ──
 ```
@@ -289,7 +289,7 @@ with:
             # ── Resolve this clinic's payment mode: full / partial / none ──
 ```
 
-- [ ] **Step 10: `conversation.py`, Path A (paid).** In `_handle_confirming_booking`, replace exactly:
+- [x] **Step 10: `conversation.py`, Path A (paid).** In `_handle_confirming_booking`, replace exactly:
 ```python
                     deposit_percent=deposit_percent,
                     doctor_id=context.get("doctor_id") or context.get("selected_doctor_id"),
@@ -304,7 +304,7 @@ with:
                 )
 ```
 
-- [ ] **Step 11: `conversation.py`, Path B (unpaid).** In `_handle_confirming_booking`, replace exactly:
+- [x] **Step 11: `conversation.py`, Path B (unpaid).** In `_handle_confirming_booking`, replace exactly:
 ```python
                 if context.get("branch_id"):
                     appointment_data["branch_id"] = context["branch_id"]
@@ -325,7 +325,7 @@ with:
                 result = await book_appointment(clinic["id"], appointment_data)
 ```
 
-- [ ] **Step 12: `conversation.py`, prep note after the unpaid confirmation.** In `_handle_confirming_booking` (Path B success), replace exactly:
+- [x] **Step 12: `conversation.py`, prep note after the unpaid confirmation.** In `_handle_confirming_booking` (Path B success), replace exactly:
 ```python
                     await self.whatsapp.send_text(clinic, phone, dept_instruction)
 ```
@@ -337,7 +337,7 @@ with:
                     )
 ```
 
-- [ ] **Step 13: `analytics.py`.**
+- [x] **Step 13: `analytics.py`.**
 
 a) Replace exactly:
 ```python
@@ -365,7 +365,7 @@ with:
             service = department or "Consultation"
 ```
 
-- [ ] **Step 14: `admin.py`, payments bookings select.** Replace exactly:
+- [x] **Step 14: `admin.py`, payments bookings select.** Replace exactly:
 ```python
             "booking_type, lab_test_id, lab_test_name, "
 ```
@@ -374,7 +374,7 @@ with:
             "booking_type, lab_test_id, lab_test_name, treatment_id, treatment_name, "
 ```
 
-- [ ] **Step 15: Run the new tests and the payment and analytics regression set**
+- [x] **Step 15: Run the new tests and the payment and analytics regression set**
 
 ```bash
 pytest tests/test_specialty_booking_payment.py tests/test_conversation_payment_mode.py tests/test_lab_test_booking_payment.py tests/test_razorpay_webhook_default_clinic.py tests/test_phase1_payment_integrity.py tests/test_insights.py tests/test_appointments_list.py tests/test_diagbooking_admin_visibility.py tests/test_lint_unscoped_queries.py -q
@@ -390,7 +390,7 @@ Expected: all PASS.
 
 Run the orphan check.
 
-- [ ] **Step 16: Commit**
+- [x] **Step 16: Commit**
 
 ```bash
 git add app/services/conversation.py app/services/payment.py app/services/analytics.py app/routers/admin.py tests/test_specialty_booking_payment.py

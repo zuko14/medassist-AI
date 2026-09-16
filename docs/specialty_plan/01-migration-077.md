@@ -17,7 +17,7 @@
 
 ---
 
-- [ ] **Step 0: Branch and baseline**
+- [x] **Step 0: Branch and baseline**
 
 ```bash
 git checkout main
@@ -30,7 +30,7 @@ pytest tests/test_plan_features.py tests/test_lab_tests_unique_name_migration.py
 ```
 Then run the orphan check from `00-global-constraints.md` §E.
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_migration_077.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_migration_077.py`:
 
 ```python
 """Migration 077 against a real PostgreSQL (pgserver), never Supabase.
@@ -203,14 +203,14 @@ def test_booking_type_constraint_is_untouched(real_pg_conn):
     assert "consultation" in definition and "lab_test" in definition
 ```
 
-- [ ] **Step 2: Run it and confirm it fails**
+- [x] **Step 2: Run it and confirm it fails**
 
 ```bash
 pytest tests/test_specialty_migration_077.py -q
 ```
 Expected: errors such as `relation "specialty_treatments" does not exist`, or a `CheckViolation` for plan `derma`.
 
-- [ ] **Step 3: Create `migrations/077_specialty_plans_and_treatments.sql`** (exact content):
+- [x] **Step 3: Create `migrations/077_specialty_plans_and_treatments.sql`** (exact content):
 
 ```sql
 -- ============================================================================
@@ -365,14 +365,14 @@ ALTER TABLE appointments
 SELECT 'migration_077_complete' AS status;
 ```
 
-- [ ] **Step 4: Run the test and confirm it passes**
+- [x] **Step 4: Run the test and confirm it passes**
 
 ```bash
 pytest tests/test_specialty_migration_077.py -q
 ```
 Expected: all tests PASS. If `test_every_plan_value_is_accepted` fails on a NOT NULL column of `clinics`, add that column to the test INSERT with a harmless value. Do not change the migration.
 
-- [ ] **Step 5: Create `migrations/rollback/077_down.sql`** (exact content):
+- [x] **Step 5: Create `migrations/rollback/077_down.sql`** (exact content):
 
 ```sql
 -- Rollback 077: remove specialty plans and the treatments catalogue.
@@ -416,7 +416,7 @@ ALTER TABLE plan_tiers ADD CONSTRAINT plan_tiers_plan_name_check
                          'essential', 'polyclinic', 'enterprise'));
 ```
 
-- [ ] **Step 6: Update `migrations/verify_supabase_schema.sql`**
+- [x] **Step 6: Update `migrations/verify_supabase_schema.sql`**
 
 a) In the `v_tables` array, replace:
 ```sql
@@ -435,14 +435,14 @@ b) In the CRITICAL COLUMNS `VALUES` list, directly after the line `            (
             ('appointments', 'treatment_name',        '077'),
 ```
 
-- [ ] **Step 7: Re-run the tests plus the existing real-Postgres tests**
+- [x] **Step 7: Re-run the tests plus the existing real-Postgres tests**
 
 ```bash
 pytest tests/test_specialty_migration_077.py tests/test_lab_tests_unique_name_migration.py tests/test_real_postgres_invariants.py -q
 ```
 Expected: all PASS. Then run the orphan check.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add migrations/077_specialty_plans_and_treatments.sql migrations/rollback/077_down.sql migrations/verify_supabase_schema.sql tests/test_specialty_migration_077.py

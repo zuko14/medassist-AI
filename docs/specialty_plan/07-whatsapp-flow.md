@@ -45,7 +45,7 @@ Part A creates the module and tests it in isolation. Part B (`07b-conversation-w
 
 ---
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_whatsapp_flow.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_whatsapp_flow.py`:
 
 ```python
 """specialty_flow in isolation: WhatsApp limits, gating, and safe fallbacks."""
@@ -395,14 +395,14 @@ async def test_firewall_offer_is_silent_for_existing_plans():
     m.whatsapp.send_interactive_buttons.assert_not_awaited()
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 ```bash
 pytest tests/test_specialty_whatsapp_flow.py -q
 ```
 Expected: `ImportError: cannot import name 'specialty_flow'`.
 
-- [ ] **Step 3: Create `app/services/specialty_flow.py`** (exact content):
+- [x] **Step 3: Create `app/services/specialty_flow.py`** (exact content):
 
 ```python
 """WhatsApp flow for specialty hospitals (derma / eye / dental / ivf) — migration 077.
@@ -1066,7 +1066,7 @@ async def offer_treatment_browse(manager, clinic: dict, phone: str, lang: str) -
         logger.warning(f"Could not offer treatment browse to {phone[:6]}***: {e}")
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 pytest tests/test_specialty_whatsapp_flow.py -q
@@ -1078,7 +1078,7 @@ Expected: all PASS. Known adjustments:
 
 Run the orphan check.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/specialty_flow.py tests/test_specialty_whatsapp_flow.py

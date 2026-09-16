@@ -20,7 +20,7 @@
 
 ---
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_plans.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_plans.py`:
 
 ```python
 """Specialty plans are registered everywhere, and the six existing plans are
@@ -172,14 +172,14 @@ def test_platform_console_offers_and_styles_the_plan(plan):
     assert f'value="{plan}"' in filter_block
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 ```bash
 pytest tests/test_specialty_plans.py -q
 ```
 Expected: `ImportError: cannot import name 'SPECIALTY_BY_PLAN'`.
 
-- [ ] **Step 3: `app/services/tenant.py`, plan comment.** Directly after the line
+- [x] **Step 3: `app/services/tenant.py`, plan comment.** Directly after the line
 ```python
 #   enterprise  — Unlimited (all current + future features via wildcard)
 ```
@@ -191,7 +191,7 @@ add:
 #   ivf         — IVF & fertility centre (treatments catalogue + lab test booking)
 ```
 
-- [ ] **Step 4: `app/services/tenant.py`, shared specialty feature set.** Directly **before** the line `PLAN_FEATURES: dict[str, set[str]] = {` insert:
+- [x] **Step 4: `app/services/tenant.py`, shared specialty feature set.** Directly **before** the line `PLAN_FEATURES: dict[str, set[str]] = {` insert:
 
 ```python
 # Specialty hospitals (migration 077). A doctor clinic's core, plus the
@@ -219,7 +219,7 @@ _SPECIALTY_FEATURES: frozenset[str] = frozenset({
 
 ```
 
-- [ ] **Step 5: `app/services/tenant.py`, register the plans.** Replace exactly:
+- [x] **Step 5: `app/services/tenant.py`, register the plans.** Replace exactly:
 ```python
         "multi_branch",  # Multi-branch support
         "lab_test_booking",
@@ -241,7 +241,7 @@ with:
     "enterprise": {
 ```
 
-- [ ] **Step 6: `app/services/tenant.py`, label.** Replace exactly:
+- [x] **Step 6: `app/services/tenant.py`, label.** Replace exactly:
 ```python
     "roster_management": "Doctor Roster & Leave",
 ```
@@ -251,7 +251,7 @@ with:
     "specialty_treatments": "Treatments & Procedures Catalog",
 ```
 
-- [ ] **Step 7: `app/services/tenant.py`, gate function.** Directly **before** the line `# ─── Branch Resolution ───` (the comment block after `require_feature`) insert:
+- [x] **Step 7: `app/services/tenant.py`, gate function.** Directly **before** the line `# ─── Branch Resolution ───` (the comment block after `require_feature`) insert:
 
 ```python
 # ─── Specialty hospitals (migration 077) ─────────────────────────────────────
@@ -288,7 +288,7 @@ def specialty_enabled(clinic: Optional[dict]) -> bool:
 
 ```
 
-- [ ] **Step 8: `app/services/permissions.py`.** Replace exactly:
+- [x] **Step 8: `app/services/permissions.py`.** Replace exactly:
 ```python
     "CONNECTOR_MANAGE",
     "LAB_TESTS_MANAGE",
@@ -305,7 +305,7 @@ with:
 ```
 Note: the similar block `"CONNECTOR_MANAGE",\n    "LAB_TESTS_MANAGE",\n]` further down, inside `_DIAGNOSTIC_OPERATOR_GRANTS`, ends with `]`, not `})`. Do not edit that one.
 
-- [ ] **Step 9: `app/tenancy.py`.** Replace exactly:
+- [x] **Step 9: `app/tenancy.py`.** Replace exactly:
 ```python
     "clinic_daily_usage",
 })
@@ -319,7 +319,7 @@ with:
 })
 ```
 
-- [ ] **Step 10: `app/services/message_accounting.py`.** Replace exactly:
+- [x] **Step 10: `app/services/message_accounting.py`.** Replace exactly:
 ```python
         "polyclinic": {"included_messages_month": 5000, "display_name": "PolyClinic"},
 ```
@@ -332,7 +332,7 @@ with:
         "ivf": {"included_messages_month": 2500, "display_name": "IVF & Fertility"},
 ```
 
-- [ ] **Step 11: `app/routers/platform.py`.**
+- [x] **Step 11: `app/routers/platform.py`.**
 
 a) Replace exactly:
 ```python
@@ -365,7 +365,7 @@ with:
     }
 ```
 
-- [ ] **Step 12: `app/routers/clinics.py`.** There are two occurrences of the Literal body (Create at ~58, Update at ~275). In **both**, replace:
+- [x] **Step 12: `app/routers/clinics.py`.** There are two occurrences of the Literal body (Create at ~58, Update at ~275). In **both**, replace:
 ```python
         "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
         "enterprise",
@@ -377,7 +377,7 @@ with:
 ```
 Keep each occurrence's original indentation.
 
-- [ ] **Step 13: `admin/platform.html`.**
+- [x] **Step 13: `admin/platform.html`.**
 
 a) Replace exactly:
 ```css
@@ -419,7 +419,7 @@ with:
 ```
 Do **not** add specialty plans to `PLANS_WITH_LAB_REPORTS`. `tests/test_diagbooking_admin_visibility.py` checks that list against the backend, and specialty plans have no `lab_reports`.
 
-- [ ] **Step 14: Run the new test and the registry regression tests**
+- [x] **Step 14: Run the new test and the registry regression tests**
 
 ```bash
 pytest tests/test_specialty_plans.py tests/test_plan_features.py tests/test_platform_roster_and_plan_features.py tests/test_diagbooking_admin_visibility.py tests/test_lab_tests_admin.py tests/test_admin_me.py tests/test_forensic_hardening_suite.py tests/test_phase4_scoped_queries.py tests/test_production_launch_gates.py tests/test_clinic_settings.py -q
@@ -430,7 +430,7 @@ Expected: all PASS.
 
 Run the orphan check.
 
-- [ ] **Step 15: Commit**
+- [x] **Step 15: Commit**
 
 ```bash
 git add app/services/tenant.py app/services/permissions.py app/tenancy.py app/services/message_accounting.py app/routers/platform.py app/routers/clinics.py admin/platform.html tests/test_specialty_plans.py

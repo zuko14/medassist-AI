@@ -19,7 +19,7 @@ Every edit below either:
 
 ---
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_conversation_wiring.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_conversation_wiring.py`:
 
 ```python
 """conversation.py wiring: existing tenants see identical behaviour; specialty
@@ -228,14 +228,14 @@ def test_no_new_booking_type_is_introduced():
     assert "treatment_procedure" not in SRC
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 ```bash
 pytest tests/test_specialty_conversation_wiring.py -q
 ```
 Expected: FAIL (missing states, unexpected `seed_context` keyword, and so on).
 
-- [ ] **Step 3: Import.** Replace exactly:
+- [x] **Step 3: Import.** Replace exactly:
 ```python
 from app.services.clinical_firewall import screen_message
 ```
@@ -245,7 +245,7 @@ from app.services.clinical_firewall import screen_message
 from app.services import specialty_flow
 ```
 
-- [ ] **Step 4: States.** Replace exactly:
+- [x] **Step 4: States.** Replace exactly:
 ```python
     CONFIRMING_COLLECTION_DATE = "confirming_collection_date"
 ```
@@ -256,7 +256,7 @@ with:
     SEARCHING_TREATMENTS = "searching_treatments"
 ```
 
-- [ ] **Step 5: Booking context keys.** Inside `BOOKING_CONTEXT_KEYS = frozenset({ … })`, replace exactly:
+- [x] **Step 5: Booking context keys.** Inside `BOOKING_CONTEXT_KEYS = frozenset({ … })`, replace exactly:
 ```python
     "department_page",
 ```
@@ -267,7 +267,7 @@ with:
     "treatment_name",
 ```
 
-- [ ] **Step 6: `update_state` context hygiene.** Replace exactly:
+- [x] **Step 6: `update_state` context hygiene.** Replace exactly:
 ```python
         if reset_context:
             merged = new_context
@@ -289,7 +289,7 @@ with:
             specialty_flow.clear_treatment_context(merged)
 ```
 
-- [ ] **Step 7: Firewall offer.** Replace exactly:
+- [x] **Step 7: Firewall offer.** Replace exactly:
 ```python
             if firewall_blocked and firewall_response:
                 await self.whatsapp.send_text(clinic, phone, firewall_response)
@@ -303,7 +303,7 @@ with:
                 await specialty_flow.offer_treatment_browse(self, clinic, phone, lang_for_firewall)
 ```
 
-- [ ] **Step 8: Button routing.** In the interactive-button `if/elif` chain in `_handle_message_locked`, replace exactly:
+- [x] **Step 8: Button routing.** In the interactive-button `if/elif` chain in `_handle_message_locked`, replace exactly:
 ```python
             elif button_id == "continue_booking":
                 intent = "continue_booking"
@@ -328,7 +328,7 @@ grep -n '"trt' app/services/*.py app/templates/*.py
 ```
 Expected: matches only in `specialty_flow.py` and this new branch.
 
-- [ ] **Step 9: Our Doctors path.** Inside `if intent == "view_doctor":`, replace exactly:
+- [x] **Step 9: Our Doctors path.** Inside `if intent == "view_doctor":`, replace exactly:
 ```python
             context = session.get("context", {})
             context["doctor"] = doc
@@ -341,7 +341,7 @@ with:
             context["doctor"] = doc
 ```
 
-- [ ] **Step 10: Typed text while browsing or searching treatments.** Insert directly **before** the line:
+- [x] **Step 10: Typed text while browsing or searching treatments.** Insert directly **before** the line:
 ```python
         # Global handlers for top-level menu intents (escape hatches from selection states)
 ```
@@ -365,7 +365,7 @@ the block:
 
 ```
 
-- [ ] **Step 11: State machine.** Insert directly **before** the line:
+- [x] **Step 11: State machine.** Insert directly **before** the line:
 ```python
         # "viewing_reports" is no longer entered — the report archive is gone.
 ```
@@ -376,7 +376,7 @@ the block:
 ```
 This `elif` must sit in the same `if state == "idle": … elif …` chain, directly after the `elif state == "confirming_collection_date":` branch and its call.
 
-- [ ] **Step 12: Main menu.** Replace the entire `_send_main_menu` method. Old (exact):
+- [x] **Step 12: Main menu.** Replace the entire `_send_main_menu` method. Old (exact):
 ```python
     async def _send_main_menu(self, clinic: dict, phone: str, lang: str) -> None:
         """Send main menu with buttons."""
@@ -441,7 +441,7 @@ New:
 ```
 Everything after that point in the method (the lab row, the "No My Reports" comment, emergency, human, `sections`, `send_interactive_list`) stays **unchanged**.
 
-- [ ] **Step 13: `_start_booking` seed.** Replace the method signature and body. Old (exact):
+- [x] **Step 13: `_start_booking` seed.** Replace the method signature and body. Old (exact):
 ```python
     async def _start_booking(
         self, clinic: dict, phone: str, patient: Optional[dict], lang: str
@@ -478,7 +478,7 @@ Then, **inside `_start_booking` only**, make these four replacements (each occur
 | `await self.update_state(clinic, phone, "selecting_family_member", {}, reset_context=True)` | `await self.update_state(clinic, phone, "selecting_family_member", dict(seed), reset_context=True)` |
 | `await self._continue_booking_after_branch(clinic, phone, patient, lang, {})` | `await self._continue_booking_after_branch(clinic, phone, patient, lang, dict(seed))` |
 
-- [ ] **Step 14: The seven places the flow asks for symptoms.** At each, add the two-line treatment route **before** the existing state update or message. The existing lines stay byte-identical.
+- [x] **Step 14: The seven places the flow asks for symptoms.** At each, add the two-line treatment route **before** the existing state update or message. The existing lines stay byte-identical.
 
 **S1** — `_handle_message_locked`, "For Me" button. Replace exactly:
 ```python
@@ -606,7 +606,7 @@ grep -c 'get_message("ask_symptoms", lang)' app/services/conversation.py
 ```
 Expected: `7`, and the second count unchanged from before this task (7).
 
-- [ ] **Step 15: `_handle_selecting_doctor`.** Three edits, all inside this method.
+- [x] **Step 15: `_handle_selecting_doctor`.** Three edits, all inside this method.
 
 **H1** — more doctors. Replace exactly:
 ```python
@@ -654,7 +654,7 @@ with:
             if context.get("department"):
 ```
 
-- [ ] **Step 16: Run the new tests and the full conversation regression set**
+- [x] **Step 16: Run the new tests and the full conversation regression set**
 
 ```bash
 pytest tests/test_specialty_conversation_wiring.py tests/test_specialty_whatsapp_flow.py tests/test_conversation_navigation_and_timeout.py tests/test_conversation_session_timeout.py tests/test_conversation_payment_mode.py tests/test_conversation_unreadable_messages.py tests/test_conversation_admin_sync_and_csv.py tests/test_lab_test_booking_conversation.py tests/test_lab_test_search.py tests/test_lab_booking_production_fixes.py tests/test_webhook.py tests/test_lint_unscoped_queries.py -q
@@ -663,7 +663,7 @@ Expected: all PASS. **Any failure in a pre-existing test is a regression.** Fix 
 
 Run the orphan check.
 
-- [ ] **Step 17: Commit**
+- [x] **Step 17: Commit**
 
 ```bash
 git add app/services/conversation.py tests/test_specialty_conversation_wiring.py

@@ -32,7 +32,7 @@
 
 ---
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_specialty_treatments_admin.py`:
+- [x] **Step 1: Write the failing test** — create `tests/test_specialty_treatments_admin.py`:
 
 ```python
 """Treatments admin API: tenant scoped, plan gated, permission gated, and no
@@ -281,14 +281,14 @@ async def test_me_without_a_clinic_reports_no_specialty():
     assert me["specialty"] is None and me["specialty_enabled"] is False
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 ```bash
 pytest tests/test_specialty_treatments_admin.py -q
 ```
 Expected: `ImportError: cannot import name 'TreatmentCreate'`.
 
-- [ ] **Step 3: Imports in `app/routers/admin.py`**
+- [x] **Step 3: Imports in `app/routers/admin.py`**
 
 a) In the existing `from app.database import (` list (~line 32), add `is_uuid,`.
 
@@ -306,7 +306,7 @@ d) Verify these names are importable in admin.py, and add any that are missing t
 grep -n "^from datetime import\|^from pydantic import\|^from typing import" app/routers/admin.py
 ```
 
-- [ ] **Step 4: `/admin/me`.** In `get_current_admin`, replace exactly:
+- [x] **Step 4: `/admin/me`.** In `get_current_admin`, replace exactly:
 ```python
     if not scoped_clinic_id:
         return {
@@ -347,7 +347,7 @@ with:
     }
 ```
 
-- [ ] **Step 5: Treatments section.** Insert directly **before** the line `CSV_MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB` (exact content):
+- [x] **Step 5: Treatments section.** Insert directly **before** the line `CSV_MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB` (exact content):
 
 ```python
 # ═══════════════════════════════════════════════════════════════════════════
@@ -797,7 +797,7 @@ Implementation notes (read before running tests):
 - **Route order:** `POST /treatments/status`, `POST /treatments/starter` and `POST /treatments/ai-description` do not clash with `PUT` or `DELETE /treatments/{treatment_id}`, because the HTTP methods differ.
 - **`log_admin_action`:** if it rejects `resource_id=None`, pass `resource_id="bulk"` instead.
 
-- [ ] **Step 6: Run the new tests and the admin security matrices**
+- [x] **Step 6: Run the new tests and the admin security matrices**
 
 ```bash
 pytest tests/test_specialty_treatments_admin.py tests/test_admin_me.py tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py tests/test_tenant_isolation_matrix.py tests/test_lint_unscoped_queries.py tests/test_phase2_unscoped_query_linter.py tests/test_lab_tests_admin.py tests/test_rls_security.py tests/test_security.py -q
@@ -806,7 +806,7 @@ Expected: all PASS. The two route matrices enumerate every `/admin*` route autom
 
 Run the orphan check.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/routers/admin.py tests/test_specialty_treatments_admin.py

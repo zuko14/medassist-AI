@@ -2,7 +2,7 @@
 
 ## Task 9 — Full targeted regression (no code changes)
 
-- [ ] **Step 1: Confirm the branch contains exactly the expected commits**
+- [x] **Step 1: Confirm the branch contains exactly the expected commits**
 
 ```bash
 git log --oneline main..feat/specialty-plans
@@ -10,7 +10,7 @@ git diff --stat main..feat/specialty-plans
 ```
 Expected: 9 commits (Tasks 1, 2, 3, 4, 5, 6, 7A, 7B, 8). The changed files are only those named in the tasks, plus the new tests and docs. **Any other changed file is scope creep: revert it.**
 
-- [ ] **Step 2: Prove no forbidden change slipped in**
+- [x] **Step 2: Prove no forbidden change slipped in**
 
 ```bash
 git diff main..feat/specialty-plans -- app/services/clinical_firewall.py app/services/scheduler.py app/utils/helpers.py migrations/0*.sql | grep -v "^+++\|^---" | grep "^[+-]" | grep -v "077_specialty_plans_and_treatments" || echo "OK: firewall, scheduler, slot helpers and old migrations untouched"
@@ -20,7 +20,7 @@ git diff main..feat/specialty-plans -- tests/ | grep "^-[^-]" | head -40
 - The last command shows **removed** lines in tests. The only acceptable removals are registry expectations updated as described in Tasks 2 and 8.
 - Every other removed test line must be justified in the session doc, or restored.
 
-- [ ] **Step 3: Run every test file touched by, or guarding, this feature** (one command; **never** the bare full suite, **never** `tests/test_multi_worker_smoke.py`)
+- [x] **Step 3: Run every test file touched by, or guarding, this feature** (one command; **never** the bare full suite, **never** `tests/test_multi_worker_smoke.py`)
 
 ```bash
 pytest \
@@ -44,9 +44,9 @@ Expected: **0 failures, 0 errors.**
 - If a failure also occurs on `main` (check with `git stash` or a clean `main` checkout of the same file), record it in the session doc as pre-existing, with its output.
 - Any failure that does **not** occur on `main` blocks deployment.
 
-- [ ] **Step 4: Orphan check** (`00-global-constraints.md` §E). Kill orphans. Record in the session doc that it was done.
+- [x] **Step 4: Orphan check** (`00-global-constraints.md` §E). Kill orphans. Record in the session doc that it was done.
 
-- [ ] **Step 5: Independent review.** Before any deploy, request a code review of `main..feat/specialty-plans` focused on:
+- [x] **Step 5: Independent review.** Before any deploy, request a code review of `main..feat/specialty-plans` focused on:
   1. tenant isolation (every new query scoped);
   2. `specialty_enabled` gating (no enterprise leak);
   3. the booking path (no new booking_type, slot guard intact);
