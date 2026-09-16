@@ -15,6 +15,13 @@
     <script defer src="/panel-assets/chart.umd.min.js"></script>
     <style>
         :root {
+            /* Native widgets — date and time picker popups, the picker icons
+               themselves, select dropdowns, spinners — follow this. Without
+               it a dark panel opens a white calendar. It was previously set
+               only on .appt-date-field, so every other date and time input
+               in the panel still opened a light popup. */
+            color-scheme: dark;
+
             /* ══ Kriya AI · "Clinical Depth" ═══════════════════════════════
                Ground and glass are tuned to the brand mark's own field: a
                deep navy lit by the logo's green→blue gradient. The mint rim
@@ -86,6 +93,7 @@
         }
 
         :root[data-theme="light"] {
+            color-scheme: light;
             /* Daylight ward: mint-tinted white rather than neutral grey, so
                the same brand rim carries across both themes. */
             --bg: #F2F7F7;
@@ -215,7 +223,7 @@
 
         .field { margin-bottom: 18px; }
         .field label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text2); margin-bottom: 7px; text-transform: none; letter-spacing: 0; }
-        .field input, .field select {
+        .field input:not([type="checkbox"]):not([type="radio"]), .field select, .field textarea, textarea {
             width: 100%;
             padding: 12px 16px;
             background: var(--surface2);
@@ -226,12 +234,148 @@
             font-family: inherit;
             transition: all 0.2s;
         }
-        .field input:focus, .field select:focus {
+        .field input:not([type="checkbox"]):not([type="radio"]):focus, .field select:focus, textarea:focus {
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
-        .field input::placeholder { color: var(--text3); }
+        .field input::placeholder, textarea::placeholder { color: var(--text3); }
+        textarea { resize: vertical; min-height: 76px; line-height: 1.5; }
+
+        /* The native "Choose File" button renders as a raw grey OS control
+           against the panel. Both file inputs (lab report PDF, catalog CSV)
+           had it. */
+        input[type="file"] { padding: 9px 12px; cursor: pointer; }
+        input[type="file"]::file-selector-button {
+            margin-right: 12px; padding: 7px 14px;
+            border: 1px solid var(--border2); border-radius: 8px;
+            background: var(--surface3); color: var(--text);
+            font: inherit; font-size: 0.83rem; font-weight: 600;
+            cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        input[type="file"]::file-selector-button:hover {
+            background: var(--accent-glow); border-color: var(--accent); color: var(--accent2);
+        }
+
+        /* Label on the left, its own "Generate with AI" on the right, so each
+           language field carries the action that fills it. */
+        .lang-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .lang-head label { margin-bottom: 7px; }
+        .btn-ai { padding: 5px 12px; font-size: 0.78rem; border-radius: 8px; min-width: auto; white-space: nowrap; }
+
+        /* ══ Checkboxes & radios ══════════════════════════════════════════
+           These were inheriting .field input's width:100% and 12px padding,
+           so every box stretched the full width of its grid cell and shoved
+           its own label text onto the next line (the Treatments doctor list
+           and the staff permission picker both showed it). The selector
+           above now excludes them; here they get one native, themable
+           control so every tick in the panel looks the same. */
+        input[type="checkbox"], input[type="radio"] {
+            appearance: none; -webkit-appearance: none;
+            width: 18px; height: 18px; flex: 0 0 18px;
+            margin: 0; padding: 0;
+            display: inline-grid; place-content: center;
+            vertical-align: -3px;
+            /* --text3, not --border2: an unticked box is an interactive
+               control and needs 3:1 against the field behind it (WCAG 1.4.11).
+               --border2 measures ~1.3:1 on the light theme. */
+            border: 1.5px solid var(--text3);
+            border-radius: 5px;
+            background: var(--surface2);
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+        }
+        input[type="radio"] { border-radius: 50%; }
+        input[type="checkbox"]::before, input[type="radio"]::before {
+            content: ""; width: 10px; height: 10px;
+            transform: scale(0); transition: transform 0.13s ease-in-out;
+            box-shadow: inset 1em 1em #fff;
+            clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+        }
+        input[type="radio"]::before { width: 8px; height: 8px; border-radius: 50%; clip-path: none; }
+        input[type="checkbox"]:hover:not(:disabled), input[type="radio"]:hover:not(:disabled) { border-color: var(--accent); }
+        input[type="checkbox"]:checked, input[type="radio"]:checked { background: var(--accent); border-color: var(--accent); }
+        input[type="checkbox"]:checked::before, input[type="radio"]:checked::before { transform: scale(1); }
+        input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
+            outline: none; box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        /* One row = one choice. align-items:flex-start keeps the box on the
+           first text line when a long permission name wraps. Declared after
+           ".field label" so it wins the display:block that rule sets. */
+        label.check {
+            display: flex; align-items: flex-start; gap: 10px;
+            margin-bottom: 0; padding: 4px 0;
+            font-size: 0.86rem; font-weight: 500; line-height: 1.4;
+            color: var(--text2); cursor: pointer;
+        }
+        label.check input[type="checkbox"], label.check input[type="radio"] { margin-top: 1px; }
+        label.check .sub { color: var(--text3); font-weight: 400; }
+        label.check:hover { color: var(--text); }
+
+        .check-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+            gap: 2px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 8px;
+        }
+        .check-grid label.check {
+            padding: 9px 11px; margin: 0;
+            border-radius: 8px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .check-grid label.check:hover { background: var(--surface); color: var(--text-strong); }
+        .check-grid label.check:has(input:checked) { background: var(--accent-glow); color: var(--text-strong); }
+        .check-grid .empty { color: var(--text3); font-size: 0.85rem; padding: 9px 11px; }
+        @media (max-width: 560px) { .check-grid { grid-template-columns: 1fr; } }
+
+        /* A week is one 7-way toggle, not seven loose checkboxes. The input
+           stays in the DOM and keeps its class and value (submitDoctor reads
+           .doc-day-cb:checked; editDoctor writes .checked), but it is the
+           chip that is visible and clickable. */
+        .day-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+        .day-picker label {
+            position: relative; margin: 0;
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 54px; padding: 9px 12px;
+            border: 1px solid var(--text3); border-radius: 9px;
+            background: var(--surface2); color: var(--text2);
+            font-size: 0.82rem; font-weight: 600; letter-spacing: 0.01em;
+            cursor: pointer; user-select: none;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .day-picker input[type="checkbox"] {
+            position: absolute; inset: 0;
+            display: block; width: 100%; height: 100%; flex: none;
+            margin: 0; border: 0; border-radius: 9px;
+            background: none; cursor: pointer;
+        }
+        .day-picker input[type="checkbox"]::before { content: none; }
+        .day-picker label:hover { border-color: var(--accent); color: var(--text); }
+        .day-picker label:has(input:checked) { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .day-picker label:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--accent-glow); }
+
+        /* Three mutually exclusive options that decide how money is taken.
+           Cards make the active one obvious at a glance; a bare radio list
+           does not. Reuses label.check for the row itself. */
+        .radio-cards { display: grid; gap: 8px; }
+        .radio-cards label.check {
+            align-items: center; padding: 13px 15px;
+            border: 1px solid var(--border); border-radius: 11px;
+            background: var(--surface2); font-size: 0.88rem;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .radio-cards label.check:hover { border-color: var(--accent); color: var(--text); }
+        .radio-cards label.check:has(input:checked) {
+            border-color: var(--accent); background: var(--accent-glow); color: var(--text-strong);
+        }
+
+        /* A toggle that switches a whole section on, rather than one option. */
+        label.check.strong { font-weight: 600; color: var(--text); font-size: 0.9rem; }
         .pwd-field { position: relative; }
         .pwd-field input { padding-right: 44px; }
         .pwd-toggle {
@@ -935,11 +1079,15 @@
         .card-head > div:last-child { flex-shrink: 0; }
 
         /* --- 6. Controls -------------------------------------------------- */
-        .field input, .field select, .search-bar {
+        /* Same exclusion as the sizing rule above. Without it this later
+           declaration re-applies --border (0.13 alpha) to every checkbox
+           inside a .field, undoing the 3:1 contrast border they need. */
+        .field input:not([type="checkbox"]):not([type="radio"]), .field select, .search-bar {
             background: var(--surface2);
             border-color: var(--border);
         }
-        .field input:hover, .field select:hover, .search-bar:hover { border-color: var(--border2); }
+        .field input:not([type="checkbox"]):not([type="radio"]):hover,
+        .field select:hover, .search-bar:hover { border-color: var(--border2); }
 
         .btn-ghost { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
         .btn-ghost:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-glow); }
@@ -1075,10 +1223,7 @@
             color: var(--text);
             font: inherit;
             font-size: 0.82rem;
-            color-scheme: light;
         }
-        :root:not([data-theme="light"]) .appt-date-field input,
-        :root:not([data-theme="light"]) .appt-date-field select { color-scheme: dark; }
         .appt-date-field input:hover, .appt-date-field select:hover { border-color: var(--border2); }
         .appt-date-field input:focus, .appt-date-field select:focus {
             outline: none;
@@ -1406,7 +1551,7 @@
                 <div id="followupMsg"></div>
                 <div class="form-row">
                     <div class="field">
-                        <label><input type="checkbox" id="f-followupEnabled"> Send a follow-up after each visit</label>
+                        <label class="check"><input type="checkbox" id="f-followupEnabled"> Send a follow-up after each visit</label>
                     </div>
                     <div class="field">
                         <label>Days after the visit</label>
@@ -1842,7 +1987,7 @@
                     <div class="field"></div>
                 </div>
                 <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px">
-                    <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer">
+                    <label class="check strong">
                         <input type="checkbox" id="f-docMornEnabled" checked onchange="toggleShiftFields()">
                         Enable Morning Shift
                     </label>
@@ -1852,7 +1997,7 @@
                     </div>
                 </div>
                 <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px">
-                    <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer">
+                    <label class="check strong">
                         <input type="checkbox" id="f-docEveEnabled" checked onchange="toggleShiftFields()">
                         Enable Evening Shift
                     </label>
@@ -1875,14 +2020,14 @@
                     </div>
                     <div class="field">
                         <label>Available Days</label>
-                        <div id="f-docDays" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px">
-                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Mon" checked>Mon</label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Tue" checked>Tue</label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Wed" checked>Wed</label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Thu" checked>Thu</label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Fri" checked>Fri</label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Sat">Sat</label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem"><input type="checkbox" class="doc-day-cb" value="Sun">Sun</label>
+                        <div id="f-docDays" class="day-picker">
+                            <label><input type="checkbox" class="doc-day-cb" value="Mon" checked>Mon</label>
+                            <label><input type="checkbox" class="doc-day-cb" value="Tue" checked>Tue</label>
+                            <label><input type="checkbox" class="doc-day-cb" value="Wed" checked>Wed</label>
+                            <label><input type="checkbox" class="doc-day-cb" value="Thu" checked>Thu</label>
+                            <label><input type="checkbox" class="doc-day-cb" value="Fri" checked>Fri</label>
+                            <label><input type="checkbox" class="doc-day-cb" value="Sat">Sat</label>
+                            <label><input type="checkbox" class="doc-day-cb" value="Sun">Sun</label>
                         </div>
                     </div>
                 </div>
@@ -2079,14 +2224,28 @@
                     <textarea id="f-trtConcerns" rows="2" maxlength="500" placeholder="Words patients use, comma-separated. e.g. tooth pain, sensitivity, swelling"></textarea>
                 </div>
                 <div class="field">
-                    <label for="f-trtDesc">Patient description, English (2 lines) <span id="trtDescCounter" style="color:var(--text3); font-weight:400;"></span></label>
+                    <div class="lang-head">
+                        <label for="f-trtDesc">Patient description, English (2 lines) <span id="trtDescCounter" style="color:var(--text3); font-weight:400;"></span></label>
+                        <button type="button" class="btn btn-ghost btn-ai trt-manage" id="btnTrtAi" onclick="generateTreatmentDescription('all')">✨ Generate all 3 languages</button>
+                    </div>
                     <textarea id="f-trtDesc" rows="3" maxlength="400" oninput="updateTrtDescCounter()"></textarea>
-                    <button type="button" class="btn btn-ghost trt-manage" id="btnTrtAi" style="margin-top:8px;" onclick="generateTreatmentDescription()">✨ Generate with AI</button>
-                    <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">AI text is a draft. Read it, correct anything inaccurate, then save. Nothing is sent to patients until you save.</p>
+                    <p style="color:var(--text3); font-size:0.78rem; margin-top:6px;">AI text is a draft. Read it, correct anything inaccurate, then save. Nothing is sent to patients until you save.</p>
                 </div>
                 <div class="form-row">
-                    <div class="field"><label for="f-trtDescHi">Description, Hindi</label><textarea id="f-trtDescHi" rows="3" maxlength="600"></textarea></div>
-                    <div class="field"><label for="f-trtDescTe">Description, Telugu</label><textarea id="f-trtDescTe" rows="3" maxlength="600"></textarea></div>
+                    <div class="field">
+                        <div class="lang-head">
+                            <label for="f-trtDescHi">Description, Hindi</label>
+                            <button type="button" class="btn btn-ghost btn-ai trt-manage" id="btnTrtAiHi" onclick="generateTreatmentDescription('hi')">✨ Generate with AI</button>
+                        </div>
+                        <textarea id="f-trtDescHi" rows="3" maxlength="600"></textarea>
+                    </div>
+                    <div class="field">
+                        <div class="lang-head">
+                            <label for="f-trtDescTe">Description, Telugu</label>
+                            <button type="button" class="btn btn-ghost btn-ai trt-manage" id="btnTrtAiTe" onclick="generateTreatmentDescription('te')">✨ Generate with AI</button>
+                        </div>
+                        <textarea id="f-trtDescTe" rows="3" maxlength="600"></textarea>
+                    </div>
                 </div>
                 <div class="field">
                     <label for="f-trtPrep">Before your visit (instructions)</label>
@@ -2094,10 +2253,10 @@
                 </div>
                 <div class="field">
                     <label>Doctors who perform this</label>
-                    <div id="f-trtDoctors" style="display:flex; flex-wrap:wrap; gap:12px;"></div>
+                    <div id="f-trtDoctors" class="check-grid"></div>
                     <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Leave all unticked to let patients choose any active doctor.</p>
                 </div>
-                <div class="field"><label><input type="checkbox" id="f-trtActive" checked> Show to patients on WhatsApp</label></div>
+                <div class="field"><label class="check"><input type="checkbox" id="f-trtActive" checked> Show to patients on WhatsApp</label></div>
                 <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
                     <button type="button" class="btn btn-accent" id="btnSaveTreatment" onclick="submitTreatment()">Save Treatment</button>
                     <button type="button" class="btn btn-ghost" onclick="cancelTreatmentForm()">Cancel</button>
@@ -2191,13 +2350,13 @@
                     </div>
                 </div>
                 <div class="field" style="margin-top:8px;">
-                    <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer;">
+                    <label class="check strong">
                         <input type="checkbox" id="f-ltFasting"> Fasting Required (10-12 hours overnight)
                     </label>
                 </div>
                 <div class="field" style="margin-top:8px;">
                     <label>Preparation Instructions</label>
-                    <textarea id="f-ltPrep" rows="2" style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:8px;" placeholder="e.g. 10-12 hours overnight fasting required. Water is permitted."></textarea>
+                    <textarea id="f-ltPrep" rows="2" placeholder="e.g. 10-12 hours overnight fasting required. Water is permitted."></textarea>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
                     <button class="btn btn-accent" id="btnSaveLabTest" onclick="submitLabTest(event)">Save Test</button>
@@ -2308,12 +2467,10 @@
                 </div>
 
                 <h3 style="margin-top:24px">How should patients pay?</h3>
-                <div class="form-row">
-                    <div class="field">
-                        <label><input type="radio" name="payMode" value="full" id="f-payModeFull"> Full payment before booking is confirmed</label><br>
-                        <label><input type="radio" name="payMode" value="partial" id="f-payModePartial"> Partial deposit now, rest at the clinic</label><br>
-                        <label><input type="radio" name="payMode" value="none" id="f-payModeNone"> No payment required — book directly</label>
-                    </div>
+                <div class="field radio-cards">
+                    <label class="check"><input type="radio" name="payMode" value="full" id="f-payModeFull"> Full payment before booking is confirmed</label>
+                    <label class="check"><input type="radio" name="payMode" value="partial" id="f-payModePartial"> Partial deposit now, rest at the clinic</label>
+                    <label class="check"><input type="radio" name="payMode" value="none" id="f-payModeNone"> No payment required — book directly</label>
                 </div>
                 <div class="form-row" id="f-payPercentRow" style="display:none">
                     <div class="field"><label>Deposit Percentage</label><input type="number" id="f-payPercent" min="1" max="99" placeholder="e.g. 20"></div>
@@ -2479,24 +2636,24 @@
                 </div>
                 <div class="field" style="margin-top:10px;">
                     <label>Extra / Delegated Permissions</label>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; background:var(--surface2); padding:12px; border-radius:10px; border:1px solid var(--border);">
-                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
-                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
-                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
-                        <label data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
-                        <label data-perm-feature="multi_branch"><input type="checkbox" class="staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
-                        <label data-perm-feature="roster_management"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
-                        <label data-perm-feature="roster_management"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
-                        <label data-perm-feature="holiday_calendar"><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
-                        <label data-perm-feature="holiday_calendar"><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
-                        <label><input type="checkbox" class="staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
-                        <label data-perm-feature="lab_test_booking"><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
-                        <label data-perm-feature="specialty_treatments"><input type="checkbox" class="staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
-                        <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
-                        <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
-                        <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
+                    <div class="check-grid">
+                        <label class="check" data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
+                        <label class="check" data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
+                        <label class="check" data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
+                        <label class="check" data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                        <label class="check" data-perm-feature="multi_branch"><input type="checkbox" class="staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
+                        <label class="check" data-perm-feature="roster_management"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
+                        <label class="check" data-perm-feature="roster_management"><input type="checkbox" class="staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
+                        <label class="check" data-perm-feature="holiday_calendar"><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
+                        <label class="check" data-perm-feature="holiday_calendar"><input type="checkbox" class="staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
+                        <label class="check"><input type="checkbox" class="staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
+                        <label class="check"><input type="checkbox" class="staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
+                        <label class="check"><input type="checkbox" class="staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
+                        <label class="check" data-perm-feature="lab_test_booking"><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                        <label class="check" data-perm-feature="specialty_treatments"><input type="checkbox" class="staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
+                        <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
+                        <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
+                        <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -2534,7 +2691,7 @@
                     <div class="field"><label>Poll Interval (minutes)</label><input type="number" id="f-connPollMinutes" min="1" value="10"></div>
                 </div>
                 <div class="form-row">
-                    <div class="field"><label><input type="checkbox" id="f-connEnabled"> Connector Enabled</label></div>
+                    <div class="field"><label class="check"><input type="checkbox" id="f-connEnabled"> Connector Enabled</label></div>
                 </div>
                 <button class="btn btn-accent" onclick="saveConnectorCredentials()">Save Credentials</button>
                 <button class="btn btn-ghost" onclick="testConnector()" id="btn-connTest"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg> Test Connection</button>
@@ -2587,7 +2744,7 @@
             <small style="color:var(--text3)">Must be a valid 10-digit Indian phone number</small>
         </div>
         <div class="field" style="margin-top:12px;">
-            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <label class="check">
                 <input type="checkbox" id="m-resolveSendNow" checked>
                 Deliver PDF via WhatsApp immediately upon saving
             </label>
@@ -2630,7 +2787,7 @@
         </div>
         <div class="field">
             <label>File (PDF only)</label>
-            <input type="file" id="m-labFile" accept=".pdf" style="padding:10px">
+            <input type="file" id="m-labFile" accept=".pdf">
         </div>
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeLabReportModal()">Cancel</button>
@@ -2696,7 +2853,7 @@
         </div>
         <div class="field">
             <label>Notes (optional)</label>
-            <textarea id="m-rxNotes" rows="2" placeholder="Additional notes..." style="width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:inherit;font-size:0.9rem;resize:vertical"></textarea>
+            <textarea id="m-rxNotes" rows="2" placeholder="Additional notes..."></textarea>
         </div>
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeRxModal()">Cancel</button>
@@ -2748,24 +2905,24 @@
         </div>
         <div class="field" style="margin-top:10px;">
             <label>Extra / Delegated Permissions</label>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; background:var(--surface2); padding:12px; border-radius:10px; border:1px solid var(--border);">
-                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
-                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
-                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
-                <label data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
-                <label data-perm-feature="multi_branch"><input type="checkbox" class="edit-staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
-                <label data-perm-feature="roster_management"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
-                <label data-perm-feature="roster_management"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
-                <label data-perm-feature="holiday_calendar"><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
-                <label data-perm-feature="holiday_calendar"><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
-                <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
-                <label data-perm-feature="lab_test_booking"><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
-                <label data-perm-feature="specialty_treatments"><input type="checkbox" class="edit-staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
-                <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
-                <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
-                <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
+            <div class="check-grid">
+                <label class="check" data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
+                <label class="check" data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_UPDATE"> Update Doctors / Schedule</label>
+                <label class="check" data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTORS_DELETE"> Delete Doctors</label>
+                <label class="check" data-perm-feature="booking"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_BRANCH_ASSIGN"> Assign Doctor Branches</label>
+                <label class="check" data-perm-feature="multi_branch"><input type="checkbox" class="edit-staff-perm-cb" value="BRANCHES_MANAGE"> Add / Edit Branches</label>
+                <label class="check" data-perm-feature="roster_management"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_CREATE"> Create Doctor Leaves</label>
+                <label class="check" data-perm-feature="roster_management"><input type="checkbox" class="edit-staff-perm-cb" value="DOCTOR_LEAVES_DELETE"> Delete Doctor Leaves</label>
+                <label class="check" data-perm-feature="holiday_calendar"><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_CREATE"> Create Holidays</label>
+                <label class="check" data-perm-feature="holiday_calendar"><input type="checkbox" class="edit-staff-perm-cb" value="HOLIDAYS_DELETE"> Delete Holidays</label>
+                <label class="check"><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_VIEW"> View Staff</label>
+                <label class="check"><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
+                <label class="check"><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
+                <label class="check" data-perm-feature="lab_test_booking"><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                <label class="check" data-perm-feature="specialty_treatments"><input type="checkbox" class="edit-staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
+                <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
+                <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
+                <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
             </div>
         </div>
         <div class="modal-actions">
@@ -3791,7 +3948,7 @@ document.getElementById('confirmPromptInput').addEventListener('keydown', (e) =>
 document.querySelectorAll('input[name="payMode"]').forEach(radio => {
     radio.addEventListener('change', () => {
         document.getElementById('f-payPercentRow').style.display =
-            document.getElementById('f-payModePartial').checked ? 'block' : 'none';
+            document.getElementById('f-payModePartial').checked ? '' : 'none';
     });
 });
 
@@ -6130,12 +6287,12 @@ function renderTreatmentDoctorChecks(selectedIds) {
     const box = document.getElementById('f-trtDoctors');
     if (!box) return;
     if (!treatmentDoctorsCache.length) {
-        box.innerHTML = '<span style="color:var(--text3); font-size:0.85rem;">No active doctors yet. Add doctors first.</span>';
+        box.innerHTML = '<span class="empty">No active doctors yet. Add doctors first.</span>';
         return;
     }
-    box.innerHTML = treatmentDoctorsCache.map(d => `<label style="display:flex; gap:6px; align-items:center; font-weight:400;">
+    box.innerHTML = treatmentDoctorsCache.map(d => `<label class="check">
         <input type="checkbox" class="trt-doc-cb" value="${esc(d.id)}" ${selectedIds.includes(d.id) ? 'checked' : ''}>
-        ${esc(d.name)}${d.specialization ? ` <span style="color:var(--text3)">(${esc(d.specialization)})</span>` : ''}
+        <span>${esc(d.name)}${d.specialization ? `<span class="sub"> · ${esc(d.specialization)}</span>` : ''}</span>
     </label>`).join('');
 }
 
@@ -6285,22 +6442,36 @@ async function submitTreatment() {
     }
 }
 
-async function generateTreatmentDescription() {
+// The endpoint always drafts English, Hindi and Telugu in one call, so a
+// per-language button costs exactly what the old all-languages button cost.
+// `lang` only decides which fields the draft may overwrite — an operator who
+// has already corrected the Hindi line can redo Telugu alone.
+const TRT_DESC_LANGS = {
+    all: { fields: ['f-trtDesc', 'f-trtDescHi', 'f-trtDescTe'], keys: ['description', 'description_hi', 'description_te'], btn: 'btnTrtAi', label: '✨ Generate all 3 languages', what: 'descriptions' },
+    en:  { fields: ['f-trtDesc'],   keys: ['description'],    btn: 'btnTrtAi',   label: '✨ Generate with AI', what: 'English description' },
+    hi:  { fields: ['f-trtDescHi'], keys: ['description_hi'], btn: 'btnTrtAiHi', label: '✨ Generate with AI', what: 'Hindi description' },
+    te:  { fields: ['f-trtDescTe'], keys: ['description_te'], btn: 'btnTrtAiTe', label: '✨ Generate with AI', what: 'Telugu description' },
+};
+
+async function generateTreatmentDescription(lang) {
+    const spec = TRT_DESC_LANGS[lang] || TRT_DESC_LANGS.all;
     const name = document.getElementById('f-trtName').value.trim();
     const category = document.getElementById('f-trtCategory').value.trim();
     if (name.length < 2) { toast('Enter the treatment name first', true); return; }
-    const hasText = ['f-trtDesc', 'f-trtDescHi', 'f-trtDescTe'].some(i => document.getElementById(i).value.trim());
-    if (hasText) {
-        const ok = await confirmDialog('Replace the current descriptions with a new AI draft?', { title: 'Generate description', okText: 'Replace' });
+    if (spec.fields.some(i => document.getElementById(i).value.trim())) {
+        const ok = await confirmDialog('Replace the current ' + spec.what + ' with a new AI draft?', { title: 'Generate description', okText: 'Replace' });
         if (!ok) return;
     }
-    const btn = document.getElementById('btnTrtAi');
-    if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+    // Lock every AI button, not just the one clicked: they all hit the same
+    // endpoint, and two in flight would race to write overlapping fields.
+    const buttons = [...new Set(Object.values(TRT_DESC_LANGS).map(x => x.btn))]
+        .map(id => document.getElementById(id)).filter(Boolean);
+    const btn = document.getElementById(spec.btn);
+    buttons.forEach(b => { b.disabled = true; });
+    if (btn) btn.textContent = 'Generating…';
     try {
         const r = await apiPost('/admin/treatments/ai-description', { name, category: category || null });
-        document.getElementById('f-trtDesc').value = r.description || '';
-        document.getElementById('f-trtDescHi').value = r.description_hi || '';
-        document.getElementById('f-trtDescTe').value = r.description_te || '';
+        spec.fields.forEach((id, i) => { document.getElementById(id).value = r[spec.keys[i]] || ''; });
         updateTrtDescCounter();
         toast(r.source === 'ai'
             ? 'AI draft added. Please review it before saving.'
@@ -6308,7 +6479,8 @@ async function generateTreatmentDescription() {
     } catch (err) {
         toast(err.message || 'Failed to generate a description', true);
     } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '✨ Generate with AI'; }
+        buttons.forEach(b => { b.disabled = false; });
+        if (btn) btn.textContent = spec.label;
     }
 }
 
@@ -7520,7 +7692,7 @@ async function loadPaymentSettings() {
         const mode = data.payment_mode || 'none';
         document.getElementById('f-payMode' + mode.charAt(0).toUpperCase() + mode.slice(1)).checked = true;
         document.getElementById('f-payPercent').value = data.payment_deposit_percent || '';
-        document.getElementById('f-payPercentRow').style.display = mode === 'partial' ? 'block' : 'none';
+        document.getElementById('f-payPercentRow').style.display = mode === 'partial' ? '' : 'none';
 
         const cancelSel = document.getElementById('f-cancelWindow');
         if (cancelSel) {

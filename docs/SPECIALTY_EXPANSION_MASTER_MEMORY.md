@@ -137,5 +137,6 @@ A new dedicated table isolated by `clinic_id` stores procedures/treatments:
 | **Session 03** | 2026-09-16 | Step-by-step production implementation plan for Antigravity / any agent (12 tasks, tests, deploy runbook, acceptance) | `docs/specialty_plan/README.md`, `docs/sessions/SESSION_03_IMPLEMENTATION_PLAN.md` |
 | **Session 04** | 2026-09-16 | Fixed the "Patient" booking name bug (all plans) and the account-holder rename; plan anchors updated | `docs/sessions/SESSION_04_BOOKING_NAME_FIX.md` |
 | **Session 05** | 2026-09-16 | Complete execution of Tasks 1-9 (Migration 077, Registry, Catalog, AI drafts, Admin API, UI, WhatsApp flow, Wiring, Bookings/Payments/Analytics, Targeted Regression) | `docs/sessions/SESSION_05_SPECIALTY_EXPANSION_EXECUTION.md` |
+| **Session 06** | 2026-09-16 | Admin panel form controls: root-caused checkbox stretching (`.field input` sized checkboxes as text inputs), styled the 6 unstyled textareas, added per-language AI draft buttons for Hindi/Telugu | `docs/sessions/SESSION_06_ADMIN_PANEL_FORM_CONTROLS.md` |
 
 > **Rule for every future session:** add `docs/sessions/SESSION_NN_<topic>.md` covering intent, decisions, files changed, tests run with results, and open items. Then add a row here. If a session proves an earlier statement in this file wrong, correct it in place and mark it `CORRECTED IN SESSION NN`.

@@ -44,9 +44,66 @@ def test_page_and_form_exist_with_whatsapp_limits():
     assert 'id="f-trtShort" maxlength="24"' in INDEX
     assert 'id="f-trtDesc" rows="3" maxlength="400"' in INDEX
     for fn in ("async function loadTreatments()", "async function submitTreatment()",
-               "async function generateTreatmentDescription()", "async function loadStarterTreatments()",
+               "async function generateTreatmentDescription(lang)", "async function loadStarterTreatments()",
                "async function setSelectedTreatmentsActive(active)", "window.delTreatment = async function"):
         assert fn in INDEX, fn
+
+
+def test_each_description_language_has_its_own_ai_button():
+    """Hindi and Telugu were fillable only by redoing English, so an operator
+    who had corrected one language lost it to regenerate the other."""
+    for btn, lang in (("btnTrtAi", "all"), ("btnTrtAiHi", "hi"), ("btnTrtAiTe", "te")):
+        # {!r} renders the language as a quoted JS argument.
+        assert 'id="{}" onclick="generateTreatmentDescription({!r})"'.format(btn, lang) in INDEX, btn
+    # Each button may only write its own field.
+    assert "hi:  { fields: ['f-trtDescHi'], keys: ['description_hi']" in INDEX
+    assert "te:  { fields: ['f-trtDescTe'], keys: ['description_te']" in INDEX
+
+
+def test_checkboxes_are_not_stretched_by_the_text_input_rule():
+    """`.field input` set width:100% + 12px padding, which blew every checkbox
+    out to the full width of its cell and pushed the label onto the next line.
+    It was declared TWICE -- a sizing rule and a later background/border rule
+    in the Controls section -- and the second one also re-applied the faint
+    --border colour, undoing the 3:1 contrast an interactive control needs.
+    Both must keep the exclusion."""
+    assert INDEX.count('.field input:not([type="checkbox"]):not([type="radio"])') >= 4
+    assert '.field input, .field select {' not in INDEX
+    assert '.field input, .field select, .search-bar {' not in INDEX
+    assert "border: 1.5px solid var(--text3);" in INDEX
+
+
+def test_no_label_hand_rolls_its_own_checkbox_layout():
+    """Every checkbox row goes through .check / .check-grid / .day-picker.
+    Inline `style="display:flex"` on a label is how the panel used to paper
+    over the stretching, and it hid the real bug for months."""
+    assert "<label style=" not in INDEX
+    assert INDEX.count('class="check-grid"') == 3
+    for cls in ("staff-perm-cb", "edit-staff-perm-cb"):
+        # Every permission label opens with the shared class.
+        assert f'<input type="checkbox" class="{cls}"' in INDEX
+    assert '<label class="check"><input type="checkbox" class="staff-perm-cb"' in INDEX
+
+
+def test_native_widgets_follow_the_active_theme():
+    """Without color-scheme a dark panel opens a white calendar popup. It was
+    set only on .appt-date-field, so the other date and time inputs still
+    opened light pickers."""
+    assert "color-scheme: dark;" in INDEX
+    assert "color-scheme: light;" in INDEX
+    assert ".appt-date-field select { color-scheme: dark; }" not in INDEX
+
+
+def test_day_picker_keeps_the_contract_submit_and_edit_rely_on():
+    """The week renders as toggle chips now. submitDoctor reads
+    .doc-day-cb:checked and editDoctor writes .checked, so the class and the
+    day value must survive any restyling of the chip."""
+    assert 'id="f-docDays" class="day-picker"' in INDEX
+    for day in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"):
+        assert f'<input type="checkbox" class="doc-day-cb" value="{day}"' in INDEX, day
+    assert "querySelectorAll('.doc-day-cb:checked')" in INDEX
+    # The chip covers its own input, so the input must not keep the 18px box.
+    assert '.day-picker input[type="checkbox"]::before { content: none; }' in INDEX
 
 
 def test_every_treatment_endpoint_used_by_the_page_exists():
