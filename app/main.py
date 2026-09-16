@@ -403,6 +403,21 @@ async def admin_panel():
     )
 
 
+@app.get("/derma-panel")
+@app.get("/eye-panel")
+@app.get("/dental-panel")
+@app.get("/ivf-panel")
+async def specialty_admin_panel():
+    """Specialty-branded entry points to the same admin panel.
+
+    The URL changes nothing about tenancy, features or data: the page asks
+    GET /admin/me who the user is and what their clinic's plan allows, exactly
+    as /admin-panel does. Kept outside /admin* on purpose — see the note on
+    admin_panel_chartjs below.
+    """
+    return await admin_panel()
+
+
 @app.get("/panel-assets/chart.umd.min.js")
 async def admin_panel_chartjs():
     """Serve self-hosted Chart.js to the clinic admin panel's Insights page.

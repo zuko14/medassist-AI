@@ -1323,6 +1323,9 @@
             <div class="nav-link" tabindex="0" data-page="labtests" data-feature="lab_test_booking" onclick="go('labtests',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.31L4.1 20.3a2 2 0 0 0 1.7 2.7h12.4a2 2 0 0 0 1.7-2.7L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg></span> Lab Tests / Services
             </div>
+            <div class="nav-link" tabindex="0" data-page="treatments" data-specialty="1" style="display:none" onclick="go('treatments',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path></svg></span> Treatments
+            </div>
             <div class="nav-link" tabindex="0" data-page="prescriptions" data-feature="booking" data-role="admin" onclick="go('prescriptions',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9.5" width="18" height="5" rx="2.5" transform="rotate(-45 12 12)"></rect><line x1="8.5" y1="15.5" x2="15.5" y2="8.5"></line></svg></span> Prescriptions
             </div>
@@ -2013,6 +2016,95 @@
             </div>
         </div>
 
+        <div id="pg-treatments" class="sec">
+            <div class="page-head">
+                <h2>Treatments &amp; Procedures</h2>
+                <p>What patients see under "Our Treatments" on WhatsApp. Only treatments marked active are shown to patients.</p>
+            </div>
+
+            <div class="card" id="trtStarterCard" style="margin-bottom:20px; display:none;">
+                <div class="card-head"><h3>Starter treatment list</h3></div>
+                <div style="padding:16px;">
+                    <p id="trtStarterText" style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;"></p>
+                    <button type="button" class="btn btn-accent" id="btnLoadStarter" onclick="loadStarterTreatments()">Load starter treatments</button>
+                </div>
+            </div>
+
+            <div class="top-row">
+                <input type="text" class="search-bar" id="trtSearch" placeholder="Search by name, category or concern..." oninput="filterTreatments()" aria-label="Search treatments">
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <select id="trtCategoryFilter" class="search-bar" style="max-width:220px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="filterTreatments()" aria-label="Filter by category">
+                        <option value="">All categories</option>
+                    </select>
+                    <button type="button" class="btn btn-ghost trt-manage" onclick="setSelectedTreatmentsActive(true)">Show to patients</button>
+                    <button type="button" class="btn btn-ghost trt-manage" onclick="setSelectedTreatmentsActive(false)">Hide from patients</button>
+                    <button type="button" class="btn btn-accent trt-manage" onclick="openAddTreatment()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Add Treatment</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3>Treatment Catalog</h3>
+                    <span id="trtCount" style="color:var(--text3); font-size:0.8rem;"></span>
+                </div>
+                <div class="tbl-wrap" id="trtList">
+                    <div class="loader"><div class="spin"></div>Loading treatments...</div>
+                </div>
+            </div>
+
+            <div class="form-card" id="trtFormCard" style="display:none; margin-top:20px;">
+                <h3 id="trtFormTitle">Add Treatment</h3>
+                <input type="hidden" id="f-trtId">
+                <div class="form-row">
+                    <div class="field"><label for="f-trtName">Treatment name *</label><input type="text" id="f-trtName" maxlength="120" placeholder="e.g. Root Canal Treatment" oninput="updateTrtShortCounter()"></div>
+                    <div class="field"><label for="f-trtCategory">Category *</label><input type="text" id="f-trtCategory" maxlength="60" list="trtCategoryOptions" placeholder="e.g. Tooth Pain &amp; Root Canal"><datalist id="trtCategoryOptions"></datalist></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label for="f-trtShort">WhatsApp list title <span id="trtShortCounter" style="color:var(--text3); font-weight:400;"></span></label>
+                        <input type="text" id="f-trtShort" maxlength="24" placeholder="Needed when the name is longer than 24 characters" oninput="updateTrtShortCounter()">
+                    </div>
+                    <div class="field"><label for="f-trtOrder">Display order</label><input type="number" id="f-trtOrder" min="0" max="10000" step="1" value="0"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label for="f-trtPrice">Price starts from (₹)</label>
+                        <input type="number" id="f-trtPrice" min="0" step="1" value="0">
+                        <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Leave 0 to show "Price shared after consultation". WhatsApp payment always uses the doctor's consultation fee.</p>
+                    </div>
+                    <div class="field"><label for="f-trtDuration">Visit duration (minutes)</label><input type="number" id="f-trtDuration" min="5" max="1440" step="5"></div>
+                </div>
+                <div class="field">
+                    <label for="f-trtConcerns">Concerns it helps with</label>
+                    <textarea id="f-trtConcerns" rows="2" maxlength="500" placeholder="Words patients use, comma-separated. e.g. tooth pain, sensitivity, swelling"></textarea>
+                </div>
+                <div class="field">
+                    <label for="f-trtDesc">Patient description, English (2 lines) <span id="trtDescCounter" style="color:var(--text3); font-weight:400;"></span></label>
+                    <textarea id="f-trtDesc" rows="3" maxlength="400" oninput="updateTrtDescCounter()"></textarea>
+                    <button type="button" class="btn btn-ghost trt-manage" id="btnTrtAi" style="margin-top:8px;" onclick="generateTreatmentDescription()">✨ Generate with AI</button>
+                    <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">AI text is a draft. Read it, correct anything inaccurate, then save. Nothing is sent to patients until you save.</p>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label for="f-trtDescHi">Description, Hindi</label><textarea id="f-trtDescHi" rows="3" maxlength="600"></textarea></div>
+                    <div class="field"><label for="f-trtDescTe">Description, Telugu</label><textarea id="f-trtDescTe" rows="3" maxlength="600"></textarea></div>
+                </div>
+                <div class="field">
+                    <label for="f-trtPrep">Before your visit (instructions)</label>
+                    <textarea id="f-trtPrep" rows="2" maxlength="600" placeholder="e.g. Stop soft contact lenses 7 days before."></textarea>
+                </div>
+                <div class="field">
+                    <label>Doctors who perform this</label>
+                    <div id="f-trtDoctors" style="display:flex; flex-wrap:wrap; gap:12px;"></div>
+                    <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Leave all unticked to let patients choose any active doctor.</p>
+                </div>
+                <div class="field"><label><input type="checkbox" id="f-trtActive" checked> Show to patients on WhatsApp</label></div>
+                <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-accent" id="btnSaveTreatment" onclick="submitTreatment()">Save Treatment</button>
+                    <button type="button" class="btn btn-ghost" onclick="cancelTreatmentForm()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <!-- ─── LAB TESTS CATALOG ─── -->
         <div id="pg-labtests" class="sec">
             <div class="page-head">
@@ -2401,6 +2493,7 @@
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
                         <label><input type="checkbox" class="staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
                         <label data-perm-feature="lab_test_booking"><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                        <label data-perm-feature="specialty_treatments"><input type="checkbox" class="staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
                         <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                         <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                         <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
@@ -2669,6 +2762,7 @@
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_CREATE"> Create Staff</label>
                 <label><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
                 <label data-perm-feature="lab_test_booking"><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
+                <label data-perm-feature="specialty_treatments"><input type="checkbox" class="edit-staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
                 <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                 <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                 <label data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
@@ -2996,6 +3090,8 @@ let myRole = null;
 let myPermissions = [];
 let myBranchId = null;
 let myStaffRole = null;
+let mySpecialty = null;
+let mySpecialtyEnabled = false;
 
 function hasPermission(perm) {
     if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
@@ -3016,6 +3112,12 @@ function planAllowsFeature(feature) {
 function applyFeatureVisibility() {
     document.querySelectorAll('[data-feature]').forEach(el => {
         el.style.display = planAllowsFeature(el.dataset.feature) ? '' : 'none';
+    });
+    // Specialty tabs follow /admin/me.specialty_enabled, never features[]:
+    // the enterprise wildcard lists every feature, which would show the tab
+    // to every enterprise clinic.
+    document.querySelectorAll('[data-specialty]').forEach(el => {
+        el.style.display = mySpecialtyEnabled ? '' : 'none';
     });
     document.querySelectorAll('[data-role="admin"]').forEach(el => {
         const page = el.dataset.page;
@@ -3130,6 +3232,8 @@ async function login() {
     myPermissions = me.permissions || [];
     myBranchId = me.branch_id || null;
     myStaffRole = me.staff_role || null;
+    mySpecialty = me.specialty || null;
+    mySpecialtyEnabled = !!me.specialty_enabled;
     myUsername = me.username || '';
     myEnvAccount = !!me.env_account;
     CLINIC_SCOPE = me.clinic_id || 'default';
@@ -3268,6 +3372,8 @@ async function adoptClinicPlan() {
         if (scoped && Array.isArray(scoped.features)) {
             myPlan = scoped.plan;
             myFeatures = scoped.features;
+            mySpecialty = scoped.specialty || null;
+            mySpecialtyEnabled = !!scoped.specialty_enabled;
         }
     } catch (e) {
         console.warn('Could not resolve plan for clinic', CLINIC_SCOPE, e);
@@ -3500,7 +3606,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
     if (loaders[page]) loaders[page]();
 }
 
@@ -4626,7 +4732,11 @@ function bookingSubjectCell(b) {
             + 'border-radius:4px;font-size:11px;font-weight:600">'
             + (esc(b.lab_test_name) || 'Lab Test') + '</span>';
     }
-    return esc(b.doctor_name) || '—';
+    const doctor = esc(b.doctor_name) || '—';
+    if (!b.treatment_name) return doctor;
+    // Specialty booking: a consultation tagged with the treatment (migration 077).
+    return doctor + '<br><span style="background:rgba(167,139,250,.14);color:#a78bfa;padding:2px 7px;'
+        + 'border-radius:4px;font-size:11px;font-weight:600">' + esc(b.treatment_name) + '</span>';
 }
 
 // Filter state for the Appointments page. It survives navigation, so a
@@ -5893,6 +6003,341 @@ async function submitLabTest(e) {
         if (btn) btn.disabled = false;
     }
 }
+
+// ═══════ TREATMENTS (specialty plans, migration 077) ═══════
+let treatmentsCache = [];
+let treatmentDoctorsCache = [];
+
+async function loadTreatments() {
+    const el = document.getElementById('trtList');
+    if (!el) return;
+    el.innerHTML = loading();
+    const canManage = hasPermission('TREATMENTS_MANAGE');
+    document.querySelectorAll('.trt-manage').forEach(b => { b.style.display = canManage ? '' : 'none'; });
+    try {
+        const [rows, docs] = await Promise.all([api('/admin/treatments'), api('/admin/doctors')]);
+        treatmentsCache = Array.isArray(rows) ? rows : [];
+        const docList = Array.isArray(docs) ? docs : ((docs && docs.doctors) || []);
+        treatmentDoctorsCache = docList.filter(d => d.is_active !== false);
+        renderTreatmentCategoryOptions();
+        renderStarterCard();
+        filterTreatments();
+    } catch (e) {
+        el.innerHTML = emptyState('warning', e.message || 'Failed to load treatments');
+    }
+}
+
+function treatmentCategories() {
+    return [...new Set(treatmentsCache.map(t => (t.category || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+}
+
+function renderTreatmentCategoryOptions() {
+    const cats = treatmentCategories();
+    const sel = document.getElementById('trtCategoryFilter');
+    if (sel) {
+        const current = sel.value;
+        sel.innerHTML = '<option value="">All categories</option>'
+            + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        sel.value = cats.includes(current) ? current : '';
+    }
+    const list = document.getElementById('trtCategoryOptions');
+    if (list) list.innerHTML = cats.map(c => `<option value="${esc(c)}"></option>`).join('');
+}
+
+function renderStarterCard() {
+    const card = document.getElementById('trtStarterCard');
+    const text = document.getElementById('trtStarterText');
+    const btn = document.getElementById('btnLoadStarter');
+    if (!card || !text || !btn) return;
+    const canManage = hasPermission('TREATMENTS_MANAGE');
+    const hiddenStarters = treatmentsCache.filter(t => t.source === 'starter' && !t.is_active).length;
+    if (!treatmentsCache.length && canManage) {
+        text.textContent = 'Your catalog is empty. Load a ready-made list of common treatments for your specialty. '
+            + 'They are added hidden, so you can set prices and edit descriptions, then choose which ones patients see.';
+        btn.style.display = '';
+        card.style.display = '';
+    } else if (hiddenStarters && canManage) {
+        text.textContent = `${hiddenStarters} starter treatment${hiddenStarters !== 1 ? 's are' : ' is'} hidden from patients. `
+            + 'Tick the ones you offer and click "Show to patients". Delete the ones you do not offer.';
+        btn.style.display = 'none';
+        card.style.display = '';
+    } else {
+        card.style.display = 'none';
+    }
+}
+
+function filterTreatments() {
+    const q = (document.getElementById('trtSearch')?.value || '').toLowerCase().trim();
+    const cat = document.getElementById('trtCategoryFilter')?.value || '';
+    const rows = treatmentsCache.filter(t =>
+        (!cat || t.category === cat)
+        && (!q || [t.name, t.short_name, t.category, t.concerns].some(v => (v || '').toLowerCase().includes(q))));
+    const countEl = document.getElementById('trtCount');
+    if (countEl) {
+        const shown = treatmentsCache.filter(t => t.is_active).length;
+        countEl.textContent = `${treatmentsCache.length} treatment${treatmentsCache.length !== 1 ? 's' : ''} · ${shown} shown to patients`;
+    }
+    renderTreatmentsTable(rows);
+}
+
+function treatmentDoctorLabel(t) {
+    const ids = t.doctor_ids || [];
+    const names = treatmentDoctorsCache.filter(d => ids.includes(d.id)).map(d => esc(d.name));
+    return names.length ? names.join(', ') : '<span style="color:var(--text3)">Any doctor</span>';
+}
+
+function formatTreatmentPrice(paise) {
+    const rupees = Math.round((paise || 0) / 100);
+    return rupees > 0 ? '₹' + String(rupees).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : 'After consultation';
+}
+
+function renderTreatmentsTable(rows) {
+    const el = document.getElementById('trtList');
+    if (!el) return;
+    if (!rows.length) {
+        el.innerHTML = emptyState('clipboard', treatmentsCache.length ? 'No treatments match your search' : 'No treatments added yet');
+        return;
+    }
+    const canManage = hasPermission('TREATMENTS_MANAGE');
+    el.innerHTML = `<table>
+        <thead><tr>
+            ${canManage ? '<th><input type="checkbox" aria-label="Select all treatments" onchange="toggleAllTreatments(this.checked)"></th>' : ''}
+            <th>Treatment</th><th>Category</th><th>Price from</th><th>Duration</th><th>Doctors</th><th>Status</th>
+            ${canManage ? '<th>Actions</th>' : ''}
+        </tr></thead>
+        <tbody>${rows.map(t => `<tr>
+            ${canManage ? `<td><input type="checkbox" class="trt-select" value="${esc(t.id)}" aria-label="Select ${esc(t.name)}"></td>` : ''}
+            <td style="font-weight:600; color:var(--text-strong)">${esc(t.name)}${t.short_name ? `<div style="color:var(--text3); font-size:0.75rem; font-weight:400">List title: ${esc(t.short_name)}</div>` : ''}</td>
+            <td>${esc(t.category)}</td>
+            <td>${formatTreatmentPrice(t.price_from_paise)}</td>
+            <td>${t.duration_minutes ? esc(String(t.duration_minutes)) + ' min' : '—'}</td>
+            <td>${treatmentDoctorLabel(t)}</td>
+            <td>${t.is_active ? badge('active') : badge('inactive')}</td>
+            ${canManage ? `<td>
+                <button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--surface); min-width:auto" aria-label="Edit ${esc(t.name)}" onclick="editTreatment('${esc(t.id)}')"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-pencil"/></svg></button>
+                <button class="btn" style="padding:4px 8px; font-size:0.8rem; background:var(--red-bg); color:var(--red); min-width:auto" aria-label="Delete ${esc(t.name)}" onclick="delTreatment('${esc(t.id)}')"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg></button>
+            </td>` : ''}
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function toggleAllTreatments(checked) {
+    document.querySelectorAll('.trt-select').forEach(cb => { cb.checked = checked; });
+}
+
+function renderTreatmentDoctorChecks(selectedIds) {
+    const box = document.getElementById('f-trtDoctors');
+    if (!box) return;
+    if (!treatmentDoctorsCache.length) {
+        box.innerHTML = '<span style="color:var(--text3); font-size:0.85rem;">No active doctors yet. Add doctors first.</span>';
+        return;
+    }
+    box.innerHTML = treatmentDoctorsCache.map(d => `<label style="display:flex; gap:6px; align-items:center; font-weight:400;">
+        <input type="checkbox" class="trt-doc-cb" value="${esc(d.id)}" ${selectedIds.includes(d.id) ? 'checked' : ''}>
+        ${esc(d.name)}${d.specialization ? ` <span style="color:var(--text3)">(${esc(d.specialization)})</span>` : ''}
+    </label>`).join('');
+}
+
+function updateTrtShortCounter() {
+    const shortEl = document.getElementById('f-trtShort');
+    const nameEl = document.getElementById('f-trtName');
+    const counter = document.getElementById('trtShortCounter');
+    if (!shortEl || !nameEl || !counter) return;
+    const title = shortEl.value.trim() || nameEl.value.trim();
+    counter.textContent = `${title.length}/24`;
+    counter.style.color = title.length > 24 ? 'var(--red)' : 'var(--text3)';
+}
+
+function updateTrtDescCounter() {
+    const desc = document.getElementById('f-trtDesc');
+    const counter = document.getElementById('trtDescCounter');
+    if (desc && counter) counter.textContent = `${desc.value.length}/400`;
+}
+
+function resetTreatmentForm() {
+    ['f-trtId', 'f-trtName', 'f-trtCategory', 'f-trtShort', 'f-trtDuration', 'f-trtConcerns',
+     'f-trtDesc', 'f-trtDescHi', 'f-trtDescTe', 'f-trtPrep'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('f-trtPrice').value = '0';
+    document.getElementById('f-trtOrder').value = '0';
+    document.getElementById('f-trtActive').checked = true;
+    document.getElementById('trtFormTitle').textContent = 'Add Treatment';
+    renderTreatmentDoctorChecks([]);
+    updateTrtShortCounter();
+    updateTrtDescCounter();
+}
+
+function openTreatmentForm() {
+    const card = document.getElementById('trtFormCard');
+    if (card) {
+        card.style.display = 'block';
+        card.scrollIntoView({ behavior: 'smooth' });
+    }
+}
+
+function openAddTreatment() {
+    resetTreatmentForm();
+    openTreatmentForm();
+}
+
+function cancelTreatmentForm() {
+    resetTreatmentForm();
+    const card = document.getElementById('trtFormCard');
+    if (card) card.style.display = 'none';
+}
+
+window.editTreatment = function (id) {
+    const t = treatmentsCache.find(x => x.id === id);
+    if (!t) return;
+    resetTreatmentForm();
+    document.getElementById('f-trtId').value = t.id;
+    document.getElementById('f-trtName').value = t.name || '';
+    document.getElementById('f-trtCategory').value = t.category || '';
+    document.getElementById('f-trtShort').value = t.short_name || '';
+    document.getElementById('f-trtOrder').value = t.display_order || 0;
+    document.getElementById('f-trtPrice').value = Math.round((t.price_from_paise || 0) / 100);
+    document.getElementById('f-trtDuration').value = t.duration_minutes || '';
+    document.getElementById('f-trtConcerns').value = t.concerns || '';
+    document.getElementById('f-trtDesc').value = t.description || '';
+    document.getElementById('f-trtDescHi').value = t.description_hi || '';
+    document.getElementById('f-trtDescTe').value = t.description_te || '';
+    document.getElementById('f-trtPrep').value = t.prep_instructions || '';
+    document.getElementById('f-trtActive').checked = !!t.is_active;
+    document.getElementById('trtFormTitle').textContent = 'Edit Treatment';
+    renderTreatmentDoctorChecks(t.doctor_ids || []);
+    updateTrtShortCounter();
+    updateTrtDescCounter();
+    openTreatmentForm();
+};
+
+window.delTreatment = async function (id) {
+    const t = treatmentsCache.find(x => x.id === id);
+    const name = t ? t.name : 'this treatment';
+    const ok = await confirmDialog(`Delete "${name}"? Past bookings keep the treatment name.`, { title: 'Delete Treatment', danger: true, okText: 'Delete' });
+    if (!ok) return;
+    try {
+        await apiDel('/admin/treatments/' + encodeURIComponent(id));
+        toast('Treatment deleted');
+        loadTreatments();
+    } catch (e) {
+        toast(e.message || 'Failed to delete treatment', true);
+    }
+};
+
+function optionalText(id) {
+    const v = document.getElementById(id).value.trim();
+    return v || null;
+}
+
+async function submitTreatment() {
+    const id = document.getElementById('f-trtId').value;
+    const name = document.getElementById('f-trtName').value.trim();
+    const category = document.getElementById('f-trtCategory').value.trim();
+    const shortName = document.getElementById('f-trtShort').value.trim();
+    if (!name || !category) { toast('Treatment name and category are required', true); return; }
+    if (name.length > 24 && !shortName) {
+        toast('The name is longer than 24 characters. Add a WhatsApp list title of up to 24 characters.', true);
+        return;
+    }
+    const price = parseInt(document.getElementById('f-trtPrice').value || '0', 10);
+    if (isNaN(price) || price < 0) { toast('Enter a valid price (0 or more)', true); return; }
+    const durationRaw = document.getElementById('f-trtDuration').value;
+    const duration = durationRaw ? parseInt(durationRaw, 10) : null;
+    if (duration !== null && (isNaN(duration) || duration < 5 || duration > 1440)) {
+        toast('Duration must be between 5 and 1440 minutes', true);
+        return;
+    }
+    const order = parseInt(document.getElementById('f-trtOrder').value || '0', 10) || 0;
+
+    const payload = {
+        name,
+        category,
+        short_name: shortName || null,
+        price_from_rupees: price,
+        duration_minutes: duration,
+        concerns: optionalText('f-trtConcerns'),
+        description: optionalText('f-trtDesc'),
+        description_hi: optionalText('f-trtDescHi'),
+        description_te: optionalText('f-trtDescTe'),
+        prep_instructions: optionalText('f-trtPrep'),
+        is_active: document.getElementById('f-trtActive').checked,
+        display_order: order,
+    };
+    const doctorIds = [...document.querySelectorAll('.trt-doc-cb:checked')].map(cb => cb.value);
+
+    const btn = document.getElementById('btnSaveTreatment');
+    if (btn) btn.disabled = true;
+    try {
+        const saved = id
+            ? await apiPut('/admin/treatments/' + encodeURIComponent(id), payload)
+            : await apiPost('/admin/treatments', payload);
+        const treatmentId = id || (saved && saved.id);
+        if (treatmentId) {
+            await apiPut('/admin/treatments/' + encodeURIComponent(treatmentId) + '/doctors', { doctor_ids: doctorIds });
+        }
+        toast(id ? 'Treatment updated' : 'Treatment added');
+        cancelTreatmentForm();
+        loadTreatments();
+    } catch (err) {
+        toast(err.message || 'Failed to save treatment', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function generateTreatmentDescription() {
+    const name = document.getElementById('f-trtName').value.trim();
+    const category = document.getElementById('f-trtCategory').value.trim();
+    if (name.length < 2) { toast('Enter the treatment name first', true); return; }
+    const hasText = ['f-trtDesc', 'f-trtDescHi', 'f-trtDescTe'].some(i => document.getElementById(i).value.trim());
+    if (hasText) {
+        const ok = await confirmDialog('Replace the current descriptions with a new AI draft?', { title: 'Generate description', okText: 'Replace' });
+        if (!ok) return;
+    }
+    const btn = document.getElementById('btnTrtAi');
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+    try {
+        const r = await apiPost('/admin/treatments/ai-description', { name, category: category || null });
+        document.getElementById('f-trtDesc').value = r.description || '';
+        document.getElementById('f-trtDescHi').value = r.description_hi || '';
+        document.getElementById('f-trtDescTe').value = r.description_te || '';
+        updateTrtDescCounter();
+        toast(r.source === 'ai'
+            ? 'AI draft added. Please review it before saving.'
+            : 'AI is unavailable right now. A standard description was added; please edit it.');
+    } catch (err) {
+        toast(err.message || 'Failed to generate a description', true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '✨ Generate with AI'; }
+    }
+}
+
+async function loadStarterTreatments() {
+    const btn = document.getElementById('btnLoadStarter');
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiPost('/admin/treatments/starter', {});
+        toast(`${r.added} starter treatment${r.added !== 1 ? 's' : ''} added, hidden from patients until you show them`);
+        loadTreatments();
+    } catch (err) {
+        toast(err.message || 'Failed to load starter treatments', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function setSelectedTreatmentsActive(active) {
+    const ids = [...document.querySelectorAll('.trt-select:checked')].map(cb => cb.value);
+    if (!ids.length) { toast('Tick at least one treatment first', true); return; }
+    try {
+        const r = await apiPost('/admin/treatments/status', { treatment_ids: ids, is_active: active });
+        toast(`${r.updated} treatment${r.updated !== 1 ? 's' : ''} ${active ? 'shown to' : 'hidden from'} patients`);
+        loadTreatments();
+    } catch (err) {
+        toast(err.message || 'Failed to update treatments', true);
+    }
+}
+
 
 async function openLabCsvModal() {
     const modal = document.getElementById('labCsvModal');
