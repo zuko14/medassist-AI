@@ -1,6 +1,10 @@
 """Starter treatment lists are safe to show patients, and seeding never
 publishes anything or overwrites a clinic's own rows."""
 
+import sys
+if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+    del sys.modules["app.database"]
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

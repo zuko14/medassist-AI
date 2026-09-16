@@ -1,6 +1,10 @@
 """A treatment booking is an ordinary consultation with a tag: same payment,
 same slot guard, same refunds. Bookings without a treatment are unchanged."""
 
+import sys
+if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+    del sys.modules["app.database"]
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

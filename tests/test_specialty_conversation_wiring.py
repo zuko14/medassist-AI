@@ -11,22 +11,8 @@ from app.services.conversation import ConversationManager, ConversationState
 import sys
 import app.database as _real_app_db
 
-# Protect real app.database attributes (caches, helpers) if another test module
-# replaces sys.modules["app.database"] with a MagicMock during multi-file suite collection.
-_orig_mock_getattr = MagicMock.__getattr__
-
-
-def _mock_db_getattr(self, name):
-    if (
-        sys.modules.get("app.database") is self
-        and hasattr(_real_app_db, name)
-        and name not in ("supabase", "sb", "log_analytics_event")
-    ):
-        return getattr(_real_app_db, name)
-    return _orig_mock_getattr(self, name)
-
-
-MagicMock.__getattr__ = _mock_db_getattr
+if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+    del sys.modules["app.database"]
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = (REPO / "app" / "services" / "conversation.py").read_text(encoding="utf-8")
