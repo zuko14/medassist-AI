@@ -2171,6 +2171,15 @@
                 <div class="card-head"><h3>Starter treatment list</h3></div>
                 <div style="padding:16px;">
                     <p id="trtStarterText" style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;"></p>
+                    <div class="field" id="trtStarterPicker" style="display:none; max-width:280px; margin-bottom:12px;">
+                        <label for="trtStarterSpecialty">Which list?</label>
+                        <select id="trtStarterSpecialty">
+                            <option value="dermatology">Skin &amp; Hair — Dermatology</option>
+                            <option value="ophthalmology">Eye — Ophthalmology</option>
+                            <option value="dental">Dental</option>
+                            <option value="fertility">Fertility &amp; IVF</option>
+                        </select>
+                    </div>
                     <button type="button" class="btn btn-accent" id="btnLoadStarter" onclick="loadStarterTreatments()">Load starter treatments</button>
                 </div>
             </div>
@@ -6212,16 +6221,31 @@ function renderStarterCard() {
     const btn = document.getElementById('btnLoadStarter');
     if (!card || !text || !btn) return;
     const canManage = hasPermission('TREATMENTS_MANAGE');
+    const picker = document.getElementById('trtStarterPicker');
     const hiddenStarters = treatmentsCache.filter(t => t.source === 'starter' && !t.is_active).length;
-    if (!treatmentsCache.length && canManage) {
-        text.textContent = 'Your catalog is empty. Load a ready-made list of common treatments for your specialty. '
+    // A multi-specialty hospital has no single starter list, so it picks one —
+    // and will come back for another. That is why the card stays available
+    // after the first load here, instead of hiding once the catalog fills up.
+    const multiSpecialty = mySpecialtyEnabled && !mySpecialty;
+    if (picker) picker.style.display = (canManage && multiSpecialty) ? '' : 'none';
+    if (!canManage) {
+        card.style.display = 'none';
+    } else if (!treatmentsCache.length) {
+        text.textContent = (multiSpecialty
+            ? 'Your catalog is empty. Choose a specialty and load a ready-made list of common treatments. '
+            : 'Your catalog is empty. Load a ready-made list of common treatments for your specialty. ')
             + 'They are added hidden, so you can set prices and edit descriptions, then choose which ones patients see.';
         btn.style.display = '';
         card.style.display = '';
-    } else if (hiddenStarters && canManage) {
+    } else if (hiddenStarters) {
         text.textContent = `${hiddenStarters} starter treatment${hiddenStarters !== 1 ? 's are' : ' is'} hidden from patients. `
             + 'Tick the ones you offer and click "Show to patients". Delete the ones you do not offer.';
-        btn.style.display = 'none';
+        btn.style.display = multiSpecialty ? '' : 'none';
+        card.style.display = '';
+    } else if (multiSpecialty) {
+        text.textContent = 'Add another specialty’s starter list — skin & hair, eye, dental or fertility. '
+            + 'Treatments you already have are left untouched.';
+        btn.style.display = '';
         card.style.display = '';
     } else {
         card.style.display = 'none';
@@ -6520,8 +6544,15 @@ async function loadStarterTreatments() {
     const btn = document.getElementById('btnLoadStarter');
     if (btn) btn.disabled = true;
     try {
-        const r = await apiPost('/admin/treatments/starter', {});
-        toast(`${r.added} starter treatment${r.added !== 1 ? 's' : ''} added, hidden from patients until you show them`);
+        // Only a multi-specialty clinic sends one; on a single-specialty plan
+        // the server ignores the body and uses the plan.
+        const picker = document.getElementById('trtStarterPicker');
+        const sel = document.getElementById('trtStarterSpecialty');
+        const body = (picker && picker.style.display !== 'none' && sel) ? { specialty: sel.value } : {};
+        const r = await apiPost('/admin/treatments/starter', body);
+        toast(r.added
+            ? `${r.added} starter treatment${r.added !== 1 ? 's' : ''} added, hidden from patients until you show them`
+            : 'You already have every treatment from that list');
         loadTreatments();
     } catch (err) {
         toast(err.message || 'Failed to load starter treatments', true);

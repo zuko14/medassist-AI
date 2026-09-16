@@ -53,7 +53,7 @@ from app.services.tenant import (
     specialty_enabled,
 )
 from app.services.ai_engine import generate_treatment_concerns, generate_treatment_description
-from app.services.specialty_catalog import seed_starter_treatments
+from app.services.specialty_catalog import STARTER_TREATMENTS, seed_starter_treatments
 from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
 from app.services.lab_reports import LabReportService
@@ -2508,6 +2508,24 @@ class TreatmentDescriptionRequest(BaseModel):
     category: Optional[str] = Field(default=None, max_length=60)
 
 
+class TreatmentStarterRequest(BaseModel):
+    """Which starter list to load. Only a hybrid plan gets to choose."""
+
+    specialty: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("specialty")
+    @classmethod
+    def _known_starter_list(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip().lower()
+        # Validated against the catalogue itself, so a new starter list is
+        # accepted the day it is added and a typo never reaches the seeder.
+        if cleaned not in STARTER_TREATMENTS:
+            raise ValueError(f"Unknown specialty. Choose one of: {', '.join(sorted(STARTER_TREATMENTS))}.")
+        return cleaned
+
+
 def _client_ip(request: Optional[Request]) -> str:
     return request.client.host if (request and request.client) else "unknown"
 
@@ -2525,6 +2543,29 @@ async def _require_specialty_clinic(clinic_id: str) -> dict:
             detail="The treatments catalogue is not enabled for this clinic's plan.",
         )
     return clinic
+
+
+def _starter_specialty(clinic: dict, requested: Optional[str]) -> str:
+    """Which starter list this clinic may seed.
+
+    On a single-specialty plan the PLAN decides and the request body is
+    ignored — a dermatology clinic must not be able to load the dental list by
+    posting a different slug.
+
+    A multi-specialty hospital (migration 078) offers several specialties, so
+    it has to name one. There is deliberately no default: silently seeding
+    fifteen dermatology treatments into an eye-and-dental hospital is worse
+    than a 400 the admin can act on.
+    """
+    plan_specialty = SPECIALTY_BY_PLAN.get(clinic.get("plan"))
+    if plan_specialty:
+        return plan_specialty
+    if requested in STARTER_TREATMENTS:
+        return requested
+    raise HTTPException(
+        status_code=400,
+        detail="Choose which starter list to load: skin & hair, eye, dental or fertility.",
+    )
 
 
 def _treatment_row(body: BaseModel, partial: bool) -> dict:
@@ -2806,21 +2847,21 @@ async def set_treatments_status(
 
 @router.post("/treatments/starter")
 async def load_starter_treatments(
+    body: Optional[TreatmentStarterRequest] = None,
     request: Request = None,
     clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
 ):
-    """Add the plan's starter treatments that are missing, hidden. Idempotent."""
+    """Add a starter treatment list that is missing, hidden. Idempotent.
+
+    The list comes from the plan on a single-specialty clinic, and from
+    body.specialty on a multi-specialty hospital — see _starter_specialty().
+    """
     effective_clinic_id = None
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         clinic = await _require_specialty_clinic(effective_clinic_id)
-        specialty = SPECIALTY_BY_PLAN.get(clinic.get("plan"))
-        if not specialty:
-            raise HTTPException(
-                status_code=400,
-                detail="Starter treatments are available on the Dermatology, Eye, Dental and IVF plans.",
-            )
+        specialty = _starter_specialty(clinic, body.specialty if body else None)
         result = await seed_starter_treatments(effective_clinic_id, specialty)
         await log_admin_action(
             user=user,

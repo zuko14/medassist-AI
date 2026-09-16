@@ -59,7 +59,7 @@ class CreateClinicRequest(BaseModel):
     whatsapp_number: str  # E.164, e.g. "+919876543210"
     plan: Literal[
         "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
-        "enterprise", "derma", "eye", "dental", "ivf",
+        "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
     ] = "soloclinic"
     meta_phone_number_id: str
     meta_access_token: str
@@ -288,7 +288,7 @@ class UpdateClinicRequest(BaseModel):
     plan: Optional[
         Literal[
             "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
-            "enterprise", "derma", "eye", "dental", "ivf",
+            "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
         ]
     ] = None
     is_active: Optional[bool] = None

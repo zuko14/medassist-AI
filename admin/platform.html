@@ -582,6 +582,7 @@
         .badge-eye { background: rgba(45,212,191,0.12); color: #2dd4bf; }
         .badge-dental { background: rgba(165,180,252,0.14); color: #a5b4fc; }
         .badge-ivf { background: rgba(251,146,60,0.12); color: #fb923c; }
+        .badge-multispecialty { background: rgba(125,211,252,0.14); color: #7dd3fc; }
 
         .status-active { background: var(--green-bg); color: var(--green); }
         .status-dormant { background: var(--red-bg); color: var(--red); }
@@ -1032,6 +1033,7 @@
                             <option value="eye">Eye Hospital</option>
                             <option value="dental">Dental Clinic</option>
                             <option value="ivf">IVF &amp; Fertility</option>
+                            <option value="multispecialty">Multi-Specialty Hospital</option>
                         </select>
                         <select class="filter-select" id="statusFilter" onchange="filterLeaderboard()">
                             <option value="ALL">All Statuses</option>
@@ -1505,6 +1507,7 @@
                         <option value="eye">Eye Hospital — cataract, LASIK, retina &amp; eye care</option>
                         <option value="dental">Dental Clinic — dental care, braces &amp; implants</option>
                         <option value="ivf">IVF &amp; Fertility Centre — fertility treatments &amp; lab tests</option>
+                        <option value="multispecialty">Multi-Specialty Hospital — departments, lab &amp; treatments catalog</option>
                         <option value="polyclinic" selected>Polyclinic — multi-department hospital</option>
                         <option value="enterprise">Enterprise — large multi-branch hospital</option>
                     </select>
@@ -2142,7 +2145,7 @@
         }
 
         // Plans that bundle lab_reports by default (mirrors PLAN_FEATURES in app/services/tenant.py)
-        const PLANS_WITH_LAB_REPORTS = ['diagstream', 'essential', 'polyclinic', 'enterprise'];
+        const PLANS_WITH_LAB_REPORTS = ['diagstream', 'essential', 'polyclinic', 'enterprise', 'multispecialty'];
 
         function planHasReportAutomation(plan) {
             return PLANS_WITH_LAB_REPORTS.includes((plan || '').toLowerCase());

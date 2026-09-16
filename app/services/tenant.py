@@ -435,6 +435,10 @@ def invalidate_tenant_cache(whatsapp_number: str = None, phone_number_id: str = 
 #   eye         — Eye hospital (treatments catalogue)
 #   dental      — Dental clinic / hospital (treatments catalogue)
 #   ivf         — IVF & fertility centre (treatments catalogue + lab test booking)
+#   multispecialty — General hospital that ALSO runs a treatments catalogue:
+#                 departments, lab, radiology and OPD, plus skin / eye / dental
+#                 procedures. Every feature, enumerated rather than wildcarded
+#                 (migration 078).
 
 # Specialty hospitals (migration 077). A doctor clinic's core, plus the
 # treatments catalogue. multi_branch and staff_training are included because
@@ -568,6 +572,14 @@ PLAN_FEATURES: dict[str, set[str]] = {
     },
 }
 
+# Multi-specialty hospital (migration 078): a polyclinic that also runs the
+# treatments catalogue. Derived from "polyclinic" rather than retyped so the
+# two can never drift — the polyclinic snapshot in tests/test_specialty_plans.py
+# guards both. Deliberately NOT the "*" wildcard: a wildcard plan cannot be
+# trimmed per tenant from the owner console, and it makes has_feature() answer
+# True for features the tenant was never sold.
+PLAN_FEATURES["multispecialty"] = set(PLAN_FEATURES["polyclinic"]) | {"specialty_treatments"}
+
 # Flat, sorted list of every named feature across all plans — excludes the
 # "*" enterprise wildcard sentinel. Used by GET /admin/me (app/routers/admin.py)
 # to tell the admin panel frontend which tabs to show, without duplicating
@@ -671,6 +683,14 @@ SPECIALTY_BY_PLAN: dict[str, str] = {
     "ivf": "fertility",
 }
 
+#: Plans that run the treatments catalogue WITHOUT being a single specialty
+#: (migration 078). Kept out of SPECIALTY_BY_PLAN on purpose: that map answers
+#: "this facility IS one specialty", which drives the starter list, the concern
+#: examples, and — through specialty_flow.is_specialty_plan() — whether the
+#: patient menu drops its "Our Services" departments row. A hospital with
+#: fifteen departments must keep that row, so it belongs here, not there.
+HYBRID_SPECIALTY_PLANS: frozenset[str] = frozenset({"multispecialty"})
+
 
 def specialty_enabled(clinic: Optional[dict]) -> bool:
     """True when the treatments catalogue and specialty WhatsApp flow apply.
@@ -680,7 +700,8 @@ def specialty_enabled(clinic: Optional[dict]) -> bool:
     enterprise clinic, and switching their WhatsApp menu on silently would be a
     production change nobody asked for.
 
-      * specialty plans: on, unless the owner set an explicit False override;
+      * specialty plans and the hybrid multi-specialty plan: on, unless the
+        owner set an explicit False override;
       * every other plan (enterprise included): on only with an explicit True
         override in clinics.features (PATCH /platform/clinics/{id}/features).
     """
@@ -689,7 +710,8 @@ def specialty_enabled(clinic: Optional[dict]) -> bool:
     overrides = clinic.get("features") or {}
     if not isinstance(overrides, dict):
         overrides = {}
-    if clinic.get("plan") in SPECIALTY_BY_PLAN:
+    plan = clinic.get("plan")
+    if plan in SPECIALTY_BY_PLAN or plan in HYBRID_SPECIALTY_PLANS:
         return overrides.get("specialty_treatments") is not False
     return overrides.get("specialty_treatments") is True
 

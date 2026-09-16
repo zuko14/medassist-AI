@@ -28,6 +28,7 @@
 | `08-booking-payment-analytics.md` | Task 8 | Tag bookings (paid + unpaid), prep note, admin alerts, insights |
 | `09-verification-deploy.md` | Tasks 9–11 | Regression run, production deployment runbook, manual acceptance checklist |
 | `10-session-memory.md` | Task 12 | Session log update |
+| `11-multispecialty-plan.md` | Task 11 (Session 07) | The `multispecialty` plan: a general hospital that also runs the treatments catalogue (migration 078, `/hospital-panel`) |
 
 ## What gets built (feature list)
 

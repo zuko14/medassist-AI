@@ -75,6 +75,13 @@ In competitive, specialized medical sectors (Dermatology/Skin & Hair, Ophthalmol
    - `eye` — Ophthalmology & Vision Care Specialty Hospital Plan
    - `dental` — Dental Hospital & Multi-Chair Clinic Plan
    - `ivf` — Fertility, IVF & Reproductive Medicine Center Plan
+   - `multispecialty` — General hospital that ALSO runs the treatments
+     catalogue (**added in Session 07, migration 078**). Deliberately NOT in
+     `SPECIALTY_BY_PLAN`: that map decides whether the patient menu drops its
+     departments row, and a hospital with fifteen departments must keep it.
+     It lives in `HYBRID_SPECIALTY_PLANS` instead. Feature set is
+     `polyclinic` ∪ `{specialty_treatments}` — every feature, enumerated
+     rather than wildcarded.
 2. **Zero Disturbance to Existing Plans:**
    - Existing plans (`soloclinic`, `diagstream`, `diagbooking`, `essential`, `polyclinic`, `enterprise`) remain 100% unchanged.
    - CHECK constraints on `clinics(plan)` and `plan_tiers(plan_name)` are widened additively via dynamic constraint inspection (following the proven migration 016/072 pattern).
@@ -109,6 +116,7 @@ A new dedicated table isolated by `clinic_id` stores procedures/treatments:
   - `/eye-panel` ➔ Eye & Ophthalmology Hospital OS
   - `/dental-panel` ➔ Dental Hospital & Clinic OS
   - `/ivf-panel` ➔ IVF & Fertility Center OS
+  - `/hospital-panel` ➔ Multi-Specialty Hospital OS (Session 07)
   - Standard `/admin-panel` continues to work and auto-adapts based on the clinic's plan returned by `GET /admin/me`.
 - **Specialized UI Features:**
   - Treatments & Procedures Catalog management
@@ -138,5 +146,6 @@ A new dedicated table isolated by `clinic_id` stores procedures/treatments:
 | **Session 04** | 2026-09-16 | Fixed the "Patient" booking name bug (all plans) and the account-holder rename; plan anchors updated | `docs/sessions/SESSION_04_BOOKING_NAME_FIX.md` |
 | **Session 05** | 2026-09-16 | Complete execution of Tasks 1-9 (Migration 077, Registry, Catalog, AI drafts, Admin API, UI, WhatsApp flow, Wiring, Bookings/Payments/Analytics, Targeted Regression) | `docs/sessions/SESSION_05_SPECIALTY_EXPANSION_EXECUTION.md` |
 | **Session 06** | 2026-09-16 | Admin panel form controls: root-caused checkbox stretching (`.field input` sized checkboxes as text inputs), styled the 6 unstyled textareas, added per-language AI draft buttons for Hindi/Telugu | `docs/sessions/SESSION_06_ADMIN_PANEL_FORM_CONTROLS.md` |
+| **Session 07** | 2026-09-16 | The `multispecialty` plan: a general hospital that also runs the treatments catalogue (migration 078, `/hospital-panel`). No WhatsApp flow code and no schema change were needed — see the doc for why. | `docs/specialty_plan/11-multispecialty-plan.md`, `docs/sessions/SESSION_07_MULTISPECIALTY_PLAN.md` |
 
 > **Rule for every future session:** add `docs/sessions/SESSION_NN_<topic>.md` covering intent, decisions, files changed, tests run with results, and open items. Then add a row here. If a session proves an earlier statement in this file wrong, correct it in place and mark it `CORRECTED IN SESSION NN`.
