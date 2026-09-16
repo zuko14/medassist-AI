@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.config import settings
 from app.database import (
     DEFAULT_LAB_COLLECTION_WINDOW,
+    is_uuid,
     is_valid_clinic_scope,
     supabase,
     check_in_appointment,
@@ -43,12 +44,16 @@ from app.database import (
 from app.services.tenant import (
     ALL_FEATURES,
     CANCELLATION_WINDOW_CHOICES,
+    SPECIALTY_BY_PLAN,
     cancellation_window_hours,
     get_clinic_by_id,
     has_feature,
     invalidate_tenant_cache,
     require_feature,
+    specialty_enabled,
 )
+from app.services.ai_engine import generate_treatment_description
+from app.services.specialty_catalog import seed_starter_treatments
 from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
 from app.services.lab_reports import LabReportService
@@ -681,6 +686,8 @@ async def get_current_admin(
             **base_response,
             "plan": None,
             "features": None,
+            "specialty": None,
+            "specialty_enabled": False,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -694,6 +701,10 @@ async def get_current_admin(
         **base_response,
         "plan": plan,
         "features": features,
+        # Specialty panels show the Treatments tab from THESE two keys, never
+        # from features[] (the enterprise wildcard lists every feature).
+        "specialty": SPECIALTY_BY_PLAN.get(plan),
+        "specialty_enabled": specialty_enabled(clinic),
     }
 
 
@@ -2416,6 +2427,439 @@ async def delete_lab_test(
         raise HTTPException(
             status_code=500, detail=_friendly_db_error(e, "Failed to delete lab test")
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SPECIALTY TREATMENTS CATALOGUE (migration 077)
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: Matches app.database._TREATMENT_MAX_ROWS, so the bot's single bounded read
+#: always sees the whole catalogue.
+_TREATMENT_CATALOG_LIMIT = 500
+_TREATMENT_TEXT_FIELDS = (
+    "short_name", "description", "description_hi", "description_te",
+    "concerns", "prep_instructions",
+)
+
+
+def _strip_optional(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
+
+
+def _strip_required(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        raise ValueError("must not be empty")
+    return v
+
+
+class TreatmentCreate(BaseModel):
+    name: str = Field(..., max_length=120)
+    category: str = Field(..., max_length=60)
+    short_name: Optional[str] = Field(default=None, max_length=24)
+    description: Optional[str] = Field(default=None, max_length=400)
+    description_hi: Optional[str] = Field(default=None, max_length=600)
+    description_te: Optional[str] = Field(default=None, max_length=600)
+    concerns: Optional[str] = Field(default=None, max_length=500)
+    duration_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
+    price_from_rupees: int = Field(default=0, ge=0, le=10_000_000)
+    prep_instructions: Optional[str] = Field(default=None, max_length=600)
+    is_active: bool = True
+    display_order: int = Field(default=0, ge=0, le=10_000)
+
+    _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
+    _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
+
+
+class TreatmentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=120)
+    category: Optional[str] = Field(default=None, max_length=60)
+    short_name: Optional[str] = Field(default=None, max_length=24)
+    description: Optional[str] = Field(default=None, max_length=400)
+    description_hi: Optional[str] = Field(default=None, max_length=600)
+    description_te: Optional[str] = Field(default=None, max_length=600)
+    concerns: Optional[str] = Field(default=None, max_length=500)
+    duration_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
+    price_from_rupees: Optional[int] = Field(default=None, ge=0, le=10_000_000)
+    prep_instructions: Optional[str] = Field(default=None, max_length=600)
+    is_active: Optional[bool] = None
+    display_order: Optional[int] = Field(default=None, ge=0, le=10_000)
+
+    _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
+    _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
+
+
+class TreatmentDoctorsUpdate(BaseModel):
+    doctor_ids: list[str] = Field(default_factory=list, max_length=200)
+
+
+class TreatmentBulkStatus(BaseModel):
+    treatment_ids: list[str] = Field(..., min_length=1, max_length=_TREATMENT_CATALOG_LIMIT)
+    is_active: bool
+
+
+class TreatmentDescriptionRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    category: Optional[str] = Field(default=None, max_length=60)
+
+
+def _client_ip(request: Optional[Request]) -> str:
+    return request.client.host if (request and request.client) else "unknown"
+
+
+async def _require_specialty_clinic(clinic_id: str) -> dict:
+    """403 unless the treatments catalogue applies to this clinic.
+
+    specialty_enabled(), not has_feature(): the enterprise wildcard would
+    otherwise open the catalogue for every enterprise tenant.
+    """
+    clinic = await get_clinic_by_id(clinic_id)
+    if not specialty_enabled(clinic):
+        raise HTTPException(
+            status_code=403,
+            detail="The treatments catalogue is not enabled for this clinic's plan.",
+        )
+    return clinic
+
+
+def _treatment_row(body: BaseModel, partial: bool) -> dict:
+    try:
+        data = body.model_dump(exclude_unset=partial, exclude={"price_from_rupees"})
+        fields_set = body.model_fields_set
+    except AttributeError:  # pydantic v1
+        data = body.dict(exclude_unset=partial, exclude={"price_from_rupees"})
+        fields_set = body.__fields_set__
+    if not partial or "price_from_rupees" in fields_set:
+        if body.price_from_rupees is not None:
+            data["price_from_paise"] = int(body.price_from_rupees) * 100
+    return data
+
+
+def _require_uuid(value: str, label: str) -> str:
+    if not is_uuid(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {label}.")
+    return str(value)
+
+
+@router.get("/treatments")
+async def list_treatments_admin(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """The whole catalogue (shown and hidden), each row with its doctor ids."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        await _require_specialty_clinic(effective_clinic_id)
+        rows_res = await sb(
+            supabase.table("specialty_treatments").select("*").eq("clinic_id", effective_clinic_id)
+            .order("display_order").order("name").order("id").limit(_TREATMENT_CATALOG_LIMIT)
+        )
+        links_res = await sb(
+            supabase.table("treatment_doctors").select("treatment_id, doctor_id")
+            .eq("clinic_id", effective_clinic_id).limit(10000)
+        )
+        by_treatment: dict[str, list[str]] = {}
+        for link in links_res.data or []:
+            by_treatment.setdefault(str(link["treatment_id"]), []).append(str(link["doctor_id"]))
+        rows = rows_res.data or []
+        for row in rows:
+            row["doctor_ids"] = by_treatment.get(str(row["id"]), [])
+        return rows
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching treatments for clinic_id={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch treatments")
+
+
+@router.post("/treatments")
+async def create_treatment(
+    body: TreatmentCreate,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    effective_clinic_id = None
+    try:
+        effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+        await _require_specialty_clinic(effective_clinic_id)
+
+        count_res = await sb(
+            supabase.table("specialty_treatments").select("id", count="exact")
+            .eq("clinic_id", effective_clinic_id).limit(1)
+        )
+        if (count_res.count or 0) >= _TREATMENT_CATALOG_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A clinic can list at most {_TREATMENT_CATALOG_LIMIT} treatments.",
+            )
+
+        data = _treatment_row(body, partial=False)
+        data["clinic_id"] = effective_clinic_id
+        data["source"] = "custom"
+        # unscoped: insert_scoped_by_payload
+        result = await sb(supabase.table("specialty_treatments").insert(data))
+        row = result.data[0]
+
+        await log_admin_action(
+            user=user,
+            action="create_treatment",
+            resource_type="specialty_treatment",
+            resource_id=row["id"],
+            details={"name": row.get("name")},
+            ip_address=_client_ip(request),
+        )
+        row["doctor_ids"] = []
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating treatment for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        if _is_duplicate_error(e):
+            raise HTTPException(status_code=409, detail="A treatment with this name already exists.")
+        raise HTTPException(status_code=500, detail=_friendly_db_error(e, "Failed to create treatment"))
+
+
+@router.put("/treatments/{treatment_id}")
+async def update_treatment(
+    treatment_id: str,
+    body: TreatmentUpdate,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    treatment_id = _require_uuid(treatment_id, "treatment id")
+    try:
+        await _require_specialty_clinic(effective_clinic_id)
+        data = _treatment_row(body, partial=True)
+        if not data:
+            return {"message": "No fields to update"}
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        result = await sb(
+            supabase.table("specialty_treatments").update(data)
+            .eq("clinic_id", effective_clinic_id).eq("id", treatment_id)
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Treatment not found")
+
+        await log_admin_action(
+            user=user,
+            action="update_treatment",
+            resource_type="specialty_treatment",
+            resource_id=treatment_id,
+            details={"updated_fields": sorted(k for k in data if k != "updated_at")},
+            ip_address=_client_ip(request),
+        )
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating treatment {treatment_id}: {e}", exc_info=True)
+        if _is_duplicate_error(e):
+            raise HTTPException(status_code=409, detail="A treatment with this name already exists.")
+        raise HTTPException(status_code=500, detail=_friendly_db_error(e, "Failed to update treatment"))
+
+
+@router.delete("/treatments/{treatment_id}")
+async def delete_treatment(
+    treatment_id: str,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    """Hard delete. Past bookings keep their treatment_name (FK is ON DELETE
+    SET NULL); doctor links cascade."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    treatment_id = _require_uuid(treatment_id, "treatment id")
+    try:
+        await _require_specialty_clinic(effective_clinic_id)
+        result = await sb(
+            supabase.table("specialty_treatments").delete()
+            .eq("clinic_id", effective_clinic_id).eq("id", treatment_id)
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Treatment not found")
+
+        await log_admin_action(
+            user=user,
+            action="delete_treatment",
+            resource_type="specialty_treatment",
+            resource_id=treatment_id,
+            details={"deleted_row": result.data[0]},
+            ip_address=_client_ip(request),
+        )
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting treatment {treatment_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=_friendly_db_error(e, "Failed to delete treatment"))
+
+
+@router.put("/treatments/{treatment_id}/doctors")
+async def set_treatment_doctors(
+    treatment_id: str,
+    body: TreatmentDoctorsUpdate,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    """Replace the doctors who perform a treatment. [] means any active doctor."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    treatment_id = _require_uuid(treatment_id, "treatment id")
+    doctor_ids = sorted({str(d).strip() for d in body.doctor_ids if str(d).strip()})
+    for doctor_id in doctor_ids:
+        _require_uuid(doctor_id, "doctor id")
+    try:
+        await _require_specialty_clinic(effective_clinic_id)
+        treatment = await sb(
+            supabase.table("specialty_treatments").select("id")
+            .eq("clinic_id", effective_clinic_id).eq("id", treatment_id)
+        )
+        if not treatment.data:
+            raise HTTPException(status_code=404, detail="Treatment not found")
+
+        if doctor_ids:
+            owned = await sb(
+                supabase.table("doctors").select("id")
+                .eq("clinic_id", effective_clinic_id).in_("id", doctor_ids)
+            )
+            if {str(r["id"]) for r in (owned.data or [])} != set(doctor_ids):
+                raise HTTPException(
+                    status_code=400,
+                    detail="One or more selected doctors do not belong to your clinic.",
+                )
+
+        # ponytail: delete-then-insert is not atomic. A failure between the two
+        # leaves the treatment with no links, which the bot reads as "any active
+        # doctor" — no booking or patient data is at risk. Move into a Postgres
+        # function if that fallback ever matters.
+        await sb(
+            supabase.table("treatment_doctors").delete()
+            .eq("clinic_id", effective_clinic_id).eq("treatment_id", treatment_id)
+        )
+        if doctor_ids:
+            # unscoped: insert_scoped_by_payload
+            await sb(supabase.table("treatment_doctors").insert([
+                {"clinic_id": effective_clinic_id, "treatment_id": treatment_id, "doctor_id": d}
+                for d in doctor_ids
+            ]))
+
+        await log_admin_action(
+            user=user,
+            action="set_treatment_doctors",
+            resource_type="specialty_treatment",
+            resource_id=treatment_id,
+            details={"doctor_ids": doctor_ids},
+            ip_address=_client_ip(request),
+        )
+        return {"treatment_id": treatment_id, "doctor_ids": doctor_ids}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting doctors for treatment {treatment_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=_friendly_db_error(e, "Failed to save doctors"))
+
+
+@router.post("/treatments/status")
+async def set_treatments_status(
+    body: TreatmentBulkStatus,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    """Show or hide several treatments at once (review of starter lists)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    ids = sorted({str(t).strip() for t in body.treatment_ids})
+    for tid in ids:
+        _require_uuid(tid, "treatment id")
+    try:
+        await _require_specialty_clinic(effective_clinic_id)
+        result = await sb(
+            supabase.table("specialty_treatments")
+            .update({"is_active": body.is_active, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .eq("clinic_id", effective_clinic_id).in_("id", ids)
+        )
+        updated = len(result.data or [])
+        await log_admin_action(
+            user=user,
+            action="set_treatments_status",
+            resource_type="specialty_treatment",
+            resource_id=None,
+            details={"treatment_ids": ids, "is_active": body.is_active, "updated": updated},
+            ip_address=_client_ip(request),
+        )
+        return {"updated": updated}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating treatment status for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=_friendly_db_error(e, "Failed to update treatments"))
+
+
+@router.post("/treatments/starter")
+async def load_starter_treatments(
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    """Add the plan's starter treatments that are missing, hidden. Idempotent."""
+    effective_clinic_id = None
+    try:
+        effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+        clinic = await _require_specialty_clinic(effective_clinic_id)
+        specialty = SPECIALTY_BY_PLAN.get(clinic.get("plan"))
+        if not specialty:
+            raise HTTPException(
+                status_code=400,
+                detail="Starter treatments are available on the Dermatology, Eye, Dental and IVF plans.",
+            )
+        result = await seed_starter_treatments(effective_clinic_id, specialty)
+        await log_admin_action(
+            user=user,
+            action="load_starter_treatments",
+            resource_type="specialty_treatment",
+            resource_id=None,
+            details={"specialty": specialty, **result},
+            ip_address=_client_ip(request),
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading starter treatments for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        if _is_duplicate_error(e):
+            raise HTTPException(
+                status_code=409,
+                detail="Starter treatments were just added by someone else. Refresh the page.",
+            )
+        raise HTTPException(status_code=500, detail="Failed to load starter treatments")
+
+
+@router.post("/treatments/ai-description")
+async def generate_treatment_description_admin(
+    body: TreatmentDescriptionRequest,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    """A 2-line EN/HI/TE draft for the admin to review. Saves nothing."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        clinic = await _require_specialty_clinic(effective_clinic_id)
+        specialty = SPECIALTY_BY_PLAN.get(clinic.get("plan")) or "general"
+        return await generate_treatment_description(body.name, body.category, specialty, clinic)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating treatment description for clinic_id={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate a description")
 
 
 CSV_MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
