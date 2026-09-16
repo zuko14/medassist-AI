@@ -8,6 +8,7 @@ sanitization, clinical firewall guards, and localized safety fallbacks.
 import asyncio
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
@@ -995,3 +996,190 @@ async def generate_response(
         }
         lang = language or "en"
         return fallbacks.get(lang, fallbacks["en"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Specialty treatments (migration 077)
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: Words that turn patient information into an outcome promise (NMC ethics),
+#: plus gender words that have no place in fertility copy (ART Act / PCPNDT).
+PROMISE_PATTERN = re.compile(
+    r"\b(?:painless|pain[- ]free|guarantee[ds]?|permanent(?:ly)?|success\s+rate|"
+    r"cure[sd]?|miracle|risk[- ]free|no\s+side[- ]effects?|instant\s+results?|"
+    r"best|boy|girl|gender)\b|100\s*%|6/6",
+    re.IGNORECASE,
+)
+
+_SPECIALTY_PROMPT_FIELD = {
+    "dermatology": "dermatology, skin and hair",
+    "ophthalmology": "eye care",
+    "dental": "dental care",
+    "fertility": "IVF and fertility",
+}
+
+
+def _completion_text(response_data) -> str:
+    """The text of the first choice, with any markdown fence removed."""
+    if hasattr(response_data, "choices"):
+        choices = response_data.choices
+        content = choices[0].message.content if choices else ""
+    else:
+        choices = (response_data or {}).get("choices") or []
+        content = choices[0].get("message", {}).get("content", "") if choices else ""
+    content = (content or "").strip()
+    if "```json" in content:
+        content = content.split("```json")[1].split("```")[0]
+    elif "```" in content:
+        content = content.split("```")[1]
+    return content.strip()
+
+
+def _template_treatment_description(name: str) -> dict:
+    """Neutral fallback. Deliberately plain: an admin should rewrite it."""
+    name = (name or "This treatment").strip()[:120]
+    return {
+        "description": (
+            f"{name} is offered at our clinic by our specialists.\n"
+            "Your doctor will examine you and explain whether it suits you, the steps and the recovery."
+        ),
+        "description_hi": (
+            f"{name} हमारे क्लिनिक में हमारे विशेषज्ञों द्वारा उपलब्ध है।\n"
+            "डॉक्टर जांच के बाद बताएंगे कि यह आपके लिए उपयुक्त है या नहीं, इसकी प्रक्रिया और रिकवरी क्या होगी।"
+        ),
+        "description_te": (
+            f"{name} మా క్లినిక్‌లో మా నిపుణుల ద్వారా అందుబాటులో ఉంది.\n"
+            "డాక్టర్ పరీక్షించి ఇది మీకు సరిపోతుందా, ప్రక్రియ మరియు కోలుకోవడం గురించి వివరిస్తారు."
+        ),
+        "source": "template",
+    }
+
+
+def _description_is_safe(text: str) -> bool:
+    from app.services.clinical_firewall import validate_llm_output
+
+    if not text or len(text) > 400:
+        return False
+    if PROMISE_PATTERN.search(text):
+        return False
+    return validate_llm_output(text, "en")[0]
+
+
+async def generate_treatment_description(
+    name: str, category: Optional[str], specialty: str, clinic: Optional[dict]
+) -> dict:
+    """Draft a 2-line patient description in English, Hindi and Telugu.
+
+    Called only from the authenticated admin API; the result is shown to the
+    admin for editing and is saved only if they save it. Never raises.
+    """
+    raw_name = (name or "").strip()[:120]
+    raw_category = (category or "").strip()[:60]
+    clean_name, suspicious_name = sanitize_user_input(raw_name)
+    clean_category, suspicious_category = sanitize_user_input(raw_category)
+    if suspicious_name or suspicious_category or not raw_name:
+        logger.warning("Treatment description request looked like prompt injection — using template")
+        return _template_treatment_description(raw_name)
+    clean_name = strip_injection_markers(clean_name).strip() or raw_name
+    clean_category = strip_injection_markers(clean_category).strip() or "General"
+    field = _SPECIALTY_PROMPT_FIELD.get(specialty, "hospital")
+
+    prompt = f"""Write patient-facing information for a treatment offered by an Indian {field} clinic.
+
+Treatment: "{clean_name}"
+Category: "{clean_category}"
+
+Rules:
+- Exactly 2 short lines separated by a newline, at most 200 characters in total.
+- Line 1: what the treatment is and what it is used for, in plain words.
+- Line 2: what the patient can expect, for example that the doctor examines them first, the number of sittings, or recovery. No promises.
+- Never promise results. Never use the words painless, guaranteed, permanent, cure, success rate or best.
+- No medicine names, no doses, no prices.
+- Give the same 2 lines translated into simple Hindi and into simple Telugu, keeping the newline.
+
+Respond ONLY with JSON: {{"en": "...", "hi": "...", "te": "..."}}"""
+
+    try:
+        response_data = await call_openrouter_with_backoff(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You write short, accurate, non-promotional patient information for a hospital. You never give medical advice.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            timeout=12,
+            max_tokens=500,
+            temperature=0.3,
+            clinic_id=(clinic or {}).get("id"),
+        )
+        result = json.loads(_completion_text(response_data))
+        draft = {
+            "description": str(result.get("en") or "").strip(),
+            "description_hi": str(result.get("hi") or "").strip(),
+            "description_te": str(result.get("te") or "").strip(),
+            "source": "ai",
+        }
+        if not all(_description_is_safe(draft[k]) for k in ("description", "description_hi", "description_te")):
+            logger.warning(f"AI treatment description for '{clean_name}' failed safety checks — using template")
+            return _template_treatment_description(clean_name)
+        return draft
+    except Exception as e:
+        logger.warning(f"Treatment description generation failed: {e}. Using template.")
+        return _template_treatment_description(clean_name)
+
+
+async def rank_treatments_for_concern(
+    concern: str, treatments: list, clinic: Optional[dict]
+) -> list:
+    """Up to 3 ids from `treatments` whose purpose relates to the concern.
+
+    The model only picks numbers from a list we built, so it can never invent
+    a treatment the clinic does not offer. Never raises; [] on any problem.
+    """
+    text = (concern or "").strip()
+    candidates = list(treatments or [])[:60]
+    if len(text) < 3 or not candidates:
+        return []
+    clean, suspicious = sanitize_user_input(text[:200])
+    if suspicious:
+        return []
+    clean = strip_injection_markers(clean).strip()
+    if not clean:
+        return []
+
+    catalogue = "\n".join(
+        f"{i + 1}. {(t.get('name') or '')[:80]} — {(t.get('concerns') or '')[:120]}"
+        for i, t in enumerate(candidates)
+    )
+    prompt = f"""A patient at a clinic described this concern: "{clean}"
+
+Treatments offered by the clinic:
+{catalogue}
+
+Pick up to 3 treatment numbers whose purpose clearly relates to the concern. If none clearly relate, return an empty list. Do not diagnose.
+
+Respond ONLY with JSON: {{"matches": [numbers]}}"""
+
+    try:
+        response_data = await call_openrouter_with_backoff(
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            timeout=6,
+            max_tokens=60,
+            clinic_id=(clinic or {}).get("id"),
+        )
+        data = json.loads(_completion_text(response_data))
+        ids: list = []
+        for n in data.get("matches") or []:
+            if isinstance(n, bool) or not isinstance(n, int):
+                continue
+            if 1 <= n <= len(candidates):
+                tid = str(candidates[n - 1].get("id"))
+                if tid and tid not in ids:
+                    ids.append(tid)
+        return ids[:3]
+    except Exception as e:
+        logger.warning(f"Treatment concern ranking failed: {e}")
+        return []
