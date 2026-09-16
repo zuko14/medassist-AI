@@ -35,13 +35,15 @@ ALL_25_STATES = [
     ConversationState.DOWNLOADING_REPORT,
     ConversationState.BROWSING_LAB_TESTS,
     ConversationState.CONFIRMING_COLLECTION_DATE,
+    ConversationState.BROWSING_TREATMENTS,
+    ConversationState.SEARCHING_TREATMENTS,
 ]
 
 
-def test_fsm_has_exactly_25_states():
-    """T6.7: Assert exactly 25 states in ConversationState enum."""
-    assert len(ConversationState) == 25
-    assert len(ALL_25_STATES) == 25
+def test_fsm_has_all_states():
+    """T6.7 / Specialty: Assert all 27 states in ConversationState enum."""
+    assert len(ConversationState) == 27
+    assert len(ALL_25_STATES) == 27
     # All states must be lowercase strings
     for state in ALL_25_STATES:
         assert isinstance(state.value, str)
