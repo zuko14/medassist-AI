@@ -192,6 +192,9 @@ def _booking_and_revenue(appts: list, day_index: dict, span: int) -> tuple:
         # read its whole service mix off a single chart.
         if booking_type == "lab_test":
             service = (a.get("lab_test_name") or "").strip() or "Lab Test"
+        elif (a.get("treatment_name") or "").strip():
+            # Specialty clinics: the treatment is what the patient came for.
+            service = a["treatment_name"].strip()
         else:
             service = department or "Consultation"
         services[service] = services.get(service, 0) + 1
@@ -634,7 +637,7 @@ class AnalyticsService:
                 "appointments",
                 clinic_id,
                 "status,department,doctor_name,appointment_date,created_at,"
-                "booking_type,lab_test_name,amount_paise,payment_id,patient_phone",
+                "booking_type,lab_test_name,treatment_name,amount_paise,payment_id,patient_phone",
                 "created_at",
                 since,
                 branch_id=branch_id,

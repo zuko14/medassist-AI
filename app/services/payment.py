@@ -124,6 +124,8 @@ class PaymentService:
         lab_test_id: Optional[str] = None,
         lab_test_name: Optional[str] = None,
         doctor_id: Optional[str] = None,
+        treatment_id: Optional[str] = None,
+        treatment_name: Optional[str] = None,
     ) -> dict:
         """Create a pending_payment booking and a Razorpay order.
 
@@ -222,6 +224,12 @@ class PaymentService:
         if booking_type == "lab_test":
             booking_data["lab_test_id"] = lab_test_id
             booking_data["lab_test_name"] = lab_test_name
+        # Specialty treatment tag (migration 077). The row stays
+        # booking_type='consultation', so uq_appointment_active_slot, the
+        # doctor_id guard above, reminders, expiry and refunds all apply.
+        if treatment_id and booking_type == "consultation":
+            booking_data["treatment_id"] = treatment_id
+            booking_data["treatment_name"] = treatment_name
 
         # Include branch info when booking at a specific branch
         if branch_id:
@@ -2343,6 +2351,11 @@ class PaymentService:
                         import asyncio
                         await asyncio.sleep(2)
 
+            if patient_notified and booking.get("treatment_id"):
+                from app.services.specialty_flow import send_prep_note
+
+                await send_prep_note(whatsapp_service, clinic, patient_phone, booking["treatment_id"], lang)
+
             if not patient_notified:
                 logger.error(
                     f"CRITICAL: Failed to deliver payment confirmation WhatsApp message to patient {patient_phone} for booking {ref_code}"
@@ -2425,6 +2438,8 @@ class PaymentService:
                         f"💰 *Paid:* ₹{amount_rupees:.0f}\n"
                         f"🆔 *Payment ID:* {booking.get('payment_id', 'N/A')}"
                     )
+                if booking.get("treatment_name") and booking.get("booking_type") != "lab_test":
+                    admin_notif_msg += f"\n🩺 *Treatment:* {booking['treatment_name']}"
                 await self._alert_admin(clinic, admin_notif_msg)
             except Exception as admin_alert_err:
                 logger.warning(f"Failed to send admin WhatsApp alert: {admin_alert_err}")
@@ -2444,6 +2459,8 @@ class PaymentService:
                             f"{booking.get('doctor_name', 'N/A')} ({booking.get('department', 'N/A')}) on "
                             f"{date_display} at {slot_time_display}. Paid ₹{amount_rupees:.0f} (Payment ID: {booking.get('payment_id', 'N/A')})."
                         )
+                    if booking.get("treatment_name") and booking.get("booking_type") != "lab_test":
+                        in_app_msg += f" Treatment: {booking['treatment_name']}."
                     notif_row = {
                         "clinic_id": clinic_id_val,
                         "admin_id": None,

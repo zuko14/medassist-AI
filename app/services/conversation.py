@@ -3355,6 +3355,12 @@ class ConversationManager:
                 time=context["appointment_time"],
             )
 
+        if context.get("treatment_name"):
+            confirm_body += (
+                "\n🩺 " + {"en": "Treatment", "hi": "उपचार", "te": "చికిత్స"}.get(lang, "Treatment")
+                + f": {context['treatment_name']}"
+            )
+
         await self.whatsapp.send_interactive_buttons(
             clinic,
             phone,
@@ -3420,6 +3426,10 @@ class ConversationManager:
                 except Exception as doc_err:
                     logger.warning(f"Failed to check doctor active status: {doc_err}")
 
+            # A treatment deleted while the patient was booking would fail the
+            # foreign key and lose the booking: drop the tag, keep the booking.
+            await specialty_flow.revalidate_treatment(clinic, context)
+
             # ── Resolve this clinic's payment mode: full / partial / none ──
             from app.services.payment import resolve_payment_mode
 
@@ -3444,6 +3454,8 @@ class ConversationManager:
                     branch_name=context.get("branch_name"),
                     deposit_percent=deposit_percent,
                     doctor_id=context.get("doctor_id") or context.get("selected_doctor_id"),
+                    treatment_id=context.get("treatment_id"),
+                    treatment_name=context.get("treatment_name"),
                 )
 
                 if result["success"]:
@@ -3611,6 +3623,10 @@ class ConversationManager:
                     appointment_data["branch_id"] = context["branch_id"]
                     appointment_data["branch_name"] = context.get("branch_name", "")
 
+                if context.get("treatment_id"):
+                    appointment_data["treatment_id"] = context["treatment_id"]
+                    appointment_data["treatment_name"] = context.get("treatment_name")
+
                 result = await book_appointment(clinic["id"], appointment_data)
 
                 if result["success"]:
@@ -3729,6 +3745,9 @@ class ConversationManager:
                         "te": f"{context.get('department')} కోసం సూచనలు: దయచేసి సంబంధిత మెడికల్ రికార్డులను తీసుకుని 15 నిమిషాల ముందుగా రండి.",
                     }.get(lang, "Please arrive 15 mins early.")
                     await self.whatsapp.send_text(clinic, phone, dept_instruction)
+                    await specialty_flow.send_prep_note(
+                        self.whatsapp, clinic, phone, context.get("treatment_id"), lang
+                    )
 
                     follow_up_msg = {
                         "en": "What would you like to do?",
