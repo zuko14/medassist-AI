@@ -50,6 +50,9 @@ TENANT_OWNED_TABLES = frozenset({
     "admin_notifications", "outbound_message_ledger", "connector_audit_log",
     "integration_processed_reports", "analytics_events",
     "clinic_daily_usage",
+    # Migration 077. Both carry clinic_id (treatment_doctors unlike
+    # doctor_branches), so scoped_query() predicates are valid on each.
+    "specialty_treatments", "treatment_doctors",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

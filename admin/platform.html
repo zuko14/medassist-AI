@@ -578,6 +578,10 @@
         .badge-enterprise { background: var(--accent-glow); color: var(--accent-light); }
         .badge-diagstream { background: var(--amber-bg); color: var(--amber); }
         .badge-diagbooking { background: rgba(56,189,248,0.12); color: #38bdf8; }
+        .badge-derma { background: rgba(244,114,182,0.12); color: #f472b6; }
+        .badge-eye { background: rgba(45,212,191,0.12); color: #2dd4bf; }
+        .badge-dental { background: rgba(165,180,252,0.14); color: #a5b4fc; }
+        .badge-ivf { background: rgba(251,146,60,0.12); color: #fb923c; }
 
         .status-active { background: var(--green-bg); color: var(--green); }
         .status-dormant { background: var(--red-bg); color: var(--red); }
@@ -1024,6 +1028,10 @@
                             <option value="enterprise">Enterprise</option>
                             <option value="diagstream">DiagStream</option>
                             <option value="diagbooking">Diagnostic Test Booking</option>
+                            <option value="derma">Dermatology &amp; Hair</option>
+                            <option value="eye">Eye Hospital</option>
+                            <option value="dental">Dental Clinic</option>
+                            <option value="ivf">IVF &amp; Fertility</option>
                         </select>
                         <select class="filter-select" id="statusFilter" onchange="filterLeaderboard()">
                             <option value="ALL">All Statuses</option>
@@ -1493,6 +1501,10 @@
                         <option value="essential">Essential — small clinic, core booking</option>
                         <option value="diagstream">DiagStream — diagnostic / lab center</option>
                         <option value="diagbooking">Diagnostic Test Booking — lab-test booking &amp; payments only</option>
+                        <option value="derma">Dermatology &amp; Hair — skin, hair &amp; aesthetic clinic</option>
+                        <option value="eye">Eye Hospital — cataract, LASIK, retina &amp; eye care</option>
+                        <option value="dental">Dental Clinic — dental care, braces &amp; implants</option>
+                        <option value="ivf">IVF &amp; Fertility Centre — fertility treatments &amp; lab tests</option>
                         <option value="polyclinic" selected>Polyclinic — multi-department hospital</option>
                         <option value="enterprise">Enterprise — large multi-branch hospital</option>
                     </select>

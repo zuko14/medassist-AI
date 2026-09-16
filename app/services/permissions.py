@@ -30,6 +30,9 @@ PERMISSIONS = frozenset({
     "REPORTS_RESOLVE",
     "CONNECTOR_MANAGE",
     "LAB_TESTS_MANAGE",
+    # Create/edit/delete/publish treatments. Deliberately in no role preset: a
+    # clinic_admin grants it per staff account.
+    "TREATMENTS_MANAGE",
 })
 
 STAFF_ROLES = frozenset({

@@ -431,6 +431,33 @@ def invalidate_tenant_cache(whatsapp_number: str = None, phone_number_id: str = 
 #   essential   — Full-service hospital (everything except enterprise wildcard)
 #   polyclinic  — Multi-branch hospital / polyclinic + diagnostics (essential + multi_branch)
 #   enterprise  — Unlimited (all current + future features via wildcard)
+#   derma       — Dermatology, skin & hair specialty clinic (treatments catalogue)
+#   eye         — Eye hospital (treatments catalogue)
+#   dental      — Dental clinic / hospital (treatments catalogue)
+#   ivf         — IVF & fertility centre (treatments catalogue + lab test booking)
+
+# Specialty hospitals (migration 077). A doctor clinic's core, plus the
+# treatments catalogue. multi_branch and staff_training are included because
+# the target clients (dental, eye and fertility chains) run several centres.
+# lab_reports is NOT included: these plans have no report connector.
+_SPECIALTY_FEATURES: frozenset[str] = frozenset({
+    "booking",
+    "reminders",
+    "multilingual",
+    "emergency_escalation",
+    "clinical_firewall",
+    "admin_dashboard",
+    "roster_management",
+    "holiday_calendar",
+    "compliance_dpdp",
+    "compliance_nmc",
+    "payments_razorpay",
+    "analytics",
+    "feedback",
+    "multi_branch",
+    "staff_training",
+    "specialty_treatments",
+})
 
 PLAN_FEATURES: dict[str, set[str]] = {
     "soloclinic": {
@@ -528,6 +555,13 @@ PLAN_FEATURES: dict[str, set[str]] = {
         "multi_branch",  # Multi-branch support
         "lab_test_booking",
     },
+    "derma": set(_SPECIALTY_FEATURES),
+    "eye": set(_SPECIALTY_FEATURES),
+    "dental": set(_SPECIALTY_FEATURES),
+    # Fertility centres run their own hormone / semen tests (AMH, semen
+    # analysis). lab_test_booking implies payments_razorpay, which the shared
+    # set already carries (test_lab_test_booking_always_implies_razorpay_payments).
+    "ivf": set(_SPECIALTY_FEATURES) | {"lab_test_booking"},
     "enterprise": {
         # Sentinel — checked first, bypasses set lookup entirely
         "*"
@@ -568,6 +602,7 @@ FEATURE_LABELS: dict[str, str] = {
     "pii_sanitization": "PII Sanitization",
     "reminders": "Automated Reminders",
     "roster_management": "Doctor Roster & Leave",
+    "specialty_treatments": "Treatments & Procedures Catalog",
     "staff_training": "Staff Training & Onboarding",
 }
 
@@ -624,6 +659,39 @@ def require_feature(clinic: dict, feature: str) -> None:
             detail=f"Feature '{feature}' is not available on your current plan. "
             f"Please upgrade to access this functionality.",
         )
+
+
+# ─── Specialty hospitals (migration 077) ─────────────────────────────────────
+#: Plan slug -> specialty. The specialty picks the starter treatment list and
+#: the WhatsApp examples; it is never taken from a URL or a request body.
+SPECIALTY_BY_PLAN: dict[str, str] = {
+    "derma": "dermatology",
+    "eye": "ophthalmology",
+    "dental": "dental",
+    "ivf": "fertility",
+}
+
+
+def specialty_enabled(clinic: Optional[dict]) -> bool:
+    """True when the treatments catalogue and specialty WhatsApp flow apply.
+
+    Deliberately NOT has_feature(clinic, "specialty_treatments"): the
+    enterprise plan is a "*" wildcard, so has_feature() is True for every
+    enterprise clinic, and switching their WhatsApp menu on silently would be a
+    production change nobody asked for.
+
+      * specialty plans: on, unless the owner set an explicit False override;
+      * every other plan (enterprise included): on only with an explicit True
+        override in clinics.features (PATCH /platform/clinics/{id}/features).
+    """
+    if not clinic:
+        return False
+    overrides = clinic.get("features") or {}
+    if not isinstance(overrides, dict):
+        overrides = {}
+    if clinic.get("plan") in SPECIALTY_BY_PLAN:
+        return overrides.get("specialty_treatments") is not False
+    return overrides.get("specialty_treatments") is True
 
 
 # ─── Branch Resolution ───────────────────────────────────────────────────────
