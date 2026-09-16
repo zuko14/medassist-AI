@@ -52,7 +52,7 @@ from app.services.tenant import (
     require_feature,
     specialty_enabled,
 )
-from app.services.ai_engine import generate_treatment_description
+from app.services.ai_engine import generate_treatment_concerns, generate_treatment_description
 from app.services.specialty_catalog import seed_starter_treatments
 from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
@@ -2860,6 +2860,25 @@ async def generate_treatment_description_admin(
     except Exception as e:
         logger.error(f"Error generating treatment description for clinic_id={effective_clinic_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate a description")
+
+
+@router.post("/treatments/ai-concerns")
+async def generate_treatment_concerns_admin(
+    body: TreatmentDescriptionRequest,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("TREATMENTS_MANAGE")),
+):
+    """Suggested patient-worded concerns for the admin to review. Saves nothing."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        clinic = await _require_specialty_clinic(effective_clinic_id)
+        specialty = SPECIALTY_BY_PLAN.get(clinic.get("plan")) or "general"
+        return await generate_treatment_concerns(body.name, body.category, specialty, clinic)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating treatment concerns for clinic_id={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to suggest concerns")
 
 
 CSV_MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB

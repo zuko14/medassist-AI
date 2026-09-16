@@ -2220,8 +2220,12 @@
                     <div class="field"><label for="f-trtDuration">Visit duration (minutes)</label><input type="number" id="f-trtDuration" min="5" max="1440" step="5"></div>
                 </div>
                 <div class="field">
-                    <label for="f-trtConcerns">Concerns it helps with</label>
+                    <div class="lang-head">
+                        <label for="f-trtConcerns">Concerns it helps with</label>
+                        <button type="button" class="btn btn-ghost btn-ai trt-manage" id="btnTrtConcernsAi" onclick="generateTreatmentConcerns()">✨ Suggest with AI</button>
+                    </div>
                     <textarea id="f-trtConcerns" rows="2" maxlength="500" placeholder="Words patients use, comma-separated. e.g. tooth pain, sensitivity, swelling"></textarea>
+                    <p style="color:var(--text3); font-size:0.78rem; margin-top:6px;">These words decide which treatment a patient's message is matched to. AI suggestions are a draft — remove anything this treatment does not actually help with.</p>
                 </div>
                 <div class="field">
                     <div class="lang-head">
@@ -6481,6 +6485,34 @@ async function generateTreatmentDescription(lang) {
     } finally {
         buttons.forEach(b => { b.disabled = false; });
         if (btn) btn.textContent = spec.label;
+    }
+}
+
+// Concerns drive patient-message matching, so a suggestion is never merged
+// blindly into what the operator already wrote — it replaces, after a confirm.
+async function generateTreatmentConcerns() {
+    const btn = document.getElementById('btnTrtConcernsAi');
+    const field = document.getElementById('f-trtConcerns');
+    const name = document.getElementById('f-trtName').value.trim();
+    const category = document.getElementById('f-trtCategory').value.trim();
+    if (name.length < 2) { toast('Enter the treatment name first', true); return; }
+    if (field.value.trim()) {
+        const ok = await confirmDialog('Replace the current concerns with AI suggestions?', { title: 'Suggest concerns', okText: 'Replace' });
+        if (!ok) return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Suggesting…'; }
+    try {
+        const r = await apiPost('/admin/treatments/ai-concerns', { name, category: category || null });
+        if (r.concerns) {
+            field.value = r.concerns;
+            toast('Suggested concerns added. Remove anything that does not fit before saving.');
+        } else {
+            toast('AI could not suggest concerns right now. Please type them.', true);
+        }
+    } catch (err) {
+        toast(err.message || 'Failed to suggest concerns', true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '✨ Suggest with AI'; }
     }
 }
 

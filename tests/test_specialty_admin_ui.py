@@ -111,8 +111,18 @@ def test_every_treatment_endpoint_used_by_the_page_exists():
 
     paths = {getattr(r, "path", "") for r in fastapi_app.routes}
     for p in ("/admin/treatments", "/admin/treatments/{treatment_id}", "/admin/treatments/{treatment_id}/doctors",
-              "/admin/treatments/status", "/admin/treatments/starter", "/admin/treatments/ai-description"):
+              "/admin/treatments/status", "/admin/treatments/starter", "/admin/treatments/ai-description",
+              "/admin/treatments/ai-concerns"):
         assert p in paths, p
+
+
+def test_concerns_field_has_a_permission_gated_ai_suggest_button():
+    """Concerns feed patient-message matching, so the button must be behind the
+    same TREATMENTS_MANAGE gate as the rest of the treatment form."""
+    assert 'id="btnTrtConcernsAi"' in INDEX
+    assert 'class="btn btn-ghost btn-ai trt-manage" id="btnTrtConcernsAi"' in INDEX
+    assert "onclick=\"generateTreatmentConcerns()\"" in INDEX
+    assert "apiPost('/admin/treatments/ai-concerns'" in INDEX
 
 
 def test_staff_can_be_granted_treatments_permission_in_both_forms():

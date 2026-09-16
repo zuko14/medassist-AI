@@ -1130,6 +1130,98 @@ Respond ONLY with JSON: {{"en": "...", "hi": "...", "te": "..."}}"""
         return _template_treatment_description(clean_name)
 
 
+MAX_TREATMENT_CONCERNS = 6
+
+
+def _clean_concern_keywords(raw) -> list:
+    """Short, lowercase, de-duplicated patient words from whatever the model sent.
+
+    The list is matched against patient messages as plain substrings
+    (specialty_flow), so a long or punctuated phrase is dead weight — drop it
+    rather than store it.
+    """
+    out = []
+    seen = set()
+    for item in (raw if isinstance(raw, list) else []):
+        word = re.sub(r"\s+", " ", str(item or "")).strip().strip(".,;:-").lower()
+        if not (2 <= len(word) <= 40) or "," in word or len(word.split()) > 4:
+            continue
+        if len(re.sub(r"[^\w\s]", "", word).strip()) < 2:
+            continue  # punctuation-only junk would match every patient message
+        if word in seen:
+            continue
+        seen.add(word)
+        out.append(word)
+        if len(out) >= MAX_TREATMENT_CONCERNS:
+            break
+    return out
+
+
+async def generate_treatment_concerns(
+    name: str, category: Optional[str], specialty: str, clinic: Optional[dict]
+) -> dict:
+    """Suggest up to 6 patient-worded concerns for a treatment.
+
+    Called only from the authenticated admin API; the result is shown to the
+    admin for editing and is saved only if they save it. Never raises. On any
+    problem returns an empty suggestion so the admin types the words instead of
+    inheriting junk keywords into the patient matching index.
+    """
+    empty = {"concerns": "", "keywords": [], "source": "template"}
+    raw_name = (name or "").strip()[:120]
+    raw_category = (category or "").strip()[:60]
+    clean_name, suspicious_name = sanitize_user_input(raw_name)
+    clean_category, suspicious_category = sanitize_user_input(raw_category)
+    if suspicious_name or suspicious_category or not raw_name:
+        logger.warning("Treatment concerns request looked like prompt injection — returning nothing")
+        return empty
+    clean_name = strip_injection_markers(clean_name).strip() or raw_name
+    clean_category = strip_injection_markers(clean_category).strip() or "General"
+    field = _SPECIALTY_PROMPT_FIELD.get(specialty, "hospital")
+
+    prompt = f"""An Indian {field} clinic offers this treatment.
+
+Treatment: "{clean_name}"
+Category: "{clean_category}"
+
+List the problems patients come in with that this treatment is used for.
+
+Rules:
+- At most {MAX_TREATMENT_CONCERNS} entries, fewer if the treatment is narrow.
+- Everyday words a patient would type on WhatsApp, not medical terms. For example "tooth pain", not "odontalgia".
+- Each entry 1 to 3 words, lowercase, no punctuation.
+- Only problems this specific treatment addresses. Never guess to fill the list.
+- No medicine names, no doses, no promises.
+
+Respond ONLY with JSON: {{"concerns": ["...", "..."]}}"""
+
+    try:
+        response_data = await call_openrouter_with_backoff(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You label hospital treatments with the everyday words patients use for their problems. You never give medical advice.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            timeout=12,
+            max_tokens=300,
+            temperature=0.2,
+            clinic_id=(clinic or {}).get("id"),
+        )
+        result = json.loads(_completion_text(response_data))
+        keywords = _clean_concern_keywords(result.get("concerns"))
+        joined = ", ".join(keywords)
+        if not keywords or not _description_is_safe(joined):
+            logger.warning(f"AI concerns for '{clean_name}' were empty or failed safety checks")
+            return empty
+        return {"concerns": joined, "keywords": keywords, "source": "ai"}
+    except Exception as e:
+        logger.warning(f"Treatment concerns generation failed: {e}")
+        return empty
+
+
 async def rank_treatments_for_concern(
     concern: str, treatments: list, clinic: Optional[dict]
 ) -> list:
