@@ -6,6 +6,7 @@ from datetime import datetime, date as dt_date, timedelta, timezone
 import logging
 import time
 from typing import Optional
+import uuid
 
 import httpx
 from supabase import create_client, Client
@@ -652,6 +653,89 @@ async def get_lab_test_by_id(
     except Exception as e:
         logger.error(f"Error getting lab test {lab_test_id}: {e}")
         return None
+
+
+# ── Specialty treatments (migration 077) ─────────────────────────────────────
+#: A specialty clinic lists tens of treatments, not thousands; the admin API
+#: refuses to create more than this, so one bounded read is always complete.
+_TREATMENT_MAX_ROWS = 500
+
+
+def is_uuid(value) -> bool:
+    """True if value is a UUID string. Guards ids that arrive from WhatsApp
+    list taps or URLs before they reach a PostgREST filter."""
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+async def get_specialty_treatments(clinic_id: str, active_only: bool = True) -> list:
+    """A clinic's treatments catalogue, ordered as the admin arranged it."""
+    try:
+        query = scoped_query("specialty_treatments", clinic_id)
+        if active_only:
+            query = query.eq("is_active", True)
+        result = await sb(
+            query.order("display_order").order("name").order("id").limit(_TREATMENT_MAX_ROWS)
+        )
+        return result.data or []
+    except Exception as e:
+        logger.error(f"Error getting specialty treatments for clinic {clinic_id}: {e}")
+        return []
+
+
+async def has_active_treatments(clinic_id: str) -> bool:
+    """Cheap existence check used by the WhatsApp main menu.
+
+    Fails closed to False: on a database error the patient sees the clinic's
+    ordinary menu rather than a treatments row that leads nowhere.
+    """
+    try:
+        result = await sb(
+            scoped_query("specialty_treatments", clinic_id, select_fields="id")
+            .eq("is_active", True)
+            .limit(1)
+        )
+        return bool(result.data)
+    except Exception as e:
+        logger.error(f"Error checking active treatments for clinic {clinic_id}: {e}")
+        return False
+
+
+async def get_treatment_by_id(
+    clinic_id: str, treatment_id, active_only: bool = True
+) -> Optional[dict]:
+    """One treatment, scoped to the clinic. None for a non-UUID id, a row from
+    another clinic, or (with active_only) a hidden treatment."""
+    if not is_uuid(treatment_id):
+        return None
+    try:
+        query = scoped_query("specialty_treatments", clinic_id).eq("id", str(treatment_id))
+        if active_only:
+            query = query.eq("is_active", True)
+        result = await sb(query)
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.error(f"Error getting treatment {treatment_id}: {e}")
+        return None
+
+
+async def get_treatment_doctor_ids(clinic_id: str, treatment_id) -> set:
+    """Doctor ids mapped to a treatment. Empty set means "any active doctor"."""
+    if not is_uuid(treatment_id):
+        return set()
+    try:
+        result = await sb(
+            scoped_query("treatment_doctors", clinic_id, select_fields="doctor_id")
+            .eq("treatment_id", str(treatment_id))
+        )
+        return {str(r["doctor_id"]) for r in (result.data or []) if r.get("doctor_id")}
+    except Exception as e:
+        logger.error(f"Error getting doctors for treatment {treatment_id}: {e}")
+        return set()
+
 
 
 #: Used when neither the branch nor the clinic has configured hours. Shared

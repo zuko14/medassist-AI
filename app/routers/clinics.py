@@ -15,7 +15,9 @@ from app.services.tenant import (
     invalidate_tenant_cache,
     invalidate_branch_cache,
     get_clinic_by_id,
+    SPECIALTY_BY_PLAN,
 )
+from app.services.specialty_catalog import seed_starter_treatments
 from app.services.subscription import DAILY_REPORT_LIMIT_TIERS
 from app.services.whatsapp import whatsapp_service
 from app.database import sb  # T5.1: off-loop query execution
@@ -215,11 +217,23 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
         except Exception as ae:
             logger.warning(f"Failed to auto-provision clinic_admin for clinic {clinic_id}: {ae}")
 
+        # ── Specialty plans: load the starter treatments, hidden ──
+        # Best-effort, like the admin login above: a failure here must never
+        # fail onboarding. The admin can load the list later from the panel.
+        starter_treatments = None
+        specialty = SPECIALTY_BY_PLAN.get(req.plan)
+        if specialty:
+            try:
+                starter_treatments = await seed_starter_treatments(clinic_id, specialty)
+            except Exception as se:
+                logger.warning(f"Failed to seed starter treatments for clinic {clinic_id}: {se}")
+
         return {
             "success": True,
             "clinic": clinic,
             "branches": created_branches if created_branches else None,
             "clinic_admin": clinic_admin,
+            "starter_treatments": starter_treatments,
         }
 
     except Exception as e:
