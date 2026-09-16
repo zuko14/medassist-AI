@@ -67,7 +67,8 @@ DECLARE
         'callmedex_whatsapp_settings', 'doctor_branches',
         'outbound_message_ledger', 'plan_tiers', 'broadcasts',
         'admin_notifications', 'lab_tests', 'meta_pricing_config',
-        'inbound_messages', 'scheduler_locks'
+        'inbound_messages', 'scheduler_locks',
+        'specialty_treatments', 'treatment_doctors'
     ];
 BEGIN
     FOREACH v_table IN ARRAY v_tables LOOP
@@ -369,6 +370,8 @@ BEGIN
             ('appointments', 'booking_type',          '039'),
             ('appointments', 'refund_id',             '046'),
             ('appointments', 'completed_at',          '063'),
+            ('appointments', 'treatment_id',          '077'),
+            ('appointments', 'treatment_name',        '077'),
             ('clinics',      'plan',                  '006'),
             ('clinics',      'phone_number_id',       '043'),
             ('clinics',      'config',                '003'),
