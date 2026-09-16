@@ -224,6 +224,29 @@ def extract_clean_message_content(message: str) -> str:
     return lines[0] if len(lines) == 1 else "\n".join(lines)
 
 
+def resolve_booking_name(context: dict, patient: Optional[dict] = None) -> str:
+    """The name of the person an appointment is for.
+
+    "Who is this appointment for?" used to store the chosen person only as
+    context["patient_name"], while the confirmation screen and both booking
+    writers read context["booking_name"] — so every "For Me" and saved-family
+    booking was confirmed and saved as "Patient". The writers now set
+    booking_name, and every reader goes through here so a context written by
+    either path (including sessions in flight during a deploy) resolves to the
+    real name. "there" is the greeting placeholder, never a name.
+    """
+    candidates = (
+        context.get("booking_name"),
+        context.get("patient_name"),
+        (patient or {}).get("name"),
+    )
+    for candidate in candidates:
+        name = candidate.strip() if isinstance(candidate, str) else ""
+        if name and name.lower() != "there":
+            return name
+    return "Patient"
+
+
 class ConversationManager:
     """Manages conversation state and flow."""
 
@@ -1938,8 +1961,21 @@ class ConversationManager:
 
         # 1. Selected "For Self"
         if msg_clean in ["fam_self", "self", "for me", "me", "for myself", "myself"]:
-            p_name = (patient or {}).get("name") or "there"
-            new_ctx = {**context, "patient_name": p_name, "for_self": True}
+            p_name = ((patient or {}).get("name") or "").strip()
+            if not p_name:
+                # No name on file: ask for it rather than booking as "there".
+                await self.update_state(
+                    clinic, phone, "collecting_name", {**context, "for_self": True, "is_family": False}
+                )
+                await self.whatsapp.send_text(clinic, phone, get_message("ask_name", lang))
+                return
+            new_ctx = {
+                **context,
+                "patient_name": p_name,
+                "booking_name": p_name,
+                "for_self": True,
+                "is_family": False,
+            }
             await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
             return
@@ -1967,8 +2003,10 @@ class ConversationManager:
             new_ctx = {
                 **context,
                 "patient_name": member["full_name"],
+                "booking_name": member["full_name"],
                 "relationship": member.get("relationship"),
                 "is_family": True,
+                "for_self": False,
             }
             await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
@@ -1980,8 +2018,10 @@ class ConversationManager:
                 new_ctx = {
                     **context,
                     "patient_name": m["full_name"],
+                    "booking_name": m["full_name"],
                     "relationship": m.get("relationship"),
                     "is_family": True,
+                    "for_self": False,
                 }
                 await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
                 await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
@@ -1989,7 +2029,13 @@ class ConversationManager:
 
         # Fallback: Treat typed input as new name if 2+ words, or prompt again
         if len(msg_clean.split()) >= 2:
-            new_ctx = {**context, "patient_name": message.strip(), "is_family": True}
+            new_ctx = {
+                **context,
+                "patient_name": message.strip(),
+                "booking_name": message.strip(),
+                "is_family": True,
+                "for_self": False,
+            }
             await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
         else:
@@ -2111,8 +2157,10 @@ class ConversationManager:
         name = result
         context["booking_name"] = name
 
-        # Save to patient record if for self
-        if context.get("for_self", True):
+        # Save to patient record if for self. "+ Someone Else" sets is_family
+        # without for_self, and the old default-True check overwrote the
+        # account holder's own name with the family member's.
+        if context.get("for_self", True) and not context.get("is_family"):
             await update_patient(clinic["id"], phone, {"name": name})
 
         # Move to symptoms
@@ -3195,7 +3243,7 @@ class ConversationManager:
                 get_message(
                     "confirm_booking",
                     lang,
-                    name=context.get("booking_name", "Patient"),
+                    name=resolve_booking_name(context),
                     doctor=context["doctor_name"],
                     department=context.get("department", ""),
                     date=date_display,
@@ -3207,7 +3255,7 @@ class ConversationManager:
             confirm_body = get_message(
                 "confirm_booking",
                 lang,
-                name=context.get("booking_name", "Patient"),
+                name=resolve_booking_name(context),
                 doctor=context["doctor_name"],
                 department=context.get("department", ""),
                 date=date_display,
@@ -3291,7 +3339,7 @@ class ConversationManager:
                 result = await payment_service.create_booking_with_payment(
                     clinic_id=clinic["id"],
                     patient_phone=phone,
-                    patient_name=context.get("booking_name", "Patient"),
+                    patient_name=resolve_booking_name(context, patient),
                     department=context.get("department", "General Medicine"),
                     doctor_name=context["doctor_name"],
                     appointment_date=context["appointment_date"],
@@ -3452,7 +3500,7 @@ class ConversationManager:
                 appointment_data = {
                     "patient_id": patient.get("id"),
                     "patient_phone": phone,
-                    "patient_name": context.get("booking_name", "Patient"),
+                    "patient_name": resolve_booking_name(context, patient),
                     "department": context.get("department", "General Medicine"),
                     "doctor_name": context["doctor_name"],
                     "appointment_date": context["appointment_date"],
