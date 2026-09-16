@@ -35,6 +35,7 @@ from app.services.tenant import cancellation_window_hours
 
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
+from app.services import specialty_flow
 
 # Per-phone asyncio lock with Meta timeout protection
 from app.services.message_queue import (
@@ -114,6 +115,8 @@ BOOKING_CONTEXT_KEYS = frozenset({
     "suggestion_reasoning",
     "doctor_page",
     "department_page",
+    "treatment_id",
+    "treatment_name",
     "branch_page",
     "lab_test_id",
     "lab_test_name",
@@ -148,6 +151,8 @@ class ConversationState(str, Enum):
     DOWNLOADING_REPORT = "downloading_report"
     BROWSING_LAB_TESTS = "browsing_lab_tests"
     CONFIRMING_COLLECTION_DATE = "confirming_collection_date"
+    BROWSING_TREATMENTS = "browsing_treatments"
+    SEARCHING_TREATMENTS = "searching_treatments"
 
 
 # ── Inbound WhatsApp message types ───────────────────────────────────────────
@@ -322,6 +327,13 @@ class ConversationManager:
             merged = new_context
         else:
             merged = {**existing, **new_context}
+
+        # A treatment tag must never outlive the treatment flow that set it. A
+        # patient who abandons it and books through departments or Our Doctors
+        # would otherwise get that booking labelled with the old treatment.
+        # No-op for every clinic that never sets these keys.
+        if new_state in specialty_flow.TREATMENT_RESET_STATES:
+            specialty_flow.clear_treatment_context(merged)
 
         update_payload = {
             "state": new_state,
@@ -560,6 +572,9 @@ class ConversationManager:
             )
             if firewall_blocked and firewall_response:
                 await self.whatsapp.send_text(clinic, phone, firewall_response)
+                # Specialty clinics only: the firewall stays exactly as strict,
+                # but the patient also gets a way into the clinic's own catalogue.
+                await specialty_flow.offer_treatment_browse(self, clinic, phone, lang_for_firewall)
                 logger.info(
                     f"Clinical firewall blocked message from {phone[:6]}*** "
                     f"(type: medication/diagnosis request)"
@@ -585,6 +600,8 @@ class ConversationManager:
                 ctx = session.get("context", {}) or {}
                 ctx["for_self"] = True
                 ctx["booking_name"] = patient_name
+                if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, ctx, lang):
+                    return
                 await update_conversation(
                     clinic["id"],
                     phone,
@@ -605,6 +622,15 @@ class ConversationManager:
                 )
                 return
 
+            elif button_id in specialty_flow.TREATMENT_BUTTON_IDS or button_id.startswith(
+                specialty_flow.TREATMENT_BUTTON_PREFIXES
+            ):
+                # Specialty treatments: menu rows, category/treatment lists and
+                # card buttons. Returns to the main menu when the clinic no
+                # longer has the feature (a stale list tapped after a plan change).
+                lang = await get_lang(clinic, phone)
+                await specialty_flow.handle_treatment_button(self, clinic, phone, button_id, session, lang)
+                return
             elif button_id == "continue_booking":
                 intent = "continue_booking"
             elif button_id == "restart_booking":
@@ -878,6 +904,8 @@ class ConversationManager:
             await self.whatsapp.send_text(clinic, phone, "\n".join(detail_lines))
 
             context = session.get("context", {})
+            # Our Doctors is not the treatment flow; drop any abandoned tag.
+            specialty_flow.clear_treatment_context(context)
             context["doctor"] = doc
             context["doctor_name"] = doc["name"]
             context["department"] = doc["department"]
@@ -1010,6 +1038,21 @@ class ConversationManager:
             await self._handle_browsing_lab_tests(
                 clinic, phone, message, intent, context, lang, interactive_data
             )
+            return
+        # A patient typing while browsing or searching treatments is describing a
+        # concern. Placed ahead of the global menu intents for the same reason as
+        # the lab-test search above: a free-text concern ("hair fall") can be
+        # classified as view_services / doctor_availability and would otherwise
+        # be hijacked. Emergency, opt-out, escalation and language change are
+        # handled above this point, so they still win.
+        if (
+            state in ("browsing_treatments", "searching_treatments")
+            and not interactive_data
+            and (message or "").strip()
+            and message.strip().lower() not in NAV_KEYWORDS
+            and intent not in {"greeting", "book_appointment", "cancel_appointment", "reschedule_appointment"}
+        ):
+            await specialty_flow.handle_treatment_search_text(self, clinic, phone, message, lang)
             return
 
         # Global handlers for top-level menu intents (escape hatches from selection states)
@@ -1146,6 +1189,8 @@ class ConversationManager:
             await self._handle_confirming_collection_date(
                 clinic, phone, message, intent, context, patient, lang, interactive_data
             )
+        elif state in ("browsing_treatments", "searching_treatments"):
+            await specialty_flow.handle_treatment_state(self, clinic, phone, lang)
         # "viewing_reports" is no longer entered — the report archive is gone.
         # Sessions still parked in it from before this change fall to the
         # unknown-state branch below, which resets them to the main menu.
@@ -1444,10 +1489,19 @@ class ConversationManager:
         }
         t = titles.get(lang, titles["en"])
 
-        rows = [{"id": "menu_book", "title": book_title[:24], "description": ""}]
+        # Specialty clinics with at least one published treatment lead with
+        # their treatments. treatment_menu_active() is False — without a
+        # database call — for every plan that existed before migration 077.
+        treatment_menu = (not diagnostics_only) and await specialty_flow.treatment_menu_active(clinic)
+
+        rows = specialty_flow.treatment_menu_rows(lang) if treatment_menu else []
+        rows.append({"id": "menu_book", "title": book_title[:24], "description": ""})
         if not diagnostics_only:
-            services_title = {"en": "Our Services", "hi": "Our Services", "te": "Our Services"}.get(lang, "Our Services")
-            rows.append({"id": "menu_services", "title": services_title[:24], "description": ""})
+            # On a single-specialty plan "Our Services" would list one department;
+            # Our Treatments replaces it. Override-enabled general clinics keep both.
+            if not (treatment_menu and specialty_flow.is_specialty_plan(clinic)):
+                services_title = {"en": "Our Services", "hi": "Our Services", "te": "Our Services"}.get(lang, "Our Services")
+                rows.append({"id": "menu_services", "title": services_title[:24], "description": ""})
             rows.append({"id": "menu_doctors", "title": t[0][:24], "description": ""})
             # A clinic that does consultations AND lab tests had no lab row at
             # all — "Book Appointment" reads as doctors-only, so patients never
@@ -1608,10 +1662,22 @@ class ConversationManager:
         await self._show_lab_test_list(clinic, phone, context, lang)
 
     async def _start_booking(
-        self, clinic: dict, phone: str, patient: Optional[dict], lang: str
+        self,
+        clinic: dict,
+        phone: str,
+        patient: Optional[dict],
+        lang: str,
+        seed_context: Optional[dict] = None,
     ) -> None:
-        """Start the booking flow — with optional branch selection for multi-branch clinics."""
+        """Start the booking flow — with optional branch selection for multi-branch clinics.
+
+        seed_context: keys carried into the fresh booking context. Only the
+        specialty treatment flow passes it ({"treatment_id", "treatment_name"});
+        every existing caller passes nothing and gets the empty context it
+        always had.
+        """
         patient = patient or {}
+        seed = dict(seed_context or {})
 
         # Guard: Language must be set before proceeding
         if not patient.get("language"):
@@ -1640,12 +1706,12 @@ class ConversationManager:
                 await self._send_branch_selection(
                     clinic, phone, bookable_branches, lang
                 )
-                await self.update_state(clinic, phone, "selecting_branch", {}, reset_context=True)
+                await self.update_state(clinic, phone, "selecting_branch", dict(seed), reset_context=True)
                 return
             elif len(bookable_branches) == 1:
                 # Only one bookable branch — auto-select it
                 branch = bookable_branches[0]
-                context = self._set_branch_context({}, branch)
+                context = self._set_branch_context(dict(seed), branch)
                 await self.update_state(clinic, phone, "selecting_family_member", context, reset_context=True)
                 await self._continue_booking_after_branch(
                     clinic, phone, patient, lang, context
@@ -1653,8 +1719,8 @@ class ConversationManager:
                 return
         # ── End Multi-Branch Check ──────────────────────────────────────────
 
-        await self.update_state(clinic, phone, "selecting_family_member", {}, reset_context=True)
-        await self._continue_booking_after_branch(clinic, phone, patient, lang, {})
+        await self.update_state(clinic, phone, "selecting_family_member", dict(seed), reset_context=True)
+        await self._continue_booking_after_branch(clinic, phone, patient, lang, dict(seed))
 
     async def _continue_booking_after_branch(
         self, clinic: dict, phone: str, patient: dict, lang: str, context: dict
@@ -1976,6 +2042,8 @@ class ConversationManager:
                 "for_self": True,
                 "is_family": False,
             }
+            if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, new_ctx, lang):
+                return
             await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
             return
@@ -2008,6 +2076,8 @@ class ConversationManager:
                 "is_family": True,
                 "for_self": False,
             }
+            if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, new_ctx, lang):
+                return
             await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
             return
@@ -2023,6 +2093,8 @@ class ConversationManager:
                     "is_family": True,
                     "for_self": False,
                 }
+                if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, new_ctx, lang):
+                    return
                 await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
                 await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
                 return
@@ -2036,6 +2108,8 @@ class ConversationManager:
                 "is_family": True,
                 "for_self": False,
             }
+            if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, new_ctx, lang):
+                return
             await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
             await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
         else:
@@ -2102,6 +2176,8 @@ class ConversationManager:
         if message.lower() in ["self", "for me", "मेरे लिए", "నా కోసం"]:
             context["for_self"] = True
             context["booking_name"] = patient.get("name")
+            if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, context, lang):
+                return
             await self.whatsapp.send_text(
                 clinic, phone, get_message("ask_symptoms", lang)
             )
@@ -2162,6 +2238,10 @@ class ConversationManager:
         # account holder's own name with the family member's.
         if context.get("for_self", True) and not context.get("is_family"):
             await update_patient(clinic["id"], phone, {"name": name})
+
+        # Treatment bookings skip symptoms: the patient already chose the treatment.
+        if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, context, lang):
+            return
 
         # Move to symptoms
         await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
@@ -2659,6 +2739,12 @@ class ConversationManager:
         # Before the doc_ prefix match: "doc_more" would otherwise be parsed as
         # a doctor id of "more" and sent to the database as a UUID.
         if button_id == "doc_more":
+            if context.get("treatment_id"):
+                await specialty_flow.show_treatment_doctors(
+                    self, clinic, phone, context, lang,
+                    page=int(context.get("doctor_page") or 0) + 1,
+                )
+                return
             await self._show_doctor_list(
                 clinic,
                 phone,
@@ -2758,6 +2844,9 @@ class ConversationManager:
             }.get(lang, "Please select from the list below:")
 
             await self.whatsapp.send_text(clinic, phone, fallback_msg)
+            if context.get("treatment_id"):
+                await specialty_flow.show_treatment_doctors(self, clinic, phone, context, lang)
+                return
             if context.get("department"):
                 await self._show_doctor_list(
                     clinic, phone, context["department"], context, lang
@@ -2768,6 +2857,10 @@ class ConversationManager:
 
         context["doctor_name"] = doctor_name
         context["doctor"] = doctor
+        if context.get("treatment_id") and isinstance(doctor, dict) and doctor.get("department"):
+            # The treatment flow skipped department selection; the booking's
+            # department (analytics, confirmations) is the specialist's own.
+            context["department"] = doctor["department"]
         if isinstance(doctor, dict) and doctor.get("id"):
             context["doctor_id"] = doctor["id"]
             context["selected_doctor_id"] = doctor["id"]
