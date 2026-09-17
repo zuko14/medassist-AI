@@ -168,3 +168,16 @@ handler names a defined function, and `<div>` tags balance.
   already applied to.
 - `get_outbound_audit_feed()` still selects the ledger directly, but it is
   bounded by an explicit `limit` and is a feed, not a total — left alone.
+
+## 8. Follow-up — CORRECTED IN SESSION 10
+
+The ledger pagination in §2 left `tests/test_platform.py::test_platform_messaging_usage_success`
+red, and it stayed red from `d72fd98` until session 10. Not a product bug: the
+test's `table_router` terminated the mocked query chain at `.gte()`, but
+`scan_outbound_ledger()` now appends `.range()`. That call returned a bare
+`MagicMock`, the scan rejected it as an unexpected payload type, and every
+count in the assertion read zero.
+
+The lesson for the next person who adds a page-until-short loop: **a mocked
+query chain has to terminate where the real one ends.** Fixed in session 10;
+the suite is green. See `SESSION_10_CARE_PATHWAY.md` §8.

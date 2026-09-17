@@ -704,6 +704,30 @@ async def has_active_treatments(clinic_id: str) -> bool:
         return False
 
 
+async def has_entry_treatment(clinic_id: str) -> bool:
+    """True if the clinic has published a first-visit consultation.
+
+    care_pathway = 'entry' (migration 081) is the treatment a new patient
+    starts from -- a comprehensive eye check-up, a dental check-up, a fertility
+    consultation. It is what "I am not sure what I need" leads to, and what a
+    doctor-decided procedure's card offers instead of the procedure itself.
+
+    Fails closed to False, like has_active_treatments: on a database error the
+    patient sees the ordinary catalogue rather than a row leading nowhere.
+    """
+    try:
+        result = await sb(
+            scoped_query("specialty_treatments", clinic_id, select_fields="id")
+            .eq("is_active", True)
+            .eq("care_pathway", "entry")
+            .limit(1)
+        )
+        return bool(result.data)
+    except Exception as e:
+        logger.error(f"Error checking entry treatment for clinic {clinic_id}: {e}")
+        return False
+
+
 async def get_treatment_by_id(
     clinic_id: str, treatment_id, active_only: bool = True
 ) -> Optional[dict]:

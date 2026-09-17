@@ -427,7 +427,9 @@ async def test_csv_template_download():
     response = await download_lab_test_csv_template(user=user)
     assert response.media_type == "text/csv"
     assert "Content-Disposition" in response.headers
-    assert b"name,price_rupees,sample_type" in response.body
+    # `category` sits third: it is the heading the test appears under in
+    # the patient's WhatsApp list (migration 080).
+    assert b"name,price_rupees,category,sample_type" in response.body
 
 
 # ─────────────────────────────────────────────────────────────

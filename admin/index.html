@@ -2222,6 +2222,21 @@
                 </div>
                 <div class="form-row">
                     <div class="field">
+                        <label for="f-trtPathway">Who decides this treatment?</label>
+                        <select id="f-trtPathway">
+                            <option value="direct">Patient can request it &mdash; they arrive asking for this by name</option>
+                            <option value="entry">Start here &mdash; the first visit / examination for a new patient</option>
+                            <option value="assessment_first">Doctor decides after examining &mdash; not booked directly</option>
+                        </select>
+                        <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">
+                            <b>Doctor decides</b> is for anything your specialist plans only after an examination &mdash; cataract surgery, a root canal, an IVF cycle.
+                            The patient still sees the treatment and can read about it, but its button books an <b>examination</b>, and the card says in words that the doctor confirms the plan.<br>
+                            <b>Start here</b> is your first-visit consultation. Publish one and the WhatsApp menu leads with <i>Book Consultation</i>, and a patient who cannot describe their problem is offered it instead of a dead end.
+                        </p>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
                         <label for="f-trtPrice">Price starts from (₹)</label>
                         <input type="number" id="f-trtPrice" min="0" step="1" value="0">
                         <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Leave 0 to show "Price shared after consultation". WhatsApp payment always uses the doctor's consultation fee.</p>
@@ -2325,6 +2340,9 @@
                     <select id="labTestBranchFilter" class="search-bar" style="display:none; max-width:200px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="changeLabTestBranch()" aria-label="Filter catalog by branch">
                         <option value="">All branches</option>
                     </select>
+                    <select id="labTestCategoryFilter" class="search-bar" style="max-width:220px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="filterLabTests()" aria-label="Filter catalog by service type">
+                        <option value="">All service types</option>
+                    </select>
                     <button class="btn btn-ghost" onclick="openLabCsvModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Import CSV</button>
                     <button class="btn btn-accent" onclick="openAddLabTestModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Add Lab Test</button>
                 </div>
@@ -2348,6 +2366,14 @@
                 <div class="form-row">
                     <div class="field"><label>Test Name *</label><input type="text" id="f-ltName" placeholder="e.g. Complete Blood Count (CBC)"></div>
                     <div class="field"><label>Sample Type</label><input type="text" id="f-ltSampleType" placeholder="e.g. Blood, Urine"></div>
+                </div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Service Type</label>
+                        <input type="text" id="f-ltCategory" list="labCategoryOptions" maxlength="60" placeholder="e.g. Radiology &amp; Imaging">
+                        <datalist id="labCategoryOptions"></datalist>
+                        <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">The heading patients pick before they see this test on WhatsApp. Use the same wording across a group &mdash; only the service types you actually use appear in the bot. Leave blank and it sits under &ldquo;Lab Tests&rdquo;.</p>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="field"><label>Price (₹) *</label><input type="number" id="f-ltPriceRupees" min="1" step="1" placeholder="e.g. 500"></div>
@@ -2955,7 +2981,8 @@
         <div style="background:var(--bg2, #1e293b); border:1px solid var(--border, #334155); border-radius:6px; padding:10px 12px; margin-bottom:14px; font-size:0.8rem; line-height:1.4;">
             <div style="font-weight:600; margin-bottom:4px; color:var(--text);">Specifications & Policy:</div>
             <div>• <b>Required Columns:</b> <code>name</code>, <code>price_rupees</code></div>
-            <div>• <b>Optional Columns:</b> <code>sample_type</code>, <code>turnaround_hours</code>, <code>fasting_required</code>, <code>prep_instructions</code></div>
+            <div>• <b>Optional Columns:</b> <code>category</code>, <code>sample_type</code>, <code>turnaround_hours</code>, <code>fasting_required</code>, <code>prep_instructions</code></div>
+            <div>• <b>Service type:</b> set it below to file the whole file at once, or add a <code>category</code> column to set it per row. A file with neither leaves existing service types untouched.</div>
             <div>• <b>Limits:</b> Max 5 MB file size & 25,000 data rows.</div>
             <div style="color:var(--accent, #38bdf8); margin-top:4px;">• <b>Atomic Guarantee:</b> If any row fails validation, zero changes are saved to the database.</div>
         </div>
@@ -2970,6 +2997,12 @@
                 <option value="">All branches — every branch offers these tests</option>
             </select>
             <p id="labCsvBranchHint" style="color:var(--text3); font-size:0.78rem; margin-top:4px;"></p>
+        </div>
+        <div class="field" style="margin-bottom:12px;">
+            <label>File this whole file under</label>
+            <input type="text" id="f-labCsvCategory" list="labCsvCategoryOptions" maxlength="60" placeholder="e.g. Radiology &amp; Imaging — leave blank to keep existing">
+            <datalist id="labCsvCategoryOptions"></datalist>
+            <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">This is how a centre actually holds its catalogue: one export per section. Upload pathology, then health packages, then radiology &mdash; each under its own service type. Patients then choose the service type first instead of scrolling one endless list.</p>
         </div>
         <div class="field">
             <label>Select CSV File</label>
@@ -4896,17 +4929,39 @@ function refundCell(a) {
 // Diagnostic centres book tests, not doctors — their rows carry doctor_name
 // = NULL by design (migration 039), so a doctor-only column renders an empty
 // row. Show whichever subject this booking actually has.
+// What the patient actually said, under the chip that says what they booked.
+// A consult-led clinic needs both: the appointment is an examination, but the
+// reason ("asked about: Cataract Surgery") is what routes the paperwork and
+// tells the doctor which way the visit is likely to go. The treatment flow
+// writes "Treatment: <name>" into symptoms and the chip already says <name>,
+// so only the part the chip does not carry is shown.
+function bookingReasonLine(b) {
+    const raw = (b.symptoms || '').trim();
+    if (!raw) return '';
+    const redundant = 'Treatment: ' + (b.treatment_name || '');
+    let text = raw;
+    if (b.treatment_name && raw === redundant) {
+        text = '';
+    } else if (b.treatment_name && raw.startsWith(redundant + ' (') && raw.endsWith(')')) {
+        text = raw.slice(redundant.length + 2, -1);
+    }
+    if (!text) return '';
+    return '<div style="color:var(--text3);font-size:0.75rem;margin-top:3px;'
+        + 'max-width:230px;white-space:normal;line-height:1.3">' + esc(text.slice(0, 140)) + '</div>';
+}
+
 function bookingSubjectCell(b) {
+    const reason = bookingReasonLine(b);
     if (b.booking_type === 'lab_test') {
         return '<span style="background:rgba(56,189,248,.14);color:#38bdf8;padding:2px 7px;'
             + 'border-radius:4px;font-size:11px;font-weight:600">'
-            + (esc(b.lab_test_name) || 'Lab Test') + '</span>';
+            + (esc(b.lab_test_name) || 'Lab Test') + '</span>' + reason;
     }
     const doctor = esc(b.doctor_name) || '—';
-    if (!b.treatment_name) return doctor;
+    if (!b.treatment_name) return doctor + reason;
     // Specialty booking: a consultation tagged with the treatment (migration 077).
     return doctor + '<br><span style="background:rgba(167,139,250,.14);color:#a78bfa;padding:2px 7px;'
-        + 'border-radius:4px;font-size:11px;font-weight:600">' + esc(b.treatment_name) + '</span>';
+        + 'border-radius:4px;font-size:11px;font-weight:600">' + esc(b.treatment_name) + '</span>' + reason;
 }
 
 // Filter state for the Appointments page. It survives navigation, so a
@@ -5980,6 +6035,52 @@ function changeLabTestBranch() {
     loadLabTests();
 }
 
+// Starter headings only. The live vocabulary is whatever this clinic's own
+// rows already carry -- a centre that calls its imaging menu "Scan Services"
+// types that once and it joins the list, and the bot shows exactly the
+// headings that have tests under them.
+const LAB_CATEGORY_SUGGESTIONS = [
+    'Lab Tests (Pathology)',
+    'Health Packages',
+    'Radiology & Imaging',
+    'Scans (CT / MRI)',
+    'Cardiac & Special Tests',
+];
+
+function labCategoriesInUse() {
+    const seen = new Map();
+    (labTestsCache || []).forEach(t => {
+        const v = (t.category || '').trim();
+        if (v && !seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), v);
+    });
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+}
+
+function renderLabCategoryOptions() {
+    const inUse = labCategoriesInUse();
+    const lower = new Set(inUse.map(c => c.toLowerCase()));
+    const all = inUse.concat(LAB_CATEGORY_SUGGESTIONS.filter(c => !lower.has(c.toLowerCase())));
+
+    ['labCategoryOptions', 'labCsvCategoryOptions'].forEach(id => {
+        const dl = document.getElementById(id);
+        if (dl) dl.innerHTML = all.map(c => `<option value="${esc(c)}"></option>`).join('');
+    });
+
+    const sel = document.getElementById('labTestCategoryFilter');
+    if (sel) {
+        const keep = sel.value;
+        const uncategorised = (labTestsCache || []).some(t => !(t.category || '').trim());
+        sel.innerHTML = '<option value="">All service types</option>'
+            + inUse.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')
+            + (uncategorised ? '<option value="__none__">Lab Tests (unfiled)</option>' : '');
+        sel.value = keep;
+        if (sel.value !== keep) sel.value = '';
+        // Nothing filed yet means one heading, which is what the bot already
+        // shows -- the filter would only be a control that does nothing.
+        sel.style.display = inUse.length ? 'inline-block' : 'none';
+    }
+}
+
 async function loadLabTests() {
     const el = document.getElementById('labTestList');
     if (!el) return;
@@ -5996,7 +6097,8 @@ async function loadLabTests() {
             const scope = labTestBranchId ? ` offered at ${labTestBranchName(labTestBranchId)}` : '';
             countEl.textContent = `${labTestsCache.length} test${labTestsCache.length !== 1 ? 's' : ''}${scope}`;
         }
-        renderLabTestsTable(labTestsCache);
+        renderLabCategoryOptions();
+        filterLabTests();
     } catch (e) {
         el.innerHTML = emptyState('warning', 'Failed to load lab tests');
     }
@@ -6014,6 +6116,7 @@ function renderLabTestsTable(tests) {
             <tr>
                 <th>Test Name</th>
                 ${labTestShowBranchCol ? '<th>Branch</th>' : ''}
+                <th>Service Type</th>
                 <th>Sample Type</th>
                 <th>Price</th>
                 <th>Turnaround</th>
@@ -6025,6 +6128,7 @@ function renderLabTestsTable(tests) {
         <tbody>${tests.map(t => `<tr>
             <td style="font-weight:600; color:var(--text-strong)">${esc(t.name)}</td>
             ${labTestShowBranchCol ? `<td>${labTestBranchLabel(t)}</td>` : ''}
+            <td>${t.category ? esc(t.category) : '<span style="color:var(--text3)">Lab Tests</span>'}</td>
             <td>${esc(t.sample_type) || '—'}</td>
             <td>₹${t.price_paise / 100}</td>
             <td>${t.turnaround_hours ? t.turnaround_hours + 'h' : '—'}</td>
@@ -6040,15 +6144,21 @@ function renderLabTestsTable(tests) {
 
 function filterLabTests() {
     const q = (document.getElementById('labTestSearch')?.value || '').toLowerCase().trim();
-    if (!q) {
-        renderLabTestsTable(labTestsCache);
-        return;
+    const cat = document.getElementById('labTestCategoryFilter')?.value || '';
+    let rows = labTestsCache;
+    if (cat === '__none__') {
+        rows = rows.filter(t => !(t.category || '').trim());
+    } else if (cat) {
+        rows = rows.filter(t => (t.category || '').trim().toLowerCase() === cat.toLowerCase());
     }
-    const filtered = labTestsCache.filter(t => 
-        (t.name || '').toLowerCase().includes(q) || 
-        (t.sample_type || '').toLowerCase().includes(q)
-    );
-    renderLabTestsTable(filtered);
+    if (q) {
+        rows = rows.filter(t =>
+            (t.name || '').toLowerCase().includes(q) ||
+            (t.sample_type || '').toLowerCase().includes(q) ||
+            (t.category || '').toLowerCase().includes(q)
+        );
+    }
+    renderLabTestsTable(rows);
 }
 
 function openAddLabTestModal() {
@@ -6070,6 +6180,11 @@ function resetLabTestForm() {
     document.getElementById('f-labTestId').value = '';
     document.getElementById('f-ltName').value = '';
     document.getElementById('f-ltSampleType').value = '';
+    // Adding while filtered to one service type means "add it there", the
+    // same reasoning as the branch default just below.
+    const catFilter = document.getElementById('labTestCategoryFilter');
+    const preset = (catFilter && catFilter.value !== '__none__') ? catFilter.value : '';
+    document.getElementById('f-ltCategory').value = preset;
     document.getElementById('f-ltPriceRupees').value = '';
     document.getElementById('f-ltTurnaround').value = '';
     document.getElementById('f-ltFasting').checked = false;
@@ -6090,6 +6205,7 @@ window.editLabTest = function(id) {
     document.getElementById('f-labTestId').value = test.id;
     document.getElementById('f-ltName').value = test.name || '';
     document.getElementById('f-ltSampleType').value = test.sample_type || '';
+    document.getElementById('f-ltCategory').value = test.category || '';
     document.getElementById('f-ltPriceRupees').value = test.price_paise ? test.price_paise / 100 : '';
     document.getElementById('f-ltTurnaround').value = test.turnaround_hours || '';
     document.getElementById('f-ltFasting').checked = !!test.fasting_required;
@@ -6126,6 +6242,7 @@ async function submitLabTest(e) {
     const id = document.getElementById('f-labTestId').value;
     const name = document.getElementById('f-ltName').value.trim();
     const sampleType = document.getElementById('f-ltSampleType').value.trim() || null;
+    const category = document.getElementById('f-ltCategory').value.trim();
     const priceRupees = parseInt(document.getElementById('f-ltPriceRupees').value, 10);
     const turnaround = parseInt(document.getElementById('f-ltTurnaround').value, 10) || null;
     const fasting = document.getElementById('f-ltFasting').checked;
@@ -6140,6 +6257,11 @@ async function submitLabTest(e) {
         return;
     }
 
+    if (category.length > 60) {
+        toast('Service type must be 60 characters or fewer', true);
+        return;
+    }
+
     const payload = {
         name,
         sample_type: sampleType,
@@ -6147,6 +6269,9 @@ async function submitLabTest(e) {
         turnaround_hours: turnaround,
         fasting_required: fasting,
         prep_instructions: prep,
+        // Empty string, not null: the API reads "" as "clear this heading",
+        // which is how an edit un-files a test.
+        category: category,
     };
     // Only sent by multi-branch clinics. A single-location clinic keeps
     // posting exactly the payload it always has, so branch_id stays NULL.
@@ -6277,6 +6402,20 @@ function formatTreatmentPrice(paise) {
     return rupees > 0 ? '₹' + String(rupees).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : 'After consultation';
 }
 
+// Rows written before migration 081, and every clinic that has classified
+// nothing, read as 'direct' -- which is exactly how they behave.
+const TREATMENT_PATHWAY_LABELS = {
+    entry: ['Start here', 'var(--accent)'],
+    direct: ['Patient can request', 'var(--text3)'],
+    assessment_first: ['Doctor decides', 'var(--amber)'],
+};
+
+function treatmentPathwayLabel(t) {
+    const key = (t.care_pathway || 'direct');
+    const entry = TREATMENT_PATHWAY_LABELS[key] || TREATMENT_PATHWAY_LABELS.direct;
+    return `<span style="color:${entry[1]}; font-size:0.8rem">${esc(entry[0])}</span>`;
+}
+
 function renderTreatmentsTable(rows) {
     const el = document.getElementById('trtList');
     if (!el) return;
@@ -6288,13 +6427,14 @@ function renderTreatmentsTable(rows) {
     el.innerHTML = `<table>
         <thead><tr>
             ${canManage ? '<th><input type="checkbox" aria-label="Select all treatments" onchange="toggleAllTreatments(this.checked)"></th>' : ''}
-            <th>Treatment</th><th>Category</th><th>Price from</th><th>Duration</th><th>Doctors</th><th>Status</th>
+            <th>Treatment</th><th>Category</th><th>Pathway</th><th>Price from</th><th>Duration</th><th>Doctors</th><th>Status</th>
             ${canManage ? '<th>Actions</th>' : ''}
         </tr></thead>
         <tbody>${rows.map(t => `<tr>
             ${canManage ? `<td><input type="checkbox" class="trt-select" value="${esc(t.id)}" aria-label="Select ${esc(t.name)}"></td>` : ''}
             <td style="font-weight:600; color:var(--text-strong)">${esc(t.name)}${t.short_name ? `<div style="color:var(--text3); font-size:0.75rem; font-weight:400">List title: ${esc(t.short_name)}</div>` : ''}</td>
             <td>${esc(t.category)}</td>
+            <td>${treatmentPathwayLabel(t)}</td>
             <td>${formatTreatmentPrice(t.price_from_paise)}</td>
             <td>${t.duration_minutes ? esc(String(t.duration_minutes)) + ' min' : '—'}</td>
             <td>${treatmentDoctorLabel(t)}</td>
@@ -6345,6 +6485,7 @@ function resetTreatmentForm() {
      'f-trtDesc', 'f-trtDescHi', 'f-trtDescTe', 'f-trtPrep'].forEach(id => { document.getElementById(id).value = ''; });
     document.getElementById('f-trtPrice').value = '0';
     document.getElementById('f-trtOrder').value = '0';
+    document.getElementById('f-trtPathway').value = 'direct';
     document.getElementById('f-trtActive').checked = true;
     document.getElementById('trtFormTitle').textContent = 'Add Treatment';
     renderTreatmentDoctorChecks([]);
@@ -6380,6 +6521,7 @@ window.editTreatment = function (id) {
     document.getElementById('f-trtCategory').value = t.category || '';
     document.getElementById('f-trtShort').value = t.short_name || '';
     document.getElementById('f-trtOrder').value = t.display_order || 0;
+    document.getElementById('f-trtPathway').value = t.care_pathway || 'direct';
     document.getElementById('f-trtPrice').value = Math.round((t.price_from_paise || 0) / 100);
     document.getElementById('f-trtDuration').value = t.duration_minutes || '';
     document.getElementById('f-trtConcerns').value = t.concerns || '';
@@ -6447,6 +6589,7 @@ async function submitTreatment() {
         prep_instructions: optionalText('f-trtPrep'),
         is_active: document.getElementById('f-trtActive').checked,
         display_order: order,
+        care_pathway: document.getElementById('f-trtPathway').value || 'direct',
     };
     const doctorIds = [...document.querySelectorAll('.trt-doc-cb:checked')].map(cb => cb.value);
 
@@ -6580,6 +6723,12 @@ async function openLabCsvModal() {
     modal.classList.add('open');
     _labCsvBusy(false);
     document.getElementById('f-labCsvFile').value = '';
+    const catFilter = document.getElementById('labTestCategoryFilter');
+    const csvCat = document.getElementById('f-labCsvCategory');
+    // Opens on whatever service type the catalogue is filtered to, for the
+    // same reason the branch select does.
+    if (csvCat) csvCat.value = (catFilter && catFilter.value !== '__none__') ? catFilter.value : '';
+    renderLabCategoryOptions();
     const resEl = document.getElementById('labCsvResults');
     if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
     await setupLabTestBranches();
@@ -6694,6 +6843,15 @@ async function submitLabTestCsv() {
     const csvBranchSel = document.getElementById('f-labCsvBranch');
     const csvBranchId = csvBranchSel ? csvBranchSel.value : '';
     if (csvBranchId) formData.append('branch_id', csvBranchId);
+    const csvCatEl = document.getElementById('f-labCsvCategory');
+    const csvCat = csvCatEl ? csvCatEl.value.trim() : '';
+    if (csvCat.length > 60) {
+        toast('Service type must be 60 characters or fewer', true);
+        return;
+    }
+    // Omitted when blank, so an import that says nothing about service types
+    // leaves the ones already filed alone.
+    if (csvCat) formData.append('category', csvCat);
 
     _labCsvBusy(true, 'Uploading…');
     _labCsvStatus(_labCsvProgressBar(0, `⏳ Uploading ${file.name}…`));

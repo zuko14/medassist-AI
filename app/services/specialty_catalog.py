@@ -18,6 +18,46 @@ from app.database import sb, supabase
 logger = logging.getLogger(__name__)
 
 
+#: Care pathway per starter treatment (migration 081). Anything not listed is
+#: 'direct' -- the patient may ask for it by name, which is how every row
+#: behaved before this column existed.
+#:
+#:   entry            the first visit; where "I'm not sure what I need" leads
+#:   assessment_first the doctor decides this AFTER examining the patient, so
+#:                    the card is information and its button books an exam
+#:
+#: Kept in step with the backfill list in migrations/081_treatment_care_pathway.sql
+#: -- tests/test_treatment_care_pathway.py fails if the two drift apart.
+#:
+#: Dermatology is deliberately absent: a derma patient arrives already saying
+#: "acne" or "hair fall", which is why that plan works as it does.
+_PATHWAY_BY_NAME: dict[str, str] = {
+    # Ophthalmology -- the examination is the product; surgery follows it.
+    "Comprehensive Eye Check-up": "entry",
+    "Cataract Surgery": "assessment_first",
+    "Anti-VEGF Injection": "assessment_first",
+    # Dental -- check-up first; RCT, extraction or a crown is the dentist's call.
+    "Dental Check-up": "entry",
+    "Root Canal Treatment": "assessment_first",
+    "Crowns & Bridges": "assessment_first",
+    "Dentures": "assessment_first",
+    "Clear Aligners": "assessment_first",
+    "Veneers & Smile Design": "assessment_first",
+    "Wisdom Tooth Removal": "assessment_first",
+    # Fertility -- nobody books an IVF cycle off a menu.
+    "Fertility Consultation": "entry",
+    "IUI (Intrauterine Insemination)": "assessment_first",
+    "IVF (In Vitro Fertilisation)": "assessment_first",
+    "ICSI": "assessment_first",
+    "Frozen Embryo Transfer": "assessment_first",
+    "Egg Freezing": "assessment_first",
+    "Hysteroscopy": "assessment_first",
+    "Laparoscopy for Fertility": "assessment_first",
+    # Dermatology -- the one row a dermatologist orders, never a patient.
+    "Skin Biopsy": "assessment_first",
+}
+
+
 def _t(category, name, description, concerns, duration_minutes=None, prep=None, short_name=None):
     return {
         "category": category,
@@ -27,6 +67,10 @@ def _t(category, name, description, concerns, duration_minutes=None, prep=None, 
         "concerns": concerns,
         "duration_minutes": duration_minutes,
         "prep_instructions": prep,
+        # Looked up rather than passed at each call site: the lookup table reads
+        # as one reviewable list beside the SQL backfill it must match, where
+        # twenty scattered keyword arguments would not.
+        "care_pathway": _PATHWAY_BY_NAME.get(name, "direct"),
     }
 
 
@@ -358,6 +402,7 @@ async def seed_starter_treatments(clinic_id: str, specialty: str) -> dict:
             "concerns": item["concerns"],
             "duration_minutes": item["duration_minutes"],
             "prep_instructions": item["prep_instructions"],
+            "care_pathway": item["care_pathway"],
             "price_from_paise": 0,
             "is_active": False,
             "display_order": (position + 1) * 10,

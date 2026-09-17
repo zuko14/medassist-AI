@@ -482,8 +482,17 @@ def test_platform_messaging_usage_success(mock_supabase, mock_log_action):
             mock_obj.select.return_value = mock_clinics
             mock_obj.select.return_value.execute.return_value.data = mock_clinics.execute.return_value.data
         elif table_name == "outbound_message_ledger":
-            mock_obj.select.return_value.eq.return_value.neq.return_value.gte.return_value = mock_ledger
-            mock_obj.select.return_value.eq.return_value.neq.return_value.gte.return_value.execute.return_value.data = mock_ledger.execute.return_value.data
+            # scan_outbound_ledger() pages the select -- PostgREST silently
+            # caps an unbounded one at 1000 rows, so the billing sweep must
+            # .range() (see message_accounting.scan_outbound_ledger). The mock
+            # has to terminate that chain too, or the page comes back as a
+            # MagicMock, is rejected as "unexpected payload type", and every
+            # count reads zero.
+            chain = mock_obj.select.return_value.eq.return_value.neq.return_value.gte.return_value
+            chain.range.return_value = mock_ledger
+            # This page is shorter than the 1000-row page size, so the loop
+            # stops after one request and never asks for page 2.
+            chain.range.return_value.execute.return_value.data = mock_ledger.execute.return_value.data
         elif table_name == "meta_pricing_config":
             mock_obj.select.return_value.eq.return_value = mock_pricing
             mock_obj.select.return_value.eq.return_value.execute.return_value.data = mock_pricing.execute.return_value.data

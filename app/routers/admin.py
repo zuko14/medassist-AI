@@ -1317,6 +1317,29 @@ class DoctorUpdate(BaseModel):
     branch_session: Optional[str] = None
 
 
+#: Matches the CHECK added by migration 080. A heading longer than this is a
+#: description, not a heading -- and WhatsApp truncates a list row at 24
+#: characters anyway.
+LAB_CATEGORY_MAX_LEN = 60
+
+
+def _clean_lab_category(v: Optional[str]) -> Optional[str]:
+    """Strip a service heading, or None for blank.
+
+    Blank collapses to None so "" and NULL cannot become two different
+    headings in the same catalogue -- the WhatsApp flow groups on this value
+    and would otherwise show the uncategorised bucket twice.
+    """
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if len(v) > LAB_CATEGORY_MAX_LEN:
+        raise ValueError(f"category must be {LAB_CATEGORY_MAX_LEN} characters or fewer")
+    return v
+
+
 class LabTestCreate(BaseModel):
     name: str
 
@@ -1342,6 +1365,15 @@ class LabTestCreate(BaseModel):
     turnaround_hours: Optional[int] = None
     is_active: bool = True
     branch_id: Optional[str] = None
+    #: Free text, not an enum: centres file their menus differently
+    #: ("Imaging", "Radiology & Scans", "Master Health Checkup") and the
+    #: WhatsApp catalogue reads its headings straight off these values.
+    category: Optional[str] = None
+
+    @field_validator("category")
+    @classmethod
+    def clean_category(cls, v: Optional[str]) -> Optional[str]:
+        return _clean_lab_category(v)
 
     @field_validator("price_rupees")
     @classmethod
@@ -1372,6 +1404,17 @@ class LabTestUpdate(BaseModel):
     turnaround_hours: Optional[int] = None
     is_active: Optional[bool] = None
     branch_id: Optional[str] = None
+    category: Optional[str] = None
+
+    @field_validator("category")
+    @classmethod
+    def clean_category(cls, v: Optional[str]) -> Optional[str]:
+        """Same rule as LabTestCreate -- see the note there.
+
+        Sending "" is how the panel CLEARS a heading, and exclude_unset means
+        omitting the field leaves the stored one alone.
+        """
+        return _clean_lab_category(v)
 
     @field_validator("price_rupees")
     @classmethod
@@ -2458,6 +2501,21 @@ def _strip_required(v: Optional[str]) -> Optional[str]:
     return v
 
 
+#: migration 081. What the patient may choose, versus what only the doctor
+#: decides. 'direct' is the default and is how every row behaved before the
+#: column existed, so a clinic that classifies nothing changes nothing.
+CARE_PATHWAYS = ("entry", "direct", "assessment_first")
+
+
+def _clean_care_pathway(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    cleaned = (v or "").strip().lower()
+    if cleaned not in CARE_PATHWAYS:
+        raise ValueError(f"care_pathway must be one of: {', '.join(CARE_PATHWAYS)}")
+    return cleaned
+
+
 class TreatmentCreate(BaseModel):
     name: str = Field(..., max_length=120)
     category: str = Field(..., max_length=60)
@@ -2471,9 +2529,11 @@ class TreatmentCreate(BaseModel):
     prep_instructions: Optional[str] = Field(default=None, max_length=600)
     is_active: bool = True
     display_order: int = Field(default=0, ge=0, le=10_000)
+    care_pathway: str = "direct"
 
     _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
     _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
+    _v_pathway = field_validator("care_pathway")(classmethod(lambda cls, v: _clean_care_pathway(v) or "direct"))
 
 
 class TreatmentUpdate(BaseModel):
@@ -2489,9 +2549,11 @@ class TreatmentUpdate(BaseModel):
     prep_instructions: Optional[str] = Field(default=None, max_length=600)
     is_active: Optional[bool] = None
     display_order: Optional[int] = Field(default=None, ge=0, le=10_000)
+    care_pathway: Optional[str] = None
 
     _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
     _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
+    _v_pathway = field_validator("care_pathway")(classmethod(lambda cls, v: _clean_care_pathway(v)))
 
 
 class TreatmentDoctorsUpdate(BaseModel):
@@ -2946,6 +3008,13 @@ _CSV_HEADER_ALIASES: dict[str, set[str]] = {
     },
     "fasting_required": {"fasting_required", "fasting", "fasting required"},
     "prep_instructions": {"prep_instructions", "preparation", "prep instructions", "instructions"},
+    # The heading this row is filed under in the WhatsApp catalogue. A lab's
+    # export usually already carries one of these columns -- "Department" is
+    # Biochemistry/Haematology/Radiology in almost every LIS export.
+    "category": {
+        "category", "test category", "test_category", "service category",
+        "section", "group", "department", "modality",
+    },
 }
 
 
@@ -2970,6 +3039,7 @@ def _normalize_csv_headers(fieldnames: list[str]) -> dict[str, str]:
 async def import_lab_tests_csv(
     file: UploadFile = File(...),
     branch_id: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
     clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
 ):
@@ -2984,6 +3054,13 @@ async def import_lab_tests_csv(
       set      -- the file is that ONE centre's catalogue. A test here
                   overrides an all-branches test of the same name for that
                   centre only (see database.get_lab_tests).
+
+    `category` files the WHOLE file under one heading -- "Radiology &
+    Imaging", "Health Packages" -- which is how a centre actually holds its
+    catalogue: one export per section. A per-row `category` column wins over
+    it where present. A file with neither leaves the heading untouched rather
+    than clearing it, so re-importing last year's pathology price list cannot
+    silently un-file a catalogue somebody sorted by hand in the panel.
 
     So a chain whose centres share a menu imports once; a chain whose menus
     differ imports once per centre; a chain that mostly shares imports the
@@ -3009,6 +3086,14 @@ async def import_lab_tests_csv(
     if branch_id:
         branch = await resolve_owned_branch(user, branch_id, effective_clinic_id)
         branch_id = str(branch["id"])
+
+    # Same isinstance guard as branch_id: called without FastAPI's form
+    # parsing this still holds the raw Form() default object.
+    default_category = category if isinstance(category, str) else None
+    try:
+        default_category = _clean_lab_category(default_category)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     raw = await file.read()
 
@@ -3166,18 +3251,38 @@ async def import_lab_tests_csv(
 
         fasting = row.get("fasting_required", "").strip().lower() in ("true", "1", "yes")
 
-        validated_rows.append(
-            {
-                "clinic_id": effective_clinic_id,
-                "branch_id": branch_id,
-                "name": name,
-                "price_paise": int(round(price_rupees_val * 100)),
-                "sample_type": sample_type,
-                "turnaround_hours": turnaround,
-                "fasting_required": fasting,
-                "prep_instructions": prep_instructions,
-            }
-        )
+        # Per-row column wins over the file-level heading, so a centre can
+        # upload one mixed export and still file it correctly.
+        row_category = row.get("category", "").strip() or default_category
+        if row_category and len(row_category) > LAB_CATEGORY_MAX_LEN:
+            errors.append(
+                {
+                    "row": i,
+                    "column": "category",
+                    "value": row_category[:50],
+                    "problem": f"Category exceeds {LAB_CATEGORY_MAX_LEN} characters.",
+                    "expected": f"At most {LAB_CATEGORY_MAX_LEN} characters (e.g. Radiology & Imaging)",
+                }
+            )
+            continue
+
+        test_row = {
+            "clinic_id": effective_clinic_id,
+            "branch_id": branch_id,
+            "name": name,
+            "price_paise": int(round(price_rupees_val * 100)),
+            "sample_type": sample_type,
+            "turnaround_hours": turnaround,
+            "fasting_required": fasting,
+            "prep_instructions": prep_instructions,
+        }
+        # Omitted, not set to None, when the file says nothing about the
+        # heading: these same dicts are reused for UPDATE, so a re-import of a
+        # plain price list would otherwise wipe every heading an admin had
+        # filed by hand. Clearing a heading is done in the panel.
+        if row_category:
+            test_row["category"] = row_category
+        validated_rows.append(test_row)
 
     # 5. Rejection gate: if any validation error occurred, abort entire import
     if errors:
@@ -3236,6 +3341,7 @@ async def import_lab_tests_csv(
             "total": len(validated_rows),
             "branch_id": branch_id,
             "scope": "branch" if branch_id else "all_branches",
+            "category": default_category,
         },
         ip_address="unknown",
     )
@@ -3245,6 +3351,7 @@ async def import_lab_tests_csv(
         "total_imported": len(validated_rows),
         "branch_id": branch_id,
         "scope": "branch" if branch_id else "all_branches",
+        "category": default_category,
         "errors": [],
     }
 
@@ -3254,13 +3361,22 @@ async def download_lab_test_csv_template(
     user: AdminUser = Depends(verify_credentials),
 ):
     """Download a canonical CSV template for lab tests / diagnostic services catalog import."""
+    # `category` is the heading the test appears under in the patient's
+    # WhatsApp list. The sample rows show the four kinds a diagnostic centre
+    # actually sells, because "what do I put in this column?" is the whole
+    # question an admin opens the template to answer.
     template_content = (
-        "name,price_rupees,sample_type,turnaround_hours,fasting_required,prep_instructions\n"
-        "Complete Blood Count (CBC),350,Blood,24,false,No special preparation needed\n"
-        "Fasting Blood Sugar (FBS),150,Blood,12,true,Fast for 8-10 hours prior to sample collection\n"
-        "Thyroid Profile (T3 T4 TSH),750,Blood,24,false,Can be taken at any time of day\n"
-        "Lipid Profile,600,Blood,24,true,12 hours overnight fasting mandatory\n"
-        "Urine Routine & Microscopy,180,Urine,12,false,Collect clean catch midstream sample\n"
+        "name,price_rupees,category,sample_type,turnaround_hours,fasting_required,prep_instructions\n"
+        "Complete Blood Count (CBC),350,Lab Tests (Pathology),Blood,24,false,No special preparation needed\n"
+        "Fasting Blood Sugar (FBS),150,Lab Tests (Pathology),Blood,12,true,Fast for 8-10 hours prior to sample collection\n"
+        "Thyroid Profile (T3 T4 TSH),750,Lab Tests (Pathology),Blood,24,false,Can be taken at any time of day\n"
+        "Urine Routine & Microscopy,180,Lab Tests (Pathology),Urine,12,false,Collect clean catch midstream sample\n"
+        "Master Health Checkup,2500,Health Packages,,48,true,Report 12 hours fasted. Allow 3 hours at the centre.\n"
+        "Chest X-Ray (PA View),400,Radiology & Imaging,,2,false,Remove metal objects and jewellery\n"
+        "Ultrasound Whole Abdomen,1200,Radiology & Imaging,,4,true,6 hours fasting. Full bladder required.\n"
+        "MRI Brain (Plain),6500,Scans (CT / MRI),,24,false,Declare any implant or pacemaker before the scan\n"
+        "CT Chest (Plain),4500,Scans (CT / MRI),,24,false,Inform staff if you are pregnant\n"
+        "ECG,300,Cardiac & Special Tests,,1,false,No special preparation needed\n"
     )
     return Response(
         content=template_content,

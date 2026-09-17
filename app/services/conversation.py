@@ -1190,7 +1190,14 @@ class ConversationManager:
                 clinic, phone, message, intent, context, patient, lang, interactive_data
             )
         elif state in ("browsing_treatments", "searching_treatments"):
-            await specialty_flow.handle_treatment_state(self, clinic, phone, lang)
+            # message is forwarded so a concern the classifier mislabelled is
+            # still searched rather than answered with the main menu; a tapped
+            # row carries its own title as `message` and must not be, so an
+            # interactive turn passes nothing.
+            await specialty_flow.handle_treatment_state(
+                self, clinic, phone, lang,
+                message="" if interactive_data else message,
+            )
         # "viewing_reports" is no longer entered — the report archive is gone.
         # Sessions still parked in it from before this change fall to the
         # unknown-state branch below, which resets them to the main menu.
@@ -1494,7 +1501,17 @@ class ConversationManager:
         # database call — for every plan that existed before migration 077.
         treatment_menu = (not diagnostics_only) and await specialty_flow.treatment_menu_active(clinic)
 
-        rows = specialty_flow.treatment_menu_rows(lang) if treatment_menu else []
+        # A clinic that has published a first-visit consultation leads with
+        # booking it: its patients arrive describing a symptom, not naming a
+        # procedure. Driven by the catalogue, never by the plan -- see
+        # specialty_flow.treatment_menu_rows.
+        rows = (
+            specialty_flow.treatment_menu_rows(
+                lang, has_entry=await specialty_flow.has_entry_treatment(clinic["id"])
+            )
+            if treatment_menu
+            else []
+        )
         rows.append({"id": "menu_book", "title": book_title[:24], "description": ""})
         if not diagnostics_only:
             # On a single-specialty plan "Our Services" would list one department;
@@ -2461,7 +2478,12 @@ class ConversationManager:
     LIST_PAGE_SIZE = 9
 
     def _page_rows(
-        self, rows: list[dict], page: int, more_id: str, lang: str
+        self,
+        rows: list[dict],
+        page: int,
+        more_id: str,
+        lang: str,
+        page_size: Optional[int] = None,
     ) -> tuple[list[dict], int]:
         """Return one page of interactive-list rows, plus the page actually used.
 
@@ -2474,14 +2496,19 @@ class ConversationManager:
         A list that already fits is returned untouched, so short catalogues keep
         showing all 10 rows and gain no extra tap.
         """
-        if page <= 0 and len(rows) <= 10:
+        # `page_size` exists for callers that append their own navigation rows
+        # (Main Menu, All categories) after paging: they shrink the content
+        # page by exactly that many rows so the total still lands inside Meta's
+        # 10-row cap instead of being silently truncated there.
+        size = page_size or self.LIST_PAGE_SIZE
+        if page <= 0 and len(rows) <= size + 1:
             return rows, 0
 
-        start = max(0, page) * self.LIST_PAGE_SIZE
+        start = max(0, page) * size
         if start >= len(rows):  # ran past the end; restart from the beginning
             start, page = 0, 0
 
-        page_rows = list(rows[start : start + self.LIST_PAGE_SIZE])
+        page_rows = list(rows[start : start + size])
         remaining = len(rows) - (start + len(page_rows))
         if remaining > 0:
             page_rows.append(
@@ -4478,6 +4505,35 @@ class ConversationManager:
     #: the very list they were trying to leave.
     LAB_SEARCH_EXIT_WORDS = NAV_KEYWORDS | {"cancel", "back", "exit", "stop"}
 
+    #: Heading shown for catalogue rows carrying no category (migration 080) --
+    #: which is every row of every catalogue imported before it. A centre that
+    #: never files its tests therefore has exactly ONE heading, and the
+    #: category step below never appears for it.
+    LAB_UNCATEGORISED_LABEL = "Lab Tests"
+
+    @staticmethod
+    def _group_lab_tests_by_category(
+        tests: list[dict],
+    ) -> list[tuple[str, list[dict]]]:
+        """Tests grouped under their category heading, largest group first.
+
+        Grouped case-insensitively on the stored text: "Radiology" typed once
+        as "radiology" in one CSV must not split a centre's imaging menu into
+        two headings. The first spelling seen is the one displayed.
+
+        Largest group first because a centre's pathology list outranks its
+        three-item packages menu; ties fall back to the heading name so the
+        order never reshuffles between two taps of the same list.
+        """
+        groups: dict[str, tuple[str, list[dict]]] = {}
+        for t in tests:
+            label = (t.get("category") or "").strip() or ConversationManager.LAB_UNCATEGORISED_LABEL
+            key = label.lower()
+            if key not in groups:
+                groups[key] = (label, [])
+            groups[key][1].append(t)
+        return sorted(groups.values(), key=lambda g: (-len(g[1]), g[0].lower()))
+
     @staticmethod
     def _match_lab_tests(tests: list[dict], query: str) -> list[dict]:
         """Tests whose name contains every whitespace-separated term in `query`.
@@ -4530,6 +4586,34 @@ class ConversationManager:
             await self._send_main_menu(clinic, phone, lang)
             return
 
+        # A diagnostic centre does not sell one flat list of blood tests: it
+        # sells pathology, health packages, radiology and scans, at wildly
+        # different prices. Asking WHICH KIND first is the difference between a
+        # 1,392-row list and a four-row one. The headings are whatever the
+        # catalogue's own category column carries, so a centre that does no
+        # imaging has no imaging heading and there is nothing to switch off.
+        groups = self._group_lab_tests_by_category(tests)
+        category = (context.get("lab_category") or "").strip() or None
+        if category:
+            picked = next(
+                (rows for label, rows in groups if label.lower() == category.lower()),
+                None,
+            )
+            if picked is None:
+                # The heading was renamed, or its last test deleted, while the
+                # patient held the list open. Fall back to the headings rather
+                # than showing them an empty catalogue.
+                context.pop("lab_category", None)
+                category = None
+            else:
+                tests = picked
+
+        # One heading -- every catalogue that existed before migration 080 --
+        # skips this step entirely and behaves exactly as it always did.
+        if category is None and not (query or "").strip() and len(groups) > 1:
+            await self._show_lab_category_list(clinic, phone, context, lang, groups)
+            return
+
         # Capped because the query is echoed back into the list body, and
         # Meta rejects the whole message over 1024 characters -- a pasted
         # paragraph would otherwise take the patient's list away entirely.
@@ -4574,7 +4658,44 @@ class ConversationManager:
                 "description": desc[:72],
             })
 
-        rows, page = self._page_rows(all_rows, page, "labtest_more", lang)
+        # A patient who has just been shown 73 search hits has no way back: the
+        # list is the whole screen and typing again only searches again. These
+        # ride along on every page, and the content page shrinks by exactly as
+        # many rows so the total stays inside Meta's 10-row cap.
+        nav_rows = []
+        if len(groups) > 1:
+            nav_rows.append({
+                "id": "labcat_all",
+                "title": {
+                    "en": "⬅️ All services",
+                    "hi": "⬅️ सभी सेवाएं",
+                    "te": "⬅️ అన్ని సేవలు",
+                }.get(lang, "⬅️ All services")[:24],
+                "description": {
+                    "en": "Back to service types",
+                    "hi": "सेवा प्रकार पर वापस",
+                    "te": "సేవల రకాలకు తిరిగి",
+                }.get(lang, "Back to service types")[:72],
+            })
+        nav_rows.append({
+            "id": "lab_menu",
+            "title": {
+                "en": "🏠 Main Menu",
+                "hi": "🏠 मुख्य मेनू",
+                "te": "🏠 మెనూ",
+            }.get(lang, "🏠 Main Menu")[:24],
+            "description": {
+                "en": "Emergency, staff and more",
+                "hi": "आपात, स्टाफ और अधिक",
+                "te": "అత్యవసరం, సిబ్బంది",
+            }.get(lang, "Emergency, staff and more")[:72],
+        })
+
+        rows, page = self._page_rows(
+            all_rows, page, "labtest_more", lang,
+            page_size=self.LIST_PAGE_SIZE - len(nav_rows),
+        )
+        rows = rows + nav_rows
 
         if query:
             body = {
@@ -4632,7 +4753,10 @@ class ConversationManager:
             button_text=button_text,
             sections=[
                 {
-                    "title": ("Search Results" if query else "Available Tests")[:24],
+                    "title": (
+                        "Search Results" if query
+                        else (category or "Available Tests")
+                    )[:24],
                     "rows": rows,
                 }
             ],
@@ -4641,6 +4765,90 @@ class ConversationManager:
         # Persisted so "More options" pages within the search result set
         # instead of silently jumping back to the full catalogue.
         context["lab_test_query"] = query
+        # Persisted for the same reason: without it "More options" on page 2 of
+        # Radiology would page through the whole catalogue instead.
+        if category:
+            context["lab_category"] = category
+        else:
+            context.pop("lab_category", None)
+        await self.update_state(clinic, phone, "browsing_lab_tests", context)
+
+    async def _show_lab_category_list(
+        self,
+        clinic: dict,
+        phone: str,
+        context: dict,
+        lang: str,
+        groups: list[tuple[str, list[dict]]],
+        page: int = 0,
+    ) -> None:
+        """Ask which KIND of service before asking which test.
+
+        Only reached when the centre's catalogue carries more than one heading
+        (see _group_lab_tests_by_category). Headings are read off the rows
+        themselves rather than configured anywhere, so an admin who imports a
+        radiology CSV gets a Radiology heading in the bot on the next tap, and
+        one who offers no health packages never shows that heading at all.
+        """
+        all_rows = [
+            {
+                "id": f"labcat_{i}",
+                "title": label[:24],
+                "description": {
+                    "en": f"{len(rows)} available",
+                    "hi": f"{len(rows)} उपलब्ध",
+                    "te": f"{len(rows)} అందుబాటులో",
+                }.get(lang, f"{len(rows)} available")[:72],
+            }
+            # Indexed over the FULL heading list, not the page, so a row id
+            # stays valid after the patient taps "More options".
+            for i, (label, rows) in enumerate(groups)
+        ]
+
+        rows, page = self._page_rows(
+            all_rows, page, "labcat_more", lang,
+            page_size=self.LIST_PAGE_SIZE - 1,
+        )
+        rows = rows + [{
+            "id": "lab_menu",
+            "title": {
+                "en": "🏠 Main Menu",
+                "hi": "🏠 मुख्य मेनू",
+                "te": "🏠 మెనూ",
+            }.get(lang, "🏠 Main Menu")[:24],
+            "description": {
+                "en": "Emergency, staff and more",
+                "hi": "आपात, स्टाफ और अधिक",
+                "te": "అత్యవసరం, సిబ్బంది",
+            }.get(lang, "Emergency, staff and more")[:72],
+        }]
+
+        body = {
+            "en": "🏥 *What would you like to book?*\n\nChoose the kind of service below — or just type what you need, e.g. \"thyroid\", \"MRI brain\" or \"full body checkup\".",
+            "hi": "🏥 *आप क्या बुक करना चाहते हैं?*\n\nनीचे सेवा का प्रकार चुनें — या सीधे नाम टाइप करें, जैसे \"thyroid\" या \"MRI brain\"।",
+            "te": "🏥 *మీరు ఏది బుక్ చేయాలనుకుంటున్నారు?*\n\nక్రింద సేవ రకం ఎంచుకోండి — లేదా పేరు టైప్ చేయండి, ఉదా. \"thyroid\" లేదా \"MRI brain\".",
+        }.get(lang, "What would you like to book? Choose a service type below, or type what you need.")
+
+        await self.whatsapp.send_interactive_list(
+            clinic,
+            phone,
+            body=body,
+            button_text={
+                "en": "Choose service",
+                "hi": "सेवा चुनें",
+                "te": "సేవ ఎంచుకోండి",
+            }.get(lang, "Choose service")[:20],
+            sections=[{"title": "Services"[:24], "rows": rows}],
+        )
+
+        context["lab_categories"] = [label for label, _ in groups]
+        context["lab_cat_page"] = page
+        # Standing on the headings means no test list is open; leaving the old
+        # page/query behind would make the next "More options" page a list the
+        # patient can no longer see.
+        context.pop("lab_category", None)
+        context.pop("lab_test_page", None)
+        context.pop("lab_test_query", None)
         await self.update_state(clinic, phone, "browsing_lab_tests", context)
 
     def _next_collection_dates(self, allowed_days_str: str, count: int = 3) -> list[str]:
@@ -4668,9 +4876,47 @@ class ConversationManager:
         interactive_data: Optional[dict] = None,
     ) -> None:
         """Handle patient picking a lab test from the interactive list."""
-        from app.database import get_lab_test_by_id, get_lab_collection_window, format_collection_window
+        from app.database import (
+            get_lab_test_by_id,
+            get_lab_collection_window,
+            format_collection_window,
+            get_lab_tests,
+        )
 
         button_id = interactive_data.get("id", "") if interactive_data else ""
+
+        # Deliberately not "labtest_menu": that prefix is parsed as a test id
+        # a few lines down, and a test called "menu" is not the point.
+        if button_id == "lab_menu":
+            await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+            await self._send_main_menu(clinic, phone, lang)
+            return
+
+        if button_id.startswith("labcat_"):
+            suffix = button_id.removeprefix("labcat_")
+            # A stale heading list stays tappable forever, so every branch here
+            # re-reads the catalogue rather than trusting what the row says.
+            if suffix == "more":
+                catalogue = await get_lab_tests(
+                    clinic["id"], branch_id=context.get("branch_id"), active_only=True
+                )
+                await self._show_lab_category_list(
+                    clinic, phone, context, lang,
+                    self._group_lab_tests_by_category(catalogue),
+                    page=int(context.get("lab_cat_page") or 0) + 1,
+                )
+                return
+            categories = context.get("lab_categories") or []
+            context.pop("lab_test_page", None)
+            context.pop("lab_test_query", None)
+            if suffix.isdigit() and int(suffix) < len(categories):
+                context["lab_category"] = categories[int(suffix)]
+            else:
+                # "All services", or a row from a list built before the
+                # catalogue was re-filed: show the headings again.
+                context.pop("lab_category", None)
+            await self._show_lab_test_list(clinic, phone, context, lang)
+            return
 
         # Before the labtest_ prefix match: "labtest_more" would otherwise be
         # read as a test id of "more".

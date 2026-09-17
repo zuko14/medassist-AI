@@ -131,7 +131,10 @@ class TestShowList:
             await m._show_lab_test_list(CLINIC, PHONE, ctx, "en", query="thyroid")
 
         rows, body = _sent_rows(m)
-        assert [r["title"] for r in rows] == [
+        # Trailing Main Menu row: a patient looking at 73 search hits has no
+        # other way out of the list.
+        assert rows[-1]["id"] == "lab_menu"
+        assert [r["title"] for r in rows[:-1]] == [
             "THYROID PROFILE T3 T4 TSH"[:24],
             "PROFILE - THYROID ANTIBODY"[:24],
         ]
@@ -149,7 +152,10 @@ class TestShowList:
         rows, body = _sent_rows(m)
         assert "Type the test name" in body
         assert str(len(CATALOGUE)) in body
-        assert rows[-1]["title"] == "More options"  # browsing still works
+        assert rows[-1]["id"] == "lab_menu"
+        assert rows[-2]["title"] == "More options"  # browsing still works
+        # Nav row included, a page must still fit Meta's 10-row cap.
+        assert len(rows) <= 10
 
     @pytest.mark.asyncio
     async def test_small_catalogue_gets_no_search_nag(self):
@@ -189,7 +195,8 @@ class TestShowList:
     @pytest.mark.asyncio
     async def test_more_options_pages_within_the_search_results(self):
         m = _manager()
-        # 30 matches: page 0 shows 9 + More, page 1 shows the next 9.
+        # 30 matches. The Main Menu row costs one slot, so page 0 shows
+        # 8 + More + Main Menu and page 1 shows the next 8.
         many = [_test(f"VITAMIN D {i:03d}") for i in range(30)]
         ctx = {"lab_test_page": 0, "lab_test_query": "vitamin"}
         with patch("app.database.get_lab_tests", new_callable=AsyncMock, return_value=many + CATALOGUE):
@@ -199,8 +206,10 @@ class TestShowList:
 
         rows, _ = _sent_rows(m)
         titles = [r["title"] for r in rows]
-        assert all(t.startswith("VITAMIN D") for t in titles[:-1]), titles
-        assert titles[-1] == "More options"
+        assert all(t.startswith("VITAMIN D") for t in titles[:-2]), titles
+        assert titles[-2] == "More options"
+        assert rows[-1]["id"] == "lab_menu"
+        assert len(rows) <= 10
         assert ctx["lab_test_query"] == "vitamin"
 
 

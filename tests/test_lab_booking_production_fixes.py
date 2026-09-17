@@ -428,6 +428,9 @@ async def test_rows_whose_names_truncate_identically_stay_distinguishable():
         await manager._show_lab_test_list(CLINIC, PHONE, {}, "en")
 
     rows = captured["sections"][0]["rows"]
+    # Two tests plus the trailing Main Menu row every catalogue list carries.
+    assert rows[-1]["id"] == "lab_menu"
+    rows = rows[:-1]
     assert len(rows) == 2
     titles = [r["title"] for r in rows]
     assert titles[0] == titles[1], "precondition: these names truncate identically"

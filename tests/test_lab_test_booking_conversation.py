@@ -120,7 +120,8 @@ class TestShowLabTestList:
         mock_send_list.assert_called_once()
         sections = mock_send_list.call_args.kwargs["sections"]
         row_ids = [r["id"] for r in sections[0]["rows"]]
-        assert row_ids == ["labtest_t1", "labtest_t2"]
+        # Trailing Main Menu row rides along on every catalogue list.
+        assert row_ids == ["labtest_t1", "labtest_t2", "lab_menu"]
         mock_update_state.assert_called_once_with(clinic, "+919876543210", "browsing_lab_tests", context)
 
     @pytest.mark.asyncio

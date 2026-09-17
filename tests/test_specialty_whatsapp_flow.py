@@ -147,7 +147,9 @@ async def test_card_has_three_buttons_and_fits_the_body_limit():
     ids = [b["id"] for b in call.kwargs["buttons"]]
     assert ids == [f"trtbook_{t['id']}", f"trtcall_{t['id']}", "menu_treatments"]
     for lang in ("en", "hi", "te"):
-        assert all(len(b["title"]) <= 20 for b in sf._card_buttons(t["id"], lang))
+        # _card_buttons takes the treatment, not its id: the first button
+        # depends on the row's care pathway (migration 081).
+        assert all(len(b["title"]) <= 20 for b in sf._card_buttons(t, lang))
 
 
 @pytest.mark.asyncio

@@ -880,9 +880,13 @@ class TestCsvImportScope:
             "total_imported": 1,
             "branch_id": MADHAPUR,
             "scope": "branch",
+            "category": None,
             "errors": [],
         }
         assert updates[0]["price_paise"] == 70000
+        # No category column and no file-level category: the key is absent so
+        # a plain price-list re-import cannot wipe headings filed by hand.
+        assert "category" not in updates[0]
         assert inserts == []
         # An import must never MOVE a test between branches: the lookup only
         # ever matches rows already in the import's scope, so the branch it

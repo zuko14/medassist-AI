@@ -25,6 +25,7 @@ from app.database import (
     get_treatment_by_id,
     get_treatment_doctor_ids,
     has_active_treatments,
+    has_entry_treatment,
     log_analytics_event,
     sb,
     supabase,
@@ -46,6 +47,8 @@ TREATMENT_CONTEXT_KEYS = (
     "treatment_category",
     "treatment_page",
     "treatment_cat_page",
+    "treatment_interest",
+    "treatment_entry_page",
 )
 TREATMENT_RESET_STATES = frozenset({
     "main_menu",
@@ -55,8 +58,43 @@ TREATMENT_RESET_STATES = frozenset({
     "collecting_symptoms",
 })
 
-TREATMENT_BUTTON_IDS = frozenset({"menu_treatments", "menu_concern", "trtcat_more", "trt_more"})
-TREATMENT_BUTTON_PREFIXES = ("trtcat_", "trtbook_", "trtcall_", "trt_")
+TREATMENT_BUTTON_IDS = frozenset({
+    "menu_treatments", "menu_concern", "menu_entry_consult",
+    "trtcat_more", "trt_more", "trtentry_more",
+})
+TREATMENT_BUTTON_PREFIXES = ("trtcat_", "trtbook_", "trtcall_", "trtexam_", "trt_")
+
+#: migration 081. What the patient is allowed to choose, and what only the
+#: doctor gets to decide.
+PATHWAY_ENTRY = "entry"                       # the first visit
+PATHWAY_DIRECT = "direct"                     # patient may ask for it by name
+PATHWAY_ASSESSMENT_FIRST = "assessment_first"  # doctor decides after examining
+
+
+def care_pathway(treatment: dict) -> str:
+    """Never trust the column to be present: rows read before migration 081,
+    and every clinic that has classified nothing, are 'direct'."""
+    # str(): this runs while rendering the main menu and every card, so a
+    # surprising value must degrade to the default rather than take the whole
+    # reply down. The column is TEXT, but the dict also arrives from seeds,
+    # fixtures and imports.
+    value = str((treatment or {}).get("care_pathway") or "").strip().lower()
+    return value if value in (PATHWAY_ENTRY, PATHWAY_DIRECT, PATHWAY_ASSESSMENT_FIRST) else PATHWAY_DIRECT
+
+
+def entry_treatments(treatments: list) -> list:
+    return [t for t in (treatments or []) if care_pathway(t) == PATHWAY_ENTRY]
+
+#: Whole messages that mean "get me out of the treatment flow". Matched on the
+#: EXACT message, never as a substring or via the intent classifier: a real
+#: concern ("my skin is stopping me sleeping") must never read as an exit.
+#: Duplicated from conversation.NAV_KEYWORDS rather than imported because
+#: conversation.py imports this module.
+TREATMENT_EXIT_WORDS = frozenset({
+    "menu", "main menu", "home", "start over", "reset", "मेनू", "మెనూ",
+    "cancel", "back", "exit", "stop", "quit",
+    "hi", "hello", "hey", "book", "book appointment", "appointment",
+})
 
 CALLBACK_COOLDOWN = timedelta(hours=24)
 _BODY_LIMIT = 1024
@@ -89,18 +127,48 @@ async def treatment_menu_active(clinic: Optional[dict]) -> bool:
     return await has_active_treatments(clinic["id"])
 
 
-def treatment_menu_rows(lang: str) -> list:
+def treatment_menu_rows(lang: str, has_entry: bool = False) -> list:
+    """The specialty rows of the main menu.
+
+    `has_entry` reorders them, and it is a fact about the clinic's catalogue
+    rather than about its plan. An eye hospital that has published a
+    "Comprehensive Eye Check-up" leads with booking it, because its patients
+    arrive describing a symptom and expect to be examined -- being handed a
+    procedure catalogue first is backwards. A derma clinic that classifies
+    nothing keeps the order it has today, where the catalogue IS the product.
+    """
+    catalogue = {
+        "id": "menu_treatments",
+        "title": _t(lang, "✨ Our Treatments", "✨ हमारे उपचार", "✨ మా చికిత్సలు")[:24],
+        "description": _t(lang, "Explore & book treatments", "उपचार देखें और बुक करें",
+                          "చికిత్సలు చూసి బుక్ చేయండి")[:72],
+    }
+    concern = {
+        "id": "menu_concern",
+        "title": _t(lang, "🔍 Find by Concern", "🔍 समस्या से खोजें", "🔍 సమస్యతో వెతకండి")[:24],
+        "description": _t(lang, "Describe your problem", "अपनी समस्या बताएं", "మీ సమస్య చెప్పండి")[:72],
+    }
+    if not has_entry:
+        return [catalogue, concern]
+
     return [
         {
-            "id": "menu_treatments",
-            "title": _t(lang, "✨ Our Treatments", "✨ हमारे उपचार", "✨ మా చికిత్సలు")[:24],
-            "description": _t(lang, "Explore & book treatments", "उपचार देखें और बुक करें",
-                              "చికిత్సలు చూసి బుక్ చేయండి")[:72],
+            "id": "menu_entry_consult",
+            "title": _t(lang, "🩺 Book Consultation", "🩺 परामर्श बुक करें", "🩺 కన్సల్టేషన్")[:24],
+            "description": _t(lang, "See a specialist first", "पहले विशेषज्ञ से मिलें",
+                              "ముందు నిపుణుడిని కలవండి")[:72],
         },
         {
-            "id": "menu_concern",
-            "title": _t(lang, "🔍 Find by Concern", "🔍 समस्या से खोजें", "🔍 సమస్యతో వెతకండి")[:24],
-            "description": _t(lang, "Describe your problem", "अपनी समस्या बताएं", "మీ సమస్య చెప్పండి")[:72],
+            **concern,
+            "title": _t(lang, "🔍 Not sure? Tell us", "🔍 पता नहीं? बताएं", "🔍 తెలియదా? చెప్పండి")[:24],
+            "description": _t(lang, "Describe what you feel", "आप क्या महसूस करते हैं",
+                              "మీకు ఏమనిపిస్తోందో చెప్పండి")[:72],
+        },
+        {
+            **catalogue,
+            "title": _t(lang, "✨ What We Treat", "✨ हम क्या इलाज करते हैं", "✨ మేము ఏం చికిత్స")[:24],
+            "description": _t(lang, "Browse our services", "हमारी सेवाएं देखें",
+                              "మా సేవలు చూడండి")[:72],
         },
     ]
 
@@ -277,9 +345,26 @@ async def show_treatments_in_category(
     )
 
 
-def _card_buttons(treatment_id: str, lang: str) -> list:
+def _card_buttons(treatment: dict, lang: str) -> list:
+    """The first button is the promise the card makes.
+
+    For a doctor-decided treatment it must not say "Book Consultation" beside
+    a procedure name, because the patient reads that as booking the procedure.
+    It books an examination instead, and the card says so in words above.
+    """
+    treatment_id = str(treatment["id"])
+    if care_pathway(treatment) == PATHWAY_ASSESSMENT_FIRST:
+        first = {
+            "id": f"trtexam_{treatment_id}",
+            "title": _t(lang, "Book Examination", "जांच बुक करें", "పరీక్ష బుక్ చేయండి"),
+        }
+    else:
+        first = {
+            "id": f"trtbook_{treatment_id}",
+            "title": _t(lang, "Book Consultation", "परामर्श बुक करें", "కన్సల్టేషన్ బుక్"),
+        }
     return [
-        {"id": f"trtbook_{treatment_id}", "title": _t(lang, "Book Consultation", "परामर्श बुक करें", "కన్సల్టేషన్ బుక్")},
+        first,
         {"id": f"trtcall_{treatment_id}", "title": _t(lang, "Request Callback", "कॉल बैक करें", "కాల్ బ్యాక్")},
         {"id": "menu_treatments", "title": _t(lang, "All Treatments", "सभी उपचार", "అన్ని చికిత్సలు")},
     ]
@@ -312,32 +397,129 @@ async def show_treatment_card(manager, clinic: dict, phone: str, treatment_id: s
     if prep:
         lines += ["", f"📝 *{_t(lang, 'Before your visit', 'आने से पहले', 'రావడానికి ముందు')}:* {prep[:300]}"]
 
-    lines += ["", _t(lang,
-                     "_Our specialist will examine you and confirm what suits you._",
-                     "_हमारे विशेषज्ञ जांच के बाद बताएंगे कि आपके लिए क्या सही है।_",
-                     "_మా నిపుణులు పరీక్షించి మీకు ఏది సరిపోతుందో చెబుతారు._")]
+    if care_pathway(treatment) == PATHWAY_ASSESSMENT_FIRST:
+        # Stated plainly, above the buttons, because the button alone cannot
+        # carry it: a patient reading "Cataract Surgery" with a Book button
+        # believes they are booking surgery.
+        lines += ["", _t(lang,
+                         "🩺 *Planned by your specialist after an examination* — this is not "
+                         "booked directly. Your first visit is a consultation, and the doctor "
+                         "confirms whether this is right for you.",
+                         "🩺 *यह विशेषज्ञ की जांच के बाद तय होता है* — इसे सीधे बुक नहीं किया जाता। "
+                         "आपकी पहली विज़िट एक परामर्श है, और डॉक्टर तय करेंगे कि यह आपके लिए सही है या नहीं।",
+                         "🩺 *ఇది నిపుణుల పరీక్ష తర్వాత నిర్ణయించబడుతుంది* — దీన్ని నేరుగా బుక్ చేయరు. "
+                         "మీ మొదటి సందర్శన కన్సల్టేషన్, డాక్టర్ ఇది మీకు సరిపోతుందో నిర్ధారిస్తారు.")]
+    else:
+        lines += ["", _t(lang,
+                         "_Our specialist will examine you and confirm what suits you._",
+                         "_हमारे विशेषज्ञ जांच के बाद बताएंगे कि आपके लिए क्या सही है।_",
+                         "_మా నిపుణులు పరీక్షించి మీకు ఏది సరిపోతుందో చెబుతారు._")]
 
     await manager.whatsapp.send_interactive_buttons(
         clinic,
         phone,
         body=_truncate_body("\n".join(lines)),
-        buttons=_card_buttons(str(treatment["id"]), lang),
+        buttons=_card_buttons(treatment, lang),
     )
     await manager.update_state(clinic, phone, "browsing_treatments", {})
 
 
 # ── Booking hand-off ─────────────────────────────────────────────────────────
 
-async def start_treatment_booking(manager, clinic: dict, phone: str, treatment_id: str, lang: str) -> None:
+async def start_treatment_booking(
+    manager, clinic: dict, phone: str, treatment_id: str, lang: str,
+    interest_name: Optional[str] = None,
+) -> None:
     treatment = await get_treatment_by_id(clinic["id"], treatment_id)
     if not treatment:
         await _send_unavailable(manager, clinic, phone, lang)
         return
     patient = await get_patient_by_phone(clinic["id"], phone)
-    await manager._start_booking(
-        clinic, phone, patient, lang,
-        seed_context={"treatment_id": str(treatment["id"]), "treatment_name": treatment["name"]},
+    seed = {"treatment_id": str(treatment["id"]), "treatment_name": treatment["name"]}
+    if interest_name:
+        # The booking is the examination; this records what the patient came
+        # asking about, so reception and the doctor are not guessing.
+        seed["treatment_interest"] = interest_name
+    await manager._start_booking(clinic, phone, patient, lang, seed_context=seed)
+
+
+async def start_entry_consultation(
+    manager, clinic: dict, phone: str, lang: str,
+    interest: Optional[dict] = None, page: int = 0,
+) -> None:
+    """Book the clinic's first-visit consultation.
+
+    Reached from "Book Consultation" on the main menu, from "Book Examination"
+    on a doctor-decided card, and from "I'm not sure" in the concern search.
+
+    `interest` is the procedure the patient was reading about. The APPOINTMENT
+    is the examination -- that is the whole point -- but the interest travels
+    with it so the clinic sees why the patient came, and so the booking is
+    routed to a doctor who actually performs it when there is no entry
+    treatment to fall back on.
+    """
+    treatments = await get_specialty_treatments(clinic["id"]) if specialty_enabled(clinic) else []
+    entries = entry_treatments(treatments)
+
+    if not entries:
+        # No first-visit row published. Booking the treatment itself still
+        # books a CONSULTATION with a doctor who performs it (a treatment is
+        # only ever a tag on a consultation -- migration 077), so this is the
+        # same promise, just without the dedicated examination row.
+        if interest:
+            await start_treatment_booking(manager, clinic, phone, str(interest["id"]), lang)
+            return
+        patient = await get_patient_by_phone(clinic["id"], phone)
+        await manager._start_booking(clinic, phone, patient, lang)
+        return
+
+    if len(entries) == 1:
+        await start_treatment_booking(
+            manager, clinic, phone, str(entries[0]["id"]), lang,
+            interest_name=(interest or {}).get("name"),
+        )
+        return
+
+    # Several first-visit rows (an eye hospital may run a general check-up and
+    # a child eye check). Ask, rather than guessing on the patient's behalf.
+    if interest:
+        ctx = ((await get_conversation(clinic["id"], phone)) or {}).get("context") or {}
+        ctx["treatment_interest"] = interest.get("name")
+        await update_conversation(clinic["id"], phone, {"context": ctx})
+
+    rows = [
+        {"id": f"trtbook_{t['id']}", "title": _title(t), "description": _row_description(t, lang)}
+        for t in entries
+    ]
+    # Its own pager id, not "trt_more": that one means "next page of the
+    # treatments in the chosen CATEGORY", and with no category set it falls
+    # back to the category list -- so a tenth first-visit row would have been
+    # silently unreachable.
+    rows, page = manager._page_rows(rows, page, "trtentry_more", lang)
+    await manager.whatsapp.send_interactive_list(
+        clinic,
+        phone,
+        header=_t(lang, "Book a consultation", "परामर्श बुक करें", "కన్సల్టేషన్ బుక్ చేయండి")[:60],
+        body=_t(lang,
+                "Our specialist will examine you and explain what is needed. "
+                "Which consultation would you like?",
+                "हमारे विशेषज्ञ आपकी जांच करके बताएंगे कि क्या ज़रूरी है। आप कौन सा परामर्श चाहेंगे?",
+                "మా నిపుణులు మిమ్మల్ని పరీక్షించి ఏమి అవసరమో చెబుతారు. మీకు ఏ కన్సల్టేషన్ కావాలి?"),
+        button_text=_t(lang, "Choose", "चुनें", "ఎంచుకోండి")[:20],
+        sections=[{"title": _t(lang, "Consultations", "परामर्श", "కన్సల్టేషన్లు")[:24], "rows": rows}],
     )
+    await manager.update_state(
+        clinic, phone, "browsing_treatments", {"treatment_entry_page": page}
+    )
+
+
+async def start_examination_for(manager, clinic: dict, phone: str, treatment_id: str, lang: str) -> None:
+    """"Book Examination" on a doctor-decided card."""
+    treatment = await get_treatment_by_id(clinic["id"], treatment_id)
+    if not treatment:
+        await _send_unavailable(manager, clinic, phone, lang)
+        return
+    await start_entry_consultation(manager, clinic, phone, lang, interest=treatment)
 
 
 async def route_to_treatment_doctors(manager, clinic: dict, phone: str, context: dict, lang: str) -> bool:
@@ -409,10 +591,11 @@ async def show_treatment_doctors(manager, clinic: dict, phone: str, context: dic
         button_text=_t(lang, "Select Doctor", "डॉक्टर चुनें", "డాక్టర్‌ ఎంచుకోండి"),
         sections=[{"title": _t(lang, "Specialists", "विशेषज्ञ", "నిపుణులు")[:24], "rows": rows}],
     )
+    interest = (context.get("treatment_interest") or "").strip()
     context.update({
         "treatment_id": str(treatment["id"]),
         "treatment_name": name,
-        "symptoms": f"Treatment: {name}",
+        "symptoms": f"Treatment: {name}" + (f" (asked about: {interest})" if interest else ""),
         "doctor_page": page,
     })
     await manager.update_state(clinic, phone, "selecting_doctor", context)
@@ -523,6 +706,34 @@ async def request_callback(manager, clinic: dict, phone: str, treatment_id: str,
 
 async def prompt_concern(manager, clinic: dict, phone: str, lang: str) -> None:
     examples = CONCERN_EXAMPLES.get(SPECIALTY_BY_PLAN.get(clinic.get("plan")), "hair fall, tooth pain, blurred vision")
+
+    # A patient who cannot name what is wrong is the normal case at an eye,
+    # dental or fertility clinic -- that is the whole objection this pathway
+    # answers. Offer the examination rather than insisting they describe it.
+    if await has_entry_treatment(clinic["id"]):
+        await manager.whatsapp.send_interactive_buttons(
+            clinic,
+            phone,
+            body=_t(lang,
+                    f"🔍 Tell us what you are feeling, in a few words.\nFor example: _{examples}_\n\n"
+                    "We will show what may be relevant at our clinic. Our specialist confirms "
+                    "everything after examining you.\n\n"
+                    "Not sure how to describe it? That is completely fine — tap below and our "
+                    "specialist will examine you and explain what is needed.",
+                    f"🔍 आप क्या महसूस कर रहे हैं, कुछ शब्दों में बताएं।\nउदाहरण: _{examples}_\n\n"
+                    "हम बताएंगे कि हमारे क्लिनिक में क्या प्रासंगिक हो सकता है। जांच के बाद विशेषज्ञ सब कुछ तय करेंगे।\n\n"
+                    "बताना मुश्किल लग रहा है? कोई बात नहीं — नीचे दबाएं, हमारे विशेषज्ञ जांच करके बताएंगे।",
+                    f"🔍 మీకు ఏమనిపిస్తోందో కొన్ని మాటల్లో చెప్పండి.\nఉదాహరణ: _{examples}_\n\n"
+                    "మా క్లినిక్‌లో ఏది ఉపయోగపడవచ్చో చూపిస్తాము. పరీక్ష తర్వాత నిపుణులు అన్నింటిని నిర్ధారిస్తారు.\n\n"
+                    "చెప్పడం కష్టంగా ఉందా? ఫర్వాలేదు — క్రింద నొక్కండి, మా నిపుణులు పరీక్షించి చెబుతారు."),
+            buttons=[{
+                "id": "menu_entry_consult",
+                "title": _t(lang, "Book Examination", "जांच बुक करें", "పరీక్ష బుక్ చేయండి"),
+            }],
+        )
+        await manager.update_state(clinic, phone, "searching_treatments", {})
+        return
+
     await manager.whatsapp.send_text(
         clinic,
         phone,
@@ -556,6 +767,7 @@ async def handle_treatment_search_text(manager, clinic: dict, phone: str, messag
     if not treatments:
         await return_to_main_menu(manager, clinic, phone, lang)
         return
+    has_entry = bool(entry_treatments(treatments))
 
     matches = match_treatments(treatments, query)[:9]
     if not matches:
@@ -564,6 +776,34 @@ async def handle_treatment_search_text(manager, clinic: dict, phone: str, messag
         matches = [by_id[i] for i in ranked if i in by_id]
 
     if not matches:
+        # Not finding a match is not the patient's failure, and dumping a
+        # category list on them implies it was. If the clinic examines first,
+        # say so -- that is the answer to "I don't know what I need".
+        if has_entry:
+            await manager.whatsapp.send_interactive_buttons(
+                clinic, phone,
+                body=_t(lang,
+                        "Thank you. Rather than guess from a message, the right next step is for "
+                        "our specialist to examine you and explain what is needed.\n\n"
+                        "_We will not suggest a treatment before a doctor has seen you._",
+                        "धन्यवाद। संदेश से अनुमान लगाने के बजाय, सही अगला कदम यह है कि हमारे विशेषज्ञ "
+                        "आपकी जांच करें और बताएं कि क्या ज़रूरी है।\n\n"
+                        "_डॉक्टर के देखे बिना हम कोई उपचार नहीं सुझाते।_",
+                        "ధన్యవాదాలు. సందేశం నుండి ఊహించే బదులు, మా నిపుణులు మిమ్మల్ని పరీక్షించి "
+                        "ఏమి అవసరమో చెప్పడమే సరైన తదుపరి అడుగు.\n\n"
+                        "_డాక్టర్ చూడకుండా మేము ఏ చికిత్సనూ సూచించము._"),
+                buttons=[
+                    {"id": "menu_entry_consult",
+                     "title": _t(lang, "Book Examination", "जांच बुक करें", "పరీక్ష బుక్")},
+                    {"id": "menu_treatments",
+                     "title": _t(lang, "What We Treat", "हमारे उपचार", "మా చికిత్సలు")},
+                    {"id": "menu_human",
+                     "title": _t(lang, "Talk to Staff", "स्टाफ से बात", "సిబ్బందితో మాట్లాడు")},
+                ],
+            )
+            await manager.update_state(clinic, phone, "searching_treatments", {})
+            return
+
         await manager.whatsapp.send_text(
             clinic, phone,
             _t(lang,
@@ -576,21 +816,35 @@ async def handle_treatment_search_text(manager, clinic: dict, phone: str, messag
         return
 
     shown = query[:60]
+    rows = [
+        {"id": f"trt_{t['id']}", "title": _title(t), "description": _row_description(t, lang)}
+        for t in matches
+    ]
+    if has_entry:
+        # The honest last row. Nothing above is a diagnosis, and a patient who
+        # recognises none of it must not be left re-typing their symptom.
+        rows.append({
+            "id": "menu_entry_consult",
+            "title": _t(lang, "🦺 Book Examination", "🦺 जांच बुक करें", "🦺 పరీక్ష బుక్")[:24],
+            "description": _t(lang, "Let the specialist decide", "विशेषज्ञ को तय करने दें",
+                              "నిపుణులు నిర్ణయించనివ్వండి")[:72],
+        })
+
     await manager.whatsapp.send_interactive_list(
         clinic,
         phone,
         header=_t(lang, "Treatments that may help", "उपयोगी उपचार", "ఉపయోగపడే చికిత్సలు")[:60],
         body=_t(lang,
-                f"These treatments at our clinic may be relevant to *{shown}*. Tap one to learn more.\n\n"
-                "_Only our specialist can confirm what suits you._",
-                f"*{shown}* के लिए हमारे क्लिनिक के ये उपचार उपयोगी हो सकते हैं। अधिक जानने के लिए किसी एक पर टैप करें।\n\n"
-                "_आपके लिए क्या सही है, यह केवल हमारे विशेषज्ञ बता सकते हैं।_",
-                f"*{shown}* కోసం మా క్లినిక్‌లోని ఈ చికిత్సలు ఉపయోగపడవచ్చు. మరింత తెలుసుకోవడానికి ఒకదాన్ని నొక్కండి.\n\n"
-                "_మీకు ఏది సరిపోతుందో మా నిపుణులు మాత్రమే నిర్ధారించగలరు._"),
+                f"These are treatments our clinic offers that relate to *{shown}*. Tap one to read about it.\n\n"
+                "_This is not a diagnosis. Your specialist examines you first and then confirms the plan._",
+                f"*{shown}* से जुड़े हमारे क्लिनिक के उपचार ये हैं। पढ़ने के लिए किसी एक पर टैप करें।\n\n"
+                "_यह निदान नहीं है। विशेषज्ञ पहले जांच करते हैं, फिर योजना तय करते हैं।_",
+                f"*{shown}* కి సంబంధించి మా క్లినిక్ అందించే చికిత్సలు ఇవి. చదవడానికి ఒకదాన్ని నొక్కండి.\n\n"
+                "_ఇది రోగ నిర్ధారణ కాదు. నిపుణులు ముందు పరీక్షించి, ఆపై ప్రణాళిక నిర్ధారిస్తారు._"),
         button_text=_t(lang, "View", "देखें", "చూడండి"),
         sections=[{
             "title": _t(lang, "Treatments", "उपचार", "చికిత్సలు")[:24],
-            "rows": [{"id": f"trt_{t['id']}", "title": _title(t), "description": _row_description(t, lang)} for t in matches],
+            "rows": rows,
         }],
     )
     await manager.update_state(clinic, phone, "searching_treatments", {})
@@ -609,6 +863,13 @@ async def handle_treatment_button(manager, clinic: dict, phone: str, button_id: 
         await show_treatment_categories(manager, clinic, phone, lang)
     elif button_id == "menu_concern":
         await prompt_concern(manager, clinic, phone, lang)
+    elif button_id == "menu_entry_consult":
+        await start_entry_consultation(manager, clinic, phone, lang)
+    elif button_id == "trtentry_more":
+        await start_entry_consultation(
+            manager, clinic, phone, lang,
+            page=int(ctx.get("treatment_entry_page") or 0) + 1,
+        )
     elif button_id == "trtcat_more":
         await show_treatment_categories(manager, clinic, phone, lang, page=int(ctx.get("treatment_cat_page") or 0) + 1)
     elif button_id == "trt_more":
@@ -626,7 +887,13 @@ async def handle_treatment_button(manager, clinic: dict, phone: str, button_id: 
         else:
             await show_treatment_categories(manager, clinic, phone, lang)
     elif button_id.startswith("trtbook_"):
-        await start_treatment_booking(manager, clinic, phone, button_id[len("trtbook_"):], lang)
+        # An interest recorded by a multi-entry prompt survives the tap.
+        await start_treatment_booking(
+            manager, clinic, phone, button_id[len("trtbook_"):], lang,
+            interest_name=(ctx.get("treatment_interest") or None),
+        )
+    elif button_id.startswith("trtexam_"):
+        await start_examination_for(manager, clinic, phone, button_id[len("trtexam_"):], lang)
     elif button_id.startswith("trtcall_"):
         await request_callback(manager, clinic, phone, button_id[len("trtcall_"):], lang)
     elif button_id.startswith("trt_"):
@@ -635,8 +902,26 @@ async def handle_treatment_button(manager, clinic: dict, phone: str, button_id: 
         await return_to_main_menu(manager, clinic, phone, lang)
 
 
-async def handle_treatment_state(manager, clinic: dict, phone: str, lang: str) -> None:
-    """Anything in a browsing/search state that no handler above claimed."""
+async def handle_treatment_state(
+    manager, clinic: dict, phone: str, lang: str, message: str = ""
+) -> None:
+    """Anything in a browsing/search state that no handler above claimed.
+
+    Typed text lands here whenever the intent classifier labelled a free-text
+    concern as something else. "Dark circles" comes back as book_appointment,
+    and the guard in conversation.py that routes typed text to the concern
+    search steps aside for that intent so a literal "book appointment" still
+    escapes. The concern was therefore answered with the main menu -- and
+    because that left the patient in main_menu, their NEXT concern ("acne")
+    started a doctor booking instead of showing a treatment.
+
+    So: text is the concern it plainly is, and the escapes keep working by
+    matching the exit words themselves instead of trusting the classifier.
+    """
+    typed = (message or "").strip()
+    if typed and typed.lower() not in TREATMENT_EXIT_WORDS:
+        await handle_treatment_search_text(manager, clinic, phone, typed, lang)
+        return
     await return_to_main_menu(manager, clinic, phone, lang)
 
 
