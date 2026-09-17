@@ -2223,3 +2223,715 @@ async def get_outbound_audit(
     return await get_outbound_audit_feed(
         clinic_id=clinic_id, source_class=source_class, days=days, limit=limit
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PLATFORM FINANCIAL CONTROL CENTRE — the Kriya AI books
+# ═══════════════════════════════════════════════════════════════════════════════
+# OWNER-ONLY, without exception. Every endpoint below carries what a clinic is
+# charged, what the platform spends, and the margin on each account. A clinic
+# seeing another clinic's negotiated rate is a commercial leak; a clinic seeing
+# the platform's margin on itself is worse. None of this may be reached from
+# app/routers/admin.py, which is where clinic admins authenticate.
+#
+# Arithmetic lives in app/services/platform_finance.py. These handlers only
+# validate input, call it, and write rows — so the money rules stay testable
+# without a web stack.
+
+
+class BillingRateUpdate(BaseModel):
+    """A negotiated per-clinic rate. Overrides the plan's list price."""
+
+    rate_paise: int = Field(..., ge=0, le=100_000_000)  # ceiling: Rs 10,00,000/mo
+    billing_mode: Literal["per_location", "flat"] = "per_location"
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+class ExpenseCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    category: Literal[
+        "hosting", "database", "ai", "messaging", "domain", "payment", "people", "other"
+    ] = "other"
+    amount_paise: int = Field(..., ge=0, le=1_000_000_000)  # ceiling: Rs 1,00,00,000
+    is_recurring: bool = True
+    month: Optional[str] = None  # required for one-off, 'YYYY-MM'
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+class ExpenseUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    category: Optional[
+        Literal["hosting", "database", "ai", "messaging", "domain", "payment", "people", "other"]
+    ] = None
+    amount_paise: Optional[int] = Field(None, ge=0, le=1_000_000_000)
+    notes: Optional[str] = Field(None, max_length=500)
+    # Which month the new amount starts applying from. Defaults to the current
+    # month; earlier months keep the old amount (see supersede_plan).
+    effective_month: Optional[str] = None
+
+
+class InvoicePaymentUpdate(BaseModel):
+    status: Literal["unpaid", "partial", "paid", "waived"]
+    amount_paid_paise: Optional[int] = Field(None, ge=0, le=1_000_000_000)
+    paid_at: Optional[str] = None  # 'YYYY-MM-DD'
+    payment_note: Optional[str] = Field(None, max_length=500)
+
+
+def _finance_unavailable(e: Exception) -> HTTPException:
+    """Turn a missing-table error into a 503 the dashboard can explain.
+
+    Migration 079 creates these tables. Until it has been applied the panel
+    must say so plainly rather than returning a 500 that reads like a bug in
+    the rest of the dashboard.
+    """
+    text = str(e).lower()
+    if "does not exist" in text or "42p01" in text:
+        return HTTPException(
+            status_code=503,
+            detail="Financial tables not found. Apply migrations/079_platform_finance.sql.",
+        )
+    return HTTPException(status_code=500, detail="Financial operation failed")
+
+
+@router.get("/finance")
+async def get_platform_finance(
+    request: Request,
+    month: Optional[str] = None,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Full P&L for a month: per-clinic economics and platform-wide totals.
+
+    OWNER-ONLY. Defaults to the current IST month.
+    """
+    from app.services.platform_finance import finance_summary, is_valid_month
+
+    if month and not is_valid_month(month):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+
+    client_ip = request.client.host if request.client else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="view_platform_finance",
+        resource_type="platform",
+        details={"month": month},
+        ip_address=client_ip,
+    )
+
+    try:
+        return await finance_summary(month)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Finance summary failed: {e}")
+        raise _finance_unavailable(e)
+
+
+# -- Per-clinic billing rates -------------------------------------------------
+
+
+@router.get("/finance/rates")
+async def get_finance_rates(
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Every clinic's effective rate, and whether it is a plan default or a
+    negotiated override. The edit surface for the per-clinic pricing table."""
+    from app.services.message_accounting import _get_plan_tiers
+    from app.services.platform_finance import fetch_billing_rates, resolve_rate
+
+    try:
+        clinics_res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinics").select("id, name, plan, is_active"))
+        )
+        clinics = clinics_res.data or []
+        plan_tiers = await _get_plan_tiers()
+        overrides = await fetch_billing_rates()
+        branch_census = await _fetch_clinic_branch_counts()
+    except Exception as e:
+        logger.error(f"Failed to load billing rates: {e}")
+        raise _finance_unavailable(e)
+
+    rows = []
+    for c in clinics:
+        cid = c.get("id")
+        if not cid:
+            continue
+        rate = resolve_rate(c.get("plan"), overrides.get(cid), plan_tiers)
+        rows.append({
+            "clinic_id": cid,
+            "clinic_name": c.get("name"),
+            "plan": c.get("plan"),
+            "is_active": c.get("is_active", True) is not False,
+            "locations_billed": _billable_locations(
+                (branch_census.get(cid) or {}).get("active", 0)
+            ),
+            "plan_default_paise": (plan_tiers.get(c.get("plan") or "") or {}).get(
+                "monthly_price_paise", 0
+            ),
+            **rate,
+        })
+
+    rows.sort(key=lambda r: (r["rate_source"] != "override", r["clinic_name"] or ""))
+    return {"success": True, "rates": rows}
+
+
+@router.put("/finance/rates/{clinic_id}")
+async def set_finance_rate(
+    clinic_id: str,
+    payload: BillingRateUpdate,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Pin a clinic to a negotiated rate.
+
+    The clinic is verified to exist first: platform_billing_rates has an FK to
+    clinics, so a typo'd id would otherwise surface as an opaque 500 instead
+    of telling the owner they addressed the wrong hospital.
+
+    Existing invoices are deliberately NOT recomputed. They carry a snapshot of
+    the rate they were raised at, which is what keeps a price rise from
+    silently rewriting what a clinic was already told it owed.
+    """
+    try:
+        exists = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinics").select("id").eq("id", clinic_id))
+        )
+        if not exists.data:
+            raise HTTPException(status_code=404, detail="Clinic not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Clinic lookup failed for rate update: {e}")
+        raise _finance_unavailable(e)
+
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "clinic_id": clinic_id,
+        "rate_paise": payload.rate_paise,
+        "billing_mode": payload.billing_mode,
+        "notes": payload.notes,
+        "updated_at": now,
+        "updated_by": owner.username,
+    }
+
+    try:
+        # unscoped: platform super-admin writing owner-only billing rates
+        await sb(supabase.table("platform_billing_rates").upsert(row))
+    except Exception as e:
+        logger.error(f"Failed to set billing rate for {clinic_id}: {e}")
+        raise _finance_unavailable(e)
+
+    await log_admin_action(
+        user=owner,
+        action="set_clinic_billing_rate",
+        resource_type="platform",
+        resource_id=clinic_id,
+        details={"rate_paise": payload.rate_paise, "billing_mode": payload.billing_mode},
+    )
+    return {"success": True, "clinic_id": clinic_id, "rate_paise": payload.rate_paise}
+
+
+@router.delete("/finance/rates/{clinic_id}")
+async def clear_finance_rate(
+    clinic_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Drop the override so the clinic falls back to its plan's list price."""
+    try:
+        # unscoped: platform super-admin writing owner-only billing rates
+        await sb(
+            supabase.table("platform_billing_rates").delete().eq("clinic_id", clinic_id)
+        )
+    except Exception as e:
+        logger.error(f"Failed to clear billing rate for {clinic_id}: {e}")
+        raise _finance_unavailable(e)
+
+    await log_admin_action(
+        user=owner,
+        action="clear_clinic_billing_rate",
+        resource_type="platform",
+        resource_id=clinic_id,
+    )
+    return {"success": True, "clinic_id": clinic_id, "reverted_to": "plan_default"}
+
+
+# -- Expenses -----------------------------------------------------------------
+
+
+@router.get("/finance/expenses")
+async def list_finance_expenses(
+    month: Optional[str] = None,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Expense rows. With `month`, only those that apply to that month."""
+    from app.services.platform_finance import (
+        current_month,
+        fetch_expenses,
+        is_valid_month,
+        select_month_expenses,
+    )
+
+    if month and not is_valid_month(month):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+
+    try:
+        rows = await fetch_expenses()
+    except Exception as e:
+        raise _finance_unavailable(e)
+
+    target = month or current_month()
+    recurring, one_off = select_month_expenses(rows, target)
+    return {
+        "success": True,
+        "month": target,
+        "recurring": recurring,
+        "one_off": one_off,
+        "all": rows,
+        "total_paise": sum(int(r.get("amount_paise") or 0) for r in recurring + one_off),
+    }
+
+
+@router.post("/finance/expenses")
+async def create_finance_expense(
+    payload: ExpenseCreate,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Add a recurring or one-off platform cost.
+
+    A one-off must name its month; a recurring one must not. That mirrors the
+    platform_expenses_shape CHECK constraint, caught here so the owner gets a
+    sentence instead of a Postgres error.
+    """
+    from app.services.platform_finance import current_month, is_valid_month, month_bounds
+
+    if payload.is_recurring and payload.month:
+        raise HTTPException(
+            status_code=422,
+            detail="A recurring expense applies every month - remove `month`.",
+        )
+    if not payload.is_recurring and not payload.month:
+        raise HTTPException(
+            status_code=422, detail="A one-off expense needs a `month` (YYYY-MM)."
+        )
+    if payload.month and not is_valid_month(payload.month):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+
+    row = {
+        "name": payload.name.strip(),
+        "category": payload.category,
+        "amount_paise": payload.amount_paise,
+        "is_recurring": payload.is_recurring,
+        "month": payload.month,
+        "notes": payload.notes,
+        "updated_by": owner.username,
+    }
+    # A recurring expense starts at the beginning of the month it was added, so
+    # its window is month-aligned like every superseded row. Mixed alignment is
+    # what would let an edited expense and its replacement both fall inside one
+    # month and get counted twice.
+    if payload.is_recurring:
+        row["effective_from"] = month_bounds(current_month())[0].isoformat()
+
+    try:
+        # unscoped: platform super-admin writing owner-only expenses
+        res = await sb(supabase.table("platform_expenses").insert(row))
+    except Exception as e:
+        logger.error(f"Failed to create expense: {e}")
+        raise _finance_unavailable(e)
+
+    await log_admin_action(
+        user=owner,
+        action="create_platform_expense",
+        resource_type="platform",
+        details={"name": row["name"], "amount_paise": row["amount_paise"]},
+    )
+    created = (res.data or [{}])[0]
+    return {"success": True, "expense": created}
+
+
+@router.put("/finance/expenses/{expense_id}")
+async def update_finance_expense(
+    expense_id: str,
+    payload: ExpenseUpdate,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Edit an expense, preserving what earlier months actually cost.
+
+    Changing the AMOUNT of a recurring expense that has been running since an
+    earlier month does not overwrite it. The old row is closed on the last day
+    of the previous month and a new row opens on the first of this one, so a
+    P&L for August still shows August's Render bill after the September rise.
+    Renames and note edits are not versioned - they describe the same cost.
+    """
+    from app.services.platform_finance import (
+        current_month,
+        is_valid_month,
+        supersede_plan,
+    )
+
+    effective_month = payload.effective_month or current_month()
+    if not is_valid_month(effective_month):
+        raise HTTPException(status_code=422, detail="effective_month must be YYYY-MM")
+
+    try:
+        res = (
+            # unscoped: platform super-admin reading owner-only expenses
+            await sb(supabase.table("platform_expenses").select("*").eq("id", expense_id))
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Expense not found")
+        existing = res.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _finance_unavailable(e)
+
+    now = datetime.now(timezone.utc).isoformat()
+    changes = {
+        k: v for k, v in {
+            "name": payload.name.strip() if payload.name else None,
+            "category": payload.category,
+            "amount_paise": payload.amount_paise,
+            "notes": payload.notes,
+        }.items() if v is not None
+    }
+    if not changes:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    amount_changed = (
+        payload.amount_paise is not None
+        and payload.amount_paise != existing.get("amount_paise")
+    )
+    plan = supersede_plan(existing, effective_month)
+    versioned = bool(
+        existing.get("is_recurring")
+        and amount_changed
+        and plan["action"] == "close_and_insert"
+    )
+
+    try:
+        if versioned:
+            # Close the old row the day before the new rate takes effect...
+            # unscoped: platform super-admin writing owner-only expenses
+            await sb(
+                supabase.table("platform_expenses")
+                .update({
+                    "effective_to": plan["close_old_at"],
+                    "updated_at": now,
+                    "updated_by": owner.username,
+                })
+                .eq("id", expense_id)
+            )
+            # ...and open its replacement on the first of the month.
+            successor = {
+                "name": changes.get("name", existing.get("name")),
+                "category": changes.get("category", existing.get("category")),
+                "amount_paise": payload.amount_paise,
+                "is_recurring": True,
+                "month": None,
+                "notes": changes.get("notes", existing.get("notes")),
+                "effective_from": plan["open_new_at"],
+                "updated_by": owner.username,
+            }
+            # unscoped: platform super-admin writing owner-only expenses
+            ins = await sb(supabase.table("platform_expenses").insert(successor))
+            result_row = (ins.data or [{}])[0]
+        else:
+            changes["updated_at"] = now
+            changes["updated_by"] = owner.username
+            # unscoped: platform super-admin writing owner-only expenses
+            upd = await sb(
+                supabase.table("platform_expenses").update(changes).eq("id", expense_id)
+            )
+            result_row = (upd.data or [{}])[0]
+    except Exception as e:
+        logger.error(f"Failed to update expense {expense_id}: {e}")
+        raise _finance_unavailable(e)
+
+    await log_admin_action(
+        user=owner,
+        action="update_platform_expense",
+        resource_type="platform",
+        resource_id=expense_id,
+        details={"versioned": versioned, "effective_month": effective_month, **changes},
+    )
+    return {
+        "success": True,
+        "versioned": versioned,
+        "effective_month": effective_month,
+        "expense": result_row,
+    }
+
+
+@router.delete("/finance/expenses/{expense_id}")
+async def delete_finance_expense(
+    expense_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Stop an expense.
+
+    A recurring cost that has already been charged to a past month is CLOSED
+    (effective_to), not deleted - deleting it would retroactively raise the
+    profit of every month it ran in. Only a row that never applied to a
+    completed month is removed outright.
+    """
+    from app.services.platform_finance import current_month, month_bounds
+
+    try:
+        res = (
+            # unscoped: platform super-admin reading owner-only expenses
+            await sb(supabase.table("platform_expenses").select("*").eq("id", expense_id))
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Expense not found")
+        existing = res.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _finance_unavailable(e)
+
+    month_start = month_bounds(current_month())[0]
+    started = str(existing.get("effective_from") or "")[:10]
+    has_history = bool(existing.get("is_recurring")) and started < month_start.isoformat()
+
+    try:
+        if has_history:
+            # unscoped: platform super-admin writing owner-only expenses
+            await sb(
+                supabase.table("platform_expenses")
+                .update({
+                    "effective_to": (month_start - timedelta(days=1)).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_by": owner.username,
+                })
+                .eq("id", expense_id)
+            )
+        else:
+            # unscoped: platform super-admin writing owner-only expenses
+            await sb(supabase.table("platform_expenses").delete().eq("id", expense_id))
+    except Exception as e:
+        logger.error(f"Failed to delete expense {expense_id}: {e}")
+        raise _finance_unavailable(e)
+
+    await log_admin_action(
+        user=owner,
+        action="delete_platform_expense",
+        resource_type="platform",
+        resource_id=expense_id,
+        details={"closed_instead_of_deleted": has_history},
+    )
+    return {"success": True, "closed": has_history, "deleted": not has_history}
+
+
+# -- Invoices: billed vs collected --------------------------------------------
+
+
+@router.get("/finance/invoices")
+async def list_finance_invoices(
+    month: Optional[str] = None,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Invoices for a month, or across all months when `month` is omitted."""
+    from app.services.platform_finance import fetch_invoices, is_valid_month
+
+    if month and not is_valid_month(month):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+
+    try:
+        invoices = await fetch_invoices(month)
+    except Exception as e:
+        raise _finance_unavailable(e)
+
+    # Name the clinics so the table does not read as a list of UUIDs.
+    try:
+        clinics_res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinics").select("id, name, plan"))
+        )
+        names = {c["id"]: c.get("name") for c in (clinics_res.data or [])}
+    except Exception:
+        names = {}
+
+    for inv in invoices:
+        inv["clinic_name"] = names.get(inv.get("clinic_id"))
+        inv["outstanding_paise"] = max(
+            0, int(inv.get("amount_paise") or 0) - int(inv.get("amount_paid_paise") or 0)
+        )
+
+    return {"success": True, "month": month, "invoices": invoices}
+
+
+@router.post("/finance/invoices/generate")
+async def generate_finance_invoices(
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Raise this month's invoices for every active clinic.
+
+    IDEMPOTENT. A clinic that already has an invoice for the month is skipped,
+    never re-raised - the unique (clinic_id, period_month) key is the backstop
+    if two clicks land at once. Re-running after adding a clinic bills only the
+    new one, and re-running after a price rise does NOT reprice invoices that
+    already exist: an invoice is a record of what was asked for at the time.
+
+    Inactive clinics are not billed.
+    """
+    from app.services.message_accounting import _get_plan_tiers
+    from app.services.platform_finance import (
+        current_month,
+        fetch_billing_rates,
+        fetch_invoices,
+        invoice_amount_paise,
+        is_valid_month,
+        resolve_rate,
+    )
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass  # no body is fine - defaults to the current month
+
+    month = (body or {}).get("month") or current_month()
+    if not is_valid_month(month):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+
+    try:
+        clinics_res = (
+            # unscoped: platform_admin
+            await sb(supabase.table("clinics").select("id, name, plan, is_active"))
+        )
+        clinics = clinics_res.data or []
+        plan_tiers = await _get_plan_tiers()
+        overrides = await fetch_billing_rates()
+        branch_census = await _fetch_clinic_branch_counts()
+        existing = {i["clinic_id"] for i in await fetch_invoices(month) if i.get("clinic_id")}
+    except Exception as e:
+        logger.error(f"Invoice generation could not load inputs: {e}")
+        raise _finance_unavailable(e)
+
+    to_insert = []
+    skipped = 0
+    for c in clinics:
+        cid = c.get("id")
+        if not cid or cid in existing or c.get("is_active", True) is False:
+            skipped += 1
+            continue
+
+        rate = resolve_rate(c.get("plan"), overrides.get(cid), plan_tiers)
+        locations = _billable_locations((branch_census.get(cid) or {}).get("active", 0))
+        amount = invoice_amount_paise(rate["rate_paise"], rate["billing_mode"], locations)
+
+        to_insert.append({
+            "clinic_id": cid,
+            "period_month": month,
+            "plan": c.get("plan"),
+            "rate_paise": rate["rate_paise"],
+            "billing_mode": rate["billing_mode"],
+            "locations_billed": locations,
+            "amount_paise": amount,
+            "status": "unpaid",
+            "amount_paid_paise": 0,
+            "updated_by": owner.username,
+        })
+
+    created = 0
+    if to_insert:
+        try:
+            # unscoped: platform super-admin writing owner-only invoices
+            res = await sb(supabase.table("platform_invoices").insert(to_insert))
+            created = len(res.data or to_insert)
+        except Exception as e:
+            # The unique key rejecting a concurrent double-click is expected,
+            # not an error worth failing the request over.
+            if "duplicate" in str(e).lower() or "23505" in str(e):
+                logger.info(f"Invoice generation for {month} raced; nothing double-billed")
+                return {
+                    "success": True, "month": month, "created": 0,
+                    "skipped": len(clinics), "note": "Already generated",
+                }
+            logger.error(f"Invoice generation failed: {e}")
+            raise _finance_unavailable(e)
+
+    await log_admin_action(
+        user=owner,
+        action="generate_platform_invoices",
+        resource_type="platform",
+        details={"month": month, "created": created, "skipped": skipped},
+    )
+    return {"success": True, "month": month, "created": created, "skipped": skipped}
+
+
+@router.patch("/finance/invoices/{invoice_id}")
+async def update_finance_invoice(
+    invoice_id: str,
+    payload: InvoicePaymentUpdate,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Record what a clinic actually paid.
+
+    'paid' fills amount_paid to the full invoice when no figure is given, so
+    the common case is one click. 'partial' requires a figure - a partial
+    payment of an unstated amount is not a record of anything.
+    """
+    try:
+        res = (
+            # unscoped: platform super-admin reading owner-only invoices
+            await sb(supabase.table("platform_invoices").select("*").eq("id", invoice_id))
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        invoice = res.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _finance_unavailable(e)
+
+    amount_due = int(invoice.get("amount_paise") or 0)
+    paid = payload.amount_paid_paise
+
+    if payload.status == "paid":
+        paid = amount_due if paid is None else paid
+    elif payload.status == "partial":
+        if paid is None:
+            raise HTTPException(
+                status_code=422,
+                detail="A partial payment needs amount_paid_paise.",
+            )
+        if amount_due > 0 and paid >= amount_due:
+            raise HTTPException(
+                status_code=422,
+                detail="That covers the full invoice - mark it paid instead.",
+            )
+    else:  # unpaid | waived
+        paid = 0 if paid is None else paid
+
+    update = {
+        "status": payload.status,
+        "amount_paid_paise": max(0, paid or 0),
+        "payment_note": payload.payment_note,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": owner.username,
+    }
+    if payload.paid_at:
+        update["paid_at"] = payload.paid_at[:10]
+    elif payload.status == "paid":
+        update["paid_at"] = datetime.now(timezone.utc).date().isoformat()
+
+    try:
+        # unscoped: platform super-admin writing owner-only invoices
+        await sb(
+            supabase.table("platform_invoices").update(update).eq("id", invoice_id)
+        )
+    except Exception as e:
+        logger.error(f"Failed to update invoice {invoice_id}: {e}")
+        raise _finance_unavailable(e)
+
+    await log_admin_action(
+        user=owner,
+        action="update_platform_invoice",
+        resource_type="platform",
+        resource_id=invoice_id,
+        details={"status": payload.status, "amount_paid_paise": update["amount_paid_paise"]},
+    )
+    return {"success": True, "invoice_id": invoice_id, **update}

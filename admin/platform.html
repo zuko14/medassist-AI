@@ -938,7 +938,10 @@
                     <div class="stat-icon"><svg class="i i-lg" aria-hidden="true" focusable="false"><use href="#i-trending-up"/></svg></div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Platform Revenue (30d)</div>
+                    <!-- Patients paying CLINICS via Razorpay, not clinics paying
+                         Kriya. Kriya's own revenue is in the Financial Control
+                         Centre below. Label only — the figure is unchanged. -->
+                    <div class="stat-label" title="Patient payments collected by clinics — not Kriya's revenue">Clinic GMV (30d)</div>
                     <div class="stat-value" id="statPlatformRevenue">₹0</div>
                     <div class="stat-meta" id="statRefundRate">0% refund rate</div>
                     <div class="stat-icon"><svg class="i i-lg" aria-hidden="true" focusable="false"><use href="#i-wallet"/></svg></div>
@@ -1152,6 +1155,106 @@
                             <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading messaging usage...</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- ═══ FINANCIAL CONTROL CENTRE (Owner-only) ═══
+                 What Kriya earns, what it spends, and what is left. Distinct
+                 from the revenue chart above, which tracks patients paying
+                 clinics — money that never reaches this business. -->
+            <div class="section-card" id="financeSection">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="chart-title">Financial Control Centre</div>
+                        <div class="chart-subtitle" id="financeSubtitle">Loading the books...</div>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                        <input type="month" class="filter-select" id="financeMonth" onchange="loadFinance()"
+                               style="min-width:160px;" title="Billing month">
+                        <button class="btn-secondary" onclick="openExpenseModal()">
+                            <svg class="i" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Expense
+                        </button>
+                        <button class="btn-primary" onclick="generateInvoices()">Generate Invoices</button>
+                    </div>
+                </div>
+
+                <!-- Shown when migration 079 has not been applied yet. The rest
+                     of the dashboard keeps working regardless. -->
+                <div id="financeUnavailable" style="display:none; padding:24px; text-align:center; color:var(--text3);">
+                    <div style="font-weight:700; color:#f59e0b; margin-bottom:6px;">Financial tables not found</div>
+                    <div style="font-size:0.85rem;">Apply <code>migrations/079_platform_finance.sql</code> in Supabase, then refresh.</div>
+                </div>
+
+                <div id="financeBody">
+                    <div class="stats-grid" style="margin-bottom:20px;">
+                        <div class="stat-card">
+                            <div class="stat-label">Monthly Recurring Revenue</div>
+                            <div class="stat-value" id="finMrr">₹0</div>
+                            <div class="stat-meta" id="finMrrMeta">what clinics owe this month</div>
+                            <div class="stat-icon"><svg class="i i-lg" aria-hidden="true" focusable="false"><use href="#i-trending-up"/></svg></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Collected</div>
+                            <div class="stat-value" id="finCollected">₹0</div>
+                            <div class="stat-meta" id="finOutstanding">nothing outstanding</div>
+                            <div class="stat-icon"><svg class="i i-lg" aria-hidden="true" focusable="false"><use href="#i-wallet"/></svg></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Total Expenses</div>
+                            <div class="stat-value" id="finExpenses">₹0</div>
+                            <div class="stat-meta" id="finExpensesMeta">infra + Meta messages</div>
+                            <div class="stat-icon"><svg class="i i-lg" aria-hidden="true" focusable="false"><use href="#i-card"/></svg></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Net Profit</div>
+                            <div class="stat-value" id="finProfit">₹0</div>
+                            <div class="stat-meta" id="finProfitMeta">MRR − expenses</div>
+                            <div class="stat-icon"><svg class="i i-lg" aria-hidden="true" focusable="false"><use href="#i-activity"/></svg></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Cash Profit</div>
+                            <div class="stat-value" id="finCashProfit">₹0</div>
+                            <div class="stat-meta">collected − expenses</div>
+                            <div class="stat-icon"><svg class="i i-lg" aria-hidden="true" focusable="false"><use href="#i-wallet"/></svg></div>
+                        </div>
+                    </div>
+
+                    <!-- Per-clinic economics. Net deducts only that clinic's own
+                         Meta spend; shared infra is never allocated onto a row. -->
+                    <div class="table-responsive" style="margin-bottom:24px;">
+                        <table class="custom-table">
+                            <thead>
+                                <tr>
+                                    <th>Hospital / Clinic</th>
+                                    <th>Plan</th>
+                                    <th>Locations</th>
+                                    <th>Rate / mo</th>
+                                    <th>Revenue</th>
+                                    <th>Meta Cost</th>
+                                    <th>Net</th>
+                                    <th>Margin</th>
+                                    <th>Invoice</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="financeClinicsBody">
+                                <tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text3)">Loading per-clinic economics...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:320px;">
+                            <div class="chart-title" style="margin-bottom:4px;">Liabilities &amp; Expenses</div>
+                            <div class="chart-subtitle" style="margin-bottom:12px;">Editing an amount keeps earlier months at their old cost</div>
+                            <div id="financeExpensesList" style="font-size:0.88rem; color:var(--text3);">Loading...</div>
+                        </div>
+                        <div style="flex:1; min-width:320px;">
+                            <div class="chart-title" style="margin-bottom:4px;">Invoices</div>
+                            <div class="chart-subtitle" style="margin-bottom:12px" id="financeInvoiceSubtitle">Billed vs collected</div>
+                            <div id="financeInvoicesList" style="font-size:0.88rem; color:var(--text3);">Loading...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1450,6 +1553,124 @@
                 </label>
             </div>
             <button class="btn-primary" onclick="submitConnector()">Save Connector</button>
+        </div>
+    </div>
+
+    <!-- Billing Rate Modal (Owner-only) -->
+    <div class="modal-overlay" id="billingRateModal">
+        <div class="modal-panel" style="max-width:480px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Billing Rate</h3>
+                <button class="close-btn" onclick="closeRateModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="error-msg" id="rateModalError">Error</div>
+            <p style="font-size:0.82rem; color:var(--text3); margin-bottom:16px;" id="rateModalContext"></p>
+            <div class="form-group">
+                <label>Rate per month (₹)</label>
+                <input type="number" class="form-control" id="rateAmount" min="0" step="1" placeholder="e.g. 8000">
+            </div>
+            <div class="form-group">
+                <label>Billing mode</label>
+                <select class="form-control" id="rateMode">
+                    <option value="per_location">Per location — multiplied by active branches</option>
+                    <option value="flat">Flat — one price regardless of branches</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Note (optional)</label>
+                <input type="text" class="form-control" id="rateNotes" maxlength="500" placeholder="e.g. early-adopter price, locked for 12 months">
+            </div>
+            <p style="font-size:0.78rem; color:var(--text3); margin-bottom:14px;">
+                Invoices already raised keep the rate they were raised at — changing this
+                affects future invoices only.
+            </p>
+            <div style="display:flex; gap:10px;">
+                <button class="btn-primary" onclick="submitRate()">Save Rate</button>
+                <button class="btn-secondary" onclick="clearRate()" id="rateClearBtn">Revert to plan default</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Expense Modal (Owner-only) -->
+    <div class="modal-overlay" id="expenseModal">
+        <div class="modal-panel" style="max-width:480px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;" id="expenseModalTitle">Add Expense</h3>
+                <button class="close-btn" onclick="closeExpenseModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="error-msg" id="expenseModalError">Error</div>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" class="form-control" id="expenseName" maxlength="200" placeholder="e.g. Render — web service">
+            </div>
+            <div class="form-group">
+                <label>Category</label>
+                <select class="form-control" id="expenseCategory">
+                    <option value="hosting">Hosting</option>
+                    <option value="database">Database</option>
+                    <option value="ai">AI / LLM</option>
+                    <option value="messaging">Messaging</option>
+                    <option value="domain">Domain &amp; DNS</option>
+                    <option value="payment">Payment gateway</option>
+                    <option value="people">People</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Amount (₹ per month)</label>
+                <input type="number" class="form-control" id="expenseAmount" min="0" step="1" placeholder="e.g. 2100">
+            </div>
+            <div class="form-group" id="expenseRecurringGroup">
+                <label>Frequency</label>
+                <select class="form-control" id="expenseRecurring" onchange="onExpenseFrequencyChange()">
+                    <option value="true">Recurring — every month until changed</option>
+                    <option value="false">One-off — a single month</option>
+                </select>
+            </div>
+            <div class="form-group" id="expenseMonthGroup" style="display:none;">
+                <label>Month</label>
+                <input type="month" class="form-control" id="expenseMonth">
+            </div>
+            <div class="form-group">
+                <label>Note (optional)</label>
+                <input type="text" class="form-control" id="expenseNotes" maxlength="500">
+            </div>
+            <p style="font-size:0.78rem; color:var(--text3); margin-bottom:14px;" id="expenseVersionNote"></p>
+            <button class="btn-primary" onclick="submitExpense()">Save Expense</button>
+        </div>
+    </div>
+
+    <!-- Record Payment Modal (Owner-only) -->
+    <div class="modal-overlay" id="paymentModal">
+        <div class="modal-panel" style="max-width:460px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Record Payment</h3>
+                <button class="close-btn" onclick="closePaymentModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="error-msg" id="paymentModalError">Error</div>
+            <p style="font-size:0.82rem; color:var(--text3); margin-bottom:16px;" id="paymentContext"></p>
+            <div class="form-group">
+                <label>Status</label>
+                <select class="form-control" id="paymentStatus" onchange="onPaymentStatusChange()">
+                    <option value="paid">Paid in full</option>
+                    <option value="partial">Partially paid</option>
+                    <option value="unpaid">Unpaid</option>
+                    <option value="waived">Waived — not collecting</option>
+                </select>
+            </div>
+            <div class="form-group" id="paymentAmountGroup" style="display:none;">
+                <label>Amount received (₹)</label>
+                <input type="number" class="form-control" id="paymentAmount" min="0" step="1">
+            </div>
+            <div class="form-group">
+                <label>Date received</label>
+                <input type="date" class="form-control" id="paymentDate">
+            </div>
+            <div class="form-group">
+                <label>Note (optional)</label>
+                <input type="text" class="form-control" id="paymentNote" maxlength="500" placeholder="e.g. UPI ref 4471">
+            </div>
+            <button class="btn-primary" onclick="submitPayment()">Save</button>
         </div>
     </div>
 
@@ -1848,6 +2069,7 @@
                 loadMessagingUsage();
                 loadPricingConfig();
                 loadPlanTiers();
+                loadFinance();
                 loadSubscriptions();
                 loadOutboundAudit();
 
@@ -2505,6 +2727,493 @@
                     <td>₹${(c.estimated_cost_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                 </tr>
             `).join('');
+        }
+
+        // ═══════ FINANCIAL CONTROL CENTRE (Owner-only) ═══════
+        // The books: what clinics owe, what the platform spends, what is left.
+        // Every amount crossing the wire is integer paise; it is divided by 100
+        // exactly once, here at the edge, so no rounding compounds through a sum.
+
+        let _financeData = null;
+        let _rateClinicId = null;
+        let _expenseId = null;        // null = creating, id = editing
+        let _paymentInvoiceId = null;
+
+        function inr(paise, opts) {
+            const value = (paise || 0) / 100;
+            return '₹' + value.toLocaleString('en-IN', {
+                minimumFractionDigits: (opts && opts.paise) ? 2 : 0,
+                maximumFractionDigits: (opts && opts.paise) ? 2 : 0,
+            });
+        }
+
+        function financeMonthValue() {
+            const el = document.getElementById('financeMonth');
+            if (el && el.value) return el.value;
+            const now = new Date();
+            // IST is ahead of UTC, so derive the month from a shifted clock —
+            // otherwise the first five and a half hours of a month would open
+            // the dashboard on the previous one.
+            const ist = new Date(now.getTime() + (5.5 * 60 - now.getTimezoneOffset()) * 60000);
+            return ist.toISOString().slice(0, 7);
+        }
+
+        async function loadFinance() {
+            const month = financeMonthValue();
+            const monthEl = document.getElementById('financeMonth');
+            if (monthEl && !monthEl.value) monthEl.value = month;
+
+            try {
+                const res = await fetch(`/platform/finance?month=${encodeURIComponent(month)}`, {
+                    headers: { 'Authorization': ownerAuthHeader }
+                });
+                if (res.status === 503) { showFinanceUnavailable(); return; }
+                const data = await res.json();
+                if (!res.ok || data.success === false) { showFinanceUnavailable(); return; }
+                _financeData = data;
+                renderFinance(data);
+            } catch (e) {
+                console.warn('Finance load skipped:', e);
+                showFinanceUnavailable();
+            }
+        }
+
+        function showFinanceUnavailable() {
+            document.getElementById('financeUnavailable').style.display = 'block';
+            document.getElementById('financeBody').style.display = 'none';
+            document.getElementById('financeSubtitle').innerText = 'Unavailable';
+        }
+
+        function renderFinance(data) {
+            document.getElementById('financeUnavailable').style.display = 'none';
+            document.getElementById('financeBody').style.display = 'block';
+
+            const t = data.totals || {};
+            document.getElementById('finMrr').innerText = inr(t.mrr_paise);
+            document.getElementById('finCollected').innerText = inr(t.collected_paise);
+            document.getElementById('finExpenses').innerText = inr(t.total_expense_paise);
+            document.getElementById('finProfit').innerText = inr(t.net_profit_paise);
+            document.getElementById('finCashProfit').innerText = inr(t.cash_profit_paise);
+
+            document.getElementById('finMrrMeta').innerText =
+                `${t.active_clinics || 0} active clinic${t.active_clinics === 1 ? '' : 's'}`;
+            document.getElementById('finOutstanding').innerText =
+                (t.outstanding_paise > 0) ? `${inr(t.outstanding_paise)} outstanding` : 'nothing outstanding';
+            document.getElementById('finExpensesMeta').innerText =
+                `${inr(t.fixed_expense_paise)} infra + ${inr(t.meta_cost_paise, { paise: true })} Meta`;
+            document.getElementById('finProfitMeta').innerText = `${t.margin_percent || 0}% margin`;
+
+            // Profit reads green or red rather than neutral — a loss should be
+            // visible at a glance, not something to be worked out from a sign.
+            const profitEl = document.getElementById('finProfit');
+            profitEl.style.color = (t.net_profit_paise || 0) >= 0 ? '#22c55e' : '#ef4444';
+            const cashEl = document.getElementById('finCashProfit');
+            cashEl.style.color = (t.cash_profit_paise || 0) >= 0 ? '#22c55e' : '#ef4444';
+
+            document.getElementById('financeSubtitle').innerText =
+                `${data.month}${data.is_current_month ? ' · current month' : ''} · ` +
+                `${inr(t.billed_paise)} billed · ${inr(t.collected_paise)} collected`;
+
+            renderFinanceClinics(data.clinics || []);
+            renderFinanceExpenses(data.expenses || {}, t);
+            renderFinanceInvoices(data.clinics || [], data.invoice_summary || {});
+        }
+
+        function renderFinanceClinics(rows) {
+            const tbody = document.getElementById('financeClinicsBody');
+            if (!rows.length) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text3)">No clinics onboarded yet.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map(r => {
+                const isOverride = r.rate_source === 'override';
+                const unpriced = !r.rate_paise;
+                const netColor = (r.net_paise || 0) >= 0 ? '#22c55e' : '#ef4444';
+                return `
+                <tr${r.is_active ? '' : ' style="opacity:0.55"'}>
+                    <td>
+                        <div>${escapeHtml(r.clinic_name || 'Unknown')}${r.is_active ? '' : ' <span class="badge status-dormant">inactive</span>'}</div>
+                        <span class="clinic-phone" style="font-family:monospace; cursor:pointer;" title="Click to copy Clinic ID" onclick="copyClinicId('${r.clinic_id}')">ID: ${r.clinic_id}</span>
+                    </td>
+                    <td>${escapeHtml(r.plan || '-')}</td>
+                    <td>${r.locations_billed || 1}${r.billing_mode === 'flat' ? ' <span style="color:var(--text3);font-size:0.75rem">(flat)</span>' : ''}</td>
+                    <td>
+                        ${unpriced
+                            ? '<span style="color:#f59e0b">not priced</span>'
+                            : inr(r.rate_paise)}
+                        ${isOverride ? '<span class="badge" style="margin-left:6px;background:rgba(139,92,246,0.18);color:#a78bfa">custom</span>' : ''}
+                    </td>
+                    <td>${inr(r.revenue_paise)}</td>
+                    <td>${inr(r.meta_cost_paise, { paise: true })}</td>
+                    <td style="color:${netColor};font-weight:700">${inr(r.net_paise)}</td>
+                    <td>${r.margin_percent || 0}%</td>
+                    <td>${r.invoice ? invoiceBadge(r.invoice) : '<span style="color:var(--text3)">not raised</span>'}</td>
+                    <td style="white-space:nowrap">
+                        <button class="btn-secondary" style="padding:4px 10px;font-size:0.78rem" onclick="openRateModal('${r.clinic_id}')">Rate</button>
+                        ${r.invoice ? `<button class="btn-secondary" style="padding:4px 10px;font-size:0.78rem;margin-left:4px" onclick="openPaymentModal('${r.invoice.id}')">Payment</button>` : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function invoiceBadge(inv) {
+            const map = {
+                paid:    ['status-active', 'paid'],
+                partial: ['badge', 'partial'],
+                unpaid:  ['status-dormant', 'unpaid'],
+                waived:  ['badge', 'waived'],
+            };
+            const [cls, label] = map[inv.status] || ['badge', inv.status || '-'];
+            return `<span class="badge ${cls}">${label}</span>`;
+        }
+
+        function renderFinanceExpenses(expenses, totals) {
+            const el = document.getElementById('financeExpensesList');
+            const recurring = expenses.recurring || [];
+            const oneOff = expenses.one_off || [];
+
+            const row = (e) => `
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+                    <div style="flex:1;min-width:0">
+                        <div style="color:var(--text1,#fff);font-weight:600">${escapeHtml(e.name || '-')}</div>
+                        <div style="font-size:0.75rem;color:var(--text3)">${escapeHtml(e.category || 'other')}${e.notes ? ' · ' + escapeHtml(e.notes) : ''}</div>
+                    </div>
+                    <div style="font-weight:700;white-space:nowrap">${inr(e.amount_paise)}</div>
+                    <button class="btn-secondary" style="padding:3px 8px;font-size:0.75rem" onclick="openExpenseModal('${e.id}')">Edit</button>
+                    <button class="btn-secondary" style="padding:3px 8px;font-size:0.75rem" onclick="deleteExpense('${e.id}')">End</button>
+                </div>`;
+
+            let html = '';
+            if (recurring.length) {
+                html += '<div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);margin-bottom:4px">Recurring</div>';
+                html += recurring.map(row).join('');
+            }
+            if (oneOff.length) {
+                html += '<div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);margin:14px 0 4px">One-off this month</div>';
+                html += oneOff.map(row).join('');
+            }
+            if (!recurring.length && !oneOff.length) {
+                html += '<div style="padding:12px 0;color:var(--text3)">No expenses recorded for this month.</div>';
+            }
+
+            // Meta is computed from the message ledger, never entered by hand —
+            // a manual row would double-count it against the live figure.
+            html += `
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0;margin-top:10px;border-top:1px solid rgba(255,255,255,0.08)">
+                    <div style="flex:1">
+                        <div style="color:var(--text1,#fff);font-weight:600">Meta WhatsApp messages</div>
+                        <div style="font-size:0.75rem;color:var(--text3)">computed from the message ledger — not editable</div>
+                    </div>
+                    <div style="font-weight:700">${inr(totals.meta_cost_paise, { paise: true })}</div>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:10px 0;margin-top:6px;border-top:2px solid rgba(255,255,255,0.12);font-weight:800;color:var(--text1,#fff)">
+                    <span>Total for ${escapeHtml((_financeData && _financeData.month) || '')}</span>
+                    <span>${inr(totals.total_expense_paise)}</span>
+                </div>`;
+
+            el.innerHTML = html;
+        }
+
+        function renderFinanceInvoices(rows, summary) {
+            const el = document.getElementById('financeInvoicesList');
+            const withInvoice = rows.filter(r => r.invoice);
+
+            document.getElementById('financeInvoiceSubtitle').innerText =
+                `${summary.count || 0} raised · ${summary.paid || 0} paid · ${summary.unpaid || 0} unpaid`;
+
+            if (!withInvoice.length) {
+                el.innerHTML = '<div style="padding:12px 0;color:var(--text3)">No invoices raised for this month yet. Use <strong>Generate Invoices</strong> above.</div>';
+                return;
+            }
+
+            el.innerHTML = withInvoice.map(r => {
+                const inv = r.invoice;
+                const due = Math.max(0, (inv.amount_paise || 0) - (inv.amount_paid_paise || 0));
+                return `
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+                    <div style="flex:1;min-width:0">
+                        <div style="color:var(--text1,#fff);font-weight:600">${escapeHtml(r.clinic_name || 'Unknown')}</div>
+                        <div style="font-size:0.75rem;color:var(--text3)">
+                            ${inr(inv.amount_paise)} billed${due > 0 ? ' · ' + inr(due) + ' due' : ''}${inv.paid_at ? ' · ' + inv.paid_at : ''}
+                        </div>
+                    </div>
+                    ${invoiceBadge(inv)}
+                    <button class="btn-secondary" style="padding:3px 8px;font-size:0.75rem" onclick="openPaymentModal('${inv.id}')">Record</button>
+                </div>`;
+            }).join('');
+        }
+
+        // ── Billing rate ────────────────────────────────────────────────────
+
+        function openRateModal(clinicId) {
+            const row = ((_financeData && _financeData.clinics) || []).find(r => r.clinic_id === clinicId);
+            if (!row) return;
+            _rateClinicId = clinicId;
+
+            document.getElementById('rateModalError').style.display = 'none';
+            document.getElementById('rateAmount').value = row.rate_paise ? row.rate_paise / 100 : '';
+            document.getElementById('rateMode').value = row.billing_mode || 'per_location';
+            document.getElementById('rateNotes').value = row.rate_notes || '';
+            document.getElementById('rateClearBtn').style.display =
+                row.rate_source === 'override' ? 'inline-flex' : 'none';
+            document.getElementById('rateModalContext').innerHTML =
+                `<strong>${escapeHtml(row.clinic_name || '')}</strong> · plan <strong>${escapeHtml(row.plan || '-')}</strong> · ` +
+                `${row.locations_billed} location${row.locations_billed === 1 ? '' : 's'} · ` +
+                `currently on the <strong>${row.rate_source === 'override' ? 'custom rate' : 'plan default'}</strong>.`;
+            document.getElementById('billingRateModal').classList.add('active');
+        }
+
+        function closeRateModal() {
+            document.getElementById('billingRateModal').classList.remove('active');
+            _rateClinicId = null;
+        }
+
+        async function submitRate() {
+            const err = document.getElementById('rateModalError');
+            const rupees = parseFloat(document.getElementById('rateAmount').value);
+            if (!isFinite(rupees) || rupees < 0) {
+                err.innerText = 'Enter a rate of ₹0 or more.';
+                err.style.display = 'block';
+                return;
+            }
+            try {
+                const res = await fetch(`/platform/finance/rates/${_rateClinicId}`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rate_paise: Math.round(rupees * 100),
+                        billing_mode: document.getElementById('rateMode').value,
+                        notes: document.getElementById('rateNotes').value || null,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    err.innerText = data.detail || 'Could not save the rate.';
+                    err.style.display = 'block';
+                    return;
+                }
+                closeRateModal();
+                loadFinance();
+            } catch (e) {
+                err.innerText = 'Network error — please try again.';
+                err.style.display = 'block';
+            }
+        }
+
+        async function clearRate() {
+            if (!confirm('Revert this clinic to its plan default price?')) return;
+            try {
+                const res = await fetch(`/platform/finance/rates/${_rateClinicId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': ownerAuthHeader },
+                });
+                if (!res.ok) { alert('Could not clear the rate.'); return; }
+                closeRateModal();
+                loadFinance();
+            } catch (e) {
+                alert('Network error — please try again.');
+            }
+        }
+
+        // ── Expenses ────────────────────────────────────────────────────────
+
+        function openExpenseModal(expenseId) {
+            _expenseId = expenseId || null;
+            document.getElementById('expenseModalError').style.display = 'none';
+            document.getElementById('expenseModalTitle').innerText = _expenseId ? 'Edit Expense' : 'Add Expense';
+
+            let row = null;
+            if (_expenseId && _financeData) {
+                const all = (_financeData.expenses.recurring || []).concat(_financeData.expenses.one_off || []);
+                row = all.find(e => e.id === _expenseId);
+            }
+
+            document.getElementById('expenseName').value = row ? (row.name || '') : '';
+            document.getElementById('expenseCategory').value = row ? (row.category || 'other') : 'hosting';
+            document.getElementById('expenseAmount').value = row ? (row.amount_paise || 0) / 100 : '';
+            document.getElementById('expenseRecurring').value = row ? String(!!row.is_recurring) : 'true';
+            document.getElementById('expenseMonth').value = (row && row.month) || financeMonthValue();
+            document.getElementById('expenseNotes').value = row ? (row.notes || '') : '';
+
+            // Frequency is fixed once a row exists: flipping a recurring cost to
+            // a one-off would orphan the months it already applied to.
+            document.getElementById('expenseRecurringGroup').style.display = _expenseId ? 'none' : 'block';
+            document.getElementById('expenseVersionNote').innerText = _expenseId
+                ? `A new amount applies from ${financeMonthValue()} onward; earlier months keep the old figure.`
+                : '';
+            onExpenseFrequencyChange();
+            document.getElementById('expenseModal').classList.add('active');
+        }
+
+        function closeExpenseModal() {
+            document.getElementById('expenseModal').classList.remove('active');
+            _expenseId = null;
+        }
+
+        function onExpenseFrequencyChange() {
+            const isRecurring = document.getElementById('expenseRecurring').value === 'true';
+            document.getElementById('expenseMonthGroup').style.display =
+                (!isRecurring && !_expenseId) ? 'block' : 'none';
+        }
+
+        async function submitExpense() {
+            const err = document.getElementById('expenseModalError');
+            const name = document.getElementById('expenseName').value.trim();
+            const rupees = parseFloat(document.getElementById('expenseAmount').value);
+
+            if (!name) { err.innerText = 'Give the expense a name.'; err.style.display = 'block'; return; }
+            if (!isFinite(rupees) || rupees < 0) {
+                err.innerText = 'Enter an amount of ₹0 or more.';
+                err.style.display = 'block';
+                return;
+            }
+
+            const isRecurring = document.getElementById('expenseRecurring').value === 'true';
+            const body = {
+                name,
+                category: document.getElementById('expenseCategory').value,
+                amount_paise: Math.round(rupees * 100),
+                notes: document.getElementById('expenseNotes').value || null,
+            };
+            if (_expenseId) {
+                body.effective_month = financeMonthValue();
+            } else {
+                body.is_recurring = isRecurring;
+                if (!isRecurring) body.month = document.getElementById('expenseMonth').value;
+            }
+
+            try {
+                const res = await fetch(
+                    _expenseId ? `/platform/finance/expenses/${_expenseId}` : '/platform/finance/expenses',
+                    {
+                        method: _expenseId ? 'PUT' : 'POST',
+                        headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    }
+                );
+                const data = await res.json();
+                if (!res.ok) {
+                    err.innerText = data.detail || 'Could not save the expense.';
+                    err.style.display = 'block';
+                    return;
+                }
+                closeExpenseModal();
+                loadFinance();
+            } catch (e) {
+                err.innerText = 'Network error — please try again.';
+                err.style.display = 'block';
+            }
+        }
+
+        async function deleteExpense(expenseId) {
+            // The name is looked up here rather than passed through the onclick
+            // attribute: escapeHtml turns an apostrophe into &#039;, which the
+            // attribute decodes back to ' and breaks the JS string literal.
+            const all = _financeData
+                ? (_financeData.expenses.recurring || []).concat(_financeData.expenses.one_off || [])
+                : [];
+            const row = all.find(e => e.id === expenseId);
+            const name = (row && row.name) || 'this expense';
+            if (!confirm(`Stop "${name}"?\n\nIf it already applied to an earlier month it is closed off, not erased — past months keep costing what they cost.`)) return;
+            try {
+                const res = await fetch(`/platform/finance/expenses/${expenseId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': ownerAuthHeader },
+                });
+                if (!res.ok) { alert('Could not stop that expense.'); return; }
+                loadFinance();
+            } catch (e) {
+                alert('Network error — please try again.');
+            }
+        }
+
+        // ── Invoices ────────────────────────────────────────────────────────
+
+        async function generateInvoices() {
+            const month = financeMonthValue();
+            if (!confirm(`Raise invoices for ${month}?\n\nClinics that already have one are skipped, so this is safe to run twice.`)) return;
+            try {
+                const res = await fetch('/platform/finance/invoices/generate', {
+                    method: 'POST',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ month }),
+                });
+                const data = await res.json();
+                if (!res.ok) { alert(data.detail || 'Could not generate invoices.'); return; }
+                alert(`${data.created} invoice(s) raised for ${data.month}. ${data.skipped} skipped (already raised or inactive).`);
+                loadFinance();
+            } catch (e) {
+                alert('Network error — please try again.');
+            }
+        }
+
+        function openPaymentModal(invoiceId) {
+            const row = ((_financeData && _financeData.clinics) || [])
+                .find(r => r.invoice && r.invoice.id === invoiceId);
+            if (!row) return;
+            _paymentInvoiceId = invoiceId;
+            const inv = row.invoice;
+
+            document.getElementById('paymentModalError').style.display = 'none';
+            document.getElementById('paymentStatus').value = inv.status || 'paid';
+            document.getElementById('paymentAmount').value = (inv.amount_paid_paise || 0) / 100;
+            document.getElementById('paymentDate').value =
+                inv.paid_at || new Date().toISOString().slice(0, 10);
+            document.getElementById('paymentNote').value = '';
+            document.getElementById('paymentContext').innerHTML =
+                `<strong>${escapeHtml(row.clinic_name || '')}</strong> · ${_financeData.month} · ` +
+                `invoiced <strong>${inr(inv.amount_paise)}</strong>`;
+            onPaymentStatusChange();
+            document.getElementById('paymentModal').classList.add('active');
+        }
+
+        function closePaymentModal() {
+            document.getElementById('paymentModal').classList.remove('active');
+            _paymentInvoiceId = null;
+        }
+
+        function onPaymentStatusChange() {
+            const status = document.getElementById('paymentStatus').value;
+            document.getElementById('paymentAmountGroup').style.display =
+                status === 'partial' ? 'block' : 'none';
+        }
+
+        async function submitPayment() {
+            const err = document.getElementById('paymentModalError');
+            const status = document.getElementById('paymentStatus').value;
+            const body = {
+                status,
+                paid_at: document.getElementById('paymentDate').value || null,
+                payment_note: document.getElementById('paymentNote').value || null,
+            };
+            if (status === 'partial') {
+                const rupees = parseFloat(document.getElementById('paymentAmount').value);
+                if (!isFinite(rupees) || rupees < 0) {
+                    err.innerText = 'Enter the amount actually received.';
+                    err.style.display = 'block';
+                    return;
+                }
+                body.amount_paid_paise = Math.round(rupees * 100);
+            }
+
+            try {
+                const res = await fetch(`/platform/finance/invoices/${_paymentInvoiceId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    err.innerText = data.detail || 'Could not record that payment.';
+                    err.style.display = 'block';
+                    return;
+                }
+                closePaymentModal();
+                loadFinance();
+            } catch (e) {
+                err.innerText = 'Network error — please try again.';
+                err.style.display = 'block';
+            }
         }
 
         // ═══════ PRICING CONFIG (Owner-only) ═══════

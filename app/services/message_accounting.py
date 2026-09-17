@@ -396,31 +396,25 @@ async def get_clinic_usage(clinic_id: str, plan_name: str) -> dict:
             "by_category": {"utility": 1600, "marketing": 247}
         }
     """
-    from app.database import supabase
-
     period_start, period_end = _billing_period()
     plan_tiers = await _get_plan_tiers()
     tier = plan_tiers.get(plan_name, {})
     included = tier.get("included_messages_month", 500)
     is_unlimited = included == 0  # enterprise
 
-    try:
-        # Query ledger for this clinic in current billing period
-        # Exclude mark_read from billable counts
-        result = (
-            # unscoped: platform_sweep
-            await sb(supabase.table("outbound_message_ledger")
-            .select("category, sent_at, send_success")
-            .eq("clinic_id", clinic_id)
-            .eq("send_success", True)
-            .neq("message_type", "mark_read")
-            .gte("sent_at", period_start)
-            .lt("sent_at", period_end))
-        )
-        rows = result.data or []
-    except Exception as e:
-        logger.error(f"Failed to query usage for clinic {clinic_id}: {e}")
-        rows = []
+    # Ledger for this clinic in the current billing period, mark_read excluded
+    # from billable counts. Paginated for a reason that bites hardest here:
+    # this count is what decides whether a clinic is over its quota, and the
+    # unbounded select it replaces was silently capped at 1000 rows by
+    # PostgREST. A clinic on the 2,500- or 5,000-message tiers could therefore
+    # never be seen to exceed its allowance, because the count could not climb
+    # past 1,000 no matter how much it actually sent.
+    rows = await scan_outbound_ledger(
+        start_iso=period_start,
+        end_iso=period_end,
+        clinic_id=clinic_id,
+        columns="category, sent_at",
+    )
 
     total_sent = len(rows)
 
@@ -465,6 +459,74 @@ async def get_clinic_usage(clinic_id: str, plan_name: str) -> dict:
     }
 
 
+async def scan_outbound_ledger(
+    start_iso: str,
+    end_iso: Optional[str] = None,
+    clinic_id: Optional[str] = None,
+    columns: str = "clinic_id, category",
+) -> list[dict]:
+    """Every billable outbound row in a time window, paginated.
+
+    WHY PAGINATION IS NOT OPTIONAL HERE
+    PostgREST caps an unbounded select at 1000 rows and returns the truncation
+    silently — no error, no flag, just a short list. The platform sweep used to
+    select the ledger without a .range(), so once the fleet passed a thousand
+    messages in the window, the owner dashboard reported exactly 1,000 sent and
+    a Meta cost computed from 1,000. Both were floors being read as totals, and
+    they are now also the basis of the profit figures in platform_finance, so
+    the undercount would have flattered every margin on the page.
+
+    This is the same page-until-short loop _fetch_clinic_branch_counts() uses
+    for the branch census, and for the same reason: an undercount of a thing
+    that is billed is worse than a slow query.
+
+    Filters match the billing definition used everywhere else — delivered
+    messages only, and mark_read receipts excluded because Meta does not
+    charge for them.
+    """
+    from app.database import supabase
+
+    page_size = 1000
+    max_pages = 500  # ponytail: 500k-row ceiling per window; move to a server-side aggregate if ever hit
+    rows: list[dict] = []
+
+    try:
+        for page in range(max_pages):
+            offset = page * page_size
+            query = (
+                # unscoped: platform_sweep
+                supabase.table("outbound_message_ledger")
+                .select(columns)
+                .eq("send_success", True)
+                .neq("message_type", "mark_read")
+                .gte("sent_at", start_iso)
+            )
+            if end_iso:
+                query = query.lt("sent_at", end_iso)
+            if clinic_id:
+                query = query.eq("clinic_id", clinic_id)
+
+            res = await sb(query.range(offset, offset + page_size - 1))
+            batch = res.data
+            if not isinstance(batch, list):
+                logger.warning("Ledger scan stopped — unexpected payload type")
+                break
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+        else:
+            logger.warning(
+                f"Ledger scan hit the {max_pages}-page cap — counts may be incomplete"
+            )
+    except Exception as e:
+        # Partial results are returned deliberately: a dashboard showing most
+        # of the month beats a dashboard showing an error, and the caller
+        # logs its own context.
+        logger.error(f"Ledger scan failed after {len(rows)} rows: {e}")
+
+    return rows
+
+
 async def get_platform_usage(days: int = 30) -> dict:
     """Get platform-wide messaging usage with full financial breakdown.
 
@@ -494,20 +556,14 @@ async def get_platform_usage(days: int = 30) -> dict:
         logger.error(f"Failed to fetch clinics for platform usage: {e}")
         return {"success": False, "error": str(e)}
 
-    # Fetch all ledger entries in period (exclude mark_read from billing)
-    try:
-        ledger_res = (
-            # unscoped: platform_sweep
-            await sb(supabase.table("outbound_message_ledger")
-            .select("clinic_id, category, send_success, message_type")
-            .eq("send_success", True)
-            .neq("message_type", "mark_read")
-            .gte("sent_at", start_date))
-        )
-        ledger_rows = ledger_res.data or []
-    except Exception as e:
-        logger.error(f"Failed to fetch ledger for platform usage: {e}")
-        ledger_rows = []
+    # Fetch all ledger entries in period (exclude mark_read from billing).
+    # Paginated: this select previously ran unbounded and PostgREST silently
+    # capped it at 1000 rows, so a busy fleet reported exactly 1,000 messages
+    # and a Meta cost to match — a floor presented as a total.
+    ledger_rows = await scan_outbound_ledger(
+        start_iso=start_date,
+        columns="clinic_id, category",
+    )
 
     # Aggregate by clinic and category
     usage_by_clinic: dict[str, dict[str, int]] = {}
