@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     openrouter_model: str = "deepseek/deepseek-chat"
     openrouter_base_url: str = "https://openrouter.ai/api/v1/chat/completions"
     openrouter_timeout: int = 8
+    openrouter_fallback_model: str = "google/gemini-2.0-flash-001"
+    ai_usd_to_inr_rate: float = 87.0
+    ai_default_monthly_budget_paise: int = 50000  # Rs 500 admin monthly spend cap
 
     # Groq AI (Deprecated Fallback)
     groq_api_key: str = ""

@@ -3648,6 +3648,341 @@ async def bulk_delete_lab_tests(
         )
 
 
+class LabPrepFixItem(BaseModel):
+    test_id: str
+    fasting_required: bool
+    preparation: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("test_id")
+    @classmethod
+    def validate_test_id(cls, v: str) -> str:
+        s = str(v).strip()
+        if not is_uuid(s):
+            raise ValueError(f"Invalid UUID: {v}")
+        return s
+
+
+class LabPriceFixItem(BaseModel):
+    test_id: str
+    price_rupees: float = Field(..., ge=1.0, le=100000.0)
+
+    @field_validator("test_id")
+    @classmethod
+    def validate_test_id(cls, v: str) -> str:
+        s = str(v).strip()
+        if not is_uuid(s):
+            raise ValueError(f"Invalid UUID: {v}")
+        return s
+
+
+class LabCleanupApplyRequest(BaseModel):
+    delete_duplicate_ids: list[str] = Field(default_factory=list, max_length=1000)
+    prep_fixes: list[LabPrepFixItem] = Field(default_factory=list, max_length=1000)
+    price_fixes: list[LabPriceFixItem] = Field(default_factory=list, max_length=1000)
+
+    @field_validator("delete_duplicate_ids")
+    @classmethod
+    def validate_delete_ids(cls, v: list[str]) -> list[str]:
+        if len(v) > 1000:
+            raise ValueError("Exceeded maximum of 1,000 items")
+        res = []
+        for x in v:
+            s = str(x).strip()
+            if not is_uuid(s):
+                raise ValueError(f"Invalid UUID: {x}")
+            res.append(s)
+        return res
+
+
+@router.get("/lab-tests/cleanup-suggestions")
+async def get_lab_tests_cleanup_suggestions(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Scan the diagnostic catalogue for duplicates, suspicious prices, and missing fasting instructions."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        from app.services.catalogue_cleaner import analyze_catalogue_quality
+
+        def _q():
+            return supabase.table("lab_tests").select("*").eq("clinic_id", effective_clinic_id)
+
+        rows = await _fetch_all_lab_tests(_q, f"catalogue cleanup scan for clinic {effective_clinic_id}")
+        return await asyncio.to_thread(analyze_catalogue_quality, rows)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error scanning catalogue cleanup for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to analyze catalogue quality")
+
+
+@router.post("/lab-tests/cleanup-apply")
+async def apply_lab_tests_cleanup(
+    body: LabCleanupApplyRequest,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Apply approved catalogue clean-up suggestions: fasting/price fixes and bulk deletion."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        updated_count = 0
+        deleted_count = 0
+        audit_updated_items = []
+        audit_deleted_items = []
+
+        # ── RUN UPDATES BEFORE DELETES ──────────────────────────────────────
+        # If any update fails, an exception is raised and deletes will NOT run.
+
+        # 1. Prep / Fasting fixes (writing to prep_instructions, not preparation)
+        for fix in body.prep_fixes:
+            check = await sb(
+                supabase.table("lab_tests")
+                .select("id, name, branch_id")
+                .eq("clinic_id", effective_clinic_id)
+                .eq("id", fix.test_id)
+            )
+            if check.data:
+                row = check.data[0]
+                enforce_branch_scope(user, row.get("branch_id"))
+                update_payload = {"fasting_required": fix.fasting_required}
+                if fix.preparation is not None:
+                    # Column is prep_instructions, capped at 500 characters
+                    update_payload["prep_instructions"] = fix.preparation[:500]
+                await sb(
+                    supabase.table("lab_tests")
+                    .update(update_payload)
+                    .eq("clinic_id", effective_clinic_id)
+                    .eq("id", fix.test_id)
+                )
+                updated_count += 1
+                audit_updated_items.append({
+                    "id": row["id"],
+                    "name": row.get("name"),
+                    "type": "prep_fix",
+                })
+
+        # 2. Price fixes (validating 1.0 <= price_rupees <= 100000.0)
+        for fix in body.price_fixes:
+            if fix.price_rupees < 1.0 or fix.price_rupees > 100000.0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Price ₹{fix.price_rupees} is out of allowable range (₹1 to ₹1,00,000)",
+                )
+            check = await sb(
+                supabase.table("lab_tests")
+                .select("id, name, branch_id")
+                .eq("clinic_id", effective_clinic_id)
+                .eq("id", fix.test_id)
+            )
+            if check.data:
+                row = check.data[0]
+                enforce_branch_scope(user, row.get("branch_id"))
+                await sb(
+                    supabase.table("lab_tests")
+                    .update({"price_paise": int(round(fix.price_rupees * 100))})
+                    .eq("clinic_id", effective_clinic_id)
+                    .eq("id", fix.test_id)
+                )
+                updated_count += 1
+                audit_updated_items.append({
+                    "id": row["id"],
+                    "name": row.get("name"),
+                    "type": "price_fix",
+                    "price_rupees": fix.price_rupees,
+                })
+
+        # ── RUN DELETES ONLY AFTER ALL UPDATES SUCCEED ──────────────────────
+        if body.delete_duplicate_ids:
+            # Query actual IDs and names for audit logging before deletion
+            try:
+                name_lookup = await sb(
+                    supabase.table("lab_tests")
+                    .select("id, name")
+                    .eq("clinic_id", effective_clinic_id)
+                    .in_("id", body.delete_duplicate_ids)
+                )
+                if name_lookup.data:
+                    audit_deleted_items = [
+                        {"id": r["id"], "name": r.get("name")}
+                        for r in name_lookup.data
+                    ]
+            except Exception as e:
+                logger.warning(f"Failed to lookup names for audit log of duplicate deletes: {e}")
+
+            del_result = await bulk_delete_lab_tests(
+                LabBulkDeleteRequest(ids=body.delete_duplicate_ids),
+                request=request,
+                clinic_id=clinic_id,
+                user=user,
+            )
+            deleted_count = del_result.get("deleted", 0)
+
+        # Audit log actual IDs and names
+        await log_admin_action(
+            user=user,
+            action="cleanup_apply_lab_tests",
+            resource_type="lab_test",
+            resource_id=None,
+            details={
+                "deleted_count": deleted_count,
+                "updated_count": updated_count,
+                "updated_items": audit_updated_items,
+                "deleted_items": audit_deleted_items,
+            },
+            ip_address=_client_ip(request),
+        )
+
+        return {
+            "message": "Cleanup applied successfully",
+            "deleted_count": deleted_count,
+            "updated_count": updated_count,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error applying catalogue cleanup for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to apply catalogue cleanup")
+
+
+@router.post("/lab-tests/{test_id}/generate-details")
+async def generate_lab_test_details_admin(
+    test_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Generate an AI draft description for a lab test or package. Preview only; saves nothing."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        from app.services.test_detail_generator import generate_test_details
+
+        res = await sb(
+            supabase.table("lab_tests")
+            .select("*")
+            .eq("clinic_id", effective_clinic_id)
+            .eq("id", test_id)
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Lab test not found")
+
+        test_row = res.data[0]
+        enforce_branch_scope(user, test_row.get("branch_id"))
+
+        draft = await generate_test_details(
+            name=test_row.get("name") or "",
+            category=test_row.get("category"),
+            sample_type=test_row.get("sample_type"),
+            fasting_required=bool(test_row.get("fasting_required")),
+            clinic_id=effective_clinic_id,
+        )
+        return {
+            "test_id": test_id,
+            "preview_description": draft.get("description", ""),
+            "source": draft.get("source", "template"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating test details for {test_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate test details")
+
+
+@router.get("/ai/usage")
+async def get_ai_usage_stats(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Retrieve monthly AI usage stats, spend breakdown, and recent ledger entries."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        from app.services.ai_gateway import check_admin_spend_cap, _clean_clinic_uuid
+        from datetime import datetime, timezone
+
+        is_exceeded, admin_spend, budget_paise = await check_admin_spend_cap(effective_clinic_id)
+
+        now = datetime.now(timezone.utc)
+        month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).isoformat()
+
+        target_clinic_id = _clean_clinic_uuid(effective_clinic_id) or effective_clinic_id
+        patient_spend = 0
+        breakdown: dict[str, int] = {}
+        recent_calls: list = []
+
+        try:
+            PAGE_SIZE = 1000
+            offset = 0
+            while True:
+                ledger_res = await sb(
+                    supabase.table("ai_usage_ledger")
+                    .select("*")
+                    .eq("clinic_id", target_clinic_id)
+                    .gte("created_at", month_start)
+                    .order("created_at", desc=True)
+                    .range(offset, offset + PAGE_SIZE - 1)
+                )
+                batch = ledger_res.data or []
+                if offset == 0:
+                    recent_calls = batch[:25]
+                for r in batch:
+                    cost = int(r.get("cost_paise", 0))
+                    tt = r.get("task_type", "other")
+                    if tt == "patient_chat":
+                        patient_spend += cost
+                    breakdown[tt] = breakdown.get(tt, 0) + cost
+                if len(batch) < PAGE_SIZE:
+                    break
+                offset += PAGE_SIZE
+        except Exception as e:
+            logger.warning(f"Could not read ai_usage_ledger for clinic {effective_clinic_id}: {e}")
+
+        total_spend = admin_spend + patient_spend
+
+        return {
+            "clinic_id": effective_clinic_id,
+            "month": now.strftime("%Y-%m"),
+            "monthly_budget_paise": budget_paise,
+            "monthly_budget_rupees": budget_paise / 100.0,
+            "admin_spend_paise": admin_spend,
+            "admin_spend_rupees": admin_spend / 100.0,
+            "patient_spend_paise": patient_spend,
+            "patient_spend_rupees": patient_spend / 100.0,
+            "total_spend_paise": total_spend,
+            "total_spend_rupees": total_spend / 100.0,
+            "is_budget_exceeded": is_exceeded,
+            "task_breakdown_paise": breakdown,
+            "recent_calls": recent_calls,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching AI usage for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch AI usage statistics")
+
+
+@router.get("/ai/budget")
+async def get_ai_budget(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Read the configured monthly AI budget for this clinic (read-only view for clinic admins)."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        from app.services.ai_gateway import check_admin_spend_cap
+        _, current_spend, budget_paise = await check_admin_spend_cap(effective_clinic_id)
+        return {
+            "clinic_id": effective_clinic_id,
+            "budget_paise": budget_paise,
+            "budget_rupees": budget_paise / 100.0,
+            "current_spend_paise": current_spend,
+            "current_spend_rupees": current_spend / 100.0,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching AI budget for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch AI budget")
+
+
 @router.get("/lab-tests/csv-template")
 async def download_lab_test_csv_template(
     user: AdminUser = Depends(verify_credentials),

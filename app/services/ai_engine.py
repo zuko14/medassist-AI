@@ -185,7 +185,7 @@ async def call_openrouter_with_backoff(
         except Exception:
             pass
 
-    return await llm_provider.create_chat_completion(
+    res = await llm_provider.create_chat_completion(
         messages=messages,
         model=model,
         max_tokens=max_tokens,
@@ -193,6 +193,34 @@ async def call_openrouter_with_backoff(
         response_format=response_format,
         timeout=timeout,
     )
+
+    # Fire-and-forget ledger write for patient chat spend tracking.
+    # Must never block or affect the reply. Unattributed calls logged as clinic_id=None.
+    try:
+        if isinstance(res, dict):
+            usage = res.get("usage") or {}
+            p_tok = usage.get("prompt_tokens", 0)
+            c_tok = usage.get("completion_tokens", 0)
+            tot_tok = usage.get("total_tokens", p_tok + c_tok)
+            used_model = res.get("model") or model or getattr(settings, "openrouter_model", "deepseek/deepseek-chat")
+            from app.services.ai_gateway import calculate_cost_paise, record_ai_usage_bg
+            cost_paise = calculate_cost_paise(usage, tot_tok)
+            record_ai_usage_bg(
+                clinic_id=clinic_id,
+                task_type="patient_chat",
+                provider="openrouter",
+                model=used_model,
+                prompt_tokens=p_tok,
+                completion_tokens=c_tok,
+                total_tokens=tot_tok,
+                cost_paise=cost_paise,
+                is_fallback=False,
+                success=True,
+            )
+    except Exception:
+        pass
+
+    return res
 
 
 # Backward-compatibility alias

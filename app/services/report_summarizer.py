@@ -10,7 +10,7 @@ Compliant with India DPDP Act 2023 data minimization requirements.
 import asyncio
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.config import settings
 from app.services.ai_engine import call_openrouter_with_backoff
@@ -46,7 +46,11 @@ class ReportSummarizer:
     """Summarize lab reports into patient-friendly messages using OpenRouter AI."""
 
     async def summarize(
-        self, report_text: str, patient_name: str, report_type: str
+        self,
+        report_text: str,
+        patient_name: str,
+        report_type: str,
+        clinic_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Summarize a lab report and return structured result.
 
@@ -117,6 +121,7 @@ class ReportSummarizer:
                     timeout=_SUMMARIZER_TIMEOUT_SECONDS,
                     max_tokens=600,
                     response_format={"type": "json_object"},
+                    clinic_id=clinic_id,
                 )
 
                 if isinstance(response, dict) and "choices" in response:

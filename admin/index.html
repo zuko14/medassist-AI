@@ -1575,6 +1575,24 @@
                 </div>
                 <button class="btn btn-accent" onclick="saveFollowupSettings()">Save Follow-up Settings</button>
             </div>
+
+            <div class="form-card" id="aiUsageCard">
+                <h3>🤖 AI Budget &amp; Spend Tracking</h3>
+                <p class="muted" style="margin:-4px 0 14px">Centralized monthly spend accounting across administrative features and patient WhatsApp chat. Patient chat is never cut off or degraded by the budget cap.</p>
+                <div id="aiBudgetMsg"></div>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Monthly Admin AI Budget (₹ Rupees)</label>
+                        <input type="number" id="f-aiBudgetRupees" placeholder="500" readonly disabled style="opacity:0.85; cursor:not-allowed;">
+                        <small class="muted">Configured by platform owner. Covers admin catalogue clean-up, AI details, summaries, and reply drafts.</small>
+                    </div>
+                    <div class="field" style="display:flex; flex-direction:column; justify-content:center;">
+                        <label>Current Month Spend</label>
+                        <div style="font-size:0.9rem; font-weight:600; color:var(--text);" id="aiCurrentSpendText">₹0.00</div>
+                        <small class="muted" id="aiSpendBreakdownText">Loading spend breakdown...</small>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="pg-dashboard" class="sec on">
@@ -2405,6 +2423,7 @@
                     <select id="labTestCategoryFilter" class="search-bar" style="max-width:220px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="filterLabTests()" aria-label="Filter catalog by service type">
                         <option value="">All service types</option>
                     </select>
+                    <button class="btn btn-ghost" id="btnCatalogueCleanup" onclick="openCatalogueCleanupModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Clean-Up Suggestions</button>
                     <button class="btn btn-ghost" onclick="openLabCsvModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Import CSV</button>
                     <button class="btn btn-accent" onclick="openAddLabTestModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Add Lab Test</button>
                 </div>
@@ -2415,12 +2434,10 @@
                     <h3>Test Catalog</h3>
                     <span id="labTestCount" style="color:var(--text3); font-size:0.8rem;"></span>
                 </div>
-                                <div id="labBulkBar" role="region" aria-label="Selected tests" style="display:none; align-items:center; justify-content:space-between; gap:12px; background:var(--bg-accent, #f1f5f9); border:1px solid var(--border); border-radius:8px; padding:8px 14px; margin-bottom:12px;">
-                    <span id="labBulkText" aria-live="polite" style="font-size:0.88rem; font-weight:600; color:var(--text-strong);">0 tests selected</span>
-                    <div style="display:flex; gap:8px;">
-                        <button type="button" class="btn" style="padding:4px 10px; font-size:0.8rem;" onclick="toggleLabSelectAll(false)">Clear</button>
-                        <button type="button" id="btnLabBulkDelete" class="btn btn-danger" style="padding:4px 12px; font-size:0.8rem;" onclick="bulkDeleteLabTests()">Delete Selected</button>
-                    </div>
+                <div id="labBulkBar" role="region" aria-label="Selected tests" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; margin-bottom:10px; border-radius:10px; background:var(--surface); border:1px solid var(--border);">
+                    <span id="labBulkText" aria-live="polite" style="font-weight:600; color:var(--text-strong)"></span>
+                    <button type="button" class="btn" style="padding:4px 10px; font-size:0.8rem; background:var(--surface); min-width:auto" onclick="clearLabSelection()">Clear</button>
+                    <button type="button" id="btnLabBulkDelete" class="btn btn-red" style="padding:4px 12px; font-size:0.8rem; min-width:auto; margin-left:auto" onclick="bulkDeleteLabTests()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg> Delete selected</button>
                 </div>
                 <div class="tbl-wrap" id="labTestList">
                     <div class="loader"><div class="spin"></div>Loading lab tests...</div>
@@ -2467,7 +2484,10 @@
                     <textarea id="f-ltPrep" rows="2" placeholder="e.g. 10-12 hours overnight fasting required. Water is permitted."></textarea>
                 </div>
                 <div class="field" style="margin-top:8px;">
-                    <label for="f-ltDescription">Details / Tests Included <span id="ltDescCounter" style="color:var(--text3); font-weight:400;"></span></label>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <label for="f-ltDescription" style="margin:0;">Details / Tests Included <span id="ltDescCounter" style="color:var(--text3); font-weight:400;"></span></label>
+                        <button type="button" class="btn btn-ghost btn-sm" id="btnAiDraftDetails" onclick="generateAiDetailsDraft()" style="font-size:0.75rem; padding:2px 8px; height:auto; line-height:1.4;">✨ AI Draft</button>
+                    </div>
                     <textarea id="f-ltDescription" rows="3" maxlength="500" oninput="updateLtDescCounter()" placeholder="e.g. CBC, Lipid Profile, LFT, KFT, Thyroid, HbA1c, Urine Routine, ECG — 62 parameters"></textarea>
                     <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Shown to the patient on WhatsApp when they open this test &mdash; what a health package includes, or what a scan covers.</p>
                 </div>
@@ -3162,6 +3182,29 @@
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeChangePassword()">Cancel</button>
             <button class="btn btn-accent" onclick="submitChangePassword()">Update Password</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ LAB CATALOGUE CLEAN-UP MODAL ═══ -->
+<div class="modal-overlay" id="labCleanupModal">
+    <div class="modal" style="max-width:720px; max-height:85vh; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0;">✨ Catalogue Clean-Up &amp; Quality Audit</h3>
+            <button class="btn btn-ghost btn-sm" onclick="closeCatalogueCleanupModal()" style="font-size:1.1rem; padding:2px 8px;">&times;</button>
+        </div>
+        <p style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;">
+            Identifies duplicate catalogue entries, suspicious prices, and tests requiring clinical fasting instructions. All changes stay preview-only until you apply them.
+        </p>
+        <div id="labCleanupBody" style="overflow-y:auto; flex:1; margin-bottom:14px; padding-right:4px;">
+            <div style="text-align:center; padding:30px; color:var(--text3);">Click &quot;Scan Catalogue&quot; to analyze test quality.</div>
+        </div>
+        <div class="modal-actions" style="display:flex; justify-content:space-between; align-items:center;">
+            <button class="btn btn-ghost" id="btnScanCleanup" onclick="scanCatalogueCleanup()">Scan Catalogue</button>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-ghost" onclick="closeCatalogueCleanupModal()">Close</button>
+                <button class="btn btn-accent" id="btnApplyCleanup" onclick="applyCatalogueCleanupFixes()" style="display:none;">Apply Selected Fixes</button>
+            </div>
         </div>
     </div>
 </div>
@@ -6336,7 +6379,7 @@ async function loadLabTests() {
             ? '/admin/lab-tests?branch_id=' + encodeURIComponent(labTestBranchId)
             : '/admin/lab-tests';
         labTestsCache = await api(path) || [];
-        // A ticked test that is gone (deleted, or not in this branch anymore)
+        // A ticked test that is gone (deleted, or not in this branch view)
         // must never ride along into the next bulk delete.
         const present = new Set(labTestsCache.map(t => t.id));
         Array.from(labSelected).forEach(id => { if (!present.has(id)) labSelected.delete(id); });
@@ -6538,6 +6581,11 @@ function resetLabTestForm() {
     // publishes the test to every centre.
     const branchSel = document.getElementById('f-ltBranch');
     if (branchSel) branchSel.value = labTestBranchId || '';
+    const draftBtn = document.getElementById('btnAiDraftDetails');
+    if (draftBtn) {
+        draftBtn.disabled = true;
+        draftBtn.title = 'Save the test first';
+    }
     document.getElementById('labTestFormTitle').textContent = 'Add Lab Test';
     const msgEl = document.getElementById('labTestMsg');
     if (msgEl) msgEl.innerHTML = '';
@@ -6547,6 +6595,11 @@ window.editLabTest = function(id) {
     const test = labTestsCache.find(t => t.id === id);
     if (!test) return;
     document.getElementById('f-labTestId').value = test.id;
+    const draftBtn = document.getElementById('btnAiDraftDetails');
+    if (draftBtn) {
+        draftBtn.disabled = false;
+        draftBtn.title = '✨ AI Draft';
+    }
     document.getElementById('f-ltName').value = test.name || '';
     document.getElementById('f-ltSampleType').value = test.sample_type || '';
     document.getElementById('f-ltCategory').value = test.category || '';
@@ -8275,6 +8328,7 @@ async function loadProfile() {
         document.getElementById('f-followupMessage').value = data.followup_message || '';
         document.getElementById('f-followupTemplate').value = data.followup_message_template_name || '';
         updateFollowupCharCount();
+        loadAiUsage();
     } catch (e) {
         msg('profileMsg', 'Error loading profile: ' + e.message, true);
     }
@@ -9417,6 +9471,243 @@ async function markAllNotificationsRead() {
         toast('Failed to mark all as read', true);
     }
 }
+
+// ═══════ AI & CATALOGUE QUALITY (PHASE 1) ═══════
+let cleanupSuggestionsCache = null;
+
+window.openCatalogueCleanupModal = function () {
+    const m = document.getElementById('labCleanupModal');
+    if (m) {
+        m.classList.add('open');
+        scanCatalogueCleanup();
+    }
+};
+
+window.closeCatalogueCleanupModal = function () {
+    const m = document.getElementById('labCleanupModal');
+    if (m) m.classList.remove('open');
+};
+
+window.scanCatalogueCleanup = async function () {
+    const body = document.getElementById('labCleanupBody');
+    const btnScan = document.getElementById('btnScanCleanup');
+    const btnApply = document.getElementById('btnApplyCleanup');
+    if (btnScan) btnScan.disabled = true;
+    if (body) body.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text3);">Analyzing catalogue for duplicates, pricing anomalies, and missing fasting instructions...</div>';
+
+    try {
+        const r = await api('/admin/lab-tests/cleanup-suggestions');
+        cleanupSuggestionsCache = r;
+
+        const summary = r.summary || {};
+        if (summary.total_suggestions_count === 0 && (r.uncategorized || []).length === 0) {
+            body.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-strong);">' +
+                '✅ <b>Catalogue quality is excellent!</b><br><span style="font-size:0.85rem; color:var(--text3);">No duplicates, zero-price anomalies, or missing fasting instructions found.</span></div>';
+            if (btnApply) btnApply.style.display = 'none';
+            return;
+        }
+
+        let html = '';
+
+        // 1. Duplicates
+        if ((r.duplicates || []).length > 0) {
+            html += '<div style="margin-bottom:16px;">' +
+                '<h4 style="color:var(--text-strong); margin-bottom:8px;">👥 Duplicate &amp; Overlapping Tests (' + r.duplicates.length + ' groups)</h4>' +
+                '<p style="font-size:0.78rem; color:var(--text3); margin-bottom:8px;">Check duplicates to delete them. The canonical row (highlighted) is kept.</p>';
+            r.duplicates.forEach(g => {
+                html += '<div style="background:var(--bg2, #1e293b); border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:8px;">' +
+                    '<div style="font-size:0.82rem; font-weight:600; color:var(--accent); margin-bottom:6px;">Keep: ' + esc(g.canonical_name) + ' (₹' + g.canonical_price_rupees + ')</div>';
+                (g.duplicate_details || []).forEach(d => {
+                    html += '<label class="check">' +
+                        '<input type="checkbox" class="cleanup-dupe-cb" value="' + esc(d.id) + '"> ' +
+                        '<span>Delete: <b>' + esc(d.name) + '</b> (₹' + d.price_rupees + ')</span>' +
+                        '</label>';
+                });
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        // 2. Missing Fasting Instructions
+        if ((r.missing_prep || []).length > 0) {
+            html += '<div style="margin-bottom:16px;">' +
+                '<h4 style="color:var(--text-strong); margin-bottom:8px;">⏳ Missing Fasting Instructions (' + r.missing_prep.length + ')</h4>' +
+                '<p style="font-size:0.78rem; color:var(--text3); margin-bottom:8px;">These tests clinically require fasting. Check below to update them with clinical instructions.</p>';
+            r.missing_prep.forEach(p => {
+                html += '<div style="background:var(--bg2, #1e293b); border:1px solid var(--border); border-radius:6px; padding:8px 10px; margin-bottom:6px;">' +
+                    '<label class="check">' +
+                    '<input type="checkbox" class="cleanup-prep-cb" data-id="' + esc(p.id) + '" data-prep="' + esc(p.suggested_preparation) + '"> ' +
+                    '<div><b>' + esc(p.name) + '</b>: Set fasting required &amp; add instructions:<br><i style="color:var(--text3); font-size:0.75rem;">"' + esc(p.suggested_preparation) + '"</i></div>' +
+                    '</label>' +
+                    '</div>';
+            });
+            html += '</div>';
+        }
+
+        // 3. Suspicious Prices
+        if ((r.suspicious_prices || []).length > 0) {
+            html += '<div style="margin-bottom:16px;">' +
+                '<h4 style="color:var(--text-strong); margin-bottom:8px;">⚠️ Suspicious Prices (' + r.suspicious_prices.length + ')</h4>' +
+                '<p style="font-size:0.78rem; color:var(--text3); margin-bottom:8px;">Tests with zero or unusually low prices. Enter a valid price in rupees to update.</p>';
+            r.suspicious_prices.forEach(sp => {
+                html += '<div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg2, #1e293b); border:1px solid var(--border); border-radius:6px; padding:8px 10px; margin-bottom:6px; font-size:0.8rem;">' +
+                    '<div><b>' + esc(sp.name) + '</b> <span style="color:var(--text3);">(Current: ₹' + sp.price_rupees + ')</span></div>' +
+                    '<div style="display:flex; align-items:center; gap:6px;">' +
+                    '<span>₹</span>' +
+                    '<input type="number" class="cleanup-price-inp" data-id="' + esc(sp.id) + '" min="10" placeholder="New price" style="width:90px; padding:3px 6px; font-size:0.8rem;">' +
+                    '</div>' +
+                    '</div>';
+            });
+            html += '</div>';
+        }
+
+        body.innerHTML = html;
+        if (btnApply) btnApply.style.display = '';
+    } catch (e) {
+        body.innerHTML = '<div style="padding:20px; color:var(--danger, red);">Could not load suggestions: ' + esc(e.message || String(e)) + '</div>';
+    } finally {
+        if (btnScan) btnScan.disabled = false;
+    }
+};
+
+window.applyCatalogueCleanupFixes = async function () {
+    const dupeCbs = document.querySelectorAll('.cleanup-dupe-cb:checked');
+    const deleteIds = Array.from(dupeCbs).map(cb => cb.value);
+
+    const prepCbs = document.querySelectorAll('.cleanup-prep-cb:checked');
+    const prepFixes = Array.from(prepCbs).map(cb => ({
+        test_id: cb.getAttribute('data-id'),
+        fasting_required: true,
+        preparation: cb.getAttribute('data-prep'),
+    }));
+
+    const priceInps = document.querySelectorAll('.cleanup-price-inp');
+    const priceFixes = [];
+    priceInps.forEach(inp => {
+        const val = parseFloat(inp.value);
+        if (!isNaN(val) && val >= 1.0 && val <= 100000.0) {
+            priceFixes.push({
+                test_id: inp.getAttribute('data-id'),
+                price_rupees: val,
+            });
+        }
+    });
+
+    if (deleteIds.length === 0 && prepFixes.length === 0 && priceFixes.length === 0) {
+        toast('No fixes selected to apply.', true);
+        return;
+    }
+
+    const n = deleteIds.length;
+    if (n >= 20) {
+        const typed = await promptDialog(
+            `Delete ${n} duplicate test${n !== 1 ? 's' : ''} and apply ${prepFixes.length} fasting instruction updates and ${priceFixes.length} price corrections? Patients stop seeing deleted tests on WhatsApp. This cannot be undone. Type DELETE to confirm.`,
+            { title: `Delete ${n} tests`, danger: true, okText: 'Delete & Apply', placeholder: 'DELETE' }
+        );
+        if (typed === null) return;
+        if (typed.toUpperCase() !== 'DELETE') {
+            toast('Not applied — type DELETE to confirm', true);
+            return;
+        }
+    } else if (n > 0) {
+        const ok = await confirmDialog(
+            `Delete ${n} duplicate test${n !== 1 ? 's' : ''} and apply ${prepFixes.length} fasting instruction updates and ${priceFixes.length} price corrections? Patients stop seeing deleted tests on WhatsApp. This cannot be undone.`,
+            { title: `Delete ${n} test${n !== 1 ? 's' : ''} & Apply Fixes`, danger: true, okText: 'Delete & Apply' }
+        );
+        if (!ok) return;
+    } else {
+        const ok = await confirmDialog(
+            `Apply ${prepFixes.length} fasting instruction updates and ${priceFixes.length} price corrections?`,
+            { title: 'Apply Catalogue Fixes', okText: 'Apply' }
+        );
+        if (!ok) return;
+    }
+
+    const btn = document.getElementById('btnApplyCleanup');
+    if (btn) btn.disabled = true;
+
+    try {
+        const r = await apiPost('/admin/lab-tests/cleanup-apply', {
+            delete_duplicate_ids: deleteIds,
+            prep_fixes: prepFixes,
+            price_fixes: priceFixes,
+        });
+        toast('Clean-up applied: ' + (r.deleted_count || 0) + ' deleted, ' + (r.updated_count || 0) + ' updated.');
+        closeCatalogueCleanupModal();
+        loadLabTests();
+    } catch (e) {
+        toast(e.message || 'Failed to apply cleanup', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+};
+
+window.generateAiDetailsDraft = async function () {
+    const idEl = document.getElementById('f-labTestId');
+    const id = idEl ? idEl.value.trim() : '';
+    if (!id) {
+        const btn = document.getElementById('btnAiDraftDetails');
+        if (btn) {
+            btn.disabled = true;
+            btn.title = 'Save the test first';
+        }
+        toast('Save the test first', true);
+        return;
+    }
+    const name = document.getElementById('f-ltName') ? document.getElementById('f-ltName').value.trim() : '';
+    if (!name) {
+        toast('Please enter a test or package name first', true);
+        return;
+    }
+    const btn = document.getElementById('btnAiDraftDetails');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generating...';
+    }
+    try {
+        const res = await apiPost('/admin/lab-tests/' + id + '/generate-details');
+        if (res.source === 'template' || !res.preview_description) {
+            toast('AI unavailable — write details manually', true);
+            return;
+        }
+        const el = document.getElementById('f-ltDescription');
+        if (el) {
+            el.value = res.preview_description;
+            updateLtDescCounter();
+        }
+        toast('AI draft generated (preview only — click Save Test to keep it)');
+    } catch (e) {
+        toast(e.message || 'Could not generate details', true);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '✨ AI Draft';
+        }
+    }
+};
+
+window.loadAiUsage = async function () {
+    const spendEl = document.getElementById('aiCurrentSpendText');
+    const breakdownEl = document.getElementById('aiSpendBreakdownText');
+    const budgetInp = document.getElementById('f-aiBudgetRupees');
+    if (!spendEl) return;
+
+    try {
+        const r = await api('/admin/ai/usage');
+        if (budgetInp) budgetInp.value = Math.round(r.monthly_budget_rupees || 500);
+        const adminRs = (r.admin_spend_rupees || 0).toFixed(2);
+        const patRs = (r.patient_spend_rupees || 0).toFixed(2);
+        const totRs = (r.total_spend_rupees || 0).toFixed(2);
+        spendEl.textContent = 'Admin: ₹' + adminRs + ' / Budget: ₹' + (r.monthly_budget_rupees || 500);
+        if (breakdownEl) {
+            breakdownEl.textContent = 'Patient WhatsApp chat: ₹' + patRs + ' (never capped) · Total spend: ₹' + totRs;
+        }
+    } catch (e) {
+        if (spendEl) spendEl.textContent = 'Unable to load AI spend';
+    }
+};
+
+
 
 </script>
 </body>

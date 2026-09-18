@@ -349,7 +349,7 @@ class LabReportService:
 
         # Step B — AI summary
         summarizer = ReportSummarizer()
-        ai_result = await summarizer.summarize(pdf_text, patient_name, report_type)
+        ai_result = await summarizer.summarize(pdf_text, patient_name, report_type, clinic_id=clinic_id)
 
         if ai_result.get("fallback"):
             logger.warning(

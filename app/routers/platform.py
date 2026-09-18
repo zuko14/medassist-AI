@@ -897,6 +897,63 @@ async def update_clinic_feature(
     return {"success": True, "clinic": result.data[0] if result.data else None}
 
 
+class PlatformAIBudgetRequest(BaseModel):
+    budget_paise: Optional[int] = Field(None, ge=0)
+    budget_rupees: Optional[float] = Field(None, ge=0)
+
+
+@router.post("/clinics/{clinic_id}/ai-budget")
+@router.patch("/clinics/{clinic_id}/ai-budget")
+async def platform_update_clinic_ai_budget(
+    clinic_id: str,
+    body: PlatformAIBudgetRequest,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Set or update the monthly administrative AI budget for a clinic (platform owner only)."""
+    new_budget_paise = body.budget_paise
+    if new_budget_paise is None and body.budget_rupees is not None:
+        new_budget_paise = int(round(body.budget_rupees * 100))
+    if new_budget_paise is None or new_budget_paise < 0:
+        raise HTTPException(status_code=400, detail="A valid budget in paise or rupees must be provided.")
+
+    clinic_res = await sb(
+        supabase.table("clinics").select("id, name, config").eq("id", clinic_id).limit(1)
+    )
+    if not clinic_res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    clinic_row = clinic_res.data[0]
+    cfg = dict(clinic_row.get("config") or {})
+    old_budget = cfg.get("ai_budget_paise", 50000)
+    cfg["ai_budget_paise"] = new_budget_paise
+
+    await sb(
+        supabase.table("clinics").update({"config": cfg}).eq("id", clinic_id)
+    )
+
+    client_ip = request.client.host if (request and getattr(request, "client", None)) else "unknown"
+    await log_admin_action(
+        user=owner,
+        action="update_clinic_ai_budget",
+        resource_type="clinic",
+        resource_id=clinic_id,
+        details={
+            "clinic_name": clinic_row.get("name"),
+            "old_budget_paise": old_budget,
+            "new_budget_paise": new_budget_paise,
+        },
+        ip_address=client_ip,
+    )
+
+    return {
+        "success": True,
+        "clinic_id": clinic_id,
+        "budget_paise": new_budget_paise,
+        "budget_rupees": new_budget_paise / 100.0,
+    }
+
+
 @router.get("/revenue")
 async def get_platform_revenue_analytics(
     request: Request,

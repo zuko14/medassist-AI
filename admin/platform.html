@@ -1461,6 +1461,19 @@
                     Lab Reports enabled
                 </label>
             </div>
+
+            <div style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">AI Monthly Budget</h4>
+                <p style="color:var(--text3); font-size:0.78rem; margin-bottom:12px;">Cap on administrative AI features (import, details, summaries, clean-up, reply drafts). Patient chat is never cut off.</p>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <div style="position:relative; flex:1;">
+                        <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text3);">₹</span>
+                        <input type="number" id="modalAiBudgetRupees" min="0" step="10" placeholder="500" class="form-control" style="padding-left:28px;">
+                    </div>
+                    <button class="btn-primary" style="width:auto; padding:8px 16px;" onclick="saveClinicAiBudget()">Save Budget</button>
+                </div>
+                <div id="modalAiBudgetStatus" style="font-size:0.8rem; margin-top:6px; color:var(--text3);"></div>
+            </div>
         </div>
     </div>
 
@@ -2430,6 +2443,12 @@
                     } else {
                         deptList.innerHTML = `<div style="font-size:0.85rem; color:var(--text3)">No department bookings logged yet.</div>`;
                     }
+
+                    const cfg = c.config || {};
+                    const budgetPaise = cfg.ai_budget_paise !== undefined ? cfg.ai_budget_paise : 50000;
+                    document.getElementById('modalAiBudgetRupees').value = Math.round(budgetPaise / 100);
+                    const statusEl = document.getElementById('modalAiBudgetStatus');
+                    if (statusEl) statusEl.innerText = '';
                 }
             } catch (e) {
                 console.error('Error fetching clinic detail:', e);
@@ -2457,6 +2476,40 @@
                 alert(`Failed to update feature: ${e.message}`);
                 // Revert the checkbox to reflect the unsaved state
                 openModal(_modalClinicId);
+            }
+        }
+
+        async function saveClinicAiBudget() {
+            if (!_modalClinicId) return;
+            const rupees = parseFloat(document.getElementById('modalAiBudgetRupees').value);
+            if (isNaN(rupees) || rupees < 0) {
+                alert('Please enter a valid budget in rupees (>= 0)');
+                return;
+            }
+            const statusEl = document.getElementById('modalAiBudgetStatus');
+            if (statusEl) {
+                statusEl.innerText = 'Saving...';
+                statusEl.style.color = 'var(--text3)';
+            }
+            try {
+                const res = await fetch(`/platform/clinics/${_modalClinicId}/ai-budget`, {
+                    method: 'POST',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ budget_rupees: rupees })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.detail || res.status);
+                }
+                if (statusEl) {
+                    statusEl.innerText = 'Budget saved successfully!';
+                    statusEl.style.color = 'var(--green)';
+                }
+            } catch (e) {
+                if (statusEl) {
+                    statusEl.innerText = `Error: ${e.message}`;
+                    statusEl.style.color = 'var(--red, #f87171)';
+                }
             }
         }
 

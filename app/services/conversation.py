@@ -4801,6 +4801,7 @@ class ConversationManager:
         "24 Hrs URINE SODIUM". Best matches are ordered first so the answer
         lands on page 1 instead of behind a "More options" tap.
         """
+        # Tier 1: All-terms-contained exact substring matching (unchanged)
         terms = [t for t in query.strip().lower().split() if t]
         if not terms:
             return list(tests)
@@ -4810,14 +4811,22 @@ class ConversationManager:
             for t in tests
             if all(term in (t.get("name") or "").lower() for term in terms)
         ]
-        matched.sort(
-            key=lambda t: (
-                not (t.get("name") or "").lower().startswith(joined),
-                len(t.get("name") or ""),
-                (t.get("name") or "").lower(),
+        if matched:
+            matched.sort(
+                key=lambda t: (
+                    not (t.get("name") or "").lower().startswith(joined),
+                    len(t.get("name") or ""),
+                    (t.get("name") or "").lower(),
+                )
             )
-        )
-        return matched
+            return matched
+
+        # Tier 2 & 3: Multilingual synonyms and difflib typo tolerance (runs only when Tier 1 is empty)
+        try:
+            from app.services.hybrid_search import multilingual_synonym_search
+            return multilingual_synonym_search(tests, query)
+        except Exception:
+            return []
 
     async def _show_lab_test_list(
         self,
