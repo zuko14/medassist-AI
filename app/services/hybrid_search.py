@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 
 # Hindi -> English translations & exact clinical abbreviations of the SAME test
 HINDI_MEDICAL_MAP: Dict[str, List[str]] = {
