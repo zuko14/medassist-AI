@@ -168,9 +168,12 @@ class TestCategoryStep:
             await m._show_lab_test_list(CLINIC, PHONE, ctx, "en")
 
         rows, body, _ = _sent(m)
+        # Each heading leads with an icon read off its own wording.
+        title = m._lab_heading_title
         assert [r["title"] for r in rows] == [
-            PATHOLOGY[:24], RADIOLOGY[:24], PACKAGES[:24], MAIN_MENU_TITLE,
+            title(PATHOLOGY), title(RADIOLOGY), title(PACKAGES), MAIN_MENU_TITLE,
         ]
+        assert rows[0]["title"].startswith("\U0001F9EA")  # the lab icon, not a bare heading
         assert rows[0]["description"].startswith("20")
         assert rows[1]["description"].startswith("2")
         assert "What would you like to book" in body

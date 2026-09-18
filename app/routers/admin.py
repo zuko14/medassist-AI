@@ -44,6 +44,7 @@ from app.database import (
 from app.services.tenant import (
     ALL_FEATURES,
     CANCELLATION_WINDOW_CHOICES,
+    HYBRID_SPECIALTY_PLANS,
     SPECIALTY_BY_PLAN,
     cancellation_window_hours,
     get_clinic_by_id,
@@ -53,7 +54,13 @@ from app.services.tenant import (
     specialty_enabled,
 )
 from app.services.ai_engine import generate_treatment_concerns, generate_treatment_description
-from app.services.specialty_catalog import STARTER_TREATMENTS, seed_starter_treatments
+from app.services.specialty_catalog import (
+    SERVICE_LINES,
+    STARTER_LISTS_BY_PLAN,
+    STARTER_SERVICE_LINE,
+    STARTER_TREATMENTS,
+    seed_starter_treatments,
+)
 from app.services.analytics import analytics_service
 from app.services.broadcast import broadcast_service
 from app.services.lab_reports import LabReportService
@@ -705,6 +712,16 @@ async def get_current_admin(
         # from features[] (the enterprise wildcard lists every feature).
         "specialty": SPECIALTY_BY_PLAN.get(plan),
         "specialty_enabled": specialty_enabled(clinic),
+        # migration 082. The Treatments page files rows under these sections
+        # (Child Care / Women Care / Fertility Care) -- from here, so the panel
+        # never keeps its own copy of the registry.
+        "service_lines": [
+            {"slug": slug, "label": entry["en"], "emoji": entry["emoji"]}
+            for slug, entry in SERVICE_LINES.items()
+        ],
+        "plan_service_lines": [
+            STARTER_SERVICE_LINE[s] for s in STARTER_LISTS_BY_PLAN.get(plan, ()) if s in STARTER_SERVICE_LINE
+        ],
     }
 
 
@@ -1340,6 +1357,22 @@ def _clean_lab_category(v: Optional[str]) -> Optional[str]:
     return v
 
 
+#: migration 083. Printed on the WhatsApp test card (body capped at 1024).
+LAB_DESCRIPTION_MAX_LEN = 500
+
+
+def _clean_lab_description(v: Optional[str]) -> Optional[str]:
+    """Blank collapses to None, so "" and NULL cannot mean two things."""
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if len(v) > LAB_DESCRIPTION_MAX_LEN:
+        raise ValueError(f"description must be {LAB_DESCRIPTION_MAX_LEN} characters or fewer")
+    return v
+
+
 class LabTestCreate(BaseModel):
     name: str
 
@@ -1369,11 +1402,19 @@ class LabTestCreate(BaseModel):
     #: ("Imaging", "Radiology & Scans", "Master Health Checkup") and the
     #: WhatsApp catalogue reads its headings straight off these values.
     category: Optional[str] = None
+    #: migration 083 -- what a package includes / what a scan covers. Printed
+    #: on the patient's WhatsApp test card.
+    description: Optional[str] = None
 
     @field_validator("category")
     @classmethod
     def clean_category(cls, v: Optional[str]) -> Optional[str]:
         return _clean_lab_category(v)
+
+    @field_validator("description")
+    @classmethod
+    def clean_description(cls, v: Optional[str]) -> Optional[str]:
+        return _clean_lab_description(v)
 
     @field_validator("price_rupees")
     @classmethod
@@ -1405,6 +1446,13 @@ class LabTestUpdate(BaseModel):
     is_active: Optional[bool] = None
     branch_id: Optional[str] = None
     category: Optional[str] = None
+    # "" clears it; omitting leaves it alone (exclude_unset), like category.
+    description: Optional[str] = None
+
+    @field_validator("description")
+    @classmethod
+    def clean_description(cls, v: Optional[str]) -> Optional[str]:
+        return _clean_lab_description(v)
 
     @field_validator("category")
     @classmethod
@@ -1737,6 +1785,7 @@ async def get_insights(
         days=days,
         branch_id=branch_id,
         include_reports=include_reports,
+        include_diagnostics=has_feature(clinic, "lab_test_booking"),
     )
 
 
@@ -2344,6 +2393,10 @@ async def create_lab_test(
             test_data = test.dict(exclude={"price_rupees"})
         test_data["price_paise"] = test.price_rupees * 100
         test_data["clinic_id"] = effective_clinic_id
+        # A test without details is sent exactly as before migration 083, so
+        # creating one never depends on the new column.
+        if test_data.get("description") is None:
+            test_data.pop("description", None)
 
         # unscoped: insert lab test with effective_clinic_id
         result = await sb(supabase.table("lab_tests").insert(test_data))
@@ -2516,6 +2569,16 @@ def _clean_care_pathway(v: Optional[str]) -> Optional[str]:
     return cleaned
 
 
+def _clean_service_line(v: Optional[str]) -> Optional[str]:
+    """migration 082. Blank means "no service line" and is stored as NULL."""
+    cleaned = (v or "").strip().lower()
+    if not cleaned:
+        return None
+    if cleaned not in SERVICE_LINES:
+        raise ValueError(f"service_line must be one of: {', '.join(SERVICE_LINES)}")
+    return cleaned
+
+
 class TreatmentCreate(BaseModel):
     name: str = Field(..., max_length=120)
     category: str = Field(..., max_length=60)
@@ -2530,10 +2593,12 @@ class TreatmentCreate(BaseModel):
     is_active: bool = True
     display_order: int = Field(default=0, ge=0, le=10_000)
     care_pathway: str = "direct"
+    service_line: Optional[str] = None
 
     _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
     _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
     _v_pathway = field_validator("care_pathway")(classmethod(lambda cls, v: _clean_care_pathway(v) or "direct"))
+    _v_line = field_validator("service_line")(classmethod(lambda cls, v: _clean_service_line(v)))
 
 
 class TreatmentUpdate(BaseModel):
@@ -2550,10 +2615,13 @@ class TreatmentUpdate(BaseModel):
     is_active: Optional[bool] = None
     display_order: Optional[int] = Field(default=None, ge=0, le=10_000)
     care_pathway: Optional[str] = None
+    # Sent as "" or null to clear; omitted to leave alone.
+    service_line: Optional[str] = None
 
     _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
     _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
     _v_pathway = field_validator("care_pathway")(classmethod(lambda cls, v: _clean_care_pathway(v)))
+    _v_line = field_validator("service_line")(classmethod(lambda cls, v: _clean_service_line(v)))
 
 
 class TreatmentDoctorsUpdate(BaseModel):
@@ -2626,8 +2694,18 @@ def _starter_specialty(clinic: dict, requested: Optional[str]) -> str:
         return requested
     raise HTTPException(
         status_code=400,
-        detail="Choose which starter list to load: skin & hair, eye, dental or fertility.",
+        detail="Choose which starter list to load: child care, women care, fertility, "
+               "skin & hair, eye or dental.",
     )
+
+
+def _starter_service_line(clinic: dict, specialty: str) -> Optional[str]:
+    """Hybrid hospitals file each starter list under its own section (Child
+    Care, Women Care, ...). Single-specialty clinics get no line, so their
+    seed is exactly what it was before migration 082."""
+    if clinic.get("plan") in HYBRID_SPECIALTY_PLANS:
+        return STARTER_SERVICE_LINE.get(specialty)
+    return None
 
 
 def _treatment_row(body: BaseModel, partial: bool) -> dict:
@@ -2640,6 +2718,10 @@ def _treatment_row(body: BaseModel, partial: bool) -> dict:
     if not partial or "price_from_rupees" in fields_set:
         if body.price_from_rupees is not None:
             data["price_from_paise"] = int(body.price_from_rupees) * 100
+    # A new row without a service line is sent exactly as before migration
+    # 082, so creating a treatment never depends on the new column.
+    if not partial and data.get("service_line") is None:
+        data.pop("service_line", None)
     return data
 
 
@@ -2924,7 +3006,10 @@ async def load_starter_treatments(
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         clinic = await _require_specialty_clinic(effective_clinic_id)
         specialty = _starter_specialty(clinic, body.specialty if body else None)
-        result = await seed_starter_treatments(effective_clinic_id, specialty)
+        line = _starter_service_line(clinic, specialty)
+        result = await seed_starter_treatments(
+            effective_clinic_id, specialty, **({"service_line": line} if line else {})
+        )
         await log_admin_action(
             user=user,
             action="load_starter_treatments",
@@ -3014,6 +3099,12 @@ _CSV_HEADER_ALIASES: dict[str, set[str]] = {
     "category": {
         "category", "test category", "test_category", "service category",
         "section", "group", "department", "modality",
+    },
+    # migration 083: what a package includes. Most package price lists carry
+    # one of these columns already.
+    "description": {
+        "description", "details", "includes", "tests included", "inclusions",
+        "components", "parameters", "package details",
     },
 }
 
@@ -3282,6 +3373,23 @@ async def import_lab_tests_csv(
         # filed by hand. Clearing a heading is done in the panel.
         if row_category:
             test_row["category"] = row_category
+
+        # Same no-wipe rule as the heading: a file without a details column
+        # leaves every existing description alone.
+        row_description = row.get("description", "").strip()
+        if row_description:
+            if len(row_description) > LAB_DESCRIPTION_MAX_LEN:
+                errors.append(
+                    {
+                        "row": i,
+                        "column": "description",
+                        "value": row_description[:50],
+                        "problem": f"Details exceed {LAB_DESCRIPTION_MAX_LEN} characters.",
+                        "expected": f"At most {LAB_DESCRIPTION_MAX_LEN} characters",
+                    }
+                )
+                continue
+            test_row["description"] = row_description
         validated_rows.append(test_row)
 
     # 5. Rejection gate: if any validation error occurred, abort entire import
@@ -3356,6 +3464,94 @@ async def import_lab_tests_csv(
     }
 
 
+class LabAutoClassifyRequest(BaseModel):
+    #: False = preview only. The panel always previews first.
+    apply: bool = False
+
+
+#: supabase-py puts the id list in the URL; 200 UUIDs stays well inside it.
+_AUTO_CLASSIFY_CHUNK = 200
+
+
+@router.post("/lab-tests/auto-classify")
+async def auto_classify_lab_tests(
+    body: LabAutoClassifyRequest,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """File every UNFILED test under a suggested service type, by its name.
+
+    A 1,392-test catalogue imported before migration 080 has no headings, so
+    the patient's WhatsApp menu cannot offer Health Packages or Radiology.
+    This proposes a heading per test (app/services/lab_classifier.py) and,
+    with apply=true, writes it.
+
+    Only rows whose category is NULL are ever written -- enforced in the
+    UPDATE's own filter, not just here -- so a heading an admin chose, even
+    one chosen between preview and apply, is never replaced.
+    """
+    from app.services.lab_classifier import classify_unfiled
+
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+    def _q():
+        # unscoped: reading this clinic's own catalogue (clinic_id filter)
+        return supabase.table("lab_tests").select("id, name, category").eq("clinic_id", effective_clinic_id)
+
+    try:
+        rows = await _fetch_all_lab_tests(_q, f"auto-classify read for clinic {effective_clinic_id}")
+        proposal = classify_unfiled(rows)
+        summary = [
+            {
+                "category": label,
+                "count": len(tests),
+                "examples": [t["name"] for t in tests[:6]],
+            }
+            for label, tests in sorted(proposal.items(), key=lambda kv: -len(kv[1]))
+        ]
+        unfiled = sum(item["count"] for item in summary)
+        updated = 0
+        if body.apply and unfiled:
+            for label, tests in proposal.items():
+                ids = [str(t["id"]) for t in tests]
+                for start in range(0, len(ids), _AUTO_CLASSIFY_CHUNK):
+                    chunk = ids[start:start + _AUTO_CLASSIFY_CHUNK]
+                    result = await sb(
+                        # unscoped: bulk filing within verified clinic scope
+                        supabase.table("lab_tests").update({"category": label})
+                        .eq("clinic_id", effective_clinic_id)
+                        .in_("id", chunk)
+                        .is_("category", "null")
+                    )
+                    updated += len(result.data or [])
+            # The WhatsApp menu caches headings for 60s; drop this worker's copy
+            # so the admin who just filed sees it on the next "Hi".
+            from app.services.conversation import ConversationManager
+
+            ConversationManager._lab_heading_cache.pop(effective_clinic_id, None)
+            await log_admin_action(
+                user=user,
+                action="auto_classify_lab_tests",
+                resource_type="lab_test",
+                resource_id=None,
+                details={"updated": updated, "proposal": {s["category"]: s["count"] for s in summary}},
+                ip_address=_client_ip(request),
+            )
+        return {
+            "total": len(rows),
+            "unfiled": unfiled,
+            "proposal": summary,
+            "applied": bool(body.apply and unfiled),
+            "updated": updated,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Auto-classify failed for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to classify the catalogue")
+
+
 @router.get("/lab-tests/csv-template")
 async def download_lab_test_csv_template(
     user: AdminUser = Depends(verify_credentials),
@@ -3366,17 +3562,17 @@ async def download_lab_test_csv_template(
     # actually sells, because "what do I put in this column?" is the whole
     # question an admin opens the template to answer.
     template_content = (
-        "name,price_rupees,category,sample_type,turnaround_hours,fasting_required,prep_instructions\n"
-        "Complete Blood Count (CBC),350,Lab Tests (Pathology),Blood,24,false,No special preparation needed\n"
-        "Fasting Blood Sugar (FBS),150,Lab Tests (Pathology),Blood,12,true,Fast for 8-10 hours prior to sample collection\n"
-        "Thyroid Profile (T3 T4 TSH),750,Lab Tests (Pathology),Blood,24,false,Can be taken at any time of day\n"
-        "Urine Routine & Microscopy,180,Lab Tests (Pathology),Urine,12,false,Collect clean catch midstream sample\n"
-        "Master Health Checkup,2500,Health Packages,,48,true,Report 12 hours fasted. Allow 3 hours at the centre.\n"
-        "Chest X-Ray (PA View),400,Radiology & Imaging,,2,false,Remove metal objects and jewellery\n"
-        "Ultrasound Whole Abdomen,1200,Radiology & Imaging,,4,true,6 hours fasting. Full bladder required.\n"
-        "MRI Brain (Plain),6500,Scans (CT / MRI),,24,false,Declare any implant or pacemaker before the scan\n"
-        "CT Chest (Plain),4500,Scans (CT / MRI),,24,false,Inform staff if you are pregnant\n"
-        "ECG,300,Cardiac & Special Tests,,1,false,No special preparation needed\n"
+        "name,price_rupees,category,sample_type,turnaround_hours,fasting_required,prep_instructions,description\n"
+        "Complete Blood Count (CBC),350,Lab Tests (Pathology),Blood,24,false,No special preparation needed,\n"
+        "Fasting Blood Sugar (FBS),150,Lab Tests (Pathology),Blood,12,true,Fast for 8-10 hours prior to sample collection,\n"
+        "Thyroid Profile (T3 T4 TSH),750,Lab Tests (Pathology),Blood,24,false,Can be taken at any time of day,\n"
+        "Urine Routine & Microscopy,180,Lab Tests (Pathology),Urine,12,false,Collect clean catch midstream sample,\n"
+        "Master Health Checkup,2500,Health Packages,,48,true,Report 12 hours fasted. Allow 3 hours at the centre.,\"CBC, Lipid Profile, LFT, KFT, Thyroid, HbA1c, Urine Routine, ECG\"\n"
+        "Chest X-Ray (PA View),400,Radiology & Imaging,,2,false,Remove metal objects and jewellery,\n"
+        "Ultrasound Whole Abdomen,1200,Radiology & Imaging,,4,true,6 hours fasting. Full bladder required.,\n"
+        "MRI Brain (Plain),6500,Scans (CT / MRI),,24,false,Declare any implant or pacemaker before the scan,\n"
+        "CT Chest (Plain),4500,Scans (CT / MRI),,24,false,Inform staff if you are pregnant,\n"
+        "ECG,300,Cardiac & Special Tests,,1,false,No special preparation needed,\n"
     )
     return Response(
         content=template_content,

@@ -17,7 +17,7 @@ from app.services.tenant import (
     get_clinic_by_id,
     SPECIALTY_BY_PLAN,
 )
-from app.services.specialty_catalog import seed_starter_treatments
+from app.services.specialty_catalog import STARTER_LISTS_BY_PLAN, STARTER_SERVICE_LINE, seed_starter_treatments
 from app.services.subscription import DAILY_REPORT_LIMIT_TIERS
 from app.services.whatsapp import whatsapp_service
 from app.database import sb  # T5.1: off-loop query execution
@@ -60,6 +60,7 @@ class CreateClinicRequest(BaseModel):
     plan: Literal[
         "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
         "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
+        "womenchild",
     ] = "soloclinic"
     meta_phone_number_id: str
     meta_access_token: str
@@ -95,6 +96,24 @@ class CreateClinicRequest(BaseModel):
     integration_secret: Optional[str] = None
     # Branches — optional, for polyclinic/multi-branch onboarding
     branches: Optional[list[BranchSeed]] = None
+
+
+async def seed_plan_starter_lists(clinic_id: str, plan: str) -> Optional[dict]:
+    """A Women & Child hospital (migration 082) knows its lists up front --
+    Child Care, Women Care and Fertility Care -- each filed under its own
+    service line. Best-effort like the rest of onboarding: one list failing
+    must not stop the others, and nothing here can fail provisioning.
+    None for every plan without such lists."""
+    total = None
+    for starter_list in STARTER_LISTS_BY_PLAN.get(plan, ()):
+        try:
+            seeded = await seed_starter_treatments(
+                clinic_id, starter_list, service_line=STARTER_SERVICE_LINE.get(starter_list)
+            )
+            total = {key: (total or {}).get(key, 0) + seeded.get(key, 0) for key in ("added", "skipped")}
+        except Exception as se:
+            logger.warning(f"Failed to seed {starter_list} starter treatments for clinic {clinic_id}: {se}")
+    return total
 
 
 async def provision_clinic(req: CreateClinicRequest) -> dict:
@@ -227,6 +246,7 @@ async def provision_clinic(req: CreateClinicRequest) -> dict:
                 starter_treatments = await seed_starter_treatments(clinic_id, specialty)
             except Exception as se:
                 logger.warning(f"Failed to seed starter treatments for clinic {clinic_id}: {se}")
+        starter_treatments = await seed_plan_starter_lists(clinic_id, req.plan) or starter_treatments
 
         return {
             "success": True,
@@ -289,6 +309,7 @@ class UpdateClinicRequest(BaseModel):
         Literal[
             "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
             "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
+            "womenchild",
         ]
     ] = None
     is_active: Optional[bool] = None

@@ -269,6 +269,7 @@ async def _get_plan_tiers() -> dict:
         "dental": {"included_messages_month": 2500, "display_name": "Dental Clinic"},
         "ivf": {"included_messages_month": 2500, "display_name": "IVF & Fertility"},
         "multispecialty": {"included_messages_month": 5000, "display_name": "Multi-Specialty Hospital"},
+        "womenchild": {"included_messages_month": 5000, "display_name": "Women & Child Hospital"},
         "enterprise": {"included_messages_month": 0, "display_name": "Enterprise"},
     }
     _plan_tiers_cache = fallback

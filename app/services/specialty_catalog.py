@@ -12,6 +12,7 @@ Copy rules (tests/test_specialty_catalog.py enforces them):
 """
 
 import logging
+from typing import Optional
 
 from app.database import sb, supabase
 
@@ -55,6 +56,63 @@ _PATHWAY_BY_NAME: dict[str, str] = {
     "Laparoscopy for Fertility": "assessment_first",
     # Dermatology -- the one row a dermatologist orders, never a patient.
     "Skin Biopsy": "assessment_first",
+    # ── First shipped with migration 082 (no rows existed to backfill) ──
+    # Child Care -- a parent describes the child, the paediatrician decides.
+    "Paediatric Consultation": "entry",
+    "Newborn Intensive Care (NICU)": "assessment_first",
+    # Women Care -- how a baby is delivered is the obstetrician's call.
+    "Gynaecology Consultation": "entry",
+    "Childbirth & Delivery Care": "assessment_first",
+    "Labour Pain Relief (Epidural)": "assessment_first",
+    "Birth After Caesarean (VBAC)": "assessment_first",
+    "Gynaecological Laparoscopy": "assessment_first",
+    "Gynaecological Hysteroscopy": "assessment_first",
+}
+
+#: Names above that first shipped after migration 081, so its backfill never
+#: listed them: no clinic can have held a starter row by these names before.
+#: tests/test_treatment_care_pathway.py uses this to keep the parity check
+#: strict for every name 081 did list.
+PATHWAYS_ADDED_AFTER_081: frozenset[str] = frozenset({
+    "Paediatric Consultation",
+    "Newborn Intensive Care (NICU)",
+    "Gynaecology Consultation",
+    "Childbirth & Delivery Care",
+    "Labour Pain Relief (Epidural)",
+    "Birth After Caesarean (VBAC)",
+    "Gynaecological Laparoscopy",
+    "Gynaecological Hysteroscopy",
+})
+
+
+#: Service lines (migration 082): the sections a hospital files its treatments
+#: under -- "Child Care", "Women Care", "Fertility Care". Slug -> emoji and
+#: patient-facing label per language. The slugs are the CHECK constraint in
+#: migrations/082_women_child_plan.sql; tests fail if the two drift.
+SERVICE_LINES: dict[str, dict[str, str]] = {
+    "child_care": {"emoji": "👶", "en": "Child Care", "hi": "शिशु व बाल देखभाल", "te": "పిల్లల సంరక్షణ"},
+    "women_care": {"emoji": "🌸", "en": "Women Care", "hi": "महिला स्वास्थ्य", "te": "మహిళల ఆరోగ్యం"},
+    "fertility_care": {"emoji": "🌱", "en": "Fertility Care", "hi": "प्रजनन देखभाल", "te": "సంతాన సాఫల్యం"},
+    "skin_hair": {"emoji": "✨", "en": "Skin & Hair", "hi": "त्वचा और बाल", "te": "చర్మం & జుట్టు"},
+    "eye_care": {"emoji": "👁️", "en": "Eye Care", "hi": "नेत्र देखभाल", "te": "కంటి సంరక్షణ"},
+    "dental_care": {"emoji": "🦷", "en": "Dental Care", "hi": "दंत चिकित्सा", "te": "దంత సంరక్షణ"},
+}
+
+#: Which service line each starter list files its rows under.
+STARTER_SERVICE_LINE: dict[str, str] = {
+    "pediatrics": "child_care",
+    "womens_health": "women_care",
+    "fertility": "fertility_care",
+    "dermatology": "skin_hair",
+    "ophthalmology": "eye_care",
+    "dental": "dental_care",
+}
+
+#: Hybrid plans whose starter lists are known in advance, seeded (hidden) at
+#: onboarding. multispecialty is deliberately absent: which specialties a
+#: general hospital runs is only known once its admin picks them.
+STARTER_LISTS_BY_PLAN: dict[str, tuple[str, ...]] = {
+    "womenchild": ("pediatrics", "womens_health", "fertility"),
 }
 
 
@@ -362,6 +420,214 @@ STARTER_TREATMENTS: dict[str, list[dict]] = {
            "The team will share fasting and pre-surgery test instructions.",
            short_name="Fertility Laparoscopy"),
     ],
+    # ── Women & Child hospitals (migration 082) ─────────────────────────────
+    # Parents describe the child, not a sub-specialty, so the first row is the
+    # paediatrician (entry). The specialist rows stay 'direct': a parent who
+    # was referred to a child heart specialist can ask for one by name, and
+    # the booking is still a consultation with that specialist.
+    "pediatrics": [
+        _t("Child Consultations", "Paediatric Consultation",
+           "A consultation with a paediatrician for fever, cough, feeding or any worry about your child.\n"
+           "The doctor examines your child and explains the next steps, including any tests.",
+           "fever in child, child cough, cold, vomiting, loose motions, not eating, child sick, baby unwell, "
+           "paediatrician, pediatrician, kids doctor, child specialist", 20,
+           "Bring the child's previous prescriptions, reports and vaccination card.",
+           short_name="Child Consultation"),
+        _t("Child Consultations", "Newborn Check-up",
+           "A check of your newborn's feeding, weight, jaundice and general well-being.\n"
+           "Advised in the first weeks after birth, and whenever you are worried.",
+           "newborn, new born baby, baby weight, jaundice in baby, yellow baby, feeding problem, baby check up", 20,
+           "Bring the discharge summary from the birth and the baby's vaccination card."),
+        _t("Child Consultations", "Vaccination",
+           "Vaccines for babies and children as per the recommended immunisation schedule.\n"
+           "The team checks the vaccination card and plans the due and missed vaccines.",
+           "vaccination, vaccine, immunisation, immunization, injection for baby, missed vaccine, booster", 15,
+           "Bring the child's vaccination card. Tell the team if the child has fever today.",
+           short_name="Child Vaccination"),
+        _t("Child Consultations", "Growth & Development Check",
+           "Assessment of height, weight, milestones, speech and behaviour for your child's age.\n"
+           "The doctor advises on nutrition, therapy or further tests if needed.",
+           "growth, short height, not gaining weight, milestones, late walking, late talking, "
+           "development delay, autism, adhd", 30,
+           "Bring earlier height and weight records if you have them.",
+           short_name="Growth & Development"),
+        _t("Newborn Care", "Newborn Intensive Care (NICU)",
+           "Specialised care for premature or unwell newborns by neonatologists and trained nurses.\n"
+           "Admission is decided by the doctor; in an emergency, call the hospital directly.",
+           "nicu, premature baby, preterm baby, low birth weight, newborn admission, baby in incubator", None, None,
+           short_name="NICU Care"),
+        _t("Child Specialists", "Child Heart Care",
+           "Consultation with a paediatric cardiologist for heart murmurs, heart defects or tiredness while feeding.\n"
+           "The specialist may advise an echo scan before planning care.",
+           "heart murmur, hole in heart, child heart problem, congenital heart, sweating while feeding", 30,
+           "Bring all previous echo reports and discharge summaries."),
+        _t("Child Specialists", "Child Brain & Nerve Care",
+           "Consultation with a paediatric neurologist for seizures, headaches, weakness or delayed milestones.\n"
+           "The specialist may advise an EEG or a scan before planning care.",
+           "epilepsy, headache in child, delayed milestones, weakness, cerebral palsy, head size", 30,
+           "Bring previous EEG and scan reports, and a video of any episode if you have one.",
+           short_name="Child Neurology"),
+        _t("Child Specialists", "Child Stomach & Liver Care",
+           "Consultation for long-standing tummy pain, vomiting, constipation, jaundice or poor growth.\n"
+           "The specialist may advise tests or an endoscopy after examining your child.",
+           "stomach pain in child, tummy pain, constipation, vomiting, jaundice, liver, poor weight gain", 30,
+           "Bring previous reports and a note of the child's diet and bowel habits.",
+           short_name="Child Stomach & Liver"),
+        _t("Child Specialists", "Child Kidney & Urine Care",
+           "Consultation for urine infections, swelling, bedwetting or kidney problems in children.\n"
+           "The specialist may advise urine tests or a scan.",
+           "urine infection, bedwetting, swelling of face, kidney problem, burning urine", 30,
+           "Bring previous urine and scan reports.",
+           short_name="Child Kidney Care"),
+        _t("Child Specialists", "Child Asthma & Allergy",
+           "Care for wheezing, frequent cough, breathing allergies and food allergies in children.\n"
+           "The doctor looks for triggers and explains how to manage them at home.",
+           "asthma, wheezing, frequent cough, allergy, food allergy, sneezing, breathing problem", 30,
+           "Bring the inhalers your child uses and any previous reports."),
+        _t("Child Specialists", "Child Hormone & Growth",
+           "Consultation for short height, early or late puberty, thyroid problems or diabetes in children.\n"
+           "The specialist may advise blood tests before planning care.",
+           "short height, puberty, early puberty, thyroid in child, child diabetes, obesity, hormone", 30,
+           "Bring previous blood reports and a record of the child's height if available."),
+        _t("Child Specialists", "Child Surgery Consultation",
+           "Consultation with a paediatric surgeon for hernia, undescended testis, lumps or other surgical problems.\n"
+           "The surgeon explains whether surgery is needed and what recovery involves.",
+           "hernia, hydrocele, undescended testis, lump, circumcision, child surgery", 30,
+           "Bring previous scan reports.",
+           short_name="Child Surgery Consult"),
+        _t("Therapy & Development", "Speech & Language Therapy",
+           "Assessment and therapy for delayed speech, stammering or difficulty understanding language.\n"
+           "The therapist sets goals and home activities with the family.",
+           "speech delay, not talking, stammering, late talking, speech therapy, language delay", 45, None,
+           short_name="Speech Therapy"),
+        _t("Therapy & Development", "Occupational Therapy",
+           "Therapy for fine motor skills, sensory issues, attention and daily activities in children.\n"
+           "Planned after an assessment by the therapist.",
+           "occupational therapy, sensory issues, handwriting, attention, autism, adhd, motor skills", 45, None),
+        _t("Therapy & Development", "Child Psychology",
+           "Support for behaviour, emotional, learning or school difficulties in children and teenagers.\n"
+           "The psychologist meets the child and parents to understand the concern first.",
+           "behaviour problem, anger, anxiety in child, learning difficulty, school problems, screen addiction, "
+           "teenager", 45, None),
+        _t("Therapy & Development", "Child Nutrition",
+           "Diet guidance for picky eating, poor weight gain, overweight or special diets in children.\n"
+           "The nutritionist plans meals that suit your child's age and routine.",
+           "picky eater, not eating, underweight child, overweight child, child diet, nutrition", 30,
+           "Note down what your child eats on a typical day."),
+    ],
+    # Pregnancy and delivery are consult-led: how a baby is delivered, and
+    # whether an epidural or a VBAC is safe, is the obstetrician's decision.
+    # Copy never mentions the sex of the baby except to say it is not
+    # disclosed -- PCPNDT Act, 1994.
+    "womens_health": [
+        _t("Gynaecology", "Gynaecology Consultation",
+           "A consultation with a gynaecologist for periods, pain, discharge, pregnancy planning or any women's health concern.\n"
+           "The doctor examines you and explains the next steps, including any tests.",
+           "gynaecologist, gynecologist, lady doctor, women doctor, periods problem, white discharge, "
+           "pelvic pain, lower abdomen pain", 20,
+           "Note the first day of your last period. Bring previous reports and prescriptions.",
+           short_name="Gynae Consultation"),
+        _t("Pregnancy Care", "Pregnancy Check-up",
+           "Regular antenatal visits to check your health and your baby's growth through pregnancy.\n"
+           "Your obstetrician plans the scans and tests for each stage.",
+           "pregnant, pregnancy, antenatal, missed period, positive pregnancy test, pregnancy check up, anc, "
+           "obstetrician", 30,
+           "Bring your pregnancy card, scan reports and the date of your last period."),
+        _t("Pregnancy Care", "High-Risk Pregnancy Care",
+           "Closer care for pregnancies with high BP, diabetes, twins or complications in an earlier pregnancy.\n"
+           "Your obstetrician plans extra monitoring and visits as needed.",
+           "high risk pregnancy, bp in pregnancy, twins, previous miscarriage, previous caesarean, "
+           "thyroid in pregnancy", 30,
+           "Bring all pregnancy reports and the records of earlier pregnancies.",
+           short_name="High-Risk Pregnancy"),
+        _t("Pregnancy Care", "Pregnancy Diabetes Care",
+           "Care for diabetes that starts in, or affects, pregnancy, with sugar monitoring and diet guidance.\n"
+           "Planned together with your obstetrician.",
+           "gestational diabetes, sugar in pregnancy, diabetes in pregnancy, gdm", 30,
+           "Bring your latest sugar test reports."),
+        _t("Pregnancy Care", "Fetal Medicine & Scans",
+           "Specialised pregnancy scans, such as NT and anomaly scans, to check the baby's growth and development.\n"
+           "The fetal medicine specialist explains the findings with you.",
+           "pregnancy scan, nt scan, anomaly scan, growth scan, baby growth, fetal echo, double marker", 45,
+           "Bring earlier scan reports. As required by law, the sex of the baby is not disclosed."),
+        _t("Pregnancy Care", "Pre-Pregnancy Check-up",
+           "A health check before planning a pregnancy, with history, tests and lifestyle advice.\n"
+           "It helps you prepare for a healthy pregnancy.",
+           "planning pregnancy, pre pregnancy, before pregnancy, preconception", 30,
+           "Bring previous reports and details of any earlier pregnancies.",
+           short_name="Pre-Pregnancy Check"),
+        _t("Delivery & Birth", "Childbirth & Delivery Care",
+           "Care through labour and birth, including normal delivery and caesarean section when needed.\n"
+           "Your obstetrician decides the safest way to deliver for you and your baby.",
+           "delivery, normal delivery, c section, caesarean, cesarean, delivery package, labour room", None,
+           "Register for delivery during your pregnancy visits so your records are ready.",
+           short_name="Delivery Care"),
+        _t("Delivery & Birth", "Labour Pain Relief (Epidural)",
+           "Options to ease pain during labour, such as an epidural given by an anaesthetist.\n"
+           "Suitability is decided during your pregnancy visits and in labour.",
+           "epidural, pain relief in labour, labour pain relief, painless delivery", None, None,
+           short_name="Labour Pain Relief"),
+        _t("Delivery & Birth", "Birth After Caesarean (VBAC)",
+           "Assessment of whether a vaginal birth is safe for you after an earlier caesarean.\n"
+           "The obstetrician reviews your previous surgery records before deciding.",
+           "vbac, normal delivery after c section, previous caesarean, vaginal birth after caesarean", 30,
+           "Bring the operation notes from your previous caesarean.",
+           short_name="VBAC Assessment"),
+        _t("Delivery & Birth", "Childbirth Preparation Classes",
+           "Classes for expecting parents on labour, breathing, feeding and newborn care.\n"
+           "Partners are welcome to attend.",
+           "antenatal classes, birth classes, pregnancy classes, lamaze, preparing for delivery", 60, None,
+           short_name="Childbirth Classes"),
+        _t("Delivery & Birth", "Breastfeeding Support",
+           "Help from a lactation specialist with latching, milk supply and feeding problems.\n"
+           "Available during pregnancy and after your baby is born.",
+           "breastfeeding, lactation, latching, low milk supply, breast pain while feeding, feeding baby", 30, None),
+        _t("Women's Health", "Periods & PCOS Care",
+           "Evaluation of irregular, heavy or painful periods and PCOS.\n"
+           "The doctor may advise blood tests or a scan before planning care.",
+           "irregular periods, pcos, pcod, heavy periods, painful periods, missed periods, facial hair", 20,
+           "Note the dates of your last three periods."),
+        _t("Women's Health", "Menopause Care",
+           "Support for hot flushes, sleep problems, mood changes and bone health around menopause.\n"
+           "The doctor explains the options that suit your health.",
+           "menopause, hot flushes, perimenopause, periods stopped, mood changes, bone health", 30,
+           "Bring previous reports and a list of the medicines you take."),
+        _t("Women's Health", "Well Woman Check-up",
+           "Routine health screening for women, including a Pap smear and breast examination.\n"
+           "Recommended regularly, even when you feel well.",
+           "health check up, pap smear, cervical screening, women health checkup, screening", 45,
+           "Avoid booking during your periods if a Pap smear is planned."),
+        _t("Women's Health", "Breast Care Clinic",
+           "Evaluation of breast lumps, breast pain or nipple discharge by a specialist.\n"
+           "The doctor may advise a scan or mammogram after the examination.",
+           "breast lump, breast pain, nipple discharge, mammogram, breast check", 30,
+           "Bring previous mammogram or scan reports."),
+        _t("Women's Health", "Urogynaecology Care",
+           "Evaluation for urine leakage, frequent urination or pelvic organ prolapse.\n"
+           "The doctor explains exercises, therapy or surgery as needed.",
+           "urine leakage, incontinence, prolapse, frequent urination, pelvic floor", 30, None),
+        _t("Women's Health", "Women's Physiotherapy",
+           "Physiotherapy during and after pregnancy for back pain, the pelvic floor and recovery.\n"
+           "Planned after an assessment by the physiotherapist.",
+           "back pain in pregnancy, pelvic floor exercises, postnatal recovery, diastasis, physiotherapy", 45, None,
+           short_name="Women Physiotherapy"),
+        _t("Women's Health", "Perinatal Mental Health",
+           "Support for anxiety, low mood or stress during pregnancy and after childbirth.\n"
+           "A confidential conversation with a trained specialist.",
+           "postpartum depression, anxiety in pregnancy, low mood after delivery, stress, crying spells", 45, None),
+        _t("Gynae Surgery", "Gynaecological Laparoscopy",
+           "Keyhole surgery for fibroids, ovarian cysts, endometriosis or removal of the uterus.\n"
+           "Planned after evaluation, with the surgeon explaining recovery.",
+           "fibroids, ovarian cyst, endometriosis, hysterectomy, uterus removal, laparoscopic surgery", 60,
+           "The team will share fasting and pre-surgery test instructions.",
+           short_name="Gynae Laparoscopy"),
+        _t("Gynae Surgery", "Gynaecological Hysteroscopy",
+           "A thin camera is used to look inside the uterus and treat polyps or abnormal bleeding.\n"
+           "Advised by your gynaecologist after a scan.",
+           "hysteroscopy, uterine polyp, abnormal periods, uterus camera", 60,
+           "Usually planned soon after your period ends. The team will share fasting instructions.",
+           short_name="Gynae Hysteroscopy"),
+    ],
 }
 
 #: Shown in the "Find by Concern" prompt, one line per specialty.
@@ -370,24 +636,39 @@ CONCERN_EXAMPLES: dict[str, str] = {
     "ophthalmology": "blurred vision, cataract, dry eyes",
     "dental": "tooth pain, bleeding gums, crooked teeth",
     "fertility": "trying to conceive, irregular periods, low sperm count",
+    "pediatrics": "fever in child, vaccination, speech delay",
+    "womens_health": "pregnancy check-up, irregular periods, PCOS",
+}
+
+#: Hybrid plans have no single specialty, so their examples are keyed by plan.
+CONCERN_EXAMPLES_BY_PLAN: dict[str, str] = {
+    "womenchild": "fever in my child, pregnancy check-up, irregular periods",
 }
 
 
-async def seed_starter_treatments(clinic_id: str, specialty: str) -> dict:
+async def seed_starter_treatments(clinic_id: str, specialty: str, service_line: Optional[str] = None) -> dict:
     """Insert the specialty's starter treatments the clinic does not already have.
 
     Every row goes in HIDDEN, priced 0, source='starter'. Existing rows are
     never modified: the clinic's own edits always win. Names are compared
     stripped and lowercased, matching the unique index from migration 077.
+
+    `service_line` (migration 082) files the rows under a section such as
+    Child Care. Callers pass it only for hybrid plans, so a single-specialty
+    clinic's insert is exactly what it was before 082. New rows are ordered
+    after the clinic's existing ones, so a second list loaded later never
+    interleaves with the first.
     """
     starters = STARTER_TREATMENTS.get(specialty) or []
     if not starters:
         return {"added": 0, "skipped": 0}
 
     existing = await sb(
-        supabase.table("specialty_treatments").select("name").eq("clinic_id", clinic_id).limit(1000)
+        supabase.table("specialty_treatments").select("name, display_order").eq("clinic_id", clinic_id).limit(1000)
     )
-    taken = {(r.get("name") or "").strip().lower() for r in (existing.data or [])}
+    existing_rows = existing.data or []
+    taken = {(r.get("name") or "").strip().lower() for r in existing_rows}
+    offset = max((int(r.get("display_order") or 0) for r in existing_rows), default=0)
 
     rows = []
     for position, item in enumerate(starters):
@@ -405,8 +686,9 @@ async def seed_starter_treatments(clinic_id: str, specialty: str) -> dict:
             "care_pathway": item["care_pathway"],
             "price_from_paise": 0,
             "is_active": False,
-            "display_order": (position + 1) * 10,
+            "display_order": offset + (position + 1) * 10,
             "source": "starter",
+            **({"service_line": service_line} if service_line in SERVICE_LINES else {}),
         })
 
     if rows:

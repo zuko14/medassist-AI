@@ -439,6 +439,9 @@ def invalidate_tenant_cache(whatsapp_number: str = None, phone_number_id: str = 
 #                 departments, lab, radiology and OPD, plus skin / eye / dental
 #                 procedures. Every feature, enumerated rather than wildcarded
 #                 (migration 078).
+#   womenchild  — Women & Child hospital: Child Care, Women Care and Fertility
+#                 Care under one roof, plus OPD departments, lab and radiology.
+#                 Same feature set as multispecialty (migration 082).
 
 # Specialty hospitals (migration 077). A doctor clinic's core, plus the
 # treatments catalogue. multi_branch and staff_training are included because
@@ -580,6 +583,11 @@ PLAN_FEATURES: dict[str, set[str]] = {
 # True for features the tenant was never sold.
 PLAN_FEATURES["multispecialty"] = set(PLAN_FEATURES["polyclinic"]) | {"specialty_treatments"}
 
+# Women & Child hospital (migration 082). The same hybrid as multispecialty --
+# paediatric and obstetric OPDs are departments with doctors, and the lab and
+# scans are the diagnostics half -- so it is derived, not retyped.
+PLAN_FEATURES["womenchild"] = set(PLAN_FEATURES["multispecialty"])
+
 # Flat, sorted list of every named feature across all plans — excludes the
 # "*" enterprise wildcard sentinel. Used by GET /admin/me (app/routers/admin.py)
 # to tell the admin panel frontend which tabs to show, without duplicating
@@ -689,7 +697,7 @@ SPECIALTY_BY_PLAN: dict[str, str] = {
 #: examples, and — through specialty_flow.is_specialty_plan() — whether the
 #: patient menu drops its "Our Services" departments row. A hospital with
 #: fifteen departments must keep that row, so it belongs here, not there.
-HYBRID_SPECIALTY_PLANS: frozenset[str] = frozenset({"multispecialty"})
+HYBRID_SPECIALTY_PLANS: frozenset[str] = frozenset({"multispecialty", "womenchild"})
 
 
 def specialty_enabled(clinic: Optional[dict]) -> bool:

@@ -426,14 +426,17 @@ class TestStarterCatalogue:
         """The migration backfills catalogues already seeded; specialty_catalog
         classifies the ones seeded from now on. They must agree, or a clinic's
         rows depend on which side of the deploy it onboarded."""
-        from app.services.specialty_catalog import _PATHWAY_BY_NAME
+        from app.services.specialty_catalog import PATHWAYS_ADDED_AFTER_081, _PATHWAY_BY_NAME
 
         sql = io.open(
             "migrations/081_treatment_care_pathway.sql", encoding="utf-8"
         ).read()
         block = sql.split("FROM (VALUES", 1)[1].split(") AS v(", 1)[0]
         pairs = dict(re.findall(r"\('([^']+)',\s*'(entry|direct|assessment_first)'\)", block))
-        assert pairs == _PATHWAY_BY_NAME
+        # Names first shipped after 081 (migration 082's child / women lists)
+        # had no rows to backfill; everything 081 did list must still match.
+        assert not (PATHWAYS_ADDED_AFTER_081 & set(pairs))
+        assert pairs == {k: v for k, v in _PATHWAY_BY_NAME.items() if k not in PATHWAYS_ADDED_AFTER_081}
 
 
 # -- Admin API ----------------------------------------------------------------

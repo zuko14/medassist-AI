@@ -408,12 +408,14 @@ async def admin_panel():
 @app.get("/dental-panel")
 @app.get("/ivf-panel")
 @app.get("/hospital-panel")
+@app.get("/women-child-panel")
 async def specialty_admin_panel():
     """Specialty-branded entry points to the same admin panel.
 
     /hospital-panel is the multi-specialty one: a hospital that runs ordinary
     departments and a treatments catalogue side by side. Same page, same
-    tenancy — the plan decides which tabs appear.
+    tenancy — the plan decides which tabs appear. /women-child-panel is the
+    same for a Women & Child hospital (migration 082).
 
     The URL changes nothing about tenancy, features or data: the page asks
     GET /admin/me who the user is and what their clinic's plan allows, exactly

@@ -82,6 +82,11 @@ In competitive, specialized medical sectors (Dermatology/Skin & Hair, Ophthalmol
      It lives in `HYBRID_SPECIALTY_PLANS` instead. Feature set is
      `polyclinic` ∪ `{specialty_treatments}` — every feature, enumerated
      rather than wildcarded.
+   - `womenchild` — Women & Child hospital: Child Care + Women Care +
+     Fertility Care (**added in Session 11, migration 082**). The second
+     member of `HYBRID_SPECIALTY_PLANS`; same feature set as
+     `multispecialty`. Its treatments are filed under service lines
+     (`specialty_treatments.service_line`).
 2. **Zero Disturbance to Existing Plans:**
    - Existing plans (`soloclinic`, `diagstream`, `diagbooking`, `essential`, `polyclinic`, `enterprise`) remain 100% unchanged.
    - CHECK constraints on `clinics(plan)` and `plan_tiers(plan_name)` are widened additively via dynamic constraint inspection (following the proven migration 016/072 pattern).
@@ -150,5 +155,7 @@ A new dedicated table isolated by `clinic_id` stores procedures/treatments:
 | **Session 08** | 2026-09-17 | Platform owner Financial Control Centre (migration 079). Owner panel only — no specialty surface touched; listed for continuity. | `docs/sessions/SESSION_08_PLATFORM_FINANCIAL_CRM.md` |
 | **Session 09** | 2026-09-17 | Diagnostic service types (migration 080) + three WhatsApp navigation fixes, including the concern-search fallthrough that answered "Dark circles" with the main menu. | `docs/sessions/SESSION_09_DIAGNOSTIC_SERVICE_TYPES.md` |
 | **Session 10** | 2026-09-17 | **Care pathway** (migration 081): who decides a treatment — the patient or the doctor. Answers the eye hospital's "our doctor examines first, then decides". Doctor-decided procedures become information cards that book an examination; clinics with a first-visit row lead the menu with it. Plus an adversarial audit of both patient flows (reachability + Meta limits) which found two real defects, and the fix that finally turned the suite green (2446/0). | `docs/sessions/SESSION_10_CARE_PATHWAY.md` |
+| **Session 11** | 2026-09-18 | The **`womenchild` plan** (migration 082) for Rainbow / BirthRight-style hospitals: Child Care, Women Care and Fertility Care under one roof. Treatments gain a `service_line`; patients pick a section only when a catalogue spans two or more (zero change otherwise). Child and women starter lists with care pathways, admin section tabs, `/women-child-panel`, a PCPNDT sex-determination guard and obstetric/newborn emergency phrases. Also found the per-route cross-tenant security matrix silently collecting 1 test under FastAPI 0.138 and fixed it. | `docs/specialty_plan/12-women-child-plan.md`, `docs/sessions/SESSION_11_WOMEN_CHILD_PLAN.md` |
+| **Session 12** | 2026-09-18 | Diagnostics catalogue experience (migration 083). Fixed the live "Hi → 73 tests matching 'Hi'" bug (a state-machine gap, not the LLM). Service types as WhatsApp main-menu rows; one-click classifier for Accumax's 1,392 unfiled tests (never overwrites a human's filing); package details; admin service-type tabs; Insights diagnostics performance with patient interest; a plan-aware "How to use" guide and working re-subscribe. | `docs/sessions/SESSION_12_DIAGNOSTICS_CATALOGUE_EXPERIENCE.md` |
 
 > **Rule for every future session:** add `docs/sessions/SESSION_NN_<topic>.md` covering intent, decisions, files changed, tests run with results, and open items. Then add a row here. If a session proves an earlier statement in this file wrong, correct it in place and mark it `CORRECTED IN SESSION NN`.

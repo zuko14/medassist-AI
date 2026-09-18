@@ -206,6 +206,65 @@ _TREATMENT_SEEKING_PATTERNS = [
     ),
 ]
 
+# ── PCPNDT Act, 1994: sex determination of the foetus ─────────────────────────
+# Disclosing, or offering to disclose, the sex of an unborn baby is a criminal
+# offence in India, for the facility as well as the doctor. Maternity and
+# Women & Child hospitals (migration 082) are asked this constantly. The answer
+# is always the same and must never reach the LLM.
+# Precise on purpose. "Gender: Female, need a pregnancy scan" is a patient
+# giving her own details and must go through, so a gender word only counts
+# when it is ABOUT the baby ("sex of the baby", "baby's gender"), or when the
+# message asks to know/tell it and mentions a pregnancy at all.
+_BABY_WORDS = r"(?:baby|babies|foetus|fetus|unborn|child in (?:the )?womb)"
+_PREGNANCY_WORDS = re.compile(
+    r"\b(?:baby|babies|foetus|fetus|unborn|pregnan\w*|garbh\w*|scan|ultrasound|sonography|womb)\b",
+    re.IGNORECASE,
+)
+_SEX_DETERMINATION_PATTERNS = [
+    re.compile(r"\bsex[- ]?determination\b|\bgender[- ]?(?:determination|test|scan|prediction|reveal)\b",
+               re.IGNORECASE),
+    re.compile(rf"\b(?:gender|sex)\s+of\s+(?:the\s+|my\s+|our\s+|a\s+)?{_BABY_WORDS}", re.IGNORECASE),
+    re.compile(rf"\b{_BABY_WORDS}(?:'s|s)?\s+(?:gender|sex)\b", re.IGNORECASE),
+    # Hindi / Telugu: "boy or girl?" and "sex test"
+    re.compile(r"लड़का\s*(?:है\s*)?या\s*लड़की|लड़की\s*(?:है\s*)?या\s*लड़का|लिंग\s*(?:जांच|जाँच|परीक्षण)"),
+    re.compile(r"అబ్బాయా\s*అమ్మాయా|అమ్మాయా\s*అబ్బాయా|లింగ\s*నిర్ధారణ"),
+]
+#: Only count when the same message also mentions a pregnancy or a scan.
+_SEX_DETERMINATION_IN_PREGNANCY = [
+    re.compile(r"\bboy or (?:a )?girl\b|\bgirl or (?:a )?boy\b", re.IGNORECASE),
+    re.compile(r"\b(?:know|tell|find out|predict|reveal|disclose|detect)\b.{0,25}\b(?:gender|sex)\b",
+               re.IGNORECASE | re.DOTALL),
+]
+
+_SEX_DETERMINATION_RESPONSE = {
+    "en": (
+        "🚫 Finding out or disclosing the sex of an unborn baby is prohibited by law "
+        "in India (PCPNDT Act, 1994). Our doctors and staff do not disclose it in any way.\n\n"
+        "I can help you book a pregnancy check-up or scan. Reply *menu* to continue."
+    ),
+    "hi": (
+        "🚫 भारत में गर्भ में शिशु का लिंग जानना या बताना कानूनन अपराध है (PCPNDT अधिनियम, 1994)। "
+        "हमारे डॉक्टर और स्टाफ किसी भी तरह यह नहीं बताते।\n\n"
+        "मैं आपकी गर्भावस्था जांच या स्कैन बुक करने में मदद कर सकता हूं। आगे बढ़ने के लिए *menu* लिखें।"
+    ),
+    "te": (
+        "🚫 భారతదేశంలో గర్భంలోని శిశువు లింగాన్ని తెలుసుకోవడం లేదా చెప్పడం చట్టరీత్యా నేరం "
+        "(PCPNDT చట్టం, 1994). మా డాక్టర్లు, సిబ్బంది ఏ విధంగానూ దీన్ని చెప్పరు.\n\n"
+        "గర్భధారణ పరీక్ష లేదా స్కాన్ బుక్ చేయడంలో సహాయం చేయగలను. కొనసాగించడానికి *menu* అని పంపండి."
+    ),
+}
+
+
+def is_sex_determination_request(message: str) -> bool:
+    if not message:
+        return False
+    if any(p.search(message) for p in _SEX_DETERMINATION_PATTERNS):
+        return True
+    return bool(_PREGNANCY_WORDS.search(message)) and any(
+        p.search(message) for p in _SEX_DETERMINATION_IN_PREGNANCY
+    )
+
+
 # ── Safe static response templates ────────────────────────────────────────────
 
 _SAFE_RESPONSE = {
@@ -288,6 +347,12 @@ def screen_message(message: str, lang: str = "en") -> tuple[bool, Optional[str]]
         return False, None
 
     msg_lower = message.lower().strip()
+
+    # 0. PCPNDT: sex determination of the foetus. Its own answer, not the
+    #    generic medical-advice one -- the patient needs to hear it is the law.
+    if is_sex_determination_request(message):
+        logger.info("Clinical firewall triggered: fetal sex determination request (PCPNDT)")
+        return True, _SEX_DETERMINATION_RESPONSE.get(lang, _SEX_DETERMINATION_RESPONSE["en"])
 
     # 1. Check for medication names anywhere in message
     for med in MEDICATION_NAMES:

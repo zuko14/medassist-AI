@@ -39,7 +39,12 @@ EXEMPT_ROUTES = {
 def get_security_sensitive_admin_routes():
     """Extract all distinct admin route paths and methods."""
     routes = []
+    # FastAPI >= 0.13x wraps each include_router() in an _IncludedRouter;
+    # without unwrapping, this matrix silently collected zero admin routes.
+    flat = []
     for r in app.routes:
+        flat.extend(getattr(getattr(r, "original_router", None), "routes", None) or [r])
+    for r in flat:
         path = getattr(r, "path", "")
         methods = getattr(r, "methods", set())
         if path.startswith("/admin") and methods:

@@ -288,6 +288,143 @@ def _booking_and_revenue(appts: list, day_index: dict, span: int) -> tuple:
     return bookings, revenue
 
 
+#: Patient taps logged by the WhatsApp lab flow (conversation.py): a service
+#: type opened, and a test card opened. Interest, as opposed to bookings.
+_LAB_INTEREST_EVENTS = ("lab_category_viewed", "lab_test_viewed")
+_UNFILED_LAB_LABEL = "Lab Tests"  # conversation.LAB_UNCATEGORISED_LABEL
+
+
+def _diagnostics_insights(appts: list, catalogue: list, events: list) -> dict:
+    """Service-type performance for a centre that sells tests: what patients
+    booked, what they paid, and what they looked at without booking.
+
+    A booking's service type is its test's CURRENT heading (by id, then by
+    name), so filing the catalogue re-files history too -- the question a
+    centre asks is "how are my packages doing", not "how were they filed".
+    """
+    by_id = {str(t.get("id")): t for t in catalogue if t.get("id")}
+    by_name = {(t.get("name") or "").strip().lower(): t for t in catalogue}
+
+    def heading(test: Optional[dict]) -> str:
+        return ((test or {}).get("category") or "").strip() or _UNFILED_LAB_LABEL
+
+    types: dict = {}
+
+    def bucket(name: str) -> dict:
+        return types.setdefault(name, {
+            "name": name, "bookings": 0, "revenue_paise": 0, "views": 0,
+            "_viewers": set(), "_bookers": set(),
+        })
+
+    tests: dict = {}
+    lab_bookings = revenue_paise = 0
+    for a in appts:
+        if (a.get("booking_type") or "") != "lab_test":
+            continue
+        test = by_id.get(str(a.get("lab_test_id"))) or by_name.get((a.get("lab_test_name") or "").strip().lower())
+        kind = heading(test)
+        b = bucket(kind)
+        b["bookings"] += 1
+        lab_bookings += 1
+        if a.get("patient_phone"):
+            b["_bookers"].add(a["patient_phone"])
+        paid = 0
+        if a.get("payment_id") and (a.get("status") or "") in _COLLECTED_STATUSES:
+            paid = a.get("amount_paise") or 0
+        b["revenue_paise"] += paid
+        revenue_paise += paid
+        name = (a.get("lab_test_name") or (test or {}).get("name") or "Lab Test").strip()
+        row = tests.setdefault(name, {"name": name, "category": kind, "bookings": 0, "revenue_paise": 0, "views": 0})
+        row["bookings"] += 1
+        row["revenue_paise"] += paid
+
+    category_views = test_views = 0
+    for e in events:
+        meta = e.get("metadata") or {}
+        if not isinstance(meta, dict):
+            continue
+        kind = (meta.get("category") or "").strip() or _UNFILED_LAB_LABEL
+        b = bucket(kind)
+        if e.get("phone"):
+            b["_viewers"].add(e["phone"])
+        if e.get("event_type") == "lab_category_viewed":
+            b["views"] += 1
+            category_views += 1
+        elif e.get("event_type") == "lab_test_viewed":
+            test_views += 1
+            name = (meta.get("test_name") or "").strip()
+            if name:
+                row = tests.setdefault(name, {"name": name, "category": kind, "bookings": 0,
+                                              "revenue_paise": 0, "views": 0})
+                row["views"] += 1
+
+    by_type = []
+    for b in types.values():
+        interested = b["_viewers"] | b["_bookers"]
+        by_type.append({
+            "name": b["name"],
+            "bookings": b["bookings"],
+            "revenue_inr": round(b["revenue_paise"] / 100, 2),
+            "views": b["views"],
+            "interested_patients": len(interested),
+            # Of the patients who looked at this service type, how many booked
+            # it. Bookers count as interested, so this can never exceed 100.
+            "conversion_pct": _pct(len(b["_bookers"]), len(interested)),
+        })
+    by_type.sort(key=lambda r: (-r["bookings"], -r["interested_patients"], r["name"]))
+
+    def public(r: dict) -> dict:
+        return {"name": r["name"], "category": r["category"], "bookings": r["bookings"],
+                "revenue_inr": round(r["revenue_paise"] / 100, 2), "views": r["views"]}
+
+    rows = list(tests.values())
+    return {
+        "by_service_type": by_type,
+        "top_tests": [public(r) for r in sorted(rows, key=lambda r: (-r["bookings"], -r["views"], r["name"]))
+                      if r["bookings"]][:10],
+        # Looked at, not (yet) booked: where a follow-up call earns money.
+        "most_viewed": [public(r) for r in sorted(rows, key=lambda r: (-r["views"], -r["bookings"], r["name"]))
+                        if r["views"]][:10],
+        "totals": {
+            "lab_bookings": lab_bookings,
+            "revenue_inr": round(revenue_paise / 100, 2),
+            "category_views": category_views,
+            "test_views": test_views,
+        },
+    }
+
+
+async def _fetch_lab_interest_events(clinic_id: str, since_iso: str) -> list:
+    """Only the two lab-interest event types, paged like _fetch_window."""
+    rows: list = []
+    while True:
+        query = (
+            scoped_query("analytics_events", clinic_id, "event_type,phone,metadata,created_at")
+            .in_("event_type", list(_LAB_INTEREST_EVENTS))
+            .gte("created_at", since_iso)
+        )
+        page = await sb(query.order("created_at").range(len(rows), len(rows) + _INSIGHTS_PAGE_ROWS - 1))
+        got = page.data or []
+        rows.extend(got)
+        if len(got) < _INSIGHTS_PAGE_ROWS or len(rows) >= _INSIGHTS_MAX_ROWS:
+            break
+    return rows
+
+
+async def _fetch_lab_catalogue(clinic_id: str) -> list:
+    rows: list = []
+    while True:
+        page = await sb(
+            scoped_query("lab_tests", clinic_id, "id,name,category")
+            .order("id").range(len(rows), len(rows) + _INSIGHTS_PAGE_ROWS - 1)
+        )
+        got = page.data or []
+        rows.extend(got)
+        if len(got) < _INSIGHTS_PAGE_ROWS or len(rows) >= _INSIGHTS_MAX_ROWS:
+            break
+    return rows
+
+
 def _report_delivery(reports: list, day_index: dict, span: int) -> dict:
     """Report-delivery series, for plans whose clinics dispatch lab reports."""
     delivered = [0] * span
@@ -594,6 +731,7 @@ class AnalyticsService:
         days: int = 30,
         branch_id: Optional[str] = None,
         include_reports: bool = False,
+        include_diagnostics: bool = False,
     ) -> dict:
         """Every chart series behind the admin panel's Insights page.
 
@@ -629,6 +767,7 @@ class AnalyticsService:
             "bookings": None,
             "revenue": None,
             "reports": None,
+            "diagnostics": None,
             "errors": [],
         }
 
@@ -637,7 +776,7 @@ class AnalyticsService:
                 "appointments",
                 clinic_id,
                 "status,department,doctor_name,appointment_date,created_at,"
-                "booking_type,lab_test_name,treatment_name,amount_paise,payment_id,patient_phone",
+                "booking_type,lab_test_id,lab_test_name,treatment_name,amount_paise,payment_id,patient_phone",
                 "created_at",
                 since,
                 branch_id=branch_id,
@@ -648,6 +787,20 @@ class AnalyticsService:
         except Exception as e:
             logger.error(f"Insights: booking series failed for {clinic_id}: {e}")
             payload["errors"].append("bookings")
+            appts = None
+
+        # Service-type performance (migration 080/083): only for a clinic that
+        # sells tests. Its own section, so a failure here costs this card only.
+        if include_diagnostics and appts is not None:
+            try:
+                payload["diagnostics"] = _diagnostics_insights(
+                    appts,
+                    await _fetch_lab_catalogue(clinic_id),
+                    await _fetch_lab_interest_events(clinic_id, since),
+                )
+            except Exception as e:
+                logger.error(f"Insights: diagnostics section failed for {clinic_id}: {e}")
+                payload["errors"].append("diagnostics")
 
         if include_reports:
             try:

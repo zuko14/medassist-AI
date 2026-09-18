@@ -23,6 +23,7 @@ from app.database import (
 )
 from app.services.ai_engine import (
     detect_intent,
+    is_greeting,
     map_symptom_to_department,
     EMERGENCY_KEYWORDS,
 )
@@ -87,6 +88,21 @@ NAV_KEYWORDS = frozenset(
 LAB_BOOKING_KEYWORDS = frozenset(
     {"book test", "book lab test", "booktest", "lab test", "lab tests"}
 )
+
+#: Whole messages asking how to use the bot. The "invalid input" reply has
+#: always told patients to "type 'help'" -- nothing answered it until now.
+HELP_KEYWORDS = frozenset({
+    "help", "how to use", "how to use?", "guide", "commands", "instructions",
+    "options", "?", "मदद", "सहायता", "సహాయం", "సహాయము",
+})
+
+#: Whole messages that turn follow-up messages back on after "stop". The
+#: opt-out reply promises "Message us anytime to re-subscribe"; these words
+#: are how that promise is kept. Only acted on for an opted-out patient.
+RESUBSCRIBE_KEYWORDS = frozenset({
+    "start", "subscribe", "resubscribe", "re-subscribe", "opt in", "optin",
+    "resume", "शुरू", "ప్రారంభించు",
+})
 
 #: Ephemeral booking and branch context keys that must not bleed across distinct sessions or bookings
 BOOKING_CONTEXT_KEYS = frozenset({
@@ -765,6 +781,19 @@ class ConversationManager:
                 await self._start_lab_booking(clinic, phone, lang)
                 return
 
+            elif button_id.startswith("labsvc_"):
+                # A service type (Health Packages, Radiology...) on the main menu.
+                lang = await get_lang(clinic, phone)
+                await self._start_lab_booking_for_heading(
+                    clinic, phone, button_id.removeprefix("labsvc_"), lang
+                )
+                return
+
+            elif button_id == "menu_help":
+                lang = await get_lang(clinic, phone)
+                await self._send_help_guide(clinic, phone, lang)
+                return
+
             elif button_id == "menu_reports":
                 lang = await get_lang(clinic, phone)
                 await self._handle_view_reports(clinic, phone, lang)
@@ -998,6 +1027,20 @@ class ConversationManager:
         # Human escalation
         if intent == "human_escalation":
             await self._handle_human_escalation(clinic, phone, lang)
+            return
+
+        # "help" / "how to use" -- from any state, typed only. The state is left
+        # alone so a patient mid-booking can read the guide and carry on.
+        typed_norm = "" if interactive_data else (message or "").strip().lower()
+        if typed_norm in HELP_KEYWORDS:
+            await self._send_help_guide(clinic, phone, lang)
+            return
+
+        # "start" after "stop": turn follow-up messages back on. Only for a
+        # patient who actually opted out -- for everyone else the word means
+        # whatever it meant before.
+        if typed_norm in RESUBSCRIBE_KEYWORDS and patient.get("opted_in") is False:
+            await self._handle_opt_in(clinic, phone, lang)
             return
 
         # Language change request (but NOT when already selecting language - let state machine handle it)
@@ -1512,7 +1555,16 @@ class ConversationManager:
             if treatment_menu
             else []
         )
-        rows.append({"id": "menu_book", "title": book_title[:24], "description": ""})
+        # A diagnostic centre whose catalogue is filed under two or more service
+        # types (migration 080) shows them right here -- Health Packages,
+        # Radiology & Imaging, Scans -- instead of one "Book Lab Test" row the
+        # patient has to open to discover what the centre sells. One heading
+        # (every unfiled catalogue) keeps the single row it always had.
+        heading_rows = await self._lab_heading_menu_rows(clinic, lang) if diagnostics_only else []
+        if heading_rows:
+            rows.extend(heading_rows)
+        else:
+            rows.append({"id": "menu_book", "title": book_title[:24], "description": ""})
         if not diagnostics_only:
             # On a single-specialty plan "Our Services" would list one department;
             # Our Treatments replaces it. Override-enabled general clinics keep both.
@@ -1532,6 +1584,15 @@ class ConversationManager:
         # the facility's own system, via reception.
         rows.append({"id": "menu_emergency", "title": t[1][:24], "description": ""})
         rows.append({"id": "menu_human", "title": t[2][:24], "description": ""})
+        # Last, and only while there is room: Meta drops an eleventh row
+        # silently, and Emergency must never be the row that goes.
+        if len(rows) < 10:
+            rows.append({
+                "id": "menu_help",
+                "title": {"en": "❓ How to use", "hi": "❓ उपयोग कैसे करें", "te": "❓ ఎలా ఉపయోగించాలి"}.get(
+                    lang, "❓ How to use")[:24],
+                "description": "",
+            })
 
         sections = [{"title": "Menu", "rows": rows}]
 
@@ -1642,8 +1703,111 @@ class ConversationManager:
         doctors = await get_doctors(clinic["id"])
         return not doctors
 
+    #: How many service types the diagnostics main menu shows as their own
+    #: rows. With Emergency, Talk to Staff and How to use that is 10 -- Meta's
+    #: cap. More headings than this collapse the tail into "All services".
+    LAB_MENU_MAX_HEADINGS = 7
+
+    #: Cache of each clinic's heading counts for the main menu, so "Hi" does
+    #: not re-read a 1,392-row catalogue every time. 60s: an admin who files a
+    #: new service type sees it on WhatsApp within a minute.
+    _LAB_HEADING_TTL_SECONDS = 60
+    _lab_heading_cache: dict = {}
+
+    @staticmethod
+    def _lab_heading_emoji(label: str) -> str:
+        """An icon for a centre's own heading text, read off its wording."""
+        text = (label or "").lower()
+        rules = (
+            (("package", "checkup", "check-up", "check up", "health", "wellness", "master"), "📦"),
+            (("mri", "ct ", "ct)", "ct/", "(ct", "scan", "pet"), "🧲"),
+            (("radiolog", "imaging", "x-ray", "xray", "x ray", "ultrasound", "usg", "sonograph",
+              "mammo", "doppler"), "📷"),
+            (("cardiac", "heart", "ecg", "echo", "tmt", "special"), "❤️"),
+            (("patholog", "lab", "blood", "urine", "test"), "🧪"),
+        )
+        for words, emoji in rules:
+            if any(w in text for w in words):
+                return emoji
+        return "🔬"
+
+    @classmethod
+    def _lab_heading_title(cls, label: str) -> str:
+        """Icon + heading, within Meta's 24-character row title. A heading too
+        long for both keeps its words and drops the icon: "Cardiac & Special
+        Tests" beats "Cardiac & Special Tes"."""
+        titled = f"{cls._lab_heading_emoji(label)} {label}"
+        return titled if len(titled) <= 24 else (label or "")[:24]
+
+    @staticmethod
+    def _lab_heading_key(label: str) -> str:
+        """Stable row-id suffix for a heading: its own text, lowercased.
+        A tap on a stale menu is matched against the catalogue as it is NOW."""
+        return (label or "").strip().lower()[:150]
+
+    async def _lab_heading_groups(self, clinic: dict) -> list[tuple[str, int]]:
+        """(heading, test count) for the whole active catalogue, largest first."""
+        import time as _time
+        from app.database import get_lab_tests
+
+        cid = clinic["id"]
+        hit = self._lab_heading_cache.get(cid)
+        if hit and _time.monotonic() - hit[0] < self._LAB_HEADING_TTL_SECONDS:
+            return hit[1]
+        tests = await get_lab_tests(cid, active_only=True)
+        groups = [(label, len(rows)) for label, rows in self._group_lab_tests_by_category(tests)]
+        self._lab_heading_cache[cid] = (_time.monotonic(), groups)
+        return groups
+
+    async def _lab_heading_menu_rows(self, clinic: dict, lang: str) -> list[dict]:
+        """One main-menu row per service type, or [] to keep "Book Lab Test".
+
+        Never raises: the main menu is the one message every patient must get.
+        """
+        try:
+            groups = await self._lab_heading_groups(clinic)
+        except Exception as e:
+            logger.warning(f"Lab heading menu rows unavailable for clinic {clinic.get('id')}: {e}")
+            return []
+        if len(groups) < 2:
+            return []
+        shown = groups if len(groups) <= self.LAB_MENU_MAX_HEADINGS else groups[: self.LAB_MENU_MAX_HEADINGS - 1]
+        rows = [
+            {
+                "id": f"labsvc_{self._lab_heading_key(label)}",
+                "title": self._lab_heading_title(label),
+                "description": {
+                    "en": f"{count} available", "hi": f"{count} उपलब्ध", "te": f"{count} అందుబాటులో",
+                }.get(lang, f"{count} available")[:72],
+            }
+            for label, count in shown
+        ]
+        if len(shown) < len(groups):
+            rows.append({
+                "id": "menu_lab_tests",
+                "title": {"en": "🔬 All services", "hi": "🔬 सभी सेवाएं", "te": "🔬 అన్ని సేవలు"}.get(
+                    lang, "🔬 All services")[:24],
+                "description": {"en": "Every test and service", "hi": "सभी टेस्ट और सेवाएं",
+                                "te": "అన్ని పరీక్షలు, సేవలు"}.get(lang, "Every test and service")[:72],
+            })
+        return rows
+
+    async def _start_lab_booking_for_heading(self, clinic: dict, phone: str, key: str, lang: str) -> None:
+        """A service-type row tapped on the main menu. Resolved against the
+        catalogue as it is now; a heading renamed since the menu was sent
+        simply opens the full list of headings."""
+        try:
+            groups = await self._lab_heading_groups(clinic)
+        except Exception:
+            groups = []
+        label = next((g for g, _ in groups if self._lab_heading_key(g) == key), None)
+        await log_analytics_event(
+            clinic["id"], phone, "lab_category_viewed", metadata={"category": label or key, "source": "menu"}
+        )
+        await self._start_lab_booking(clinic, phone, lang, category=label)
+
     async def _start_lab_booking(
-        self, clinic: dict, phone: str, lang: str
+        self, clinic: dict, phone: str, lang: str, category: Optional[str] = None
     ) -> None:
         """Entry point for the diagnostics-only lab-test flow.
 
@@ -1663,17 +1827,21 @@ class ConversationManager:
         # out here -- for a diagnostics-only clinic they are the whole business.
         active = [b for b in (branches or []) if b.get("is_active", True)]
 
+        # A service type chosen on the main menu rides along; _show_lab_test_list
+        # falls back to the headings if that centre does not offer it.
+        seed = {"lab_category": category} if category else {}
+
         if len(active) >= 2:
             await self._send_branch_selection(clinic, phone, active, lang)
             await self.update_state(
-                clinic, phone, "selecting_branch", {"lab_flow": True}, reset_context=True
+                clinic, phone, "selecting_branch", {"lab_flow": True, **seed}, reset_context=True
             )
             return
 
-        context = {}
+        context = dict(seed)
         if len(active) == 1:
             branch = active[0]
-            context = self._set_branch_context({}, branch)
+            context = self._set_branch_context(dict(seed), branch)
 
         await self.update_state(clinic, phone, "browsing_lab_tests", context, reset_context=True)
         await self._show_lab_test_list(clinic, phone, context, lang)
@@ -4158,6 +4326,96 @@ class ConversationManager:
         )
         await log_analytics_event(clinic["id"], phone, "opt_out")
 
+    async def _handle_opt_in(self, clinic: dict, phone: str, lang: str) -> None:
+        """Turn follow-up and check-in messages back on after "stop"."""
+        await update_patient(
+            clinic["id"], phone,
+            {"opted_in": True, "opted_in_at": datetime.now(timezone.utc).isoformat()},
+        )
+        await self.whatsapp.send_text(clinic, phone, {
+            "en": "✅ Welcome back — follow-up and health check-in messages are on again. "
+                  "Send *stop* anytime to turn them off, or *menu* to see all options.",
+            "hi": "✅ फिर से स्वागत है — फॉलो-अप और हेल्थ चेक-इन संदेश फिर से चालू हैं। "
+                  "बंद करने के लिए कभी भी *stop* भेजें, या सभी विकल्पों के लिए *menu*।",
+            "te": "✅ తిరిగి స్వాగతం — ఫాలో-అప్, ఆరోగ్య చెక్-ఇన్ సందేశాలు మళ్లీ ప్రారంభమయ్యాయి. "
+                  "ఆపడానికి ఎప్పుడైనా *stop* పంపండి, అన్ని ఎంపికలకు *menu* పంపండి.",
+        }.get(lang, "✅ Follow-up messages are on again. Send *stop* anytime to turn them off."))
+        await log_analytics_event(clinic["id"], phone, "opt_in")
+
+    async def _send_help_guide(self, clinic: dict, phone: str, lang: str) -> None:
+        """How to use the bot, listing only what THIS clinic's plan can do.
+
+        Every command below is one this codebase actually answers: a guide
+        that names a command the bot then misreads is worse than no guide.
+        """
+        from app.services.tenant import has_feature
+
+        diagnostics_only = await self._is_diagnostics_only(clinic)
+        labs = has_feature(clinic, "lab_test_booking")
+        doctors = has_feature(clinic, "booking") and not diagnostics_only
+        name = (clinic.get("name") or "").strip()
+
+        def t(en: str, hi: str, te: str) -> str:
+            return {"en": en, "hi": hi, "te": te}.get(lang, en)
+
+        lines = [t(
+            f"❓ *How to use{' ' + name if name else ''} on WhatsApp*",
+            "❓ *WhatsApp पर उपयोग कैसे करें*",
+            "❓ *WhatsAppలో ఎలా ఉపయోగించాలి*",
+        ), "", t("Just type any of these words:", "बस इनमें से कोई शब्द लिखें:",
+                 "ఈ పదాల్లో ఏదైనా టైప్ చేయండి:"), ""]
+        lines.append(t("📋 *menu* — see all options", "📋 *menu* — सभी विकल्प देखें",
+                       "📋 *menu* — అన్ని ఎంపికలు చూడండి"))
+        if doctors:
+            lines.append(t("📅 *book* — book a doctor appointment", "📅 *book* — डॉक्टर अपॉइंटमेंट बुक करें",
+                           "📅 *book* — డాక్టర్ అపాయింట్‌మెంట్ బుక్ చేయండి"))
+        if labs:
+            lines.append(t("🧪 *book test* — book a lab test, scan or health package",
+                           "🧪 *book test* — लैब टेस्ट, स्कैन या हेल्थ पैकेज बुक करें",
+                           "🧪 *book test* — ల్యాబ్ పరీక్ష, స్కాన్ లేదా హెల్త్ ప్యాకేజీ బుక్ చేయండి"))
+            lines.append(t('🔍 Type a test name to search — e.g. "thyroid", "MRI brain"',
+                           '🔍 खोजने के लिए टेस्ट का नाम लिखें — जैसे "thyroid", "MRI brain"',
+                           '🔍 వెతకడానికి పరీక్ష పేరు టైప్ చేయండి — ఉదా. "thyroid", "MRI brain"'))
+        lines.append(t("❌ *cancel booking* — cancel an upcoming booking",
+                       "❌ *cancel booking* — आने वाली बुकिंग रद्द करें",
+                       "❌ *cancel booking* — రాబోయే బుకింగ్ రద్దు చేయండి"))
+        if doctors:
+            lines.append(t("🔁 *reschedule* — change your appointment date or time",
+                           "🔁 *reschedule* — अपॉइंटमेंट की तारीख या समय बदलें",
+                           "🔁 *reschedule* — అపాయింట్‌మెంట్ తేదీ లేదా సమయం మార్చండి"))
+        lines += [
+            t("🌐 *change language* — English, हिंदी, తెలుగు", "🌐 *change language* — भाषा बदलें",
+              "🌐 *change language* — భాష మార్చండి"),
+            t("👩‍⚕️ *talk to staff* — reach our team", "👩‍⚕️ *talk to staff* — हमारी टीम से बात करें",
+              "👩‍⚕️ *talk to staff* — మా బృందంతో మాట్లాడండి"),
+            t("🚨 *emergency* — urgent help and our emergency number",
+              "🚨 *emergency* — तुरंत मदद और आपातकालीन नंबर",
+              "🚨 *emergency* — అత్యవసర సహాయం, నంబర్"),
+            "",
+            t("🔕 *stop* — stop follow-up and health check-in messages. Booking "
+              "confirmations, reminders, reports and payment updates still arrive.",
+              "🔕 *stop* — फॉलो-अप और हेल्थ चेक-इन संदेश बंद करें। बुकिंग, रिमाइंडर, "
+              "रिपोर्ट और भुगतान सूचनाएं आती रहेंगी।",
+              "🔕 *stop* — ఫాలో-అప్, ఆరోగ్య చెక్-ఇన్ సందేశాలు ఆపండి. బుకింగ్, రిమైండర్లు, "
+              "రిపోర్ట్లు, చెల్లింపు సమాచారం వస్తూనే ఉంటాయి."),
+            t("🔔 *start* — turn them back on", "🔔 *start* — इन्हें फिर से चालू करें",
+              "🔔 *start* — మళ్లీ ప్రారంభించండి"),
+            t("🗑️ *delete my data* — erase your details from our system",
+              "🗑️ *delete my data* — अपना डेटा हटाएं",
+              "🗑️ *delete my data* — మీ వివరాలు తొలగించండి"),
+            "",
+            t("You can also simply type what you need in your own words.",
+              "आप अपनी बात अपने शब्दों में भी लिख सकते हैं।",
+              "మీకు కావలసింది మీ మాటల్లో కూడా టైప్ చేయవచ్చు."),
+        ]
+        body = "\n".join(lines)
+        await self.whatsapp.send_interactive_buttons(
+            clinic, phone,
+            body=body[:1024],
+            buttons=[{"id": "main_menu", "title": t("Main Menu", "मुख्य मेनू", "ప్రధాన మెనూ")[:20]}],
+        )
+        await log_analytics_event(clinic["id"], phone, "help_viewed")
+
     async def _handle_data_deletion(
         self, clinic: dict, phone: str, patient: dict, lang: str
     ) -> None:
@@ -4793,7 +5051,7 @@ class ConversationManager:
         all_rows = [
             {
                 "id": f"labcat_{i}",
-                "title": label[:24],
+                "title": self._lab_heading_title(label),
                 "description": {
                     "en": f"{len(rows)} available",
                     "hi": f"{len(rows)} उपलब्ध",
@@ -4911,6 +5169,12 @@ class ConversationManager:
             context.pop("lab_test_query", None)
             if suffix.isdigit() and int(suffix) < len(categories):
                 context["lab_category"] = categories[int(suffix)]
+                # "How many patients looked at Health Packages" -- the interest
+                # half of the Insights conversion figure.
+                await log_analytics_event(
+                    clinic["id"], phone, "lab_category_viewed",
+                    metadata={"category": context["lab_category"], "source": "list"},
+                )
             else:
                 # "All services", or a row from a list built before the
                 # catalogue was re-filed: show the headings again.
@@ -4938,7 +5202,11 @@ class ConversationManager:
             # ("More options" 100+ times), so the text is a search query.
             typed = (message or "").strip()
             typed_lower = typed.lower()
-            if typed_lower in self.LAB_SEARCH_EXIT_WORDS:
+            # A greeting is a patient starting over, never a test name: "Hi"
+            # used to come back as "73 test(s) matching 'Hi'" (THIAMINE,
+            # CHIKUNGUNYA...), because this state is not one the global
+            # greeting-to-menu rule covers.
+            if typed_lower in self.LAB_SEARCH_EXIT_WORDS or is_greeting(typed) or intent == "greeting":
                 await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
                 await self._send_main_menu(clinic, phone, lang)
             elif typed and typed_lower not in self.LAB_SEARCH_RESET_WORDS:
@@ -4969,6 +5237,16 @@ class ConversationManager:
         context["lab_test_fasting_required"] = test.get("fasting_required", False)
         context["lab_test_prep_instructions"] = test.get("prep_instructions")
         context["lab_test_turnaround_hours"] = test.get("turnaround_hours")
+        # Interest that did not become a booking is exactly what Insights
+        # shows a centre ("opened 40 times, booked 6").
+        await log_analytics_event(
+            clinic["id"], phone, "lab_test_viewed",
+            metadata={
+                "test_id": str(test["id"]),
+                "test_name": test["name"],
+                "category": (test.get("category") or "").strip() or self.LAB_UNCATEGORISED_LABEL,
+            },
+        )
 
         # Fetch collection window for branch or clinic
         window = await get_lab_collection_window(clinic, branch_id=context.get("branch_id"))
@@ -4986,6 +5264,11 @@ class ConversationManager:
         # Format test summary + instructions
         price_rupees = test["price_paise"] // 100
         instructions_line = ""
+        # migration 083: what a health package includes, what a scan covers.
+        # .get() -- rows read before the column exists simply have none.
+        details = (test.get("description") or "").strip()
+        if details:
+            instructions_line += f"\n📝 *Details:* {details[:400]}"
         if test.get("fasting_required"):
             instructions_line = "\n⚠️ *Fasting Required:* 10-12 hours fasting before collection."
         if test.get("prep_instructions"):

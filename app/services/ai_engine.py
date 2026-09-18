@@ -554,12 +554,34 @@ EMERGENCY_KEYWORDS = [
     "fits",
     "paralysis",
     "severe chest pain",
+    # Pregnancy & newborn red flags (migration 082, Women & Child hospitals).
+    # Whole phrases only: "labour pain" alone is deliberately absent, because
+    # "do you offer labour pain relief?" is a question, not an emergency.
+    "water broke",
+    "waters broke",
+    "water has broken",
+    "waters have broken",
+    "water bag burst",
+    "labour has started",
+    "labor has started",
+    "labour started",
+    "labor started",
+    "labour pains started",
+    "labor pains started",
+    "baby not moving",
+    "baby is not moving",
+    "baby stopped moving",
+    "baby turned blue",
+    "baby is blue",
+    "convulsion",
     # Hindi
     "खून बह",
     "बेहोश",
     "दुर्घटना",
     "हार्ट अटैक",
     "लकवा",
+    "पानी की थैली फट",  # water bag burst
+    "बच्चा हिल नहीं रहा",  # baby is not moving
     # Telugu
     "రక్తం కారుతోంది",
     "అపస్మారం",
@@ -655,6 +677,27 @@ SECURITY RULES (NEVER VIOLATE):
     return base_prompt.strip()
 
 
+#: Whole messages that are only a greeting. Matched on the WHOLE message (after
+#: trimming punctuation), never as a substring -- "hi" is inside "thiamine".
+#: Deterministic on purpose: "Hi" sent to the LLM sometimes came back
+#: "unknown", and a patient standing in the lab-test search then had "Hi"
+#: searched as a test name ("73 test(s) matching 'Hi'").
+GREETING_WORDS = frozenset({
+    "hi", "hii", "hiii", "hai", "hello", "helo", "hlo", "hey", "heyy", "hy",
+    "namaste", "namaskar", "namaskaram", "good morning", "good afternoon",
+    "good evening", "gm", "hi there", "hello there",
+    "हाय", "हेलो", "हलो", "नमस्ते", "नमस्कार",
+    "హాయ్", "హలో", "నమస్కారం", "నమస్తే",
+})
+
+_GREETING_TRIM = " \t\r\n.,!?;:~-_'\"👋🙏😊🙂"
+
+
+def is_greeting(message: str) -> bool:
+    """True when the whole message is just a greeting ("Hi", "hello!", "नमस्ते")."""
+    return (message or "").strip(_GREETING_TRIM).lower() in GREETING_WORDS
+
+
 def keyword_intent_fallback(message: str) -> str:
     """Fallback intent detection using keywords when OpenRouter fails."""
     msg = message.lower().strip()
@@ -737,6 +780,10 @@ async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
     for kw in INTENT_KEYWORDS.get("data_deletion_request", []):
         if kw in msg_clean:
             return "data_deletion_request"
+
+    # Fast-path 3: a bare greeting never needs the LLM (see GREETING_WORDS).
+    if is_greeting(message):
+        return "greeting"
 
     # ── Security: Sanitize input ──
     sanitized_message, is_suspicious = sanitize_user_input(message)

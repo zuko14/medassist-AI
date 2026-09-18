@@ -31,8 +31,8 @@ from app.database import (
     supabase,
     update_conversation,
 )
-from app.services.ai_engine import EMERGENCY_KEYWORDS, rank_treatments_for_concern
-from app.services.specialty_catalog import CONCERN_EXAMPLES
+from app.services.ai_engine import EMERGENCY_KEYWORDS, is_greeting, rank_treatments_for_concern
+from app.services.specialty_catalog import CONCERN_EXAMPLES, CONCERN_EXAMPLES_BY_PLAN, SERVICE_LINES
 from app.services.tenant import SPECIALTY_BY_PLAN, specialty_enabled
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ TREATMENT_CONTEXT_KEYS = (
     "treatment_cat_page",
     "treatment_interest",
     "treatment_entry_page",
+    "treatment_line",
 )
 TREATMENT_RESET_STATES = frozenset({
     "main_menu",
@@ -62,7 +63,7 @@ TREATMENT_BUTTON_IDS = frozenset({
     "menu_treatments", "menu_concern", "menu_entry_consult",
     "trtcat_more", "trt_more", "trtentry_more",
 })
-TREATMENT_BUTTON_PREFIXES = ("trtcat_", "trtbook_", "trtcall_", "trtexam_", "trt_")
+TREATMENT_BUTTON_PREFIXES = ("trtcat_", "trtbook_", "trtcall_", "trtexam_", "trtline_", "trt_")
 
 #: migration 081. What the patient is allowed to choose, and what only the
 #: doctor gets to decide.
@@ -208,6 +209,59 @@ def _truncate_body(text: str) -> str:
     return text if len(text) <= _BODY_LIMIT else text[: _BODY_LIMIT - 4].rstrip() + "…"
 
 
+#: Pseudo service line for rows filed under none, shown only when the rest of
+#: the catalogue IS split into lines -- otherwise those rows would vanish.
+LINE_OTHER = "other"
+
+
+def _line(treatment: dict) -> Optional[str]:
+    """A row's service line (migration 082), or None. Rows read before the
+    column existed, and any unknown value, have none."""
+    value = str((treatment or {}).get("service_line") or "").strip().lower()
+    return value if value in SERVICE_LINES else None
+
+
+def service_lines_in(treatments: list) -> list:
+    """The service lines a patient must choose between, in the admin's order.
+
+    Empty unless the treatments span TWO OR MORE lines -- the zero-regression
+    property: a clinic that files nothing, or files everything under one line,
+    browses exactly as before migration 082.
+    """
+    first_order: dict = {}
+    for t in treatments:
+        line = _line(t)
+        if line is None:
+            continue
+        order = int(t.get("display_order") or 0)
+        if line not in first_order or order < first_order[line]:
+            first_order[line] = order
+    if len(first_order) < 2:
+        return []
+    lines = sorted(first_order, key=lambda k: (first_order[k], k))
+    if any(_line(t) is None for t in treatments):
+        lines.append(LINE_OTHER)
+    return lines
+
+
+def in_line(treatments: list, line: Optional[str]) -> list:
+    """The treatments of one service line. No line (or a line the catalogue no
+    longer has) means the whole catalogue, exactly as before 082."""
+    lines = service_lines_in(treatments)
+    if not line or line not in lines:
+        return treatments
+    if line == LINE_OTHER:
+        return [t for t in treatments if _line(t) is None]
+    return [t for t in treatments if _line(t) == line]
+
+
+def line_label(line: str, lang: str) -> str:
+    if line == LINE_OTHER:
+        return _t(lang, "➕ Other Services", "➕ अन्य सेवाएं", "➕ ఇతర సేవలు")
+    entry = SERVICE_LINES[line]
+    return f"{entry['emoji']} {entry.get(lang) or entry['en']}"
+
+
 def ordered_categories(treatments: list) -> list:
     """Categories in the order the admin arranged treatments (lowest display_order first)."""
     first_order: dict = {}
@@ -271,15 +325,56 @@ async def _send_unavailable(manager, clinic: dict, phone: str, lang: str) -> Non
 
 # ── Browsing ─────────────────────────────────────────────────────────────────
 
-async def show_treatment_categories(manager, clinic: dict, phone: str, lang: str, page: int = 0) -> None:
+async def show_service_lines(manager, clinic: dict, phone: str, lang: str, lines: list, treatments: list) -> None:
+    """Child Care / Women Care / Fertility Care -- the first tap at a hospital
+    that runs several service lines (migration 082)."""
+    rows = [
+        {
+            "id": f"trtline_{line}",
+            "title": line_label(line, lang)[:24],
+            "description": _t(lang, "{n} treatments", "{n} उपचार", "{n} చికిత్సలు")
+            .format(n=len(in_line(treatments, line)))[:72],
+        }
+        for line in lines
+    ]
+    await manager.whatsapp.send_interactive_list(
+        clinic,
+        phone,
+        # Not "Our Services": a hybrid hospital's main menu already has that
+        # row, and it lists departments.
+        header=_t(lang, "What We Treat", "हमारे उपचार", "మా చికిత్సలు")[:60],
+        body=_t(lang,
+                "Which area of care are you looking for?",
+                "आप किस तरह की देखभाल ढूंढ रहे हैं?",
+                "మీరు ఏ విభాగం సేవల కోసం చూస్తున్నారు?"),
+        button_text=_t(lang, "View", "देखें", "చూడండి"),
+        # At most seven rows exist (six lines + Other) -- inside Meta's ten.
+        sections=[{"title": _t(lang, "Areas of care", "सेवा क्षेत्र", "సేవా విభాగాలు")[:24], "rows": rows}],
+    )
+    await manager.update_state(clinic, phone, "browsing_treatments", {"treatment_line": None})
+
+
+async def show_treatment_categories(
+    manager, clinic: dict, phone: str, lang: str, page: int = 0, line: Optional[str] = None,
+) -> None:
     treatments = await get_specialty_treatments(clinic["id"]) if specialty_enabled(clinic) else []
     if not treatments:
         await return_to_main_menu(manager, clinic, phone, lang)
         return
 
+    lines = service_lines_in(treatments)
+    if lines and line not in lines:
+        await show_service_lines(manager, clinic, phone, lang, lines, treatments)
+        return
+    treatments = in_line(treatments, line)
+    # Only a split catalogue carries the line in context; every other clinic's
+    # context keeps exactly the shape it had before migration 082.
+    line_ctx = {"treatment_line": line} if lines else {}
+
     categories = ordered_categories(treatments)
     if len(categories) == 1:
-        await show_treatments_in_category(manager, clinic, phone, categories[0], lang, treatments=treatments)
+        await show_treatments_in_category(manager, clinic, phone, categories[0], lang,
+                                          treatments=treatments, line=line)
         return
 
     counts: dict = {}
@@ -298,7 +393,7 @@ async def show_treatment_categories(manager, clinic: dict, phone: str, lang: str
     await manager.whatsapp.send_interactive_list(
         clinic,
         phone,
-        header=_t(lang, "Our Treatments", "हमारे उपचार", "మా చికిత్సలు")[:60],
+        header=(line_label(line, lang) if lines else _t(lang, "Our Treatments", "हमारे उपचार", "మా చికిత్సలు"))[:60],
         body=_t(lang,
                 "Choose a category to see the treatments we offer.",
                 "हमारे उपचार देखने के लिए एक श्रेणी चुनें।",
@@ -308,19 +403,21 @@ async def show_treatment_categories(manager, clinic: dict, phone: str, lang: str
     )
     await manager.update_state(
         clinic, phone, "browsing_treatments",
-        {"treatment_categories": categories, "treatment_cat_page": page},
+        {"treatment_categories": categories, "treatment_cat_page": page, **line_ctx},
     )
 
 
 async def show_treatments_in_category(
     manager, clinic: dict, phone: str, category: str, lang: str,
-    page: int = 0, treatments: Optional[list] = None,
+    page: int = 0, treatments: Optional[list] = None, line: Optional[str] = None,
 ) -> None:
     if treatments is None:
-        treatments = await get_specialty_treatments(clinic["id"])
+        # The same category name can exist in two service lines ("Surgery" in
+        # Women Care and in Fertility Care), so the line narrows it first.
+        treatments = in_line(await get_specialty_treatments(clinic["id"]), line)
     in_category = [t for t in treatments if _category(t) == category]
     if not in_category:
-        await show_treatment_categories(manager, clinic, phone, lang)
+        await show_treatment_categories(manager, clinic, phone, lang, line=line)
         return
 
     all_rows = [
@@ -341,7 +438,9 @@ async def show_treatments_in_category(
     )
     await manager.update_state(
         clinic, phone, "browsing_treatments",
-        {"treatment_category": category, "treatment_page": page},
+        # The line rides along so "More" pages within it; only a split
+        # catalogue ever passes one.
+        {"treatment_category": category, "treatment_page": page, **({"treatment_line": line} if line else {})},
     )
 
 
@@ -705,7 +804,11 @@ async def request_callback(manager, clinic: dict, phone: str, treatment_id: str,
 # ── Concern search ───────────────────────────────────────────────────────────
 
 async def prompt_concern(manager, clinic: dict, phone: str, lang: str) -> None:
-    examples = CONCERN_EXAMPLES.get(SPECIALTY_BY_PLAN.get(clinic.get("plan")), "hair fall, tooth pain, blurred vision")
+    examples = (
+        CONCERN_EXAMPLES.get(SPECIALTY_BY_PLAN.get(clinic.get("plan")))
+        or CONCERN_EXAMPLES_BY_PLAN.get(clinic.get("plan"))
+        or "hair fall, tooth pain, blurred vision"
+    )
 
     # A patient who cannot name what is wrong is the normal case at an eye,
     # dental or fertility clinic -- that is the whole objection this pathway
@@ -858,6 +961,9 @@ async def handle_treatment_button(manager, clinic: dict, phone: str, button_id: 
         await return_to_main_menu(manager, clinic, phone, lang)
         return
     ctx = (session or {}).get("context") or {}
+    # The service line the patient is browsing (migration 082); None for every
+    # clinic whose catalogue is not split into lines.
+    line = ctx.get("treatment_line") or None
 
     if button_id == "menu_treatments":
         await show_treatment_categories(manager, clinic, phone, lang)
@@ -871,21 +977,26 @@ async def handle_treatment_button(manager, clinic: dict, phone: str, button_id: 
             page=int(ctx.get("treatment_entry_page") or 0) + 1,
         )
     elif button_id == "trtcat_more":
-        await show_treatment_categories(manager, clinic, phone, lang, page=int(ctx.get("treatment_cat_page") or 0) + 1)
+        await show_treatment_categories(manager, clinic, phone, lang,
+                                        page=int(ctx.get("treatment_cat_page") or 0) + 1, line=line)
     elif button_id == "trt_more":
         category = ctx.get("treatment_category")
         if category:
             await show_treatments_in_category(manager, clinic, phone, category, lang,
-                                              page=int(ctx.get("treatment_page") or 0) + 1)
+                                              page=int(ctx.get("treatment_page") or 0) + 1, line=line)
         else:
-            await show_treatment_categories(manager, clinic, phone, lang)
+            await show_treatment_categories(manager, clinic, phone, lang, line=line)
+    elif button_id.startswith("trtline_"):
+        # Validated inside show_treatment_categories: a line the catalogue no
+        # longer has (a stale list tap) re-shows the line picker.
+        await show_treatment_categories(manager, clinic, phone, lang, line=button_id[len("trtline_"):])
     elif button_id.startswith("trtcat_"):
         categories = ctx.get("treatment_categories") or []
         index = button_id[len("trtcat_"):]
         if index.isdigit() and int(index) < len(categories):
-            await show_treatments_in_category(manager, clinic, phone, categories[int(index)], lang)
+            await show_treatments_in_category(manager, clinic, phone, categories[int(index)], lang, line=line)
         else:
-            await show_treatment_categories(manager, clinic, phone, lang)
+            await show_treatment_categories(manager, clinic, phone, lang, line=line)
     elif button_id.startswith("trtbook_"):
         # An interest recorded by a multi-entry prompt survives the tap.
         await start_treatment_booking(
@@ -919,7 +1030,9 @@ async def handle_treatment_state(
     matching the exit words themselves instead of trusting the classifier.
     """
     typed = (message or "").strip()
-    if typed and typed.lower() not in TREATMENT_EXIT_WORDS:
+    # is_greeting: "Hii" and "Good morning" are a patient starting over, the
+    # same as "hi" -- see the lab-search note in ai_engine.GREETING_WORDS.
+    if typed and typed.lower() not in TREATMENT_EXIT_WORDS and not is_greeting(typed):
         await handle_treatment_search_text(manager, clinic, phone, typed, lang)
         return
     await return_to_main_menu(manager, clinic, phone, lang)

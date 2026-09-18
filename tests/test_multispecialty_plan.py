@@ -81,7 +81,9 @@ def test_hybrid_plan_is_not_a_single_specialty():
     assert SPECIALTY_BY_PLAN == {
         "derma": "dermatology", "eye": "ophthalmology", "dental": "dental", "ivf": "fertility",
     }
-    assert HYBRID_SPECIALTY_PLANS == frozenset({PLAN})
+    # womenchild (migration 082) is the second hybrid: same reasoning, it
+    # keeps its paediatric and obstetric departments.
+    assert HYBRID_SPECIALTY_PLANS == frozenset({PLAN, "womenchild"})
     assert not specialty_flow.is_specialty_plan({"plan": PLAN})
 
 
@@ -123,7 +125,7 @@ async def test_menu_keeps_departments_and_lab_tests_alongside_treatments():
         await m._send_main_menu({"id": "c1", "plan": PLAN}, PHONE, "en")
     assert _menu_ids(m) == [
         "menu_treatments", "menu_concern", "menu_book", "menu_services",
-        "menu_doctors", "menu_lab_tests", "menu_emergency", "menu_human",
+        "menu_doctors", "menu_lab_tests", "menu_emergency", "menu_human", "menu_help",
     ]
 
 
@@ -149,7 +151,7 @@ async def test_menu_without_a_published_treatment_is_an_ordinary_hospital_menu()
          patch.object(specialty_flow, "has_active_treatments", AsyncMock(return_value=False)):
         await m._send_main_menu({"id": "c1", "plan": PLAN}, PHONE, "en")
     assert _menu_ids(m) == ["menu_book", "menu_services", "menu_doctors", "menu_lab_tests",
-                            "menu_emergency", "menu_human"]
+                            "menu_emergency", "menu_human", "menu_help"]
 
 
 # ── starter treatments: the hybrid clinic names the list ─────────────────────

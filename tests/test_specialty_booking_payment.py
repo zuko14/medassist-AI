@@ -133,7 +133,7 @@ def test_insights_and_payments_read_the_treatment_name():
     repo = Path(__file__).resolve().parent.parent
     analytics = (repo / "app" / "services" / "analytics.py").read_text(encoding="utf-8")
     admin = (repo / "app" / "routers" / "admin.py").read_text(encoding="utf-8")
-    assert "booking_type,lab_test_name,treatment_name,amount_paise" in analytics
+    assert "lab_test_name,treatment_name,amount_paise" in analytics
     assert "booking_type, lab_test_id, lab_test_name, treatment_id, treatment_name, " in admin
 
 

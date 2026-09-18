@@ -1775,6 +1775,39 @@
                 <div class="stat"><div class="glow"></div><div class="label">Patients Served</div><div class="num" id="i-patients">—</div></div>
             </div>
 
+            <!-- Diagnostics performance: only for clinics that sell tests -->
+            <div id="insightsDiagnostics" style="display:none; margin-bottom:20px;">
+                <div class="stats">
+                    <div class="stat"><div class="glow"></div><div class="label">Tests &amp; Scans Booked</div><div class="num" id="i-lab-bookings">—</div></div>
+                    <div class="stat" data-feature="payments_razorpay"><div class="glow"></div><div class="label">Diagnostics Revenue</div><div class="num" id="i-lab-revenue">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Service Types Opened</div><div class="num" id="i-lab-catviews">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Tests Viewed</div><div class="num" id="i-lab-testviews">—</div></div>
+                </div>
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head"><div>
+                        <h3>Service Type Performance</h3>
+                        <span class="chart-sub">Lab tests, health packages, radiology and scans — booked, earned, and how many patients showed interest</span>
+                    </div></div>
+                    <div class="tbl-wrap" id="insightsLabTypes"></div>
+                </div>
+                <div class="chart-grid">
+                    <div class="card">
+                        <div class="card-head"><div>
+                            <h3>Top Booked Tests &amp; Packages</h3>
+                            <span class="chart-sub">Your highest-demand services this period</span>
+                        </div></div>
+                        <div class="tbl-wrap" id="insightsLabTop"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-head"><div>
+                            <h3>Most Viewed — Follow-up Opportunities</h3>
+                            <span class="chart-sub">Opened on WhatsApp but not booked: patients worth a call</span>
+                        </div></div>
+                        <div class="tbl-wrap" id="insightsLabViewed"></div>
+                    </div>
+                </div>
+            </div>
+
             <div class="chart-grid one-up">
                 <div class="card">
                     <div class="card-head">
@@ -2174,6 +2207,8 @@
                     <div class="field" id="trtStarterPicker" style="display:none; max-width:280px; margin-bottom:12px;">
                         <label for="trtStarterSpecialty">Which list?</label>
                         <select id="trtStarterSpecialty">
+                            <option value="pediatrics">Child Care — Paediatrics &amp; Newborn</option>
+                            <option value="womens_health">Women Care — Gynaecology &amp; Pregnancy</option>
                             <option value="dermatology">Skin &amp; Hair — Dermatology</option>
                             <option value="ophthalmology">Eye — Ophthalmology</option>
                             <option value="dental">Dental</option>
@@ -2183,6 +2218,8 @@
                     <button type="button" class="btn btn-accent" id="btnLoadStarter" onclick="loadStarterTreatments()">Load starter treatments</button>
                 </div>
             </div>
+
+            <div class="toggle-group" id="trtLineTabs" role="tablist" aria-label="Treatment sections" style="display:none; flex-wrap:wrap; max-width:100%;"></div>
 
             <div class="top-row">
                 <input type="text" class="search-bar" id="trtSearch" placeholder="Search by name, category or concern..." oninput="filterTreatments()" aria-label="Search treatments">
@@ -2219,6 +2256,16 @@
                         <input type="text" id="f-trtShort" maxlength="24" placeholder="Needed when the name is longer than 24 characters" oninput="updateTrtShortCounter()">
                     </div>
                     <div class="field"><label for="f-trtOrder">Display order</label><input type="number" id="f-trtOrder" min="0" max="10000" step="1" value="0"></div>
+                </div>
+                <div class="form-row" id="trtLineRow" style="display:none;">
+                    <div class="field">
+                        <label for="f-trtLine">Section</label>
+                        <select id="f-trtLine"></select>
+                        <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">
+                            Which part of the hospital offers this &mdash; for example Child Care or Women Care.
+                            On WhatsApp, patients first choose a section, then see only its treatments.
+                        </p>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="field">
@@ -2334,6 +2381,21 @@
                 </div>
             </div>
 
+            <!-- migration 080/083: one tab per service type the catalogue uses -->
+            <div class="toggle-group" id="labTypeTabs" role="tablist" aria-label="Service types" style="display:none; flex-wrap:wrap; max-width:100%;"></div>
+
+            <div class="card" id="labAutoClassifyCard" style="display:none; margin-bottom:20px;">
+                <div class="card-head"><h3>✨ Organise your catalogue</h3></div>
+                <div style="padding:16px;">
+                    <p id="labAutoClassifyText" style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;"></p>
+                    <div id="labAutoClassifyResult"></div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-ghost" id="btnLabClassifyPreview" onclick="previewLabAutoClassify()">Preview suggestions</button>
+                        <button type="button" class="btn btn-accent" id="btnLabClassifyApply" style="display:none;" onclick="applyLabAutoClassify()">Apply</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="top-row">
                 <input type="text" class="search-bar" id="labTestSearch" placeholder="Search lab tests by name or sample type..." oninput="filterLabTests()">
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -2396,6 +2458,11 @@
                 <div class="field" style="margin-top:8px;">
                     <label>Preparation Instructions</label>
                     <textarea id="f-ltPrep" rows="2" placeholder="e.g. 10-12 hours overnight fasting required. Water is permitted."></textarea>
+                </div>
+                <div class="field" style="margin-top:8px;">
+                    <label for="f-ltDescription">Details / Tests Included <span id="ltDescCounter" style="color:var(--text3); font-weight:400;"></span></label>
+                    <textarea id="f-ltDescription" rows="3" maxlength="500" oninput="updateLtDescCounter()" placeholder="e.g. CBC, Lipid Profile, LFT, KFT, Thyroid, HbA1c, Urine Routine, ECG — 62 parameters"></textarea>
+                    <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Shown to the patient on WhatsApp when they open this test &mdash; what a health package includes, or what a scan covers.</p>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
                     <button class="btn btn-accent" id="btnSaveLabTest" onclick="submitLabTest(event)">Save Test</button>
@@ -3295,6 +3362,9 @@ let myBranchId = null;
 let myStaffRole = null;
 let mySpecialty = null;
 let mySpecialtyEnabled = false;
+// migration 082: treatment sections (Child Care / Women Care / ...) from /admin/me
+let myServiceLines = [];
+let myPlanServiceLines = [];
 
 function hasPermission(perm) {
     if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
@@ -3437,6 +3507,8 @@ async function login() {
     myStaffRole = me.staff_role || null;
     mySpecialty = me.specialty || null;
     mySpecialtyEnabled = !!me.specialty_enabled;
+    myServiceLines = Array.isArray(me.service_lines) ? me.service_lines : [];
+    myPlanServiceLines = Array.isArray(me.plan_service_lines) ? me.plan_service_lines : [];
     myUsername = me.username || '';
     myEnvAccount = !!me.env_account;
     CLINIC_SCOPE = me.clinic_id || 'default';
@@ -3577,6 +3649,8 @@ async function adoptClinicPlan() {
             myFeatures = scoped.features;
             mySpecialty = scoped.specialty || null;
             mySpecialtyEnabled = !!scoped.specialty_enabled;
+            myServiceLines = Array.isArray(scoped.service_lines) ? scoped.service_lines : [];
+            myPlanServiceLines = Array.isArray(scoped.plan_service_lines) ? scoped.plan_service_lines : [];
         }
     } catch (e) {
         console.warn('Could not resolve plan for clinic', CLINIC_SCOPE, e);
@@ -4349,6 +4423,44 @@ async function loadInsights() {
     }
 }
 
+function renderDiagnosticsInsights(diag) {
+    const box = document.getElementById('insightsDiagnostics');
+    if (!box) return;
+    if (!diag) { box.style.display = 'none'; return; }
+    const tot = diag.totals || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('i-lab-bookings', tot.lab_bookings ?? 0);
+    set('i-lab-revenue', inr(tot.revenue_inr));
+    set('i-lab-catviews', tot.category_views ?? 0);
+    set('i-lab-testviews', tot.test_views ?? 0);
+
+    const empty = text => `<p style="color:var(--text3); padding:16px; font-size:0.85rem">${esc(text)}</p>`;
+    const types = diag.by_service_type || [];
+    document.getElementById('insightsLabTypes').innerHTML = types.length ? `<table>
+        <thead><tr><th>Service type</th><th>Bookings</th><th>Revenue</th><th>Patients interested</th><th>Booked after viewing</th></tr></thead>
+        <tbody>${types.map(r => `<tr>
+            <td style="font-weight:600; color:var(--text-strong)">${esc(labTypeEmoji(r.name) + ' ' + r.name)}</td>
+            <td>${esc(String(r.bookings))}</td>
+            <td>${inr(r.revenue_inr)}</td>
+            <td>${esc(String(r.interested_patients))}</td>
+            <td>${esc(String(r.conversion_pct))}%</td>
+        </tr>`).join('')}</tbody></table>` : empty('No test bookings or catalogue views in this period yet.');
+
+    const testTable = (rows, emptyText, showGap) => rows.length ? `<table>
+        <thead><tr><th>Test / package</th><th>Service type</th><th>${showGap ? 'Views' : 'Bookings'}</th><th>${showGap ? 'Booked' : 'Revenue'}</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+            <td style="font-weight:600; color:var(--text-strong)">${esc(r.name)}</td>
+            <td style="color:var(--text3)">${esc(r.category)}</td>
+            <td>${esc(String(showGap ? r.views : r.bookings))}</td>
+            <td>${showGap ? esc(String(r.bookings)) : inr(r.revenue_inr)}</td>
+        </tr>`).join('')}</tbody></table>` : empty(emptyText);
+    document.getElementById('insightsLabTop').innerHTML =
+        testTable(diag.top_tests || [], 'No tests booked in this period.', false);
+    document.getElementById('insightsLabViewed').innerHTML =
+        testTable(diag.most_viewed || [], 'Views are recorded from today as patients open tests on WhatsApp.', true);
+    box.style.display = '';
+}
+
 function exportInsightsCSV() {
     if (!insightsData || !insightsData.dates || !insightsData.dates.length) {
         toast('No insights data available to export', true);
@@ -4451,6 +4563,7 @@ function renderInsights(d) {
     put('i-revenue', inr(rev.collected_inr));
     put('i-avgticket', inr(rev.avg_ticket_inr));
     put('i-patients', b.unique_patients ?? 0);
+    renderDiagnosticsInsights(d.diagnostics);
 
     // ── Booking volume ──────────────────────────────────────────────────
     const volumeCanvas = document.getElementById('ch-volume');
@@ -6077,8 +6190,124 @@ function renderLabCategoryOptions() {
         if (sel.value !== keep) sel.value = '';
         // Nothing filed yet means one heading, which is what the bot already
         // shows -- the filter would only be a control that does nothing.
-        sel.style.display = inUse.length ? 'inline-block' : 'none';
+        sel.style.display = 'none';  // the tabs below are the control now
     }
+    renderLabTypeTabs(inUse);
+    renderLabAutoClassifyCard();
+}
+
+// Same reading of a heading's wording as the WhatsApp menu
+// (ConversationManager._lab_heading_emoji), so the panel and the bot match.
+function labTypeEmoji(label) {
+    const t = (label || '').toLowerCase();
+    const rules = [
+        [['package', 'checkup', 'check-up', 'check up', 'health', 'wellness', 'master'], '📦'],
+        [['mri', 'ct ', 'ct)', 'ct/', '(ct', 'scan', 'pet'], '🧲'],
+        [['radiolog', 'imaging', 'x-ray', 'xray', 'x ray', 'ultrasound', 'usg', 'sonograph', 'mammo', 'doppler'], '📷'],
+        [['cardiac', 'heart', 'ecg', 'echo', 'tmt', 'special'], '❤️'],
+        [['patholog', 'lab', 'blood', 'urine', 'test'], '🧪'],
+    ];
+    for (const [words, emoji] of rules) {
+        if (words.some(w => t.includes(w))) return emoji;
+    }
+    return '🔬';
+}
+
+function renderLabTypeTabs(inUse) {
+    const tabs = document.getElementById('labTypeTabs');
+    const sel = document.getElementById('labTestCategoryFilter');
+    if (!tabs || !sel) return;
+    const all = labTestsCache || [];
+    if (!inUse.length) { tabs.style.display = 'none'; return; }
+    const current = sel.value;
+    const count = v => v === '__none__'
+        ? all.filter(t => !(t.category || '').trim()).length
+        : all.filter(t => (t.category || '').trim().toLowerCase() === v.toLowerCase()).length;
+    const unfiled = count('__none__');
+    const btn = (value, label, n) =>
+        `<button type="button" class="toggle-btn ${current === value ? 'on' : ''}" role="tab" aria-selected="${current === value}" data-value="${esc(value)}" onclick="setLabTypeTab(this.dataset.value)">${esc(label)} <span style="opacity:0.7">(${n})</span></button>`;
+    tabs.innerHTML = btn('', 'All', all.length)
+        + inUse.map(c => btn(c, labTypeEmoji(c) + ' ' + c, count(c))).join('')
+        + (unfiled ? btn('__none__', 'Unfiled', unfiled) : '');
+    tabs.style.display = '';
+}
+
+window.setLabTypeTab = function (value) {
+    const sel = document.getElementById('labTestCategoryFilter');
+    if (!sel) return;
+    sel.value = value || '';
+    renderLabTypeTabs(labCategoriesInUse());
+    filterLabTests();
+};
+
+function renderLabAutoClassifyCard() {
+    const card = document.getElementById('labAutoClassifyCard');
+    if (!card) return;
+    const unfiled = (labTestsCache || []).filter(t => !(t.category || '').trim()).length;
+    if (!unfiled || !hasPermission('LAB_TESTS_MANAGE')) { card.style.display = 'none'; return; }
+    document.getElementById('labAutoClassifyText').textContent =
+        `${unfiled} test${unfiled !== 1 ? 's are' : ' is'} not filed under a service type, so patients on WhatsApp `
+        + 'see one long list instead of Lab Tests, Health Packages, Radiology and Scans. '
+        + 'Kriya can suggest a service type for each from its name. Nothing is saved until you apply, '
+        + 'and tests you have already filed are never changed.';
+    document.getElementById('labAutoClassifyResult').innerHTML = '';
+    document.getElementById('btnLabClassifyApply').style.display = 'none';
+    card.style.display = '';
+}
+
+let labClassifyPreviewCount = 0;
+
+window.previewLabAutoClassify = async function () {
+    const btn = document.getElementById('btnLabClassifyPreview');
+    const out = document.getElementById('labAutoClassifyResult');
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiPost('/admin/lab-tests/auto-classify', { apply: false });
+        labClassifyPreviewCount = r.unfiled || 0;
+        if (!labClassifyPreviewCount) {
+            out.innerHTML = '<p style="color:var(--text3)">Every test is already filed.</p>';
+            return;
+        }
+        out.innerHTML = `<div class="tbl-wrap" style="margin-bottom:12px;"><table>
+            <thead><tr><th>Service type</th><th>Tests</th><th>Examples</th></tr></thead>
+            <tbody>${(r.proposal || []).map(p => `<tr>
+                <td style="font-weight:600; color:var(--text-strong)">${esc(labTypeEmoji(p.category) + ' ' + p.category)}</td>
+                <td>${esc(String(p.count))}</td>
+                <td style="color:var(--text3); font-size:0.8rem">${(p.examples || []).map(esc).join(' · ')}</td>
+            </tr>`).join('')}</tbody></table></div>
+            <p style="color:var(--text3); font-size:0.8rem; margin-bottom:12px;">You can re-file any single test afterwards from its edit form.</p>`;
+        const apply = document.getElementById('btnLabClassifyApply');
+        apply.textContent = `Apply to ${labClassifyPreviewCount} tests`;
+        apply.style.display = '';
+    } catch (e) {
+        toast(e.message || 'Could not prepare suggestions', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+};
+
+window.applyLabAutoClassify = async function () {
+    const ok = await confirmDialog(
+        `File ${labClassifyPreviewCount} unfiled tests under the suggested service types? Tests you already filed are not touched.`,
+        { title: 'Organise catalogue', okText: 'Apply' });
+    if (!ok) return;
+    const btn = document.getElementById('btnLabClassifyApply');
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiPost('/admin/lab-tests/auto-classify', { apply: true });
+        toast(`${r.updated || 0} tests filed. Patients now see your service types on WhatsApp.`);
+        loadLabTests();
+    } catch (e) {
+        toast(e.message || 'Could not apply suggestions', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+};
+
+function updateLtDescCounter() {
+    const el = document.getElementById('f-ltDescription');
+    const c = document.getElementById('ltDescCounter');
+    if (el && c) c.textContent = el.value.length ? `${el.value.length}/500` : '';
 }
 
 async function loadLabTests() {
@@ -6189,6 +6418,8 @@ function resetLabTestForm() {
     document.getElementById('f-ltTurnaround').value = '';
     document.getElementById('f-ltFasting').checked = false;
     document.getElementById('f-ltPrep').value = '';
+    document.getElementById('f-ltDescription').value = '';
+    updateLtDescCounter();
     // Adding while filtered to one branch means "add it at this branch" far
     // more often than "add it everywhere"; defaulting the other way silently
     // publishes the test to every centre.
@@ -6210,6 +6441,8 @@ window.editLabTest = function(id) {
     document.getElementById('f-ltTurnaround').value = test.turnaround_hours || '';
     document.getElementById('f-ltFasting').checked = !!test.fasting_required;
     document.getElementById('f-ltPrep').value = test.prep_instructions || '';
+    document.getElementById('f-ltDescription').value = test.description || '';
+    updateLtDescCounter();
     const editBranchSel = document.getElementById('f-ltBranch');
     if (editBranchSel) editBranchSel.value = test.branch_id || '';
     document.getElementById('labTestFormTitle').textContent = 'Edit Lab Test';
@@ -6247,6 +6480,7 @@ async function submitLabTest(e) {
     const turnaround = parseInt(document.getElementById('f-ltTurnaround').value, 10) || null;
     const fasting = document.getElementById('f-ltFasting').checked;
     const prep = document.getElementById('f-ltPrep').value.trim() || null;
+    const details = document.getElementById('f-ltDescription').value.trim();
 
     if (!name) {
         toast('Please enter test name', true);
@@ -6273,6 +6507,11 @@ async function submitLabTest(e) {
         // which is how an edit un-files a test.
         category: category,
     };
+    // Sent only when there is something to say, or to clear what an edit had:
+    // a test without details posts exactly what it always has.
+    if (details || (id && (labTestsCache.find(t => t.id === id) || {}).description)) {
+        payload.description = details;
+    }
     // Only sent by multi-branch clinics. A single-location clinic keeps
     // posting exactly the payload it always has, so branch_id stays NULL.
     if (labTestShowBranchCol) {
@@ -6315,6 +6554,7 @@ async function loadTreatments() {
         const docList = Array.isArray(docs) ? docs : ((docs && docs.doctors) || []);
         treatmentDoctorsCache = docList.filter(d => d.is_active !== false);
         renderTreatmentCategoryOptions();
+        renderTreatmentLineControls();
         renderStarterCard();
         filterTreatments();
     } catch (e) {
@@ -6355,6 +6595,12 @@ function renderStarterCard() {
     if (picker) picker.style.display = (canManage && multiSpecialty) ? '' : 'none';
     if (!canManage) {
         card.style.display = 'none';
+    } else if (!treatmentsCache.length && myPlanServiceLines.length) {
+        text.textContent = 'Your catalog is empty. Load ready-made lists one section at a time: '
+            + myPlanServiceLines.map(treatmentLineLabel).filter(Boolean).join(', ') + '. '
+            + 'They are added hidden, so you can set prices and edit descriptions, then choose which ones patients see.';
+        btn.style.display = '';
+        card.style.display = '';
     } else if (!treatmentsCache.length) {
         text.textContent = (multiSpecialty
             ? 'Your catalog is empty. Choose a specialty and load a ready-made list of common treatments. '
@@ -6368,7 +6614,7 @@ function renderStarterCard() {
         btn.style.display = multiSpecialty ? '' : 'none';
         card.style.display = '';
     } else if (multiSpecialty) {
-        text.textContent = 'Add another specialty’s starter list — skin & hair, eye, dental or fertility. '
+        text.textContent = 'Add another starter list — child care, women care, fertility, skin & hair, eye or dental. '
             + 'Treatments you already have are left untouched.';
         btn.style.display = '';
         card.style.display = '';
@@ -6377,11 +6623,77 @@ function renderStarterCard() {
     }
 }
 
+// ── Sections (migration 082) ──
+// A hybrid hospital files treatments under service lines. The tabs show the
+// plan's own sections (a Women & Child hospital always sees Child Care, Women
+// Care and Fertility Care) plus any section a row already uses. A clinic with
+// neither sees no tabs and no Section field -- the page it had before.
+let trtLineFilter = '';
+
+function treatmentLinesInUse() {
+    const known = new Set(myServiceLines.map(l => l.slug));
+    const used = new Set(treatmentsCache.map(t => t.service_line).filter(v => v && known.has(v)));
+    const order = [...myPlanServiceLines, ...myServiceLines.map(l => l.slug)];
+    return [...new Set(order)].filter(slug => myPlanServiceLines.includes(slug) || used.has(slug));
+}
+
+function treatmentLineLabel(slug) {
+    const line = myServiceLines.find(l => l.slug === slug);
+    return line ? `${line.emoji} ${line.label}` : '';
+}
+
+function treatmentSectionsOn() {
+    return mySpecialtyEnabled && !mySpecialty && myServiceLines.length > 0;
+}
+
+function treatmentInLine(t, filter, lines) {
+    if (!filter) return true;
+    if (filter === 'none') return !lines.includes(t.service_line);
+    return t.service_line === filter;
+}
+
+function renderTreatmentLineControls() {
+    const tabs = document.getElementById('trtLineTabs');
+    const row = document.getElementById('trtLineRow');
+    const sel = document.getElementById('f-trtLine');
+    const lines = treatmentLinesInUse();
+    if (row) row.style.display = treatmentSectionsOn() ? '' : 'none';
+    if (sel) {
+        const current = sel.value;
+        sel.innerHTML = '<option value="">No section</option>'
+            + myServiceLines.map(l => `<option value="${esc(l.slug)}">${esc(l.emoji + ' ' + l.label)}</option>`).join('');
+        sel.value = current;
+    }
+    if (!tabs) return;
+    if (!(treatmentSectionsOn() && lines.length)) {
+        tabs.style.display = 'none';
+        trtLineFilter = '';
+        return;
+    }
+    if (trtLineFilter && trtLineFilter !== 'none' && !lines.includes(trtLineFilter)) trtLineFilter = '';
+    const count = value => treatmentsCache.filter(t => treatmentInLine(t, value, lines)).length;
+    const unfiled = count('none');
+    const btn = (value, label, n) =>
+        `<button type="button" class="toggle-btn ${trtLineFilter === value ? 'on' : ''}" role="tab" aria-selected="${trtLineFilter === value}" onclick="setTreatmentLineFilter('${esc(value)}')">${esc(label)} <span style="opacity:0.7">(${n})</span></button>`;
+    tabs.innerHTML = btn('', 'All', treatmentsCache.length)
+        + lines.map(slug => btn(slug, treatmentLineLabel(slug), count(slug))).join('')
+        + (unfiled ? btn('none', 'No section', unfiled) : '');
+    tabs.style.display = '';
+}
+
+window.setTreatmentLineFilter = function (value) {
+    trtLineFilter = value || '';
+    renderTreatmentLineControls();
+    filterTreatments();
+};
+
 function filterTreatments() {
     const q = (document.getElementById('trtSearch')?.value || '').toLowerCase().trim();
     const cat = document.getElementById('trtCategoryFilter')?.value || '';
+    const lines = treatmentLinesInUse();
     const rows = treatmentsCache.filter(t =>
-        (!cat || t.category === cat)
+        treatmentInLine(t, trtLineFilter, lines)
+        && (!cat || t.category === cat)
         && (!q || [t.name, t.short_name, t.category, t.concerns].some(v => (v || '').toLowerCase().includes(q))));
     const countEl = document.getElementById('trtCount');
     if (countEl) {
@@ -6424,15 +6736,17 @@ function renderTreatmentsTable(rows) {
         return;
     }
     const canManage = hasPermission('TREATMENTS_MANAGE');
+    const sections = treatmentSectionsOn();
     el.innerHTML = `<table>
         <thead><tr>
             ${canManage ? '<th><input type="checkbox" aria-label="Select all treatments" onchange="toggleAllTreatments(this.checked)"></th>' : ''}
-            <th>Treatment</th><th>Category</th><th>Pathway</th><th>Price from</th><th>Duration</th><th>Doctors</th><th>Status</th>
+            <th>Treatment</th>${sections ? '<th>Section</th>' : ''}<th>Category</th><th>Pathway</th><th>Price from</th><th>Duration</th><th>Doctors</th><th>Status</th>
             ${canManage ? '<th>Actions</th>' : ''}
         </tr></thead>
         <tbody>${rows.map(t => `<tr>
             ${canManage ? `<td><input type="checkbox" class="trt-select" value="${esc(t.id)}" aria-label="Select ${esc(t.name)}"></td>` : ''}
             <td style="font-weight:600; color:var(--text-strong)">${esc(t.name)}${t.short_name ? `<div style="color:var(--text3); font-size:0.75rem; font-weight:400">List title: ${esc(t.short_name)}</div>` : ''}</td>
+            ${sections ? `<td>${esc(treatmentLineLabel(t.service_line)) || '<span style="color:var(--text3)">—</span>'}</td>` : ''}
             <td>${esc(t.category)}</td>
             <td>${treatmentPathwayLabel(t)}</td>
             <td>${formatTreatmentPrice(t.price_from_paise)}</td>
@@ -6486,6 +6800,9 @@ function resetTreatmentForm() {
     document.getElementById('f-trtPrice').value = '0';
     document.getElementById('f-trtOrder').value = '0';
     document.getElementById('f-trtPathway').value = 'direct';
+    // A new treatment added while a section tab is open belongs to it.
+    const lineSel = document.getElementById('f-trtLine');
+    if (lineSel) lineSel.value = (trtLineFilter && trtLineFilter !== 'none') ? trtLineFilter : '';
     document.getElementById('f-trtActive').checked = true;
     document.getElementById('trtFormTitle').textContent = 'Add Treatment';
     renderTreatmentDoctorChecks([]);
@@ -6522,6 +6839,8 @@ window.editTreatment = function (id) {
     document.getElementById('f-trtShort').value = t.short_name || '';
     document.getElementById('f-trtOrder').value = t.display_order || 0;
     document.getElementById('f-trtPathway').value = t.care_pathway || 'direct';
+    const lineSelEdit = document.getElementById('f-trtLine');
+    if (lineSelEdit) lineSelEdit.value = t.service_line || '';
     document.getElementById('f-trtPrice').value = Math.round((t.price_from_paise || 0) / 100);
     document.getElementById('f-trtDuration').value = t.duration_minutes || '';
     document.getElementById('f-trtConcerns').value = t.concerns || '';
@@ -6591,6 +6910,9 @@ async function submitTreatment() {
         display_order: order,
         care_pathway: document.getElementById('f-trtPathway').value || 'direct',
     };
+    // Only a clinic that sees the Section field sends it, so every other
+    // clinic's save is byte-for-byte what it was before migration 082.
+    if (treatmentSectionsOn()) payload.service_line = document.getElementById('f-trtLine').value || null;
     const doctorIds = [...document.querySelectorAll('.trt-doc-cb:checked')].map(cb => cb.value);
 
     const btn = document.getElementById('btnSaveTreatment');

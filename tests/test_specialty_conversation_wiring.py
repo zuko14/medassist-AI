@@ -49,7 +49,7 @@ async def test_existing_plans_keep_the_exact_same_menu(plan):
          patch("app.services.tenant.has_feature", return_value=False), \
          patch.object(specialty_flow, "has_active_treatments", AsyncMock(return_value=True)) as active:
         await m._send_main_menu({"id": "c1", "plan": plan}, PHONE, "en")
-    assert _menu_ids(m) == ["menu_book", "menu_services", "menu_doctors", "menu_emergency", "menu_human"]
+    assert _menu_ids(m) == ["menu_book", "menu_services", "menu_doctors", "menu_emergency", "menu_human", "menu_help"]
     active.assert_not_awaited()
 
 
@@ -60,7 +60,7 @@ async def test_existing_plan_with_lab_booking_keeps_its_lab_row():
          patch("app.services.tenant.has_feature", side_effect=lambda c, f: f == "lab_test_booking"):
         await m._send_main_menu({"id": "c1", "plan": "polyclinic"}, PHONE, "en")
     assert _menu_ids(m) == ["menu_book", "menu_services", "menu_doctors", "menu_lab_tests",
-                            "menu_emergency", "menu_human"]
+                            "menu_emergency", "menu_human", "menu_help"]
 
 
 @pytest.mark.asyncio
@@ -71,7 +71,7 @@ async def test_specialty_clinic_with_treatments_gets_treatment_rows_and_no_servi
          patch.object(specialty_flow, "has_active_treatments", AsyncMock(return_value=True)):
         await m._send_main_menu({"id": "c1", "plan": "dental", "features": {}}, PHONE, "en")
     assert _menu_ids(m) == ["menu_treatments", "menu_concern", "menu_book", "menu_doctors",
-                            "menu_emergency", "menu_human"]
+                            "menu_emergency", "menu_human", "menu_help"]
 
 
 @pytest.mark.asyncio
@@ -81,7 +81,7 @@ async def test_specialty_clinic_without_published_treatments_keeps_the_normal_me
          patch("app.services.tenant.has_feature", return_value=False), \
          patch.object(specialty_flow, "has_active_treatments", AsyncMock(return_value=False)):
         await m._send_main_menu({"id": "c1", "plan": "eye", "features": {}}, PHONE, "en")
-    assert _menu_ids(m) == ["menu_book", "menu_services", "menu_doctors", "menu_emergency", "menu_human"]
+    assert _menu_ids(m) == ["menu_book", "menu_services", "menu_doctors", "menu_emergency", "menu_human", "menu_help"]
 
 
 @pytest.mark.asyncio
@@ -92,7 +92,7 @@ async def test_override_enabled_general_clinic_keeps_services_alongside_treatmen
          patch.object(specialty_flow, "has_active_treatments", AsyncMock(return_value=True)):
         await m._send_main_menu({"id": "c1", "plan": "polyclinic", "features": {"specialty_treatments": True}}, PHONE, "en")
     assert _menu_ids(m) == ["menu_treatments", "menu_concern", "menu_book", "menu_services", "menu_doctors",
-                            "menu_emergency", "menu_human"]
+                            "menu_emergency", "menu_human", "menu_help"]
 
 
 # ── context hygiene ──────────────────────────────────────────────────────────

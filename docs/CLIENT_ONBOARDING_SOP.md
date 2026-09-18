@@ -2,7 +2,7 @@
 **Document Version:** 3.0 (All Plans — Production-Hardened Standard)  
 **Provider:** Zuko Labs (Meta Tech Provider — Business ID: `1602916427428175`)  
 **Platform:** Kriya AI Multi-Tenant WhatsApp Healthcare Automation (App ID: `946290901317238`)  
-**Plans Covered:** soloclinic · diagstream · diagbooking · essential · polyclinic · enterprise · derma · eye · dental · ivf · multispecialty
+**Plans Covered:** soloclinic · diagstream · diagbooking · essential · polyclinic · enterprise · derma · eye · dental · ivf · multispecialty · womenchild
 
 ---
 
@@ -50,6 +50,7 @@ Before onboarding, identify which plan matches the client's facility. Each plan 
 | `dental` | Dental Clinic | Dental surgery & orthodontics | ✨ Treatments · 🔍 Concern · Book · Doctors · Emergency · Staff | `/dental-panel` | 2,500 |
 | `ivf` | IVF Centre | Fertility & reproductive medicine | ✨ Treatments · 🔍 Concern · Book · Doctors · 🧪 Lab Test · Emergency · Staff | `/ivf-panel` | 2,500 |
 | `multispecialty` | Multi-Specialty Hospital | General hospital + treatments catalogue | ✨ Treatments · 🔍 Concern · Book · Services · Doctors · 🧪 Lab Test · Emergency · Staff | `/hospital-panel` | 5,000 |
+| `womenchild` | Women & Child Hospital | Child Care + Women Care + Fertility Care, with departments & lab | 🩺 Consultation · 🔍 Not sure? · ✨ What We Treat (👶/🌸/🌱 sections) · Book · Services · Doctors · 🧪 Lab Test · Emergency · Staff | `/women-child-panel` | 5,000 |
 
 > [!NOTE]
 > **Specialty plans** (`derma`, `eye`, `dental`, `ivf`) drop the "Our Services" departments row because one department is not a menu. **Multispecialty** keeps it — a hospital with fifteen departments needs that row. The `enterprise` plan is a wildcard (`*`) — all features are always on, but the treatments catalogue must be explicitly enabled via a feature override.
@@ -149,23 +150,23 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 
 | Template Name | Category | Plans That Need It |
 |---|---|---|
-| `lab_report_ready_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty |
-| `lab_report_summary_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty |
-| `appointment_reminder_24h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty |
-| `appointment_reminder_2h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty |
-| `appointment_confirmation` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty |
-| `appointment_cancelled_doctor_leave` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty |
+| `lab_report_ready_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty, womenchild |
+| `lab_report_summary_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty, womenchild |
+| `appointment_reminder_24h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
+| `appointment_reminder_2h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
+| `appointment_confirmation` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
+| `appointment_cancelled_doctor_leave` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
 | `post_appointment_followup` | UTILITY | All plans with `reminders` feature |
 | `followup_custom_message_v1` | UTILITY | All plans with `reminders` feature |
 | `opt_out_confirmation` | UTILITY | All plans (DPDP Act 2023 compliance) |
 | `data_deletion_confirmation` | UTILITY | All plans (DPDP Act 2023 compliance) |
 
 > [!IMPORTANT]
-> **`diagstream`** and **`diagbooking`** do NOT need appointment-related templates (no doctor booking). **`diagbooking`** does NOT need lab report templates (no report connector). Specialty plans (`derma`, `eye`, `dental`, `ivf`) do NOT need lab report templates (no report connector). **`multispecialty`** needs ALL templates because it has both booking and lab report features.
+> **`diagstream`** and **`diagbooking`** do NOT need appointment-related templates (no doctor booking). **`diagbooking`** does NOT need lab report templates (no report connector). Specialty plans (`derma`, `eye`, `dental`, `ivf`) do NOT need lab report templates (no report connector). **`multispecialty`** and **`womenchild`** need ALL templates because they have both booking and lab report features.
 
 ---
 
-### Step 10A: Lab Report Templates (diagstream / essential / polyclinic / enterprise / multispecialty)
+### Step 10A: Lab Report Templates (diagstream / essential / polyclinic / enterprise / multispecialty / womenchild)
 
 #### Template 1: Standard 2-Variable Report (`lab_report_ready_v1`)
 * **Template Name:** `lab_report_ready_v1`
@@ -201,7 +202,7 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 ---
 
 ### Step 10B: Appointment Reminder Templates (All booking plans)
-**Required for:** soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty  
+**Required for:** soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild  
 **NOT required for:** diagstream, diagbooking (no doctor appointments)
 
 #### Template 3: 24-Hour Reminder (`appointment_reminder_24h`)
@@ -519,6 +520,7 @@ curl -X POST "https://graph.facebook.com/v22.0/<PHONE_NUMBER_ID>/register" \
 | `dental` | Dental Clinic | — | Treatments auto-seeded on creation |
 | `ivf` | IVF Centre | — | Treatments + lab test booking auto-seeded |
 | `multispecialty` | Multi-Specialty Hospital | `lab_report_ready_v1` | No auto-seed; admin loads starters manually |
+| `womenchild` | Women & Child Hospital | `lab_report_ready_v1` | Child Care, Women Care & Fertility Care lists auto-seeded (hidden), each under its section |
 
 ---
 
@@ -532,7 +534,7 @@ After the tenant is created in the Platform Panel, the **clinic admin** (or you 
 
 1. **Login** → Use clinic WhatsApp number or credentials.
 2. **Hospital Profile** → Set operating hours, address, emergency number.
-3. **Departments** → Add departments (essential, polyclinic, enterprise, multispecialty only).
+3. **Departments** → Add departments (essential, polyclinic, enterprise, multispecialty, womenchild only).
 4. **Doctors** → Add doctors with name, department, qualification, slot duration, and schedule.
 5. **Payment Settings** → Enter Razorpay Key ID, Key Secret, and Webhook Secret.
 6. **Holiday Calendar** → Set public holidays and clinic closures.
@@ -637,6 +639,31 @@ This plan combines everything: departments, doctors, lab tests, branches **AND**
 
 ---
 
+### E5: Women & Child Hospital Plan (womenchild)
+
+**Admin Panel URL:** `https://medassist-ai-docker.onrender.com/women-child-panel`
+
+For Rainbow Children's / BirthRight-style hospitals: **Child Care**, **Women Care** and **Fertility Care** under one roof, plus OPD departments, doctors, lab and branches. Same feature set as multispecialty. Details: `docs/specialty_plan/12-women-child-plan.md`.
+
+#### Onboarding Steps:
+
+1. **Migration 082 must be applied** before the first Women & Child clinic is created.
+2. **Hospital Profile** → Operating hours, address and the **emergency number** (for a children's hospital, the paediatric emergency line). Obstetric and newborn red flags ("water broke", "baby not moving", "convulsion") send patients here.
+3. **Departments** → Paediatrics, Neonatology, Obstetrics & Gynaecology, Fertility, and each paediatric sub-specialty the hospital runs.
+4. **Doctors** → Add doctors, assign departments, set schedules.
+5. **Treatments tab** → Three **section tabs**: 👶 Child Care (16 starters), 🌸 Women Care (20), 🌱 Fertility Care (12), all **auto-seeded hidden** at creation. Per tab: set prices, edit, link doctors, then **Show to patients**. A treatment added while a tab is open is filed under that section.
+   - First-visit rows (Paediatric / Gynaecology / Fertility Consultation) are marked **Start here** — keep them published, they lead the WhatsApp menu.
+   - Delivery, epidural, VBAC, NICU and gynae surgery are **Doctor decides** — patients can read about them, but the button books an examination.
+6. **Branches · Lab Tests · Payment Settings · Holiday Calendar · Follow-ups** → as for multispecialty.
+
+> [!IMPORTANT]
+> With first-visit rows published the menu shows **9 rows** (within Meta's 10): 🩺 Book Consultation · 🔍 Not sure? Tell us · ✨ What We Treat · Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff. *What We Treat* opens 👶 Child Care / 🌸 Women Care / 🌱 Fertility Care.
+
+> [!NOTE]
+> **PCPNDT:** any question about the sex of the unborn baby is answered with a legal refusal (en/hi/te) before any AI is involved. Tell the hospital this is built in.
+
+---
+
 ## Part F: Live End-to-End Verification (1 Minute)
 
 ### 1. Automated Health & Media Probe (Doctor CLI)
@@ -665,6 +692,7 @@ python -m scripts.whatsapp_doctor --clinic <CLINIC_UUID>
 | **derma / eye / dental** | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Doctors · Emergency · Talk to Staff |
 | **ivf** | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff |
 | **multispecialty** | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff |
+| **womenchild** | 🩺 Book Consultation · 🔍 Not sure? Tell us · ✨ What We Treat · Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff |
 
 > [!TIP]
 > Treatment menu items (✨ Our Treatments, 🔍 Find by Concern) only appear if the clinic has at least one **active** (visible) treatment. If you just onboarded and haven't activated any treatments yet, send a test after activating at least one.
@@ -675,7 +703,7 @@ python -m scripts.whatsapp_doctor --clinic <CLINIC_UUID>
   {"level": "INFO", "message": "[Accumax Diagnostics] Resolved tenant via phone_number_id '1296654790197336'"}
   ```
 
-### 4. Specialty-Specific Verification (derma / eye / dental / ivf / multispecialty):
+### 4. Specialty-Specific Verification (derma / eye / dental / ivf / multispecialty / womenchild):
 After activating treatments in the admin panel:
 1. Send `"Hi"` → Verify ✨ Our Treatments and 🔍 Find by Concern appear in the menu.
 2. Tap **✨ Our Treatments** → Verify treatment categories list appears.
@@ -700,7 +728,7 @@ After activating treatments in the admin panel:
 | **Webhook Not Firing** | Webhook field unsubscribed in Meta Developer portal. | In Meta Developer Portal $\rightarrow$ Step 2 Production Setup $\rightarrow$ Ensure `messages` is toggled Blue (Subscribed). |
 | **Treatments not showing in WhatsApp menu** | No treatments are active (all seeded as hidden). | Admin panel → Treatments → Toggle "Show to patients" on at least one treatment. |
 | **"Our Treatments" row missing for specialty plan** | `treatment_menu_active()` returns False when zero treatments are published. | Activate at least one treatment in the admin panel. The menu row appears dynamically. |
-| **Starter treatments not seeding** | Clinic plan mismatch or treatments already exist. | Seeding is idempotent. For multispecialty, select a specialty in the starter picker. |
+| **Starter treatments not seeding** | Clinic plan mismatch or treatments already exist. | Seeding is idempotent. For multispecialty and womenchild, select a list in the starter picker. |
 | **Treatment booking creates duplicate appointments** | Should not happen — `uq_appointment_active_slot` constraint prevents this. | Verify the unique index exists: `SELECT indexname FROM pg_indexes WHERE indexname = 'uq_appointment_active_slot';` |
 
 ---
@@ -724,6 +752,7 @@ Eye Hospital:      https://medassist-ai-docker.onrender.com/eye-panel
 Dental Clinic:     https://medassist-ai-docker.onrender.com/dental-panel
 IVF Centre:        https://medassist-ai-docker.onrender.com/ivf-panel
 Multi-Specialty:   https://medassist-ai-docker.onrender.com/hospital-panel
+Women & Child:     https://medassist-ai-docker.onrender.com/women-child-panel
 ```
 
 ### Feature Summary by Plan:

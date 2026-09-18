@@ -362,6 +362,7 @@ async def get_platform_overview(
             "enterprise": 0,
             "derma": 0,
             "multispecialty": 0,
+            "womenchild": 0,
             "eye": 0,
             "dental": 0,
             "ivf": 0,
@@ -1608,6 +1609,7 @@ async def update_plan_tier(
     valid_plans = {
         "soloclinic", "diagstream", "diagbooking", "essential", "polyclinic",
         "enterprise", "derma", "eye", "dental", "ivf", "multispecialty",
+        "womenchild",
     }
     if plan_name not in valid_plans:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_name}")

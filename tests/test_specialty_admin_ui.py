@@ -109,7 +109,13 @@ def test_day_picker_keeps_the_contract_submit_and_edit_rely_on():
 def test_every_treatment_endpoint_used_by_the_page_exists():
     from app.main import app as fastapi_app
 
-    paths = {getattr(r, "path", "") for r in fastapi_app.routes}
+    # FastAPI >= 0.13x wraps each include_router() in an _IncludedRouter, so
+    # app.routes alone no longer lists the admin paths (the same unwrapping as
+    # tests/test_admin_super_admin_scope_matrix.py).
+    routes = []
+    for r in fastapi_app.routes:
+        routes.extend(getattr(getattr(r, "original_router", None), "routes", None) or [r])
+    paths = {getattr(r, "path", "") for r in routes}
     for p in ("/admin/treatments", "/admin/treatments/{treatment_id}", "/admin/treatments/{treatment_id}/doctors",
               "/admin/treatments/status", "/admin/treatments/starter", "/admin/treatments/ai-description",
               "/admin/treatments/ai-concerns"):
