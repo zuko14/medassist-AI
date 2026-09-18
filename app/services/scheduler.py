@@ -257,6 +257,14 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── AI: Purge expired catalogue import previews (daily 4 AM) ──
+        self.scheduler.add_job(
+            self.purge_expired_catalogue_import_previews,
+            CronTrigger(hour=4, minute=0),
+            id="catalogue_import_previews_purge",
+            replace_existing=True,
+        )
+
         # ── Payment: Expire stale pending_payment bookings (every minute) ──
         # Also recovers bookings where Razorpay shows paid but webhook was missed
         self.scheduler.add_job(
@@ -1419,6 +1427,22 @@ class SchedulerService:
                     logger.info(f"Scheduler: processed {count} pending lab report retries")
             except Exception as e:
                 logger.debug(f"Lab report retry job skipped: {e}")
+
+    async def purge_expired_catalogue_import_previews(self):
+        """Purge expired catalogue import previews past their 24h TTL. Production only."""
+        if getattr(settings, "app_env", "") != "production":
+            return
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("purge_expired_catalogue_import_previews", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.data_retention import data_retention_service
+                count = await data_retention_service.purge_expired_catalogue_import_previews()
+                if count > 0:
+                    logger.info(f"Scheduler: purged {count} expired catalogue import previews")
+            except Exception as e:
+                logger.error(f"Catalogue import previews purge job failed: {e}")
 
 
 # Global instance

@@ -141,6 +141,30 @@ class DataRetentionService:
             logger.error(f"Inbound messages purge error: {e}")
             return 0
 
+    async def purge_expired_catalogue_import_previews(self) -> int:
+        """Purge expired price list import previews from catalogue_import_previews.
+
+        Runs only when APP_ENV == 'production'.
+        """
+        if getattr(settings, "app_env", "") != "production":
+            return 0
+
+        cutoff = datetime.now(timezone.utc).isoformat()
+        try:
+            result = await sb(
+                # unscoped: platform_sweep
+                supabase.table("catalogue_import_previews")
+                .delete()
+                .lt("expires_at", cutoff)
+            )
+            count = len(result.data) if result.data else 0
+            if count > 0:
+                logger.info(f"Data retention: purged {count} expired catalogue import previews")
+            return count
+        except Exception as e:
+            logger.error(f"Data retention: failed to purge expired catalogue import previews: {e}")
+            return 0
+
     async def purge_failed_messages_dlq(self, days: int = 30) -> int:
         """Purge dead-letter failed_messages records older than `days` (default 30 days).
 
@@ -427,3 +451,9 @@ class DataRetentionService:
 
 # Global service instance
 data_retention_service = DataRetentionService()
+
+
+async def purge_expired_catalogue_import_previews() -> int:
+    """Module-level helper to purge expired catalogue import previews."""
+    return await data_retention_service.purge_expired_catalogue_import_previews()
+

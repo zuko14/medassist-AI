@@ -1784,6 +1784,33 @@
                 <span id="insightsNoteText"></span>
             </div>
 
+            <!-- Weekly Insights Operational Summary Card (Clinic-wide) -->
+            <div id="weeklyInsightsSummaryCard" class="card" style="margin-bottom:20px; background:linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8)); border:1px solid rgba(99, 102, 241, 0.3);">
+                <div class="card-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <h3 style="margin:0; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
+                            <span>📊</span> Weekly Operational Insights
+                        </h3>
+                        <span class="badge" style="background:rgba(99, 102, 241, 0.2); color:#a5b4fc; font-size:0.75rem; border:1px solid rgba(99, 102, 241, 0.4);">Clinic-wide</span>
+                        <span id="weeklySummaryPeriodBadge" class="badge badge-secondary" style="font-size:0.75rem;"></span>
+                    </div>
+                    <div id="weeklySummaryActions" style="display:flex; align-items:center; gap:8px;">
+                        <button type="button" id="btnWeeklySummaryRegenerate" class="btn btn-ghost btn-sm" onclick="generateWeeklySummary(true)" style="font-size:0.8rem;">
+                            <svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> <span id="weeklySummaryBtnText">Generate Summary</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="weeklySummaryContent" style="padding:14px 18px; line-height:1.6; font-size:0.9rem;">
+                    <div class="loader" style="padding:20px 0;"><div class="spin"></div>Loading weekly summary...</div>
+                </div>
+                <div id="weeklyFactSheetContainer" style="display:none; padding:12px 18px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(0,0,0,0.15);">
+                    <details style="cursor:pointer;">
+                        <summary style="font-weight:600; font-size:0.82rem; color:var(--text3); user-select:none;">📋 View Operational Fact Sheet &amp; Comparisons</summary>
+                        <div id="weeklyFactSheetDetails" style="margin-top:10px; font-size:0.82rem; display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;"></div>
+                    </details>
+                </div>
+            </div>
+
             <div class="stats">
                 <div class="stat"><div class="glow"></div><div class="label">Total Bookings</div><div class="num" id="i-total">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Completed</div><div class="num" id="i-completed">—</div></div>
@@ -2424,6 +2451,7 @@
                         <option value="">All service types</option>
                     </select>
                     <button class="btn btn-ghost" id="btnCatalogueCleanup" onclick="openCatalogueCleanupModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Clean-Up Suggestions</button>
+                    <button class="btn btn-ghost" id="btnPriceListImport" onclick="openPriceListImportModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Import Price List</button>
                     <button class="btn btn-ghost" onclick="openLabCsvModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Import CSV</button>
                     <button class="btn btn-accent" onclick="openAddLabTestModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Add Lab Test</button>
                 </div>
@@ -3106,6 +3134,117 @@
         <div class="modal-actions" style="margin-top:16px;">
             <button class="btn btn-ghost" id="btnCloseLabCsv" onclick="closeLabCsvModal()">Close</button>
             <button class="btn btn-accent" id="btnUploadLabCsv" onclick="submitLabTestCsv()">Upload & Import</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ PRICE LIST IMPORT & REVIEW MODAL ═══ -->
+<div class="modal-overlay" id="priceListImportModal">
+    <div class="modal" style="max-width:850px; width:95vw; max-height:90vh; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0;">Import Diagnostic Price List</h3>
+            <button class="btn btn-ghost btn-sm" onclick="closePriceListImportModal()" style="font-size:1.1rem; padding:4px 8px;">✕</button>
+        </div>
+
+        <!-- Step 1: Upload View -->
+        <div id="priceListUploadStep">
+            <p style="color:var(--text3); font-size:0.85rem; margin-bottom:12px;">
+                Upload a price list (PDF, XLSX, CSV, PNG, or JPG) up to 10 MB. Files are processed in the background and held in preview for 24 hours until you approve and apply them.
+            </p>
+            <div style="background:var(--bg2, #1e293b); border:1px solid var(--border, #334155); border-radius:8px; padding:12px 14px; margin-bottom:14px; font-size:0.8rem; line-height:1.45;">
+                <div style="font-weight:600; margin-bottom:4px; color:var(--text);">Supported Formats &amp; Safety Limits:</div>
+                <div>• <b>Formats:</b> Excel (<code>.xlsx</code>), CSV, PDF (up to 30 pages), Images (PNG, JPG)</div>
+                <div>• <b>Upload Limits:</b> Max 10 MB upload size; OCR limited to 10 pages; legacy <code>.xls</code> must be saved as <code>.xlsx</code> or CSV</div>
+                <div>• <b>Staging Guarantee:</b> Zero unapproved writes to your live catalogue. You review every row before applying.</div>
+            </div>
+
+            <div class="field" id="priceListBranchField" style="display:none; margin-bottom:12px;">
+                <label>Apply this file to branch</label>
+                <select id="f-priceListBranch" onchange="onPriceListBranchChanged()">
+                    <option value="">All branches — every branch offers these tests</option>
+                </select>
+                <p id="priceListBranchHint" style="color:var(--text3); font-size:0.78rem; margin-top:4px;"></p>
+            </div>
+
+            <div class="field" style="margin-bottom:12px;">
+                <label>Default service type (optional)</label>
+                <input type="text" id="f-priceListCategory" list="labCsvCategoryOptions" maxlength="60" placeholder="e.g. Pathology, Health Packages, Radiology — leave blank to keep existing">
+            </div>
+
+            <div id="priceListDropZone" style="border:2px dashed rgba(99, 102, 241, 0.4); border-radius:8px; padding:30px 20px; text-align:center; background:rgba(30, 41, 59, 0.4); cursor:pointer; margin-bottom:14px; transition:border 0.2s;" onclick="document.getElementById('f-priceListFile').click()">
+                <div style="font-size:2rem; margin-bottom:8px;">📄</div>
+                <div style="font-weight:600; font-size:0.95rem; margin-bottom:4px;">Choose a file or drag &amp; drop here</div>
+                <div style="color:var(--text3); font-size:0.8rem;">CSV, XLSX, PDF, PNG, JPG up to 10 MB</div>
+                <input type="file" id="f-priceListFile" accept=".csv,.xlsx,.pdf,.png,.jpg,.jpeg" style="display:none;" onchange="onPriceListFileSelected()">
+            </div>
+
+            <div id="priceListSelectedFile" style="display:none; align-items:center; gap:10px; padding:10px 14px; background:var(--surface); border:1px solid var(--border); border-radius:6px; margin-bottom:14px; font-size:0.85rem;">
+                <span>📎</span>
+                <span id="priceListFileName" style="font-weight:600; flex:1;"></span>
+                <span id="priceListFileSize" style="color:var(--text3);"></span>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="clearPriceListFile()">Remove</button>
+            </div>
+
+            <div class="modal-actions" style="margin-top:16px;">
+                <button class="btn btn-ghost" onclick="closePriceListImportModal()">Cancel</button>
+                <button class="btn btn-accent" id="btnStartPriceListUpload" onclick="submitPriceListUpload()" disabled>Upload &amp; Process Preview</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Processing View -->
+        <div id="priceListProcessingStep" style="display:none; text-align:center; padding:40px 20px;">
+            <div class="loader"><div class="spin"></div></div>
+            <div style="font-weight:600; font-size:1.05rem; margin-top:16px;" id="priceListProcessingTitle">Processing Price List...</div>
+            <p style="color:var(--text3); font-size:0.85rem; margin-top:8px;" id="priceListProcessingMsg">
+                Analyzing structure, extracting tests and validating prices. This may take a moment for large files or OCR.
+            </p>
+        </div>
+
+        <!-- Step 3: Review & Apply Table View -->
+        <div id="priceListReviewStep" style="display:none; flex-direction:column; min-height:0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="priceListReviewStats" style="font-weight:600; font-size:0.9rem;"></span>
+                    <span id="priceListExpiryNotice" class="badge badge-secondary" style="font-size:0.75rem;">Held for 24 hours</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button class="btn btn-ghost btn-sm" onclick="selectAllPriceListRows(true)">Select All</button>
+                    <button class="btn btn-ghost btn-sm" onclick="selectAllPriceListRows(false)">Deselect All</button>
+                </div>
+            </div>
+
+            <div style="overflow-y:auto; border:1px solid var(--border); border-radius:6px; max-height:400px; margin-bottom:12px;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.82rem; text-align:left;">
+                    <thead style="position:sticky; top:0; background:var(--bg2, #1e293b); z-index:1; border-bottom:1px solid var(--border);">
+                        <tr>
+                            <th style="padding:8px 10px; width:36px;"><input type="checkbox" id="priceListMasterCheck" onchange="togglePriceListMasterCheck(this.checked)"></th>
+                            <th style="padding:8px 10px;">Status</th>
+                            <th style="padding:8px 10px;">Test Name</th>
+                            <th style="padding:8px 10px;">Price</th>
+                            <th style="padding:8px 10px;">Service Type</th>
+                            <th style="padding:8px 10px;">Flags / Notes</th>
+                            <th style="padding:8px 10px;">Source Snippet</th>
+                        </tr>
+                    </thead>
+                    <tbody id="priceListTableBody"></tbody>
+                </table>
+            </div>
+
+            <!-- Safety Confirmation if >= 20 rows -->
+            <div id="priceListSafetyConfirmBox" style="display:none; background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); border-radius:6px; padding:10px 14px; margin-bottom:12px;">
+                <div style="font-weight:600; color:var(--red, #f87171); font-size:0.85rem; margin-bottom:4px;">
+                    ⚠️ Safety Confirmation: Large Catalogue Mutation
+                </div>
+                <div style="font-size:0.8rem; color:var(--text); margin-bottom:8px;">
+                    You are about to apply <span id="priceListSelectedCountWarn" style="font-weight:700;"></span> tests. To confirm this operation, type <code>IMPORT</code> below:
+                </div>
+                <input type="text" id="f-priceListConfirmInput" placeholder="Type IMPORT to confirm" oninput="onPriceListConfirmInputChanged()" style="max-width:240px; padding:6px 10px; font-size:0.85rem; text-transform:uppercase;">
+            </div>
+
+            <div class="modal-actions" style="margin-top:auto; padding-top:10px; border-top:1px solid var(--border);">
+                <button class="btn btn-ghost" onclick="closePriceListImportModal()">Cancel</button>
+                <button class="btn btn-accent" id="btnApplyPriceList" onclick="applyPriceListImport()">Apply Selected Tests (<span id="priceListApplyCount">0</span>)</button>
+            </div>
         </div>
     </div>
 </div>
@@ -4461,6 +4600,7 @@ async function loadInsights() {
         const data = await api(url);
         insightsData = data;
         renderInsights(data);
+        loadWeeklySummary();
     } catch (e) {
         console.error('Insights:', e);
         insightsData = null;
@@ -4896,6 +5036,185 @@ function renderInsights(d) {
             }
         }
     }, 'No reports handled in this period');
+}
+
+// ═══════ WEEKLY OPERATIONAL INSIGHTS SUMMARY (CLINIC-WIDE) ═══════
+
+function formatSimpleMarkdown(text) {
+    if (!text) return '';
+    const lines = text.split('\n');
+    let html = '';
+    let inList = false;
+    for (let line of lines) {
+        let trimmed = line.trim();
+        if (!trimmed) {
+            if (inList) { html += '</ul>'; inList = false; }
+            continue;
+        }
+        if (trimmed.startsWith('### ')) {
+            if (inList) { html += '</ul>'; inList = false; }
+            html += `<h4 style="margin:12px 0 6px 0; font-size:0.95rem; color:var(--text); font-weight:600;">${esc(trimmed.slice(4))}</h4>`;
+        } else if (trimmed.startsWith('## ')) {
+            if (inList) { html += '</ul>'; inList = false; }
+            html += `<h3 style="margin:14px 0 8px 0; font-size:1.05rem; color:var(--text); font-weight:600;">${esc(trimmed.slice(3))}</h3>`;
+        } else if (trimmed.startsWith('# ')) {
+            if (inList) { html += '</ul>'; inList = false; }
+            html += `<h2 style="margin:16px 0 8px 0; font-size:1.15rem; color:var(--text); font-weight:700;">${esc(trimmed.slice(2))}</h2>`;
+        } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            if (!inList) { html += '<ul style="margin:6px 0 8px 0; padding-left:20px;">'; inList = true; }
+            let itemText = esc(trimmed.slice(2));
+            itemText = itemText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+            html += `<li style="margin-bottom:4px; color:var(--text2); line-height:1.5;">${itemText}</li>`;
+        } else {
+            if (inList) { html += '</ul>'; inList = false; }
+            let pText = esc(trimmed);
+            pText = pText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+            html += `<p style="margin:6px 0; color:var(--text2); line-height:1.5;">${pText}</p>`;
+        }
+    }
+    if (inList) html += '</ul>';
+    return html;
+}
+
+function renderWeeklyFactSheet(factSheet) {
+    const container = document.getElementById('weeklyFactSheetContainer');
+    const details = document.getElementById('weeklyFactSheetDetails');
+    if (!container || !details) return;
+    if (!factSheet) {
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = 'block';
+
+    const fmtDiff = (metric, isRupees = false, isPp = false) => {
+        if (!metric) return '—';
+        const d = metric.diff ?? metric.diff_pp ?? 0;
+        const arrow = d > 0 ? '▲ +' : (d < 0 ? '▼ ' : '');
+        const pct = metric.pct_change !== undefined && metric.pct_change !== null ? ` (${metric.pct_change > 0 ? '+' : ''}${metric.pct_change}%)` : '';
+        const pp = isPp ? ' pp' : '';
+        const color = d > 0 ? '#4ade80' : (d < 0 ? '#f87171' : 'var(--text3)');
+        const valStr = isRupees ? `₹${Number(d).toLocaleString()}` : `${d}${pp}`;
+        return `<span style="color:${color}; font-weight:600;">${arrow}${valStr}${pct}</span>`;
+    };
+
+    const b = factSheet.bookings_count || {};
+    const c = factSheet.completed_bookings || {};
+    const cr = factSheet.cancellation_rate_pct || {};
+    const rev = factSheet.revenue_inr || {};
+    const abv = factSheet.avg_booking_value_inr || {};
+    const p = factSheet.patients_served || {};
+
+    let html = `
+        <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
+            <div style="color:var(--text3); font-size:0.75rem;">Total Bookings</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${b.lw ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${b.pw ?? 0})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(b)}</div>
+        </div>
+        <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
+            <div style="color:var(--text3); font-size:0.75rem;">Completed Bookings</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${c.lw ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${c.pw ?? 0})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(c)}</div>
+        </div>
+        <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
+            <div style="color:var(--text3); font-size:0.75rem;">Cancellation Rate</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${cr.lw ?? 0}% <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${cr.pw ?? 0}%)</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(cr, false, true)}</div>
+        </div>
+        <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
+            <div style="color:var(--text3); font-size:0.75rem;">Revenue (Collected)</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">₹${(rev.lw ?? 0).toLocaleString()} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ₹${(rev.pw ?? 0).toLocaleString()})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(rev, true)}</div>
+        </div>
+        <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
+            <div style="color:var(--text3); font-size:0.75rem;">Average Ticket</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">₹${(abv.lw ?? 0).toLocaleString()} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ₹${(abv.pw ?? 0).toLocaleString()})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(abv, true)}</div>
+        </div>
+        <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
+            <div style="color:var(--text3); font-size:0.75rem;">Patients Served</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${p.lw ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${p.pw ?? 0})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(p)}</div>
+        </div>
+    `;
+    details.innerHTML = html;
+}
+
+let weeklySummaryBusy = false;
+
+async function loadWeeklySummary() {
+    const badge = document.getElementById('weeklySummaryPeriodBadge');
+    const content = document.getElementById('weeklySummaryContent');
+    const btnText = document.getElementById('weeklySummaryBtnText');
+    if (!content) return;
+
+    try {
+        const data = await api('/admin/insights/summary');
+        if (!data) return;
+
+        if (badge && data.iso_week && data.iso_year) {
+            badge.textContent = `Week ${data.iso_week}, ${data.iso_year}`;
+        }
+
+        if (data.status === 'not_generated') {
+            content.innerHTML = `
+                <div style="color:var(--text3); font-size:0.88rem; padding:10px 0;">
+                    No operational summary generated yet for Week ${data.iso_week}, ${data.iso_year}.
+                    Click <b>Generate Summary</b> to synthesize clinic-wide trends, volume shifts, and key recommendations.
+                </div>
+            `;
+            if (btnText) btnText.textContent = 'Generate Summary';
+            renderWeeklyFactSheet(data.fact_sheet);
+        } else if (data.status === 'available') {
+            const formatted = formatSimpleMarkdown(data.summary_text);
+            const genTime = data.generated_at ? new Date(data.generated_at).toLocaleString() : '';
+            const modelLabel = data.model_used ? `<span style="color:var(--text3); font-size:0.75rem; margin-left:8px;">Model: ${esc(data.model_used)} • ${esc(genTime)}</span>` : '';
+            content.innerHTML = `
+                <div>${formatted}</div>
+                <div style="margin-top:12px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">${modelLabel}</div>
+            `;
+            if (btnText) btnText.textContent = 'Regenerate';
+            renderWeeklyFactSheet(data.fact_sheet);
+        }
+    } catch (e) {
+        console.warn('Could not load weekly summary:', e);
+        content.innerHTML = `<div style="color:var(--text3); font-size:0.85rem;">Weekly summary is currently unavailable.</div>`;
+    }
+}
+
+async function generateWeeklySummary(force = false) {
+    if (weeklySummaryBusy) return;
+    weeklySummaryBusy = true;
+    const btn = document.getElementById('btnWeeklySummaryRegenerate');
+    const btnText = document.getElementById('weeklySummaryBtnText');
+    const content = document.getElementById('weeklySummaryContent');
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.textContent = 'Generating…';
+    if (content) content.innerHTML = '<div class="loader" style="padding:20px 0;"><div class="spin"></div>Generating weekly operational summary...</div>';
+
+    try {
+        const resp = await fetch(API + withScope('/admin/insights/summary/generate'), {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ force: !!force })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.status === 429) {
+            toast(data.detail || 'Daily generation limit reached (3 per day for this clinic). Please try again tomorrow.', true);
+            await loadWeeklySummary();
+            return;
+        }
+        if (!resp.ok) {
+            throw new Error(data.detail || 'Failed to generate weekly summary');
+        }
+        toast('Weekly operational summary generated successfully.');
+        await loadWeeklySummary();
+    } catch (e) {
+        toast(e.message || 'Generation failed', true);
+        await loadWeeklySummary();
+    } finally {
+        weeklySummaryBusy = false;
+        if (btn) btn.disabled = false;
+    }
 }
 
 // ═══════ SUBSCRIPTION LIFECYCLE + DAILY REPORT LIMIT (customer-safe) ═══════
@@ -7416,6 +7735,373 @@ async function submitLabTestCsv() {
         toast(e.message || 'Import failed', true);
     } finally {
         _labCsvBusy(false);
+    }
+}
+
+// ═══════ AI PRICE LIST IMPORT PIPELINE (FEATURE 2) ═══════
+let currentPriceListPreview = null;
+let priceListPollTimer = null;
+let selectedPriceListRows = new Set();
+let priceListSelectedFileObj = null;
+
+async function setupPriceListBranches() {
+    await setupLabTestBranches();
+    const sel = document.getElementById('f-priceListBranch');
+    const field = document.getElementById('priceListBranchField');
+    if (!sel || !field) return;
+    if (labTestBranches && labTestBranches.length > 1) {
+        field.style.display = 'block';
+        sel.innerHTML = '<option value="">All branches — every branch offers these tests</option>' +
+            labTestBranches.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+        sel.value = labTestBranchId || '';
+    } else {
+        field.style.display = 'none';
+        sel.innerHTML = '<option value="">All branches — every branch offers these tests</option>';
+        sel.value = '';
+    }
+    onPriceListBranchChanged();
+}
+
+function onPriceListBranchChanged() {
+    const sel = document.getElementById('f-priceListBranch');
+    const hint = document.getElementById('priceListBranchHint');
+    if (!hint) return;
+    const bid = sel ? sel.value : '';
+    hint.textContent = bid
+        ? `Only ${labTestBranchName(bid)} will offer these tests. Where a name here also exists under "All branches", this file's price and details win at ${labTestBranchName(bid)} and nowhere else.`
+        : 'Every branch will offer these tests. Import once per branch instead if your branches run different menus.';
+}
+
+async function openPriceListImportModal() {
+    const modal = document.getElementById('priceListImportModal');
+    if (!modal) return;
+    modal.classList.add('open');
+    if (priceListPollTimer) { clearInterval(priceListPollTimer); priceListPollTimer = null; }
+
+    currentPriceListPreview = null;
+    priceListSelectedFileObj = null;
+    selectedPriceListRows.clear();
+
+    // Reset view steps
+    document.getElementById('priceListUploadStep').style.display = 'block';
+    document.getElementById('priceListProcessingStep').style.display = 'none';
+    document.getElementById('priceListReviewStep').style.display = 'none';
+
+    // Reset upload inputs
+    clearPriceListFile();
+    const catFilter = document.getElementById('labTestCategoryFilter');
+    const catEl = document.getElementById('f-priceListCategory');
+    if (catEl) catEl.value = (catFilter && catFilter.value !== '__none__') ? catFilter.value : '';
+
+    await setupPriceListBranches();
+}
+
+function closePriceListImportModal() {
+    const modal = document.getElementById('priceListImportModal');
+    if (modal) modal.classList.remove('open');
+    if (priceListPollTimer) {
+        clearInterval(priceListPollTimer);
+        priceListPollTimer = null;
+    }
+}
+
+function onPriceListFileSelected() {
+    const input = document.getElementById('f-priceListFile');
+    if (!input || !input.files || !input.files.length) return;
+    const f = input.files[0];
+
+    if (f.size > 10 * 1024 * 1024) {
+        toast('File exceeds maximum size limit of 10 MB', true);
+        clearPriceListFile();
+        return;
+    }
+
+    priceListSelectedFileObj = f;
+    const nameEl = document.getElementById('priceListFileName');
+    const sizeEl = document.getElementById('priceListFileSize');
+    const box = document.getElementById('priceListSelectedFile');
+    const dropZone = document.getElementById('priceListDropZone');
+    const btn = document.getElementById('btnStartPriceListUpload');
+
+    if (nameEl) nameEl.textContent = f.name;
+    if (sizeEl) sizeEl.textContent = _labCsvFileSize(f.size);
+    if (box) box.style.display = 'flex';
+    if (dropZone) dropZone.style.display = 'none';
+    if (btn) btn.disabled = false;
+}
+
+function clearPriceListFile() {
+    priceListSelectedFileObj = null;
+    const input = document.getElementById('f-priceListFile');
+    if (input) input.value = '';
+    const box = document.getElementById('priceListSelectedFile');
+    const dropZone = document.getElementById('priceListDropZone');
+    const btn = document.getElementById('btnStartPriceListUpload');
+
+    if (box) box.style.display = 'none';
+    if (dropZone) dropZone.style.display = 'block';
+    if (btn) btn.disabled = true;
+}
+
+async function submitPriceListUpload() {
+    if (!priceListSelectedFileObj) {
+        toast('Please select a file to import', true);
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', priceListSelectedFileObj);
+    const branchSel = document.getElementById('f-priceListBranch');
+    if (branchSel && branchSel.value) formData.append('branch_id', branchSel.value);
+    const catEl = document.getElementById('f-priceListCategory');
+    const cat = catEl ? catEl.value.trim() : '';
+    if (cat) {
+        if (cat.length > 60) {
+            toast('Service type must be 60 characters or fewer', true);
+            return;
+        }
+        formData.append('category', cat);
+    }
+
+    // Switch to processing view
+    document.getElementById('priceListUploadStep').style.display = 'none';
+    document.getElementById('priceListProcessingStep').style.display = 'block';
+    document.getElementById('priceListProcessingTitle').textContent = 'Uploading & Analyzing File…';
+    document.getElementById('priceListProcessingMsg').textContent = 'Checking file structure and initializing background extraction…';
+
+    try {
+        const resp = await fetch(API + withScope('/admin/lab-tests/import-preview'), {
+            method: 'POST',
+            headers: authHeaders(),
+            body: formData
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.status === 202) {
+            const previewId = data.preview_id;
+            toast('File uploaded. Processing background extraction…');
+            pollPriceListPreview(previewId);
+        } else {
+            throw new Error(data.detail || 'Upload failed');
+        }
+    } catch (e) {
+        toast(e.message || 'Upload failed', true);
+        document.getElementById('priceListUploadStep').style.display = 'block';
+        document.getElementById('priceListProcessingStep').style.display = 'none';
+    }
+}
+
+function pollPriceListPreview(previewId) {
+    if (priceListPollTimer) clearInterval(priceListPollTimer);
+
+    let attempts = 0;
+    const maxAttempts = 150; // up to 5 minutes at 2s interval
+
+    priceListPollTimer = setInterval(async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+            clearInterval(priceListPollTimer);
+            priceListPollTimer = null;
+            toast('Import processing timed out. Please try again.', true);
+            document.getElementById('priceListUploadStep').style.display = 'block';
+            document.getElementById('priceListProcessingStep').style.display = 'none';
+            return;
+        }
+
+        try {
+            const data = await api('/admin/lab-tests/import-preview/' + previewId);
+            if (!data) return;
+
+            if (data.status === 'processing') {
+                const titleEl = document.getElementById('priceListProcessingTitle');
+                const msgEl = document.getElementById('priceListProcessingMsg');
+                if (titleEl) titleEl.textContent = 'Processing Price List…';
+                if (msgEl) msgEl.textContent = 'Parsing tabular data, running OCR or extracting with AI. Please wait…';
+            } else if (data.status === 'failed') {
+                clearInterval(priceListPollTimer);
+                priceListPollTimer = null;
+                toast(data.error_message || 'Import parsing failed', true);
+                document.getElementById('priceListUploadStep').style.display = 'block';
+                document.getElementById('priceListProcessingStep').style.display = 'none';
+            } else if (data.status === 'pending') {
+                clearInterval(priceListPollTimer);
+                priceListPollTimer = null;
+                renderPriceListReview(data);
+            } else if (data.status === 'applied') {
+                clearInterval(priceListPollTimer);
+                priceListPollTimer = null;
+                toast('This preview has already been applied.');
+                closePriceListImportModal();
+                loadLabTests();
+            }
+        } catch (e) {
+            console.warn('Polling error:', e);
+        }
+    }, 2000);
+}
+
+function renderPriceListReview(preview) {
+    currentPriceListPreview = preview;
+    document.getElementById('priceListProcessingStep').style.display = 'none';
+    document.getElementById('priceListUploadStep').style.display = 'none';
+    const reviewStep = document.getElementById('priceListReviewStep');
+    reviewStep.style.display = 'flex';
+
+    selectedPriceListRows.clear();
+    const rows = preview.rows || [];
+    rows.forEach((_, idx) => selectedPriceListRows.add(idx));
+
+    // Stats
+    const total = rows.length;
+    const newCount = rows.filter(r => r.status === 'new').length;
+    const updCount = rows.filter(r => r.status === 'update').length;
+    const flagCount = rows.filter(r => r.status === 'flagged').length;
+
+    const statsEl = document.getElementById('priceListReviewStats');
+    if (statsEl) {
+        statsEl.innerHTML = `Total: <b>${total}</b> tests (<span style="color:#4ade80;">${newCount} new</span>, <span style="color:#38bdf8;">${updCount} updates</span>, <span style="color:#fbbf24;">${flagCount} flagged</span>)`;
+    }
+
+    const tbody = document.getElementById('priceListTableBody');
+    if (!tbody) return;
+
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="padding:20px; text-align:center; color:var(--text3);">No tests could be extracted from this document.</td></tr>';
+        updatePriceListApplyState();
+        return;
+    }
+
+    tbody.innerHTML = rows.map((r, idx) => {
+        const isChecked = selectedPriceListRows.has(idx) ? 'checked' : '';
+        const badgeClass = r.status === 'new' ? 'badge-primary' : (r.status === 'update' ? 'badge-secondary' : 'badge-warning');
+        const badgeLabel = r.status === 'new' ? 'New' : (r.status === 'update' ? 'Update' : 'Flagged');
+        const flags = (r.flags || []).concat(r.notes || []).filter(Boolean);
+        const flagsHtml = flags.length
+            ? flags.map(f => `<span style="color:#fbbf24; display:block; font-size:0.75rem;">⚠️ ${esc(f)}</span>`).join('')
+            : '<span style="color:var(--text3); font-size:0.75rem;">—</span>';
+        const snippet = r.source_snippet ? `<code style="font-size:0.7rem; color:var(--text3); max-width:140px; display:inline-block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(r.source_snippet)}">${esc(r.source_snippet)}</code>` : '—';
+
+        return `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05); ${r.status === 'flagged' ? 'background:rgba(251, 191, 36, 0.04);' : ''}">
+                <td style="padding:8px 10px;"><input type="checkbox" data-idx="${idx}" ${isChecked} onchange="togglePriceListRow(${idx}, this.checked)"></td>
+                <td style="padding:8px 10px;"><span class="badge ${badgeClass}" style="font-size:0.72rem;">${badgeLabel}</span></td>
+                <td style="padding:8px 10px; font-weight:600; color:var(--text-strong);">${esc(r.name)}</td>
+                <td style="padding:8px 10px; font-weight:600;">₹${Number(r.price_inr).toLocaleString()}</td>
+                <td style="padding:8px 10px; color:var(--text3);">${esc(r.category || '—')}</td>
+                <td style="padding:8px 10px;">${flagsHtml}</td>
+                <td style="padding:8px 10px;">${snippet}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const confirmInput = document.getElementById('f-priceListConfirmInput');
+    if (confirmInput) confirmInput.value = '';
+
+    updatePriceListApplyState();
+}
+
+function togglePriceListRow(idx, checked) {
+    if (checked) selectedPriceListRows.add(idx);
+    else selectedPriceListRows.delete(idx);
+    updatePriceListApplyState();
+}
+
+function togglePriceListMasterCheck(checked) {
+    selectAllPriceListRows(checked);
+}
+
+function selectAllPriceListRows(val) {
+    const rows = (currentPriceListPreview && currentPriceListPreview.rows) || [];
+    selectedPriceListRows.clear();
+    if (val) {
+        rows.forEach((_, idx) => selectedPriceListRows.add(idx));
+    }
+    const checkboxes = document.querySelectorAll('#priceListTableBody input[type="checkbox"]');
+    checkboxes.forEach(cb => { cb.checked = val; });
+    updatePriceListApplyState();
+}
+
+function updatePriceListApplyState() {
+    const total = (currentPriceListPreview && currentPriceListPreview.rows && currentPriceListPreview.rows.length) || 0;
+    const count = selectedPriceListRows.size;
+
+    const countEl = document.getElementById('priceListApplyCount');
+    if (countEl) countEl.textContent = count;
+
+    const master = document.getElementById('priceListMasterCheck');
+    if (master) {
+        master.checked = total > 0 && count === total;
+        master.indeterminate = count > 0 && count < total;
+    }
+
+    const safetyBox = document.getElementById('priceListSafetyConfirmBox');
+    const warnCountEl = document.getElementById('priceListSelectedCountWarn');
+    const confirmInput = document.getElementById('f-priceListConfirmInput');
+    const applyBtn = document.getElementById('btnApplyPriceList');
+
+    if (count >= 20) {
+        if (safetyBox) safetyBox.style.display = 'block';
+        if (warnCountEl) warnCountEl.textContent = count;
+        const confirmed = confirmInput && confirmInput.value.trim().toUpperCase() === 'IMPORT';
+        if (applyBtn) applyBtn.disabled = !confirmed || count === 0;
+    } else {
+        if (safetyBox) safetyBox.style.display = 'none';
+        if (applyBtn) applyBtn.disabled = count === 0;
+    }
+}
+
+function onPriceListConfirmInputChanged() {
+    updatePriceListApplyState();
+}
+
+async function applyPriceListImport() {
+    if (!currentPriceListPreview || !currentPriceListPreview.id) return;
+    const count = selectedPriceListRows.size;
+    if (count === 0) {
+        toast('No tests selected to apply', true);
+        return;
+    }
+
+    if (count >= 20) {
+        const confirmInput = document.getElementById('f-priceListConfirmInput');
+        if (!confirmInput || confirmInput.value.trim().toUpperCase() !== 'IMPORT') {
+            toast('Please type IMPORT into the confirmation box to proceed.', true);
+            return;
+        }
+    }
+
+    const applyBtn = document.getElementById('btnApplyPriceList');
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Applying Tests…';
+    }
+
+    try {
+        const payload = { selected_indices: Array.from(selectedPriceListRows) };
+        const resp = await fetch(API + withScope('/admin/lab-tests/import-apply/' + currentPriceListPreview.id), {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.status === 409) {
+            toast(data.detail || 'This preview has already been applied, expired, or was claimed by another session.', true);
+            closePriceListImportModal();
+            loadLabTests();
+            return;
+        }
+        if (!resp.ok) {
+            throw new Error(data.detail || 'Failed to apply import');
+        }
+
+        toast(`Import applied successfully: ${data.created} created, ${data.updated} updated (${data.total_imported} total)`);
+        closePriceListImportModal();
+        loadLabTests();
+    } catch (e) {
+        toast(e.message || 'Apply failed', true);
+        if (applyBtn) {
+            applyBtn.disabled = false;
+            applyBtn.textContent = `Apply Selected Tests (${selectedPriceListRows.size})`;
+        }
     }
 }
 

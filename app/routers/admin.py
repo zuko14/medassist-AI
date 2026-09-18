@@ -8,7 +8,7 @@ import logging
 import re
 import secrets
 from datetime import date, datetime, time as time_type, timedelta, timezone
-from typing import Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -1789,6 +1789,79 @@ async def get_insights(
     )
 
 
+@router.get("/insights/summary")
+async def get_weekly_insights_summary(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Retrieve the cached weekly insights summary for the clinic.
+
+    Zero AI spend on page load: only returns cached summary or {"status": "not_generated"}.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    from app.services.weekly_summary import get_last_completed_iso_week
+
+    lw_year, lw_week, lw_monday, lw_sunday, _, _, _, _ = get_last_completed_iso_week()
+
+    res = await sb(
+        supabase.table("weekly_insights_summaries")
+        .select("*")
+        .eq("clinic_id", effective_clinic_id)
+        .eq("iso_year", lw_year)
+        .eq("iso_week", lw_week)
+    )
+
+    if res.data:
+        row = res.data[0]
+        return {
+            "status": "ready",
+            "clinic_id": effective_clinic_id,
+            "iso_year": lw_year,
+            "iso_week": lw_week,
+            "period": {
+                "start": lw_monday.isoformat(),
+                "end": lw_sunday.isoformat(),
+                "label": f"Week {lw_week}, {lw_year} ({lw_monday.strftime('%d %b')} – {lw_sunday.strftime('%d %b %Y')})",
+            },
+            "summary_text": row["summary_text"],
+            "fact_sheet": row.get("fact_sheet") or {},
+            "source": row.get("source", "ai"),
+            "regenerate_count": row.get("regenerate_count", 0),
+            "updated_at": row.get("updated_at"),
+        }
+
+    return {
+        "status": "not_generated",
+        "clinic_id": effective_clinic_id,
+        "iso_year": lw_year,
+        "iso_week": lw_week,
+        "period": {
+            "start": lw_monday.isoformat(),
+            "end": lw_sunday.isoformat(),
+            "label": f"Week {lw_week}, {lw_year} ({lw_monday.strftime('%d %b')} – {lw_sunday.strftime('%d %b %Y')})",
+        },
+    }
+
+
+@router.post("/insights/summary/generate")
+async def generate_weekly_insights_summary(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Generate or regenerate weekly operational summary for the last completed ISO week.
+
+    Enforces rate limit of at most 3 generations per clinic per day in IST.
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    from app.services.weekly_summary import generate_weekly_summary
+
+    summary = await generate_weekly_summary(
+        clinic_id=effective_clinic_id,
+        force_regenerate=True,
+    )
+    return summary
+
+
 @router.get("/doctors")
 async def get_doctors(
     clinic_id: str = "default",
@@ -3126,6 +3199,92 @@ def _normalize_csv_headers(fieldnames: list[str]) -> dict[str, str]:
     return header_map
 
 
+async def _execute_lab_tests_upsert(
+    clinic_id: str,
+    branch_id: Optional[str],
+    rows: list[dict],
+    user: AdminUser,
+    default_category: Optional[str] = None,
+    ip_address: str = "unknown",
+    action_name: str = "import_lab_tests_csv",
+) -> dict:
+    """Core upsert engine for lab test catalogue rows (shared by CSV and preview apply).
+
+    Performs scoped name lookup, updates existing rows, inserts new rows,
+    invalidates WhatsApp menu cache, logs admin audit event, and returns counts.
+    """
+    def _existing_q():
+        # unscoped: fetching existing lab test names within verified clinic scope for upsert matching
+        q = supabase.table("lab_tests").select("id, name").eq("clinic_id", clinic_id)
+        return q.eq("branch_id", branch_id) if branch_id else q.is_("branch_id", "null")
+
+    existing_rows = await _fetch_all_lab_tests(
+        _existing_q, f"lab_tests upsert lookup for clinic {clinic_id}"
+    )
+    existing_map = {r["name"].strip().lower(): r["id"] for r in existing_rows}
+
+    created, updated = 0, 0
+    for test_data in rows:
+        name_lower = (test_data.get("name") or "").strip().lower()
+        if not name_lower:
+            continue
+        record = {
+            "clinic_id": clinic_id,
+            "branch_id": branch_id,
+            "name": test_data["name"].strip(),
+            "price_paise": test_data.get("price_paise") if test_data.get("price_paise") is not None else int(round(float(test_data.get("price_rupees", 0)) * 100)),
+            "sample_type": test_data.get("sample_type"),
+            "turnaround_hours": test_data.get("turnaround_hours"),
+            "fasting_required": bool(test_data.get("fasting_required")),
+            "prep_instructions": test_data.get("prep_instructions"),
+        }
+        # No-wipe rule: category and description only set if provided
+        cat = test_data.get("category") or default_category
+        if cat:
+            record["category"] = cat
+        desc = test_data.get("description")
+        if desc:
+            record["description"] = desc
+
+        if name_lower in existing_map:
+            # unscoped: updating existing lab test within verified clinic
+            await sb(supabase.table("lab_tests").update(record).eq("id", existing_map[name_lower]))
+            updated += 1
+        else:
+            # unscoped: inserting new lab test within verified clinic
+            await sb(supabase.table("lab_tests").insert(record))
+            created += 1
+
+    # Invalidate WhatsApp menu cache
+    from app.services.conversation import ConversationManager
+    ConversationManager._lab_heading_cache.pop(clinic_id, None)
+
+    await log_admin_action(
+        user=user,
+        action=action_name,
+        resource_type="lab_test",
+        resource_id=None,
+        details={
+            "created": created,
+            "updated": updated,
+            "total": len(rows),
+            "branch_id": branch_id,
+            "scope": "branch" if branch_id else "all_branches",
+            "category": default_category,
+        },
+        ip_address=ip_address,
+    )
+    return {
+        "created": created,
+        "updated": updated,
+        "total_imported": len(rows),
+        "branch_id": branch_id,
+        "scope": "branch" if branch_id else "all_branches",
+        "category": default_category,
+        "errors": [],
+    }
+
+
 @router.post("/lab-tests/import-csv")
 async def import_lab_tests_csv(
     file: UploadFile = File(...),
@@ -3407,61 +3566,302 @@ async def import_lab_tests_csv(
     if not validated_rows:
         raise HTTPException(status_code=400, detail="CSV contains no valid data rows.")
 
-    # Existing rows are matched WITHIN the import's own scope. Keying on name
-    # alone made an all-branches re-import pick one same-named branch row at
-    # random and rewrite it, leaving the other centres' rows stale; it also
-    # made a per-branch import impossible, since the first centre's row
-    # swallowed every later centre's. Scope the lookup and both go away.
-    #
-    # Paged, because a 1,392-test catalogue read through a single un-ranged
-    # select came back capped at 1,000: tests 1,001+ looked absent and were
-    # re-CREATED on every re-import, duplicating the tail of the catalogue.
-    def _existing_q():
-        # unscoped: fetching existing lab test names within verified clinic scope for upsert matching
-        q = supabase.table("lab_tests").select("id, name").eq("clinic_id", effective_clinic_id)
-        return q.eq("branch_id", branch_id) if branch_id else q.is_("branch_id", "null")
-
-    existing_rows = await _fetch_all_lab_tests(
-        _existing_q, f"lab_tests upsert lookup for clinic {effective_clinic_id}"
-    )
-    existing_map = {r["name"].strip().lower(): r["id"] for r in existing_rows}
-
-    created, updated = 0, 0
-    for test_data in validated_rows:
-        name_lower = test_data["name"].lower()
-        if name_lower in existing_map:
-            # unscoped: updating existing lab test within verified clinic
-            await sb(supabase.table("lab_tests").update(test_data).eq("id", existing_map[name_lower]))
-            updated += 1
-        else:
-            # unscoped: inserting new lab test within verified clinic
-            await sb(supabase.table("lab_tests").insert(test_data))
-            created += 1
-
-    await log_admin_action(
+    return await _execute_lab_tests_upsert(
+        clinic_id=effective_clinic_id,
+        branch_id=branch_id,
+        rows=validated_rows,
         user=user,
-        action="import_lab_tests_csv",
-        resource_type="lab_test",
-        resource_id=None,
-        details={
-            "created": created,
-            "updated": updated,
-            "total": len(validated_rows),
-            "branch_id": branch_id,
-            "scope": "branch" if branch_id else "all_branches",
-            "category": default_category,
-        },
+        default_category=default_category,
         ip_address="unknown",
+        action_name="import_lab_tests_csv",
     )
-    return {
-        "created": created,
-        "updated": updated,
-        "total_imported": len(validated_rows),
+
+
+_import_semaphore = asyncio.Semaphore(1)
+
+
+async def _process_catalogue_import_job(
+    preview_id: str,
+    clinic_id: str,
+    branch_id: Optional[str],
+    default_category: Optional[str],
+    raw_bytes: bytes,
+    filename: str,
+):
+    """Background task worker processing catalogue import preview with semaphore."""
+    async with _import_semaphore:
+        try:
+            from app.services.price_list_parser import parse_catalogue_file
+            staged_rows = await parse_catalogue_file(
+                raw_bytes=raw_bytes,
+                filename=filename,
+                clinic_id=clinic_id,
+                branch_id=branch_id,
+                default_category=default_category,
+            )
+            await sb(
+                supabase.table("catalogue_import_previews")
+                .update({
+                    "status": "pending",
+                    "rows": staged_rows,
+                })
+                .eq("id", preview_id)
+                .eq("clinic_id", clinic_id)
+            )
+            logger.info(f"Import preview {preview_id} processed: {len(staged_rows)} rows staged.")
+        except Exception as e:
+            logger.error(f"Import preview {preview_id} failed: {e}", exc_info=True)
+            err_msg = str(getattr(e, "detail", e))
+            await sb(
+                supabase.table("catalogue_import_previews")
+                .update({
+                    "status": "failed",
+                    "failure_reason": err_msg[:500],
+                })
+                .eq("id", preview_id)
+                .eq("clinic_id", clinic_id)
+            )
+
+
+@router.post("/lab-tests/import-preview", status_code=202)
+async def create_catalogue_import_preview(
+    file: UploadFile = File(...),
+    branch_id: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+    request: Request = None,
+):
+    """Upload and stage a price list (CSV, XLSX, PDF, PNG, JPG) for admin review.
+
+    Validates file size (max 10MB) and magic bytes before queuing a background job.
+    Returns 202 Accepted with preview ID for polling.
+    """
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    branch_id = (branch_id.strip() or None) if isinstance(branch_id, str) else None
+    if branch_id:
+        branch = await resolve_owned_branch(user, branch_id, effective_clinic_id)
+        branch_id = str(branch["id"])
+
+    default_category = category if isinstance(category, str) else None
+    if default_category:
+        try:
+            default_category = _clean_lab_category(default_category)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # Read at most 10 MB + 1 byte
+    max_bytes = 10 * 1024 * 1024
+    raw_bytes = await file.read(max_bytes + 1)
+    if len(raw_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="File exceeds maximum size limit of 10 MB.",
+        )
+
+    # Validate magic bytes and format
+    from app.services.price_list_parser import detect_and_validate_file_type
+    detect_and_validate_file_type(raw_bytes, file.filename or "")
+
+    user_id_str = str(user.user_id) if getattr(user, "user_id", None) else str(user)
+    now_utc = datetime.now(timezone.utc)
+    expires_utc = now_utc + timedelta(hours=24)
+
+    preview_row = {
+        "clinic_id": effective_clinic_id,
         "branch_id": branch_id,
-        "scope": "branch" if branch_id else "all_branches",
-        "category": default_category,
-        "errors": [],
+        "status": "processing",
+        "rows": [],
+        "created_by": user_id_str,
+        "created_at": now_utc.isoformat(),
+        "expires_at": expires_utc.isoformat(),
     }
+
+    insert_res = await sb(
+        # unscoped: insert_scoped_by_payload
+        supabase.table("catalogue_import_previews")
+        .insert(preview_row)
+    )
+    if not insert_res.data:
+        raise HTTPException(status_code=500, detail="Failed to initialize import preview.")
+
+    preview_id = insert_res.data[0]["id"]
+
+    # Queue background task
+    from app.utils.async_tasks import spawn_background_task
+    spawn_background_task(
+        _process_catalogue_import_job(
+            preview_id=preview_id,
+            clinic_id=effective_clinic_id,
+            branch_id=branch_id,
+            default_category=default_category,
+            raw_bytes=raw_bytes,
+            filename=file.filename or "",
+        ),
+        name=f"catalogue_import_{preview_id}",
+    )
+
+    return {
+        "id": preview_id,
+        "preview_id": preview_id,
+        "status": "processing",
+        "message": "Price list import queued for processing.",
+    }
+
+
+@router.get("/lab-tests/import-preview/{preview_id}")
+async def get_catalogue_import_preview(
+    preview_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Retrieve the current status and staged rows of a price list import preview."""
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+    res = await sb(
+        supabase.table("catalogue_import_previews")
+        .select("*")
+        .eq("id", preview_id)
+        .eq("clinic_id", effective_clinic_id)
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Import preview not found.")
+
+    row = res.data[0]
+
+    # Check expiration if pending or processing
+    if row["status"] in ("processing", "pending"):
+        expires_at = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+        if expires_at <= datetime.now(timezone.utc):
+            await sb(
+                supabase.table("catalogue_import_previews")
+                .update({"status": "expired"})
+                .eq("id", preview_id)
+                .eq("clinic_id", effective_clinic_id)
+            )
+            row["status"] = "expired"
+
+    return {
+        "id": row["id"],
+        "clinic_id": row["clinic_id"],
+        "branch_id": row.get("branch_id"),
+        "status": row["status"],
+        "rows": row.get("rows") or [],
+        "created_by": row["created_by"],
+        "failure_reason": row.get("failure_reason"),
+        "applied_counts": row.get("applied_counts"),
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+        "applied_at": row.get("applied_at"),
+    }
+
+
+class ImportApplyPayload(BaseModel):
+    selected_indexes: Optional[List[int]] = None
+    rows: Optional[List[Dict[str, Any]]] = None
+
+
+@router.post("/lab-tests/import-apply/{preview_id}")
+async def apply_catalogue_import_preview(
+    preview_id: str,
+    payload: Optional[ImportApplyPayload] = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+    request: Request = None,
+):
+    """Atomically claim and apply a staged price list import preview to lab_tests."""
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    user_id_str = str(user.user_id) if getattr(user, "user_id", None) else str(user)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Step 1: Claim atomically
+    claim_res = await sb(
+        supabase.table("catalogue_import_previews")
+        .update({"status": "applying"})
+        .eq("id", preview_id)
+        .eq("clinic_id", effective_clinic_id)
+        .eq("created_by", user_id_str)
+        .eq("status", "pending")
+        .gt("expires_at", now_iso)
+    )
+
+    if not claim_res.data:
+        raise HTTPException(
+            status_code=409,
+            detail="Preview already applied, expired, or not yours.",
+        )
+
+    preview = claim_res.data[0]
+
+    # Step 2: Apply rows through _execute_lab_tests_upsert
+    try:
+        all_staged_rows = preview.get("rows") or []
+        if payload and payload.selected_indexes is not None:
+            sel_set = set(payload.selected_indexes)
+            rows_to_apply = [r for i, r in enumerate(all_staged_rows) if i in sel_set]
+        elif payload and payload.rows is not None:
+            rows_to_apply = payload.rows
+        else:
+            rows_to_apply = [r for r in all_staged_rows if r.get("selected", True)]
+
+        if not rows_to_apply:
+            raise HTTPException(status_code=400, detail="No rows selected for import.")
+
+        counts = await _execute_lab_tests_upsert(
+            clinic_id=effective_clinic_id,
+            branch_id=preview.get("branch_id"),
+            rows=rows_to_apply,
+            user=user,
+            default_category=None,
+            ip_address=_client_ip(request) if request else "unknown",
+            action_name="import_lab_tests_catalogue",
+        )
+
+        # On success: set applied and store applied_counts
+        applied_at_str = datetime.now(timezone.utc).isoformat()
+        await sb(
+            supabase.table("catalogue_import_previews")
+            .update({
+                "status": "applied",
+                "applied_counts": counts,
+                "applied_at": applied_at_str,
+            })
+            .eq("id", preview_id)
+            .eq("clinic_id", effective_clinic_id)
+        )
+
+        await log_admin_action(
+            user=user,
+            action="apply_catalogue_import",
+            resource_type="catalogue_import_previews",
+            resource_id=preview_id,
+            details={
+                "clinic_id": effective_clinic_id,
+                "counts": counts,
+            },
+            ip_address=_client_ip(request) if request else "unknown",
+        )
+
+        return {
+            "status": "applied",
+            "preview_id": preview_id,
+            "counts": counts,
+            "created": counts.get("created", 0),
+            "updated": counts.get("updated", 0),
+            "total_imported": counts.get("total_imported", 0),
+        }
+    except Exception as e:
+        # On any failure: set back to pending so the admin can retry safely
+        logger.error(f"Failed to apply preview {preview_id}: {e}", exc_info=True)
+        await sb(
+            supabase.table("catalogue_import_previews")
+            .update({"status": "pending"})
+            .eq("id", preview_id)
+            .eq("clinic_id", effective_clinic_id)
+        )
+        if isinstance(e, HTTPException):
+            raise
+        raise HTTPException(status_code=500, detail=f"Apply failed: {e}")
 
 
 class LabAutoClassifyRequest(BaseModel):

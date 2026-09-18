@@ -55,6 +55,8 @@ TENANT_OWNED_TABLES = frozenset({
     "specialty_treatments", "treatment_doctors",
     # Migration 084: AI spend tracking and token usage ledger
     "ai_usage_ledger",
+    # Migration 085: Price list import previews & weekly insights summaries
+    "catalogue_import_previews", "weekly_insights_summaries",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning
