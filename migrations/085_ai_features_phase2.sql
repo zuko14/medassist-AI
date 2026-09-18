@@ -44,3 +44,25 @@ CREATE TABLE IF NOT EXISTS weekly_insights_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_weekly_insights_summaries_clinic
     ON weekly_insights_summaries(clinic_id, iso_year DESC, iso_week DESC);
+
+-- Same pattern as 084: RLS on, service_role only. The app connects as
+-- service_role; anon/authenticated get nothing. Without the policy Supabase's
+-- linter reports rls_enabled_no_policy (it auto-enables RLS on new tables).
+ALTER TABLE catalogue_import_previews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE weekly_insights_summaries ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies
+                   WHERE tablename = 'catalogue_import_previews'
+                     AND policyname = 'service_role_all_catalogue_import_previews') THEN
+        CREATE POLICY "service_role_all_catalogue_import_previews" ON catalogue_import_previews
+            FOR ALL TO service_role USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies
+                   WHERE tablename = 'weekly_insights_summaries'
+                     AND policyname = 'service_role_all_weekly_insights_summaries') THEN
+        CREATE POLICY "service_role_all_weekly_insights_summaries" ON weekly_insights_summaries
+            FOR ALL TO service_role USING (true) WITH CHECK (true);
+    END IF;
+END $$;
