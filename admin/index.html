@@ -2415,6 +2415,13 @@
                     <h3>Test Catalog</h3>
                     <span id="labTestCount" style="color:var(--text3); font-size:0.8rem;"></span>
                 </div>
+                                <div id="labBulkBar" role="region" aria-label="Selected tests" style="display:none; align-items:center; justify-content:space-between; gap:12px; background:var(--bg-accent, #f1f5f9); border:1px solid var(--border); border-radius:8px; padding:8px 14px; margin-bottom:12px;">
+                    <span id="labBulkText" aria-live="polite" style="font-size:0.88rem; font-weight:600; color:var(--text-strong);">0 tests selected</span>
+                    <div style="display:flex; gap:8px;">
+                        <button type="button" class="btn" style="padding:4px 10px; font-size:0.8rem;" onclick="toggleLabSelectAll(false)">Clear</button>
+                        <button type="button" id="btnLabBulkDelete" class="btn btn-danger" style="padding:4px 12px; font-size:0.8rem;" onclick="bulkDeleteLabTests()">Delete Selected</button>
+                    </div>
+                </div>
                 <div class="tbl-wrap" id="labTestList">
                     <div class="loader"><div class="spin"></div>Loading lab tests...</div>
                 </div>
@@ -6023,6 +6030,13 @@ async function resendReport(id) {
 
 // ═══════ LAB TESTS ═══════
 let labTestsCache = [];
+//: Ticked test ids. Survives search and tab changes, so "search X-ray, tick
+//: all, search USG, tick all, delete" works; the bar says how many are hidden.
+const labSelected = new Set();
+//: Ids of the rows currently shown, in order -- what "tick all" and
+//: shift-click ranges act on.
+let labVisibleIds = [];
+let labLastTickIdx = -1;
 
 // A chain with three collection centres rarely offers the same menu at all
 // three. A test carries a branch when only that branch offers it (or prices
@@ -6058,6 +6072,7 @@ function resetLabTestBranchState() {
     labTestBranchId = null;
     labTestShowBranchCol = false;
     labTestsCache = [];
+    labSelected.clear();
 }
 
 function labTestMultiBranch() {
@@ -6321,6 +6336,10 @@ async function loadLabTests() {
             ? '/admin/lab-tests?branch_id=' + encodeURIComponent(labTestBranchId)
             : '/admin/lab-tests';
         labTestsCache = await api(path) || [];
+        // A ticked test that is gone (deleted, or not in this branch anymore)
+        // must never ride along into the next bulk delete.
+        const present = new Set(labTestsCache.map(t => t.id));
+        Array.from(labSelected).forEach(id => { if (!present.has(id)) labSelected.delete(id); });
         const countEl = document.getElementById('labTestCount');
         if (countEl) {
             const scope = labTestBranchId ? ` offered at ${labTestBranchName(labTestBranchId)}` : '';
@@ -6336,6 +6355,10 @@ async function loadLabTests() {
 function renderLabTestsTable(tests) {
     const el = document.getElementById('labTestList');
     if (!el) return;
+    const canManage = hasPermission('LAB_TESTS_MANAGE');
+    labVisibleIds = tests.map(t => t.id);
+    labLastTickIdx = -1;
+    updateLabBulkBar();
     if (!tests.length) {
         el.innerHTML = emptyState('clipboard', 'No lab tests added yet');
         return;
@@ -6343,6 +6366,7 @@ function renderLabTestsTable(tests) {
     el.innerHTML = `<table>
         <thead>
             <tr>
+                ${canManage ? `<th style="width:36px"><input type="checkbox" id="labSelectAll" aria-label="Select all ${tests.length} tests shown" onchange="toggleLabSelectAll(this.checked)" style="width:16px; height:16px; cursor:pointer"></th>` : ''}
                 <th>Test Name</th>
                 ${labTestShowBranchCol ? '<th>Branch</th>' : ''}
                 <th>Service Type</th>
@@ -6354,7 +6378,8 @@ function renderLabTestsTable(tests) {
                 <th>Actions</th>
             </tr>
         </thead>
-        <tbody>${tests.map(t => `<tr>
+        <tbody>${tests.map((t, i) => `<tr>
+            ${canManage ? `<td><input type="checkbox" class="lab-sel" data-id="${esc(t.id)}" data-idx="${i}" ${labSelected.has(t.id) ? 'checked' : ''} aria-label="Select ${esc(t.name)}" onclick="labRowTick(event, this)" style="width:16px; height:16px; cursor:pointer"></td>` : ''}
             <td style="font-weight:600; color:var(--text-strong)">${esc(t.name)}</td>
             ${labTestShowBranchCol ? `<td>${labTestBranchLabel(t)}</td>` : ''}
             <td>${t.category ? esc(t.category) : '<span style="color:var(--text3)">Lab Tests</span>'}</td>
@@ -6369,7 +6394,95 @@ function renderLabTestsTable(tests) {
             </td>
         </tr>`).join('')}</tbody>
     </table>`;
+    syncLabSelectAll();
 }
+
+function syncLabSelectAll() {
+    const all = document.getElementById('labSelectAll');
+    if (!all) return;
+    const n = labVisibleIds.filter(id => labSelected.has(id)).length;
+    all.checked = n > 0 && n === labVisibleIds.length;
+    all.indeterminate = n > 0 && n < labVisibleIds.length;
+}
+
+function updateLabBulkBar() {
+    const bar = document.getElementById('labBulkBar');
+    if (!bar) return;
+    const n = labSelected.size;
+    if (!n || !hasPermission('LAB_TESTS_MANAGE')) { bar.style.display = 'none'; return; }
+    const shown = new Set(labVisibleIds);
+    const hidden = Array.from(labSelected).filter(id => !shown.has(id)).length;
+    document.getElementById('labBulkText').textContent =
+        `${n} test${n !== 1 ? 's' : ''} selected` + (hidden ? ` (${hidden} not in this view)` : '');
+    bar.style.display = 'flex';
+}
+
+// Only the ticked boxes change -- re-rendering 1,400 rows per click would lag.
+function setLabTicks(ids, on) {
+    ids.forEach(id => on ? labSelected.add(id) : labSelected.delete(id));
+    const want = new Set(ids);
+    document.querySelectorAll('#labTestList input.lab-sel').forEach(cb => {
+        if (want.has(cb.dataset.id)) cb.checked = on;
+    });
+    syncLabSelectAll();
+    updateLabBulkBar();
+}
+
+// Shift-click ticks (or unticks) the whole range since the last click.
+window.labRowTick = function (e, cb) {
+    const idx = parseInt(cb.dataset.idx, 10);
+    const ids = (e.shiftKey && labLastTickIdx >= 0)
+        ? labVisibleIds.slice(Math.min(idx, labLastTickIdx), Math.max(idx, labLastTickIdx) + 1)
+        : [cb.dataset.id];
+    labLastTickIdx = idx;
+    setLabTicks(ids, cb.checked);
+};
+
+window.toggleLabSelectAll = function (on) { setLabTicks(labVisibleIds.slice(), on); };
+
+window.clearLabSelection = function () { setLabTicks(Array.from(labSelected), false); };
+
+window.bulkDeleteLabTests = async function () {
+    const byId = new Map((labTestsCache || []).map(t => [t.id, t]));
+    const chosen = Array.from(labSelected).filter(id => byId.has(id));
+    if (!chosen.length) { updateLabBulkBar(); return; }
+    const n = chosen.length;
+    const names = chosen.slice(0, 5).map(id => byId.get(id).name);
+    let message = `Remove ${n} test${n !== 1 ? 's' : ''} from your catalog? `
+        + names.map(x => `"${x}"`).join(', ') + (n > 5 ? ` and ${n - 5} more.` : '.')
+        + ' Patients stop seeing them on WhatsApp. Past bookings are not affected. This cannot be undone.';
+    if (labTestBranchId) {
+        const shared = chosen.filter(id => !byId.get(id).branch_id).length;
+        if (shared) message += ` ${shared} of these ${shared !== 1 ? 'are' : 'is'} offered at all branches and will be removed from every branch.`;
+    }
+    // A big delete asks for the word, so a stray click on "Delete" can't empty the catalogue.
+    if (n >= 20) {
+        const typed = await promptDialog(message + ' Type DELETE to confirm.',
+            { title: `Delete ${n} tests`, danger: true, okText: 'Delete', placeholder: 'DELETE' });
+        if (typed === null) return;
+        if (typed.toUpperCase() !== 'DELETE') { toast('Not deleted — type DELETE to confirm', true); return; }
+    } else {
+        const ok = await confirmDialog(message,
+            { title: n === 1 ? 'Delete Lab Test' : `Delete ${n} tests`, danger: true, okText: 'Delete' });
+        if (!ok) return;
+    }
+    const btn = document.getElementById('btnLabBulkDelete');
+    if (btn) btn.disabled = true;
+    let deleted = 0;
+    try {
+        for (let i = 0; i < chosen.length; i += 1000) {
+            const r = await apiPost('/admin/lab-tests/bulk-delete', { ids: chosen.slice(i, i + 1000) });
+            deleted += r.deleted || 0;
+        }
+        labSelected.clear();
+        toast(`${deleted} test${deleted !== 1 ? 's' : ''} deleted`);
+    } catch (e) {
+        toast((deleted ? `${deleted} deleted, then: ` : '') + (e.message || 'Failed to delete the selected tests'), true);
+    } finally {
+        if (btn) btn.disabled = false;
+        loadLabTests();
+    }
+};
 
 function filterLabTests() {
     const q = (document.getElementById('labTestSearch')?.value || '').toLowerCase().trim();

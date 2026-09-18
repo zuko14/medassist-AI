@@ -9,7 +9,7 @@ import re
 import secrets
 from datetime import date, datetime, time as time_type, timedelta, timezone
 from typing import Literal, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import (
@@ -3550,6 +3550,102 @@ async def auto_classify_lab_tests(
     except Exception as e:
         logger.error(f"Auto-classify failed for clinic_id={effective_clinic_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to classify the catalogue")
+
+
+#: One request's worth. The panel sends a bigger selection in several calls.
+LAB_BULK_DELETE_MAX = 1000
+
+
+class LabBulkDeleteRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1, max_length=LAB_BULK_DELETE_MAX)
+
+    @field_validator("ids")
+    @classmethod
+    def _uuids_only(cls, v: list[str]) -> list[str]:
+        # Every id goes into a PostgREST in.(...) filter: a non-UUID (a comma,
+        # a parenthesis) would change the filter, so it is refused, not escaped.
+        out: list[str] = []
+        for raw in v:
+            try:
+                out.append(str(UUID(str(raw).strip())))
+            except (ValueError, AttributeError, TypeError):
+                raise ValueError("Every id must be a lab test id")
+        return list(dict.fromkeys(out))
+
+
+@router.post("/lab-tests/bulk-delete")
+async def bulk_delete_lab_tests(
+    body: LabBulkDeleteRequest,
+    request: Request = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_permission("LAB_TESTS_MANAGE")),
+):
+    """Delete many catalogue tests in one go -- the per-row trash can, times N.
+
+    Same rules as DELETE /lab-tests/{id}: clinic-scoped in the DELETE's own
+    filter, so an id from another clinic is simply "not found". Rows are read
+    first so a branch-pinned staff account is held to its branch (as on create
+    and edit) and the audit log names what was removed. Past bookings keep
+    their test name: appointments.lab_test_id is ON DELETE SET NULL (039).
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        found: list = []
+        for start in range(0, len(body.ids), _AUTO_CLASSIFY_CHUNK):
+            chunk = body.ids[start:start + _AUTO_CLASSIFY_CHUNK]
+            res = await sb(
+                # unscoped: reading this clinic's own rows (clinic_id filter)
+                supabase.table("lab_tests").select("id, name, branch_id")
+                .eq("clinic_id", effective_clinic_id)
+                .in_("id", chunk)
+            )
+            found.extend(res.data or [])
+        # All-or-nothing on scope: one test outside the caller's branch refuses
+        # the whole request before anything is deleted.
+        for row in found:
+            enforce_branch_scope(user, row.get("branch_id"))
+
+        deleted: list = []
+        ids = [str(r["id"]) for r in found]
+        for start in range(0, len(ids), _AUTO_CLASSIFY_CHUNK):
+            chunk = ids[start:start + _AUTO_CLASSIFY_CHUNK]
+            res = await sb(
+                # unscoped: bulk delete within verified clinic scope
+                supabase.table("lab_tests").delete()
+                .eq("clinic_id", effective_clinic_id)
+                .in_("id", chunk)
+            )
+            deleted.extend(res.data or [])
+
+        if deleted:
+            # The WhatsApp menu caches service-type counts for 60s.
+            from app.services.conversation import ConversationManager
+
+            ConversationManager._lab_heading_cache.pop(effective_clinic_id, None)
+            await log_admin_action(
+                user=user,
+                action="bulk_delete_lab_tests",
+                resource_type="lab_test",
+                resource_id=None,
+                details={
+                    "deleted": len(deleted),
+                    "ids": [str(r.get("id")) for r in deleted],
+                    "names": [r.get("name") for r in deleted][:100],
+                },
+                ip_address=_client_ip(request),
+            )
+        return {
+            "requested": len(body.ids),
+            "deleted": len(deleted),
+            "not_found": len(body.ids) - len(found),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bulk delete failed for clinic_id={effective_clinic_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=_friendly_db_error(e, "Failed to delete the selected tests")
+        )
 
 
 @router.get("/lab-tests/csv-template")
