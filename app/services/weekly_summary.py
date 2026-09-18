@@ -17,6 +17,7 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.database import supabase, sb, scoped_query
+from app.services.ai_engine import _completion_text
 from app.services.ai_gateway import call_ai_gateway, SpendCapExceededError
 
 logger = logging.getLogger(__name__)
@@ -236,25 +237,41 @@ async def build_weekly_fact_sheet(
     return fact_sheet
 
 
+def _normalize_number_token(tok: str) -> Optional[str]:
+    """Normalise '1,20,000' and '120,000' to '120000', and '12.5' stays '12.5'."""
+    clean = tok.replace(",", "").strip()
+    if not clean:
+        return None
+    try:
+        if "." in clean:
+            val = float(clean)
+            if val.is_integer():
+                return str(int(val))
+            return str(val)
+        return str(int(clean))
+    except ValueError:
+        return None
+
+
 def extract_all_numbers_from_fact_sheet(fact_sheet: Any) -> Set[str]:
     """Recursively harvest every single valid number/digit sequence present in fact_sheet."""
-    valid_numbers: Set[str] = {
-        # Allow small structural integers for markdown list markers
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "0"
-    }
+    valid_numbers: Set[str] = set()
 
     def _traverse(val: Any) -> None:
         if isinstance(val, (int, float)):
+            norm = _normalize_number_token(str(abs(val)))
+            if norm:
+                valid_numbers.add(norm)
+                if "." in norm and norm.endswith(".0"):
+                    valid_numbers.add(norm[:-2])
             v_int = int(round(abs(val)))
             valid_numbers.add(str(v_int))
-            valid_numbers.add(str(abs(val)))
-            # Also add magnitude without negative sign
-            valid_numbers.add(str(v_int))
         elif isinstance(val, str):
-            # Extract all digit sequences from formatted rupee/date/pct strings
-            for num in re.findall(r"\d+", val):
-                valid_numbers.add(num)
-                valid_numbers.add(str(int(num)))
+            # Extract whole number tokens with optional commas and decimals
+            for m in re.finditer(r'(?<![0-9])\d+(?:,\d+)*(?:\.\d+)?(?![0-9])', val):
+                norm = _normalize_number_token(m.group(0))
+                if norm:
+                    valid_numbers.add(norm)
         elif isinstance(val, dict):
             for v in val.values():
                 _traverse(v)
@@ -269,23 +286,43 @@ def extract_all_numbers_from_fact_sheet(fact_sheet: Any) -> Set[str]:
 def verify_deterministic_numbers(summary_text: str, fact_sheet: Dict[str, Any]) -> bool:
     """Verify that every sequence of digits in summary_text was grounded in the fact sheet.
 
-    If any number is hallucinated or invented by the model, returns False.
+    Normalises Indian and Western comma separated numbers ('1,20,000' -> '120000').
+    Allows numbers inside test names only when that exact name appears in top_services.
     """
     if not summary_text:
         return False
 
     valid_numbers = extract_all_numbers_from_fact_sheet(fact_sheet)
+    text_to_check = summary_text
 
-    # Extract all numbers from AI generated summary text
-    text_numbers = set(re.findall(r"\b\d+\b", summary_text))
+    # Allow numbers inside test names only when that exact name is in top_services
+    top_services = fact_sheet.get("top_services", []) or []
+    for svc in top_services:
+        if isinstance(svc, dict):
+            svc_name = (svc.get("name") or "").strip()
+            if svc_name:
+                # Mask this exact test name in the summary text so its embedded digits (e.g. B12)
+                # are not extracted as numerical metrics
+                pattern = re.compile(re.escape(svc_name), re.IGNORECASE)
+                text_to_check = pattern.sub(" ", text_to_check)
 
-    for num in text_numbers:
-        # Check integer representation
-        num_clean = str(int(num))
-        if num_clean not in valid_numbers and num not in valid_numbers:
+    # Strip markdown list markers at start of lines (e.g. "1. ", "2. ", "1) ")
+    cleaned_lines = []
+    for line in text_to_check.splitlines():
+        line_clean = re.sub(r'^\s*\d+[\.\)]\s+', ' ', line)
+        cleaned_lines.append(line_clean)
+    text_to_check = "\n".join(cleaned_lines)
+
+    # Find all whole number tokens, including commas and decimals
+    tokens = re.findall(r'(?<![0-9])\d+(?:,\d+)*(?:\.\d+)?(?![0-9])', text_to_check)
+
+    for tok in tokens:
+        norm = _normalize_number_token(tok)
+        if not norm:
+            continue
+        if norm not in valid_numbers:
             logger.warning(
-                f"Weekly Insights: deterministic check failed on ungrounded number '{num}' "
-                f"(valid numbers: {sorted(list(valid_numbers))})"
+                f"Weekly Insights: deterministic check failed on ungrounded number '{tok}' (norm: '{norm}')"
             )
             return False
 
@@ -383,22 +420,110 @@ async def generate_weekly_summary(
             "updated_at": existing_row.get("updated_at"),
         }
 
-    # 1. Enforce Daily Limit (max 3 per day in IST)
-    # Conditional atomic check to prevent race conditions
+    # 1. Enforce Daily Limit (max 3 per day in IST) with race-safe conditional updates
     current_date_str = str(today_ist)
-    current_count = 0
+    now_utc_str = datetime.now(timezone.utc).isoformat()
+    current_count = 1
+
+    if not existing_row:
+        initial_row = {
+            "clinic_id": clinic_id,
+            "iso_year": lw_year,
+            "iso_week": lw_week,
+            "fact_sheet": {},
+            "summary_text": "",
+            "source": "generating",
+            "regenerate_date": current_date_str,
+            "regenerate_count": 1,
+            "updated_at": now_utc_str,
+        }
+        try:
+            ins_res = await sb(
+                # unscoped: insert_scoped_by_payload
+                supabase.table("weekly_insights_summaries")
+                .insert(initial_row)
+            )
+            if not ins_res.data:
+                existing_res = await sb(
+                    supabase.table("weekly_insights_summaries")
+                    .select("*")
+                    .eq("clinic_id", clinic_id)
+                    .eq("iso_year", lw_year)
+                    .eq("iso_week", lw_week)
+                )
+                existing_row = existing_res.data[0] if existing_res.data else None
+            else:
+                current_count = 1
+        except Exception:
+            existing_res = await sb(
+                supabase.table("weekly_insights_summaries")
+                .select("*")
+                .eq("clinic_id", clinic_id)
+                .eq("iso_year", lw_year)
+                .eq("iso_week", lw_week)
+            )
+            existing_row = existing_res.data[0] if existing_res.data else None
 
     if existing_row:
         prev_date = existing_row.get("regenerate_date")
-        prev_count = existing_row.get("regenerate_count", 0)
-        if prev_date == current_date_str and prev_count >= 3:
-            raise HTTPException(
-                status_code=429,
-                detail="Daily generation limit reached for this clinic (maximum 3 generations per day).",
+        if prev_date == current_date_str:
+            if (existing_row.get("regenerate_count") or 0) >= 3:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Daily generation limit reached for this clinic (maximum 3 generations per day).",
+                )
+            claim_res = await sb(
+                supabase.table("weekly_insights_summaries")
+                .update({
+                    "regenerate_count": existing_row.get("regenerate_count", 0) + 1,
+                    "updated_at": now_utc_str,
+                })
+                .eq("clinic_id", clinic_id)
+                .eq("iso_year", lw_year)
+                .eq("iso_week", lw_week)
+                .eq("regenerate_date", current_date_str)
+                .lt("regenerate_count", 3)
             )
-        current_count = (prev_count + 1) if prev_date == current_date_str else 1
-    else:
-        current_count = 1
+            if not claim_res.data:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Daily generation limit reached for this clinic (maximum 3 generations per day).",
+                )
+            current_count = claim_res.data[0]["regenerate_count"]
+        else:
+            claim_res = await sb(
+                supabase.table("weekly_insights_summaries")
+                .update({
+                    "regenerate_date": current_date_str,
+                    "regenerate_count": 1,
+                    "updated_at": now_utc_str,
+                })
+                .eq("clinic_id", clinic_id)
+                .eq("iso_year", lw_year)
+                .eq("iso_week", lw_week)
+                .neq("regenerate_date", current_date_str)
+            )
+            if not claim_res.data:
+                claim_res2 = await sb(
+                    supabase.table("weekly_insights_summaries")
+                    .update({
+                        "regenerate_count": 2,
+                        "updated_at": now_utc_str,
+                    })
+                    .eq("clinic_id", clinic_id)
+                    .eq("iso_year", lw_year)
+                    .eq("iso_week", lw_week)
+                    .eq("regenerate_date", current_date_str)
+                    .lt("regenerate_count", 3)
+                )
+                if not claim_res2.data:
+                    raise HTTPException(
+                        status_code=429,
+                        detail="Daily generation limit reached for this clinic (maximum 3 generations per day).",
+                    )
+                current_count = claim_res2.data[0]["regenerate_count"]
+            else:
+                current_count = 1
 
     # 2. Build precomputed fact sheet
     fact_sheet = await build_weekly_fact_sheet(clinic_id, now=now)
@@ -430,7 +555,7 @@ async def generate_weekly_summary(
             max_tokens=800,
             temperature=0.2,
         )
-        ai_text = (response.get("content") or "").strip()
+        ai_text = _completion_text(response)
 
         # Deterministic number verification
         if ai_text and verify_deterministic_numbers(ai_text, fact_sheet):
@@ -445,24 +570,18 @@ async def generate_weekly_summary(
         summary_text = build_template_weekly_summary(fact_sheet)
         source = "template"
 
-    # 4. Upsert into database
-    now_utc_str = datetime.now(timezone.utc).isoformat()
-    upsert_row = {
-        "clinic_id": clinic_id,
-        "iso_year": lw_year,
-        "iso_week": lw_week,
-        "fact_sheet": fact_sheet,
-        "summary_text": summary_text,
-        "source": source,
-        "regenerate_date": current_date_str,
-        "regenerate_count": current_count,
-        "updated_at": now_utc_str,
-    }
-
+    # 4. Save generated summary into database
     await sb(
-        # unscoped: insert_scoped_by_payload
         supabase.table("weekly_insights_summaries")
-        .upsert(upsert_row, on_conflict="clinic_id,iso_year,iso_week")
+        .update({
+            "fact_sheet": fact_sheet,
+            "summary_text": summary_text,
+            "source": source,
+            "updated_at": now_utc_str,
+        })
+        .eq("clinic_id", clinic_id)
+        .eq("iso_year", lw_year)
+        .eq("iso_week", lw_week)
     )
 
     return {

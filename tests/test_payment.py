@@ -71,7 +71,16 @@ mock_db_module.sb = _fake_sb
 mock_db_module.is_valid_clinic_scope = lambda c: bool(
     c and str(c).strip().lower() not in ("default", "none", "null", "*", "system", "all", "")
 )
+def _test_is_uuid(value) -> bool:
+    try:
+        import uuid as _uuid
+        _uuid.UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+mock_db_module.is_uuid = _test_is_uuid
 sys.modules["app.database"] = mock_db_module
+
 
 
 @pytest.fixture(scope="module", autouse=True)

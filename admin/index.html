@@ -5086,56 +5086,62 @@ function renderWeeklyFactSheet(factSheet) {
     }
     container.style.display = 'block';
 
-    const fmtDiff = (metric, isRupees = false, isPp = false) => {
-        if (!metric) return '—';
-        const d = metric.diff ?? metric.diff_pp ?? 0;
-        const arrow = d > 0 ? '▲ +' : (d < 0 ? '▼ ' : '');
-        const pct = metric.pct_change !== undefined && metric.pct_change !== null ? ` (${metric.pct_change > 0 ? '+' : ''}${metric.pct_change}%)` : '';
-        const pp = isPp ? ' pp' : '';
-        const color = d > 0 ? '#4ade80' : (d < 0 ? '#f87171' : 'var(--text3)');
-        const valStr = isRupees ? `₹${Number(d).toLocaleString()}` : `${d}${pp}`;
-        return `<span style="color:${color}; font-weight:600;">${arrow}${valStr}${pct}</span>`;
-    };
+    const b = factSheet.bookings || {};
+    const c = factSheet.completed || {};
+    const cr = factSheet.cancellations || {};
+    const rev = factSheet.revenue || {};
+    const abv = factSheet.avg_ticket || {};
+    const topSvc = factSheet.top_services || [];
 
-    const b = factSheet.bookings_count || {};
-    const c = factSheet.completed_bookings || {};
-    const cr = factSheet.cancellation_rate_pct || {};
-    const rev = factSheet.revenue_inr || {};
-    const abv = factSheet.avg_booking_value_inr || {};
-    const p = factSheet.patients_served || {};
+    const fmtDiff = (change, pct = null, isRupees = false, isPp = false) => {
+        const val = change ?? 0;
+        const arrow = val > 0 ? '▲ +' : (val < 0 ? '▼ ' : '');
+        const pctStr = pct !== null && pct !== undefined ? ` (${pct > 0 ? '+' : ''}${pct}%)` : '';
+        const pp = isPp ? ' pp' : '';
+        const color = val > 0 ? '#4ade80' : (val < 0 ? '#f87171' : 'var(--text3)');
+        const valStr = isRupees ? `₹${Math.abs(val).toLocaleString()}` : `${Math.abs(val)}${pp}`;
+        return `<span style="color:${color}; font-weight:600;">${arrow}${valStr}${pctStr}</span>`;
+    };
 
     let html = `
         <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
             <div style="color:var(--text3); font-size:0.75rem;">Total Bookings</div>
-            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${b.lw ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${b.pw ?? 0})</span></div>
-            <div style="font-size:0.78rem;">${fmtDiff(b)}</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${b.last_week ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${b.prior_week ?? 0})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(b.change, b.change_pct)}</div>
         </div>
         <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
-            <div style="color:var(--text3); font-size:0.75rem;">Completed Bookings</div>
-            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${c.lw ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${c.pw ?? 0})</span></div>
-            <div style="font-size:0.78rem;">${fmtDiff(c)}</div>
+            <div style="color:var(--text3); font-size:0.75rem;">Completed Visits</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${c.last_week ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${c.prior_week ?? 0})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(c.change, c.change_pct)}</div>
         </div>
         <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
             <div style="color:var(--text3); font-size:0.75rem;">Cancellation Rate</div>
-            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${cr.lw ?? 0}% <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${cr.pw ?? 0}%)</span></div>
-            <div style="font-size:0.78rem;">${fmtDiff(cr, false, true)}</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${cr.last_week_rate_pct ?? 0}% <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${cr.prior_week_rate_pct ?? 0}%)</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(cr.rate_change_pct, null, false, true)} <span style="font-size:0.75rem; color:var(--text3);">(${cr.last_week_count ?? 0} cancelled)</span></div>
         </div>
         <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
             <div style="color:var(--text3); font-size:0.75rem;">Revenue (Collected)</div>
-            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">₹${(rev.lw ?? 0).toLocaleString()} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ₹${(rev.pw ?? 0).toLocaleString()})</span></div>
-            <div style="font-size:0.78rem;">${fmtDiff(rev, true)}</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">₹${(rev.last_week_rupees ?? 0).toLocaleString()} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ₹${(rev.prior_week_rupees ?? 0).toLocaleString()})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(rev.change_rupees, rev.change_pct, true)}</div>
         </div>
         <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
             <div style="color:var(--text3); font-size:0.75rem;">Average Ticket</div>
-            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">₹${(abv.lw ?? 0).toLocaleString()} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ₹${(abv.pw ?? 0).toLocaleString()})</span></div>
-            <div style="font-size:0.78rem;">${fmtDiff(abv, true)}</div>
-        </div>
-        <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
-            <div style="color:var(--text3); font-size:0.75rem;">Patients Served</div>
-            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">${p.lw ?? 0} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ${p.pw ?? 0})</span></div>
-            <div style="font-size:0.78rem;">${fmtDiff(p)}</div>
+            <div style="font-size:1.1rem; font-weight:700; margin:2px 0;">₹${(abv.last_week_rupees ?? 0).toLocaleString()} <span style="font-size:0.75rem; font-weight:normal; color:var(--text3);">(prev: ₹${(abv.prior_week_rupees ?? 0).toLocaleString()})</span></div>
+            <div style="font-size:0.78rem;">${fmtDiff(abv.change_rupees, null, true)}</div>
         </div>
     `;
+
+    if (topSvc && topSvc.length) {
+        html += `
+            <div style="background:var(--surface); padding:10px 12px; border-radius:6px; border:1px solid var(--border); grid-column:1 / -1;">
+                <div style="color:var(--text3); font-size:0.75rem; margin-bottom:4px;">Top Services</div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                    ${topSvc.map(s => `<span class="badge badge-secondary" style="font-size:0.75rem;">${esc(s.name)}: <b>${s.count}</b></span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+
     details.innerHTML = html;
 }
 
@@ -7901,7 +7907,7 @@ function pollPriceListPreview(previewId) {
         if (attempts > maxAttempts) {
             clearInterval(priceListPollTimer);
             priceListPollTimer = null;
-            toast('Import processing timed out. Please try again.', true);
+            toast('Import was interrupted — please upload again', true);
             document.getElementById('priceListUploadStep').style.display = 'block';
             document.getElementById('priceListProcessingStep').style.display = 'none';
             return;
@@ -7919,7 +7925,7 @@ function pollPriceListPreview(previewId) {
             } else if (data.status === 'failed') {
                 clearInterval(priceListPollTimer);
                 priceListPollTimer = null;
-                toast(data.error_message || 'Import parsing failed', true);
+                toast(data.failure_reason || 'Import was interrupted — please upload again', true);
                 document.getElementById('priceListUploadStep').style.display = 'block';
                 document.getElementById('priceListProcessingStep').style.display = 'none';
             } else if (data.status === 'pending') {
@@ -7952,9 +7958,9 @@ function renderPriceListReview(preview) {
 
     // Stats
     const total = rows.length;
-    const newCount = rows.filter(r => r.status === 'new').length;
-    const updCount = rows.filter(r => r.status === 'update').length;
-    const flagCount = rows.filter(r => r.status === 'flagged').length;
+    const newCount = rows.filter(r => (r.status || '').toLowerCase() === 'new').length;
+    const updCount = rows.filter(r => (r.status || '').toLowerCase() === 'update').length;
+    const flagCount = rows.filter(r => (r.status || '').toLowerCase() === 'flagged').length;
 
     const statsEl = document.getElementById('priceListReviewStats');
     if (statsEl) {
@@ -7972,20 +7978,21 @@ function renderPriceListReview(preview) {
 
     tbody.innerHTML = rows.map((r, idx) => {
         const isChecked = selectedPriceListRows.has(idx) ? 'checked' : '';
-        const badgeClass = r.status === 'new' ? 'badge-primary' : (r.status === 'update' ? 'badge-secondary' : 'badge-warning');
-        const badgeLabel = r.status === 'new' ? 'New' : (r.status === 'update' ? 'Update' : 'Flagged');
-        const flags = (r.flags || []).concat(r.notes || []).filter(Boolean);
+        const st = (r.status || '').toLowerCase();
+        const badgeClass = st === 'new' ? 'badge-primary' : (st === 'update' ? 'badge-secondary' : 'badge-warning');
+        const badgeLabel = st === 'new' ? 'New' : (st === 'update' ? 'Update' : 'Flagged');
+        const flags = (r.flags || []).filter(Boolean);
         const flagsHtml = flags.length
             ? flags.map(f => `<span style="color:#fbbf24; display:block; font-size:0.75rem;">⚠️ ${esc(f)}</span>`).join('')
             : '<span style="color:var(--text3); font-size:0.75rem;">—</span>';
-        const snippet = r.source_snippet ? `<code style="font-size:0.7rem; color:var(--text3); max-width:140px; display:inline-block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(r.source_snippet)}">${esc(r.source_snippet)}</code>` : '—';
+        const snippet = r.source_line ? `<code style="font-size:0.7rem; color:var(--text3); max-width:140px; display:inline-block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(r.source_line)}">${esc(r.source_line)}</code>` : '—';
 
         return `
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.05); ${r.status === 'flagged' ? 'background:rgba(251, 191, 36, 0.04);' : ''}">
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05); ${st === 'flagged' ? 'background:rgba(251, 191, 36, 0.04);' : ''}">
                 <td style="padding:8px 10px;"><input type="checkbox" data-idx="${idx}" ${isChecked} onchange="togglePriceListRow(${idx}, this.checked)"></td>
                 <td style="padding:8px 10px;"><span class="badge ${badgeClass}" style="font-size:0.72rem;">${badgeLabel}</span></td>
                 <td style="padding:8px 10px; font-weight:600; color:var(--text-strong);">${esc(r.name)}</td>
-                <td style="padding:8px 10px; font-weight:600;">₹${Number(r.price_inr).toLocaleString()}</td>
+                <td style="padding:8px 10px; font-weight:600;">₹${Number(r.price_rupees).toLocaleString()}</td>
                 <td style="padding:8px 10px; color:var(--text3);">${esc(r.category || '—')}</td>
                 <td style="padding:8px 10px;">${flagsHtml}</td>
                 <td style="padding:8px 10px;">${snippet}</td>

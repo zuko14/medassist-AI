@@ -11,13 +11,18 @@ Covers:
 """
 
 import re
+import sys
 from pathlib import Path
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
+    del sys.modules["app.database"]
+
 from app.routers.admin import (
+
     AdminUser,
     LabCleanupApplyRequest,
     LabPrepFixItem,

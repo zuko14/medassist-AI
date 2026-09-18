@@ -1803,32 +1803,34 @@ async def get_weekly_insights_summary(
 
     lw_year, lw_week, lw_monday, lw_sunday, _, _, _, _ = get_last_completed_iso_week()
 
-    res = await sb(
-        supabase.table("weekly_insights_summaries")
-        .select("*")
-        .eq("clinic_id", effective_clinic_id)
-        .eq("iso_year", lw_year)
-        .eq("iso_week", lw_week)
-    )
-
-    if res.data:
-        row = res.data[0]
-        return {
-            "status": "ready",
-            "clinic_id": effective_clinic_id,
-            "iso_year": lw_year,
-            "iso_week": lw_week,
-            "period": {
-                "start": lw_monday.isoformat(),
-                "end": lw_sunday.isoformat(),
-                "label": f"Week {lw_week}, {lw_year} ({lw_monday.strftime('%d %b')} – {lw_sunday.strftime('%d %b %Y')})",
-            },
-            "summary_text": row["summary_text"],
-            "fact_sheet": row.get("fact_sheet") or {},
-            "source": row.get("source", "ai"),
-            "regenerate_count": row.get("regenerate_count", 0),
-            "updated_at": row.get("updated_at"),
-        }
+    try:
+        res = await sb(
+            supabase.table("weekly_insights_summaries")
+            .select("*")
+            .eq("clinic_id", effective_clinic_id)
+            .eq("iso_year", lw_year)
+            .eq("iso_week", lw_week)
+        )
+        if res.data:
+            row = res.data[0]
+            return {
+                "status": "ready",
+                "clinic_id": effective_clinic_id,
+                "iso_year": lw_year,
+                "iso_week": lw_week,
+                "period": {
+                    "start": lw_monday.isoformat(),
+                    "end": lw_sunday.isoformat(),
+                    "label": f"Week {lw_week}, {lw_year} ({lw_monday.strftime('%d %b')} – {lw_sunday.strftime('%d %b %Y')})",
+                },
+                "summary_text": row["summary_text"],
+                "fact_sheet": row.get("fact_sheet") or {},
+                "source": row.get("source", "ai"),
+                "regenerate_count": row.get("regenerate_count", 0),
+                "updated_at": row.get("updated_at"),
+            }
+    except Exception as e:
+        logger.warning(f"Failed to query weekly insights summary for {effective_clinic_id}: {e}")
 
     return {
         "status": "not_generated",
@@ -3728,6 +3730,22 @@ async def get_catalogue_import_preview(
         raise HTTPException(status_code=404, detail="Import preview not found.")
 
     row = res.data[0]
+
+    # Check if stuck in processing for > 15 minutes
+    if row["status"] == "processing":
+        created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) - created_at > timedelta(minutes=15):
+            await sb(
+                supabase.table("catalogue_import_previews")
+                .update({
+                    "status": "failed",
+                    "failure_reason": "Import was interrupted — please upload again",
+                })
+                .eq("id", preview_id)
+                .eq("clinic_id", effective_clinic_id)
+            )
+            row["status"] = "failed"
+            row["failure_reason"] = "Import was interrupted — please upload again"
 
     # Check expiration if pending or processing
     if row["status"] in ("processing", "pending"):

@@ -245,7 +245,8 @@ class TestPriceListEndpoints:
 
         preview_row = {
             "name": "Blood Glucose Fasting",
-            "price_inr": 200.0,
+            "price_rupees": 200.0,
+            "price_paise": 20000,
             "category": "",  # Empty category -> should not wipe existing category
             "status": "update",
             "matched_test_id": "test-uuid-99",
@@ -295,7 +296,7 @@ class TestPriceListEndpoints:
             "created_by": "user-1",
             "status": "applying",
             "branch_id": None,
-            "rows": [{"name": "Test", "price_inr": 100.0, "status": "new"}],
+            "rows": [{"name": "Test", "price_rupees": 100.0, "status": "new"}],
         }
 
         with patch.object(admin_module, "supabase") as mock_sb, patch.object(
@@ -317,6 +318,165 @@ class TestPriceListEndpoints:
             # Verify rollback call set status back to 'pending'
             mock_sb.table.return_value.update.assert_any_call({"status": "pending"})
 
+    def test_get_preview_stuck_in_processing_reported_as_failed(self, test_app):
+        """A preview in processing for > 15 minutes is reported as failed by GET /lab-tests/import-preview/{id}."""
+        user = _make_admin_user(clinic_id="clinic-1")
+        test_app.dependency_overrides[verify_credentials] = lambda: user
+
+        stuck_created_at = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
+        stuck_row = {
+            "id": "stuck-preview-1",
+            "clinic_id": "clinic-1",
+            "created_by": "user-1",
+            "status": "processing",
+            "created_at": stuck_created_at,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            "rows": [],
+        }
+
+        with patch.object(admin_module, "sb", new_callable=AsyncMock) as mock_sb, patch.object(
+            admin_module, "resolve_clinic_id_for_write", new_callable=AsyncMock, return_value="clinic-1"
+        ):
+            mock_sb.return_value = MagicMock(data=[dict(stuck_row)])
+
+            client = TestClient(test_app)
+            resp = client.get("/admin/lab-tests/import-preview/stuck-preview-1")
+
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "failed"
+            assert data["failure_reason"] == "Import was interrupted — please upload again"
+
+    @pytest.mark.asyncio
+    async def test_pdf_with_text_price_list_yields_rows_through_ai_path(self):
+        """Proves that a PDF with a text price list yields staged rows through the AI path."""
+        import json
+        from app.services.price_list_parser import parse_catalogue_file
+
+        dummy_pdf_bytes = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+        pdf_text_lines = [
+            "XYZ DIAGNOSTIC CENTRE",
+            "DEPARTMENT OF PATHOLOGY & BIOCHEMISTRY",
+            "TEST NAME | CHARGES | SAMPLE TYPE",
+            "Thyroid Profile (T3, T4, TSH) - 650",
+            "Vitamin D Total - 1200",
+            "Complete Blood Count (CBC) - 350",
+        ]
+
+        ai_response = {
+            "choices": [{
+                "message": {
+                    "content": json.dumps({
+                        "tests": [
+                            {
+                                "name": "Thyroid Profile (T3, T4, TSH)",
+                                "price_rupees": 650.0,
+                                "category": "Biochemistry",
+                                "sample_type": "Blood",
+                                "fasting_required": True,
+                                "source_line": "Thyroid Profile (T3, T4, TSH) - 650",
+                            },
+                            {
+                                "name": "Vitamin D Total",
+                                "price_rupees": 1200.0,
+                                "category": "Biochemistry",
+                                "sample_type": "Serum",
+                                "fasting_required": False,
+                                "source_line": "Vitamin D Total - 1200",
+                            },
+                        ]
+                    })
+                }
+            }],
+            "model": "google/gemini-2.5-flash",
+            "usage": {"total_tokens": 250},
+        }
+
+        with patch("app.services.price_list_parser.extract_text_and_tables_from_pdf", return_value=(pdf_text_lines, 1)), patch(
+            "app.services.price_list_parser.call_ai_gateway", new_callable=AsyncMock, return_value=ai_response
+        ) as mock_gateway, patch(
+            "app.routers.admin._fetch_all_lab_tests", new_callable=AsyncMock, return_value=[]
+        ), patch("app.services.price_list_parser.sb", new_callable=AsyncMock) as mock_sb:
+            mock_sb.return_value = MagicMock(data=[])
+
+            rows = await parse_catalogue_file(
+                raw_bytes=dummy_pdf_bytes,
+                filename="pricelist.pdf",
+                clinic_id="clinic-1",
+            )
+
+            # Proves it called the AI gateway with the raw text
+            mock_gateway.assert_called_once()
+            assert len(rows) == 2
+
+            assert rows[0]["name"] == "Thyroid Profile (T3, T4, TSH)"
+            assert rows[0]["price_rupees"] == 650.0
+            assert rows[0]["price_paise"] == 65000
+            assert rows[0]["source_line"] == "Thyroid Profile (T3, T4, TSH) - 650"
+            assert rows[0]["status"] == "New"
+
+            assert rows[1]["name"] == "Vitamin D Total"
+            assert rows[1]["price_rupees"] == 1200.0
+            assert rows[1]["price_paise"] == 120000
+            assert rows[1]["source_line"] == "Vitamin D Total - 1200"
+            assert rows[1]["status"] == "New"
+
+    def test_panel_js_preview_rows_key_contract(self):
+        """Checks the panel JS only reads keys the backend actually returns for preview rows."""
+        import os
+        import re
+        from app.services.price_list_parser import _audit_and_stage_row
+
+        # Get a sample staged row from backend
+        staged = _audit_and_stage_row(
+            {"name": "CBC", "price_rupees": 350.0, "category": "Hematology"},
+            "CBC 350",
+            0,
+            {},
+        )
+
+        html_path = os.path.join(os.path.dirname(__file__), "..", "admin", "index.html")
+        with open(html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        # Find renderPriceListReview in admin/index.html
+        start = html.find("function renderPriceListReview")
+        end = html.find("function togglePriceListRow", start)
+        fn_code = html[start:end]
+
+        # Verify old / wrong keys are NOT referenced
+        assert "price_inr" not in fn_code, "price_inr should be replaced with price_rupees"
+        assert "source_snippet" not in fn_code, "source_snippet should be replaced with source_line"
+
+        # Verify correct keys are referenced
+        assert "price_rupees" in fn_code
+        assert "source_line" in fn_code
+
+        # Verify all r.<prop> fields used exist in the staged row
+        props = set(re.findall(r'\br\.([a-zA-Z0-9_]+)\b', fn_code))
+        for prop in props:
+            assert prop in staged, f"Property 'r.{prop}' used in panel JS must be present in staged row"
+
+    def test_image_size_limit_inside_parser_only(self):
+        """Checks image width * height inside parser without modifying PIL.Image.MAX_IMAGE_PIXELS."""
+        from PIL import Image
+        from app.services.price_list_parser import preprocess_image_for_ocr
+
+        orig_max = getattr(Image, "MAX_IMAGE_PIXELS", None)
+
+        # Create a mock PIL image with width * height > 40,000,000
+        mock_img = MagicMock()
+        mock_img.width = 7000
+        mock_img.height = 6000  # 42,000,000 pixels
+
+        with pytest.raises(HTTPException) as exc:
+            preprocess_image_for_ocr(mock_img)
+        assert exc.value.status_code == 400
+        assert "Image dimensions exceed maximum safe limit" in exc.value.detail
+
+        # Global Image.MAX_IMAGE_PIXELS must NOT be altered
+        assert getattr(Image, "MAX_IMAGE_PIXELS", None) == orig_max
+
 
 class TestRetentionPurge:
     @pytest.mark.asyncio
@@ -335,3 +495,36 @@ class TestRetentionPurge:
             mock_sb.return_value = MagicMock(data=[{"id": "p1"}, {"id": "p2"}])
             deleted = await purge_expired_catalogue_import_previews()
             assert deleted == 2
+
+    @pytest.mark.asyncio
+    async def test_purge_job_marks_stuck_processing_previews_as_failed(self):
+        """Purge job marks previews stuck in processing for > 15 minutes as failed."""
+        from app.services.data_retention import purge_expired_catalogue_import_previews
+        from app.config import settings
+
+        with patch.object(settings, "app_env", "production"), patch(
+            "app.services.data_retention.sb", new_callable=AsyncMock
+        ) as mock_sb:
+            mock_sb.return_value = MagicMock(data=[])
+            await purge_expired_catalogue_import_previews()
+
+            from app.services.data_retention import supabase as dr_supabase
+
+            payloads = []
+            # 1. From real PostgREST builder request.json
+            for call in mock_sb.call_args_list:
+                arg = call[0][0]
+                if hasattr(arg, "request") and hasattr(arg.request, "json") and isinstance(arg.request.json, dict):
+                    payloads.append(arg.request.json)
+
+            # 2. From mock supabase table update call args (when supabase is mocked by earlier tests)
+            if hasattr(dr_supabase, "table") and hasattr(dr_supabase.table, "return_value"):
+                tbl = dr_supabase.table.return_value
+                if hasattr(tbl, "update") and hasattr(tbl.update, "call_args_list"):
+                    for ucall in tbl.update.call_args_list:
+                        if ucall and ucall[0] and isinstance(ucall[0][0], dict):
+                            payloads.append(ucall[0][0])
+
+            assert any(p.get("failure_reason") == "Import was interrupted — please upload again" for p in payloads)
+
+

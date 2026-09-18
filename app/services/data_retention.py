@@ -149,8 +149,23 @@ class DataRetentionService:
         if getattr(settings, "app_env", "") != "production":
             return 0
 
-        cutoff = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        cutoff = now.isoformat()
+        stuck_cutoff = (now - timedelta(minutes=15)).isoformat()
         try:
+            # 1. Mark previews stuck in processing for > 15 minutes as failed
+            await sb(
+                # unscoped: platform_sweep
+                supabase.table("catalogue_import_previews")
+                .update({
+                    "status": "failed",
+                    "failure_reason": "Import was interrupted — please upload again",
+                })
+                .eq("status", "processing")
+                .lt("created_at", stuck_cutoff)
+            )
+
+            # 2. Delete expired previews
             result = await sb(
                 # unscoped: platform_sweep
                 supabase.table("catalogue_import_previews")

@@ -28,6 +28,7 @@ except ImportError:
 
 from app.config import settings
 from app.database import supabase, sb
+from app.services.ai_engine import _completion_text
 from app.services.ai_gateway import call_ai_gateway, SpendCapExceededError
 
 logger = logging.getLogger(__name__)
@@ -40,9 +41,7 @@ MAX_PDF_PAGES = 30
 MAX_OCR_PAGES = 10
 OCR_TIMEOUT_SECONDS = 120.0
 MAX_EXTRACTION_CHUNKS = 20
-
-# Safe Image Limits
-Image.MAX_IMAGE_PIXELS = 40_000_000
+MAX_IMAGE_PIXELS = 40_000_000  # Checked locally in preprocess_image_for_ocr
 
 # Canonical column name aliases for fast-path header matching
 NAME_ALIASES = frozenset({
@@ -179,12 +178,20 @@ def validate_xlsx_zip_safety(raw_bytes: bytes) -> None:
 
 
 def preprocess_image_for_ocr(img: Image.Image) -> Image.Image:
-    """Downscale oversized images and convert to RGB before OCR."""
+    """Downscale oversized images and convert to RGB before OCR.
+    
+    Enforces pixel ceiling internally without setting PIL's global MAX_IMAGE_PIXELS.
+    """
+    if (img.width * img.height) > MAX_IMAGE_PIXELS:
+        raise HTTPException(
+            status_code=400,
+            detail="Image dimensions exceed maximum safe limit (40 megapixels).",
+        )
     if img.mode != "RGB":
         img = img.convert("RGB")
     max_dim = max(img.width, img.height)
-    if max_dim > 2500:
-        scale = 2500.0 / max_dim
+    if max_dim > 2000:
+        scale = 2000.0 / max_dim
         new_w = max(1, int(img.width * scale))
         new_h = max(1, int(img.height * scale))
         img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -561,7 +568,7 @@ async def extract_catalogue_with_ai(
                 temperature=0.1,
                 response_format={"type": "json_object"},
             )
-            content = response.get("content") or "{}"
+            content = _completion_text(response) or "{}"
             parsed = json.loads(content)
             tests = parsed.get("tests") or []
             for t in tests:
