@@ -168,3 +168,33 @@ class TestDataRetention:
             assert "appointment_date" not in update_dict
             assert "status" not in update_dict
             assert len(result["errors"]) == 0
+
+    @pytest.mark.asyncio
+    async def test_erasure_deletes_saved_family_members_by_real_columns(self):
+        """Step 4 used to update non-existent columns (name,
+        primary_patient_phone), fail at debug level, and leave every saved
+        family name in place after "Delete my data"."""
+        service = DataRetentionService()
+        mock_supabase = MagicMock()
+        mock_patients = MagicMock()
+        mock_patients.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"id": "p-3", "name": "Ravi Kumar"}]
+        )
+        mock_family = MagicMock()
+        mock_family.delete.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"id": "f1"}, {"id": "f2"}]
+        )
+        mock_supabase.table.side_effect = lambda name: {
+            "patients": mock_patients, "family_members": mock_family,
+        }.get(name, MagicMock())
+
+        with patch("app.services.data_retention.supabase", mock_supabase):
+            result = await service.anonymize_clinical_records("clinic-1", "+919000000001")
+
+        mock_family.update.assert_not_called()
+        mock_family.delete.return_value.eq.assert_called_once_with("clinic_id", "clinic-1")
+        mock_family.delete.return_value.eq.return_value.eq.assert_called_once_with(
+            "primary_phone", "+919000000001"
+        )
+        assert result["family_members_deleted"] == 2
+        assert result["errors"] == []

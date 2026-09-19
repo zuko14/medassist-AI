@@ -340,16 +340,23 @@ class DataRetentionService:
             logger.error(f"Prescriptions anonymization error: {e}")
             results["errors"].append(f"prescriptions: {e}")
 
-        # 4. Anonymize family members linked to patient
+        # 4. Delete saved family members. They are pure PII (a name list the
+        # patient saved for quick booking), not clinical records, so nothing
+        # has to be retained. This used to update columns that do not exist
+        # ("name", "primary_patient_phone"), failed silently at debug level,
+        # and every family name survived erasure. Redacting instead would hit
+        # UNIQUE (clinic_id, primary_phone, full_name) for 2+ members.
         try:
-            await sb(supabase.table("family_members").update(
-                {
-                    "name": "[REDACTED]",
-                    "relationship": "[REDACTED]",
-                }
-            ).eq("clinic_id", clinic_id).eq("primary_patient_phone", phone))
+            fam_res = await sb(
+                supabase.table("family_members")
+                .delete()
+                .eq("clinic_id", clinic_id)
+                .eq("primary_phone", phone)
+            )
+            results["family_members_deleted"] = len(fam_res.data or [])
         except Exception as e:
-            logger.debug(f"Family members anonymization note: {e}")
+            logger.error(f"Family members erasure error: {e}")
+            results["errors"].append(f"family_members: {e}")
 
         # 5. Mark the patient row itself as anonymized (but keep the shell for FK integrity)
         try:

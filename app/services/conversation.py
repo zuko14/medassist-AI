@@ -276,7 +276,7 @@ def resolve_booking_name(context: dict, patient: Optional[dict] = None) -> str:
     )
     for candidate in candidates:
         name = candidate.strip() if isinstance(candidate, str) else ""
-        if name and name.lower() != "there":
+        if name and name.lower() != "there" and name != "[REDACTED]":
             return name
     return "Patient"
 

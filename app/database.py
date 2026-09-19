@@ -303,7 +303,13 @@ async def get_patient_by_phone(clinic_id: str, phone: str) -> Optional[dict]:
             .eq("phone", phone))
         )
         if result.data:
-            return result.data[0]
+            patient = result.data[0]
+            # DPDP erasure keeps the row but sets name to "[REDACTED]". Treat
+            # that as no name, or "For Me" books the returning patient under
+            # the placeholder instead of asking who they are.
+            if (patient.get("name") or "").strip() == "[REDACTED]":
+                patient = {**patient, "name": None}
+            return patient
         return None
     except Exception as e:
         logger.error(f"Error getting patient: {e}")

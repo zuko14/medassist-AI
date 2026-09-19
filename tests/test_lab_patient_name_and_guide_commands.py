@@ -475,3 +475,32 @@ async def test_doctor_save_prompt_repeats_on_unrelated_input():
     buttons.assert_awaited_once()
     add.assert_not_called()
     state.assert_not_called()
+
+
+# ── Erased patient ("Delete my data") returns: "[REDACTED]" is not a name ────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored, expected", [
+    ("[REDACTED]", None),
+    ("Chaitanya Kumar", "Chaitanya Kumar"),
+    (None, None),
+])
+async def test_erased_name_reads_as_no_name(stored, expected):
+    from types import SimpleNamespace
+
+    from app import database
+
+    row = {"id": "p1", "phone": PHONE, "name": stored, "language": "en"}
+    with patch.object(database, "scoped_query"), \
+         patch.object(database, "sb", new_callable=AsyncMock,
+                      return_value=SimpleNamespace(data=[row])):
+        patient = await database.get_patient_by_phone(CLINIC["id"], PHONE)
+    assert patient["name"] == expected
+    assert patient["language"] == "en" and row["name"] == stored
+
+
+def test_resolve_booking_name_skips_the_erasure_placeholder():
+    from app.services.conversation import resolve_booking_name
+
+    assert resolve_booking_name({"booking_name": "[REDACTED]"}, {"name": "Ravi Kumar"}) == "Ravi Kumar"
