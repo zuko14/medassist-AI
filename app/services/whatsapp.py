@@ -327,9 +327,15 @@ class WhatsAppService:
         message: str,
         _source: str = "conversation",
         _capture: Optional[dict] = None,
+        _window_open: bool = False,
     ) -> bool:
-        """Send a freeform text message (only if within 24h window)."""
-        if not await self._can_send_freeform(clinic, phone):
+        """Send a freeform text message (only if within 24h window).
+
+        _window_open: the caller is replying to a message received moments
+        ago, so the window is known to be open even though the conversation
+        row that records it is gone (the data-deletion reply).
+        """
+        if not _window_open and not await self._can_send_freeform(clinic, phone):
             logger.warning(
                 f"Cannot send freeform text to {self._mask_phone(phone)}: session expired"
             )

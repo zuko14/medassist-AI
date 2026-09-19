@@ -226,6 +226,8 @@ def _lab_context():
         "lab_test_id": "test-0001",
         "lab_test_name": "(1,3)-BETA-D-GLUCAN",
         "lab_test_price_paise": 1200000,
+        "lab_collection_date": "2026-09-10",
+        "lab_step": "who",
         "branch_id": None,
         "branch_name": None,
     }
@@ -258,8 +260,8 @@ async def test_lab_booking_confirms_directly_when_the_centre_has_no_razorpay_key
         manager, "update_state", new_callable=AsyncMock
     ) as mock_update_state:
         await manager._handle_confirming_collection_date(
-            CLINIC, PHONE, "", "select_date", context, {"id": "patient-1"}, "en",
-            interactive_data={"id": "labdate_2026-09-10"},
+            CLINIC, PHONE, "", "", context, {"id": "patient-1", "name": "Ravi Kumar"}, "en",
+            interactive_data={"id": "labfor_self"},
         )
 
     mock_paid_booking.assert_not_called()
@@ -308,8 +310,8 @@ async def test_lab_booking_still_takes_the_payment_path_when_keys_are_configured
         manager, "update_state", new_callable=AsyncMock
     ) as mock_update_state:
         await manager._handle_confirming_collection_date(
-            CLINIC, PHONE, "", "select_date", context, {"id": "patient-1"}, "en",
-            interactive_data={"id": "labdate_2026-09-10"},
+            CLINIC, PHONE, "", "", context, {"id": "patient-1", "name": "Ravi Kumar"}, "en",
+            interactive_data={"id": "labfor_self"},
         )
 
     mock_paid_booking.assert_called_once()

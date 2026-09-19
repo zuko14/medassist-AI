@@ -726,6 +726,34 @@ def is_greeting(message: str) -> bool:
     return (message or "").strip(_GREETING_TRIM).lower() in GREETING_WORDS
 
 
+#: The exact commands the "How to use" guide tells patients to type. Matched
+#: on the whole message only, before the LLM, so an advertised command never
+#: depends on a classifier call: with the LLM down, "cancel booking" used to
+#: fall back to book_appointment (substring "book") and "change language" to
+#: reschedule_appointment (substring "change").
+GUIDE_COMMAND_INTENTS = {
+    "cancel": "cancel_appointment",
+    "cancel booking": "cancel_appointment",
+    "cancel my booking": "cancel_appointment",
+    "cancel appointment": "cancel_appointment",
+    "cancel my appointment": "cancel_appointment",
+    "cancel test": "cancel_appointment",
+    "cancel my test": "cancel_appointment",
+    "reschedule": "reschedule_appointment",
+    "change language": "change_language",
+    "language": "change_language",
+    "भाषा बदलें": "change_language",
+    "భాష మార్చు": "change_language",
+    "talk to staff": "human_escalation",
+    "emergency": "emergency",
+}
+
+
+def guide_command_intent(message: str) -> Optional[str]:
+    """Intent for a message that is exactly one of the guide's commands."""
+    return GUIDE_COMMAND_INTENTS.get((message or "").strip(_GREETING_TRIM).lower())
+
+
 def keyword_intent_fallback(message: str) -> str:
     """Fallback intent detection using keywords when OpenRouter fails."""
     msg = message.lower().strip()
@@ -808,6 +836,11 @@ async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
     for kw in INTENT_KEYWORDS.get("data_deletion_request", []):
         if kw in msg_clean:
             return "data_deletion_request"
+
+    # Fast-path 2b: the exact commands the help guide advertises.
+    guide_intent = guide_command_intent(message)
+    if guide_intent:
+        return guide_intent
 
     # Fast-path 3: a bare greeting never needs the LLM (see GREETING_WORDS).
     if is_greeting(message):

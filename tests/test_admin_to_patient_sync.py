@@ -217,6 +217,8 @@ async def test_lab_test_booking_reaches_the_payment_service():
     context = {
         "lab_test_id": "test-1",
         "lab_test_name": "Lipid Profile",
+        "lab_collection_date": "2026-09-10",
+        "lab_step": "who",
         "branch_id": None,
         "branch_name": None,
     }
@@ -248,7 +250,7 @@ async def test_lab_test_booking_reaches_the_payment_service():
             context=context,
             patient={"name": "Test Patient"},
             lang="en",
-            interactive_data={"id": "labdate_2026-09-10"},
+            interactive_data={"id": "labfor_self"},
         )
 
     mock_create.assert_awaited_once()

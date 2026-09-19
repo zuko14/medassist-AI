@@ -200,6 +200,19 @@ MID_BOOKING_STATES = {
     "booking_lab_test",
     "selecting_lab_date",
     "confirming_lab_booking",
+    # Lab date -> who -> name. Holding it to the same 30 minutes means a date
+    # picked yesterday cannot be booked today by typing a name.
+    "confirming_collection_date",
+}
+
+#: Merged into the context on leaving the lab booking steps. update_state
+#: merges rather than replaces, so a key must be overwritten to be cleared.
+_LAB_STEP_CLEARED = {
+    "lab_step": None,
+    "lab_for_self": None,
+    "lab_collection_date": None,
+    "lab_family": None,
+    "lab_pending_name": None,
 }
 
 
@@ -826,6 +839,9 @@ class ConversationManager:
             "collecting_name",
             "collecting_symptoms",
             "suggesting_department",
+            # Lab flow: the "already booking with <doctor>" prompt has no
+            # doctor to name, and "book test" restarts the lab flow anyway.
+            "confirming_collection_date",
         ]
         if (
             intent == "book_appointment"
@@ -1048,6 +1064,15 @@ class ConversationManager:
             intent in ["change_language", "select_language"]
             or message.lower() in ["change language", "भाषा बदलें", "భాష మార్చు"]
         ):
+            # A language button tapped on an earlier picker already says which
+            # language: apply it rather than asking again. Only for a patient
+            # who has consented -- everyone else goes through the picker so the
+            # consent step in _handle_selecting_language still runs.
+            if intent == "select_language" and interactive_data and patient.get("data_consent"):
+                await self._handle_selecting_language(
+                    clinic, phone, message, patient, interactive_data
+                )
+                return
             await self._send_language_selection(clinic, phone)
             await self.update_state(clinic, phone, "selecting_language")
             return
@@ -1080,6 +1105,22 @@ class ConversationManager:
         ):
             await self._handle_browsing_lab_tests(
                 clinic, phone, message, intent, context, lang, interactive_data
+            )
+            return
+        # The lab flow's typed patient name, for the same reason: a name is
+        # free text the classifier may call anything (doctor_availability at a
+        # diagnostics-only clinic restarts the whole lab flow). Navigation,
+        # cancel and the always-first handlers above still win.
+        if (
+            state == "confirming_collection_date"
+            and context.get("lab_step") == "name"
+            and not interactive_data
+            and (message or "").strip()
+            and message.strip().lower() not in NAV_KEYWORDS | LAB_BOOKING_KEYWORDS
+            and intent not in {"greeting", "cancel_appointment", "reschedule_appointment"}
+        ):
+            await self._handle_confirming_collection_date(
+                clinic, phone, message, intent, context, patient, lang, interactive_data
             )
             return
         # A patient typing while browsing or searching treatments is describing a
@@ -2284,19 +2325,22 @@ class ConversationManager:
                 await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
                 return
 
-        # Fallback: Treat typed input as new name if 2+ words, or prompt again
-        if len(msg_clean.split()) >= 2:
+        # Fallback: Treat typed input as new name if 2+ words, or prompt again.
+        # Validated like the name prompt, now that the name may be saved.
+        from app.utils.validators import validate_name
+
+        name_ok, typed_name = validate_name(message) if len(msg_clean.split()) >= 2 else (False, "")
+        if name_ok:
             new_ctx = {
                 **context,
-                "patient_name": message.strip(),
-                "booking_name": message.strip(),
+                "patient_name": typed_name,
+                "booking_name": typed_name,
                 "is_family": True,
                 "for_self": False,
             }
-            if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, new_ctx, lang):
+            if await self._offer_save_family_member(clinic, phone, new_ctx, lang, typed_name):
                 return
-            await self.update_state(clinic, phone, "collecting_symptoms", new_ctx)
-            await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
+            await self._continue_after_patient_name(clinic, phone, new_ctx, lang)
         else:
             await self.whatsapp.send_text(
                 clinic, phone, "Please select who this appointment is for or type their full name."
@@ -2310,24 +2354,83 @@ class ConversationManager:
         context: dict,
         lang: str,
     ) -> None:
-        """Save a new family member to the database if the patient confirmed YES."""
+        """Save (or not) a newly typed family member, then carry on booking.
+
+        This state was never entered before: nothing offered the save, so the
+        family list the booking flow reads was always empty. Either answer now
+        continues to the next booking step instead of dropping the patient at
+        the main menu mid-booking.
+        """
         msg = message.strip().lower()
-        if msg in ["save_family_yes", "yes", "y", "हाँ", "అవును"]:
-            name = context.get("patient_name")
-            if name:
-                await add_family_member(
-                    clinic["id"],
-                    phone,
-                    full_name=name,
-                    relationship=context.get("relationship"),
-                )
-                save_ack = {
-                    "en": f"Saved {name} to your family profiles for quick booking next time! 👍",
-                    "hi": f"{name} को अगली बार त्वरित बुकिंग के लिए आपकी प्रोफ़ाइल में सहेज लिया गया है! 👍",
-                    "te": f"{name} ను తదుపరి శీఘ్ర బుకింగ్ కోసం మీ ప్రొఫైల్‌లో సేవ్ చేసాము! 👍",
-                }.get(lang, f"Saved {name} to your family profiles!")
-                await self.whatsapp.send_text(clinic, phone, save_ack)
-        await self.update_state(clinic, phone, "main_menu")
+        name = context.get("pending_family_name")
+        if not name:
+            # A session parked here by nothing we know of: start clean.
+            await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+            await self._send_main_menu(clinic, phone, lang)
+            return
+
+        if msg in ["save_family_yes", "yes", "y", "save", "हाँ", "हां", "అవును"]:
+            await add_family_member(
+                clinic["id"],
+                phone,
+                full_name=name,
+                relationship=context.get("relationship"),
+            )
+            save_ack = {
+                "en": f"Saved {name} to your family profiles for quick booking next time! 👍",
+                "hi": f"{name} को अगली बार त्वरित बुकिंग के लिए आपकी प्रोफ़ाइल में सहेज लिया गया है! 👍",
+                "te": f"{name} ను తదుపరి శీఘ్ర బుకింగ్ కోసం మీ ప్రొఫైల్‌లో సేవ్ చేసాము! 👍",
+            }.get(lang, f"Saved {name} to your family profiles!")
+            await self.whatsapp.send_text(clinic, phone, save_ack)
+        elif msg not in ["save_family_no", "no", "n", "not now", "नहीं", "కాదు"]:
+            await self._send_save_family_prompt(clinic, phone, name, lang)
+            return
+
+        context["pending_family_name"] = None
+        await self._continue_after_patient_name(clinic, phone, context, lang)
+
+    async def _send_save_family_prompt(self, clinic: dict, phone: str, name: str, lang: str) -> None:
+        await self.whatsapp.send_interactive_buttons(
+            clinic,
+            phone,
+            body={
+                "en": f"Save *{name}* to your family list, so you can pick them next time?",
+                "hi": f"क्या *{name}* को अपनी फैमिली सूची में सेव करें, ताकि अगली बार सीधे चुन सकें?",
+                "te": f"*{name}* ను మీ కుటుంబ జాబితాలో సేవ్ చేయాలా? తదుపరి సారి నేరుగా ఎంచుకోవచ్చు.",
+            }.get(lang, f"Save {name} to your family list?"),
+            buttons=[
+                {"id": "save_family_yes", "title": {
+                    "en": "Save", "hi": "सेव करें", "te": "సేవ్ చేయండి",
+                }.get(lang, "Save")},
+                {"id": "save_family_no", "title": {
+                    "en": "Not now", "hi": "अभी नहीं", "te": "ఇప్పుడు వద్దు",
+                }.get(lang, "Not now")},
+            ],
+        )
+
+    async def _offer_save_family_member(
+        self, clinic: dict, phone: str, context: dict, lang: str, name: str
+    ) -> bool:
+        """Ask to keep a newly typed name. False when it is already saved."""
+        saved = context.get("family_members")
+        if saved is None:
+            saved = await get_family_members(clinic["id"], phone)
+        if name.casefold() in {(m.get("full_name") or "").strip().casefold() for m in saved}:
+            return False
+        context["pending_family_name"] = name
+        await self._send_save_family_prompt(clinic, phone, name, lang)
+        await self.update_state(clinic, phone, "confirming_save_family_member", context)
+        return True
+
+    async def _continue_after_patient_name(
+        self, clinic: dict, phone: str, context: dict, lang: str
+    ) -> None:
+        """The step after "who is this for": the treatment's doctors, or symptoms."""
+        # Treatment bookings skip symptoms: the patient already chose the treatment.
+        if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, context, lang):
+            return
+        await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
+        await self.update_state(clinic, phone, "collecting_symptoms", context)
 
     async def _handle_collecting_name(
         self,
@@ -2380,39 +2483,7 @@ class ConversationManager:
 
         is_valid, result = validate_name(message)
         if not is_valid:
-            if result == "need_full_name":
-                msg = {
-                    "en": "Please share both first and last name. \nExample: Chaitanya Kumar",
-                    "hi": "कृपया अपना पूरा नाम बताएं। \nउदाहरण: चैतन्य कुमार",
-                    "te": "దయచేసి మీ పూర్తి పేరు చెప్పండి. \nఉదా: చైతన్య కుమార్",
-                }.get(
-                    lang,
-                    "Please share both first and last name. \nExample: Chaitanya Kumar",
-                )
-                await self.whatsapp.send_text(clinic, phone, msg)
-            else:
-                errors = {
-                    "en": {
-                        "too_short": "Name is too short. Please share your full name.",
-                        "invalid_chars": "Name should contain only letters.",
-                        "invalid_name": "That doesn't look like a name. \nPlease share the patient's full name.",
-                    },
-                    "hi": {
-                        "too_short": "नाम बहुत छोटा है। कृपया अपना पूरा नाम बताएं।",
-                        "invalid_chars": "नाम में केवल अक्षर होने चाहिए।",
-                        "invalid_name": "यह नाम जैसा नहीं लगता। \nकृपया मरीज़ का पूरा नाम बताएं।",
-                    },
-                    "te": {
-                        "too_short": "పేరు చాలా చిన్నది. దయచేసి మీ పూర్తి పేరు చెప్పండి.",
-                        "invalid_chars": "పేరులో అక్షరాలు మాత్రమే ఉండాలి.",
-                        "invalid_name": "ఇది పేరులా అనిపించడం లేదు. \nదయచేసి రోగి పూర్తి పేరును పంచుకోండి.",
-                    },
-                }
-                lang_errors = errors.get(lang, errors["en"])
-                error_msg = lang_errors.get(
-                    result, errors["en"].get(result, "Please enter a valid full name.")
-                )
-                await self.whatsapp.send_text(clinic, phone, error_msg)
+            await self._send_name_error(clinic, phone, result, lang)
             return
 
         name = result
@@ -2423,14 +2494,48 @@ class ConversationManager:
         # account holder's own name with the family member's.
         if context.get("for_self", True) and not context.get("is_family"):
             await update_patient(clinic["id"], phone, {"name": name})
+        else:
+            context["patient_name"] = name
+            if await self._offer_save_family_member(clinic, phone, context, lang, name):
+                return
 
-        # Treatment bookings skip symptoms: the patient already chose the treatment.
-        if await specialty_flow.route_to_treatment_doctors(self, clinic, phone, context, lang):
-            return
+        await self._continue_after_patient_name(clinic, phone, context, lang)
 
-        # Move to symptoms
-        await self.whatsapp.send_text(clinic, phone, get_message("ask_symptoms", lang))
-        await self.update_state(clinic, phone, "collecting_symptoms", context)
+    async def _send_name_error(self, clinic: dict, phone: str, result: str, lang: str) -> None:
+        """Why a typed name was refused (validate_name's reason code)."""
+        if result == "need_full_name":
+            msg = {
+                "en": "Please share both first and last name. \nExample: Chaitanya Kumar",
+                "hi": "कृपया अपना पूरा नाम बताएं। \nउदाहरण: चैतन्य कुमार",
+                "te": "దయచేసి మీ పూర్తి పేరు చెప్పండి. \nఉదా: చైతన్య కుమార్",
+            }.get(
+                lang,
+                "Please share both first and last name. \nExample: Chaitanya Kumar",
+            )
+            await self.whatsapp.send_text(clinic, phone, msg)
+        else:
+            errors = {
+                "en": {
+                    "too_short": "Name is too short. Please share your full name.",
+                    "invalid_chars": "Name should contain only letters.",
+                    "invalid_name": "That doesn't look like a name. \nPlease share the patient's full name.",
+                },
+                "hi": {
+                    "too_short": "नाम बहुत छोटा है। कृपया अपना पूरा नाम बताएं।",
+                    "invalid_chars": "नाम में केवल अक्षर होने चाहिए।",
+                    "invalid_name": "यह नाम जैसा नहीं लगता। \nकृपया मरीज़ का पूरा नाम बताएं।",
+                },
+                "te": {
+                    "too_short": "పేరు చాలా చిన్నది. దయచేసి మీ పూర్తి పేరు చెప్పండి.",
+                    "invalid_chars": "పేరులో అక్షరాలు మాత్రమే ఉండాలి.",
+                    "invalid_name": "ఇది పేరులా అనిపించడం లేదు. \nదయచేసి రోగి పూర్తి పేరును పంచుకోండి.",
+                },
+            }
+            lang_errors = errors.get(lang, errors["en"])
+            error_msg = lang_errors.get(
+                result, errors["en"].get(result, "Please enter a valid full name.")
+            )
+            await self.whatsapp.send_text(clinic, phone, error_msg)
 
     async def _handle_collecting_symptoms(
         self,
@@ -4422,9 +4527,22 @@ class ConversationManager:
         """Handle data deletion request."""
         from app.database import delete_patient_data
 
-        await delete_patient_data(clinic["id"], phone)
-        await self.whatsapp.send_text(clinic, phone, get_message("data_deleted", lang))
-        await log_analytics_event(clinic["id"], phone, "data_deleted")
+        deleted = await delete_patient_data(clinic["id"], phone)
+        if deleted:
+            reply = get_message("data_deleted", lang)
+        else:
+            reply = {
+                "en": "We couldn't delete your data just now. Please try again in a few minutes, or contact the centre.",
+                "hi": "हम अभी आपका डेटा नहीं हटा सके। कृपया कुछ मिनट बाद फिर कोशिश करें या केंद्र से संपर्क करें।",
+                "te": "ప్రస్తుతం మీ డేటాను తొలగించలేకపోయాము. దయచేసి కొన్ని నిమిషాల తర్వాత మళ్లీ ప్రయత్నించండి లేదా కేంద్రాన్ని సంప్రదించండి.",
+            }.get(lang, "We couldn't delete your data just now. Please try again.")
+        # The purge above deletes the conversation row, and send_text reads
+        # that row to decide whether the 24h window is open -- so the
+        # confirmation was always dropped as "session expired". The patient
+        # messaged us seconds ago, so the window is open by definition.
+        await self.whatsapp.send_text(clinic, phone, reply, _window_open=True)
+        if deleted:
+            await log_analytics_event(clinic["id"], phone, "data_deleted")
 
     async def _handle_human_escalation(
         self, clinic: dict, phone: str, lang: str
@@ -4673,10 +4791,15 @@ class ConversationManager:
             appt_date = appt.get("appointment_date", "")
             date_label = "Today" if appt_date == today else appt_date
             status_label = (appt.get("status") or "").replace("_", " ").title()
+            # A lab-test booking stores doctor_name as NULL (migration 039), and
+            # .get(key, default) returns that None rather than the default, so
+            # slicing it raised TypeError and "cancel" went unanswered for
+            # every patient holding a lab booking.
+            title = appt.get("doctor_name") or appt.get("lab_test_name") or "Booking"
             rows.append(
                 {
                     "id": f"cancel_{appt['id']}",
-                    "title": f"{appt.get('doctor_name', 'Doctor')[:20]}",
+                    "title": title[:24],
                     "description": f"{date_label} {format_slot_time(appt.get('appointment_time', ''))} · {status_label}"[
                         :72
                     ],
@@ -4688,8 +4811,12 @@ class ConversationManager:
         await self.whatsapp.send_interactive_list(
             clinic,
             phone,
-            body="Which appointment would you like to cancel?",
-            button_text="Select",
+            body={
+                "en": "Which booking would you like to cancel?",
+                "hi": "आप कौन सी बुकिंग रद्द करना चाहते हैं?",
+                "te": "మీరు ఏ బుకింగ్ రద్దు చేయాలనుకుంటున్నారు?",
+            }.get(lang, "Which booking would you like to cancel?"),
+            button_text={"en": "Select", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(lang, "Select"),
             sections=sections,
         )
 
@@ -5239,7 +5366,9 @@ class ConversationManager:
             await self._show_lab_test_list(clinic, phone, context, lang)
             return
 
-        # Stash test details in conversation context
+        # Stash test details in conversation context. A new test starts the
+        # date/who/name steps afresh.
+        context.update(_LAB_STEP_CLEARED)
         context["lab_test_id"] = test["id"]
         context["lab_test_name"] = test["name"]
         context["lab_test_price_paise"] = test["price_paise"]
@@ -5311,13 +5440,28 @@ class ConversationManager:
         lang: str,
         interactive_data: Optional[dict] = None,
     ) -> None:
-        """Handle patient selecting a collection date and create the booking."""
-        from app.services.payment import payment_service, resolve_payment_mode
+        """Collection date, then who the test is for, then the booking.
 
-        selected_date = None
-        if interactive_data and interactive_data.get("id", "").startswith("labdate_"):
-            selected_date = interactive_data["id"].removeprefix("labdate_")
+        Three steps inside one state, told apart by context["lab_step"]:
+          (no date yet) -> date buttons
+          "who"         -> For Me / Someone Else buttons
+          "name"        -> the patient's full name, typed
+        The booking used to be written the moment a date was tapped, under
+        the account holder's saved name or the literal "Patient" -- so the
+        centre never learned who was coming, and a test booked for a parent
+        carried nobody's name at all.
+        """
+        from app.utils.validators import validate_name
 
+        button_id = interactive_data.get("id", "") if interactive_data else ""
+
+        # A date tap is honoured at any step, so re-picking the date works.
+        if button_id.startswith("labdate_"):
+            context["lab_collection_date"] = button_id.removeprefix("labdate_")
+            await self._ask_lab_test_patient(clinic, phone, context, patient, lang)
+            return
+
+        selected_date = context.get("lab_collection_date")
         if not selected_date:
             msg = {
                 "en": "Please tap one of the date buttons above to continue.",
@@ -5327,7 +5471,170 @@ class ConversationManager:
             await self.whatsapp.send_text(clinic, phone, msg)
             return
 
-        patient_name = (patient or {}).get("name") or context.get("patient_name") or "Patient"
+        if button_id in ("labfor_self", "labfor_other"):
+            for_self = button_id == "labfor_self"
+            saved_name = ((patient or {}).get("name") or "").strip()
+            if for_self and saved_name:
+                await self._finalize_lab_booking(
+                    clinic, phone, context, patient, lang, selected_date, saved_name
+                )
+                return
+            context["lab_step"] = "name"
+            context["lab_for_self"] = for_self
+            await self.whatsapp.send_text(clinic, phone, get_message("ask_name", lang))
+            await self.update_state(clinic, phone, "confirming_collection_date", context)
+            return
+
+        # A saved family member, indexed into the list the patient was shown.
+        if button_id.startswith("labfor_fam_"):
+            family = context.get("lab_family") or []
+            idx = button_id.removeprefix("labfor_fam_")
+            if idx.isdigit() and int(idx) < len(family):
+                await self._finalize_lab_booking(
+                    clinic, phone, context, patient, lang, selected_date, family[int(idx)]
+                )
+                return
+            # A list from before the family list changed: ask again.
+            await self._ask_lab_test_patient(clinic, phone, context, patient, lang)
+            return
+
+        if button_id in ("labsave_yes", "labsave_no") and context.get("lab_pending_name"):
+            name = context["lab_pending_name"]
+            if button_id == "labsave_yes":
+                await add_family_member(clinic["id"], phone, full_name=name)
+            await self._finalize_lab_booking(
+                clinic, phone, context, patient, lang, selected_date, name
+            )
+            return
+
+        if context.get("lab_step") == "name" and not interactive_data:
+            is_valid, result = validate_name(message or "")
+            if not is_valid:
+                await self._send_name_error(clinic, phone, result, lang)
+                return
+            if context.get("lab_for_self"):
+                await update_patient(clinic["id"], phone, {"name": result})
+            elif result.casefold() not in {n.casefold() for n in context.get("lab_family") or []}:
+                # Someone new: one tap to keep them for next time. Both
+                # buttons book, so paid and counter centres alike continue.
+                context["lab_step"] = "save"
+                context["lab_pending_name"] = result
+                await self._ask_save_lab_family_member(clinic, phone, context, lang)
+                return
+            await self._finalize_lab_booking(
+                clinic, phone, context, patient, lang, selected_date, result
+            )
+            return
+
+        if context.get("lab_step") == "save" and context.get("lab_pending_name"):
+            await self._ask_save_lab_family_member(clinic, phone, context, lang)
+            return
+
+        # Anything else at the "who" step: ask again.
+        await self._ask_lab_test_patient(clinic, phone, context, patient, lang)
+
+    async def _ask_save_lab_family_member(
+        self, clinic: dict, phone: str, context: dict, lang: str
+    ) -> None:
+        """Offer to keep a newly typed name in the family list."""
+        name = context["lab_pending_name"]
+        body = {
+            "en": f"Save *{name}* to your family list, so you can pick them next time?",
+            "hi": f"क्या *{name}* को अपनी फैमिली सूची में सेव करें, ताकि अगली बार सीधे चुन सकें?",
+            "te": f"*{name}* ను మీ కుటుంబ జాబితాలో సేవ్ చేయాలా? తదుపరి సారి నేరుగా ఎంచుకోవచ్చు.",
+        }.get(lang, f"Save {name} to your family list?")
+        await self.whatsapp.send_interactive_buttons(
+            clinic,
+            phone,
+            body=body,
+            buttons=[
+                {"id": "labsave_yes", "title": {
+                    "en": "Save & Book", "hi": "सेव करके बुक करें", "te": "సేవ్ చేసి బుక్",
+                }.get(lang, "Save & Book")},
+                {"id": "labsave_no", "title": {
+                    "en": "Just Book", "hi": "सिर्फ बुक करें", "te": "బుక్ మాత్రమే",
+                }.get(lang, "Just Book")},
+            ],
+        )
+        await self.update_state(clinic, phone, "confirming_collection_date", context)
+
+    @staticmethod
+    def _collection_hours_on(window: dict, date_str: str, lang: str) -> str:
+        """Collection hours for the ONE date booked. The confirmation used to
+        quote the whole week ("07:00 - 21:00 (Sun: 07:00 - 14:00)") even for a
+        Sunday booking, leaving the patient to work out which applied."""
+        start, end = window.get("start", "07:00"), window.get("end", "11:00")
+        try:
+            is_sunday = datetime.strptime(date_str, "%Y-%m-%d").weekday() == 6
+        except (TypeError, ValueError):
+            is_sunday = False
+        if is_sunday and window.get("sunday_start") and window.get("sunday_end"):
+            start, end = window["sunday_start"], window["sunday_end"]
+        label = {
+            "en": "Sample collection", "hi": "सैंपल कलेक्शन", "te": "శాంపిల్ కలెక్షన్",
+        }.get(lang, "Sample collection")
+        return f"{label}: {start} - {end}"
+
+    async def _ask_lab_test_patient(
+        self, clinic: dict, phone: str, context: dict, patient: Optional[dict], lang: str
+    ) -> None:
+        """Ask who the lab test is for, once the collection date is chosen."""
+        saved_name = ((patient or {}).get("name") or "").strip()
+        first = f", {saved_name.split()[0]}" if saved_name else ""
+        body = {
+            "en": f"Who is this test for{first}?",
+            "hi": f"यह टेस्ट किसके लिए है{first}?",
+            "te": f"ఈ పరీక్ష ఎవరి కోసం{first}?",
+        }.get(lang, f"Who is this test for{first}?")
+        self_row = {"id": "labfor_self", "title": {
+            "en": "For Me", "hi": "मेरे लिए", "te": "నా కోసం",
+        }.get(lang, "For Me")}
+        other_row = {"id": "labfor_other", "title": {
+            "en": "Someone Else", "hi": "किसी और के लिए", "te": "వేరొకరి కోసం",
+        }.get(lang, "Someone Else")}
+
+        # Meta allows 10 list rows: For Me + 8 family + Someone Else.
+        family = [
+            (m.get("full_name") or "").strip()
+            for m in await get_family_members(clinic["id"], phone)
+        ]
+        family = [n for n in family if n][:8]
+        context["lab_family"] = family
+
+        if family:
+            rows = [self_row]
+            rows += [
+                {"id": f"labfor_fam_{i}", "title": n[:24]} for i, n in enumerate(family)
+            ]
+            rows.append({**other_row, "title": "+ " + other_row["title"]})
+            await self.whatsapp.send_interactive_list(
+                clinic,
+                phone,
+                body=body,
+                button_text={"en": "Choose", "hi": "चुनें", "te": "ఎంచుకోండి"}.get(lang, "Choose"),
+                sections=[{"title": {
+                    "en": "Patient", "hi": "मरीज़", "te": "రోగి",
+                }.get(lang, "Patient"), "rows": rows}],
+            )
+        else:
+            await self.whatsapp.send_interactive_buttons(
+                clinic, phone, body=body, buttons=[self_row, other_row],
+            )
+        context["lab_step"] = "who"
+        await self.update_state(clinic, phone, "confirming_collection_date", context)
+
+    async def _finalize_lab_booking(
+        self,
+        clinic: dict,
+        phone: str,
+        context: dict,
+        patient: Optional[dict],
+        lang: str,
+        selected_date: str,
+        patient_name: str,
+    ) -> None:
+        """Write the lab booking once date and patient name are both known."""
+        from app.services.payment import payment_service, resolve_payment_mode
 
         # A diagnostic centre with no Razorpay keys used to reach
         # create_booking_with_payment anyway, which asked Razorpay for a payment
@@ -5336,7 +5643,7 @@ class ConversationManager:
         # Every lab booking at such a centre died there. Consultations have
         # always consulted resolve_payment_mode() and booked directly when a
         # clinic collects at the counter; the lab flow simply never did.
-        payment_mode, _deposit_percent = resolve_payment_mode(clinic)
+        payment_mode, deposit_percent = resolve_payment_mode(clinic)
 
         if payment_mode == "none":
             await self._book_lab_test_without_payment(
@@ -5364,6 +5671,10 @@ class ConversationManager:
             lab_test_name=context.get("lab_test_name"),
             branch_id=context.get("branch_id"),
             branch_name=context.get("branch_name"),
+            # Both were dropped here: a centre on "partial" was charged the
+            # full price, and the booking never linked to the patient record.
+            patient_id=(patient or {}).get("id"),
+            deposit_percent=deposit_percent,
         )
 
         if not result.get("success"):
@@ -5381,16 +5692,29 @@ class ConversationManager:
                 "te": "మేము మీ బుకింగ్‌ను ప్రారంభించలేకపోయాము. దయచేసి మళ్లీ ప్రయత్నించండి.",
             }.get(lang, "Failed to initialize booking.")
             await self.whatsapp.send_text(clinic, phone, err_msg)
+            # Leave the name step, or the next thing typed at the menu would
+            # be read as a patient name and retry the booking unasked.
+            await self.update_state(
+                clinic, phone, "main_menu", {"menu_shown": False, **_LAB_STEP_CLEARED}
+            )
             await self._send_main_menu(clinic, phone, lang)
             return
 
         # Send payment link to patient
         amount_rupees = result["amount_paise"] // 100
+        deposit_note = (
+            f"_This is a {deposit_percent}% deposit — the remaining "
+            f"{100 - deposit_percent}% is payable at the centre._\n\n"
+            if payment_mode == "partial" and deposit_percent < 100
+            else ""
+        )
         pay_msg = (
             f"🧪 *Lab Test Booking Reserved*\n\n"
             f"Test: *{context.get('lab_test_name')}*\n"
+            f"Patient: *{patient_name}*\n"
             f"Date: *{selected_date}*\n"
             f"Amount: *₹{amount_rupees}*\n\n"
+            f"{deposit_note}"
             f"Please complete your payment within {settings.booking_hold_minutes} minutes to confirm:\n"
             f"{result['payment_link']}\n\n"
             f"Ref: `{result['booking_ref']}`"
@@ -5401,6 +5725,7 @@ class ConversationManager:
         context["booking_ref"] = result["booking_ref"]
         context["payment_link"] = result["payment_link"]
         context["hold_expires_at"] = result["hold_expires_at"]
+        context.update(_LAB_STEP_CLEARED)
 
         await self.update_state(clinic, phone, "awaiting_payment", context)
 
@@ -5420,7 +5745,7 @@ class ConversationManager:
         centre whose payment mode resolves to "none". The test is confirmed
         immediately and the price is quoted as payable on arrival.
         """
-        from app.database import get_lab_collection_window, format_collection_window
+        from app.database import get_lab_collection_window
 
         appointment_data = {
             "patient_id": (patient or {}).get("id"),
@@ -5453,7 +5778,9 @@ class ConversationManager:
                 "te": "మేము మీ బుకింగ్‌ను పూర్తి చేయలేకపోయాము. దయచేసి మళ్లీ ప్రయత్నించండి లేదా కేంద్రాన్ని సంప్రదించండి.",
             }.get(lang, "We couldn't complete your booking. Please try again.")
             await self.whatsapp.send_text(clinic, phone, err_msg)
-            await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+            await self.update_state(
+                clinic, phone, "main_menu", {"menu_shown": False, **_LAB_STEP_CLEARED}
+            )
             await self._send_main_menu(clinic, phone, lang)
             return
 
@@ -5474,7 +5801,7 @@ class ConversationManager:
             window = await get_lab_collection_window(
                 clinic, branch_id=context.get("branch_id")
             )
-            window_line = f"\n🏠 {format_collection_window(window)}"
+            window_line = f"\n🏠 {self._collection_hours_on(window, selected_date, lang)}"
         except Exception as e:
             # The booking is already written; a missing window must not turn a
             # confirmed test into an error message.
@@ -5499,6 +5826,7 @@ class ConversationManager:
         confirm_text = (
             f"{header}\n\n"
             f"🧪 {context.get('lab_test_name')}\n"
+            f"👤 {patient_name}\n"
             f"📅 {date_display}"
             f"{price_line}"
             f"{window_line}"
@@ -5510,7 +5838,9 @@ class ConversationManager:
             clinic, phone, confirm_text, _source="booking_confirmation"
         )
 
-        await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+        await self.update_state(
+            clinic, phone, "main_menu", {"menu_shown": False, **_LAB_STEP_CLEARED}
+        )
         await self._send_main_menu(clinic, phone, lang)
 
 

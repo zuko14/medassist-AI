@@ -221,7 +221,10 @@ class TestHandleConfirmingCollectionDate:
             },
         }
         patient = {"id": "patient-1", "name": "Test Patient"}
-        context = {"lab_test_id": "t1", "lab_test_name": "CBC", "branch_id": None, "branch_name": None}
+        context = {
+            "lab_test_id": "t1", "lab_test_name": "CBC", "branch_id": None, "branch_name": None,
+            "lab_collection_date": "2026-08-24", "lab_step": "who",
+        }
 
         fake_result = {
             "success": True,
@@ -242,8 +245,8 @@ class TestHandleConfirmingCollectionDate:
             manager, "update_state", new_callable=AsyncMock
         ) as mock_update_state:
             await manager._handle_confirming_collection_date(
-                clinic, "+919876543210", "", "select_date", context, patient, "en",
-                interactive_data={"id": "labdate_2026-08-24"},
+                clinic, "+919876543210", "", "", context, patient, "en",
+                interactive_data={"id": "labfor_self"},
             )
 
         mock_create_booking.assert_called_once()

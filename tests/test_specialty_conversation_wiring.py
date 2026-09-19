@@ -200,7 +200,10 @@ def test_routing_hooks_are_wired():
     assert "specialty_flow.handle_treatment_search_text(" in SRC
     assert "specialty_flow.handle_treatment_state(" in SRC
     assert "specialty_flow.TREATMENT_RESET_STATES" in SRC
-    assert SRC.count("specialty_flow.route_to_treatment_doctors(") == 7
+    # The typed-name paths share _continue_after_patient_name (which also
+    # follows the save-family prompt), so two former call sites are one.
+    assert SRC.count("specialty_flow.route_to_treatment_doctors(") == 6
+    assert "await self._continue_after_patient_name(" in SRC
     view_doctor_block = SRC.split('if intent == "view_doctor":')[1][:3500]
     assert "specialty_flow.clear_treatment_context(context)" in view_doctor_block
 
