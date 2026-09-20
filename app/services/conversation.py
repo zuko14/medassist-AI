@@ -1059,6 +1059,30 @@ class ConversationManager:
             await self._handle_opt_in(clinic, phone, lang)
             return
 
+        # A question ABOUT the clinic -- "where are you located", "what are
+        # your timings", "your contact number". Answered from any state and
+        # WITHOUT touching it, exactly like the help guide above: a patient
+        # halfway through a booking who asks where to come keeps their place.
+        # Placed ahead of the free-text capture branches below (lab search,
+        # treatment search, typed patient name) because those swallow any text
+        # handed to them -- which is how "Where are you located" came back as
+        # 'No test matched "Where are you located"'.
+        # Deliberately NOT before consent: DPDP consent has to be answered
+        # before this bot holds a conversation, and a patient sitting in
+        # `idle` without it is one the state machine is about to send the
+        # consent prompt to. Anyone mid-booking has consented by definition,
+        # so this only gates the first conversation.
+        if (
+            intent == "clinic_info"
+            and patient.get("data_consent")
+            and state not in ("selecting_language", "awaiting_consent")
+        ):
+            if await self._answer_clinic_info(clinic, phone, message, state, lang):
+                return
+            # False means the LLM alone reached clinic_info while the patient
+            # was mid-flow. Fall through to the routing that ran before this
+            # block existed, so a misread test name is still searched.
+
         # Language change request (but NOT when already selecting language - let state machine handle it)
         if state != "selecting_language" and (
             intent in ["change_language", "select_language"]
@@ -4520,6 +4544,82 @@ class ConversationManager:
             buttons=[{"id": "main_menu", "title": t("Main Menu", "मुख्य मेनू", "ప్రధాన మెనూ")[:20]}],
         )
         await log_analytics_event(clinic["id"], phone, "help_viewed")
+
+    #: States a patient is not in the middle of anything. Everywhere else, an
+    #: answered question is an interruption they need help getting back from.
+    _RESTING_STATES = frozenset({"idle", "main_menu", "emergency", "escalated_to_human"})
+
+    async def _answer_clinic_info(
+        self, clinic: dict, phone: str, message: str, state: str, lang: str
+    ) -> bool:
+        """Answer a question about the clinic from the clinic's own data.
+
+        Returns True when an answer was sent, False when the caller should
+        carry on routing as if this block did not exist.
+
+        The conversation state is left exactly as it was, so this can be asked
+        at any point in a booking without costing the patient their progress.
+        """
+        from app.services.tenant import get_clinic_contact
+        from app.services.faq_engine import answer as clinic_info_answer, detect_topic
+
+        topic = detect_topic(message, clinic, lang)
+
+        # A patient mid-search or mid-booking is only interrupted on a
+        # deterministic phrase match. The LLM may route a novel phrasing
+        # ("ur place kahan hai") from a resting state, but never while a
+        # catalogue search is open: one misread test name there would take the
+        # patient's search away, which costs more than the answer is worth.
+        if topic is None and state not in self._RESTING_STATES:
+            return False
+
+        # topic None from a resting state = an info question we could not
+        # categorise. answer() then returns every topic this clinic has data
+        # for, which beats guessing one and guessing wrong.
+        body = await clinic_info_answer(clinic, topic, lang)
+
+        def t(en: str, hi: str, te: str) -> str:
+            return {"en": en, "hi": hi, "te": te}.get(lang, en)
+
+        if state in self._RESTING_STATES:
+            hint = t(
+                "Type *menu* for all options.",
+                "सभी विकल्पों के लिए *menu* लिखें।",
+                "అన్ని ఎంపికల కోసం *menu* అని టైప్ చేయండి.",
+            )
+        else:
+            hint = t(
+                "↩️ You can carry on from where you left off — or type *menu* to start again.",
+                "↩️ आप जहाँ थे वहीं से जारी रख सकते हैं — या फिर से शुरू करने के लिए *menu* लिखें।",
+                "↩️ మీరు ఆపిన చోటి నుండే కొనసాగవచ్చు — లేదా మళ్లీ మొదలుపెట్టడానికి *menu* అని టైప్ చేయండి.",
+            )
+
+        if not body:
+            # Nothing configured for what they asked. Say so and hand them a
+            # human -- the one thing this must never do is fill the gap with a
+            # plausible-sounding address or opening time.
+            reception = get_clinic_contact(
+                clinic,
+                "staff_phone",
+                get_clinic_contact(
+                    clinic,
+                    "phone",
+                    clinic.get("whatsapp_number") or settings.hospital_phone,
+                ),
+            )
+            body = t(
+                f"I don't have that detail on hand. Our team can help — please call {reception}.",
+                f"मेरे पास यह जानकारी नहीं है। कृपया हमारी टीम को {reception} पर कॉल करें।",
+                f"ఆ వివరం నా దగ్గర లేదు. దయచేసి మా బృందానికి {reception} కు కాల్ చేయండి.",
+            )
+
+        await self.whatsapp.send_text(clinic, phone, f"{body}\n\n{hint}")
+        # analytics_events.intent is VARCHAR(50) and a clinic names its own
+        # custom topics, so the width is not ours to assume.
+        await log_analytics_event(
+            clinic["id"], phone, "clinic_info_answered", intent=(topic or "general")[:50]
+        )
+        return True
 
     async def _handle_data_deletion(
         self, clinic: dict, phone: str, patient: dict, lang: str
