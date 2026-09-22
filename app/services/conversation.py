@@ -24,6 +24,7 @@ from app.database import (
 from app.services.ai_engine import (
     detect_intent,
     is_greeting,
+    language_change_request,
     map_symptom_to_department,
     EMERGENCY_KEYWORDS,
 )
@@ -1097,6 +1098,15 @@ class ConversationManager:
                     clinic, phone, message, patient, interactive_data
                 )
                 return
+            # Typed with the language named -- "switch to Telugu", "hindi
+            # please" -- is the same answer as tapping that button, so it is
+            # applied the same way, under the same consent rule.
+            named = None if interactive_data else language_change_request(message)
+            if named in ("en", "hi", "te") and patient.get("data_consent"):
+                await self._handle_selecting_language(
+                    clinic, phone, message, patient, {"id": f"lang_{named}"}
+                )
+                return
             await self._send_language_selection(clinic, phone)
             await self.update_state(clinic, phone, "selecting_language")
             return
@@ -1179,6 +1189,27 @@ class ConversationManager:
                 if has_feature(clinic, "lab_test_booking"):
                     await self._start_lab_booking(clinic, phone, lang)
                     return
+
+            # "I have sugar, what test can I do", "cost of CBC": the question
+            # itself is the search. The catalogue answers it, never the model
+            # -- only tests this centre actually sells are listed. Skipped
+            # where the patient is answering OUR question in free text (a
+            # name, their symptoms): "I have sugar" there is the answer.
+            if (
+                intent == "find_tests"
+                and not interactive_data
+                and state not in self._FREE_TEXT_ANSWER_STATES
+                # Consent answered (either way) first, as for clinic_info.
+                and patient.get("data_consent") is not None
+            ):
+                from app.services.tenant import has_feature
+
+                if has_feature(clinic, "lab_test_booking"):
+                    await self._start_lab_booking(clinic, phone, lang, query=message)
+                    return
+                # The plan changed under an open conversation: the same
+                # answer "services" questions got before find_tests existed.
+                intent = "view_services"
 
             if intent == "doctor_availability":
                 if await self._is_diagnostics_only(clinic):
@@ -1872,7 +1903,12 @@ class ConversationManager:
         await self._start_lab_booking(clinic, phone, lang, category=label)
 
     async def _start_lab_booking(
-        self, clinic: dict, phone: str, lang: str, category: Optional[str] = None
+        self,
+        clinic: dict,
+        phone: str,
+        lang: str,
+        category: Optional[str] = None,
+        query: Optional[str] = None,
     ) -> None:
         """Entry point for the diagnostics-only lab-test flow.
 
@@ -1898,8 +1934,12 @@ class ConversationManager:
 
         if len(active) >= 2:
             await self._send_branch_selection(clinic, phone, active, lang)
+            # A question asked before the centre was picked is answered
+            # right after it, from that centre's catalogue.
+            pending = {"lab_pending_query": query} if query else {}
             await self.update_state(
-                clinic, phone, "selecting_branch", {"lab_flow": True, **seed}, reset_context=True
+                clinic, phone, "selecting_branch", {"lab_flow": True, **seed, **pending},
+                reset_context=True,
             )
             return
 
@@ -1909,7 +1949,7 @@ class ConversationManager:
             context = self._set_branch_context(dict(seed), branch)
 
         await self.update_state(clinic, phone, "browsing_lab_tests", context, reset_context=True)
-        await self._show_lab_test_list(clinic, phone, context, lang)
+        await self._show_lab_test_list(clinic, phone, context, lang, query=query)
 
     async def _start_booking(
         self,
@@ -2220,7 +2260,10 @@ class ConversationManager:
                 # session that lost its context still lands correctly.
                 if context.get("lab_flow") or await self._is_diagnostics_only(clinic):
                     new_context.pop("lab_flow", None)
-                    await self._show_lab_test_list(clinic, phone, new_context, lang)
+                    await self._show_lab_test_list(
+                        clinic, phone, new_context, lang,
+                        query=new_context.pop("lab_pending_query", None),
+                    )
                     return
 
                 # If diagnostic-only branch, redirect to reports
@@ -4549,6 +4592,9 @@ class ConversationManager:
     #: answered question is an interruption they need help getting back from.
     _RESTING_STATES = frozenset({"idle", "main_menu", "emergency", "escalated_to_human"})
 
+    #: States where free text is the patient's answer to our question.
+    _FREE_TEXT_ANSWER_STATES = frozenset({"collecting_name", "collecting_symptoms", "asking_symptoms"})
+
     async def _answer_clinic_info(
         self, clinic: dict, phone: str, message: str, state: str, lang: str
     ) -> bool:
@@ -5051,9 +5097,63 @@ class ConversationManager:
         # Tier 2 & 3: Multilingual synonyms and difflib typo tolerance (runs only when Tier 1 is empty)
         try:
             from app.services.hybrid_search import multilingual_synonym_search
-            return multilingual_synonym_search(tests, query)
+            hits = multilingual_synonym_search(tests, query)
         except Exception:
-            return []
+            hits = []
+        if hits or "," not in query:
+            return hits
+
+        # "sugar, thyroid" -- two things asked about at once (the interpreted
+        # query _show_lab_test_list stores). Each part is searched on its own,
+        # in order, rather than hunting for one test that is both.
+        seen: set = set()
+        union: list[dict] = []
+        for part in query.split(","):
+            if not part.strip():
+                continue
+            for t in ConversationManager._match_lab_tests(tests, part):
+                if id(t) not in seen:
+                    seen.add(id(t))
+                    union.append(t)
+        return union
+
+    async def _interpret_lab_query(
+        self, clinic: dict, tests: list[dict], query: str
+    ) -> tuple[list[dict], str]:
+        """Read a sentence typed into the search when the words themselves
+        matched nothing. Returns (tests, the query they matched), or
+        ([], query) to fall back exactly as before.
+
+        1. Drop the conversational words: "I have sugar, what test can I do"
+           is a search for "sugar". Free, and works with the LLM down.
+        2. Still nothing and it reads like a sentence: ask the model which
+           test, organ or condition was NAMED (never inferred from a
+           symptom), in any language, and look those up.
+
+        Either way every row shown is a test this centre actually sells.
+        """
+        from app.services.ai_engine import extract_catalogue_terms
+        from app.services.hybrid_search import strip_query_filler
+
+        cleaned = strip_query_filler(query)
+        if cleaned and cleaned != query.strip().lower():
+            hits = self._match_lab_tests(tests, cleaned)
+            if hits:
+                return hits, cleaned
+
+        # Single words and typos are the fuzzy tier's job; the model is only
+        # worth a call for a sentence.
+        if len(query.split()) >= self.LAB_INTERPRET_MIN_WORDS:
+            terms = await extract_catalogue_terms(query, clinic)
+            if terms:
+                joined = ", ".join(terms)
+                hits = self._match_lab_tests(tests, joined)
+                if hits:
+                    return hits, joined
+        return [], query
+
+    #: Words a no-match search needs before the model is asked to read it.
+    LAB_INTERPRET_MIN_WORDS = 3
 
     async def _show_lab_test_list(
         self,
@@ -5111,22 +5211,38 @@ class ConversationManager:
         # Capped because the query is echoed back into the list body, and
         # Meta rejects the whole message over 1024 characters -- a pasted
         # paragraph would otherwise take the patient's list away entirely.
-        query = (query or "").strip()[:60].strip() or None
+        # The whole question is read when it has to be interpreted; only the
+        # echo is capped.
+        full_query = (query or "").strip()[:300]
+        query = full_query[:60].strip() or None
         shown = tests
+        # True when the list answers what the patient MEANT rather than the
+        # words they typed -- the body then says these are options, not advice.
+        interpreted = False
         if query:
             shown = self._match_lab_tests(tests, query)
             if not shown:
+                shown, matched_query = await self._interpret_lab_query(clinic, tests, full_query)
+                if shown:
+                    query, interpreted = matched_query[:60].strip(), True
+            if not shown:
                 # Falling back to the unfiltered catalogue is the only exit
                 # that does not dead-end a patient who mistyped a test name.
-                await self.whatsapp.send_text(
-                    clinic,
-                    phone,
-                    {
+                if len(query.split()) >= self.LAB_INTERPRET_MIN_WORDS:
+                    # A sentence nothing in the catalogue answers -- usually
+                    # a symptom. Which test suits it is a doctor's call.
+                    no_match = {
+                        "en": "I couldn't find a test by that name. I can't advise which test you need — a doctor can. Type a test name (e.g. \"thyroid\", \"CBC\"), pick from the list below, or type *talk to staff*.",
+                        "hi": "इस नाम से कोई टेस्ट नहीं मिला। कौन सा टेस्ट चाहिए, यह डॉक्टर बता सकते हैं — मैं सलाह नहीं दे सकता। टेस्ट का नाम लिखें (जैसे \"thyroid\"), नीचे सूची से चुनें, या *talk to staff* लिखें।",
+                        "te": "ఆ పేరుతో పరీక్ష దొరకలేదు. మీకు ఏ పరీక్ష అవసరమో డాక్టర్ చెప్పగలరు — నేను సలహా ఇవ్వలేను. పరీక్ష పేరు టైప్ చేయండి (ఉదా. \"thyroid\"), క్రింది జాబితా నుండి ఎంచుకోండి, లేదా *talk to staff* అని టైప్ చేయండి.",
+                    }
+                else:
+                    no_match = {
                         "en": f'No test matched "{query}". Showing the full list — try a shorter word, like "thyroid" or "urine".',
                         "hi": f'"{query}" से कोई टेस्ट नहीं मिला। पूरी सूची दिखा रहे हैं — छोटा शब्द आज़माएँ, जैसे "thyroid"।',
                         "te": f'"{query}" కి పరీక్ష దొరకలేదు. పూర్తి జాబితా చూపిస్తున్నాం — చిన్న పదం ప్రయత్నించండి, ఉదా. "thyroid".',
-                    }.get(lang, f'No test matched "{query}". Showing the full list.'),
-                )
+                    }
+                await self.whatsapp.send_text(clinic, phone, no_match.get(lang, no_match["en"]))
                 shown, query, page = tests, None, 0
 
         all_rows = []
@@ -5197,6 +5313,12 @@ class ConversationManager:
                 "hi": f'🔍 "{query}" से मिलते {len(shown)} टेस्ट।\n\nनीचे टैप करके चुनें, दूसरा नाम टाइप करके फिर खोजें, या पूरी सूची के लिए "all" भेजें।',
                 "te": f'🔍 "{query}" కి సరిపోయే {len(shown)} పరీక్షలు.\n\nక్రింద ట్యాప్ చేసి ఎంచుకోండి, మళ్లీ వెతకడానికి మరో పేరు టైప్ చేయండి, లేదా పూర్తి జాబితాకు "all" పంపండి.',
             }.get(lang, f'{len(shown)} test(s) matching "{query}".')
+            if interpreted:
+                body += {
+                    "en": "\n\nℹ️ These are the tests we offer for what you mentioned. Only your doctor can advise which one you need.",
+                    "hi": "\n\nℹ️ आपने जो बताया, उससे जुड़े हमारे टेस्ट ये हैं। कौन सा टेस्ट आपके लिए सही है, यह केवल आपके डॉक्टर बता सकते हैं।",
+                    "te": "\n\nℹ️ మీరు చెప్పినదానికి సంబంధించి మా వద్ద ఉన్న పరీక్షలు ఇవి. మీకు ఏది అవసరమో మీ డాక్టర్ మాత్రమే చెప్పగలరు.",
+                }.get(lang, "")
         elif len(tests) > self.LAB_SEARCH_HINT_THRESHOLD:
             # Lead with the question, not the catalogue size. A 1,392-test
             # menu is 155 taps deep at 9 rows a page, so browsing is the
@@ -5508,7 +5630,8 @@ class ConversationManager:
         if details:
             instructions_line += f"\n📝 *Details:* {details[:400]}"
         if test.get("fasting_required"):
-            instructions_line = "\n⚠️ *Fasting Required:* 10-12 hours fasting before collection."
+            # += : plain = here threw away the package's Details line above.
+            instructions_line += "\n⚠️ *Fasting Required:* 10-12 hours fasting before collection."
         if test.get("prep_instructions"):
             instructions_line += f"\n📋 *Prep:* {test['prep_instructions']}"
 

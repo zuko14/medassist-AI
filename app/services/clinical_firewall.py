@@ -124,6 +124,58 @@ MEDICATION_NAMES = {
     "సిరప్",
 }
 
+#: Nutrients and hormones a lab MEASURES as often as a pharmacy sells them.
+#: "Vitamin B12", "Serum Calcium" and "Fasting Insulin" are test names at every
+#: diagnostic centre, so on their own they are a catalogue search. They count
+#: as a medication request only next to a dosage form, or a take-verb that is
+#: not about a test ("how much insulin should I take" still blocks).
+ANALYTE_NAMES = frozenset({"calcium", "zinc", "vitamin d3", "vitamin b12", "insulin"})
+
+_DOSAGE_FORM = re.compile(
+    r"\b(?:medicine|medicines|medication|medications|tablet|tablets|tab|tabs|capsule|capsules|"
+    r"syrup|injection|injections|drug|drugs|dose|doses|dosage|pill|pills|supplement|"
+    r"supplements|ointment|cream|remedy|remedies|mg|mcg|iu|prescri\w*)\b",
+    re.IGNORECASE,
+)
+_TAKE_VERB = re.compile(r"\b(?:take|taking|took|eat|eating|drink|drinking)\b", re.IGNORECASE)
+
+#: A question about a lab test, scan or package. "Which test should I take for
+#: sugar" and "can I take the test on Sunday" are catalogue questions, not a
+#: request for medicine -- as long as no dosage form is mentioned too.
+_TEST_CONTEXT = re.compile(
+    r"\b(?:test|tests|testing|scan|scans|x-?ray|mri|ct|ultrasound|usg|sonography|checkup|"
+    r"check-up|profile|panel|package|packages|screening|lab)\b|टेस्ट|जांच|जाँच|పరీక్ష|టెస్ట్",
+    re.IGNORECASE,
+)
+
+#: Latin-script names are matched as whole words -- a substring match read
+#: "Pandey" and "lipid panel" as the antacid "pan", "genotype" as "eno", and
+#: told those patients we cannot give medical advice. A trailing digit still
+#: counts ("dolo650", "pan40"). Hindi/Telugu names keep the substring match:
+#: their vowel signs are not word characters, so \b is unreliable there.
+_ASCII_MEDICATION_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(
+        re.escape(m)
+        for m in sorted(MEDICATION_NAMES - ANALYTE_NAMES, key=len, reverse=True)
+        if m.isascii()
+    )
+    + r")(?=\d|\b)",
+    re.IGNORECASE,
+)
+_ANALYTE_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(m) for m in sorted(ANALYTE_NAMES, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+_NON_ASCII_MEDICATION_NAMES = tuple(m for m in MEDICATION_NAMES if not m.isascii())
+
+#: The phrases below that are ambiguous between a medicine and a test.
+_TAKE_PHRASES = frozenset({"should i take", "can i take", "what can i take for"})
+
+
+def _is_test_question(message: str) -> bool:
+    return bool(_TEST_CONTEXT.search(message)) and not _DOSAGE_FORM.search(message)
+
 # ── Diagnostic Request Patterns ────────────────────────────────────────────────
 
 DIAGNOSTIC_PHRASES = [
@@ -354,24 +406,39 @@ def screen_message(message: str, lang: str = "en") -> tuple[bool, Optional[str]]
         logger.info("Clinical firewall triggered: fetal sex determination request (PCPNDT)")
         return True, _SEX_DETERMINATION_RESPONSE.get(lang, _SEX_DETERMINATION_RESPONSE["en"])
 
+    test_question = _is_test_question(message)
+
     # 1. Check for medication names anywhere in message
-    for med in MEDICATION_NAMES:
-        if med.lower() in msg_lower:
-            logger.info(
-                f"Clinical firewall triggered: medication keyword '{med}' detected"
-            )
-            return True, _build_response(lang)
+    med_hit = _ASCII_MEDICATION_PATTERN.search(message)
+    med = med_hit.group(0) if med_hit else next(
+        (m for m in _NON_ASCII_MEDICATION_NAMES if m in msg_lower), None
+    )
+    analyte = None if med else _ANALYTE_PATTERN.search(message)
+    if analyte and (
+        _DOSAGE_FORM.search(message) or (_TAKE_VERB.search(message) and not test_question)
+    ):
+        med = analyte.group(0)
+    if med:
+        logger.info(
+            f"Clinical firewall triggered: medication keyword '{med}' detected"
+        )
+        return True, _build_response(lang)
 
     # 2. Check for diagnostic/prescription phrases
     for phrase in DIAGNOSTIC_PHRASES:
+        if phrase in _TAKE_PHRASES and test_question:
+            continue
         if phrase.lower() in msg_lower:
             logger.info(
                 f"Clinical firewall triggered: diagnostic phrase '{phrase}' detected"
             )
             return True, _build_response(lang)
 
-    # 3. Check regex treatment-seeking patterns
-    for pattern in _TREATMENT_SEEKING_PATTERNS:
+    # 3. Check regex treatment-seeking patterns. The first one ("what ...
+    #    take ... for ... sugar") is also how a test question is worded.
+    for i, pattern in enumerate(_TREATMENT_SEEKING_PATTERNS):
+        if i == 0 and test_question:
+            continue
         if pattern.search(message):
             logger.info(
                 "Clinical firewall triggered: treatment-seeking pattern matched"

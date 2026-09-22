@@ -770,6 +770,97 @@ def guide_command_intent(message: str) -> Optional[str]:
     return GUIDE_COMMAND_INTENTS.get((message or "").strip(_GREETING_TRIM).lower())
 
 
+#: What patients call each language, in all three scripts.
+_LANGUAGE_NAMES = {
+    "en": ("english", "angrezi", "inglish", "इंग्लिश", "अंग्रेज़ी", "अंग्रेजी", "ఇంగ్లీష్", "ఇంగ్లిష్", "ఆంగ్లం"),
+    "hi": ("hindi", "हिंदी", "हिन्दी", "హిందీ"),
+    "te": ("telugu", "తెలుగు", "तेलुगु", "तेलुगू"),
+}
+_LANGUAGE_WORDS = frozenset({"language", "languages", "lang", "bhasha", "bhasa", "भाषा", "భాష"})
+_LANGUAGE_VERB_STEMS = ("chang", "switch", "select", "choos", "prefer", "updat", "modif",
+                        "badal", "badl", "maarch", "marchu", "बदल", "మార్చ")
+#: Every other word a language request is made of. A message is only read as
+#: one when EVERY word is a language name, a language word, a change verb or
+#: one of these -- so "change my language" and "hindi mein baat karo" count,
+#: while "is the report in english?" (report) and "do you have Telugu
+#: speaking staff" (have, staff) are left to the classifier.
+_LANGUAGE_FILLER = frozenset({
+    "i", "im", "me", "my", "mine", "we", "us", "you", "u", "your", "ur", "can", "could",
+    "would", "will", "please", "pls", "plz", "kindly", "want", "wanna", "need", "like",
+    "to", "in", "into", "the", "a", "an", "of", "from", "now", "only", "just", "and",
+    "or", "back", "is", "it", "set", "let", "lets", "use", "different", "another", "other",
+    "how", "do", "chat", "talk", "speak", "reply", "respond", "write", "text", "message",
+    "messages", "send", "ok", "okay", "sir", "madam", "mam", "bot", "mode",
+    "mein", "mai", "main", "lo", "karo", "kar", "karein", "kariye", "kijiye",
+    "baat", "mujhe", "meri", "apni", "cheppandi", "chepandi", "matladandi",
+    "maatladandi", "matladu", "naaku", "naku", "nenu", "hai", "karni", "karna",
+    "chahiye", "chahta", "chahti", "hu", "hoon", "kavali",
+    "में", "मैं", "मुझे", "मेरी", "बात", "करो", "करें", "कीजिए", "कृपया",
+    "है", "करनी", "करना", "चाहिए", "चाहता", "चाहती", "हूं", "हूँ",
+    "లో", "నాకు", "నా", "మాట్లాడండి", "మాట్లాడు", "చెప్పండి", "దయచేసి", "కావాలి",
+})
+
+
+def _language_named(word: str, name: str) -> bool:
+    # Telugu and Hindi glue the postposition on: "తెలుగులో", "हिंदीमें".
+    return word == name or (not name.isascii() and word.startswith(name) and len(word) - len(name) <= 3)
+
+
+def language_change_request(message: str) -> Optional[str]:
+    """Is this a request to change the chat language, in the patient's words?
+
+    Returns "en" / "hi" / "te" when the message names the language to switch
+    to, "ask" when it asks to change without naming one ("change my
+    language"), and None when it is not a language request at all.
+
+    Deterministic, so the commonest phrasings survive an LLM outage. Before
+    this only the literal guide command "change language" was recognised;
+    "Change my language" went to the classifier, which had no such intent.
+    """
+    text = (message or "").strip(_GREETING_TRIM).lower()
+    if not text or len(text) > 80:
+        return None
+    words = re.findall(r"[\wऀ-ॿఀ-౿]+", text)
+    if not words or len(words) > 10:
+        return None
+
+    named: list = []  # (word index, code)
+    has_lang_word = has_verb = False
+    for i, w in enumerate(words):
+        code = next(
+            (c for c, names in _LANGUAGE_NAMES.items() if any(_language_named(w, n) for n in names)),
+            None,
+        )
+        if code:
+            named.append((i, code))
+        elif w in _LANGUAGE_WORDS or w.startswith(("भाषा", "భాష")):
+            has_lang_word = True
+        elif w.startswith(_LANGUAGE_VERB_STEMS):
+            has_verb = True
+        elif w not in _LANGUAGE_FILLER:
+            return None
+
+    codes = {c for _, c in named}
+    if len(codes) > 1:
+        # "change from english to telugu": the one after "to"/"into"/"in" wins.
+        after = [c for i, c in named if i > 0 and words[i - 1] in ("to", "into", "in")]
+        return after[-1] if after else "ask"
+    if codes:
+        return codes.pop()
+    if has_lang_word and (has_verb or len(words) <= 3):
+        return "ask"
+    return None
+
+
+#: Words that make a message about a test, scan or package rather than a
+#: doctor or an appointment. Used only by the offline fallback below.
+_TEST_WORDS = re.compile(
+    r"\b(?:test|tests|scan|scans|mri|ct scan|x-?ray|ultrasound|sonography|checkup|check-up|"
+    r"health package|profile)\b|टेस्ट|जांच|जाँच|పరీక్ష|టెస్ట్",
+    re.IGNORECASE,
+)
+
+
 def keyword_intent_fallback(message: str, clinic: Optional[dict] = None) -> str:
     """Fallback intent detection using keywords when OpenRouter fails."""
     msg = message.lower().strip()
@@ -794,7 +885,19 @@ def keyword_intent_fallback(message: str, clinic: Optional[dict] = None) -> str:
             if kw in msg:
                 return intent
 
+    # After every keyword above, so "test report", "book test" and "cancel
+    # my test" keep their meaning: only a message nothing else claimed is
+    # read as a question about the test catalogue.
+    if clinic and _offers_lab_tests(clinic) and _TEST_WORDS.search(message):
+        return "find_tests"
+
     return "unknown"
+
+
+def _offers_lab_tests(clinic: Optional[dict]) -> bool:
+    from app.services.tenant import has_feature
+
+    return bool(clinic) and has_feature(clinic, "lab_test_booking")
 
 
 def keyword_symptom_fallback(symptom: str) -> dict:
@@ -867,6 +970,11 @@ async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
     if guide_intent:
         return guide_intent
 
+    # Fast-path 2c: the same request in the patient's own words -- "change my
+    # language", "switch to Telugu", "hindi mein baat karo".
+    if language_change_request(message):
+        return "change_language"
+
     # Fast-path 3: a bare greeting never needs the LLM (see GREETING_WORDS).
     if is_greeting(message):
         return "greeting"
@@ -889,6 +997,22 @@ async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
 
     clean_message = strip_injection_markers(sanitized_message)
 
+    # find_tests is only offered where there is a test catalogue to search;
+    # anywhere else the classifier sees exactly the intent list it always did.
+    labs = _offers_lab_tests(clinic)
+    find_tests_intent = " find_tests," if labs else ""
+    find_tests_guide = (
+        """
+*find_tests* is for a question about which lab tests, scans or health packages we
+offer, their price, or which tests exist for a condition or organ the patient names:
+"do you have thyroid test", "cost of CBC", "I have sugar, what test can I do",
+"kidney test available?", "full body checkup price". Not for test RESULTS or reports
+(view_reports), and not to book a doctor.
+"""
+        if labs
+        else ""
+    )
+
     try:
         system_prompt = build_system_prompt(clinic)
         response_data = await call_openrouter_with_backoff(
@@ -898,11 +1022,15 @@ async def detect_intent(message: str, clinic: Optional[dict] = None) -> str:
                     "role": "user",
                     "content": f"""Classify this patient message into exactly one intent:
 book_appointment, cancel_appointment, reschedule_appointment, view_services, view_reports,
-doctor_availability, clinic_info, queue_status, emergency, opt_out, data_deletion_request,
-human_escalation, followup_booking, greeting, or unknown.
+doctor_availability, clinic_info,{find_tests_intent} change_language, queue_status, emergency, opt_out,
+data_deletion_request, human_escalation, followup_booking, greeting, or unknown.
 
 *NOTE*: If the user mentions a common symptom (e.g., 'fever', 'pain', 'cough'), the intent is book_appointment, NOT emergency.
 
+*change_language* is a request to talk in another language (English, Hindi, Telugu),
+in any wording: "change my language", "can we talk in telugu", "hindi please".
+Moving an appointment is reschedule_appointment, not change_language.
+{find_tests_guide}
 *clinic_info* is for a question ABOUT the clinic itself rather than a request to do
 something — where it is, how to get there, what hours it keeps, whether it is open
 today, how to phone it. Patients ask these in their own words, e.g. "where r u",
@@ -929,10 +1057,15 @@ Respond with ONLY the intent name, nothing else.""",
         else:
             choices = response_data.get("choices") or []
             if not choices:
-                return keyword_intent_fallback(message)
+                return keyword_intent_fallback(message, clinic)
             content = choices[0].get("message", {}).get("content", "")
 
         intent = content.strip().lower()
+
+        # Offered only to a clinic with a catalogue (see above); a model that
+        # says it anyway gets the answer the same question always got.
+        if intent == "find_tests" and not labs:
+            return "view_services"
 
         # Strict whitelist validation
         allowed_intents = {
@@ -943,6 +1076,8 @@ Respond with ONLY the intent name, nothing else.""",
             "view_reports",
             "doctor_availability",
             "clinic_info",
+            "find_tests",
+            "change_language",
             "queue_status",
             "emergency",
             "opt_out",
@@ -959,11 +1094,11 @@ Respond with ONLY the intent name, nothing else.""",
         logger.warning(
             f"LLM returned unexpected intent '{intent}' — falling back to keyword"
         )
-        return keyword_intent_fallback(message)
+        return keyword_intent_fallback(message, clinic)
 
     except Exception as e:
         logger.warning(f"OpenRouter intent detection failed: {e}. Using keyword fallback.")
-        return keyword_intent_fallback(message)
+        return keyword_intent_fallback(message, clinic)
 
 
 async def map_symptom_to_department(symptom: str, clinic: dict) -> dict:
@@ -1113,7 +1248,9 @@ async def generate_response(
             messages=[
                 {
                     "role": "system",
-                    "content": build_system_prompt(clinic) + f"\n\n{lang_instruction}",
+                    "content": build_system_prompt(clinic)
+                    + _reply_grounding(clinic)
+                    + f"\n\n{lang_instruction}",
                 },
                 {"role": "user", "content": clean_message},
             ],
@@ -1148,6 +1285,104 @@ async def generate_response(
         }
         lang = language or "en"
         return fallbacks.get(lang, fallbacks["en"])
+
+
+def _reply_grounding(clinic: Optional[dict]) -> str:
+    """What the free-text reply may point to, and what it must never invent.
+
+    The reply is what a patient gets when nothing else understood them, so it
+    has to end in something they can do. Only commands this clinic's plan
+    actually answers are listed -- the same rule as the help guide.
+    """
+    from app.services.tenant import has_feature
+
+    clinic = clinic or {}
+    commands = ["*menu* (all options)"]
+    if has_feature(clinic, "booking"):
+        commands.append("*book* (doctor appointment)")
+    if _offers_lab_tests(clinic):
+        commands.append("a test name such as *thyroid* or *CBC* (lab tests, prices, booking)")
+    commands += ["*cancel booking*", "*change language*", "*talk to staff*", "*emergency*"]
+    return (
+        "\n\nFACTS: Never state a price, test, doctor, timing, address or service that is "
+        "not written above. If you do not know, say our staff can help."
+        "\nEnd your reply by telling the patient which ONE of these they can type: "
+        + ", ".join(commands)
+        + "."
+    )
+
+
+#: Longest term and most terms extract_catalogue_terms will hand back.
+_MAX_TERM_CHARS = 40
+_MAX_TERMS = 3
+_TERM_SHAPE = re.compile(r"^[\w][\w \-+./()]*$")
+
+
+async def extract_catalogue_terms(message: str, clinic: Optional[dict] = None) -> List[str]:
+    """Search words for a lab catalogue, read out of a patient's sentence.
+
+    "I have sugar, what kind of test can I have" -> ["sugar"]
+    "నాకు థైరాయిడ్ టెస్ట్ కావాలి" -> ["thyroid"]
+
+    Used only after the literal catalogue search found nothing. The terms are
+    never shown to the patient as advice: they are looked up in the clinic's
+    own catalogue, and only tests that exist there are listed.
+
+    The model is told to return a term only for a test, organ or condition the
+    patient NAMED, never to infer tests from symptoms -- which test suits a
+    symptom is a doctor's call, the same line hybrid_search draws. Returns []
+    on any failure, so the caller falls back to what it did before.
+    """
+    sanitized, is_suspicious = sanitize_user_input(message or "")
+    if is_suspicious or not sanitized.strip():
+        return []
+    clean = strip_injection_markers(sanitized)[:300]
+
+    try:
+        response_data = await call_openrouter_with_backoff(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You turn a patient's WhatsApp message into search words for a "
+                        "diagnostic lab's test catalogue. Reply with JSON only: "
+                        '{"terms": ["..."]}\n'
+                        "Rules:\n"
+                        "- Only a test, scan, health package, organ or condition the patient "
+                        'NAMED: "sugar" or "diabetes" -> "glucose"; "thyroid"; "kidney"; '
+                        '"cholesterol"; "vitamin d"; "pregnancy"; "MRI brain"; "full body checkup".\n'
+                        "- Translate Hindi, Telugu and Hinglish into the English words a lab "
+                        "catalogue uses.\n"
+                        "- Symptoms alone (tiredness, pain, fever, dizziness) are NOT a test: "
+                        'return {"terms": []}. Never guess which test suits a symptom.\n'
+                        "- No medicines, advice or explanations. At most 3 terms, 1-3 words each."
+                    ),
+                },
+                {"role": "user", "content": f'Message: "{clean}"'},
+            ],
+            response_format={"type": "json_object"},
+            timeout=4,
+            max_tokens=60,
+            clinic_id=(clinic or {}).get("id"),
+        )
+        raw = _completion_text(response_data)
+        terms = json.loads(raw).get("terms") if raw else None
+    except Exception as e:
+        logger.warning(f"Catalogue term extraction failed: {e}")
+        return []
+
+    if not isinstance(terms, list):
+        return []
+    out: List[str] = []
+    for term in terms:
+        if not isinstance(term, str):
+            continue
+        term = " ".join(term.split()).strip(" ,")
+        if term and len(term) <= _MAX_TERM_CHARS and _TERM_SHAPE.match(term) and term.lower() not in out:
+            out.append(term.lower())
+        if len(out) == _MAX_TERMS:
+            break
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════

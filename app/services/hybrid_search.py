@@ -107,6 +107,32 @@ ENGLISH_SYNONYM_MAP: Dict[str, List[str]] = {
 # Common noise words to strip from query before processing
 STOP_WORDS = {"test", "tests", "checkup", "package", "profile", "investigation", "panel", "for", "in", "of", "and"}
 
+#: The conversational part of a question typed into the catalogue search --
+#: "I have sugar, what kind of test can I do" is a search for "sugar". Only
+#: words that are never a test name on their own; "blood", "full", "body",
+#: "checkup" and "profile" stay, because the catalogue uses them.
+QUERY_FILLER = frozenset({
+    "i", "im", "me", "my", "mine", "we", "our", "you", "your", "u", "ur", "he", "she", "his",
+    "her", "they", "their", "it", "its", "this", "that", "these", "those", "there", "here",
+    "have", "has", "had", "having", "got", "get", "am", "is", "are", "was", "were", "be",
+    "been", "do", "does", "did", "done", "doing", "can", "could", "should", "would", "will",
+    "shall", "may", "might", "must", "what", "whats", "which", "who", "how", "much", "many",
+    "any", "some", "kind", "kinds", "type", "types", "sort", "of", "a", "an", "the", "to",
+    "for", "in", "on", "at", "with", "about", "and", "or", "please", "pls", "plz", "want",
+    "wanna", "need", "needed", "like", "know", "tell", "take", "taking", "available",
+    "availability", "test", "tests", "testing", "price", "prices", "cost", "costs", "rate",
+    "rates", "charge", "charges", "fee", "fees", "book", "booking", "suggest", "give",
+    "show", "list", "offer", "provide", "also", "just", "so", "if", "then", "hi", "hello",
+    "sir", "madam", "mam", "ji", "kya", "hai", "hain", "ka", "ki", "ke", "ko", "mujhe",
+    "mera", "meri", "mere", "liye", "konsa", "kaunsa", "kaun", "sa", "se", "chahiye",
+    "karna", "karwana", "karana", "hoga", "ho", "kitna", "kitne",
+})
+
+
+def strip_query_filler(query: str) -> str:
+    """The words of `query` that could name a test, in their original order."""
+    return " ".join(w for w in _tokenize(query) if w not in QUERY_FILLER)
+
 
 def _tokenize(text: str) -> List[str]:
     """Extract lowercase alphanumeric words and non-ASCII unicode tokens."""
