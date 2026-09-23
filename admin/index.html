@@ -2062,7 +2062,14 @@
                             <option value="">— Select Branch —</option>
                         </select>
                     </div>
-                    <div class="field"></div>
+                    <div class="field">
+                        <label>Session at this Branch</label>
+                        <select id="f-docBranchSession" onchange="updateSlotPreview()">
+                            <option value="both">Both (All Slots)</option>
+                            <option value="morning">Morning Only</option>
+                            <option value="evening">Evening Only</option>
+                        </select>
+                    </div>
                 </div>
                 <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px">
                     <label class="check strong">
@@ -3448,8 +3455,15 @@ function updateSlotPreview() {
         const parts = [];
         if (mornEnabled) parts.push(`${morn} morning`);
         if (eveEnabled) parts.push(`${eve} evening`);
-        previewEl.textContent = `→ generates ${parts.join(' + ')} slots`;
-        previewEl.style.color = 'var(--text3)';
+        let text = `→ generates ${parts.join(' + ')} slots`;
+        // A branch session filters the shifts above out of what patients see
+        // (get_available_slots). Say so here, where the shifts are edited.
+        const session = document.getElementById('f-docBranchSession')?.value || 'both';
+        const hidden = session === 'morning' && eveEnabled ? 'evening'
+            : session === 'evening' && mornEnabled ? 'morning' : '';
+        if (hidden) text += ` · ${session} only at this branch: ${hidden} slots are NOT offered to patients`;
+        previewEl.textContent = text;
+        previewEl.style.color = hidden ? 'var(--amber)' : 'var(--text3)';
     }
 }
 
@@ -5867,6 +5881,29 @@ async function loadDoctors() {
 
 // Populate branch dropdown in doctor form (only visible for multi-branch clinics)
 let _docBranchCache = [];
+let _docBranchLocked = false;
+const DOC_MULTI_BRANCH = '__multi__';
+
+function setDocBranchLocked(locked) {
+    _docBranchLocked = locked;
+    const sel = document.getElementById('f-docBranch');
+    const sessionSel = document.getElementById('f-docBranchSession');
+    const marker = sel.querySelector(`option[value="${DOC_MULTI_BRANCH}"]`);
+    if (locked && !marker) {
+        const opt = document.createElement('option');
+        opt.value = DOC_MULTI_BRANCH;
+        opt.textContent = 'Assigned to multiple branches (manage in Branches tab)';
+        sel.appendChild(opt);
+    } else if (!locked && marker) {
+        marker.remove();
+    }
+    if (locked) {
+        sel.value = DOC_MULTI_BRANCH;
+        sessionSel.value = 'both';
+    }
+    sel.disabled = locked;
+    sessionSel.disabled = locked;
+}
 async function populateDocBranchDropdown() {
     const sel = document.getElementById('f-docBranch');
     const row = document.getElementById('docBranchRow');
@@ -5940,8 +5977,12 @@ async function submitDoctor() {
         // Include branch_id if the dropdown is visible (supports explicit unassignment when empty)
         const branchSel = document.getElementById('f-docBranch');
         const branchRow = document.getElementById('docBranchRow');
-        if (branchSel && branchRow && branchRow.style.display !== 'none') {
+        if (!_docBranchLocked && branchSel && branchRow && branchRow.style.display !== 'none') {
             payload.branch_id = branchSel.value || "";
+            // Sent with the branch: saving used to reset it to "both" unseen.
+            if (branchSel.value) {
+                payload.branch_session = document.getElementById('f-docBranchSession').value || 'both';
+            }
         }
 
         if (id) {
@@ -5970,7 +6011,9 @@ function resetDoctorForm() {
     document.getElementById('f-docEveStart').value = '17:00';
     document.getElementById('f-docEveEnd').value = '19:00';
     document.getElementById('f-docDuration').value = '30';
+    setDocBranchLocked(false);
     document.getElementById('f-docBranch').value = '';
+    document.getElementById('f-docBranchSession').value = 'both';
     document.querySelectorAll('.doc-day-cb').forEach(cb => {
         cb.checked = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(cb.value);
     });
@@ -6000,7 +6043,14 @@ window.editDoctor = function(id) {
     document.getElementById('f-docEveEnd').value = hasEve ? d.evening_end.slice(0, 5) : '19:00';
     document.getElementById('f-docDuration').value = d.slot_duration_minutes || 30;
     // Pre-select the doctor's current branch
-    document.getElementById('f-docBranch').value = d.branch_id || '';
+    // A doctor at several branches cannot be shown in one dropdown, and
+    // saving one branch replaced them all. Branch changes go through the
+    // Branches tab; this form then leaves the assignments alone.
+    setDocBranchLocked((d.branches || []).length > 1);
+    if (!_docBranchLocked) {
+        document.getElementById('f-docBranch').value = d.branch_id || '';
+        document.getElementById('f-docBranchSession').value = d.branch_session || 'both';
+    }
     const activeDays = (d.available_days || 'Mon,Tue,Wed,Thu,Fri').split(',');
     document.querySelectorAll('.doc-day-cb').forEach(cb => { cb.checked = activeDays.includes(cb.value); });
     toggleShiftFields();

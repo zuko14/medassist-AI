@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.config import settings
 from app.database import (
     DEFAULT_LAB_COLLECTION_WINDOW,
+    doctor_session_slots,
     is_uuid,
     is_valid_clinic_scope,
     restrict_to_branch,
@@ -1345,7 +1346,7 @@ class DoctorCreate(BaseModel):
     evening_end: Optional[time_type] = None
     slot_duration_minutes: int = 30
     branch_id: Optional[str] = None
-    branch_session: str = "both"
+    branch_session: Literal["morning", "evening", "both"] = "both"
 
 
 class DoctorUpdate(BaseModel):
@@ -1363,7 +1364,7 @@ class DoctorUpdate(BaseModel):
     evening_end: Optional[time_type] = None
     slot_duration_minutes: Optional[int] = None
     branch_id: Optional[str] = None
-    branch_session: Optional[str] = None
+    branch_session: Optional[Literal["morning", "evening", "both"]] = None
 
 
 #: Matches the CHECK added by migration 080. A heading longer than this is a
@@ -1623,7 +1624,7 @@ class BranchUpdate(BaseModel):
 
 class DoctorBranchAssign(BaseModel):
     doctor_id: str
-    session: str = "both"  # morning | evening | both
+    session: Literal["morning", "evening", "both"] = "both"
 
 
 class ConnectorCredentialsUpdate(BaseModel):
@@ -1947,9 +1948,11 @@ async def get_doctors(
                 if assignments:
                     doc["branch_name"] = assignments[0]["branch_name"]
                     doc["branch_id"] = assignments[0]["branch_id"]
+                    doc["branch_session"] = assignments[0]["session"]
                 else:
                     doc["branch_name"] = None
                     doc["branch_id"] = None
+                    doc["branch_session"] = None
 
         # Optional: filter to a specific branch
         if branch_id:
@@ -1996,6 +1999,21 @@ def _is_duplicate_error(e: Exception) -> bool:
     """A unique-constraint violation is the caller's problem, not a 500."""
     msg = str(e).lower()
     return "duplicate" in msg or "unique" in msg or "23505" in msg
+
+
+def _reject_empty_branch_session(doc: dict, session: Optional[str]) -> None:
+    """A branch session is a filter over the doctor's own shifts (see
+    get_available_slots). Naming a shift the doctor does not work leaves them
+    listed at the branch with no slot on any day."""
+    if session in ("morning", "evening") and not doctor_session_slots(doc, session):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"This doctor has no {session} shift, so '{session} only' at this "
+                f"branch would leave no bookable slots. Enable the {session} shift "
+                "or choose another session."
+            ),
+        )
 
 
 def _apply_slot_config(data: dict) -> dict:
@@ -2108,6 +2126,7 @@ async def create_doctor(
             doctor_data.pop("branch_session", None)
 
         doctor_data = _apply_slot_config(doctor_data)
+        _reject_empty_branch_session(doctor_data, requested_branch_session)
         doctor_data["clinic_id"] = effective_clinic_id
         # unscoped: inserting new doctor record with explicit clinic_id
         result = await sb(supabase.table("doctors").insert(doctor_data))
@@ -2252,6 +2271,39 @@ async def update_doctor(
             update_data.pop("branch_session", None)
 
         update_data = _apply_slot_config(update_data)
+        if requested_branch_id is not None:
+            # This form holds ONE branch, and writing it deletes every
+            # assignment first -- so saving a doctor who works at several
+            # branches silently dropped all but the one in the dropdown.
+            assigned = (
+                # unscoped: doctor_id ownership verified by the gate above
+                await sb(supabase.table("doctor_branches")
+                .select("branch_id, session")
+                .eq("doctor_id", doctor_id))
+            ).data or []
+            if len(assigned) > 1:
+                current = next(
+                    (a for a in assigned if str(a["branch_id"]) == str(requested_branch_id)),
+                    None,
+                )
+                if current is None or requested_branch_session not in (None, current["session"]):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "This doctor is assigned to multiple branches. Change their "
+                            "branch assignments in the Branches tab; saving here would "
+                            "remove the others."
+                        ),
+                    )
+                # One of the existing assignments, unchanged: nothing to write.
+                requested_branch_id = None
+                requested_branch_session = None
+        if requested_branch_id:
+            # Checked against the shifts as they will be after this update,
+            # before anything is written.
+            _reject_empty_branch_session(
+                {**existing_doctor, **update_data}, requested_branch_session or "both"
+            )
         if not update_data and requested_branch_id is None:
             return {"message": "No fields to update"}
 
@@ -7646,13 +7698,14 @@ async def assign_doctor_to_branch(
     # unscoped: tenant-scoped operation with verified clinic authorization
     doc_query = (
         supabase.table("doctors")
-        .select("id")
+        .select("id, morning_start, morning_end, evening_start, evening_end, morning_slots, evening_slots")
         .eq("id", body.doctor_id)
         .eq("clinic_id", branch_clinic_id)
     )
     doc_res = await sb(doc_query)
     if not doc_res.data:
         raise HTTPException(status_code=404, detail="Doctor not found in this clinic")
+    _reject_empty_branch_session(doc_res.data[0], body.session)
 
     try:
         data = {
@@ -7734,6 +7787,16 @@ async def update_doctor_branch_session(
 ):
     """Update a doctor's session assignment at a branch."""
     branch = await resolve_owned_branch(user, branch_id, enforce_clinic_access(user, clinic_id))
+    if body.session != "both":
+        doc_res = await sb(
+            supabase.table("doctors")
+            .select("id, morning_start, morning_end, evening_start, evening_end, morning_slots, evening_slots")
+            .eq("id", doctor_id)
+            .eq("clinic_id", branch.get("clinic_id"))
+        )
+        if not doc_res.data:
+            raise HTTPException(status_code=404, detail="Doctor-branch assignment not found")
+        _reject_empty_branch_session(doc_res.data[0], body.session)
     try:
         result = (
         # unscoped: doctor branch association

@@ -10,7 +10,8 @@
    book_appointment, "change language" to reschedule_appointment).
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,6 +21,8 @@ from app.services.conversation import ConversationManager
 
 CLINIC = {"id": "clinic-1", "name": "Accumx Diagnostics", "whatsapp_number": "919999999999"}
 PHONE = "919876543210"
+# A date tap is checked against the dates still open, so it must not be past.
+TOMORROW = (datetime.now(ZoneInfo("Asia/Kolkata")).date() + timedelta(days=1)).isoformat()
 
 
 def _ctx(**extra):
@@ -72,12 +75,12 @@ async def test_date_tap_asks_who_and_books_nothing():
     with p[0], p[1] as book, p[2], p[3], p[4], p[5] as buttons, p[6], p[7] as state:
         await m._handle_confirming_collection_date(
             CLINIC, PHONE, "", "", ctx, {"name": "Ravi Kumar"}, "en",
-            interactive_data={"id": "labdate_2026-09-20"},
+            interactive_data={"id": f"labdate_{TOMORROW}"},
         )
     book.assert_not_called()
     ids = [b["id"] for b in buttons.call_args.kwargs["buttons"]]
     assert ids == ["labfor_self", "labfor_other"]
-    assert ctx["lab_collection_date"] == "2026-09-20" and ctx["lab_step"] == "who"
+    assert ctx["lab_collection_date"] == TOMORROW and ctx["lab_step"] == "who"
     assert state.call_args[0][2] == "confirming_collection_date"
 
 
@@ -328,7 +331,7 @@ async def test_saved_family_members_are_offered_as_a_list():
          p[0], p[1] as book, p[2], p[3], p[4], p[5] as buttons, p[6], p[7]:
         await m._handle_confirming_collection_date(
             CLINIC, PHONE, "", "", ctx, {"name": "Ravi Kumar"}, "en",
-            interactive_data={"id": "labdate_2026-09-21"},
+            interactive_data={"id": f"labdate_{TOMORROW}"},
         )
     book.assert_not_called()
     buttons.assert_not_called()

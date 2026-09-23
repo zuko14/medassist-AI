@@ -171,7 +171,11 @@ Patient types "book lab test" or taps "Lab Tests / Services"
 [conversation.py: _handle_lab_test_selection]
        │
        ├─► 6. Checks sample collection requirements (e.g. "10-12 hours fasting required")
-       ├─► 7. Prompts for Collection Date (Today / Tomorrow / Pick Date)
+       ├─► 7. Prompts for Collection Date: 3 buttons from _next_collection_dates(window).
+       │      Window = branches.config.lab_collection > clinics.config.lab_collection > default
+       │      (admin "Collection window" editor). Today is included while now(IST) < end
+       │      (sunday_end on Sundays when both Sunday times are set). A labdate_ tap not in
+       │      the current 3 dates (past / closed today) is refused and dates re-offered.
        ├─► 8. State -> CONFIRMING_COLLECTION_DATE
        ├─► 9. Prompts for Patient Name
        ├─► 10. Booking Creation:

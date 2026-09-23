@@ -5586,19 +5586,55 @@ class ConversationManager:
         context.pop("lab_test_query", None)
         await self.update_state(clinic, phone, "browsing_lab_tests", context)
 
-    def _next_collection_dates(self, allowed_days_str: str, count: int = 3) -> list[str]:
-        """Compute the next `count` calendar dates (YYYY-MM-DD) whose weekday is in allowed_days_str."""
+    @staticmethod
+    def _collection_open_today(window: dict, now: datetime) -> bool:
+        """Whether today's collection window has not closed yet (IST wall clock).
+
+        Sunday hours apply only when both are set, as in format_collection_window.
+        """
+        end = window.get("end") or "11:00"
+        if now.weekday() == 6 and window.get("sunday_start") and window.get("sunday_end"):
+            end = window["sunday_end"]
+        try:
+            close = datetime.strptime(end, "%H:%M").time()
+        except (TypeError, ValueError):
+            return False  # unreadable hours: offer tomorrow onward, as before
+        return now.time() < close
+
+    def _next_collection_dates(
+        self, window: dict, count: int = 3, now: Optional[datetime] = None
+    ) -> list[str]:
+        """The next `count` collection dates (YYYY-MM-DD) on the window's days.
+
+        Today is included while its window is still open. Dates used to start
+        tomorrow unconditionally, so a patient messaging at 8am could not book
+        that morning's collection.
+        """
         from zoneinfo import ZoneInfo
-        IST = ZoneInfo("Asia/Kolkata")
-        allowed = {d.strip() for d in allowed_days_str.split(",") if d.strip()}
         day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        allowed = {d.strip() for d in (window.get("days") or "").split(",")} & set(day_names)
+        # Missing `days` has always meant every day. It is also free text, and
+        # with no recognised day the loop below used to never end.
+        allowed = allowed or set(day_names)
+        now = now or datetime.now(ZoneInfo("Asia/Kolkata"))
+        cur = now.date()
+        if not self._collection_open_today(window, now):
+            cur += timedelta(days=1)
         out = []
-        cur = datetime.now(IST).date() + timedelta(days=1)  # start tomorrow in IST
         while len(out) < count:
             if day_names[cur.weekday()] in allowed:
                 out.append(cur.strftime("%Y-%m-%d"))
             cur += timedelta(days=1)
         return out
+
+    def _lab_date_buttons(self, window: dict) -> list[dict]:
+        return [
+            {
+                "id": f"labdate_{d}",
+                "title": datetime.strptime(d, "%Y-%m-%d").strftime("%a, %d %b")[:20],
+            }
+            for d in self._next_collection_dates(window, count=3)
+        ]
 
     async def _handle_browsing_lab_tests(
         self,
@@ -5734,16 +5770,7 @@ class ConversationManager:
 
         # Fetch collection window for branch or clinic
         window = await get_lab_collection_window(clinic, branch_id=context.get("branch_id"))
-        dates = self._next_collection_dates(window.get("days", "Mon,Tue,Wed,Thu,Fri,Sat,Sun"), count=3)
-
-        # Build date selection buttons
-        buttons = []
-        for d in dates:
-            dt = datetime.strptime(d, "%Y-%m-%d")
-            buttons.append({
-                "id": f"labdate_{d}",
-                "title": dt.strftime("%a, %d %b")[:20],
-            })
+        buttons = self._lab_date_buttons(window)
 
         # Format test summary + instructions
         price_rupees = test["price_paise"] // 100
@@ -5804,7 +5831,25 @@ class ConversationManager:
 
         # A date tap is honoured at any step, so re-picking the date works.
         if button_id.startswith("labdate_"):
-            context["lab_collection_date"] = button_id.removeprefix("labdate_")
+            from app.database import get_lab_collection_window
+
+            picked = button_id.removeprefix("labdate_")
+            window = await get_lab_collection_window(clinic, branch_id=context.get("branch_id"))
+            # Today is offered while its window is open, so a button can go
+            # stale: today's after closing time, or any date from an old message.
+            if picked not in self._next_collection_dates(window, count=3):
+                context["lab_collection_date"] = None
+                msg = {
+                    "en": "That date is no longer open for sample collection. Please choose another date:",
+                    "hi": "उस तारीख पर अब सैंपल कलेक्शन उपलब्ध नहीं है। कृपया दूसरी तारीख चुनें:",
+                    "te": "ఆ తేదీన ఇప్పుడు శాంపిల్ సేకరణ అందుబాటులో లేదు. దయచేసి మరో తేదీని ఎంచుకోండి:",
+                }.get(lang, "That date is no longer open for sample collection. Please choose another date:")
+                await self.whatsapp.send_interactive_buttons(
+                    clinic, phone, body=msg, buttons=self._lab_date_buttons(window)
+                )
+                await self.update_state(clinic, phone, "confirming_collection_date", context)
+                return
+            context["lab_collection_date"] = picked
             await self._ask_lab_test_patient(clinic, phone, context, patient, lang)
             return
 

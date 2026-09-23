@@ -21,7 +21,7 @@ This document provides a forensic classification of every major capability in Kr
 | **CallMedex Lab Queue Engine** | Verified from code/tests | [`app/integrations/callmedex/`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/integrations/callmedex/) | HMAC verification, replay window check, in-memory/DB task queue, and idempotent PDF ingestion. |
 | **Distributed Scheduler Lock** | Verified from code/tests | [`app/services/distributed_lock.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/services/distributed_lock.py) | Atomic CAS acquire via `acquire_scheduler_lock` RPC; background lease renewal heartbeat; raises `LockStolenError` on lease loss. |
 | **Orphaned File: `admin/admin.js`**| **Dead / Unreferenced** | [`admin/admin.js`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/admin/admin.js) | Explicitly excluded from `admin/index.html` (which inlines its own script). Modifications to this file have zero runtime effect. |
-| **Root Shell Redirection Files** | **Dead / Garbage** | `main`, `tuple[bool`, `type`, `bool`, `Expected`, `str` | Accidental artifacts created by Windows/PowerShell redirection typos during past development sessions. |
+| **Root Shell Redirection Files** | **Removed 2026-09-23** | `main`, `tuple[bool`, `type`, `bool`, `Expected`, `str` | Accidental artifacts created by Windows/PowerShell redirection typos during past development sessions. |
 
 ---
 
@@ -93,3 +93,17 @@ Details: `docs/sessions/SESSION_21_PATIENT_QUESTIONS.md`. Tests: `tests/test_ses
 4. Treatment bookings could reach unmapped doctors via typed name/department, older list, Edit booking, or "select another doctor". All paths now go through `specialty_flow._treatment_doctors`.
 
 Still open: `get_treatment_doctor_ids` returns an empty set on a DB error, which reads as "any doctor" (fails open to the unfiltered list, consistent with what the patient was shown).
+
+## 5. SESSION 22 (2026-09-23) — FIXED
+
+1. Lab collection dates always started tomorrow. `_next_collection_dates(window)` now includes today while now(IST) < window end (Sunday end when both Sunday times set); stale `labdate_` taps are refused. Unrecognised `days` text no longer loops forever. Tests: `tests/test_lab_same_day_collection.py`.
+2. Doctor's evening shift invisible to patients: `doctor_branches.session='morning'` (Branches page) filtered it out in `get_available_slots`, while the Doctors form never showed the session. The form now shows/sends "Session at this Branch" and warns when a shift is hidden; `GET /admin/doctors` returns `branch_session`; every session write (create, update, assign, re-session) rejects a session naming a shift the doctor lacks (422). Tests: `tests/test_doctor_branch_session_visibility.py`.
+
+3. **RESOLVED** — saving the Doctors form for a doctor at several branches deleted every `doctor_branches` row and re-inserted only the dropdown's branch. The form now locks the branch fields ("Assigned to multiple branches (manage in Branches tab)") and omits them from the payload; `update_doctor` reads the assignments before any write and returns 400 for a branch change on a multi-branch doctor (re-sending one existing assignment unchanged is a no-op). Tests: `tests/test_doctor_multi_branch_preserved.py`.
+4. **RESOLVED** — `tests/test_multi_worker_smoke.py` could never pass: conftest's placeholder credentials made the lifespan refuse to boot (`APP_ENV` testing). The subprocess now runs with `APP_ENV=development`; boot gates stay covered by `test_production_launch_gates.py` / `test_security.py`.
+5. **RESOLVED** — the empty root redirection artifacts (`main`, `tuple[bool`, `type`, `bool`, `Expected`, `str`) are deleted.
+
+Still open (decisions, not code defects):
+- `get_treatment_doctor_ids` fails open on a DB error (Session 21 decision; the doctor list read right after it fails too).
+- 2026-09-23 read-only check: all 3 live clinics (Aura, Accumx, Visakha) have NO `config.integration_secret`, so each accepts lab reports signed with the shared platform secret. Setting one without updating that clinic's sender breaks report delivery — coordinate per clinic.
+- Tenant cache staleness up to 30 s across workers (KA-19, section 2).

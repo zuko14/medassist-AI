@@ -29,6 +29,11 @@ async def test_multi_worker_concurrency_smoke():
     env = os.environ.copy()
     env["PYTHONPATH"] = os.path.abspath(".")
     env["PYTHONUNBUFFERED"] = "1"
+    # conftest forces fake credentials, and outside development the lifespan
+    # refuses placeholder secrets and checks schema_migrations on that fake
+    # database -- so the server never started and this test always failed.
+    # Those checks are tested elsewhere; this one is about worker dispatch.
+    env["APP_ENV"] = "development"
 
     # Start uvicorn with 2 worker processes
     cmd = [

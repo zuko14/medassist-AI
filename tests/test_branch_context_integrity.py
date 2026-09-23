@@ -510,9 +510,11 @@ class TestProductionHardeningFixes:
              patch("app.routers.admin.log_admin_action", new_callable=AsyncMock), \
              patch("app.routers.admin.invalidate_doctor_cache") as mock_inval:
 
-            # Mock responses: 1. owner_query, 2. delete doctor_branches
+            # Mock responses: 1. owner_query, 2. current assignments (a
+            # multi-branch doctor would be refused), 3. delete doctor_branches
             mock_sb.side_effect = [
                 MagicMock(data=[existing_doc]),  # owner query
+                MagicMock(data=[{"branch_id": "b-1", "session": "both"}]),
                 MagicMock(data=[]),              # delete doctor_branches
             ]
 
