@@ -19,6 +19,7 @@ Usage:
   - delete_patient_data() in database.py calls anonymize_clinical_records().
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -293,7 +294,10 @@ class DataRetentionService:
             # Remove objects from Supabase Storage
             if file_paths_to_delete:
                 try:
-                    supabase.storage.from_("lab-reports").remove(file_paths_to_delete)
+                    # Blocking HTTP call: keep it off the event loop (AGENTS.md invariant 2).
+                    await asyncio.to_thread(
+                        supabase.storage.from_("lab-reports").remove, file_paths_to_delete
+                    )
                     logger.info(
                         f"Data retention: deleted {len(file_paths_to_delete)} lab report storage object(s) for patient"
                     )
@@ -402,7 +406,11 @@ class DataRetentionService:
             await sb(supabase.table("admin_audit_logs").insert(
                 {
                     "clinic_id": clinic_id,
-                    "user_id": "dpdp_erasure",
+                    # user_id is a UUID FK to clinic_admins and role is NOT
+                    # NULL (migration 014). The old "dpdp_erasure" string made
+                    # this insert fail on every erasure, silently.
+                    "user_id": None,
+                    "role": "system",
                     "username": "patient_erasure",
                     "action": "DATA_ERASURE_REQUEST",
                     "resource_type": "patient",
@@ -417,7 +425,8 @@ class DataRetentionService:
                 }
             ))
         except Exception as audit_err:
-            logger.debug(f"Audit log write note: {audit_err}")
+            # The erasure itself succeeded; losing its compliance record must be visible.
+            logger.error(f"DPDP erasure audit log write FAILED: {audit_err}")
 
         logger.info(
             f"Data retention: anonymized records for phone={phone[:6]}*** "

@@ -581,7 +581,13 @@ class ConversationManager:
                 )
                 return
             await self.whatsapp.send_text(
-                clinic, phone, get_message("unsupported_media", lang)
+                clinic,
+                phone,
+                get_message(
+                    "unsupported_media",
+                    lang,
+                    phone=clinic.get("whatsapp_number") or settings.hospital_phone,
+                ),
             )
             logger.info(
                 f"Unreadable message type '{message_type}' from {mask_phone(phone)} "

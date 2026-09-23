@@ -201,6 +201,7 @@ def test_admin_refund_booking_own_tenant_resolves_clinic_creds():
                 "Customer request",
                 clinic=clinic_a_dict,
                 idempotency_key=None,
+                enforce_window=False,  # staff refunds ignore the patient cutoff
             )
     finally:
         app.dependency_overrides.pop(require_admin, None)

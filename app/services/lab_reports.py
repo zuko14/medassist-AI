@@ -1,5 +1,6 @@
 """Lab Report Delivery Service."""
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -132,8 +133,9 @@ class LabReportService:
         """
         storage_path = f"{clinic_id}/{patient_phone}/{uuid4()}_{filename}"
         try:
-            upload_result = supabase.storage.from_("lab-reports").upload(
-                storage_path, file_bytes, {"content-type": content_type}
+            upload_result = await asyncio.to_thread(
+                supabase.storage.from_("lab-reports").upload,
+                storage_path, file_bytes, {"content-type": content_type},
             )
             logger.info(f"Uploaded report to storage: {storage_path} -> {upload_result}")
         except Exception as e:
@@ -145,8 +147,9 @@ class LabReportService:
 
         pdf_signed_url = None
         try:
-            signed = supabase.storage.from_("lab-reports").create_signed_url(
-                storage_path, 604800
+            signed = await asyncio.to_thread(
+                supabase.storage.from_("lab-reports").create_signed_url,
+                storage_path, 604800,
             )
             raw_signed_url = signed.get("signedURL") or signed.get("signedUrl")
             if raw_signed_url:
@@ -821,8 +824,8 @@ class LabReportService:
             summary_sent_ok = False  # did the AI summary text actually reach the patient?
             # Download file from Supabase Storage
             try:
-                file_bytes = supabase.storage.from_("lab-reports").download(
-                    file_path
+                file_bytes = await asyncio.to_thread(
+                    supabase.storage.from_("lab-reports").download, file_path
                 )
             except Exception as storage_err:
                 logger.error(
@@ -856,8 +859,9 @@ class LabReportService:
                 # Resolve media handle: prefer Supabase Storage signed URL (direct link), fallback to WhatsApp upload
                 pdf_signed_url = None
                 try:
-                    signed = supabase.storage.from_("lab-reports").create_signed_url(
-                        file_path, 604800
+                    signed = await asyncio.to_thread(
+                        supabase.storage.from_("lab-reports").create_signed_url,
+                        file_path, 604800,
                     )
                     pdf_signed_url = signed.get("signedURL") or signed.get("signedUrl")
                 except Exception as sign_err:
@@ -1076,14 +1080,17 @@ class LabReportService:
                 )
 
                 # Download PDF from Supabase Storage
-                file_bytes = supabase.storage.from_("lab-reports").download(file_path)
+                file_bytes = await asyncio.to_thread(
+                    supabase.storage.from_("lab-reports").download, file_path
+                )
                 filename = file_path.split("/")[-1]
 
                 # Generate fresh signed URL
                 pdf_signed_url = None
                 try:
-                    signed = supabase.storage.from_("lab-reports").create_signed_url(
-                        file_path, 604800
+                    signed = await asyncio.to_thread(
+                        supabase.storage.from_("lab-reports").create_signed_url,
+                        file_path, 604800,
                     )
                     raw_signed_url = signed.get("signedURL") or signed.get("signedUrl")
                     if raw_signed_url:

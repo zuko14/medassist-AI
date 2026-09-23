@@ -956,7 +956,10 @@ async def get_available_slots(
                 .eq("clinic_id", clinic_id)
                 .eq("doctor_name", doctor_name)
                 .eq("appointment_date", date_str)
-                .in_("status", ["confirmed", "pending_payment"])
+                # pending_review holds the slot in uq_appointment_active_slot
+                # (migration 064). Leaving it out offered a slot that always
+                # failed as slot_taken — and the retry re-offered the same slot.
+                .in_("status", ["confirmed", "pending_payment", "pending_review"])
                 .execute()
             )
             rows = res.data or []
@@ -964,7 +967,7 @@ async def get_available_slots(
             booked = []
             for r in rows:
                 status = r.get("status")
-                if status in ("confirmed", None):
+                if status in ("confirmed", "pending_review", None):
                     booked.append(r)
                 elif status == "pending_payment":
                     hold_exp = r.get("hold_expires_at")
@@ -1425,6 +1428,11 @@ def apply_queue_key(query, doctor_name: Optional[str], branch_id: Optional[str],
     return query.eq("branch_id", branch_id)
 
 
+_NOT_CHECKABLE_IN = frozenset(
+    {"cancelled", "refunded", "expired", "pending_payment", "pending_review", "no_show"}
+)
+
+
 async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[dict]:
     """Assign the next sequential token number for this appointment's queue.
 
@@ -1437,11 +1445,18 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     conflict instead of allowing duplicate tokens under concurrent check-ins.
     """
     appt_result = (
-        await sb(scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, branch_id, appointment_date, token_number, queue_status")
+        await sb(scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, branch_id, appointment_date, token_number, queue_status, status")
         .eq("id", appointment_id))
     )
     if not appt_result.data:
         return None
+
+    # The panel only offers Check In on confirmed rows, but a stale page can
+    # still post it after the patient cancelled on WhatsApp — which handed a
+    # cancelled booking a live token and messaged the patient their number.
+    status = appt_result.data[0].get("status")
+    if status in _NOT_CHECKABLE_IN:
+        raise ValueError(f"not_checkable_in:{status}")
 
     # Idempotency: if already checked in with a token, return existing record
     existing_token = appt_result.data[0].get("token_number")

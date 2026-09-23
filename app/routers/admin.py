@@ -4882,7 +4882,7 @@ async def cancel_appointment_by_admin(
         raise
     except Exception as e:
         logger.error(f"Error cancelling appointment {appointment_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/appointments/{appointment_id}/check-in")
@@ -4895,6 +4895,12 @@ async def check_in_appointment_endpoint(
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
     try:
         result = await check_in_appointment(effective_clinic_id, appointment_id)
+    except ValueError as e:
+        status_now = str(e).split(":", 1)[-1]
+        raise HTTPException(
+            status_code=409,
+            detail=f"This booking is {status_now.replace('_', ' ')} and cannot be checked in. Refresh the page.",
+        )
     except Exception as e:
         logger.error(f"Error during check-in for appointment {appointment_id}: {e}")
         raise HTTPException(
@@ -5467,7 +5473,11 @@ async def admin_refund_booking(
         reason = (body or {}).get("reason", f"Admin refund by {user.username or user.role}")
         req_idempotency_key = (body or {}).get("idempotency_key")
         result = await payment_service.initiate_refund(
-            booking_id, reason, clinic=clinic, idempotency_key=req_idempotency_key
+            booking_id,
+            reason,
+            clinic=clinic,
+            idempotency_key=req_idempotency_key,
+            enforce_window=False,
         )
         if not result["success"]:
             raise HTTPException(
@@ -5478,7 +5488,7 @@ async def admin_refund_booking(
         raise
     except Exception as e:
         logger.error(f"Admin refund error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/payment-events/{booking_id}")

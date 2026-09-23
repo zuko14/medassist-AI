@@ -596,8 +596,10 @@ class SchedulerService:
                             f"no appointment_time"
                         )
                         continue
-                    # Check if appointment is in ~2 hours
-                    if appt_time[:5] <= in_2h[:5]:
+                    # Check if appointment is in ~2 hours. The lower bound
+                    # stops a missed run (deploy, lock loss) from telling a
+                    # patient "in 2 hours" about a visit that already started.
+                    if now.strftime("%H:%M") <= appt_time[:5] <= in_2h[:5]:
                         try:
                             clinic = await get_clinic_by_id(
                                 appt.get("clinic_id", "default")
@@ -998,10 +1000,35 @@ class SchedulerService:
                             clinic = await get_clinic_by_id(
                                 appt.get("clinic_id", "default")
                             )
-                            # unscoped: unique_row_key
-                            await sb(supabase.table("appointments").update(
-                                {"status": "cancelled"}
-                            ).eq("id", appt["id"]))
+                            # A paid booking used to be flipped to 'cancelled'
+                            # here with no refund: the clinic cancelled, the
+                            # patient kept nothing. Refund first (the clinic's
+                            # decision, so the patient cutoff does not apply);
+                            # a successful refund already moves the row off
+                            # 'confirmed', which also releases the slot.
+                            from app.services.payment import payment_service
+
+                            refund = None
+                            if appt.get("payment_id"):
+                                refund = await payment_service.initiate_refund(
+                                    appt["id"],
+                                    reason="doctor_leave",
+                                    clinic=clinic,
+                                    enforce_window=False,
+                                )
+                                if not refund.get("success"):
+                                    await payment_service._alert_admin(
+                                        clinic,
+                                        f"Doctor-leave cancellation of {appt.get('booking_ref')} "
+                                        f"could not be refunded automatically "
+                                        f"({refund.get('reason')}). Refund payment "
+                                        f"{appt['payment_id']} manually in Razorpay.",
+                                    )
+                            if not (refund and refund.get("success")):
+                                # unscoped: unique_row_key
+                                await sb(supabase.table("appointments").update(
+                                    {"status": "cancelled"}
+                                ).eq("id", appt["id"]).eq("status", "confirmed"))
 
                             components = TEMPLATES["appointment_cancelled_doctor_leave"][
                                 "components_builder"
@@ -1014,6 +1041,11 @@ class SchedulerService:
                                 components=components,
                                 _source="scheduler",
                             )
+                            if refund is not None:
+                                # Receipt, or "our team will refund you" — never silence.
+                                await payment_service.notify_cancellation_outcome(
+                                    appt, refund, clinic=clinic
+                                )
 
                             logger.info(
                                 f"Cancelled appointment {appt['id']} due to doctor leave"
