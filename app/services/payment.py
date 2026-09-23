@@ -764,10 +764,17 @@ class PaymentService:
             logger.info(f"Booking {booking_id} already confirmed (idempotent)")
             return {"status": "ok", "code": 200, "reason": "already_confirmed"}
 
-        if current_status == "expired":
+        # A booking the patient cancelled while it was still pending_payment
+        # keeps a live Razorpay link, so it can be paid afterwards exactly like
+        # an expired hold. Such a payment used to hit the terminal-state guard
+        # below and be kept with no refund and no alert. No payment_id on the
+        # row means no payment was ever applied to it, so this one is late.
+        if current_status == "expired" or (
+            current_status == "cancelled" and not booking.get("payment_id")
+        ):
             logger.warning(
                 f"LATE_PAYMENT booking={booking_id} ref={booking.get('booking_ref')} "
-                f"payment_id={payment_id} — hold already expired, auto-refunding"
+                f"status={current_status} payment_id={payment_id} — auto-refunding"
             )
             await self._log_payment_event(
                 booking_id,
@@ -790,21 +797,42 @@ class PaymentService:
                 reason="Payment received after slot hold expired",
                 clinic=clinic,
             )
+            if not refund.get("success"):
+                # The money is still captured. Marking the row 'refunded' here
+                # told the patient and the admin a refund was on its way when
+                # none was. Leave the row as it is (a redelivered webhook retries
+                # the refund under the same idempotency key) and hand it to a human.
+                await self._alert_admin(
+                    clinic,
+                    f"LATE PAYMENT REFUND FAILED for {booking.get('booking_ref')}: "
+                    f"{amount_paid / 100:.0f} INR captured on a {current_status} booking. "
+                    f"Refund payment {payment_id} manually in the Razorpay dashboard.",
+                )
+                await self._notify_late_payment_refund_failed(booking, clinic)
+                return {
+                    "status": "ok",
+                    "code": 200,
+                    "reason": "late_payment_refund_failed",
+                }
+
             # unscoped: unique_row_key
-            await sb(supabase.table("appointments").update({
+            late_update = await sb(supabase.table("appointments").update({
                 "status": "refunded",
                 "refund_reason": "late_payment",
                 "payment_id": payment_id,
                 "refund_id": refund.get("refund_id"),
                 "refunded_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", booking_id).eq("status", "expired"))
+            }).eq("id", booking_id).eq("status", current_status))
 
-            await self._notify_late_payment_refunded(booking, refund)
-            await self._alert_admin(
-                clinic,
-                f"Late payment auto-refunded: {booking.get('booking_ref')} "
-                f"({amount_paid / 100:.0f} INR). Slot was already released.",
-            )
+            # payment.captured and payment_link.paid both arrive for one payment;
+            # only the delivery that moved the row tells the patient.
+            if late_update.data:
+                await self._notify_late_payment_refunded(booking, refund)
+                await self._alert_admin(
+                    clinic,
+                    f"Late payment auto-refunded: {booking.get('booking_ref')} "
+                    f"({amount_paid / 100:.0f} INR). Slot was already released.",
+                )
             return {
                 "status": "ok",
                 "code": 200,
@@ -833,6 +861,14 @@ class PaymentService:
                     clinic_id=use_clinic_scope,
                     provider_event_id=rz_event_id,
                 )
+                # A different payment than the one this booking settled on is
+                # money captured against a closed booking — never keep it silently.
+                if payment_id != booking.get("payment_id"):
+                    await self._alert_admin(
+                        f"Payment {payment_id} ({(amount_paid or 0) / 100:.0f} INR) was captured "
+                        f"for booking {booking.get('booking_ref', booking_id)}, which is already "
+                        f"{current_status}. It was NOT applied. Refund it from the Razorpay dashboard."
+                    )
                 return {"status": "ok", "code": 200, "reason": f"terminal_state_{current_status}"}
 
             # Non-terminal, non-pending_payment state — route to review
@@ -1228,8 +1264,13 @@ class PaymentService:
         reason: str = "",
         clinic: Optional[dict] = None,
         idempotency_key: Optional[str] = None,
+        enforce_window: bool = True,
     ) -> dict:
         """Initiate a refund for a confirmed booking.
+
+        enforce_window: the clinic's cancellation cutoff is the PATIENT's
+        policy. Admin-initiated refunds/rejects/cancels pass False so staff can
+        always return money (e.g. doctor absent, payment dispute).
 
         Checks refund eligibility (4+ hours before slot), calls Razorpay
         Refund API with a deterministic idempotency key, and logs all transitions.
@@ -1298,7 +1339,7 @@ class PaymentService:
         # helper the booking confirmation quotes to the patient, so what they
         # were promised and what is enforced here cannot drift apart.
         window_hours = cancellation_window_hours(clinic)
-        if slot_datetime:
+        if slot_datetime and enforce_window:
             hours_until_slot = (
                 slot_datetime - datetime.now(timezone.utc)
             ).total_seconds() / 3600
@@ -1470,10 +1511,14 @@ class PaymentService:
                 "reason": f"can_only_confirm_pending_review_not_{booking['status']}",
             }
 
+        # CAS on pending_review: a concurrent reject may already have refunded
+        # this booking, and confirming over that would book a refunded patient.
         # unscoped: unique_row_key
-        await sb(supabase.table("appointments").update({"status": "confirmed"}).eq(
+        confirm = await sb(supabase.table("appointments").update({"status": "confirmed"}).eq(
             "id", booking_id
-        ))
+        ).eq("status", "pending_review"))
+        if not confirm.data:
+            return {"success": False, "reason": "booking_changed_concurrently"}
 
         await self._log_payment_event(
             booking_id,
@@ -1548,6 +1593,7 @@ class PaymentService:
                 booking_id,
                 reason=f"Admin rejected: {admin_notes}"[:255],
                 clinic=clinic,
+                enforce_window=False,
             )
             if not refund_result.get("success"):
                 logger.error(
@@ -1644,7 +1690,10 @@ class PaymentService:
 
             clinic = await get_clinic_by_id(booking.get("clinic_id") or "default")
             refund_result = await self.initiate_refund(
-                booking_id, reason=admin_notes or "Cancelled by admin", clinic=clinic
+                booking_id,
+                reason=admin_notes or "Cancelled by admin",
+                clinic=clinic,
+                enforce_window=False,
             )
             if not refund_result["success"]:
                 # A refund that cannot be issued is not a reason to refuse the
@@ -2594,7 +2643,9 @@ class PaymentService:
                     else get_message("refund_late_no_refund", lang, hours=hours)
                 )
             elif refund:
-                msg = get_message("refund_failed_manual_review", lang)
+                msg = get_message(
+                    "refund_failed_manual_review", lang, phone=self._clinic_contact_phone(clinic)
+                )
             else:
                 return
 
@@ -2661,10 +2712,16 @@ class PaymentService:
             clinic_id_val = booking.get("clinic_id") or "default"
             clinic = await get_clinic_by_id(clinic_id_val)
             amount_rupees = (booking.get("amount_paise") or 0) / 100
+            if booking.get("status") == "cancelled":
+                title = "Payment Received For A Cancelled Booking"
+                why = "but this booking had already been cancelled"
+            else:
+                title = "Payment Received After Slot Hold Expired"
+                why = "but the slot hold had already expired"
             msg = (
-                f"⚠️ *Payment Received After Slot Hold Expired*\n\n"
+                f"⚠️ *{title}*\n\n"
                 f"📋 *Booking Ref:* {booking.get('booking_ref', 'N/A')}\n"
-                f"💰 We received your payment of ₹{amount_rupees:.0f}, but the slot hold had already expired.\n\n"
+                f"💰 We received your payment of ₹{amount_rupees:.0f}, {why}.\n\n"
                 f"A full refund of ₹{amount_rupees:.0f} has been automatically initiated (Refund ID: {refund.get('refund_id', 'pending')}) "
                 f"and will reflect in your account within 5-7 business days.\n\n"
                 f"Please visit {clinic.get('whatsapp_number', '')} to select a new appointment slot."
@@ -2672,6 +2729,44 @@ class PaymentService:
             await whatsapp_service.send_text(clinic, booking["patient_phone"], msg, _source="payment")
         except Exception as e:
             logger.error(f"Failed to send late payment refund notification: {e}")
+
+    async def _notify_late_payment_refund_failed(
+        self, booking: dict, clinic: Optional[dict]
+    ) -> None:
+        """Tell a late payer the truth: the money is held and a human will refund it."""
+        try:
+            from app.services.whatsapp import whatsapp_service
+            from app.services.tenant import get_clinic_by_id
+            from app.templates.whatsapp_templates import get_message
+
+            phone = booking.get("patient_phone")
+            if not phone:
+                return
+            clinic_id_val = booking.get("clinic_id") or "default"
+            if not clinic:
+                clinic = await get_clinic_by_id(clinic_id_val)
+            lang = await self.resolve_patient_language(clinic_id_val, phone)
+            msg = get_message(
+                "refund_failed_manual_review", lang, phone=self._clinic_contact_phone(clinic)
+            )
+            await whatsapp_service.send_text(clinic, phone, msg, _source="payment")
+        except Exception as e:
+            logger.error(f"Failed to send late payment refund-failed notification: {e}")
+
+    @staticmethod
+    def _clinic_contact_phone(clinic: Optional[dict]) -> str:
+        """The number a patient of THIS clinic should call, never another tenant's.
+
+        Same precedence as the bot's human-escalation message.
+        """
+        from app.services.tenant import get_clinic_contact
+
+        clinic = clinic or {}
+        return get_clinic_contact(
+            clinic,
+            "staff_phone",
+            clinic.get("whatsapp_number") or clinic.get("phone") or settings.hospital_phone,
+        )
 
     async def _alert_admin(self, clinic_or_message: Union[dict, str, None], message: Optional[str] = None) -> None:
         """Send alert to clinic admin phone with platform operator fallback."""
@@ -2712,7 +2807,10 @@ class PaymentService:
             from datetime import timezone as tz
 
             ist = tz(timedelta(hours=5, minutes=30))
-            dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            # Postgres returns a TIME column as "HH:MM:SS". Parsing only
+            # "HH:MM" made this return None for every stored booking, which
+            # silently disabled the clinic's cancellation window.
+            dt = datetime.strptime(f"{date_str} {str(time_str)[:5]}", "%Y-%m-%d %H:%M")
             return dt.replace(tzinfo=ist)
         except Exception:
             return None

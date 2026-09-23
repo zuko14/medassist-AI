@@ -191,7 +191,7 @@ async def test_c3_late_payment_auto_refund_on_expired_hold():
          patch.object(service, "_alert_admin", new_callable=AsyncMock):
         
         mock_settings.razorpay_webhook_secret = "secret"
-        mock_refund_id.return_value = {"id": "rfd_late_123", "refund_id": "rfd_late_123"}
+        mock_refund_id.return_value = {"success": True, "refund_id": "rfd_late_123"}
         
         res = await service.process_payment_webhook(
             payload, "valid_sig", webhook_secret="secret"

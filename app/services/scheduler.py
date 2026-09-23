@@ -568,22 +568,31 @@ class SchedulerService:
                 from app.services.tenant import has_feature
 
                 now = datetime.now()
-                in_2h = (now + timedelta(hours=2)).strftime("%H:%M")
-                today = now.strftime("%Y-%m-%d")
+                window_end = now + timedelta(hours=2)
 
-                appointments = (
-                    # unscoped: platform_sweep
-                    await sb(supabase.table("appointments")
-                    .select("*")
-                    .eq("appointment_date", today)
-                    .eq("status", "confirmed")
-                    # See send_24h_reminders: lab-test bookings carry no doctor
-                    # and no slot time, so they are not reminder material.
-                    .eq("booking_type", "consultation")
-                    .eq("reminder_2h_sent", False))
-                )
+                # Compared as full datetimes, per queried date. Comparing
+                # "HH:MM" strings broke from 22:00: the window end wrapped to
+                # "00:xx", so no slot between 22:00 and 02:00 ever qualified.
+                dates = [now.date()]
+                if window_end.date() != now.date():
+                    dates.append(window_end.date())
 
-                for appt in appointments.data:
+                due = []
+                for day in dates:
+                    res = (
+                        # unscoped: platform_sweep
+                        await sb(supabase.table("appointments")
+                        .select("*")
+                        .eq("appointment_date", day.strftime("%Y-%m-%d"))
+                        .eq("status", "confirmed")
+                        # See send_24h_reminders: lab-test bookings carry no doctor
+                        # and no slot time, so they are not reminder material.
+                        .eq("booking_type", "consultation")
+                        .eq("reminder_2h_sent", False))
+                    )
+                    due.extend((day, a) for a in (res.data or []))
+
+                for day, appt in due:
                     # Second layer behind the booking_type filter above. This
                     # slice sits OUTSIDE the per-appointment try below, so a
                     # single row with a NULL appointment_time raised TypeError
@@ -596,8 +605,20 @@ class SchedulerService:
                             f"no appointment_time"
                         )
                         continue
-                    # Check if appointment is in ~2 hours
-                    if appt_time[:5] <= in_2h[:5]:
+                    # Check if appointment is in ~2 hours. The lower bound
+                    # stops a missed run (deploy, lock loss) from telling a
+                    # patient "in 2 hours" about a visit that already started.
+                    try:
+                        slot_at = datetime.combine(
+                            day, datetime.strptime(str(appt_time)[:5], "%H:%M").time()
+                        )
+                    except ValueError:
+                        logger.warning(
+                            f"Skipping 2h reminder for appointment {appt.get('id')}: "
+                            f"unparseable appointment_time {appt_time!r}"
+                        )
+                        continue
+                    if now <= slot_at <= window_end:
                         try:
                             clinic = await get_clinic_by_id(
                                 appt.get("clinic_id", "default")
@@ -980,7 +1001,7 @@ class SchedulerService:
                     .select("*")
                     .gte("leave_date", tomorrow)
                     .lte("leave_date", next_week)
-                    .eq("leave_type", "full"))
+                    .in_("leave_type", ["full", "half_morning", "half_evening"]))
                 )
 
                 for leave in leaves.data:
@@ -992,16 +1013,66 @@ class SchedulerService:
                         .eq("appointment_date", leave["leave_date"])
                         .eq("status", "confirmed"))
                     )
+                    rows = affected.data or []
 
-                    for appt in affected.data:
+                    # A half-day leave blocks one session. New bookings for it
+                    # were already refused by get_available_slots; bookings made
+                    # before the leave was entered used to be left in place and
+                    # the patient arrived to an absent doctor. Cancel exactly the
+                    # slots of the blocked session — using the same slot lists
+                    # the picker uses — and never guess when the doctor is unknown.
+                    leave_type = leave.get("leave_type") or "full"
+                    if leave_type != "full":
+                        from app.database import doctor_session_slots, get_doctor_by_name
+
+                        doc = await get_doctor_by_name(leave.get("clinic_id"), leave["doctor_name"])
+                        if not doc:
+                            logger.warning(
+                                f"Half-day leave for unknown doctor {leave['doctor_name']!r} "
+                                f"on {leave['leave_date']}: bookings left untouched"
+                            )
+                            continue
+                        session = "morning" if leave_type == "half_morning" else "evening"
+                        blocked = set(doctor_session_slots(doc, session))
+                        rows = [
+                            a for a in rows
+                            if str(a.get("appointment_time") or "")[:5] in blocked
+                        ]
+
+                    for appt in rows:
                         try:
                             clinic = await get_clinic_by_id(
                                 appt.get("clinic_id", "default")
                             )
-                            # unscoped: unique_row_key
-                            await sb(supabase.table("appointments").update(
-                                {"status": "cancelled"}
-                            ).eq("id", appt["id"]))
+                            # A paid booking used to be flipped to 'cancelled'
+                            # here with no refund: the clinic cancelled, the
+                            # patient kept nothing. Refund first (the clinic's
+                            # decision, so the patient cutoff does not apply);
+                            # a successful refund already moves the row off
+                            # 'confirmed', which also releases the slot.
+                            from app.services.payment import payment_service
+
+                            refund = None
+                            if appt.get("payment_id"):
+                                refund = await payment_service.initiate_refund(
+                                    appt["id"],
+                                    reason="doctor_leave",
+                                    clinic=clinic,
+                                    enforce_window=False,
+                                )
+                                if not refund.get("success"):
+                                    await payment_service._alert_admin(
+                                        clinic,
+                                        f"Doctor-leave cancellation of {appt.get('booking_ref')} "
+                                        f"could not be refunded automatically "
+                                        f"({refund.get('reason')}). Refund payment "
+                                        f"{appt['payment_id']} manually in Razorpay.",
+                                    )
+                            if not (refund and refund.get("success")):
+                                # unscoped: unique_row_key
+                                await sb(supabase.table("appointments").update(
+                                    {"status": "cancelled"}
+                                ).eq("id", appt["id"]).eq("status", "confirmed"))
 
                             components = TEMPLATES["appointment_cancelled_doctor_leave"][
                                 "components_builder"
@@ -1014,6 +1085,11 @@ class SchedulerService:
                                 components=components,
                                 _source="scheduler",
                             )
+                            if refund is not None:
+                                # Receipt, or "our team will refund you" — never silence.
+                                await payment_service.notify_cancellation_outcome(
+                                    appt, refund, clinic=clinic
+                                )
 
                             logger.info(
                                 f"Cancelled appointment {appt['id']} due to doctor leave"

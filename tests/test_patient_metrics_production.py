@@ -5,6 +5,15 @@ from app.utils.validators import validate_name
 from app.services.analytics import analytics_service
 from app.database import get_genuine_patients, supabase, sb
 
+import os
+
+# These read the two live clinics' real data. They are production smoke checks,
+# not unit tests: run them only on purpose, with KRIYA_TEST_LIVE=1.
+live_db = pytest.mark.skipif(
+    os.environ.get("KRIYA_TEST_LIVE") != "1",
+    reason="reads live production data; set KRIYA_TEST_LIVE=1",
+)
+
 VISAKHA_CLINIC_ID = "9d9e9f12-c775-49c0-a326-98a59cdcc2e4"
 TEST_HOSPITAL_ID = "f13ea1b8-ec12-4d15-82a8-82668b74bd29"
 ACCUMX_CLINIC_ID = "c2a14afe-27a9-4a13-b7c3-5ece8d05dc6c"
@@ -73,6 +82,7 @@ async def _clinical_phones(clinic_id: str) -> set:
 
 
 @pytest.mark.asyncio
+@live_db
 async def test_visakha_clinic_counts_only_genuine_patients():
     """Metrics must reflect clinical engagement, not raw WhatsApp contacts.
 
@@ -126,6 +136,7 @@ async def test_visakha_clinic_counts_only_genuine_patients():
 
 
 @pytest.mark.asyncio
+@live_db
 async def test_unengaged_whatsapp_ping_does_not_inflate_metrics():
     """A raw WhatsApp contact with no visits must not move the counters.
 
@@ -196,6 +207,7 @@ async def test_unengaged_whatsapp_ping_does_not_inflate_metrics():
 
 
 @pytest.mark.asyncio
+@live_db
 async def test_other_clinics_remain_functional():
     """Verify TestHospital and Accumx retain accurate metrics without regression."""
     th_stats = await analytics_service.get_dashboard_stats(TEST_HOSPITAL_ID, days=30)

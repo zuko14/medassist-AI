@@ -1,5 +1,6 @@
 """CallMedex Background Worker Runner & DI Container (Phase 3 & Phase R2 Implementation)."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -299,10 +300,14 @@ class CallMedexWorkerRunner:
                     try:
                         from app.database import supabase as _supabase
                         storage_path = f"callmedex/{request.clinic_id}/{report_job_id}.pdf"
-                        _supabase.storage.from_("lab-reports").upload(
-                            storage_path, pdf_bytes, {"content-type": "application/pdf"}
+                        # Blocking storage HTTP: run off the web event loop.
+                        await asyncio.to_thread(
+                            _supabase.storage.from_("lab-reports").upload,
+                            storage_path, pdf_bytes, {"content-type": "application/pdf"},
                         )
-                        signed = _supabase.storage.from_("lab-reports").create_signed_url(storage_path, 86400)
+                        signed = await asyncio.to_thread(
+                            _supabase.storage.from_("lab-reports").create_signed_url, storage_path, 86400
+                        )
                         pdf_url = signed.get("signedURL") or signed.get("signedUrl")
 
                         if summary_report is not None and pdf_url:

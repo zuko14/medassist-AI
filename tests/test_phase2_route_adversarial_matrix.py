@@ -74,6 +74,16 @@ def test_adversarial_cross_tenant_rejection_per_route(client, method, path):
 
     app.dependency_overrides[verify_credentials] = lambda: user_clinic_a
 
+    # An empty database, not a live one: routes that load the target row
+    # before their tenant check (staff edit/toggle/delete) must still refuse.
+    # This only ever makes a leak easier to see — a route that answers 200 on
+    # empty data still fails the assertion below.
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    empty = MagicMock(data=[], count=0)
+    db_patch = patch("app.routers.admin.sb", new=AsyncMock(return_value=empty))
+    db_patch.start()
+
     try:
         # Construct concrete test path with dummy UUID parameters
         test_path = (
@@ -129,4 +139,5 @@ def test_adversarial_cross_tenant_rejection_per_route(client, method, path):
         )
 
     finally:
+        db_patch.stop()
         app.dependency_overrides.pop(verify_credentials, None)

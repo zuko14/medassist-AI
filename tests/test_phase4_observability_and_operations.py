@@ -39,7 +39,12 @@ def test_w5_1_correlation_id_middleware_and_header(client):
 
 def test_w5_2_prometheus_metrics_endpoint(client):
     """W5.2: /metrics returns valid Prometheus formatted plain text."""
-    res = client.get("/metrics")
+    from app.config import settings
+
+    # Outside development /metrics requires a token (metrics_token, falling back
+    # to admin_secret / meta_app_secret). Send the one this run is configured with.
+    token = settings.metrics_token or settings.admin_secret or settings.meta_app_secret
+    res = client.get("/metrics", headers={"X-Metrics-Token": token} if token else {})
     assert res.status_code == 200
     assert "text/plain" in res.headers["content-type"]
     text = res.text

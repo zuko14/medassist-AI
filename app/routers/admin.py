@@ -33,6 +33,7 @@ from app.database import (
     DEFAULT_LAB_COLLECTION_WINDOW,
     is_uuid,
     is_valid_clinic_scope,
+    restrict_to_branch,
     supabase,
     check_in_appointment,
     call_next_patient,
@@ -619,6 +620,37 @@ async def resolve_clinic_id_for_write(
     is now a 400.
     """
     return enforce_clinic_access(user, requested_clinic_id)
+
+
+def _staff_branch(user: "AdminUser") -> Optional[str]:
+    """The branch a pinned staff account is limited to, or None (whole clinic).
+
+    Only role=staff with a branch_id is pinned. clinic_admin, super_admin and
+    tenant-wide staff are unaffected, so their queries are unchanged.
+    """
+    if getattr(user, "role", None) == "staff" and getattr(user, "branch_id", None):
+        return str(user.branch_id)
+    return None
+
+
+def _branch_kw(user: "AdminUser") -> dict:
+    """kwargs for analytics list calls: empty for everyone except pinned staff."""
+    branch = _staff_branch(user)
+    return {"branch_id": branch} if branch else {}
+
+
+async def _enforce_booking_branch(user: "AdminUser", clinic_id: str, booking_id: str) -> None:
+    """403 when pinned staff act on another branch's booking. No-op otherwise."""
+    if not _staff_branch(user):
+        return
+    res = await sb(
+        supabase.table("appointments")
+        .select("branch_id")
+        .eq("clinic_id", clinic_id)
+        .eq("id", booking_id)
+    )
+    if res.data:
+        enforce_branch_scope(user, res.data[0].get("branch_id"))
 
 
 @router.get("/clinics")
@@ -1664,7 +1696,9 @@ async def get_recent_appointments(
 ):
     """Get recent appointments."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
-    return await analytics_service.get_recent_appointments(effective_clinic_id, limit)
+    return await analytics_service.get_recent_appointments(
+        effective_clinic_id, limit, **_branch_kw(user)
+    )
 
 
 @router.get("/appointments/upcoming")
@@ -1673,7 +1707,9 @@ async def get_upcoming_appointments(
 ):
     """Get upcoming appointments."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
-    return await analytics_service.get_upcoming_appointments(effective_clinic_id, days)
+    return await analytics_service.get_upcoming_appointments(
+        effective_clinic_id, days, **_branch_kw(user)
+    )
 
 
 #: Longest window the Appointments page may ask for — bounds the count scan.
@@ -1738,6 +1774,7 @@ async def list_appointments(
             status=status,
             limit=limit,
             offset=offset,
+            **_branch_kw(user),
         )
         # Same Refund column as the Payments page: an in-flight or failed
         # refund is only visible in payment_events. Best-effort by design.
@@ -4867,6 +4904,7 @@ async def cancel_appointment_by_admin(
     notification (see payment.py for why this matters).
     """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    await _enforce_booking_branch(user, effective_clinic_id, appointment_id)
     try:
         from app.services.payment import payment_service
 
@@ -4882,7 +4920,7 @@ async def cancel_appointment_by_admin(
         raise
     except Exception as e:
         logger.error(f"Error cancelling appointment {appointment_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/appointments/{appointment_id}/check-in")
@@ -4893,8 +4931,15 @@ async def check_in_appointment_endpoint(
 ):
     """Assign the next OPD token number to an arriving patient."""
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    await _enforce_booking_branch(user, effective_clinic_id, appointment_id)
     try:
         result = await check_in_appointment(effective_clinic_id, appointment_id)
+    except ValueError as e:
+        status_now = str(e).split(":", 1)[-1]
+        raise HTTPException(
+            status_code=409,
+            detail=f"This booking is {status_now.replace('_', ' ')} and cannot be checked in. Refresh the page.",
+        )
     except Exception as e:
         logger.error(f"Error during check-in for appointment {appointment_id}: {e}")
         raise HTTPException(
@@ -5324,7 +5369,9 @@ async def get_bookings(
             "booking_type, lab_test_id, lab_test_name, treatment_id, treatment_name, "
             "refund_id, refund_reason, refunded_at"
         )
-        query = query.eq("clinic_id", effective_clinic_id)
+        query = restrict_to_branch(
+            query.eq("clinic_id", effective_clinic_id), _staff_branch(user)
+        )
         if status:
             query = query.eq("status", status)
         if booking_type:
@@ -5351,7 +5398,9 @@ async def get_pending_review_bookings(
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("appointments").select("*").eq("status", "pending_review")
         )
-        query = query.eq("clinic_id", effective_clinic_id)
+        query = restrict_to_branch(
+            query.eq("clinic_id", effective_clinic_id), _staff_branch(user)
+        )
         result = await sb(query.order("created_at", desc=True).limit(2000))
         return {"bookings": result.data or []}
     except Exception as e:
@@ -5370,6 +5419,7 @@ async def admin_confirm_booking(
 ):
     """Manually confirm a pending_review booking (admin override)."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    await _enforce_booking_branch(user, effective_clinic_id, booking_id)
     try:
         from app.services.payment import payment_service
 
@@ -5404,6 +5454,7 @@ async def admin_reject_booking(
 ):
     """Manually reject a pending_review booking + initiate refund."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    await _enforce_booking_branch(user, effective_clinic_id, booking_id)
     try:
         from app.services.payment import payment_service
 
@@ -5467,7 +5518,11 @@ async def admin_refund_booking(
         reason = (body or {}).get("reason", f"Admin refund by {user.username or user.role}")
         req_idempotency_key = (body or {}).get("idempotency_key")
         result = await payment_service.initiate_refund(
-            booking_id, reason, clinic=clinic, idempotency_key=req_idempotency_key
+            booking_id,
+            reason,
+            clinic=clinic,
+            idempotency_key=req_idempotency_key,
+            enforce_window=False,
         )
         if not result["success"]:
             raise HTTPException(
@@ -5478,7 +5533,7 @@ async def admin_refund_booking(
         raise
     except Exception as e:
         logger.error(f"Admin refund error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/payment-events/{booking_id}")

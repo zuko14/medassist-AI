@@ -334,7 +334,16 @@ async def test_2h_reminder_sweep_survives_a_booking_with_no_appointment_time():
     """A confirmed lab booking has appointment_time NULL. Slicing it raised
     TypeError outside the per-appointment try, killing the sweep for every
     clinic. The consultation behind it must still get its reminder."""
+    from datetime import datetime, timedelta
+
     from app.services.scheduler import SchedulerService
+
+    now = datetime.now()
+    if now.hour >= 22:
+        pytest.skip("the 2h window wraps past midnight")
+    # A slot a few minutes ahead: inside the 2h window, and not already started
+    # (a slot that has started is deliberately skipped by the sweep).
+    soon = (now + timedelta(minutes=5)).strftime("%H:%M")
 
     rows = [
         {
@@ -353,7 +362,7 @@ async def test_2h_reminder_sweep_survives_a_booking_with_no_appointment_time():
             "doctor_name": "Dr. Rao",
             "patient_phone": "+919888888888",
             "appointment_date": "2026-09-10",
-            "appointment_time": "00:01",
+            "appointment_time": soon,
             "booking_type": "consultation",
             "reminder_2h_sent": False,
         },

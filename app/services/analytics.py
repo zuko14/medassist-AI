@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from app.database import (
     get_genuine_patients,
     log_analytics_event,
+    restrict_to_branch,
     scoped_query,
     supabase,
 )
@@ -580,7 +581,9 @@ class AnalyticsService:
                 "error": str(e),
             }
 
-    async def get_recent_appointments(self, clinic_id: str, limit: int = 20) -> list:
+    async def get_recent_appointments(
+        self, clinic_id: str, limit: int = 20, branch_id: Optional[str] = None
+    ) -> list:
         """Get recent appointments."""
         try:
             query = (
@@ -589,14 +592,16 @@ class AnalyticsService:
                 .order("created_at", desc=True)
                 .limit(limit)
             )
-            query = query.eq("clinic_id", clinic_id)
+            query = restrict_to_branch(query.eq("clinic_id", clinic_id), branch_id)
             result = await sb(query)
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting recent appointments: {e}")
             return []
 
-    async def get_upcoming_appointments(self, clinic_id: str, days: int = 7) -> list:
+    async def get_upcoming_appointments(
+        self, clinic_id: str, days: int = 7, branch_id: Optional[str] = None
+    ) -> list:
         """Get upcoming appointments."""
         try:
             today = datetime.now().strftime("%Y-%m-%d")
@@ -610,7 +615,7 @@ class AnalyticsService:
                 .order("appointment_date")
                 .order("appointment_time")
             )
-            query = query.eq("clinic_id", clinic_id)
+            query = restrict_to_branch(query.eq("clinic_id", clinic_id), branch_id)
             result = await sb(query)
 
             return result.data or []
@@ -629,6 +634,7 @@ class AnalyticsService:
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        branch_id: Optional[str] = None,
     ) -> dict:
         """One page of the admin Appointments list, with per-status counts.
 
@@ -649,7 +655,9 @@ class AnalyticsService:
         while True:
             page = await sb(
                 _appointment_window(
-                    scoped_query("appointments", clinic_id, "status"),
+                    restrict_to_branch(
+                        scoped_query("appointments", clinic_id, "status"), branch_id
+                    ),
                     basis, date_from, date_to, period_days,
                 )
                 .order("id")
@@ -674,7 +682,7 @@ class AnalyticsService:
         rows: list = []
         if truncated or offset < total:
             query = _appointment_window(
-                scoped_query("appointments", clinic_id, "*"),
+                restrict_to_branch(scoped_query("appointments", clinic_id, "*"), branch_id),
                 basis, date_from, date_to, period_days,
             )
             if status:
