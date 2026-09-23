@@ -64,19 +64,22 @@ Postgres returns `HH:MM:SS`. Treat a mocked test's data shape as a claim to veri
 
 **Audited and found sound (no change):** admin/platform frontend escaping (no stored XSS from patient or tenant fields), `resolve_tenant` fail-closed cascade, WhatsApp webhook ingest/retry/claim release, platform owner + FHIR + clinics + integration auth, FHIR tenant scoping, broadcast/notification scoping, IST daily counters and fail-open report gate, queue token uniqueness, deposit-percent validation, no blocking `.execute()` in async code.
 
-**Open — needs a product decision, deliberately NOT changed**
-- Branch-pinned staff see and can cancel/confirm/reject appointments of every branch in
-  their clinic (list and actions are clinic-scoped). Branch pinning applies to staff and
-  doctor management only.
-- Only FULL-day doctor leave cancels bookings; a half-day leave added after bookings exist
-  leaves those bookings in place.
-- Clinics without `config.integration_secret` accept lab reports signed with the shared
-  platform secret (documented migration window in `routers/integrations.py`).
-- The 2h reminder window cannot wrap past midnight: slots between 22:00 and 24:00 get no 2h reminder.
+**Resolved by owner decision (2026-09-23)**
+- Branch-pinned staff (role=staff with branch_id) now see and act on ONLY their branch's bookings plus
+  branch-less ones: `admin._staff_branch/_branch_kw/_enforce_booking_branch` + `database.restrict_to_branch`.
+  clinic_admin / super_admin / tenant-wide staff are unchanged (queries byte-identical).
+- Half-day leave now cancels (and refunds) only the bookings in the blocked session, using the same
+  `database.doctor_session_slots` the picker uses; an unknown doctor leaves bookings untouched.
+- 2h reminders compare full datetimes and query tomorrow when the window crosses midnight.
 
-**Known pre-existing test failures (fail identically on the untouched code)**
-- `handle_message` tests need the live DB phone lock (see memory note): test_booking_confirmation_followup,
-  test_branch_context_integrity (symptom dispatch), test_diagnostics_catalogue_experience (greeting/help/resubscribe).
-- `test_phase2_route_adversarial_matrix` staff PUT/toggle/DELETE: unmocked DB call; the routes themselves
-  call `enforce_clinic_access` on the loaded row.
-- `test_phase_g_scheduler::test_send_24h_reminders_idempotency_and_update`: does not mock the distributed lock.
+**Still open**
+- Clinics without `config.integration_secret` accept lab reports signed with the shared
+  platform secret (documented migration window in `routers/integrations.py`). Config, not code.
+
+**Test harness (fixed 2026-09-23)**
+`tests/conftest.py` now forces test credentials at import, BEFORE app.config loads `.env`, and replaces
+the Postgres scheduler/phone lock with an in-memory one (except the 5 modules that test the real lock).
+A plain `pytest` no longer touches production Supabase, WhatsApp or production locks. Set
+`KRIYA_TEST_LIVE=1` to deliberately run against `.env`. `test_patient_metrics_production.py`'s three
+live-data checks run only under that flag. Real-schema proofs: `tests/test_session20_real_postgres.py`;
+payment lifecycle through the real HTTP route: `tests/test_session20_payment_e2e.py`.

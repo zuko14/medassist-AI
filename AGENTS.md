@@ -46,6 +46,9 @@ Detailed, implementation-level intelligence documents are maintained in [`docs/a
 
 ## 3. VERIFICATION COMMANDS
 
+> `pytest` is hermetic: `tests/conftest.py` forces test credentials before `.env` loads and fakes the
+> distributed lock. Never run tests with `KRIYA_TEST_LIVE=1` unless you intend to hit production.
+
 Before committing any code changes, execute:
 
 ```bash

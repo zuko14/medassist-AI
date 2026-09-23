@@ -327,3 +327,186 @@ async def test_check_in_refuses_a_non_bookable_status(status):
     with patch.object(app_db, "supabase", sb_mock):
         with pytest.raises(ValueError, match=status):
             await app_db.check_in_appointment("c-1", "a-1")
+
+
+# ── 2h reminder across midnight; half-day leave cancels only its session ───
+async def _run_2h_sweep(fake_now, rows_by_date):
+    from app.services import scheduler as sched_mod
+
+    class _Now(sched_mod.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fake_now
+
+    queried = []
+
+    class _T:
+        def select(self, *_):
+            q = MagicMock()
+            state = {}
+
+            def eq(col, val):
+                state[col] = val
+                return q
+
+            q.eq.side_effect = eq
+            q.execute.side_effect = lambda: (
+                queried.append(state.get("appointment_date"))
+                or MagicMock(data=rows_by_date.get(state.get("appointment_date"), []))
+            )
+            return q
+
+        def update(self, _payload):
+            return _Q([{}])
+
+    sb_mock = MagicMock()
+    sb_mock.table.side_effect = lambda _n: _T()
+    with patch.object(sched_mod, "datetime", _Now), \
+         patch.object(sched_mod, "supabase", sb_mock), \
+         patch("app.services.distributed_lock.distributed_job_lock", _always_locked), \
+         patch.object(sched_mod, "get_clinic_by_id", new_callable=AsyncMock,
+                      return_value={"id": "c-1", "name": "C"}), \
+         patch("app.services.tenant.has_feature", return_value=True), \
+         patch.object(sched_mod, "automated_outbound_allowed", return_value=True), \
+         patch.object(sched_mod.whatsapp_service, "send_template", new_callable=AsyncMock) as send:
+        await sched_mod.SchedulerService().send_2h_reminders()
+    return queried, send
+
+
+def _consult(appt_id, time_str):
+    return {"id": appt_id, "clinic_id": "c-1", "doctor_name": "Dr. A",
+            "patient_phone": "+919876543210", "appointment_time": time_str}
+
+
+@pytest.mark.asyncio
+async def test_2h_reminder_reaches_late_evening_and_after_midnight_slots():
+    from datetime import datetime as _dt
+
+    queried, send = await _run_2h_sweep(
+        _dt(2035, 5, 15, 22, 30),
+        {"2035-05-15": [_consult("late", "23:30:00"), _consult("past", "21:00:00")],
+         "2035-05-16": [_consult("tomorrow", "00:15:00"), _consult("far", "09:00:00")]},
+    )
+    assert queried == ["2035-05-15", "2035-05-16"]
+    sent_to = {c.args[1] for c in send.await_args_list}
+    assert send.await_count == 2 and sent_to == {"+919876543210"}
+
+
+@pytest.mark.asyncio
+async def test_2h_reminder_daytime_queries_only_today():
+    from datetime import datetime as _dt
+
+    queried, send = await _run_2h_sweep(
+        _dt(2035, 5, 15, 10, 0), {"2035-05-15": [_consult("a", "11:00:00")]}
+    )
+    assert queried == ["2035-05-15"]
+    assert send.await_count == 1
+
+
+async def _run_half_leave(leave_type, appts, doc):
+    from app.services import scheduler as sched_mod
+    from app.services.payment import payment_service
+
+    leave = {"clinic_id": "c-1", "doctor_name": "Dr. A", "leave_date": "2035-05-15",
+             "leave_type": leave_type}
+    updates = []
+
+    class _T:
+        def __init__(self, name):
+            self.name = name
+
+        def select(self, *_):
+            return _Q([leave] if self.name == "doctor_leaves" else appts)
+
+        def update(self, payload):
+            updates.append(payload)
+            return _Q([{}])
+
+    sb_mock = MagicMock()
+    sb_mock.table.side_effect = _T
+    with patch.object(sched_mod, "supabase", sb_mock), \
+         patch("app.services.distributed_lock.distributed_job_lock", _always_locked), \
+         patch.object(sched_mod, "get_clinic_by_id", new_callable=AsyncMock, return_value={"id": "c-1"}), \
+         patch("app.database.get_doctor_by_name", new_callable=AsyncMock, return_value=doc), \
+         patch.object(sched_mod.whatsapp_service, "send_template", new_callable=AsyncMock) as template, \
+         patch.object(payment_service, "initiate_refund", new_callable=AsyncMock), \
+         patch.object(payment_service, "notify_cancellation_outcome", new_callable=AsyncMock):
+        await sched_mod.SchedulerService().check_doctor_leaves()
+    return updates, template
+
+
+@pytest.mark.asyncio
+async def test_half_morning_leave_cancels_only_morning_bookings():
+    doc = {"morning_slots": ["09:00", "09:30"], "evening_slots": ["17:00"]}
+    appts = [dict(_leave_appt(None), id="m", appointment_time="09:30:00"),
+             dict(_leave_appt(None), id="e", appointment_time="17:00:00")]
+    updates, template = await _run_half_leave("half_morning", appts, doc)
+    assert updates == [{"status": "cancelled"}]  # only the 09:30 booking
+    assert template.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_half_leave_for_unknown_doctor_touches_nothing():
+    appts = [dict(_leave_appt(None), appointment_time="09:30:00")]
+    updates, template = await _run_half_leave("half_morning", appts, None)
+    assert updates == []
+    template.assert_not_called()
+
+
+# ── Branch-pinned staff see and act on their own branch only ───────────────
+_BRANCH_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+_BRANCH_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+
+def _user(role, branch_id=None):
+    from app.routers.admin import AdminUser
+
+    return AdminUser(username="u", role=role, clinic_id="c-1", user_id="u-1", branch_id=branch_id)
+
+
+def test_restrict_to_branch_filter_and_injection_guard():
+    from app.database import restrict_to_branch
+
+    q = MagicMock()
+    restrict_to_branch(q, _BRANCH_A)
+    q.or_.assert_called_once_with(f"branch_id.eq.{_BRANCH_A},branch_id.is.null")
+    assert restrict_to_branch(q, None) is q  # admins: untouched
+    with pytest.raises(ValueError):
+        restrict_to_branch(MagicMock(), "x,clinic_id.neq.c-1")
+
+
+@pytest.mark.asyncio
+async def test_pinned_staff_blocked_on_another_branch_booking():
+    from fastapi import HTTPException
+
+    from app.routers import admin as admin_mod
+
+    other = MagicMock(data=[{"branch_id": _BRANCH_B}])
+    with patch.object(admin_mod, "sb", new=AsyncMock(return_value=other)):
+        with pytest.raises(HTTPException) as exc:
+            await admin_mod._enforce_booking_branch(_user("staff", _BRANCH_A), "c-1", "b-1")
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,branch", [("clinic_admin", None), ("staff", None), ("clinic_admin", _BRANCH_A)])
+async def test_unpinned_users_are_never_queried_or_blocked(role, branch):
+    from app.routers import admin as admin_mod
+
+    db = AsyncMock()
+    with patch.object(admin_mod, "sb", new=db):
+        await admin_mod._enforce_booking_branch(_user(role, branch), "c-1", "b-1")
+    db.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recent_list_scoped_for_pinned_staff_only():
+    from app.routers import admin as admin_mod
+
+    with patch.object(admin_mod, "enforce_clinic_access", return_value="c-1"), \
+         patch.object(admin_mod.analytics_service, "get_recent_appointments",
+                      new_callable=AsyncMock, return_value=[]) as recent:
+        await admin_mod.get_recent_appointments(clinic_id="c-1", limit=5, user=_user("staff", _BRANCH_A))
+        await admin_mod.get_recent_appointments(clinic_id="c-1", limit=5, user=_user("clinic_admin"))
+    assert recent.await_args_list[0].kwargs == {"branch_id": _BRANCH_A}
+    assert recent.await_args_list[1].kwargs == {}

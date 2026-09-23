@@ -251,6 +251,19 @@ class TenantIsolationError(RuntimeError):
 from app.tenancy import TENANT_OWNED_TABLES, is_valid_clinic_scope  # noqa: F401,E402
 
 
+def restrict_to_branch(query, branch_id: Optional[str]):
+    """Limit an appointments query to one branch plus branch-less rows.
+
+    For staff pinned to a branch. Branch-less rows stay visible, mirroring
+    permissions.enforce_branch_scope(). No-op when branch_id is None. The id is
+    parsed as a UUID so a session value can never inject into the filter string.
+    """
+    if not branch_id:
+        return query
+    bid = str(uuid.UUID(str(branch_id)))
+    return query.or_(f"branch_id.eq.{bid},branch_id.is.null")
+
+
 def scoped_query(
     table_name: str,
     clinic_id: Optional[str] = None,
@@ -905,6 +918,30 @@ async def get_doctor_by_name(clinic_id: str, name: str) -> Optional[dict]:
         return None
 
 
+_DEFAULT_SESSION_SLOTS = {
+    "morning": ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"],
+    "evening": ["17:00", "17:30", "18:00", "18:30"],
+}
+
+
+def doctor_session_slots(doc: dict, session: str) -> list:
+    """A doctor's "HH:MM" slots for one session ('morning' | 'evening').
+
+    The single definition of which slot belongs to which session, shared by the
+    slot picker and the half-day-leave sweep so the two can never disagree.
+    """
+    raw = doc.get(f"{session}_slots")
+    if raw is not None:
+        return raw
+    if (
+        doc.get(f"{session}_start") is None
+        and doc.get(f"{session}_end") is None
+        and f"{session}_slots" in doc
+    ):
+        return []
+    return list(_DEFAULT_SESSION_SLOTS[session])
+
+
 async def get_available_slots(
     clinic_id: str,
     doctor_name: str,
@@ -1017,21 +1054,8 @@ async def get_available_slots(
         if day_name not in available_days:
             return [], "doctor_off_day"
 
-        raw_morn = doc.get("morning_slots")
-        if raw_morn is not None:
-            morning_slots = raw_morn
-        elif doc.get("morning_start") is None and doc.get("morning_end") is None and "morning_slots" in doc:
-            morning_slots = []
-        else:
-            morning_slots = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
-
-        raw_eve = doc.get("evening_slots")
-        if raw_eve is not None:
-            evening_slots = raw_eve
-        elif doc.get("evening_start") is None and doc.get("evening_end") is None and "evening_slots" in doc:
-            evening_slots = []
-        else:
-            evening_slots = ["17:00", "17:30", "18:00", "18:30"]
+        morning_slots = doctor_session_slots(doc, "morning")
+        evening_slots = doctor_session_slots(doc, "evening")
 
         include_morning = "morning" not in blocked_sessions
         include_evening = "evening" not in blocked_sessions
