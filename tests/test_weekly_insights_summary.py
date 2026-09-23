@@ -45,6 +45,17 @@ def _make_admin_user(clinic_id="clinic-1", user_id="user-1"):
     return user
 
 
+def _reads_empty_writes_echo(q):
+    """PostgREST as it really answers: nothing cached to read, and a write
+    returns the row it wrote. A mock that returned no row for the final save
+    too is how "generated successfully" shipped with nothing saved."""
+    req = getattr(q, "request", None)
+    if req is not None and req.http_method in ("POST", "PATCH"):
+        row = req.json if isinstance(req.json, dict) else {}
+        return MagicMock(data=[{"regenerate_count": 1, **row}])
+    return MagicMock(data=[])
+
+
 @pytest.fixture
 def test_app():
     app = FastAPI()
@@ -286,7 +297,7 @@ class TestWeeklySummaryEndpoints:
             "app.services.weekly_summary.call_ai_gateway", new_callable=AsyncMock
         ) as mock_gateway:
             # No existing row
-            mock_sb.return_value = MagicMock(data=[])
+            mock_sb.side_effect = _reads_empty_writes_echo
             fact_sheet = {
                 "bookings": {"last_week": 10, "prior_week": 5, "change": 5, "change_pct": 100},
                 "completed": {"last_week": 8, "prior_week": 4},
@@ -332,7 +343,7 @@ class TestWeeklySummaryEndpoints:
         ) as mock_fact, patch(
             "app.services.weekly_summary.call_ai_gateway", new_callable=AsyncMock
         ) as mock_gateway:
-            mock_sb.return_value = MagicMock(data=[])
+            mock_sb.side_effect = _reads_empty_writes_echo
             fact_sheet = {
                 "bookings": {"last_week": 20, "prior_week": 15, "change": 5, "change_pct": 33},
                 "completed": {"last_week": 18, "prior_week": 12},
@@ -498,7 +509,7 @@ class TestWeeklySummaryEndpoints:
             new_callable=AsyncMock,
             side_effect=SpendCapExceededError("Monthly budget exceeded"),
         ):
-            mock_sb.return_value = MagicMock(data=[])
+            mock_sb.side_effect = _reads_empty_writes_echo
             mock_fact.return_value = {
                 "last_week_label": "Week 37, 2026",
                 "prior_week_label": "Week 36, 2026",

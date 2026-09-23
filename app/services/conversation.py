@@ -1,6 +1,7 @@
 """Conversation state machine for MediAssist."""
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
@@ -19,6 +20,7 @@ from app.database import (
     get_patient_queue_status,
     get_family_members,
     add_family_member,
+    is_uuid,
     log_analytics_event,
 )
 from app.services.ai_engine import (
@@ -80,6 +82,32 @@ _MORE_DOCTORS_ID = "view_doc_more"
 NAV_KEYWORDS = frozenset(
     {"menu", "main menu", "home", "start over", "reset", "मेनू", "మెనూ"}
 )
+
+_MENU_WORDS = frozenset({"menu", "मेनू", "మెనూ"})
+#: Words a patient wraps around "menu" when asking for it: "I need the menu",
+#: "show me the main menu please", "मुझे मेनू चाहिए". A message counts only when
+#: it names the menu and EVERY other word is one of these, so "menu card for
+#: the canteen" is never read as navigation.
+_MENU_REQUEST_FILLER = frozenset({
+    "i", "need", "want", "wanna", "the", "a", "me", "my", "show", "give", "send",
+    "open", "go", "back", "to", "please", "pls", "plz", "kindly", "can", "could",
+    "you", "u", "get", "main", "take", "see", "again", "just", "ok", "okay", "home",
+    "मुझे", "दिखाओ", "दिखाइए", "चाहिए", "भेजो", "मेन", "నాకు", "చూపించు",
+    "చూపించండి", "కావాలి", "పంపండి",
+})
+
+
+def is_menu_request(message: Optional[str]) -> bool:
+    """A typed request for the main menu, exact word or in a short sentence."""
+    text = (message or "").strip().lower()
+    if text in NAV_KEYWORDS:
+        return True
+    words = re.findall(r"[\wऀ-ॿఀ-౿]+", text)
+    return (
+        0 < len(words) <= 8
+        and any(w in _MENU_WORDS for w in words)
+        and all(w in _MENU_WORDS or w in _MENU_REQUEST_FILLER for w in words)
+    )
 
 #: Whole messages that mean "start booking a lab test". Matched on the exact
 #: message, never as a substring, so "cancel my lab test" is not a booking.
@@ -1020,6 +1048,33 @@ class ConversationManager:
             await self.update_state(clinic, phone, "selecting_language")
             return
 
+        # A patient who already has a language and has consented, sitting on a
+        # language picker they never answered ("change my language" yesterday,
+        # no tap), is not stuck there: selecting_language never expires and
+        # rejects all typed text, so "I need the menu" came back as the picker
+        # again, forever. Typing a language applies it; typing anything else
+        # leaves the picker and is handled as if it were sent from the menu.
+        # First-time patients (no language, or consent not given) are
+        # untouched and still have to pick -- the consent step follows it.
+        if (
+            state == "selecting_language"
+            and not interactive_data
+            and patient.get("language")
+            and patient.get("data_consent")
+        ):
+            named = language_change_request(message)
+            if named in ("en", "hi", "te"):
+                await self._handle_selecting_language(
+                    clinic, phone, message, patient, {"id": f"lang_{named}"}
+                )
+                return
+            # "ask" (change requested, none named) or a classifier that read
+            # it as a language request keeps the picker, as before.
+            if named is None and intent not in ("change_language", "select_language"):
+                state, context = "main_menu", {}
+                session = {**session, "state": state, "context": context}
+                await self.update_state(clinic, phone, "main_menu", {})
+
         # Emergency can trigger from ANY state
         if intent == "emergency":
             await self._handle_emergency(clinic, phone, lang)
@@ -1156,7 +1211,8 @@ class ConversationManager:
             and context.get("lab_step") == "name"
             and not interactive_data
             and (message or "").strip()
-            and message.strip().lower() not in NAV_KEYWORDS | LAB_BOOKING_KEYWORDS
+            and message.strip().lower() not in LAB_BOOKING_KEYWORDS
+            and not is_menu_request(message)
             and intent not in {"greeting", "cancel_appointment", "reschedule_appointment"}
         ):
             await self._handle_confirming_collection_date(
@@ -1173,7 +1229,7 @@ class ConversationManager:
             state in ("browsing_treatments", "searching_treatments")
             and not interactive_data
             and (message or "").strip()
-            and message.strip().lower() not in NAV_KEYWORDS
+            and not is_menu_request(message)
             and intent not in {"greeting", "book_appointment", "cancel_appointment", "reschedule_appointment"}
         ):
             await specialty_flow.handle_treatment_search_text(self, clinic, phone, message, lang)
@@ -1182,6 +1238,13 @@ class ConversationManager:
         # Global handlers for top-level menu intents (escape hatches from selection states)
         if state not in ["selecting_language", "awaiting_consent"]:
             msg_lower = message.strip().lower()
+
+            # "menu", or "I need the menu": first, so a classifier that reads
+            # the sentence as view_services / unknown cannot divert it.
+            if is_menu_request(message):
+                await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
+                await self._send_main_menu(clinic, phone, lang)
+                return
 
             # Ahead of every intent check: see LAB_BOOKING_KEYWORDS for why the
             # classifier cannot be trusted with these words. The lab report
@@ -1195,6 +1258,26 @@ class ConversationManager:
                 if has_feature(clinic, "lab_test_booking"):
                     await self._start_lab_booking(clinic, phone, lang)
                     return
+
+            # "Do you provide newborn checkup?": a question naming a treatment
+            # this clinic lists is answered with that treatment, not with the
+            # department picker "view_services" opens. Only from the places a
+            # patient asks a fresh question (not mid-booking, not while we
+            # wait for their name or symptoms); a question naming nothing in
+            # the catalogue falls through to exactly what it got before.
+            # A booking or an unclassified message only yields to a match on
+            # a treatment's NAME, so "I have fever" still starts a booking.
+            if (
+                not interactive_data
+                and intent in self._NAMED_TREATMENT_INTENTS
+                and state in self._NAMED_TREATMENT_STATES
+                and patient.get("data_consent")
+                and await specialty_flow.answer_named_treatment(
+                    self, clinic, phone, message, lang,
+                    names_only=intent not in ("view_services", "find_tests"),
+                )
+            ):
+                return
 
             # "I have sugar, what test can I do", "cost of CBC": the question
             # itself is the search. The catalogue answers it, never the model
@@ -1244,10 +1327,7 @@ class ConversationManager:
                 "selecting_date",
                 "selecting_slot",
             }
-            if (
-                msg_lower in NAV_KEYWORDS
-                or (intent == "greeting" and state in CHOICE_STATES and state != "main_menu")
-            ):
+            if intent == "greeting" and state in CHOICE_STATES and state != "main_menu":
                 await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
                 await self._send_main_menu(clinic, phone, lang)
                 return
@@ -3131,6 +3211,11 @@ class ConversationManager:
         doctor_id = None
         if button_id.startswith("doc_"):
             doctor_id = button_id.replace("doc_", "")
+            if re.match(r"\d+_", doctor_id) and not is_uuid(doctor_id):
+                # "Select another doctor" rows are doc_{i}_{name}; handle_message
+                # already put the name in `message`. Querying "0_Dr X" as a
+                # UUID raised instead of matching the name below.
+                doctor_id = None
 
         if doctor_id:
             from app.database import supabase
@@ -3158,7 +3243,9 @@ class ConversationManager:
             active_depts = list(set(r["department"] for r in (dept_res.data or []) if r.get("department")))
 
             matched_dept = None
-            for dept in active_depts:
+            # A treatment booking lists only the doctors who perform it; a
+            # typed department name must not reopen the whole department.
+            for dept in ([] if context.get("treatment_id") else active_depts):
                 if dept.lower() in msg or msg in dept.lower():
                     matched_dept = dept
                     break
@@ -3207,6 +3294,16 @@ class ConversationManager:
             else:
                 doctor = None
                 doctor_name = ""
+
+        if doctor and context.get("treatment_id"):
+            # Whatever picked the doctor -- a typed name, a list from earlier
+            # in the chat -- a treatment booking goes only to a doctor the
+            # clinic mapped to that treatment (all doctors when none are).
+            allowed = await specialty_flow._treatment_doctors(
+                clinic["id"], context["treatment_id"], context.get("branch_id")
+            )
+            if str(doctor.get("id")) not in {str(d.get("id")) for d in allowed}:
+                doctor = None
 
         if not doctor:
             # Implement Fallback: resend the list instead of just an error text
@@ -4171,6 +4268,10 @@ class ConversationManager:
                         )
                         await self.update_state(clinic, phone, "main_menu", reset_context=True)
                         await self._send_main_menu(clinic, phone, lang)
+        elif context.get("treatment_id"):
+            # Edit booking on a treatment booking: its own doctor list, not
+            # the whole department's.
+            await specialty_flow.show_treatment_doctors(self, clinic, phone, context, lang)
         else:
             # Edit booking - go back to doctor selection
             await self._show_doctor_list(
@@ -4291,11 +4392,14 @@ class ConversationManager:
         from datetime import datetime, timedelta
 
         branch_id = context.get("branch_id")
-        doctors = [
-            d
-            for d in await get_doctors(clinic["id"], department, branch_id=branch_id)
-            if d["name"] != exclude_doctor
-        ]
+        if context.get("treatment_id"):
+            # Only doctors who perform the treatment, not the department.
+            pool = await specialty_flow._treatment_doctors(
+                clinic["id"], context["treatment_id"], branch_id
+            )
+        else:
+            pool = await get_doctors(clinic["id"], department, branch_id=branch_id)
+        doctors = [d for d in pool if d["name"] != exclude_doctor]
 
         # One round per day across every doctor still needing one, instead of
         # doctors x 7 serial round-trips — this runs inside the patient's turn,
@@ -4600,6 +4704,15 @@ class ConversationManager:
 
     #: States where free text is the patient's answer to our question.
     _FREE_TEXT_ANSWER_STATES = frozenset({"collecting_name", "collecting_symptoms", "asking_symptoms"})
+
+    #: Where a typed question may be answered with a named treatment (see
+    #: specialty_flow.answer_named_treatment), and for which intents.
+    _NAMED_TREATMENT_STATES = frozenset(
+        {"idle", "main_menu", "selecting_department", "selecting_doctor"}
+    )
+    _NAMED_TREATMENT_INTENTS = frozenset(
+        {"view_services", "find_tests", "unknown", "book_appointment"}
+    )
 
     async def _answer_clinic_info(
         self, clinic: dict, phone: str, message: str, state: str, lang: str
@@ -5570,7 +5683,12 @@ class ConversationManager:
             # used to come back as "73 test(s) matching 'Hi'" (THIAMINE,
             # CHIKUNGUNYA...), because this state is not one the global
             # greeting-to-menu rule covers.
-            if typed_lower in self.LAB_SEARCH_EXIT_WORDS or is_greeting(typed) or intent == "greeting":
+            if (
+                typed_lower in self.LAB_SEARCH_EXIT_WORDS
+                or is_menu_request(typed)
+                or is_greeting(typed)
+                or intent == "greeting"
+            ):
                 await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
                 await self._send_main_menu(clinic, phone, lang)
             elif typed and typed_lower not in self.LAB_SEARCH_RESET_WORDS:

@@ -73,3 +73,6 @@ screenshots_browser_automation_callmedex/
 # verification run cannot leave a committable directory behind.
 tmp_pg_*/
 
+
+# Codebase memory index (generated, not committed)
+.codebase-memory/

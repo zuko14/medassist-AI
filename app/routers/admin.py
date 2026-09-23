@@ -1848,7 +1848,9 @@ async def get_weekly_insights_summary(
             .eq("iso_year", lw_year)
             .eq("iso_week", lw_week)
         )
-        if res.data:
+        # A row with no text is a generation that never finished (the
+        # placeholder claimed for the daily limit): nothing to show yet.
+        if res.data and (res.data[0].get("summary_text") or "").strip():
             row = res.data[0]
             return {
                 "status": "ready",

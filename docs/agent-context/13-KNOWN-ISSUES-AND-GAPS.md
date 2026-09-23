@@ -83,3 +83,13 @@ A plain `pytest` no longer touches production Supabase, WhatsApp or production l
 `KRIYA_TEST_LIVE=1` to deliberately run against `.env`. `test_patient_metrics_production.py`'s three
 live-data checks run only under that flag. Real-schema proofs: `tests/test_session20_real_postgres.py`;
 payment lifecycle through the real HTTP route: `tests/test_session20_payment_e2e.py`.
+
+## 4. SESSION 21 (2026-09-23) — FIXED
+
+Details: `docs/sessions/SESSION_21_PATIENT_QUESTIONS.md`. Tests: `tests/test_session21_*.py`.
+1. Weekly summary never saved: placeholder `source="generating"` violated migration 085's CHECK; failure swallowed, API returned `ready`; panel also expected `'available'`. Now saved or 503.
+2. Patient stuck on an unanswered language picker (`selecting_language` never expires, rejected typed text). Consented patients with a language now escape it; "I need the menu"-style phrasing is `is_menu_request`.
+3. Typed "do you provide <treatment>" answered with the department list. Now answered from the clinic's treatment catalogue (`specialty_flow.answer_named_treatment`, strict match, no LLM).
+4. Treatment bookings could reach unmapped doctors via typed name/department, older list, Edit booking, or "select another doctor". All paths now go through `specialty_flow._treatment_doctors`.
+
+Still open: `get_treatment_doctor_ids` returns an empty set on a DB error, which reads as "any doctor" (fails open to the unfiltered list, consistent with what the patient was shown).

@@ -324,8 +324,15 @@ class TestRouting:
     @pytest.mark.parametrize("state", ["selecting_language", "awaiting_consent"])
     async def test_consent_still_comes_first(self, state):
         """DPDP: nothing is answered before the patient has consented."""
-        m = await self._route("Where are you located", "clinic_info", state)
+        m = await self._route("Where are you located", "clinic_info", state, consent=None)
         m.whatsapp.send_text.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_consented_patient_on_an_abandoned_picker_is_answered(self):
+        """Session 21: a consented patient who left a language picker unanswered
+        is no longer stuck on it -- consent was already given."""
+        m = await self._route("Where are you located", "clinic_info", "selecting_language")
+        m.whatsapp.send_text.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_consent_is_asked_before_anything_is_answered(self):

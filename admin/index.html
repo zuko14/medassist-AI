@@ -5170,10 +5170,11 @@ async function loadWeeklySummary() {
             `;
             if (btnText) btnText.textContent = 'Generate Summary';
             renderWeeklyFactSheet(data.fact_sheet);
-        } else if (data.status === 'available') {
+        } else if (data.status === 'ready') {
             const formatted = formatSimpleMarkdown(data.summary_text);
-            const genTime = data.generated_at ? new Date(data.generated_at).toLocaleString() : '';
-            const modelLabel = data.model_used ? `<span style="color:var(--text3); font-size:0.75rem; margin-left:8px;">Model: ${esc(data.model_used)} • ${esc(genTime)}</span>` : '';
+            const genTime = data.updated_at ? new Date(data.updated_at).toLocaleString() : '';
+            const sourceLabel = data.source === 'ai' ? 'AI summary' : 'Standard summary';
+            const modelLabel = `<span style="color:var(--text3); font-size:0.75rem; margin-left:8px;">${esc(sourceLabel)}${genTime ? ' • ' + esc(genTime) : ''}</span>`;
             content.innerHTML = `
                 <div>${formatted}</div>
                 <div style="margin-top:12px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">${modelLabel}</div>

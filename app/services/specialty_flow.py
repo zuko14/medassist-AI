@@ -292,6 +292,58 @@ def match_treatments(treatments: list, query: str) -> list:
     return [s[3] for s in scored]
 
 
+#: Words of a question ABOUT a service that never name one: "do you provide
+#: newborn checkup", "which treatments are available". Applied after
+#: hybrid_search.strip_query_filler, which removes the conversational words.
+_SERVICE_QUESTION_WORDS = frozenset({
+    "service", "services", "treatment", "treatments", "treat", "facility", "facilities",
+    "hospital", "clinic", "here", "anything", "something", "option", "options",
+    "procedure", "procedures", "perform", "performed", "yes", "okay", "appointment",
+    "appointments", "slot", "doctor", "doctors", "dr", "we", "your", "you", "our",
+})
+
+
+def service_question_terms(message: str) -> str:
+    """The words of a typed question that could name a treatment."""
+    from app.services.hybrid_search import strip_query_filler
+
+    return " ".join(
+        w for w in strip_query_filler(message or "").split() if w not in _SERVICE_QUESTION_WORDS
+    )
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[\W\d_]+", "", (text or "").lower())
+
+
+def named_treatments(treatments: list, query: str, names_only: bool = False) -> list:
+    """Treatments the query NAMES outright -- stricter than match_treatments.
+
+    match_treatments ranks partial hits for a patient describing a concern;
+    this answers "do you offer X", so every word must be found in the
+    treatment, or the words run together must be ("new born checkup" is
+    "Newborn Check-up"). `names_only` looks at the name alone, for messages
+    whose own intent (a booking) should win unless a treatment is named.
+    Treatments named by their title come first; ties keep the admin's order.
+    """
+    words = [w for w in re.findall(r"[^\W\d_]+", (query or "").lower()) if len(w) >= 3]
+    if not words:
+        return []
+    joined = "".join(words)
+    hits = []
+    for t in treatments:
+        title = " ".join(filter(None, [t.get("name"), t.get("short_name")])).lower()
+        hay = title if names_only else " ".join(
+            filter(None, [title, t.get("category"), t.get("concerns")])
+        ).lower()
+        compact = _compact(hay)
+        if joined in compact or all(w in hay or w in compact for w in words):
+            by_title = joined in _compact(title) or all(w in title for w in words)
+            hits.append((0 if by_title else 1, t))
+    hits.sort(key=lambda h: h[0])  # stable: admin order within each group
+    return [t for _, t in hits]
+
+
 async def _treatment_doctors(clinic_id: str, treatment_id: str, branch_id: Optional[str] = None) -> list:
     """Active doctors who perform the treatment, at the branch when one is chosen.
 
@@ -469,13 +521,16 @@ def _card_buttons(treatment: dict, lang: str) -> list:
     ]
 
 
-async def show_treatment_card(manager, clinic: dict, phone: str, treatment_id: str, lang: str) -> None:
+async def show_treatment_card(
+    manager, clinic: dict, phone: str, treatment_id: str, lang: str,
+    intro: Optional[str] = None,
+) -> None:
     treatment = await get_treatment_by_id(clinic["id"], treatment_id)
     if not treatment:
         await _send_unavailable(manager, clinic, phone, lang)
         return
 
-    lines = [f"✨ *{treatment['name']}*", f"_{_category(treatment)}_", ""]
+    lines = ([intro, ""] if intro else []) + [f"✨ *{treatment['name']}*", f"_{_category(treatment)}_", ""]
     description = localized_description(treatment, lang)
     if description:
         lines += [description, ""]
@@ -918,7 +973,12 @@ async def handle_treatment_search_text(manager, clinic: dict, phone: str, messag
         await show_treatment_categories(manager, clinic, phone, lang)
         return
 
-    shown = query[:60]
+    await _send_treatment_matches(manager, clinic, phone, matches, query[:60], has_entry, lang)
+
+
+async def _send_treatment_matches(
+    manager, clinic: dict, phone: str, matches: list, shown: str, has_entry: bool, lang: str
+) -> None:
     rows = [
         {"id": f"trt_{t['id']}", "title": _title(t), "description": _row_description(t, lang)}
         for t in matches
@@ -954,6 +1014,40 @@ async def handle_treatment_search_text(manager, clinic: dict, phone: str, messag
 
 
 # ── Routing entry points used by conversation.py ────────────────────────────
+
+async def answer_named_treatment(
+    manager, clinic: dict, phone: str, message: str, lang: str, names_only: bool = False
+) -> bool:
+    """"Do you provide newborn checkup?" answered with the clinic's Newborn
+    Check-up, instead of the generic department picker the question got
+    before. True = answered.
+
+    Only a treatment the patient NAMED, from this clinic's own catalogue: a
+    question naming nothing ("what are your services") or matching nothing
+    returns False and the caller carries on exactly as before. No LLM call.
+    """
+    if not await treatment_menu_active(clinic):
+        return False
+    terms = service_question_terms(message)
+    if not terms:
+        return False
+    treatments = await get_specialty_treatments(clinic["id"])
+    matches = named_treatments(treatments, terms, names_only=names_only)[:9]
+    if not matches:
+        return False
+    if len(matches) == 1:
+        await show_treatment_card(
+            manager, clinic, phone, str(matches[0]["id"]), lang,
+            intro=_t(lang, "✅ Yes, we offer this at our clinic:",
+                     "✅ जी हाँ, यह सेवा हमारे क्लिनिक में उपलब्ध है:",
+                     "✅ అవును, ఈ సేవ మా క్లినిక్‌లో అందుబాటులో ఉంది:"),
+        )
+        return True
+    await _send_treatment_matches(
+        manager, clinic, phone, matches, terms[:60], bool(entry_treatments(treatments)), lang
+    )
+    return True
+
 
 async def handle_treatment_button(manager, clinic: dict, phone: str, button_id: str, session: dict, lang: str) -> None:
     if not specialty_enabled(clinic):

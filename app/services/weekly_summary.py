@@ -432,7 +432,12 @@ async def generate_weekly_summary(
             "iso_week": lw_week,
             "fact_sheet": {},
             "summary_text": "",
-            "source": "generating",
+            # Placeholder until step 4 overwrites it. Must satisfy the
+            # CHECK (source IN ('ai','template')) of migration 085: the old
+            # value "generating" was rejected, the insert failed silently and
+            # every first generation of a week was never saved. An empty
+            # summary_text is what marks the row as not generated yet.
+            "source": "template",
             "regenerate_date": current_date_str,
             "regenerate_count": 1,
             "updated_at": now_utc_str,
@@ -570,19 +575,43 @@ async def generate_weekly_summary(
         summary_text = build_template_weekly_summary(fact_sheet)
         source = "template"
 
-    # 4. Save generated summary into database
-    await sb(
+    # 4. Save generated summary into database. Success is only reported once
+    # a row really holds it: an UPDATE that matched nothing used to return
+    # "ready" and the admin saw "generated successfully" over an empty card.
+    saved = {
+        "fact_sheet": fact_sheet,
+        "summary_text": summary_text,
+        "source": source,
+        "updated_at": now_utc_str,
+    }
+    save_res = await sb(
         supabase.table("weekly_insights_summaries")
-        .update({
-            "fact_sheet": fact_sheet,
-            "summary_text": summary_text,
-            "source": source,
-            "updated_at": now_utc_str,
-        })
+        .update(saved)
         .eq("clinic_id", clinic_id)
         .eq("iso_year", lw_year)
         .eq("iso_week", lw_week)
     )
+    if not save_res.data:
+        try:
+            save_res = await sb(
+                # unscoped: insert_scoped_by_payload
+                supabase.table("weekly_insights_summaries").insert({
+                    **saved,
+                    "clinic_id": clinic_id,
+                    "iso_year": lw_year,
+                    "iso_week": lw_week,
+                    "regenerate_date": current_date_str,
+                    "regenerate_count": current_count,
+                })
+            )
+        except Exception as e:
+            logger.error(f"Weekly summary could not be saved for clinic {clinic_id}: {e}")
+            save_res = None
+        if not (save_res and save_res.data):
+            raise HTTPException(
+                status_code=503,
+                detail="The weekly summary could not be saved. Please try again.",
+            )
 
     return {
         "status": "ready",
