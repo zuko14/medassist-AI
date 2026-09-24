@@ -296,3 +296,82 @@ class TestCrossPathReportDeduplication:
         assert data["already_processed"] is True
         mock_whatsapp.send_text.assert_not_called()
         mock_whatsapp.send_document.assert_not_called()
+
+
+class TestCallMedexSampleBarcodeDedup:
+    """Option C: a processing centre that is also a direct client (Accumx) must
+    not send, from its own number, a report CallMedex already delivered for the
+    same specimen. The two intakes use different report ids; the specimen
+    barcode (MocDoc SampleID) is the shared key."""
+
+    @pytest.fixture
+    def client_and_mocks(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from unittest.mock import AsyncMock, MagicMock
+        from app.routers.integrations import router
+        from app.services.patient_match import MatchResult
+
+        app = FastAPI()
+        app.include_router(router)
+        with patch("app.routers.integrations.settings") as st, \
+             patch("app.routers.integrations.supabase") as sb_mock, \
+             patch("app.routers.integrations.assert_clinic_integration_secret", new=AsyncMock()), \
+             patch("app.services.patient_match.patient_match_service.match", new=AsyncMock(return_value=MatchResult(
+                 status="matched", is_safe_to_send=True, match_source="test", match_confidence=1.0,
+                 normalized_phone="+919876543210", patient_name="P"))), \
+             patch("app.services.lab_reports.LabReportService.upload_and_send",
+                   new=AsyncMock(return_value={"id": "lr-new", "status": "sent"})) as upload:
+            st.integration_secret = "test-secret-key"
+            yield TestClient(app), sb_mock, upload
+
+    def _post(self, client, **extra):
+        data = {
+            "clinic_id": "clinic-A", "patient_phone": "+919876543210", "patient_name": "P",
+            "report_name": "CBC", "external_report_id": "VAM-1_2922", "connector_type": "mocdoc", **extra,
+        }
+        return client.post(
+            "/internal/integrations/lab-report",
+            headers={"X-Integration-Secret": "test-secret-key"},
+            data=data,
+            files={"file": ("r.pdf", b"%PDF-1.4 x", "application/pdf")},
+        )
+
+    def _db(self, sb_mock, callmedex_rows):
+        from unittest.mock import MagicMock
+
+        t = sb_mock.table.return_value
+        # integration_processed_reports (3 eq) and lab_reports by external id (2 eq): nothing
+        t.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        t.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        # sample-barcode lookup: select.eq(clinic).eq(barcode).eq(source).eq(status).limit(1)
+        t.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=callmedex_rows)
+        return t
+
+    def test_callmedex_delivered_sample_is_not_resent_by_connector(self, client_and_mocks):
+        client, sb_mock, upload = client_and_mocks
+        t = self._db(sb_mock, [{"id": "lr-cmx"}])
+        resp = self._post(client, sample_id="260700007335")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["already_processed"] is True and body["lab_report_id"] == "lr-cmx"
+        upload.assert_not_awaited()
+        # the lookup is tenant-scoped and restricted to CallMedex deliveries
+        eqs = t.select.return_value.eq
+        assert eqs.call_args_list[0].args == ("clinic_id", "clinic-A")
+
+    def test_no_callmedex_match_sends_and_records_the_barcode(self, client_and_mocks):
+        client, sb_mock, upload = client_and_mocks
+        self._db(sb_mock, [])
+        resp = self._post(client, sample_id="260700007335")
+        assert resp.status_code == 200
+        upload.assert_awaited_once()
+        assert upload.await_args.kwargs["sample_barcode"] == "260700007335"
+
+    def test_without_a_barcode_nothing_is_suppressed(self, client_and_mocks):
+        client, sb_mock, upload = client_and_mocks
+        self._db(sb_mock, [{"id": "lr-cmx"}])  # would match if it were consulted
+        resp = self._post(client)
+        assert resp.status_code == 200
+        upload.assert_awaited_once()
+        assert upload.await_args.kwargs["sample_barcode"] is None

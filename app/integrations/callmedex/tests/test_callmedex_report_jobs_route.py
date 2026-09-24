@@ -346,15 +346,36 @@ async def test_patient_upload_never_touches_a_clinic(v1, monkeypatch):
     lock.release.assert_not_awaited()
 
 
+def _primary(status_name, message_id="wamid.CMX"):
+    result = MagicMock(status=getattr(WhatsAppDeliveryStatus, status_name), message_id=message_id)
+    return patch.object(runner_mod.WhatsAppDeliveryService, "deliver_report_and_summary", AsyncMock(return_value=result))
+
+
 @pytest.mark.asyncio
 async def test_patient_upload_undeliverable_fails_without_clinic_fallback(v1, monkeypatch):
     r, cb, lock, *_ = v1
     upload = AsyncMock()
     monkeypatch.setattr("app.services.lab_reports.LabReportService.upload_and_send", upload)
-    await r.execute_callmedex_v1_job(_req())  # OCR fails -> no summary -> no CallMedex send
+    with _primary("FAILED"):
+        await r.execute_callmedex_v1_job(_req())
     upload.assert_not_awaited()
     assert cb.send_report_failed.await_args.args[2] == "delivery_failed"
     lock.release.assert_awaited_once()  # CallMedex's retry worker may resubmit
+
+
+@pytest.mark.asyncio
+async def test_no_ai_summary_still_sends_pdf_from_callmedex_number(v1):
+    """Fail-open on content: OCR failed, the PDF still goes out on the CallMedex
+    number with a neutral line — never an invented interpretation."""
+    r, cb, *_ = v1  # fixture's OCR raises
+    deliver = AsyncMock(return_value=MagicMock(status=WhatsAppDeliveryStatus.DELIVERED, message_id="wamid.CMX"))
+    with patch.object(runner_mod.WhatsAppDeliveryService, "deliver_report_and_summary", deliver):
+        await r.execute_callmedex_v1_job(_req())
+    summary = deliver.await_args.kwargs["summary_report"]
+    assert summary.patient_summary[0].statement.startswith("Your lab report is attached")
+    assert summary.review_flagged is True
+    analysis = cb.send_report_delivered.await_args.args[3]
+    assert analysis["plain_language_summary"] == "" and analysis["abnormal_flags"] == []
 
 
 @pytest.mark.asyncio
@@ -393,7 +414,22 @@ async def test_bad_document_is_invalid_source_document(v1, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_center_job_falls_back_to_clinic_number_and_clears_stale_retry_row(v1, monkeypatch):
+async def test_center_job_never_uses_the_clinic_number(v1, monkeypatch):
+    """Channel isolation: a CallMedex booking for Accumax is sent ONLY from the
+    CallMedex number. If that fails, report-failed — never Accumax's number."""
+    r, cb, lock, fake_sb, db_calls = v1
+    monkeypatch.setattr(runner_mod, "resolve_callmedex_clinic_id", AsyncMock(return_value="clinic-A"))
+    upload = AsyncMock()
+    monkeypatch.setattr("app.services.lab_reports.LabReportService.upload_and_send", upload)
+    with _primary("FAILED"):
+        await r.execute_callmedex_v1_job(_req(processing_center_id="e204185b-fd1c-4753-9243-58715d76b51c"))
+    upload.assert_not_awaited()
+    assert cb.send_report_failed.await_args.args[2] == "delivery_failed"
+    lock.release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_center_job_clears_stale_retry_row_and_records_barcode(v1, monkeypatch):
     r, cb, lock, fake_sb, db_calls = v1
     monkeypatch.setattr(runner_mod, "resolve_callmedex_clinic_id", AsyncMock(return_value="clinic-A"))
     rows = iter([MagicMock(data=[{"status": "failed"}])])  # first query: prior attempt's row
@@ -403,14 +439,49 @@ async def test_center_job_falls_back_to_clinic_number_and_clears_stale_retry_row
         return next(rows, MagicMock(data=[]))
 
     monkeypatch.setattr(runner_mod, "sb", sb_exec)
-    upload = AsyncMock(return_value={"status": "sent", "whatsapp_message_id": "wamid.CLINIC"})
-    monkeypatch.setattr("app.services.lab_reports.LabReportService.upload_and_send", upload)
-    await r.execute_callmedex_v1_job(_req(processing_center_id="e204185b-fd1c-4753-9243-58715d76b51c"))
+    with _primary("DELIVERED"):
+        await r.execute_callmedex_v1_job(_req(processing_center_id="e204185b", barcode="260700007335"))
     lab = fake_sb.table.return_value
     lab.delete.return_value.eq.return_value.eq.return_value.neq.assert_called_once_with("status", "sent")
-    assert upload.await_args.kwargs["external_report_id"] == "job-r-1"
-    assert upload.await_args.kwargs["clinic_id"] == "clinic-A"
-    assert cb.send_report_delivered.await_args.args[2] == "wamid.CLINIC"
+    row = lab.insert.call_args.args[0]
+    assert row["clinic_id"] == "clinic-A" and row["source"] == "callmedex" and row["status"] == "sent"
+    assert row["external_report_id"] == "job-r-1" and row["sample_barcode"] == "260700007335"
+    assert cb.send_report_delivered.await_args.args[2] == "wamid.CMX"
+
+
+@pytest.mark.asyncio
+async def test_sample_already_delivered_by_centre_connector_is_not_resent(v1, monkeypatch):
+    """Option C, reverse direction: Accumx's MocDoc connector delivered this
+    specimen first -> CallMedex does not send a second copy."""
+    r, cb, lock, fake_sb, _ = v1
+    monkeypatch.setattr(runner_mod, "resolve_callmedex_clinic_id", AsyncMock(return_value="clinic-A"))
+    monkeypatch.setattr(runner_mod, "_prior_report_already_sent", AsyncMock(return_value=False))
+    monkeypatch.setattr(runner_mod, "_connector_already_sent_sample", AsyncMock(return_value=True))
+    deliver = AsyncMock()
+    with patch.object(runner_mod.WhatsAppDeliveryService, "deliver_report_and_summary", deliver):
+        await r.execute_callmedex_v1_job(_req(processing_center_id="e204185b", barcode="260700007335"))
+    deliver.assert_not_awaited()
+    runner_mod._download_source_document.assert_not_awaited()
+    runner_mod._connector_already_sent_sample.assert_awaited_once_with("clinic-A", "260700007335")
+    cb.send_report_delivered.assert_awaited_once()
+    lock.renew.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_connector_sample_lookup_is_tenant_scoped_and_fails_open(monkeypatch):
+    q = MagicMock()
+    fake = MagicMock()
+    fake.table.return_value.select.return_value = q
+    q.eq.return_value = q
+    q.neq.return_value = q
+    q.limit.return_value = q
+    monkeypatch.setattr("app.database.supabase", fake)
+    monkeypatch.setattr(runner_mod, "sb", AsyncMock(return_value=MagicMock(data=[{"id": "x"}])))
+    assert await runner_mod._connector_already_sent_sample("clinic-A", "BC1") is True
+    assert ("clinic_id", "clinic-A") in [c.args for c in q.eq.call_args_list]
+    q.neq.assert_called_once_with("source", "callmedex")
+    monkeypatch.setattr(runner_mod, "sb", AsyncMock(side_effect=RuntimeError("db down")))
+    assert await runner_mod._connector_already_sent_sample("clinic-A", "BC1") is False
 
 
 def test_document_url_allowlist():

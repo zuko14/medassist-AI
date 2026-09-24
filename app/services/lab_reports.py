@@ -242,6 +242,7 @@ class LabReportService:
         match_confidence: Optional[float] = None,
         match_source: Optional[str] = None,
         matched_patient_id: Optional[str] = None,
+        sample_barcode: Optional[str] = None,
     ) -> dict:
         """Full pipeline: extract text, AI summary, upload, send via WhatsApp, save record.
 
@@ -659,6 +660,10 @@ class LabReportService:
                 )
             ),
         }
+        if sample_barcode:
+            # Cross-intake dedup key (migration 087); only written when known so
+            # intakes without a barcode are unchanged.
+            row["sample_barcode"] = sample_barcode
         if sent_ok:
             row["sent_at"] = datetime.now(timezone.utc).isoformat()
         elif deferred_reason:

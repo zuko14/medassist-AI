@@ -141,6 +141,7 @@ async def receive_lab_report(
     match_confidence: Optional[float] = Form(default=None),
     match_source: Optional[str] = Form(default=None),
     matched_patient_id: Optional[str] = Form(default=None),
+    sample_id: Optional[str] = Form(default=None),
     file: UploadFile = File(...),
     x_integration_secret: Optional[str] = Header(None),
 ):
@@ -217,6 +218,39 @@ async def receive_lab_report(
             )
     except Exception as e:
         logger.warning(f"Idempotency check failed (proceeding): {e}")
+
+    # Step 1b: Cross-intake dedup with CallMedex. A processing centre that is
+    # also a direct client (Accumx) sees the same report twice: CallMedex
+    # delivers it from the CallMedex number, then this centre's own connector
+    # finds it in the EMR. The report ids differ; the specimen barcode is the
+    # one shared key. Only an exact barcode match suppresses — a phone-only
+    # match could be a different test, and withholding a report is worse than
+    # a duplicate. Fail-open: a failed check sends as before.
+    sample_barcode = (sample_id or "").strip() or None
+    if sample_barcode and connector_type != "callmedex":
+        try:
+            dup = await sb(
+                supabase.table("lab_reports")
+                .select("id")
+                .eq("clinic_id", clinic_id)
+                .eq("sample_barcode", sample_barcode)
+                .eq("source", "callmedex")
+                .eq("status", "sent")
+                .limit(1)
+            )
+            if dup.data:
+                logger.info(
+                    f"Report {external_report_id} (sample {sample_barcode}) was already delivered "
+                    f"via CallMedex — skipped duplicate send from the clinic number"
+                )
+                return LabReportResponse(
+                    success=True,
+                    already_processed=True,
+                    lab_report_id=str(dup.data[0].get("id")),
+                    message=f"Report {external_report_id} already delivered via CallMedex",
+                )
+        except Exception as e:
+            logger.warning(f"CallMedex cross-intake dedup check failed (proceeding): {e}")
 
     # Step 2: Read file bytes
     file_bytes = await file.read()
@@ -341,6 +375,7 @@ async def receive_lab_report(
             match_confidence=effective_match_confidence,
             match_source=effective_match_source,
             matched_patient_id=effective_matched_patient_id,
+            sample_barcode=sample_barcode,
         )
     except Exception as e:
         logger.error(f"LabReportService failed for {external_report_id}: {e}")

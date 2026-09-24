@@ -595,6 +595,14 @@ class CallMedexWorkerRunner:
                 # Delivered by an earlier run whose claim has since expired.
                 return await finish_delivered(None, build_analysis_payload())
 
+            sample_barcode = (request.barcode or "").strip() or None
+            if clinic_id and sample_barcode and await _connector_already_sent_sample(clinic_id, sample_barcode):
+                # Cross-intake dedup: the centre's own EMR connector already
+                # delivered this specimen's report to the patient.
+                logger.info(f"CallMedex v1 job {report_job_id}: sample {sample_barcode} already delivered "
+                            f"by the centre's own connector — not sending a duplicate")
+                return await finish_delivered(None, build_analysis_payload())
+
             pdf_bytes = await _download_source_document(request.source_document_url)
             patient_name = request.patient.name or "Patient"
             report_name = "Laboratory Report" if request.source_type == "lab_report" else (request.source_type or "Report")
@@ -626,48 +634,39 @@ class CallMedexWorkerRunner:
                 storage_path = ""
                 logger.warning(f"CallMedex v1 job {report_job_id}: storage upload failed, using source URL: {stor_err}")
 
-            whatsapp_sent, whatsapp_message_id, used_fallback = False, None, False
-            if summary_report is not None:
-                result = await WhatsAppDeliveryService(callback_handler=callbacks).deliver_report_and_summary(
-                    phone_number=patient_phone, pdf_storage_url=pdf_url, summary_report=summary_report,
-                    report_job_id=report_job_id, correlation_id=corr_id,
-                )
-                whatsapp_sent = result.status == WhatsAppDeliveryStatus.DELIVERED
-                whatsapp_message_id = result.message_id if whatsapp_sent else None
+            # Channel isolation: a CallMedex booking is delivered ONLY from the
+            # CallMedex number — never from the processing centre's own number.
+            # If it cannot be sent, report-failed lets CallMedex retry/alert.
+            # Fail-open on content: no AI summary still sends the PDF, with a
+            # neutral line instead of an interpretation.
+            result = await WhatsAppDeliveryService(callback_handler=callbacks).deliver_report_and_summary(
+                phone_number=patient_phone, pdf_storage_url=pdf_url,
+                summary_report=summary_report or _plain_delivery_summary(),
+                report_job_id=report_job_id, correlation_id=corr_id,
+            )
+            whatsapp_sent = result.status == WhatsAppDeliveryStatus.DELIVERED
+            whatsapp_message_id = result.message_id if whatsapp_sent else None
 
-            if not whatsapp_sent and clinic_id:
+            if clinic_id:
+                row = {
+                    "clinic_id": clinic_id,
+                    "patient_phone": patient_phone,
+                    "patient_name": patient_name,
+                    "report_name": report_name,
+                    "report_type": "Laboratory",
+                    "file_path": storage_path,
+                    "ai_summary": " ".join(s.statement for s in summary_report.patient_summary) if summary_report else None,
+                    "has_abnormal_values": bool(summary_report and summary_report.status.value != "success"),
+                    "status": "sent" if whatsapp_sent else "failed",
+                    "error_message": None if whatsapp_sent else "CallMedex WhatsApp delivery did not complete",
+                    "external_report_id": report_job_id,
+                    "source": "callmedex",
+                    "sent_at": _utc_now_iso() if whatsapp_sent else None,
+                }
+                if sample_barcode:
+                    row["sample_barcode"] = sample_barcode
                 try:
-                    from app.services.lab_reports import LabReportService
-
-                    fb = await LabReportService().upload_and_send(
-                        clinic_id=clinic_id, file_bytes=pdf_bytes, filename=f"{report_job_id}.pdf",
-                        content_type="application/pdf", patient_phone=patient_phone, patient_name=patient_name,
-                        report_name=report_name, report_type="Laboratory",
-                        external_report_id=report_job_id, source="callmedex",
-                    )
-                    used_fallback = True
-                    whatsapp_sent = fb.get("status") == "sent"
-                    whatsapp_message_id = fb.get("whatsapp_message_id")
-                except Exception as fb_err:
-                    logger.error(f"CallMedex v1 job {report_job_id}: clinic-number fallback failed: {fb_err}")
-
-            if clinic_id and not used_fallback:
-                try:
-                    await sb(_supabase.table("lab_reports").insert({
-                        "clinic_id": clinic_id,
-                        "patient_phone": patient_phone,
-                        "patient_name": patient_name,
-                        "report_name": report_name,
-                        "report_type": "Laboratory",
-                        "file_path": storage_path,
-                        "ai_summary": " ".join(s.statement for s in summary_report.patient_summary) if summary_report else None,
-                        "has_abnormal_values": bool(summary_report and summary_report.status.value != "success"),
-                        "status": "sent" if whatsapp_sent else "failed",
-                        "error_message": None if whatsapp_sent else "CallMedex WhatsApp delivery did not complete",
-                        "external_report_id": report_job_id,
-                        "source": "callmedex",
-                        "sent_at": _utc_now_iso() if whatsapp_sent else None,
-                    }))
+                    await sb(_supabase.table("lab_reports").insert(row))
                 except Exception as db_err:
                     logger.warning(f"CallMedex v1 job {report_job_id}: lab_reports insert failed: {db_err}")
 
@@ -675,7 +674,7 @@ class CallMedexWorkerRunner:
                 return await finish_delivered(whatsapp_message_id, build_analysis_payload(summary_report, canonical_report))
             return await finish_failed(
                 "delivery_failed",
-                "WhatsApp delivery did not complete" + ("" if clinic_id else " (CallMedex number only: no processing centre)"),
+                "WhatsApp delivery from the CallMedex number did not complete (check the CallMedex WhatsApp number/token)",
             )
 
         except ValidationError as e:
@@ -771,3 +770,43 @@ async def _prior_report_already_sent(clinic_id: str, report_job_id: str) -> bool
                  .eq("clinic_id", clinic_id).eq("external_report_id", report_job_id)
                  .neq("status", "sent"))
     return False
+
+
+async def _connector_already_sent_sample(clinic_id: str, sample_barcode: str) -> bool:
+    """True if this clinic's own EMR connector already delivered the report for
+    this specimen (cross-intake dedup, migration 087). Exact barcode match only;
+    a failed check returns False so the patient still gets the report."""
+    from app.database import supabase
+
+    try:
+        res = await sb(supabase.table("lab_reports").select("id")
+                       .eq("clinic_id", clinic_id)
+                       .eq("sample_barcode", sample_barcode)
+                       .neq("source", "callmedex")
+                       .eq("status", "sent")
+                       .limit(1))
+        return bool(res.data)
+    except Exception as e:
+        logger.warning(f"Cross-intake dedup check failed for sample {sample_barcode} (sending): {e}")
+        return False
+
+
+def _plain_delivery_summary():
+    """Template body when OCR/AI produced nothing: states the report is
+    attached, interprets nothing. Keeps delivery on the CallMedex number."""
+    from app.integrations.callmedex.ai.generator import MANDATORY_DISCLAIMER
+    from app.integrations.callmedex.ai.schemas import (
+        MultiAudienceSummaryReport, StatementProvenance, SummaryStatus,
+    )
+
+    return MultiAudienceSummaryReport(
+        patient_summary=[StatementProvenance(
+            statement="Your lab report is attached. Please review it with your doctor.",
+            supported_by=[],
+        )],
+        clinician_summary=[],
+        medical_disclaimer=MANDATORY_DISCLAIMER,
+        status=SummaryStatus.ESCALATED,
+        overall_confidence=0.0,
+        review_flagged=True,
+    )

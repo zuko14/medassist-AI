@@ -129,6 +129,10 @@ class HospitalConnector(ABC):
             "external_report_id": meta.external_report_id,
             "connector_type": self.connector_type,
         }
+        if meta.sample_id:
+            # Specimen barcode: lets the API suppress a duplicate of a report
+            # CallMedex already delivered for the same sample.
+            post_data["sample_id"] = meta.sample_id
         if meta.provider:
             post_data["provider"] = meta.provider
         if meta.routed_recipient:

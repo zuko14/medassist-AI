@@ -96,3 +96,32 @@ Still open:
 - `CALLMEDEX_BEARER_TOKEN` on Kriya must equal CallMedex's `MEDIASSIST_BEARER_TOKEN`; CallMedex's `MEDIASSIST_BASE_URL` (local `.env`: `http://localhost:8000`) must be Kriya's production URL on CallMedex's Render.
 - If Accumax verifies samples in CallMedex AND Accumx's MocDoc connector runs, the same report can reach the patient twice (the two paths use different report ids). Decide which path owns Accumx.
 - `/notifications` templates are not implemented.
+
+---
+
+## Session 24c — Accumx dual role: channel isolation + cross-intake dedup (Option C)
+
+**Migration:** `087_lab_reports_sample_barcode.sql` adds a nullable `lab_reports.sample_barcode` column and a partial index on `(clinic_id, sample_barcode)`. It is additive only. **Apply it on Supabase and record it in `schema_migrations` BEFORE deploying**, or the startup drift check refuses to boot:
+```sql
+-- run the file's SQL, then:
+INSERT INTO schema_migrations (name) VALUES ('087_lab_reports_sample_barcode.sql');
+```
+
+**Channel isolation.** `execute_callmedex_v1_job` no longer falls back to the processing centre's own number (`LabReportService.upload_and_send`). A CallMedex booking is sent only from the CallMedex WhatsApp number; if that fails, it reports `report-failed / delivery_failed` so CallMedex retries. When OCR/AI yields no summary, the PDF is still sent from the CallMedex number with a neutral line ("Your lab report is attached. Please review it with your doctor."). No interpretation is invented, and the callback's `analysis` stays empty.
+
+**Cross-intake dedup.** MocDoc ids are `{VAMID}_{ReportNo}` and CallMedex ids are its `report_job_id`, so they never match. The specimen barcode is the shared key:
+- The MocDoc connector (`connectors/base.py`) now posts the `SampleID` it already parsed as `sample_id`, and the intake stores it as `sample_barcode`.
+- CallMedex jobs store `request.barcode` as `sample_barcode` on their `lab_reports` row (processing-centre jobs only).
+- **Intake (`receive_lab_report`):** if the same clinic has a `source='callmedex'`, `status='sent'` row with this `sample_barcode`, it returns `already_processed` and sends nothing.
+- **CallMedex job:** if the same clinic's connector has a `sent` row with this barcode, it reports `delivered` and neither downloads nor sends.
+- Both lookups are scoped by `clinic_id` and fail open (a failed check sends as before).
+
+**Deliberately NOT done:** suppression on "same phone within 24h" or on test name. CallMedex jobs carry no test name, and a phone-only match could be a different test. Withholding a patient's report is worse than a duplicate. Suspected-but-unconfirmed duplicates are still delivered.
+
+**Operational dependency:** dedup works only if the CallMedex tube barcode equals the MocDoc SampleID, i.e. Accumax scans or enters CallMedex's barcode as the MocDoc sample ID. **Unverified.** If they differ, both paths deliver: one copy from the CallMedex number and one from Accumx's number.
+
+**Ordering note:** while the CallMedex WhatsApp number/token is unset on Kriya, every CallMedex job fails with `delivery_failed` (by design, no clinic fallback). Accumx's own MocDoc connector still delivers the report from Accumx's number, because no CallMedex `sent` row exists to suppress it. So the patient is never left without the report.
+
+Tests:
+- `tests/test_integrations.py::TestCallMedexSampleBarcodeDedup` (3)
+- `test_callmedex_report_jobs_route.py`: no clinic-number use, no-summary PDF send, stale-row clear + barcode persisted, reverse dedup, tenant-scoped/fail-open lookup
