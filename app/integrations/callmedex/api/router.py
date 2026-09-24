@@ -134,8 +134,14 @@ async def verify_callmedex_auth_and_hmac(
             detail="Invalid or missing authorization bearer token or X-Integration-Secret header",
         )
 
-    is_production = callmedex_settings.app_env == "production"
+    # CALLMEDEX_APP_ENV defaults to "development"; if it was never set on the
+    # production service, signatures would silently become optional. The main
+    # APP_ENV is always "production" there (boot gates depend on it).
+    from app.config import settings as _app_settings
+
+    is_production = callmedex_settings.app_env == "production" or _app_settings.app_env == "production"
     sig_header = x_signature or x_signature_256
+    request.state.hmac_timestamped = False
 
     # Production Mode Enforcement: HMAC and Timestamp are strictly mandatory
     if is_production and (not sig_header or not x_timestamp):
@@ -193,10 +199,12 @@ async def verify_callmedex_auth_and_hmac(
             secret.encode("utf-8"), raw_body, hashlib.sha256
         ).hexdigest()
 
-        matched = (
-            hmac.compare_digest(expected_sig_with_ts.lower(), sig_clean.lower())
-            or hmac.compare_digest(expected_sig_bare.lower(), sig_clean.lower())
-        )
+        matched_ts = bool(ts_str) and hmac.compare_digest(expected_sig_with_ts.lower(), sig_clean.lower())
+        matched = matched_ts or hmac.compare_digest(expected_sig_bare.lower(), sig_clean.lower())
+        # The bare-body scheme does not bind X-Timestamp, so a captured request
+        # can be replayed with a fresh timestamp once the per-worker replay
+        # cache forgets it. Routes that act on patients require the bound one.
+        request.state.hmac_timestamped = matched_ts
         if not matched:
             logger.warning(f"CallMedex API [corr={corr_id}]: HMAC-SHA256 signature verification failed")
             raise HTTPException(

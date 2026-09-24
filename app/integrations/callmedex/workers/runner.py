@@ -10,9 +10,6 @@ from app.integrations.callmedex.api.schemas import (
     ProcessReportRequest,
     ProcessReportResponse,
     CallMedexReportJobRequest,
-    ConnectorType,
-    PatientIdentity,
-    ReportType,
 )
 from app.integrations.callmedex.connectors.factory import ConnectorFactory
 from app.integrations.callmedex.ocr.engine import CanonicalOCRPipeline
@@ -32,6 +29,7 @@ from app.integrations.callmedex.config.processing_centers import (
 )
 from app.database import sb  # T5.1: off-loop query execution
 from app.utils.async_tasks import spawn_background_task
+from app.services.distributed_lock import distributed_lock_manager
 
 logger = logging.getLogger(__name__)
 
@@ -523,263 +521,168 @@ class CallMedexWorkerRunner:
     async def execute_callmedex_v1_job(
         self, request: CallMedexReportJobRequest, correlation_id: Optional[str] = None
     ) -> None:
-        """Process an inbound CallMedex report job from POST /api/v1/report-jobs.
+        """Process a CallMedex report job from POST /api/v1/report-jobs. Never raises.
 
-        Handles:
-        1. Ingest via direct pre-signed URL (source_document_url) or LIS barcode.
-        2. Status progression & callbacks: accepted -> processing -> delivered / failed.
-        3. Canonical OCR pipeline -> Clinical AI reasoning -> MultiAudience summary.
-        4. WhatsApp delivery: Strategy 1 (CallMedex number) with fallback to Strategy 2 (Clinic number).
-        5. lab_reports table persistence (scoped to resolved clinic_id).
+        Routing (fails closed on tenancy):
+          * processing_center_id given -> must map to an enrolled Kriya clinic,
+            else report-failed. Delivery: CallMedex number, then that clinic's
+            own number (fail-open for the patient).
+          * no processing_center_id (patient self-upload) -> CallMedex number
+            only; no clinic's number or lab_reports is ever used.
+          * barcode-only jobs (no source_document_url) are refused: scraping
+            MocDoc means Chromium in the web container (the 2026-09-02 outage),
+            and the centre's own MocDoc connector already delivers them.
+        The route's scheduler_locks claim is renewed for 7 days on delivery and
+        released on failure so CallMedex's retry worker can resubmit.
         """
         report_job_id = request.report_job_id
         corr_id = correlation_id or str(uuid4())
         callbacks = self.container.callback_handler
+        lock_name = report_job_lock_name(report_job_id)
 
         set_job_status_record(report_job_id, "processing")
         self._emit_event("V1ReportJobStarted", report_job_id, corr_id, {"source_type": request.source_type})
+        cmx_tasks: list = [
+            spawn_background_task(
+                callbacks.send_report_accepted(report_job_id, _utc_now_iso(), corr_id),
+                name=f"cmx_v1_acc_{report_job_id}",
+            ),
+            spawn_background_task(
+                callbacks.send_report_processing(report_job_id, _utc_now_iso(), corr_id),
+                name=f"cmx_v1_proc_{report_job_id}",
+            ),
+        ]
 
-        # Non-terminal callbacks
-        cmx_tasks: list = []
-        cmx_tasks.append(spawn_background_task(
-            callbacks.send_report_accepted(report_job_id, _utc_now_iso(), corr_id),
-            name=f"cmx_v1_acc_{report_job_id}",
-        ))
-        cmx_tasks.append(spawn_background_task(
-            callbacks.send_report_processing(report_job_id, _utc_now_iso(), corr_id),
-            name=f"cmx_v1_proc_{report_job_id}",
-        ))
+        async def finish_failed(reason: str, details: str) -> None:
+            logger.warning(f"CallMedex v1 job {report_job_id} failed ({reason}): {details}")
+            set_job_status_record(report_job_id, "failed", failure_reason=reason)
+            await _settle_callbacks(cmx_tasks)
+            await callbacks.send_report_failed(report_job_id, _utc_now_iso(), reason, details, corr_id)
+            await distributed_lock_manager.release(lock_name)
 
-        temp_filepath = None
-        patient_phone = request.patient.phone
-        patient_name = request.patient.name or "Patient"
-        patient_id = request.patient.patient_id
-        barcode = request.barcode or report_job_id
-        summary_report = None
-        canonical_report = None
+        async def finish_delivered(message_id: Optional[str], analysis: dict) -> None:
+            set_job_status_record(report_job_id, "delivered")
+            await distributed_lock_manager.renew(lock_name, lease_seconds=REPORT_JOB_DONE_LEASE_SECONDS)
+            await _settle_callbacks(cmx_tasks)
+            await callbacks.send_report_delivered(report_job_id, _utc_now_iso(), message_id, analysis, corr_id)
 
         try:
-            # 1. Resolve clinic_id
-            clinic_id = await resolve_callmedex_clinic_id(request.processing_center_id)
+            from app.utils.validators import normalize_phone, validate_phone
 
-            # 2. Check DB idempotency
-            try:
-                from app.database import supabase as _sb_precheck
-                already = (
-                    await sb(_sb_precheck.table("lab_reports")
-                    .select("id, status")
-                    .eq("clinic_id", clinic_id)
-                    .eq("external_report_id", barcode))
+            patient_phone = normalize_phone(request.patient.phone or "")
+            if not validate_phone(patient_phone):
+                return await finish_failed("delivery_failed", "Patient phone is missing or invalid")
+            if not (request.source_document_url or "").strip():
+                return await finish_failed(
+                    "download_automation_failed",
+                    "source_document_url is required: barcode-only jobs are not scraped by MediAssist "
+                    "(the processing centre's own MocDoc connector delivers those reports)",
                 )
-                if isinstance(already.data, list) and already.data:
-                    logger.info(
-                        f"Report {barcode} for clinic {clinic_id} already exists in lab_reports. Marking delivered."
+
+            clinic_id: Optional[str] = None
+            if request.processing_center_id:
+                clinic_id = await resolve_callmedex_clinic_id(request.processing_center_id)
+                if clinic_id is None:
+                    return await finish_failed(
+                        "delivery_failed",
+                        f"processing_center_id '{request.processing_center_id}' is not mapped to an "
+                        f"enrolled MediAssist clinic",
                     )
-                    set_job_status_record(report_job_id, "delivered")
-                    await _settle_callbacks(cmx_tasks)
-                    await callbacks.send_report_delivered(
-                        report_job_id,
-                        _utc_now_iso(),
-                        None,
-                        {
-                            "plain_language_summary": "Report already delivered",
-                            "doctor_clinical_summary": "Report already processed and delivered",
-                            "health_score": None,
-                            "abnormal_flags": [],
-                            "recommendations": [],
-                        },
-                        corr_id,
-                    )
-                    return
-            except Exception as idemp_err:
-                logger.debug(f"Idempotency check skipped: {idemp_err}")
 
-            # 3. Acquire PDF document
-            pdf_bytes: bytes = b""
-            if request.source_document_url and request.source_document_url.strip():
-                # Direct download path
-                self._emit_event("DownloadingSourceDocument", report_job_id, corr_id, {"url": request.source_document_url[:60]})
-                import httpx
-                async with httpx.AsyncClient(timeout=30.0) as http_client:
-                    dl_resp = await http_client.get(request.source_document_url)
-                    if dl_resp.status_code != 200:
-                        raise ValidationError(f"Failed to download report PDF from URL: HTTP {dl_resp.status_code}")
-                    pdf_bytes = dl_resp.content
+            from app.database import supabase as _supabase
 
-                if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
-                    raise ValidationError("Downloaded document is empty or not a valid PDF header (%PDF missing)")
-                temp_filepath = await self.container.storage_provider.save_temp_report(
-                    barcode, pdf_bytes, f"{barcode}.pdf"
-                )
-            elif request.barcode:
-                # EMR Barcode automation path: delegate to MocDoc runner flow
-                proc_req = ProcessReportRequest(
-                    clinic_id=clinic_id,
-                    connector_type=ConnectorType.MOCDOC,
-                    external_report_id=request.barcode,
-                    patient=PatientIdentity(
-                        patient_phone=patient_phone,
-                        patient_name=patient_name,
-                        patient_mrn=patient_id,
-                    ),
-                    report_name=request.source_type or "Laboratory Report",
-                    report_type=ReportType.LABORATORY,
-                    processing_center_id=request.processing_center_id or clinic_id,
-                    report_job_id=report_job_id,
-                )
-                await self.execute_report_job(proc_req, correlation_id=corr_id)
-                set_job_status_record(report_job_id, "delivered")
-                return
-            else:
-                raise ValidationError("Neither source_document_url nor barcode was provided in the report job")
+            if clinic_id and await _prior_report_already_sent(clinic_id, report_job_id):
+                # Delivered by an earlier run whose claim has since expired.
+                return await finish_delivered(None, build_analysis_payload())
 
-            # 4. Canonical OCR
+            pdf_bytes = await _download_source_document(request.source_document_url)
+            patient_name = request.patient.name or "Patient"
+            report_name = "Laboratory Report" if request.source_type == "lab_report" else (request.source_type or "Report")
+
+            canonical_report = summary_report = None
             try:
                 canonical_report = self.container.ocr_pipeline.process_pdf(
-                    pdf_bytes=pdf_bytes,
-                    report_id=report_job_id,
-                    patient_id=patient_id,
-                    barcode=barcode,
-                    processing_center_id=clinic_id,
+                    pdf_bytes=pdf_bytes, report_id=report_job_id, patient_id=request.patient.patient_id,
+                    barcode=request.barcode or report_job_id, processing_center_id=clinic_id or "callmedex",
                 )
-                self._emit_event("OCRExtracted", report_job_id, corr_id, {"extracted_tests": len(canonical_report.tests)})
-            except Exception as ocr_err:
-                logger.warning(f"OCR Pipeline extraction warning for {report_job_id}: {ocr_err}")
+                reasoning = ClinicalReasoningEngine().analyze_report(canonical_report)
+                summary_report = MultiAudienceSummaryGenerator().generate_summary(canonical_report, reasoning)
+            except Exception as ai_err:  # fail-open: the raw PDF still goes out
+                logger.warning(f"CallMedex v1 job {report_job_id}: OCR/summary unavailable: {ai_err}")
 
-            # 5. AI Summary & Clinical Reasoning
-            if canonical_report is not None:
-                try:
-                    reasoning = ClinicalReasoningEngine().analyze_report(canonical_report)
-                    summary_report = MultiAudienceSummaryGenerator().generate_summary(canonical_report, reasoning)
-                    self._emit_event("AISummarized", report_job_id, corr_id, {"status": summary_report.status.value})
-                except Exception as ai_err:
-                    logger.warning(f"AI Summary generation warning for {report_job_id}: {ai_err}")
-
-            # 6. Delivery via WhatsApp
-            whatsapp_sent = False
-            whatsapp_message_id = None
-            storage_path = None
-            used_fallback = False
+            # Our own 24h signed link (CallMedex's expires in 1h).
             pdf_url = request.source_document_url
+            storage_path = f"callmedex/{clinic_id or 'patient_uploads'}/{report_job_id}.pdf"
+            try:
+                await asyncio.to_thread(
+                    _supabase.storage.from_("lab-reports").upload,
+                    storage_path, pdf_bytes, {"content-type": "application/pdf", "upsert": "true"},
+                )
+                signed = await asyncio.to_thread(
+                    _supabase.storage.from_("lab-reports").create_signed_url, storage_path, 86400
+                )
+                pdf_url = signed.get("signedURL") or signed.get("signedUrl") or pdf_url
+            except Exception as stor_err:
+                storage_path = ""
+                logger.warning(f"CallMedex v1 job {report_job_id}: storage upload failed, using source URL: {stor_err}")
 
-            if patient_phone:
+            whatsapp_sent, whatsapp_message_id, used_fallback = False, None, False
+            if summary_report is not None:
+                result = await WhatsAppDeliveryService(callback_handler=callbacks).deliver_report_and_summary(
+                    phone_number=patient_phone, pdf_storage_url=pdf_url, summary_report=summary_report,
+                    report_job_id=report_job_id, correlation_id=corr_id,
+                )
+                whatsapp_sent = result.status == WhatsAppDeliveryStatus.DELIVERED
+                whatsapp_message_id = result.message_id if whatsapp_sent else None
+
+            if not whatsapp_sent and clinic_id:
                 try:
-                    from app.database import supabase as _supabase
-                    storage_path = f"callmedex/{clinic_id}/{report_job_id}.pdf"
-                    try:
-                        await asyncio.to_thread(
-                            _supabase.storage.from_("lab-reports").upload,
-                            storage_path, pdf_bytes, {"content-type": "application/pdf"},
-                        )
-                        signed = await asyncio.to_thread(
-                            _supabase.storage.from_("lab-reports").create_signed_url, storage_path, 86400
-                        )
-                        if signed and (signed.get("signedURL") or signed.get("signedUrl")):
-                            pdf_url = signed.get("signedURL") or signed.get("signedUrl")
-                    except Exception as stor_err:
-                        logger.warning(f"Supabase storage upload warning (using source url): {stor_err}")
+                    from app.services.lab_reports import LabReportService
 
-                    if summary_report is not None and pdf_url:
-                        delivery_service = WhatsAppDeliveryService(callback_handler=callbacks)
-                        delivery_result = await delivery_service.deliver_report_and_summary(
-                            phone_number=patient_phone,
-                            pdf_storage_url=pdf_url,
-                            summary_report=summary_report,
-                            report_job_id=report_job_id,
-                            correlation_id=corr_id,
-                        )
-                        whatsapp_sent = delivery_result.status == WhatsAppDeliveryStatus.DELIVERED
-                        if whatsapp_sent:
-                            whatsapp_message_id = delivery_result.message_id
+                    fb = await LabReportService().upload_and_send(
+                        clinic_id=clinic_id, file_bytes=pdf_bytes, filename=f"{report_job_id}.pdf",
+                        content_type="application/pdf", patient_phone=patient_phone, patient_name=patient_name,
+                        report_name=report_name, report_type="Laboratory",
+                        external_report_id=report_job_id, source="callmedex",
+                    )
+                    used_fallback = True
+                    whatsapp_sent = fb.get("status") == "sent"
+                    whatsapp_message_id = fb.get("whatsapp_message_id")
+                except Exception as fb_err:
+                    logger.error(f"CallMedex v1 job {report_job_id}: clinic-number fallback failed: {fb_err}")
 
-                    if not whatsapp_sent:
-                        # Strategy 2 fallback
-                        try:
-                            from app.services.lab_reports import LabReportService
-                            fallback_result = await LabReportService().upload_and_send(
-                                clinic_id=clinic_id,
-                                file_bytes=pdf_bytes,
-                                filename=f"{barcode}.pdf",
-                                content_type="application/pdf",
-                                patient_phone=patient_phone,
-                                patient_name=patient_name,
-                                report_name=request.source_type or "Laboratory Report",
-                                report_type="Laboratory",
-                                external_report_id=barcode,
-                                source="callmedex",
-                            )
-                            whatsapp_sent = fallback_result.get("status") == "sent"
-                            whatsapp_message_id = fallback_result.get("whatsapp_message_id")
-                            used_fallback = True
-                        except Exception as fb_err:
-                            logger.error(f"Fallback delivery failed for {report_job_id}: {fb_err}")
-
-                except Exception as wa_err:
-                    logger.warning(f"WhatsApp delivery flow warning for {report_job_id}: {wa_err}")
-
-            # 7. Persist in lab_reports
-            if not used_fallback:
+            if clinic_id and not used_fallback:
                 try:
-                    from app.database import supabase as _supabase
-                    await sb(_supabase.table("lab_reports").insert(
-                        {
-                            "clinic_id": clinic_id,
-                            "patient_phone": patient_phone or "",
-                            "patient_name": patient_name,
-                            "report_name": request.source_type or "Laboratory Report",
-                            "report_type": "Laboratory",
-                            "file_path": storage_path or (request.source_document_url or ""),
-                            "ai_summary": (
-                                " ".join(s.statement for s in summary_report.patient_summary)
-                                if summary_report else None
-                            ),
-                            "has_abnormal_values": bool(summary_report and summary_report.status.value != "success"),
-                            "status": "sent" if whatsapp_sent else "failed",
-                            "error_message": None if whatsapp_sent else "CallMedex WhatsApp delivery did not complete",
-                            "external_report_id": barcode,
-                            "source": "callmedex",
-                            "sent_at": _utc_now_iso() if whatsapp_sent else None,
-                        }
-                    ))
+                    await sb(_supabase.table("lab_reports").insert({
+                        "clinic_id": clinic_id,
+                        "patient_phone": patient_phone,
+                        "patient_name": patient_name,
+                        "report_name": report_name,
+                        "report_type": "Laboratory",
+                        "file_path": storage_path,
+                        "ai_summary": " ".join(s.statement for s in summary_report.patient_summary) if summary_report else None,
+                        "has_abnormal_values": bool(summary_report and summary_report.status.value != "success"),
+                        "status": "sent" if whatsapp_sent else "failed",
+                        "error_message": None if whatsapp_sent else "CallMedex WhatsApp delivery did not complete",
+                        "external_report_id": report_job_id,
+                        "source": "callmedex",
+                        "sent_at": _utc_now_iso() if whatsapp_sent else None,
+                    }))
                 except Exception as db_err:
-                    logger.warning(f"Failed to persist lab_reports row for v1 job {report_job_id}: {db_err}")
+                    logger.warning(f"CallMedex v1 job {report_job_id}: lab_reports insert failed: {db_err}")
 
-            # 8. Terminal Callback & Status Update
-            await _settle_callbacks(cmx_tasks)
             if whatsapp_sent:
-                set_job_status_record(report_job_id, "delivered")
-                await callbacks.send_report_delivered(
-                    report_job_id,
-                    _utc_now_iso(),
-                    whatsapp_message_id,
-                    build_analysis_payload(summary_report, canonical_report),
-                    corr_id,
-                )
-            else:
-                set_job_status_record(report_job_id, "failed", failure_reason="delivery_failed")
-                await callbacks.send_report_failed(
-                    report_job_id,
-                    _utc_now_iso(),
-                    "delivery_failed",
-                    "WhatsApp delivery could not be completed on primary or fallback channels",
-                    corr_id,
-                )
-
-        except Exception as e:
-            logger.error(f"V1 ReportJob {report_job_id} failed: {e}", exc_info=True)
-            await _settle_callbacks(cmx_tasks)
-            reason = "invalid_source_document" if isinstance(e, ValidationError) else "download_automation_failed"
-            set_job_status_record(report_job_id, "failed", failure_reason=reason)
-            await callbacks.send_report_failed(
-                report_job_id, _utc_now_iso(), reason, str(e), corr_id
+                return await finish_delivered(whatsapp_message_id, build_analysis_payload(summary_report, canonical_report))
+            return await finish_failed(
+                "delivery_failed",
+                "WhatsApp delivery did not complete" + ("" if clinic_id else " (CallMedex number only: no processing centre)"),
             )
-            raise
-        finally:
-            if temp_filepath:
-                try:
-                    await self.container.storage_provider.cleanup_temp_report(temp_filepath)
-                except Exception:
-                    pass
+
+        except ValidationError as e:
+            await finish_failed("invalid_source_document", str(e))
+        except Exception as e:
+            logger.exception(f"CallMedex v1 job {report_job_id} crashed")
+            await finish_failed("interpretation_failed", f"{type(e).__name__}: {str(e)[:300]}")
 
 
 # ── In-Memory Job Status Cache for Fast Polling ─────────────────────────────
@@ -801,4 +704,70 @@ def set_job_status_record(job_id: str, status: str, failure_reason: Optional[str
         "updated_at": datetime.now(timezone.utc),
     }
 
+# ── CallMedex v1 report-job helpers ─────────────────────────────────────────
 
+REPORT_JOB_CLAIM_LEASE_SECONDS = 30 * 60        # in-flight claim; expires if the process dies
+REPORT_JOB_DONE_LEASE_SECONDS = 7 * 24 * 3600   # delivered: swallow resubmissions for a week
+_MAX_SOURCE_PDF_BYTES = 25 * 1024 * 1024
+
+
+def report_job_lock_name(report_job_id: str) -> str:
+    return f"callmedex_report_job:{report_job_id}"
+
+
+def _allowed_document_host(url: str) -> bool:
+    """CallMedex hands out Supabase Storage signed URLs. Anything else (plain
+    http, internal hosts, arbitrary sites) is refused: the URL comes from an
+    external system and is fetched from inside our network."""
+    from urllib.parse import urlparse
+
+    p = urlparse(url)
+    if p.scheme != "https" or not p.hostname:
+        return False
+    host = p.hostname.lower()
+    cmx_host = (urlparse(callmedex_settings.callmedex_base_url or "").hostname or "").lower()
+    return host.endswith(".supabase.co") or (bool(cmx_host) and host == cmx_host)
+
+
+async def _download_source_document(url: str) -> bytes:
+    import httpx
+
+    if not _allowed_document_host(url):
+        raise ValidationError("source_document_url must be an https Supabase Storage (or CallMedex) URL")
+    buf = bytearray()
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    raise ValidationError(f"Could not download source document: HTTP {resp.status_code}")
+                async for chunk in resp.aiter_bytes():
+                    buf += chunk
+                    if len(buf) > _MAX_SOURCE_PDF_BYTES:
+                        raise ValidationError("Source document exceeds 25 MB")
+    except httpx.HTTPError as e:
+        raise ValidationError(f"Could not download source document ({type(e).__name__})") from e
+    if not bytes(buf[:5]).startswith(b"%PDF"):
+        raise ValidationError("Source document is not a PDF")
+    return bytes(buf)
+
+
+async def _prior_report_already_sent(clinic_id: str, report_job_id: str) -> bool:
+    """True if this CallMedex job was already delivered for this clinic.
+
+    Otherwise clears any earlier failed/crashed attempt's row: CallMedex's
+    retry worker resubmits the same report_job_id, and a stale row makes
+    upload_and_send report "already processed" and our insert collide, so the
+    retry could never succeed. Safe: the route's lease guarantees no other
+    attempt for this job is in flight.
+    """
+    from app.database import supabase
+
+    prior = await sb(supabase.table("lab_reports").select("status")
+                     .eq("clinic_id", clinic_id).eq("external_report_id", report_job_id))
+    if prior.data and prior.data[0].get("status") == "sent":
+        return True
+    if prior.data:
+        await sb(supabase.table("lab_reports").delete()
+                 .eq("clinic_id", clinic_id).eq("external_report_id", report_job_id)
+                 .neq("status", "sent"))
+    return False
