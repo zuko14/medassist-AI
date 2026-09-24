@@ -7318,28 +7318,37 @@ async def get_diagnostic_stats(
                 except Exception:
                     next_run_at = None
 
+            # Check if currently executing (lock held within 15 min)
+            is_running_now = False
+            lock_renewed_recently = False
+            locked_at = c.get("locked_at")
+            if locked_at:
+                try:
+                    ldt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+                    lock_age = datetime.now(timezone.utc) - ldt
+                    if lock_age < timedelta(minutes=15):
+                        is_running_now = True
+                    # The runner renews its lease after every report
+                    # (connectors/runner.py LOCK_LEASE = 5 min); a dead worker
+                    # stops renewing within one lease.
+                    lock_renewed_recently = lock_age < timedelta(minutes=5)
+                except Exception:
+                    pass
+
             if not is_enabled:
                 health = "disabled"          # grey  — OFF
                 next_run_at = None           # nothing polls a disabled connector
             elif age is None:
                 health = "never_run"         # grey  — NEVER RUN
-            elif age > stale_after:
+            elif age > stale_after and not lock_renewed_recently:
+                # last_run_at is stamped only when a run FINISHES, so a long
+                # run (or the first run after a deploy restart killed the
+                # previous one) is not "stalled" while it is still renewing.
                 health = "stalled"           # red   — NOT RUNNING (worker dead)
             elif last_error:
                 health = "warning"           # amber — RUNNING WITH ERRORS
             else:
                 health = "healthy"           # green — ACTIVE / HEALTHY
-
-            # Check if currently executing (lock held within 15 min)
-            is_running_now = False
-            locked_at = c.get("locked_at")
-            if locked_at:
-                try:
-                    ldt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
-                    if datetime.now(timezone.utc) - ldt < timedelta(minutes=15):
-                        is_running_now = True
-                except Exception:
-                    pass
 
             evaluated.append({
                 "id": c.get("id"),

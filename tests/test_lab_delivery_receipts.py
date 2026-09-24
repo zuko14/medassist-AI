@@ -290,3 +290,44 @@ async def test_diagnostic_stats_connector_health():
     with patch("app.routers.admin.supabase", mock_sb):
         res = await get_diagnostic_stats(clinic_id="test-clinic", user=admin_user)
         assert res["connector"]["health"] == "stalled"
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_stats_running_connector_is_not_stalled():
+    """2026-09-24: a deploy restart killed an in-flight run; the next run kept
+    renewing its lock report by report, yet the dashboard said "Stalled"
+    because last_run_at is only stamped when a run finishes."""
+    admin_user = AdminUser("admin")
+    admin_user.username = "admin"
+    admin_user.role = "admin"
+    admin_user.clinic_id = "test-clinic"
+    admin_user.user_id = "user-1"
+    admin_user.permissions = ["REPORTS_VIEW"]
+    admin_user.branch_id = None
+    now = datetime.now(timezone.utc)
+
+    def stats_for(locked_minutes_ago):
+        conn = [{
+            "id": "c-1", "clinic_id": "test-clinic", "connector_type": "mocdoc", "is_enabled": True,
+            "last_run_at": (now - timedelta(minutes=27)).isoformat(),  # > 3 x 5-min poll
+            "last_error": None, "config": {"poll_interval_minutes": 5},
+            "locked_at": (now - timedelta(minutes=locked_minutes_ago)).isoformat() if locked_minutes_ago is not None else None,
+        }]
+        mock_sb = MagicMock()
+        lab, cn = MagicMock(), MagicMock()
+        mock_sb.table.side_effect = lambda n: lab if n == "lab_reports" else cn if n == "integration_connectors" else MagicMock()
+        lab.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        cn.select.return_value.eq.return_value.execute.return_value = MagicMock(data=conn)
+        return mock_sb
+
+    with patch("app.routers.admin.supabase", stats_for(0.5)):
+        res = await get_diagnostic_stats(clinic_id="test-clinic", user=admin_user)
+        assert res["connector"]["health"] == "healthy"
+        assert res["connector"]["is_running_now"] is True
+    # Lock stopped renewing (worker died mid-run) -> red again within one lease.
+    with patch("app.routers.admin.supabase", stats_for(6)):
+        res = await get_diagnostic_stats(clinic_id="test-clinic", user=admin_user)
+        assert res["connector"]["health"] == "stalled"
+    with patch("app.routers.admin.supabase", stats_for(None)):
+        res = await get_diagnostic_stats(clinic_id="test-clinic", user=admin_user)
+        assert res["connector"]["health"] == "stalled"
