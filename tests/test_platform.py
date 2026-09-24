@@ -522,3 +522,75 @@ def test_platform_messaging_usage_success(mock_supabase, mock_log_action):
 def test_platform_messaging_usage_requires_auth():
     response = client.get("/platform/messaging-usage")
     assert response.status_code == 401
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_callmedex_centers_groups_clinic_wide_and_branch_connectors(mock_supabase, mock_log_action):
+    """Accumx regression: a clinic-wide connector plus a branch connector showed
+    the same hospital twice and double-counted its reports."""
+    connectors = MagicMock()
+    connectors.execute.return_value.data = [
+        {"id": "conn-branch", "clinic_id": "clinic-A", "branch_id": "br-1", "connector_type": "mocdoc",
+         "is_enabled": True, "last_error": None,
+         "config": {"base_url": "https://mocdoc.com", "clinic_slug": "s", "username": "u", "password_encrypted": "x"}},
+        {"id": "conn-wide", "clinic_id": "clinic-A", "branch_id": None, "connector_type": "mocdoc",
+         "is_enabled": True, "last_error": None,
+         "config": {"base_url": "https://mocdoc.com", "clinic_slug": "s", "username": "u"}},
+    ]
+    clinics = MagicMock()
+    clinics.execute.return_value.data = [{"id": "clinic-A", "name": "Accumx Diagnostics", "is_active": True}]
+    branches = MagicMock()
+    branches.execute.return_value.data = [{"id": "br-1", "name": "MAHARANIPETA"}]
+    reports = MagicMock()
+    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    reports.execute.return_value.data = [{"clinic_id": "clinic-A", "uploaded_at": recent}]
+
+    def table_router(name):
+        t = MagicMock()
+        if name == "integration_connectors":
+            t.select.return_value.eq.return_value = connectors
+        elif name == "clinics":
+            t.select.return_value.in_.return_value = clinics
+        elif name == "branches":
+            t.select.return_value.in_.return_value = branches
+        elif name == "lab_reports":
+            t.select.return_value.eq.return_value.in_.return_value = reports
+        return t
+
+    mock_supabase.table.side_effect = table_router
+    data = client.get("/platform/callmedex/centers", headers=get_owner_auth_header()).json()
+
+    assert data["total_active_centers"] == 1
+    assert data["total_reports_delivered"] == 1
+    center = data["centers"][0]
+    assert center["connector_id"] == "conn-wide"  # clinic-wide row is primary
+    scopes = [(c["connector_id"], c["branch_name"]) for c in center["connectors"]]
+    assert scopes == [("conn-wide", None), ("conn-branch", "MAHARANIPETA")]
+    assert center["connectors"][1]["has_password"] is True
+    assert "password_encrypted" not in str(data) and "config" not in center
+
+
+@patch("app.routers.platform.log_admin_action")
+@patch("app.routers.platform.supabase")
+def test_callmedex_whatsapp_number_cannot_be_a_clinics_number(mock_supabase, mock_log_action):
+    """Inbound messages on the CallMedex number go to the CallMedex booking flow,
+    so reusing a clinic's number would divert that clinic's patients."""
+    def table_router(name):
+        t = MagicMock()
+        if name == "clinics":
+            t.select.return_value.execute.return_value = MagicMock(
+                data=[{"id": "c1", "name": "Aura", "phone_number_id": "971342239407011", "config": {}}]
+            )
+        else:
+            t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        return t
+
+    mock_supabase.table.side_effect = table_router
+    response = client.put(
+        "/platform/callmedex/whatsapp-settings",
+        headers=get_owner_auth_header(),
+        json={"phone_number_id": "971342239407011"},
+    )
+    assert response.status_code == 400
+    assert "Aura" in response.json()["detail"]

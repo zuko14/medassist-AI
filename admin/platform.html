@@ -1527,6 +1527,8 @@
                 <button class="close-btn" onclick="closeConnectorModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
             </div>
             <div class="error-msg" id="connectorError">Error</div>
+            <input type="hidden" id="cnBranchId" value="">
+            <p style="font-size:0.8rem; color:var(--text3); margin-bottom:12px;" id="cnScope">Scope: Clinic-wide (used by CallMedex report jobs)</p>
             <div class="form-group">
                 <label>Select Hospital / Clinic</label>
                 <select class="form-control" id="cnClinicSelect" onchange="onConnectorClinicSelectChange(this.value)">
@@ -2692,9 +2694,13 @@
                     summaryEl.innerText = 'Failed to load CallMedex WhatsApp number.';
                     return;
                 }
-                const tokenStatus = data.token_set ? 'token configured' : 'no token set';
-                const sourceLabel = data.source === 'database' ? 'owner-configured' : 'environment default';
-                summaryEl.innerText = `${data.phone_number_id || 'Not set'} · ${tokenStatus} · ${sourceLabel}`;
+                if (!data.token_set) {
+                    // 100000000000000 is the code's placeholder, not a real number.
+                    summaryEl.innerText = 'CallMedex WhatsApp number NOT configured — CallMedex reports fall back to each center\'s own number. Click "CallMedex WhatsApp Number" to set it.';
+                    return;
+                }
+                const sourceLabel = data.source === 'database' ? 'owner-configured' : 'environment';
+                summaryEl.innerText = `Phone Number ID ${data.phone_number_id} · token configured · ${sourceLabel}`;
             } catch (e) {
                 console.error('Error fetching CallMedex WhatsApp number:', e);
             }
@@ -3430,6 +3436,10 @@
                 return;
             }
 
+            // One row per clinic; each connector (clinic-wide or a branch's own)
+            // gets its own scope label and its own Edit, so editing a branch
+            // connector never silently rewrites the clinic-wide one.
+            cmxConnectorIndex = [];
             tbody.innerHTML = centers.map(c => {
                 const lastDelivery = c.last_delivery_at
                     ? new Date(c.last_delivery_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -3437,6 +3447,18 @@
                 const lastError = c.last_error
                     ? `<span style="color:var(--red, #ef4444)">${escapeHtml(c.last_error)}</span>`
                     : '—';
+                const conns = (c.connectors && c.connectors.length)
+                    ? c.connectors
+                    : [{ connector_type: c.connector_type, branch_id: null }];
+                const connectorCell = conns.map(k => {
+                    const scope = k.branch_id ? `Branch: ${escapeHtml(k.branch_name || k.branch_id.slice(0, 8))}` : 'Clinic-wide';
+                    return `<div style="margin-bottom:4px"><span class="badge">${escapeHtml(k.connector_type || '')}</span> <span style="font-size:0.75rem; color:var(--text3)">${scope}</span></div>`;
+                }).join('');
+                const editButtons = conns.map(k => {
+                    const i = cmxConnectorIndex.push({ clinic_id: c.clinic_id, ...k }) - 1;
+                    const label = k.branch_id ? `Edit ${escapeHtml(k.branch_name || 'branch')}` : 'Edit';
+                    return `<button class="action-btn" style="margin:0 4px 4px 0" onclick="openConnectorModalAt(${i})">${label}</button>`;
+                }).join('');
                 return `
                     <tr>
                         <td>
@@ -3445,25 +3467,44 @@
                                 <span class="clinic-phone" style="font-family:monospace; cursor:pointer;" title="Click to copy Clinic ID" onclick="copyClinicId('${c.clinic_id}')">ID: ${c.clinic_id}</span>
                             </div>
                         </td>
-                        <td><span class="badge">${escapeHtml(c.connector_type)}</span></td>
+                        <td>${connectorCell}</td>
                         <td style="font-weight:700">${c.reports_delivered_30d || 0}</td>
                         <td>${c.reports_delivered_total || 0}</td>
                         <td style="font-size:0.82rem; color:var(--text2)">${lastDelivery}</td>
                         <td style="font-size:0.78rem;">${lastError}</td>
-                        <td><button class="action-btn" onclick="openConnectorModal('${c.clinic_id}', '${c.connector_type}')">Edit</button></td>
+                        <td>${editButtons}</td>
                     </tr>
                 `;
             }).join('');
         }
 
-        function openConnectorModal(clinicId, connectorType) {
+        let cmxConnectorIndex = [];
+
+        function openConnectorModalAt(i) {
+            const k = cmxConnectorIndex[i];
+            if (k) openConnectorModal(k.clinic_id, k.connector_type, k);
+        }
+
+        function openConnectorModal(clinicId, connectorType, existing) {
+            const k = existing || {};
             document.getElementById('cnClinicSelect').value = clinicId || '';
             document.getElementById('cnClinicId').value = clinicId || '';
             document.getElementById('cnConnectorType').value = connectorType || 'mocdoc';
-            document.getElementById('cnBaseUrl').value = '';
-            document.getElementById('cnClinicSlug').value = '';
-            document.getElementById('cnUsername').value = '';
+            document.getElementById('cnBranchId').value = k.branch_id || '';
+            document.getElementById('cnScope').innerText = k.branch_id
+                ? `Scope: Branch — ${k.branch_name || k.branch_id}`
+                : 'Scope: Clinic-wide (used by CallMedex report jobs)';
+            // Editing an existing connector pins its identity: changing clinic or
+            // type here would create a second row instead of updating this one.
+            const locked = !!existing;
+            ['cnClinicSelect', 'cnClinicId', 'cnConnectorType'].forEach(id => { document.getElementById(id).disabled = locked; });
+            document.getElementById('cnBaseUrl').value = k.base_url || '';
+            document.getElementById('cnClinicSlug').value = k.clinic_slug || '';
+            document.getElementById('cnUsername').value = k.username || '';
             document.getElementById('cnPassword').value = '';
+            document.getElementById('cnPassword').placeholder = k.has_password
+                ? 'Saved — leave blank to keep existing'
+                : 'Required for portal login';
             document.getElementById('cnEnabled').checked = true;
             document.getElementById('connectorError').style.display = 'none';
             document.getElementById('connectorModal').classList.add('active');
@@ -3481,6 +3522,7 @@
             const username = document.getElementById('cnUsername').value.trim();
             const password = document.getElementById('cnPassword').value;
             const is_enabled = document.getElementById('cnEnabled').checked;
+            const branch_id = document.getElementById('cnBranchId').value;
             const errEl = document.getElementById('connectorError');
             errEl.style.display = 'none';
 
@@ -3491,6 +3533,7 @@
             }
 
             const body = { connector_type, is_enabled };
+            if (branch_id) body.branch_id = branch_id;
             if (base_url) body.base_url = base_url;
             if (clinic_slug) body.clinic_slug = clinic_slug;
             if (username) body.username = username;

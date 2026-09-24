@@ -69,6 +69,17 @@ class WhatsAppDeliveryService:
         token, phone_id = await self._get_effective_whatsapp_credentials()
 
         if not token or not phone_id or token in ("dev_whatsapp_token", "change_in_prod"):
+            from app.config import settings as app_settings
+
+            if app_settings.app_env == "production":
+                # A simulated "delivered" in production recorded reports as sent
+                # that no patient ever received. Report FAILED so the runner
+                # falls back to the clinic's own number instead.
+                logger.error(
+                    "CALLMEDEX_WHATSAPP_NOT_CONFIGURED: no CallMedex WhatsApp number/token "
+                    "(owner panel or CALLMEDEX_WHATSAPP_* env) — cannot send from the CallMedex number"
+                )
+                return WhatsAppDeliveryStatus.FAILED, ""
             logger.info("WhatsApp Cloud API credentials not configured/placeholder — test simulation mode active")
             msg_id = f"wmid.callmedex.sim.{uuid.uuid4().hex[:12]}"
             return WhatsAppDeliveryStatus.DELIVERED, msg_id

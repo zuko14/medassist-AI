@@ -85,15 +85,24 @@ This document inventories all external service integrations, APIs, protocols, an
 - **Directory**: [`app/integrations/callmedex/`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/integrations/callmedex/)
 - **Router**: [`app/integrations/callmedex/api/router.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/integrations/callmedex/api/router.py)
 
-### API Security
-- Requires `Authorization: Bearer <token>`.
-- Header `X-Signature` containing HMAC-SHA256 over request body.
+### API Security (inbound, CallMedex → Kriya)
+- Requires `Authorization: Bearer <token>` (or `X-Integration-Secret`).
+- Header `X-Signature-256`: bare hex HMAC-SHA256 over the raw body (`CALLMEDEX_HMAC_SIGNATURE_SECRET`).
 - Replay Attack Mitigation: Header `X-Timestamp` verified against a 300-second (5-minute) clock skew window; duplicate signatures are rejected.
+- NOTE: CallMedex's own client (`callmedex/backend/app/integrations/mediassist_client.py`) signs `X-Signature: sha256=hex(HMAC(ts + "." + body))` and posts to `POST /api/v1/report-jobs`, which Kriya does NOT expose (Session 23 finding, see 13-KNOWN-ISSUES §6).
 
 ### Ingestion Flow
-- Endpoint: `POST /internal/integrations/callmedex/process-report`
+- Endpoint: `POST /internal/integrations/callmedex/process-report` (optional `report_job_id` = CallMedex's job id).
 - Enqueues jobs to `global_container.queue_engine`.
 - Background worker executes PDF extraction, patient fuzzy matching (`app/services/patient_match.py`), AI summarization (`app/services/report_summarizer.py`), and WhatsApp dispatch.
+- Delivery: CallMedex number (template `lab_report_summary`) first; if no summary OR that send fails, falls back to `LabReportService.upload_and_send` on the clinic's own number. In production, unconfigured CallMedex WhatsApp credentials are a FAILED send (no simulated "delivered").
+- Processing center creds: `config/processing_centers.py` prefers the clinic-wide `integration_connectors` row over branch rows and decrypts `password_encrypted`.
+
+### Outbound (Kriya → CallMedex) — `app/integrations/callmedex/api/client.py`
+- Base: `CALLMEDEX_BASE_URL` + `/api/v1/integrations/mediassist`. Blank base URL = no outbound calls.
+- Signing matches CallMedex's verifier (`backend/app/middleware/mediassist_auth.py`): `Authorization: Bearer` (`CALLMEDEX_OUTBOUND_BEARER_TOKEN`, else `CALLMEDEX_BEARER_TOKEN`), `X-Timestamp` = epoch seconds, `X-Signature: sha256=hex(HMAC(ts + "." + raw_query + raw_body))`, `X-Correlation-Id`, `X-Idempotency-Key` (uuid5 of job+event, stable across retries).
+- Report lifecycle callbacks (`callbacks/handler.py`): `report-accepted`, `report-processing` (background, drained before the terminal one), `report-delivered` (with `analysis` from `build_analysis_payload`), `report-failed` (mapped `failure_reason`). Sent only when the job carries CallMedex's `report_job_id`.
+- WhatsApp booking (`whatsapp/booking.py`): inbound messages whose `phone_number_id` is the CallMedex number (DB `callmedex_whatsapp_settings` or `CALLMEDEX_WHATSAPP_PHONE_NUMBER_ID`, minus any id a clinic owns) skip tenant resolution and run a menu → date → window → address → confirm flow; `GET /patients/lookup` prefills address/language, `POST /whatsapp-bookings` creates the booking. State: `callmedex_booking_sessions` (migration 086), 30-min timeout, purged after 1 day.
 
 ---
 

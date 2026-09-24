@@ -103,6 +103,21 @@ Still open: `get_treatment_doctor_ids` returns an empty set on a DB error, which
 4. **RESOLVED** — `tests/test_multi_worker_smoke.py` could never pass: conftest's placeholder credentials made the lifespan refuse to boot (`APP_ENV` testing). The subprocess now runs with `APP_ENV=development`; boot gates stay covered by `test_production_launch_gates.py` / `test_security.py`.
 5. **RESOLVED** — the empty root redirection artifacts (`main`, `tuple[bool`, `type`, `bool`, `Expected`, `str`) are deleted.
 
+## 6. SESSION 23 (2026-09-24) — CALLMEDEX SYNC
+
+Fixed:
+1. Owner panel showed Accumx twice: it has a clinic-wide AND a MAHARANIPETA-branch MocDoc connector (both legit, migration 025). `/platform/callmedex/centers` now returns one row per clinic with `connectors[]` (scope + non-secret config); total reports were double-counted per connector — now per clinic. Each connector gets its own Edit (sends `branch_id`, prefilled, clinic/type locked). Placeholder CallMedex number `100000000000000` is shown as "NOT configured".
+2. `resolve_processing_center` used `.single()` → errored for Accumx's 2 rows → CallMedex jobs fell back to env MocDoc creds. Now prefers the clinic-wide row. It also passed `password_encrypted` ciphertext to MocDoc as the password → now decrypted.
+3. CallMedex WhatsApp "simulation mode" reported DELIVERED in production when the number/token was unset → lab_reports said "sent", patient got nothing. Production now treats it as FAILED and the runner falls back to the clinic number (also when a real CallMedex send fails).
+4. Per-event signed callbacks + CallMedex-number booking flow + signed client — see 07-INTEGRATIONS §5. `PUT /platform/callmedex/whatsapp-settings` refuses a phone_number_id any clinic owns.
+Tests: `app/integrations/callmedex/tests/test_callmedex_bidirectional_sync.py`, `tests/test_callmedex_webhook_isolation.py`, `tests/test_platform.py` (2 new).
+
+Still open:
+- **CallMedex → Kriya report submission is not wired.** CallMedex posts to `POST {MEDIASSIST_BASE_URL}/api/v1/report-jobs` (body: `report_job_id`, `source_document_url`, `patient`, `delivery`, `processing_center_id` = CallMedex's own id) signed `X-Signature: sha256=…(ts.body)`. Kriya has no such route; its `/process-report` expects `X-Signature-256`, a Kriya `clinic_id`, and scrapes MocDoc by barcode. Until that route exists (needs a CallMedex-center → Kriya-clinic mapping decision), no job carries a CallMedex `report_job_id`, so the new callbacks never fire in practice.
+- Migration 086 must be applied to live Supabase and recorded in `schema_migrations` BEFORE deploying (startup drift check refuses to boot otherwise).
+- Accumx's two MocDoc connectors poll the same portal/slug; `lab_reports` unique index prevents double sends, but one of them is probably redundant — owner decision.
+- `app/integrations/callmedex/tests` are outside `tests/`, so `tests/conftest.py`'s forced test credentials only apply when both dirs are collected in one run; running that dir alone uses `.env` (production).
+
 Still open (decisions, not code defects):
 - `get_treatment_doctor_ids` fails open on a DB error (Session 21 decision; the doctor list read right after it fails too).
 - 2026-09-23 read-only check: all 3 live clinics (Aura, Accumx, Visakha) have NO `config.integration_secret`, so each accepts lab reports signed with the shared platform secret. Setting one without updating that clinic's sender breaks report delivery — coordinate per clinic.

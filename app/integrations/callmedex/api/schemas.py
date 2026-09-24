@@ -80,6 +80,12 @@ class ProcessReportRequest(BaseModel):
         description="Processing center identifier for MocDoc portal config resolution. "
         "If not provided, clinic_id is used as the lookup key.",
     )
+    report_job_id: Optional[str] = Field(
+        None,
+        description="CallMedex's own report_job id. When present, lifecycle callbacks "
+        "(report-accepted/processing/delivered/failed) are posted back to CallMedex; "
+        "when absent (e.g. connector-driven jobs) no callback is sent.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

@@ -10,6 +10,11 @@ from app.models.message import WhatsAppWebhookPayload
 from app.services.conversation import conversation_manager
 from app.services.whatsapp import whatsapp_service
 from app.services.tenant import resolve_tenant, TenantNotFound
+from app.integrations.callmedex.whatsapp.booking import (
+    cached_callmedex_number,
+    is_callmedex_number,
+    handle_inbound as handle_callmedex_inbound,
+)
 from app.utils.validators import normalize_phone
 from app.utils.security import verify_webhook_signature
 
@@ -92,7 +97,11 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                         phone = normalize_phone(getattr(message, "from_", ""))
                         clinic_id = None
                         try:
-                            clinic = await resolve_tenant(display_phone, phone_number_id=phone_number_id)
+                            # CallMedex's own number is not a clinic tenant — skip the
+                            # doomed lookup (pure in-memory check, no I/O on this path).
+                            clinic = None if cached_callmedex_number(phone_number_id) else (
+                                await resolve_tenant(display_phone, phone_number_id=phone_number_id)
+                            )
                             if clinic:
                                 clinic_id = clinic.get("id")
                         except Exception as tenant_err:
@@ -213,6 +222,17 @@ async def process_message(message, display_phone: str, phone_number_id: str = No
     """Process incoming WhatsApp message."""
     try:
         message_id = message.id
+
+        # CallMedex number -> isolated home-collection booking flow. Only the
+        # exact CallMedex phone_number_id matches (never an id any clinic owns),
+        # so every clinic message continues below completely unchanged.
+        if await is_callmedex_number(phone_number_id):
+            if not await message_queue.acquire(message_id, clinic_id=None):
+                logger.info(f"Webhook: duplicate CallMedex message {message_id} dropped by atomic queue")
+                return
+            await message_queue.claim_message(message_id)
+            await handle_callmedex_inbound(message, phone_number_id)
+            return
 
         # Resolve tenant clinic first to capture clinic attribution
         try:

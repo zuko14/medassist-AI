@@ -69,13 +69,15 @@ async def resolve_processing_center(
         )
 
     try:
+        # No .single(): a clinic may hold a clinic-wide row AND branch rows
+        # (migration 025), and .single() errored on 2+ rows — silently dropping
+        # the job onto the env-var fallback credentials.
         result = (
             await sb(supabase.table("integration_connectors")
-            .select("config")
+            .select("config, branch_id")
             .eq("clinic_id", clinic_id)
             .eq("connector_type", connector_type)
-            .eq("is_enabled", True)
-            .single())
+            .eq("is_enabled", True))
         )
     except Exception as e:
         logger.error(
@@ -85,19 +87,36 @@ async def resolve_processing_center(
             f"Database query failed for processing center '{clinic_id}': {e}"
         ) from e
 
-    if not result.data:
+    rows = result.data if isinstance(result.data, list) else ([result.data] if result.data else [])
+    if not rows:
         raise ValueError(
             f"No enabled {connector_type} connector config found for clinic '{clinic_id}'. "
             f"Ensure an entry exists in integration_connectors with is_enabled=true."
         )
+    # CallMedex jobs carry no branch — the clinic-wide row is the canonical one.
+    row = next((r for r in rows if not r.get("branch_id")), rows[0])
 
-    config: dict = result.data.get("config", {})
+    config: dict = row.get("config") or {}
     base_url = config.get("base_url", "").strip().rstrip("/")
     if base_url and not base_url.startswith(("http://", "https://")):
         base_url = f"https://{base_url}"
     clinic_slug = config.get("clinic_slug", "")
     username = config.get("username")
-    password = config.get("password") or config.get("password_encrypted")
+    password = config.get("password")
+    if not password and config.get("password_encrypted"):
+        # Owner/admin panels store only the Fernet ciphertext; sending that to
+        # MocDoc as the password guaranteed a login failure.
+        from app.config import settings as app_settings
+        from app.utils.connector_crypto import decrypt_password
+
+        try:
+            password = decrypt_password(config["password_encrypted"], app_settings.connector_encryption_key)
+        except Exception as e:
+            logger.error(
+                f"Could not decrypt connector password for clinic '{clinic_id}' "
+                f"({type(e).__name__}) — re-enter it in the owner panel or check CONNECTOR_ENCRYPTION_KEY"
+            )
+            password = None
 
     if not base_url:
         raise ValueError(

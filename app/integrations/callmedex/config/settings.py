@@ -1,7 +1,7 @@
 """CallMedex Integration Configuration & Settings Model (Phase 2 Contract)."""
 
 from typing import Literal
-from pydantic import SecretStr, Field
+from pydantic import AliasChoices, SecretStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,13 @@ class CallMedexSettings(BaseSettings):
         default="http://localhost:8000/internal/integrations/callmedex/callback",
         description="Callback webhook URL for CallMedex status updates",
     )
+    # Root of the CallMedex backend (e.g. https://api.callmedex.in). Empty
+    # disables every outbound call to CallMedex (report callbacks, patient
+    # lookup, WhatsApp bookings) — nothing is sent to a guessed host.
+    callmedex_base_url: str = Field(
+        default="",
+        description="CallMedex API root; paths /api/v1/integrations/mediassist/* are appended",
+    )
 
     # Security & Authentication (Bearer + HMAC)
     integration_secret: SecretStr = Field(
@@ -31,10 +38,18 @@ class CallMedexSettings(BaseSettings):
     hmac_signature_secret: SecretStr = Field(
         default=SecretStr("dev_hmac_signature_secret_change_in_prod"),
         description="Secret key for signing callback webhooks via HMAC-SHA256",
+        # Both names are in use across the two deployments' docs.
+        validation_alias=AliasChoices("CALLMEDEX_HMAC_SIGNATURE_SECRET", "CALLMEDEX_HMAC_SECRET"),
     )
     bearer_token: SecretStr = Field(
         default=SecretStr("dev_bearer_token_change_in_prod"),
         description="Bearer token for CallMedex API authentication",
+    )
+    # Token Kriya presents when calling INTO CallMedex (CallMedex checks it
+    # against MEDIASSIST_INBOUND_BEARER_TOKEN). Blank = reuse bearer_token.
+    outbound_bearer_token: SecretStr = Field(
+        default=SecretStr(""),
+        description="Bearer token sent on outbound calls to CallMedex",
     )
     mocdoc_username: SecretStr = Field(
         default=SecretStr("mock_user"),
@@ -106,6 +121,7 @@ class CallMedexSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
 

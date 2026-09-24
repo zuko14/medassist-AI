@@ -69,6 +69,79 @@ class CallMedexCallbackHandler(BaseCallbackHandler):
             return False
 
 
+    # ── Per-event callbacks to CallMedex's dedicated routes ─────────────────
+    # POST {CALLMEDEX_BASE_URL}/api/v1/integrations/mediassist/callbacks/<event>
+    # Only meaningful for jobs CallMedex created: report_job_id is CallMedex's
+    # own id (its routes 404 anything else). No environment bypass — a
+    # configured CALLMEDEX_BASE_URL is the only switch. Never raises.
+
+    async def _post_report_event(self, event: str, body: dict, correlation_id: str) -> bool:
+        from app.integrations.callmedex.api import client as callmedex_client
+
+        resp = await callmedex_client.request(
+            "POST",
+            f"/callbacks/{event}",
+            json_body=body,
+            idem_key=callmedex_client.idempotency_key(body["report_job_id"], event),
+            correlation_id=correlation_id,
+        )
+        ok = resp is not None and resp.status_code == 200
+        logger.info(
+            f"CallMedex callback {event} for report_job {body['report_job_id']}: "
+            f"{'delivered' if ok else 'NOT delivered'}"
+            f"{f' (HTTP {resp.status_code})' if resp is not None else ''}"
+        )
+        return ok
+
+    async def send_report_accepted(self, report_job_id: str, occurred_at: str, correlation_id: str) -> bool:
+        return await self._post_report_event(
+            "report-accepted", {"report_job_id": report_job_id, "occurred_at": occurred_at}, correlation_id
+        )
+
+    async def send_report_processing(self, report_job_id: str, occurred_at: str, correlation_id: str) -> bool:
+        return await self._post_report_event(
+            "report-processing", {"report_job_id": report_job_id, "occurred_at": occurred_at}, correlation_id
+        )
+
+    async def send_report_delivered(
+        self,
+        report_job_id: str,
+        occurred_at: str,
+        message_id: Optional[str],
+        analysis_payload: dict,
+        correlation_id: str,
+    ) -> bool:
+        return await self._post_report_event(
+            "report-delivered",
+            {
+                "report_job_id": report_job_id,
+                "occurred_at": occurred_at,
+                "delivered_channel": "whatsapp",
+                "message_id": message_id,
+                "analysis": analysis_payload,
+            },
+            correlation_id,
+        )
+
+    async def send_report_failed(
+        self,
+        report_job_id: str,
+        occurred_at: str,
+        failure_reason: str,
+        details: Optional[str],
+        correlation_id: str,
+    ) -> bool:
+        return await self._post_report_event(
+            "report-failed",
+            {
+                "report_job_id": report_job_id,
+                "occurred_at": occurred_at,
+                "failure_reason": failure_reason,
+                "details": (details or "")[:500] or None,
+            },
+            correlation_id,
+        )
+
     async def verify_signature(
         self, raw_body: bytes, signature_header: str
     ) -> bool:
@@ -77,3 +150,32 @@ class CallMedexCallbackHandler(BaseCallbackHandler):
             self.secret.encode("utf-8"), raw_body, hashlib.sha256
         ).hexdigest()
         return hmac.compare_digest(expected_sig, signature_header)
+
+
+def build_analysis_payload(summary_report=None, canonical_report=None) -> dict:
+    """`analysis` object for report-delivered, shaped like CallMedex's
+    ReportAnalysisPayload. Only what the pipeline actually produced — no
+    health_score or recommendations are invented (both nullable/empty in the
+    contract). Empty summaries when OCR/AI failed and the fallback delivered."""
+    abnormal = []
+    if canonical_report is not None:
+        for t in canonical_report.tests:
+            status = getattr(t.flag, "value", str(t.flag))
+            if status in ("high", "low", "critical"):
+                abnormal.append({
+                    "marker": t.display_name,
+                    "value": f"{t.value:g} {t.unit}".strip(),
+                    "status": status,
+                    "reference_range": t.reference_range,
+                })
+    return {
+        "plain_language_summary": (
+            " ".join(s.statement for s in summary_report.patient_summary) if summary_report else ""
+        ),
+        "doctor_clinical_summary": (
+            " ".join(s.statement for s in summary_report.clinician_summary) if summary_report else ""
+        ),
+        "health_score": None,
+        "abnormal_flags": abnormal,
+        "recommendations": [],
+    }

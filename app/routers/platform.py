@@ -1332,7 +1332,21 @@ async def update_callmedex_whatsapp_settings(
     row = dict(existing.data[0]) if existing.data else {"id": "default"}
 
     if body.phone_number_id and body.phone_number_id.strip():
-        row["phone_number_id"] = body.phone_number_id.strip()
+        new_id = body.phone_number_id.strip()
+        # Inbound messages on the CallMedex number are routed to the CallMedex
+        # booking flow, so it must never be a number a clinic already owns.
+        # Every clinic's Meta number, to refuse a clash.
+        # unscoped: platform_admin
+        clinics_res = await sb(supabase.table("clinics").select("id, name, phone_number_id, config"))
+        for c in clinics_res.data or []:
+            cfg = c.get("config") or {}
+            if new_id in (c.get("phone_number_id"), cfg.get("meta_phone_number_id"), cfg.get("phone_number_id")):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Phone Number ID {new_id} already belongs to clinic '{c.get('name')}' — "
+                    "the CallMedex number must be its own dedicated WhatsApp number",
+                )
+        row["phone_number_id"] = new_id
 
     if body.api_token and body.api_token.strip():
         key = settings.connector_encryption_key
@@ -1386,7 +1400,7 @@ async def get_callmedex_processing_centers(
             # unscoped: platform super-admin monitoring connector health across all clinics
             await sb(supabase.table("integration_connectors")
             .select(
-                "id, clinic_id, connector_type, is_enabled, last_run_at, last_success_at, last_error"
+                "id, clinic_id, branch_id, connector_type, is_enabled, last_run_at, last_success_at, last_error, config"
             )
             .eq("is_enabled", True))
         )
@@ -1420,13 +1434,30 @@ async def get_callmedex_processing_centers(
         for r in reports_res.data or []:
             reports_by_clinic.setdefault(r["clinic_id"], []).append(r.get("uploaded_at", ""))
 
+        branch_ids = list({c["branch_id"] for c in connectors if c.get("branch_id")})
+        branch_names: dict[str, str] = {}
+        if branch_ids:
+            # unscoped: platform_admin
+            branches_res = await sb(supabase.table("branches").select("id, name").in_("id", branch_ids))
+            branch_names = {b["id"]: b.get("name") or "" for b in (branches_res.data or [])}
+
+        # One row per clinic. A clinic may hold a clinic-wide connector AND
+        # branch-scoped ones (migration 025); listing each connector as its own
+        # center showed the same hospital twice and double-counted its reports,
+        # which are attributed per clinic, not per connector.
+        by_clinic: dict[str, list] = {}
+        for conn in connectors:
+            by_clinic.setdefault(conn["clinic_id"], []).append(conn)
+
         centers = []
         total_delivered = 0
-        for conn in connectors:
-            cid = conn["clinic_id"]
+        for cid, conns in by_clinic.items():
             clinic = clinics_by_id.get(cid)
             if not clinic:
                 continue
+            # Clinic-wide row first — it is the one CallMedex jobs resolve to.
+            conns.sort(key=lambda c: (c.get("branch_id") is not None, c.get("connector_type") or ""))
+            primary = conns[0]
             timestamps = reports_by_clinic.get(cid, [])
             delivered_30d = sum(1 for t in timestamps if t >= start_30d)
             total_delivered += len(timestamps)
@@ -1437,14 +1468,34 @@ async def get_callmedex_processing_centers(
                     "clinic_name": clinic.get("name"),
                     "whatsapp_number": clinic.get("whatsapp_number"),
                     "is_active": clinic.get("is_active", True),
-                    "connector_id": conn["id"],
-                    "connector_type": conn["connector_type"],
+                    "connector_id": primary["id"],
+                    "connector_type": primary["connector_type"],
                     "reports_delivered_total": len(timestamps),
                     "reports_delivered_30d": delivered_30d,
                     "last_delivery_at": max(timestamps) if timestamps else None,
-                    "last_run_at": conn.get("last_run_at"),
-                    "last_success_at": conn.get("last_success_at"),
-                    "last_error": conn.get("last_error"),
+                    "last_run_at": primary.get("last_run_at"),
+                    "last_success_at": primary.get("last_success_at"),
+                    "last_error": next((c.get("last_error") for c in conns if c.get("last_error")), None),
+                    # Non-secret config only — the password never leaves the server.
+                    "connectors": [
+                        {
+                            "connector_id": c["id"],
+                            "connector_type": c["connector_type"],
+                            "branch_id": c.get("branch_id"),
+                            "branch_name": branch_names.get(c.get("branch_id") or "", None),
+                            "base_url": (c.get("config") or {}).get("base_url"),
+                            "clinic_slug": (c.get("config") or {}).get("clinic_slug"),
+                            "username": (c.get("config") or {}).get("username"),
+                            "has_password": bool(
+                                (c.get("config") or {}).get("password_encrypted")
+                                or (c.get("config") or {}).get("password")
+                            ),
+                            "last_run_at": c.get("last_run_at"),
+                            "last_success_at": c.get("last_success_at"),
+                            "last_error": c.get("last_error"),
+                        }
+                        for c in conns
+                    ],
                 }
             )
 

@@ -9,8 +9,6 @@ from app.integrations.callmedex.config.settings import callmedex_settings, CallM
 from app.integrations.callmedex.api.schemas import (
     ProcessReportRequest,
     ProcessReportResponse,
-    CallbackStatusPayload,
-    TaskStatus,
 )
 from app.integrations.callmedex.connectors.factory import ConnectorFactory
 from app.integrations.callmedex.ocr.engine import CanonicalOCRPipeline
@@ -21,13 +19,36 @@ from app.integrations.callmedex.whatsapp.schemas import WhatsAppDeliveryStatus
 from app.integrations.callmedex.connectors.base.connector import JobCheckpoint
 from app.integrations.callmedex.browser.session import PlaywrightBrowserSession
 from app.integrations.callmedex.storage.provider import LocalStorageProvider
-from app.integrations.callmedex.callbacks.handler import CallMedexCallbackHandler
+from app.integrations.callmedex.callbacks.handler import CallMedexCallbackHandler, build_analysis_payload
 from app.integrations.callmedex.queue.drivers import InMemoryQueue
-from app.integrations.callmedex.api.exceptions import ConfigurationError, CallMedexException
+from app.integrations.callmedex.api.exceptions import ConfigurationError, CallMedexException, ValidationError
 from app.integrations.callmedex.config.processing_centers import resolve_processing_center
 from app.database import sb  # T5.1: off-loop query execution
+from app.utils.async_tasks import spawn_background_task
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _settle_callbacks(tasks: list, timeout: float = 15.0) -> None:
+    """Let in-flight non-terminal callbacks finish (bounded), then drop the rest."""
+    if not tasks:
+        return
+    _, pending = await asyncio.wait(tasks, timeout=timeout)
+    for t in pending:
+        t.cancel()
+
+
+def _failure_reason(exc: Exception, checkpoint: JobCheckpoint) -> str:
+    """Map a pipeline exception onto CallMedex's report-failed enum."""
+    if isinstance(exc, ValidationError) or checkpoint == JobCheckpoint.PDF_DOWNLOADED:
+        return "invalid_source_document"
+    if "did not appear in MocDoc" in str(exc):  # connector wait_until_report_available timeout
+        return "report_not_ready_timeout"
+    return "download_automation_failed"
 
 
 class CallMedexContainer:
@@ -123,8 +144,20 @@ class CallMedexWorkerRunner:
         corr_id = correlation_id or str(uuid4())
         connector_type = request.connector_type or "mocdoc"
         connector = self.container.get_connector(connector_type)
+        # CallMedex's own job id — lifecycle callbacks only exist for jobs CallMedex created.
+        cmx_job_id = getattr(request, "report_job_id", None)
+        callbacks = self.container.callback_handler
 
         self._emit_event("ReportJobCreated", report_job_id, corr_id, {"barcode": request.external_report_id, "connector": connector_type})
+        # Non-terminal callbacks run in the background so a slow/down CallMedex
+        # never delays the patient's report; _settle_callbacks() drains them
+        # before the terminal one so "processing" can never land after "delivered".
+        cmx_tasks: list = []
+        if cmx_job_id:
+            cmx_tasks.append(spawn_background_task(
+                callbacks.send_report_accepted(cmx_job_id, _utc_now_iso(), corr_id),
+                name=f"cmx_accepted_{cmx_job_id}",
+            ))
 
         # Step 1: Connector Created & Browser Session Initialized
         self._emit_event("ConnectorInitialized", report_job_id, corr_id, {"connector": connector_type})
@@ -139,6 +172,10 @@ class CallMedexWorkerRunner:
 
         temp_filepath = None
         checkpoint = JobCheckpoint.CREATED
+        # Read by the step-9 callback even if step 8 never ran.
+        patient_phone = getattr(request.patient, "patient_phone", None)
+        summary_report = canonical_report = whatsapp_message_id = None
+        whatsapp_sent = False
 
         try:
             # Step 2: Resolve processing center config & credentials (base_url, clinic_slug, username, password)
@@ -262,6 +299,12 @@ class CallMedexWorkerRunner:
                 patient_id = getattr(request.patient, "patient_mrn", None) or patient_phone or "unknown"
                 patient_name = getattr(request.patient, "patient_name", "Patient")
 
+                if cmx_job_id:
+                    cmx_tasks.append(spawn_background_task(
+                        callbacks.send_report_processing(cmx_job_id, _utc_now_iso(), corr_id),
+                        name=f"cmx_processing_{cmx_job_id}",
+                    ))
+
                 # OCR Processing
                 canonical_report = None
                 try:
@@ -294,6 +337,7 @@ class CallMedexWorkerRunner:
                 #   ReportSummarizer pipeline (PDF text extraction → OpenRouter). This ensures
                 #   patients ALWAYS receive the report + best-effort AI summary, never silence.
                 whatsapp_sent = False
+                whatsapp_message_id = None
                 storage_path = None
                 used_fallback_path = False
                 if patient_phone:
@@ -321,11 +365,17 @@ class CallMedexWorkerRunner:
                                 correlation_id=corr_id,
                             )
                             whatsapp_sent = delivery_result.status == WhatsAppDeliveryStatus.DELIVERED
-                        else:
-                            # Strategy 2: OCR/AI failed → fall back to LabReportService
-                            # which runs its own ReportSummarizer (PDF text → OpenRouter)
+                            if whatsapp_sent:
+                                whatsapp_message_id = delivery_result.message_id
+                        if not whatsapp_sent:
+                            # Strategy 2: OCR/AI produced no summary, OR Strategy 1's
+                            # send failed (e.g. template not approved on the CallMedex
+                            # WABA) → LabReportService, which runs its own
+                            # ReportSummarizer and sends from the clinic's own number.
+                            # Fail-open: the patient must never get silence.
                             logger.warning(
-                                f"CallMedex OCR/AI pipeline returned no summary for {report_job_id} "
+                                f"CallMedex primary delivery unavailable for {report_job_id} "
+                                f"(summary={'yes' if summary_report else 'no'}) "
                                 f"— falling back to LabReportService.upload_and_send() for delivery"
                             )
                             try:
@@ -343,6 +393,7 @@ class CallMedexWorkerRunner:
                                     source="callmedex",
                                 )
                                 whatsapp_sent = fallback_result.get("status") == "sent"
+                                whatsapp_message_id = fallback_result.get("whatsapp_message_id")
                                 used_fallback_path = True
                                 self._emit_event(
                                     "FallbackDelivery", report_job_id, corr_id,
@@ -391,19 +442,27 @@ class CallMedexWorkerRunner:
 
 
 
-            # Step 9: Send Signed HMAC Callback
+            # Step 9: Signed lifecycle callback to CallMedex (only for CallMedex-created jobs)
             callback_delivered = False
-            callback_payload = CallbackStatusPayload(
-                task_id=report_job_id,
-                clinic_id=request.clinic_id,
-                connector_type=request.connector_type,
-                external_report_id=request.external_report_id,
-                status=TaskStatus.COMPLETED,
-                correlation_id=corr_id,
-            )
-            callback_delivered = await self.container.callback_handler.send_status_callback(
-                callback_payload
-            )
+            if cmx_job_id:
+                await _settle_callbacks(cmx_tasks)
+                if whatsapp_sent:
+                    callback_delivered = await callbacks.send_report_delivered(
+                        cmx_job_id,
+                        _utc_now_iso(),
+                        whatsapp_message_id,
+                        build_analysis_payload(summary_report, canonical_report),
+                        corr_id,
+                    )
+                else:
+                    callback_delivered = await callbacks.send_report_failed(
+                        cmx_job_id,
+                        _utc_now_iso(),
+                        "delivery_failed",
+                        "No patient phone on the job" if not patient_phone
+                        else "WhatsApp delivery did not complete on either the CallMedex or the clinic number",
+                        corr_id,
+                    )
             checkpoint = JobCheckpoint.CALLBACK_SENT
             self._emit_event(
                 "CallbackDelivered",
@@ -437,6 +496,13 @@ class CallMedexWorkerRunner:
                 f"ReportJob {report_job_id} failed at Checkpoint {checkpoint.value}: {e}",
                 extra={"correlation_id": corr_id, "report_job_id": report_job_id},
             )
+            if cmx_job_id:
+                await _settle_callbacks(cmx_tasks)
+                # Deterministic idempotency key per job: queue retries re-send the
+                # same failed event, which CallMedex replays instead of re-applying.
+                await callbacks.send_report_failed(
+                    cmx_job_id, _utc_now_iso(), _failure_reason(e, checkpoint), str(e), corr_id
+                )
             raise
 
         finally:
