@@ -87,12 +87,16 @@ This document inventories all external service integrations, APIs, protocols, an
 
 ### API Security (inbound, CallMedex → Kriya)
 - Requires `Authorization: Bearer <token>` (or `X-Integration-Secret`).
-- Header `X-Signature-256`: bare hex HMAC-SHA256 over the raw body (`CALLMEDEX_HMAC_SIGNATURE_SECRET`).
+- Header `X-Signature: sha256=<hex>` or `X-Signature-256`: HMAC-SHA256 over `f"{ts}." + raw_query + raw_body` (or bare raw body) using `CALLMEDEX_HMAC_SIGNATURE_SECRET`.
 - Replay Attack Mitigation: Header `X-Timestamp` verified against a 300-second (5-minute) clock skew window; duplicate signatures are rejected.
-- NOTE: CallMedex's own client (`callmedex/backend/app/integrations/mediassist_client.py`) signs `X-Signature: sha256=hex(HMAC(ts + "." + body))` and posts to `POST /api/v1/report-jobs`, which Kriya does NOT expose (Session 23 finding, see 13-KNOWN-ISSUES §6).
+- Mounted routers:
+  - Internal: `POST /internal/integrations/callmedex/process-report`
+  - External v1: `POST /api/v1/report-jobs`, `GET /api/v1/report-jobs/{report_job_id}`, `POST /api/v1/notifications` ([`app/integrations/callmedex/api/v1_router.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/integrations/callmedex/api/v1_router.py)).
 
 ### Ingestion Flow
-- Endpoint: `POST /internal/integrations/callmedex/process-report` (optional `report_job_id` = CallMedex's job id).
+- Endpoint: `POST /api/v1/report-jobs` (external) or `POST /internal/integrations/callmedex/process-report` (internal).
+- Direct PDF downloads supported via `source_document_url` (bypasses browser scraping when PDF is pre-signed).
+- Center resolution: `resolve_callmedex_clinic_id` maps CallMedex centers (e.g. Accumax `e204185b-fd1c-4753-9243-58715d76b51c`) to Kriya clinics (`c2a14afe-27a9-4a13-b7c3-5ece8d05dc6c`).
 - Enqueues jobs to `global_container.queue_engine`.
 - Background worker executes PDF extraction, patient fuzzy matching (`app/services/patient_match.py`), AI summarization (`app/services/report_summarizer.py`), and WhatsApp dispatch.
 - Delivery: CallMedex number (template `lab_report_summary`) first; if no summary OR that send fails, falls back to `LabReportService.upload_and_send` on the clinic's own number. In production, unconfigured CallMedex WhatsApp credentials are a FAILED send (no simulated "delivered").

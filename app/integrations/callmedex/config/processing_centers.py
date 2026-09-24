@@ -142,3 +142,62 @@ async def resolve_processing_center(
         username=username,
         password=password,
     )
+
+
+# ── CallMedex Center -> Kriya Clinic Mapping ────────────────────────────────
+
+CALLMEDEX_CENTER_TO_CLINIC: dict[str, str] = {
+    # Accumax Diagnostic Center (CallMedex ID -> Kriya ID)
+    "e204185b-fd1c-4753-9243-58715d76b51c": "c2a14afe-27a9-4a13-b7c3-5ece8d05dc6c",
+}
+DEFAULT_CALLMEDEX_CLINIC_ID = "c2a14afe-27a9-4a13-b7c3-5ece8d05dc6c"
+
+
+async def resolve_callmedex_clinic_id(processing_center_id: Optional[str]) -> str:
+    """Resolve incoming CallMedex processing_center_id to a valid Kriya clinic_id.
+
+    Resolution order:
+    1. Static mapping for known processing centers (e.g. Accumax).
+    2. Direct match against active clinics table in Supabase.
+    3. Match against integration_connectors table (connector.clinic_id).
+    4. Fallback default to Accumx Diagnostics (c2a14afe-27a9-4a13-b7c3-5ece8d05dc6c).
+    """
+    if not processing_center_id:
+        return DEFAULT_CALLMEDEX_CLINIC_ID
+
+    clean_id = str(processing_center_id).strip().lower()
+    for cmx_id, clinic_id in CALLMEDEX_CENTER_TO_CLINIC.items():
+        if clean_id == cmx_id.lower():
+            return clinic_id
+
+    try:
+        from app.database import supabase
+        # Check if processing_center_id matches an active clinic in clinics table
+        # Note: clinics table is platform-level, not in TENANT_OWNED_TABLES
+        clinic_res = await sb(
+            supabase.table("clinics")
+            .select("id")
+            .eq("id", processing_center_id)
+            .limit(1)
+        )
+        if clinic_res.data and len(clinic_res.data) > 0:
+            return str(clinic_res.data[0]["id"])
+
+        # Check if processing_center_id matches an integration_connectors row
+        # unscoped: unique_row_key
+        conn_res = await sb(
+            supabase.table("integration_connectors")
+            .select("clinic_id")
+            .eq("id", processing_center_id)
+            .limit(1)
+        )
+        if conn_res.data and len(conn_res.data) > 0:
+            return str(conn_res.data[0]["clinic_id"])
+    except Exception as e:
+        logger.warning(
+            f"Failed dynamic resolution for CallMedex center '{processing_center_id}': {e}. "
+            f"Falling back to default clinic {DEFAULT_CALLMEDEX_CLINIC_ID}."
+        )
+
+    return DEFAULT_CALLMEDEX_CLINIC_ID
+

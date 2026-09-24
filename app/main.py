@@ -17,6 +17,7 @@ from app.integrations.callmedex.api.router import (
     router as callmedex_router,
     global_container as callmedex_container,
 )
+from app.integrations.callmedex.api.v1_router import v1_router as callmedex_v1_router
 from app.routers.fhir import router as fhir_router
 from app.routers.razorpay_webhook import router as razorpay_router
 from app.services.scheduler import scheduler_service
@@ -369,6 +370,8 @@ app.include_router(razorpay_router)
 app.include_router(integrations_router)
 # CallMedex internal integration API (/internal/integrations/callmedex)
 app.include_router(callmedex_router)
+# CallMedex external integration API (POST /api/v1/report-jobs, GET /api/v1/report-jobs/{id}, POST /api/v1/notifications)
+app.include_router(callmedex_v1_router)
 
 
 @app.get("/")

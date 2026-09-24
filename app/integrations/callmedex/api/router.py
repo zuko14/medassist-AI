@@ -84,6 +84,7 @@ async def verify_callmedex_auth_and_hmac(
     response: Response,
     authorization: Optional[str] = Header(None),
     x_integration_secret: Optional[str] = Header(None),
+    x_signature: Optional[str] = Header(None),
     x_signature_256: Optional[str] = Header(None),
     x_timestamp: Optional[str] = Header(None),
     x_correlation_id: Optional[str] = Header(None),
@@ -134,13 +135,14 @@ async def verify_callmedex_auth_and_hmac(
         )
 
     is_production = callmedex_settings.app_env == "production"
+    sig_header = x_signature or x_signature_256
 
     # Production Mode Enforcement: HMAC and Timestamp are strictly mandatory
-    if is_production and (not x_signature_256 or not x_timestamp):
+    if is_production and (not sig_header or not x_timestamp):
         logger.warning(f"CallMedex API [corr={corr_id}]: Missing mandatory signature or timestamp in production mode")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HMAC signature (X-Signature-256) and timestamp (X-Timestamp) are mandatory in production mode",
+            detail="HMAC signature (X-Signature / X-Signature-256) and timestamp (X-Timestamp) are mandatory in production mode",
         )
 
     # 2. Replay Protection Window & Duplicate Signature Check
@@ -174,14 +176,28 @@ async def verify_callmedex_auth_and_hmac(
             )
 
     # 3. HMAC-SHA256 Signature Verification & Replay Cache Check
-    if x_signature_256:
+    if sig_header:
         raw_body = await request.body()
         secret = callmedex_settings.hmac_signature_secret.get_secret_value()
-        expected_sig = hmac.new(
+        sig_clean = sig_header[len("sha256="):] if sig_header.startswith("sha256=") else sig_header
+
+        # Support both CallMedex timestamped signing format (ts. + query + body) and legacy bare body
+        ts_str = str(x_timestamp).strip() if x_timestamp else ""
+        query_bytes = request.url.query.encode("utf-8") if request.url.query else b""
+        expected_sig_with_ts = hmac.new(
+            secret.encode("utf-8"),
+            f"{ts_str}.".encode("utf-8") + query_bytes + raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+        expected_sig_bare = hmac.new(
             secret.encode("utf-8"), raw_body, hashlib.sha256
         ).hexdigest()
 
-        if not hmac.compare_digest(expected_sig.lower(), x_signature_256.lower()):
+        matched = (
+            hmac.compare_digest(expected_sig_with_ts.lower(), sig_clean.lower())
+            or hmac.compare_digest(expected_sig_bare.lower(), sig_clean.lower())
+        )
+        if not matched:
             logger.warning(f"CallMedex API [corr={corr_id}]: HMAC-SHA256 signature verification failed")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -189,7 +205,7 @@ async def verify_callmedex_auth_and_hmac(
             )
 
         # Check duplicate signature replay within sliding window
-        if replay_cache.is_duplicate_and_add(x_signature_256.lower(), req_epoch):
+        if replay_cache.is_duplicate_and_add(sig_clean.lower(), req_epoch):
             logger.warning(f"CallMedex API [corr={corr_id}]: Replay attack detected (duplicate HMAC signature)")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

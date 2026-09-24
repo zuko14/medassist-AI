@@ -113,8 +113,8 @@ Fixed:
 Tests: `app/integrations/callmedex/tests/test_callmedex_bidirectional_sync.py`, `tests/test_callmedex_webhook_isolation.py`, `tests/test_platform.py` (2 new).
 
 Still open:
-- **CallMedex → Kriya report submission is not wired.** CallMedex posts to `POST {MEDIASSIST_BASE_URL}/api/v1/report-jobs` (body: `report_job_id`, `source_document_url`, `patient`, `delivery`, `processing_center_id` = CallMedex's own id) signed `X-Signature: sha256=…(ts.body)`. Kriya has no such route; its `/process-report` expects `X-Signature-256`, a Kriya `clinic_id`, and scrapes MocDoc by barcode. Until that route exists (needs a CallMedex-center → Kriya-clinic mapping decision), no job carries a CallMedex `report_job_id`, so the new callbacks never fire in practice.
-- Migration 086 must be applied to live Supabase and recorded in `schema_migrations` BEFORE deploying (startup drift check refuses to boot otherwise).
+- **CallMedex → Kriya report submission is WIRED (Session 24):** Mounted `POST /api/v1/report-jobs`, `GET /api/v1/report-jobs/{report_job_id}`, and `POST /api/v1/notifications` on `v1_router` in `app/main.py`. Supports CallMedex's `X-Signature: sha256=...` over `ts.query.body`, direct PDF download from `source_document_url`, center mapping (Accumax `e204185b-fd1c-4753-9243-58715d76b51c` -> `c2a14afe-27a9-4a13-b7c3-5ece8d05dc6c`), OCR, AI summary, WhatsApp delivery, DB persistence, and signed callbacks.
+- Migration 086 checksum row is recorded in live Supabase `schema_migrations` (applied 2026-09-24).
 - Accumx's two MocDoc connectors poll the same portal/slug; `lab_reports` unique index prevents double sends, but one of them is probably redundant — owner decision.
 - `app/integrations/callmedex/tests` are outside `tests/`, so `tests/conftest.py`'s forced test credentials only apply when both dirs are collected in one run; running that dir alone uses `.env` (production).
 
