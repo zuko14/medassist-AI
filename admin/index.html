@@ -1212,7 +1212,13 @@
         .appt-filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .appt-filter-row .toggle-group { margin-bottom: 0; }
         .appt-filter-row .toggle-btn:disabled,
+        .appt-filter-row .btn:disabled,
         .appt-pager .btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+        .appt-search { position: relative; }
+        .appt-search .i { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none; }
+        .appt-search .search-bar { margin-bottom: 0; padding-left: 42px; }
+        .appt-when { white-space: nowrap; }
+        .appt-phone { color: var(--text3); font-size: 0.78rem; }
         .appt-date-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text3); }
         .appt-date-field input, .appt-date-field select {
             min-height: 34px;
@@ -1978,6 +1984,12 @@
                 <p id="apptCaption">Upcoming appointments in the next 30 days</p>
             </div>
             <div class="card appt-filters">
+                <div class="appt-search" role="search">
+                    <svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg>
+                    <input type="search" class="search-bar" id="apptSearch" maxlength="100" autocomplete="off" spellcheck="false"
+                        placeholder="Search by patient name, phone, booking ref, doctor or test — across all dates"
+                        aria-label="Search appointments" oninput="onApptSearchInput()" onkeydown="onApptSearchKey(event)">
+                </div>
                 <div class="appt-filter-row">
                     <div class="range-pick" id="apptPresets" role="group" aria-label="Period">
                         <button type="button" class="btn btn-ghost btn-sm on" data-preset="upcoming" aria-pressed="true" onclick="setApptPreset('upcoming')">Upcoming</button>
@@ -5472,7 +5484,9 @@ function bookingSubjectCell(b) {
 // "Upcoming" is the page's original view and stays the default.
 const APPT_PAGE_SIZE = 50;
 const APPT_MAX_SPAN_DAYS = 366;  // mirrors _APPOINTMENT_LIST_MAX_SPAN_DAYS
-const APPT_FILTER_DEFAULT = { preset: 'upcoming', basis: 'visit', date: null, month: null, from: null, to: null, status: null, offset: 0 };
+// q is the search box. A search spans every date (the server orders it newest
+// first), so the date controls step aside while it is active.
+const APPT_FILTER_DEFAULT = { preset: 'upcoming', basis: 'visit', date: null, month: null, from: null, to: null, status: null, offset: 0, q: null };
 const apptFilter = { ...APPT_FILTER_DEFAULT };
 let apptLoadSeq = 0;
 
@@ -5533,6 +5547,14 @@ function fmtBookedAt(ts) {
     return `${p.day} ${APPT_MONTHS[Number(p.month) - 1]} ${p.year}, ${p.hour}:${p.minute} ${String(p.dayPeriod || '').toLowerCase()}`;
 }
 
+// "14:30:00" → "2:30 PM", the way the bot quotes it to the patient.
+function fmtApptTime(t) {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
+    if (!m) return esc(t) || '—';
+    const h = Number(m[1]);
+    return `${h % 12 || 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
 function apptStatusLabel(s) {
     const t = String(s || '').replace(/_/g, ' ');
     return t.charAt(0).toUpperCase() + t.slice(1);
@@ -5544,6 +5566,13 @@ function apptStatusLabel(s) {
 // this list agree.
 function apptQuery(f, today) {
     const q = new URLSearchParams();
+    if (f.q) {
+        q.set('q', f.q);
+        if (f.status) q.set('status', f.status);
+        q.set('limit', String(APPT_PAGE_SIZE));
+        q.set('offset', String(f.offset || 0));
+        return { qs: q.toString() };
+    }
     const basis = f.preset === 'upcoming' ? 'visit' : f.basis;
     let from = null, to = null;
     if (f.preset === 'upcoming') { from = today; to = addDaysIso(today, 30); }
@@ -5573,6 +5602,7 @@ function apptQuery(f, today) {
 }
 
 function apptCaptionText(f, today) {
+    if (f.q) return `Search results for “${f.q}” across all dates`;
     const booked = f.preset !== 'upcoming' && f.basis === 'booked';
     const lead = booked ? 'Bookings made' : 'Appointments scheduled';
     switch (f.preset) {
@@ -5597,21 +5627,29 @@ function apptStatusChipList(summary, active) {
 function syncApptControls() {
     const f = apptFilter;
     const upcoming = f.preset === 'upcoming';
+    const searching = !!f.q;
+    const box = document.getElementById('apptSearch');
+    // Never rewrite the box under the admin's cursor: mid-typing it may hold a
+    // trailing space or a single letter that is not a search yet.
+    if (document.activeElement !== box) box.value = f.q || '';
     document.querySelectorAll('#apptPresets [data-preset]').forEach(b => {
-        const on = b.dataset.preset === f.preset;
+        const on = !searching && b.dataset.preset === f.preset;
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', String(on));
+        b.disabled = searching;
+        b.title = searching ? 'Clear the search to filter by date' : '';
     });
     document.querySelectorAll('#apptBasis [data-basis]').forEach(b => {
         const on = b.dataset.basis === (upcoming ? 'visit' : f.basis);
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', String(on));
-        b.disabled = upcoming;
-        b.title = upcoming ? 'Upcoming always lists by appointment date' : '';
+        b.disabled = upcoming || searching;
+        b.title = searching ? 'Clear the search to filter by date'
+            : upcoming ? 'Upcoming always lists by appointment date' : '';
     });
-    document.getElementById('apptDateField').hidden = f.preset !== 'date';
-    document.getElementById('apptMonthField').hidden = f.preset !== 'month';
-    document.getElementById('apptRangeField').hidden = f.preset !== 'range';
+    document.getElementById('apptDateField').hidden = searching || f.preset !== 'date';
+    document.getElementById('apptMonthField').hidden = searching || f.preset !== 'month';
+    document.getElementById('apptRangeField').hidden = searching || f.preset !== 'range';
     if (f.preset === 'date') document.getElementById('apptDate').value = f.date || '';
     if (f.preset === 'range') {
         document.getElementById('apptFrom').value = f.from || '';
@@ -5633,7 +5671,34 @@ function syncApptControls() {
         yearSel.innerHTML = years.map(yr => `<option value="${yr}">${yr}</option>`).join('');
         yearSel.value = String(y);
     }
-    document.getElementById('apptReset').hidden = upcoming && !f.status;
+    document.getElementById('apptReset').hidden = upcoming && !f.status && !searching;
+}
+
+// Letters, digits and combining marks (Indic vowel signs), mirroring what the
+// server keeps; under two of them is not a search yet — the server would 422.
+function apptSearchTerm(raw) {
+    const v = String(raw || '').trim().slice(0, 100);
+    return (v.match(/[\p{L}\p{N}\p{M}]/gu) || []).length >= 2 ? v : null;
+}
+
+let apptSearchTimer = null;
+function onApptSearchInput() {
+    clearTimeout(apptSearchTimer);
+    apptSearchTimer = setTimeout(applyApptSearch, 350);
+}
+
+function onApptSearchKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); applyApptSearch(); }
+    else if (e.key === 'Escape' && e.target.value) { e.target.value = ''; applyApptSearch(); }
+}
+
+function applyApptSearch() {
+    clearTimeout(apptSearchTimer);
+    const q = apptSearchTerm(document.getElementById('apptSearch').value);
+    if (q === apptFilter.q) return;
+    apptFilter.q = q;
+    apptFilter.offset = 0;
+    loadAppointments();
 }
 
 function setApptPreset(preset) {
@@ -5705,7 +5770,7 @@ function pageAvailable(page) {
 
 function openApptsFromDashboard(status) {
     if (!pageAvailable('appointments')) return;
-    Object.assign(apptFilter, { preset: 'last30', basis: 'booked', status: status || null, offset: 0 });
+    Object.assign(apptFilter, { preset: 'last30', basis: 'booked', status: status || null, offset: 0, q: null });
     go('appointments', null);
 }
 
@@ -5795,6 +5860,10 @@ function renderAppointments(data, rows, today) {
     }
     if (!rows.length) {
         const what = apptFilter.status ? `${apptStatusLabel(apptFilter.status).toLowerCase()} appointments` : 'appointments';
+        if (apptFilter.q) {
+            el.innerHTML = emptyState('calendar', `No ${esc(what)} match “${esc(apptFilter.q)}”`);
+            return;
+        }
         el.innerHTML = emptyState('calendar', apptFilter.preset === 'upcoming' && !apptFilter.status
             ? 'No upcoming appointments'
             : `No ${esc(what)} for this period`);
@@ -5811,11 +5880,11 @@ function renderAppointments(data, rows, today) {
             <tbody>${rows.map(a => `<tr>
                 <td style="color:var(--accent2);font-weight:600;font-family:monospace">${esc(a.booking_ref) || '—'}</td>
                 <td>${a.token_number ? `<span style="background:var(--card-bg, #f3f4f6);padding:3px 8px;border-radius:4px;font-weight:700;color:var(--accent,#0ea5e9);">#${a.token_number}</span>` : '<span style="color:var(--text-muted,#9ca3af);">—</span>'}</td>
-                <td>${esc(a.patient_name || a.patient_phone) || '—'}</td>
+                <td>${esc(a.patient_name || a.patient_phone) || '—'}${a.patient_name && a.patient_phone ? `<br><small class="appt-phone">${esc(a.patient_phone)}</small>` : ''}</td>
                 <td>${bookingSubjectCell(a)}</td>
                 <td>${esc(a.department) || '—'}</td>
-                <td>${a.appointment_date || '—'}</td>
-                <td>${a.appointment_time || '—'}</td>
+                <td class="appt-when">${/^\d{4}-\d{2}-\d{2}$/.test(a.appointment_date || '') ? fmtApptDate(a.appointment_date) : (esc(a.appointment_date) || '—')}</td>
+                <td class="appt-when">${fmtApptTime(a.appointment_time)}</td>
                 <td>${badge(a.status)}</td>
                 <td>${refundCell(a)}</td>
                 <td style="white-space:nowrap;color:var(--text2);font-size:0.8rem">${fmtBookedAt(a.created_at)}</td>

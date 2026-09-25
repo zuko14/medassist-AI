@@ -26,7 +26,11 @@ from app.routers.admin import (
     AdminUser,
     verify_credentials,
 )
-from app.services.analytics import _INSIGHTS_PAGE_ROWS, AnalyticsService
+from app.services.analytics import (
+    _INSIGHTS_PAGE_ROWS,
+    AnalyticsService,
+    appointment_search_filter,
+)
 
 CLINIC_UUID = "11111111-1111-1111-1111-111111111111"
 OTHER_CLINIC_UUID = "99999999-9999-9999-9999-999999999999"
@@ -226,6 +230,88 @@ class TestCountsAndPaging:
                 )
 
 
+class TestSearch:
+    """The front desk's "find this patient" box.
+
+    User text must never reach PostgREST's filter grammar: a comma or a paren
+    would add a clause of the user's choosing, a * or % would widen the match.
+    """
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "a),clinic_id.neq.x,(b",
+            "x*,id.gt.0",
+            "ab%_%cd",
+            "Chaitanya\x00Kumar",
+            'na"me\\:x;y',
+        ],
+    )
+    def test_reserved_characters_never_survive_into_the_filter(self, raw):
+        f = appointment_search_filter(raw)
+        clauses = f.split(",")
+        assert len(clauses) == 4  # exactly one clause per text column, none injected
+        for c in clauses:
+            col, op, pattern = c.split(".", 2)
+            assert op == "ilike"
+            assert not set(pattern) & set('(),%_"\\:;.\x00')
+
+    def test_words_match_in_order_across_any_gap(self):
+        f = appointment_search_filter("  Dr. Priya   sharma ")
+        assert "patient_name.ilike.*Dr*Priya*sharma*" in f.split(",")
+        assert "doctor_name.ilike.*Dr*Priya*sharma*" in f.split(",")
+        assert not any(c.startswith("patient_phone") for c in f.split(","))
+
+    @pytest.mark.parametrize(
+        "raw, digits",
+        [("+91 98765 43210", "9876543210"), ("919876543210", "9876543210"), ("7890", "7890")],
+    )
+    def test_a_phone_matches_on_its_last_ten_digits(self, raw, digits):
+        assert f"patient_phone.ilike.*{digits}*" in appointment_search_filter(raw).split(",")
+
+    def test_a_booking_ref_keeps_its_hyphens(self):
+        f = appointment_search_filter("MC-2026-2001")
+        assert "booking_ref.ilike.*MC-2026-2001*" in f.split(",")
+
+    @pytest.mark.parametrize("raw", ["", "a", " . , ", "*", "%%"])
+    def test_too_short_is_none(self, raw):
+        assert appointment_search_filter(raw) is None
+
+    @pytest.mark.asyncio
+    async def test_search_with_no_dates_spans_all_history_newest_first(self):
+        result, built = await _run(
+            [_statuses("completed", "cancelled"), [{"id": "a1"}]],
+            search="chaitanya",
+        )
+        assert result["window_total"] == 2
+        assert len(built) == 2
+        for q in built:
+            assert q.called("gte") == [] and q.called("lte") == []  # no date window
+            (arg,), _ = q.called("or_")[0]
+            assert "patient_name.ilike.*chaitanya*" in arg
+        assert [(a[0], k) for a, k in built[-1].called("order")] == [
+            ("appointment_date", {"desc": True}),
+            ("appointment_time", {"desc": True}),
+            ("id", {"desc": True}),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_search_inside_a_window_keeps_the_window(self):
+        _, built = await _run(
+            [_statuses("confirmed"), [{"id": "a1"}]],
+            basis="visit", date_from=date(2026, 9, 1), date_to=date(2026, 9, 30),
+            search="9876543210",
+        )
+        for q in built:
+            assert q.called("gte") == [(("appointment_date", "2026-09-01"), {})]
+            assert len(q.called("or_")) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_too_short_search_fails_closed(self):
+        with pytest.raises(ValueError):
+            await _run([], search="a")
+
+
 class TestRoute:
     @pytest.fixture
     def client(self):
@@ -301,8 +387,41 @@ class TestRoute:
         assert kwargs == {
             "basis": "booked", "date_from": date(2026, 9, 5), "date_to": date(2026, 9, 5),
             "period_days": None, "status": "cancelled", "limit": 25, "offset": 25,
+            "search": None,
         }
         annotate.assert_awaited_once_with(rows)
+
+    @pytest.mark.parametrize("q", ["a", " . ", "*", "x" * 101])
+    def test_a_useless_search_is_422(self, client, q):
+        self._as("clinic_admin")
+        with patch(
+            "app.routers.admin.analytics_service.list_appointments", new=AsyncMock()
+        ) as spy:
+            r = self._get(client, q=q)
+        assert r.status_code == 422, r.text
+        spy.assert_not_awaited()
+
+    def test_a_search_needs_no_dates_but_half_a_range_is_still_rejected(self, client):
+        self._as("staff")
+        with patch(
+            "app.routers.admin.analytics_service.list_appointments",
+            new=AsyncMock(return_value={"appointments": []}),
+        ) as spy, patch("app.routers.admin._annotate_refund_state", new=AsyncMock()):
+            r = self._get(client, q="  Chaitanya ")
+            assert r.status_code == 200, r.text
+            kw = spy.await_args.kwargs
+            assert kw["search"] == "Chaitanya"
+            assert kw["date_from"] is None and kw["date_to"] is None
+            assert self._get(client, q="Chaitanya", date_from="2026-09-01").status_code == 422
+
+    def test_a_search_cannot_reach_another_clinic(self, client):
+        self._as("clinic_admin", clinic_id=OTHER_CLINIC_UUID)
+        with patch(
+            "app.routers.admin.analytics_service.list_appointments", new=AsyncMock()
+        ) as spy:
+            r = self._get(client, q="Chaitanya")
+        assert r.status_code == 403
+        spy.assert_not_awaited()
 
     def test_dashboard_window_is_accepted(self, client):
         self._as("clinic_admin")

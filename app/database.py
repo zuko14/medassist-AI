@@ -18,8 +18,13 @@ logger = logging.getLogger(__name__)
 # TTL Caches for static metadata (doctor cache reduced to 60s for fast admin->bot sync)
 _doctor_cache: dict[str, dict] = {}
 _holiday_cache: dict[str, dict] = {}
-DOCTOR_CACHE_TTL_SECONDS = 60
-HOLIDAY_CACHE_TTL_SECONDS = 300
+# The invalidate_* helpers below clear only the worker that served the admin
+# request; every other uvicorn worker keeps its copy until the TTL runs out. So
+# the TTL IS the admin→bot propagation delay: keep it at the tenant cache's
+# documented 30s (app/services/tenant.py CACHE_TTL_SECONDS). At 300s a holiday
+# declared in the panel stayed bookable on the other worker for five minutes.
+DOCTOR_CACHE_TTL_SECONDS = 30
+HOLIDAY_CACHE_TTL_SECONDS = 30
 
 
 def invalidate_holiday_cache(clinic_id: Optional[str] = None, holiday_date: Optional[str] = None) -> None:

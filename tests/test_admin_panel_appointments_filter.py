@@ -38,6 +38,11 @@ FUNCTIONS = (
     "fmtApptMonth",
     "fmtBookedAt",
     "apptStatusLabel",
+    "fmtApptTime",
+    "apptSearchTerm",
+    "applyApptSearch",
+    "onApptSearchKey",
+    "resetApptFilters",
     "apptQuery",
     "apptCaptionText",
     "apptStatusChipList",
@@ -90,7 +95,7 @@ HARNESS = textwrap.dedent(
     const els = {};
     for (const id of ['apptList', 'apptFilterMsg', 'apptCaption', 'apptStatusChips', 'apptPager',
                       'apptDateField', 'apptMonthField', 'apptRangeField', 'apptDate', 'apptFrom',
-                      'apptTo', 'apptMonth', 'apptYear', 'apptReset']) { els[id] = makeEl(id); }
+                      'apptTo', 'apptMonth', 'apptYear', 'apptReset', 'apptSearch']) { els[id] = makeEl(id); }
     const navLinks = { appointments: { style: { display: '' } }, patients: { style: { display: '' } } };
     globalThis.document = {
         getElementById: (id) => els[id] || null,
@@ -112,6 +117,7 @@ HARNESS = textwrap.dedent(
 
     const apptFilter = { ...APPT_FILTER_DEFAULT };
     let apptLoadSeq = 0;
+    let apptSearchTimer = null;
     let dashPeriodStart = null;
     let patientNewSince = null;
     const wentTo = [];
@@ -317,6 +323,83 @@ def test_dashboard_tiles_open_the_matching_lists():
         wentTo.length = 0;
         openApptsFromDashboard('confirmed');
         check('opened a page the plan hides', wentTo.length === 0, wentTo.join());
+        """
+    )
+    _assert_ok(proc)
+
+
+def test_search_spans_all_dates_and_keeps_the_status_chip():
+    proc = _run(
+        """
+        const T = '2026-09-13';
+        const q = (f) => Object.fromEntries(new URLSearchParams(apptQuery({ ...APPT_FILTER_DEFAULT, ...f }, T).qs));
+
+        // A search ignores whatever date view was open: it must find the patient anywhere.
+        let p = q({ preset: 'month', month: '2025-01', q: 'Chaitanya', status: 'cancelled' });
+        check('search sends q', p.q === 'Chaitanya', JSON.stringify(p));
+        check('search sends no dates', !p.date_from && !p.date_to && !p.period_days && !p.date_basis, JSON.stringify(p));
+        check('search keeps the status chip', p.status === 'cancelled', JSON.stringify(p));
+        check('search pages', p.limit === '50' && p.offset === '0', JSON.stringify(p));
+        check('caption says all dates', apptCaptionText({ ...APPT_FILTER_DEFAULT, q: 'Ravi' }, T) === 'Search results for “Ravi” across all dates');
+
+        // Under two letters/digits is not a search: the server would 422 it.
+        check('one letter is not a search', apptSearchTerm(' a ') === null);
+        check('punctuation is not a search', apptSearchTerm('.,*%') === null);
+        check('trimmed term', apptSearchTerm('  98765 ') === '98765');
+        check('hindi name with vowel signs', apptSearchTerm('रा') === 'रा');
+
+        // Typing a term loads page 1 of the search; Escape clears it.
+        apptFilter.offset = 100;
+        els.apptSearch.value = ' MC-2026-2001 ';
+        applyApptSearch();
+        check('search loaded', pending.length === 1 && params(pending[0].path).q === 'MC-2026-2001', pending[0] && pending[0].path);
+        check('search reset paging', apptFilter.offset === 0, apptFilter.offset);
+        applyApptSearch();
+        check('same term reloaded', pending.length === 1, pending.length);
+        pending[0].resolve({ appointments: [], total: 0, window_total: 0, summary: {}, limit: 50, offset: 0 });
+        await tick();
+        check('no-match message names the term', els.apptList.innerHTML.includes('match “MC-2026-2001”'), els.apptList.innerHTML);
+        check('reset offered while searching', els.apptReset.hidden === false);
+
+        onApptSearchKey({ key: 'Escape', target: els.apptSearch, preventDefault() {} });
+        check('escape cleared the search', apptFilter.q === null && els.apptSearch.value === '', JSON.stringify(apptFilter));
+        check('escape reloaded the date view', pending.length === 2 && !params(pending[1].path).q, pending[1] && pending[1].path);
+
+        // The search term is escaped wherever it is echoed back.
+        apptFilter.q = '<img src=x onerror=alert(1)>';
+        const run = loadAppointments();
+        pending[pending.length - 1].resolve({ appointments: [], total: 0, window_total: 0, summary: {}, limit: 50, offset: 0 });
+        await run;
+        check('term echoed unescaped', !els.apptList.innerHTML.includes('<img'), els.apptList.innerHTML);
+
+        // Dashboard tiles open their own list, not the last search.
+        openApptsFromDashboard('confirmed');
+        check('tile kept the search', apptFilter.q === null, apptFilter.q);
+        apptFilter.q = 'x1';
+        resetApptFilters();
+        check('reset kept the search', apptFilter.q === null);
+        """
+    )
+    _assert_ok(proc)
+
+
+def test_rows_show_phone_and_readable_date_and_time():
+    proc = _run(
+        """
+        const run = loadAppointments();
+        pending[0].resolve({ total: 2, window_total: 2, summary: { completed: 2 }, limit: 50, offset: 0, appointments: [
+            { id: 'a', patient_name: 'Chaitanya Kumar', patient_phone: '919876543210', status: 'completed',
+              appointment_date: '2026-08-26', appointment_time: '14:05:00' },
+            { id: 'b', patient_name: null, patient_phone: '918888888888', status: 'completed',
+              appointment_date: '2026-08-26', appointment_time: '00:30:00' },
+        ] });
+        await run;
+        const html = els.apptList.innerHTML;
+        check('phone under name', html.includes('Chaitanya Kumar<br><small class="appt-phone">919876543210</small>'), html);
+        check('phone not repeated when it is the only identity', (html.match(/918888888888/g) || []).length === 1);
+        check('readable date', html.includes('Wed, 26 Aug 2026'), html);
+        check('12-hour time', html.includes('2:05 PM') && html.includes('12:30 AM'), html);
+        check('odd time passes through escaped', fmtApptTime('<b>') === '&lt;b&gt;' && fmtApptTime(null) === '—');
         """
     )
     _assert_ok(proc)

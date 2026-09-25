@@ -63,7 +63,7 @@ from app.services.specialty_catalog import (
     STARTER_TREATMENTS,
     seed_starter_treatments,
 )
-from app.services.analytics import analytics_service
+from app.services.analytics import analytics_service, appointment_search_filter
 from app.services.broadcast import broadcast_service
 from app.services.lab_reports import LabReportService
 from app.services.permissions import (
@@ -1728,6 +1728,7 @@ async def list_appointments(
     status: Optional[str] = None,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0, le=100000),
+    q: Optional[str] = Query(None, max_length=100),
     user: AdminUser = Depends(verify_credentials),
 ):
     """Appointments for a date, month or range — past as well as upcoming.
@@ -1738,17 +1739,25 @@ async def list_appointments(
     agree. Same audience as /appointments/upcoming, which this supersedes in
     the panel.
 
+    q searches patient name/phone, booking ref, doctor and lab test. With q
+    and no dates at all it searches every date — the front desk's "find this
+    patient".
+
     limit is capped at 100 because the refund-state lookup puts every row's id
     into one query string.
     """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    q = (q or "").strip() or None
+    if q and not appointment_search_filter(q):
+        raise HTTPException(status_code=422, detail="Type at least 2 letters or digits to search")
+    search_all_dates = bool(q) and not date_from and not date_to
     if period_days is not None:
         if date_from or date_to or date_basis != "booked":
             raise HTTPException(
                 status_code=422,
                 detail="period_days is a booked-on window and cannot be combined with dates",
             )
-    else:
+    elif not search_all_dates:
         if not date_from or not date_to:
             raise HTTPException(
                 status_code=422, detail="date_from and date_to are required"
@@ -1775,6 +1784,7 @@ async def list_appointments(
             status=status,
             limit=limit,
             offset=offset,
+            search=q,
             **_branch_kw(user),
         )
         # Same Refund column as the Payments page: an in-flight or failed

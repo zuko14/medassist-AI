@@ -1,6 +1,7 @@
 """Analytics service for tracking events and metrics."""
 
 import logging
+import re
 import statistics
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
@@ -125,6 +126,37 @@ def _appointment_window(
     return query.gte("appointment_date", date_from.isoformat()).lte(
         "appointment_date", date_to.isoformat()
     )
+
+
+#: Anything PostgREST's filter grammar or LIKE treats specially, plus control
+#: characters. User text is split on these, never passed through, so a search
+#: can only ever become the one ilike pattern built below.
+_SEARCH_SPLIT_RE = re.compile(r"[\s,()*%_\\\"'.:;!|&=<>\[\]{}\x00-\x1f\x7f]+")
+_SEARCH_PHONE_RE = re.compile(r"\+?[\d\s-]+")
+#: Searchable columns: who (patient name/phone), what (booking ref) and with
+#: whom (doctor or lab test), so a front desk can find a visit from any of them.
+_SEARCH_TEXT_COLUMNS = ("patient_name", "booking_ref", "doctor_name", "lab_test_name")
+
+
+def appointment_search_filter(raw: Optional[str]) -> Optional[str]:
+    """PostgREST or-filter for the Appointments search box, or None if too short.
+
+    Words match in order with anything between them, so "priya sharma" finds
+    "Dr. Priya K Sharma". A phone-like term matches on digits only, and on the
+    last ten of them, so "+91 98765 43210" finds a number stored as 9876543210
+    and one stored as 919876543210 alike.
+    """
+    raw = raw or ""
+    tokens = [t for t in _SEARCH_SPLIT_RE.split(raw) if t]
+    if sum(len(t) for t in tokens) < 2:
+        return None
+    pattern = "*" + "*".join(tokens) + "*"
+    clauses = [f"{col}.ilike.{pattern}" for col in _SEARCH_TEXT_COLUMNS]
+    if _SEARCH_PHONE_RE.fullmatch(raw.strip()):
+        digits = re.sub(r"\D", "", raw)[-10:]
+        if len(digits) >= 3:
+            clauses.append(f"patient_phone.ilike.*{digits}*")
+    return ",".join(clauses)
 
 
 def _ist_day(value) -> Optional[date]:
@@ -635,6 +667,7 @@ class AnalyticsService:
         limit: int = 50,
         offset: int = 0,
         branch_id: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> dict:
         """One page of the admin Appointments list, with per-status counts.
 
@@ -642,9 +675,23 @@ class AnalyticsService:
         the clinic's calendar. period_days is the dashboard tiles' own window
         (booked basis only), so a tile and the list it opens show one number.
 
+        search (an appointment_search_filter() term) narrows the window; with
+        no dates at all it spans every date, newest first — the search itself
+        is then what bounds the scan.
+
         Raises on a database failure instead of returning an empty page: "no
         appointments on 5 Sep" must never be what an outage looks like.
         """
+        search_filter = appointment_search_filter(search) if search else None
+        if search and not search_filter:
+            raise ValueError("search term is too short")
+        all_dates = bool(search_filter) and period_days is None and date_from is None and date_to is None
+
+        def narrowed(query):
+            if not all_dates:
+                query = _appointment_window(query, basis, date_from, date_to, period_days)
+            return query.or_(search_filter) if search_filter else query
+
         # Counts cover the whole window, ignoring the status filter, so every
         # chip keeps its number while one is selected. Only `status` is read,
         # and it is paged because PostgREST caps a response at 1000 rows.
@@ -654,11 +701,10 @@ class AnalyticsService:
         truncated = False
         while True:
             page = await sb(
-                _appointment_window(
+                narrowed(
                     restrict_to_branch(
                         scoped_query("appointments", clinic_id, "status"), branch_id
-                    ),
-                    basis, date_from, date_to, period_days,
+                    )
                 )
                 .order("id")
                 .range(scanned, scanned + _INSIGHTS_PAGE_ROWS - 1)
@@ -681,13 +727,19 @@ class AnalyticsService:
         total = summary.get(status, 0) if status else scanned
         rows: list = []
         if truncated or offset < total:
-            query = _appointment_window(
-                restrict_to_branch(scoped_query("appointments", clinic_id, "*"), branch_id),
-                basis, date_from, date_to, period_days,
+            query = narrowed(
+                restrict_to_branch(scoped_query("appointments", clinic_id, "*"), branch_id)
             )
             if status:
                 query = query.eq("status", status)
-            if period_days is not None or basis == "booked":
+            if all_dates:
+                # A search across all history: the latest visit is the likeliest one.
+                query = (
+                    query.order("appointment_date", desc=True)
+                    .order("appointment_time", desc=True)
+                    .order("id", desc=True)
+                )
+            elif period_days is not None or basis == "booked":
                 query = query.order("created_at", desc=True).order("id", desc=True)
             else:
                 query = (

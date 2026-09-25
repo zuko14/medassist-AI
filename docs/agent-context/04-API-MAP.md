@@ -89,7 +89,7 @@ All `/admin` endpoints require authentication via either a session token in head
 - `DELETE /admin/staff/{staff_id}`: Deletes staff record. Prevents self-deletion.
 
 ### C. Appointments & Queue Management
-- `GET /admin/appointments`: Scoped query on `appointments`. Supports filtering by date range, doctor, department, status, and search query.
+- `GET /admin/appointments`: Scoped (+ branch-restricted) query on `appointments`. Filters: `date_basis` (visit|booked), `date_from`/`date_to` (≤366 days) or `period_days`, `status`, `limit`≤100/`offset`, and `q` (search, 2026-09-25). `q` matches patient_name, booking_ref, doctor_name, lab_test_name (ilike, words in order) and, for phone-like input, the last 10 digits of patient_phone; it is tokenized by `appointment_search_filter()` so no PostgREST/LIKE metacharacter reaches the filter. `q` with no dates searches all dates, newest first. Returns `{appointments, total, window_total, summary, limit, offset, truncated}`.
 - `GET /admin/appointments/recent`: Fetches latest 50 appointments.
 - `GET /admin/appointments/upcoming`: Fetches appointments scheduled for today and tomorrow.
 - `POST /admin/appointments/{appointment_id}/check-in`: Updates status to `checked_in`, assigns queue token number, logs action in `audit_logs`.
