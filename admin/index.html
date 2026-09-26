@@ -1492,6 +1492,11 @@
             <div class="nav-link" tabindex="0" data-page="staff" data-role="admin" onclick="go('staff',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> Staff Accounts
             </div>
+            <!-- No data-feature: every plan can import, export and message Kriya.
+                 data-role="admin": bulk patient data is admin-only server-side. -->
+            <div class="nav-link" tabindex="0" data-page="data" data-role="admin" onclick="go('data',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path></svg></span> Data &amp; Support
+            </div>
             <div class="nav-link" tabindex="0" data-page="connectors" data-feature="diagnostic_reports" onclick="go('connectors',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span> Report Connector
             </div>
@@ -2211,6 +2216,125 @@
             <div class="card">
                 <div class="tbl-wrap" id="patientList">
                     <div class="loader"><div class="spin"></div>Loading patients...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── DATA & SUPPORT ─── -->
+        <!-- Imported patients live in their own list (patient_records) and are
+             never messaged by the WhatsApp bot — see app/services/client_data.py. -->
+        <div id="pg-data" class="sec">
+            <div class="page-head">
+                <h2>Data &amp; Support</h2>
+                <p>Bring your existing patient list from your old software, download your data as Excel-ready CSV, and message the Kriya team.</p>
+            </div>
+
+            <div class="card" id="dataStorageCard" style="margin-bottom:20px;">
+                <div style="padding:16px 18px;">
+                    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline;">
+                        <strong>Patient data storage</strong>
+                        <span id="dataStorageText" style="color:var(--text2); font-size:0.88rem;">Loading…</span>
+                    </div>
+                    <div role="progressbar" aria-label="Patient data storage used" aria-valuemin="0" aria-valuemax="100" id="dataStorageBarWrap"
+                         style="height:10px; background:var(--bg3, rgba(148,163,184,.2)); border-radius:6px; margin:10px 0 8px; overflow:hidden;">
+                        <div id="dataStorageBar" style="height:100%; width:0; background:var(--accent); transition:width .3s;"></div>
+                    </div>
+                    <div id="dataStorageNote" style="font-size:0.85rem; color:var(--text3);"></div>
+                </div>
+            </div>
+
+            <div class="toggle-group" role="tablist" aria-label="Data and support sections" style="flex-wrap:wrap; max-width:100%;">
+                <button class="toggle-btn on" data-dtab="import" onclick="setDataTab('import')">Import patients</button>
+                <button class="toggle-btn" data-dtab="records" onclick="setDataTab('records')">Imported patients</button>
+                <button class="toggle-btn" data-dtab="export" onclick="setDataTab('export')">Export data</button>
+                <button class="toggle-btn" data-dtab="support" onclick="setDataTab('support')">Messages to Kriya</button>
+            </div>
+
+            <div class="dtab" id="dtab-import">
+                <div class="form-card">
+                    <h3>Import your existing patients</h3>
+                    <p style="color:var(--text3); font-size:0.85rem; margin-bottom:14px;">
+                        Export the patient list from your old software as a <b>CSV</b> file (in Excel: File &rarr; Save As &rarr; CSV).
+                        Only a <b>Name</b> column is required; Phone, Patient ID, Gender, Date of Birth (DD/MM/YYYY), Age, Email,
+                        Address, Last Visit and Notes are picked up automatically, and any other columns are kept as extra notes.
+                        Importing the same file again never creates duplicates. Imported patients are <b>not</b> sent WhatsApp messages.
+                    </p>
+                    <div class="field" style="max-width:460px;">
+                        <label for="dataImportFile">CSV file (max 5 MB, 25,000 patients)</label>
+                        <input type="file" id="dataImportFile" accept=".csv,text/csv">
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-ghost" onclick="downloadPatientTemplate()">Download template</button>
+                        <button type="button" class="btn btn-ghost" id="dataCheckBtn" onclick="runPatientImport(true)">Check file</button>
+                        <button type="button" class="btn btn-accent" id="dataImportBtn" onclick="runPatientImport(false)">Import patients</button>
+                    </div>
+                    <div id="dataImportResult" style="margin-top:14px;" aria-live="polite"></div>
+                </div>
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-head"><h3>Import history</h3></div>
+                    <div class="tbl-wrap" id="dataImportHistory"><div class="loader"><div class="spin"></div>Loading…</div></div>
+                </div>
+            </div>
+
+            <div class="dtab" id="dtab-records" style="display:none;">
+                <div class="top-row">
+                    <input type="text" class="search-bar" id="dataRecordSearch" placeholder="Search by name, phone or patient ID..." oninput="debouncedRecordSearch()" aria-label="Search imported patients">
+                </div>
+                <div class="card">
+                    <div class="tbl-wrap" id="dataRecordList"><div class="loader"><div class="spin"></div>Loading…</div></div>
+                    <div id="dataRecordPager" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; gap:10px; flex-wrap:wrap;"></div>
+                </div>
+            </div>
+
+            <div class="dtab" id="dtab-export" style="display:none;">
+                <div class="form-card">
+                    <h3>Download your data</h3>
+                    <p style="color:var(--text3); font-size:0.85rem; margin-bottom:14px;">Opens in Excel, Google Sheets, or can be imported into other software. Up to one year per download.</p>
+                    <div class="form-row" style="display:flex; gap:14px; flex-wrap:wrap;">
+                        <div class="field" style="min-width:240px; flex:1;">
+                            <label for="exportDataset">What to download</label>
+                            <select id="exportDataset" onchange="onExportDatasetChange()">
+                                <option value="appointments">Appointments &amp; bookings (by appointment date)</option>
+                                <option value="patients">WhatsApp patients (by first contact date)</option>
+                                <option value="patient_records">Imported patients (all)</option>
+                            </select>
+                        </div>
+                        <div class="field export-range"><label for="exportFrom">From</label><input type="date" id="exportFrom"></div>
+                        <div class="field export-range"><label for="exportTo">To</label><input type="date" id="exportTo"></div>
+                    </div>
+                    <div class="export-range" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="setExportPreset('this_month')">This month</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="setExportPreset('last_month')">Last month</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="setExportPreset('this_year')">This year</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="setExportPreset('last_year')">Last year</button>
+                    </div>
+                    <button type="button" class="btn btn-accent" id="exportBtn" onclick="downloadExport()">Download CSV</button>
+                    <div id="exportMsg" style="margin-top:12px;" aria-live="polite"></div>
+                </div>
+            </div>
+
+            <div class="dtab" id="dtab-support" style="display:none;">
+                <div class="form-card">
+                    <h3>Message the Kriya team</h3>
+                    <p style="color:var(--text3); font-size:0.85rem; margin-bottom:14px;">Raise a concern, request a feature your clinic needs, or ask for more data storage. Replies appear below.</p>
+                    <div class="field" style="max-width:320px;">
+                        <label for="supportCategory">Type</label>
+                        <select id="supportCategory">
+                            <option value="concern">Concern / problem</option>
+                            <option value="feature_request">Feature request</option>
+                            <option value="storage_request">More data storage</option>
+                            <option value="billing">Billing</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="field"><label for="supportSubject">Subject</label><input type="text" id="supportSubject" maxlength="150" placeholder="Short summary"></div>
+                    <div class="field"><label for="supportMessage">Message</label><textarea id="supportMessage" rows="5" maxlength="4000" placeholder="Tell us what you need"></textarea></div>
+                    <button type="button" class="btn btn-accent" id="supportSendBtn" onclick="sendSupportMessage()">Send message</button>
+                    <div id="supportMsg" style="margin-top:12px;" aria-live="polite"></div>
+                </div>
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-head"><h3>Your messages</h3></div>
+                    <div id="supportList" style="padding:12px 16px;"><div class="loader"><div class="spin"></div>Loading…</div></div>
                 </div>
             </div>
         </div>
@@ -4098,7 +4222,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage };
     if (loaders[page]) loaders[page]();
 }
 
@@ -4198,6 +4322,16 @@ async function apiPut(path, body) {
 async function apiDel(path) {
     const r = await fetch(API + withScope(path), { method: 'DELETE', headers: authHeaders() });
     if (!r.ok) await apiFail(r);
+}
+
+// Raw Response for blob downloads and multipart uploads. `keepStatus(status)`
+// returning true hands that failure back to the caller (e.g. an import's 422
+// row-error list) instead of throwing; 401/403 always go through apiFail.
+async function apiRaw(path, opts, keepStatus) {
+    const r = await fetch(API + withScope(path), Object.assign({ headers: authHeaders() }, opts || {}));
+    const keep = keepStatus && r.status !== 401 && r.status !== 403 && keepStatus(r.status);
+    if (!r.ok && !keep) await apiFail(r);
+    return r;
 }
 
 function badge(status) {
@@ -5313,9 +5447,362 @@ function renderSubscriptionStrip(d) {
         }
     }
 
+    // ── Imported patient data storage (owner-set limit) ──
+    // Admin-only: staff cannot import or message Kriya, so the call to action
+    // would be a dead end for them. Shown from 90% (the server's warn_percent).
+    const ds = d.data_storage;
+    if (ds && ds.used > 0 && (ds.level === 'warning' || ds.level === 'full') && myRole !== 'staff') {
+        const full = ds.level === 'full';
+        const color = full ? '#ef4444' : '#f59e0b';
+        const title = full
+            ? `Patient data storage is full — ${ds.used.toLocaleString('en-IN')} of ${ds.limit.toLocaleString('en-IN')} records`
+            : `Your data storage is filling up — ${ds.percent}% used (${ds.used.toLocaleString('en-IN')} of ${ds.limit.toLocaleString('en-IN')} records)`;
+        const body = full
+            ? 'New patient imports are paused. Please contact Kriya for extra storage.'
+            : 'Please contact Kriya for extra storage before it runs out.';
+        parts.push(`
+        <div role="alert" style="background:${full ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)'}; border:1px solid ${color}; border-left:4px solid ${color};
+                    color:${color}; padding:12px 16px; border-radius:8px; margin-bottom:14px;
+                    display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:0.9rem;">
+            <span style="font-size:1.15rem; line-height:1.2">\u{1F4BE}</span>
+            <div style="flex:1; min-width:200px">
+                <div style="font-weight:700; margin-bottom:2px">${esc(title)}</div>
+                <div style="opacity:.92">${esc(body)}</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openStorageRequest()">Request more storage</button>
+        </div>`);
+    }
+
     if (!parts.length) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
     strip.innerHTML = parts.join('');
     strip.style.display = 'block';
+}
+
+// ═══════ DATA & SUPPORT (legacy patient import, CSV export, messages to Kriya) ═══════
+let dataTab = 'import';
+let dataRecordQ = '';
+let dataRecordOffset = 0;
+const DATA_RECORD_PAGE = 50;
+
+function setDataTab(tab) {
+    dataTab = tab;
+    document.querySelectorAll('#pg-data [data-dtab]').forEach(b => {
+        const on = b.dataset.dtab === tab;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('#pg-data .dtab').forEach(p => { p.style.display = p.id === 'dtab-' + tab ? '' : 'none'; });
+    if (tab === 'import') loadImportHistory();
+    if (tab === 'records') loadDataRecords();
+    if (tab === 'support') loadSupportMessages();
+}
+
+function loadDataPage() {
+    loadDataStorage();
+    if (!document.getElementById('exportFrom').value) setExportPreset('this_month');
+    onExportDatasetChange();
+    setDataTab(dataTab);
+}
+
+function openStorageRequest() {
+    if (!pageAvailable('data')) return;
+    go('data', null);
+    setDataTab('support');
+    document.getElementById('supportCategory').value = 'storage_request';
+    const subj = document.getElementById('supportSubject');
+    if (!subj.value) subj.value = 'Request for extra patient data storage';
+    document.getElementById('supportMessage').focus();
+}
+
+async function loadDataStorage() {
+    const text = document.getElementById('dataStorageText');
+    const bar = document.getElementById('dataStorageBar');
+    const note = document.getElementById('dataStorageNote');
+    try {
+        const s = await api('/admin/data/storage');
+        const fmt = n => Number(n || 0).toLocaleString('en-IN');
+        text.textContent = `${fmt(s.used)} of ${fmt(s.limit)} patient records used (${s.percent}%)`;
+        bar.style.width = Math.min(100, s.percent) + '%';
+        bar.style.background = s.level === 'full' ? '#ef4444' : s.level === 'warning' ? '#f59e0b' : 'var(--accent)';
+        document.getElementById('dataStorageBarWrap').setAttribute('aria-valuenow', String(s.percent));
+        note.innerHTML = s.limit === 0
+            ? 'Importing is not enabled for your clinic. <a href="#" onclick="openStorageRequest();return false;">Contact Kriya</a> to enable it.'
+            : s.level === 'ok'
+                ? `${fmt(s.remaining)} records remaining.`
+                : `${esc(s.level === 'full' ? 'Storage is full.' : 'Storage is filling up.')} <a href="#" onclick="openStorageRequest();return false;">Request more storage</a>`;
+    } catch (e) {
+        text.textContent = 'Storage usage unavailable';
+        note.textContent = '';
+    }
+}
+
+async function downloadPatientTemplate() {
+    try {
+        const r = await apiRaw('/admin/data/import-template');
+        _saveBlob(await r.blob(), 'patient_import_template.csv');
+    } catch (e) { toast(e.message || 'Download failed', true); }
+}
+
+function _saveBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function _issueList(items, title) {
+    if (!items || !items.length) return '';
+    return `<details style="margin-top:8px;"><summary>${esc(title)} (${items.length}${items.length >= 100 ? '+' : ''})</summary>
+        <ul style="margin:6px 0 0 18px; font-size:0.83rem;">${items.map(i =>
+            `<li>Row ${esc(i.row)} — ${esc(i.column)}: ${esc(i.problem)}</li>`).join('')}</ul></details>`;
+}
+
+async function runPatientImport(dryRun) {
+    const input = document.getElementById('dataImportFile');
+    const out = document.getElementById('dataImportResult');
+    const file = input.files && input.files[0];
+    if (!file) { out.innerHTML = '<div class="alert alert-err">Choose a CSV file first.</div>'; return; }
+    if (!dryRun && !confirm(`Import patients from "${file.name}"? Rows already imported earlier are skipped.`)) return;
+
+    const btns = [document.getElementById('dataCheckBtn'), document.getElementById('dataImportBtn')];
+    btns.forEach(b => { b.disabled = true; });
+    out.innerHTML = `<div class="loader"><div class="spin"></div>${dryRun ? 'Checking file…' : 'Importing… this can take a minute for large files.'}</div>`;
+
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('dry_run', dryRun ? 'true' : 'false');
+    try {
+        const r = await apiRaw('/admin/data/patient-records/import', { method: 'POST', body: fd }, () => true);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            out.innerHTML = `<div class="alert alert-err">${esc(detailText(d) || d.detail || 'Import failed.')}</div>`
+                + _issueList(d.errors, 'Rows to fix') + _issueList(d.warnings, 'Values kept as notes');
+            return;
+        }
+        const fmt = n => Number(n || 0).toLocaleString('en-IN');
+        const lines = [
+            `${fmt(d.rows_in_file)} rows in file`,
+            `${fmt(d.new_rows)} new patient(s)`,
+            d.already_imported ? `${fmt(d.already_imported)} already imported (skipped)` : null,
+            d.duplicates_in_file ? `${fmt(d.duplicates_in_file)} duplicate row(s) in the file (skipped)` : null,
+            d.warning_count ? `${fmt(d.warning_count)} value(s) kept as notes` : null,
+        ].filter(Boolean).join(' · ');
+        const head = dryRun
+            ? `File looks good. ${lines}. After import: ${fmt(d.storage_after_import.used)} of ${fmt(d.storage_after_import.limit)} records used.`
+            : `Imported ${fmt(d.inserted)} patient(s). ${lines}.`;
+        const cols = Object.entries(d.mapped_columns || {}).map(([k, v]) => `${esc(k)} → ${esc(v.replace(/_/g, ' '))}`).join(', ');
+        out.innerHTML = `<div class="alert alert-ok">${esc(head)}</div>`
+            + (cols ? `<div style="font-size:0.83rem; color:var(--text3); margin-top:6px;">Columns recognised: ${cols}${(d.extra_columns || []).length ? '. Kept as notes: ' + d.extra_columns.map(esc).join(', ') : ''}</div>` : '')
+            + _issueList(d.warnings, 'Values kept as notes');
+        if (!dryRun) {
+            input.value = '';
+            toast(`Imported ${fmt(d.inserted)} patient(s)`);
+            loadDataStorage();
+            loadImportHistory();
+            loadSubscriptionStatus();
+        }
+    } catch (e) {
+        out.innerHTML = `<div class="alert alert-err">${esc(e.message || 'Network error — nothing was imported. Please retry.')}</div>`;
+    } finally {
+        btns.forEach(b => { b.disabled = false; });
+    }
+}
+
+function _fmtDateTime(ts) {
+    if (!ts) return '—';
+    try { return new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return '—'; }
+}
+
+async function loadImportHistory() {
+    const el = document.getElementById('dataImportHistory');
+    try {
+        const d = await api('/admin/data/imports');
+        const rows = d.imports || [];
+        if (!rows.length) { el.innerHTML = emptyState('users', 'No imports yet'); return; }
+        el.innerHTML = `<table>
+            <thead><tr><th>Imported</th><th>File</th><th>Rows</th><th>Added</th><th>Skipped</th><th>By</th><th></th></tr></thead>
+            <tbody>${rows.map(b => `<tr>
+                <td>${esc(_fmtDateTime(b.created_at))}${b.status !== 'completed' ? ' <span class="badge badge-cancelled">incomplete</span>' : ''}</td>
+                <td>${esc(b.file_name || '—')}</td>
+                <td>${esc(b.rows_in_file)}</td>
+                <td>${esc(b.inserted_count)}</td>
+                <td>${esc((b.skipped_existing || 0) + (b.duplicates_in_file || 0))}</td>
+                <td>${esc(b.created_by || '')}</td>
+                <td><button type="button" class="btn btn-red btn-sm" data-id="${esc(b.id)}" data-name="${esc(b.file_name || 'this import')}" onclick="undoImport(this.dataset.id, this.dataset.name)">Undo</button></td>
+            </tr>`).join('')}</tbody></table>`;
+    } catch (e) { el.innerHTML = emptyState('warning', esc(e.message || 'Failed to load import history')); }
+}
+
+async function undoImport(id, name) {
+    if (!confirm(`Remove every patient added by "${name}"? This cannot be undone.`)) return;
+    try {
+        await apiDel('/admin/data/imports/' + encodeURIComponent(id));
+        toast('Import removed');
+        loadDataStorage();
+        loadImportHistory();
+        loadSubscriptionStatus();
+    } catch (e) { toast(e.message || 'Could not remove import', true); }
+}
+
+let _recordSearchTimer = null;
+function debouncedRecordSearch() {
+    clearTimeout(_recordSearchTimer);
+    _recordSearchTimer = setTimeout(() => {
+        dataRecordQ = document.getElementById('dataRecordSearch').value.trim();
+        dataRecordOffset = 0;
+        loadDataRecords();
+    }, 300);
+}
+
+async function loadDataRecords() {
+    const el = document.getElementById('dataRecordList');
+    const pager = document.getElementById('dataRecordPager');
+    el.innerHTML = loading();
+    try {
+        const qs = `limit=${DATA_RECORD_PAGE}&offset=${dataRecordOffset}` + (dataRecordQ ? '&q=' + encodeURIComponent(dataRecordQ) : '');
+        const d = await api('/admin/data/patient-records?' + qs);
+        const rows = d.records || [];
+        if (!rows.length) {
+            el.innerHTML = emptyState('users', dataRecordQ ? 'No imported patients match your search' : 'No imported patients yet');
+            pager.innerHTML = '';
+            return;
+        }
+        const dash = v => (v === null || v === undefined || v === '') ? '—' : esc(v);
+        el.innerHTML = `<table>
+            <thead><tr><th>Name</th><th>Phone</th><th>Patient ID</th><th>Gender</th><th>Age / DOB</th><th>Last Visit</th><th>Notes</th></tr></thead>
+            <tbody>${rows.map(r => {
+                const extra = Object.entries(r.extra || {}).map(([k, v]) => `${k}: ${v}`).join('; ');
+                const notes = [r.notes, extra].filter(Boolean).join(' — ');
+                return `<tr>
+                    <td>${dash(r.full_name)}</td>
+                    <td>${dash(r.phone)}</td>
+                    <td>${dash(r.external_id)}</td>
+                    <td>${dash(r.gender)}</td>
+                    <td>${r.date_of_birth ? esc(r.date_of_birth) : dash(r.age_years)}</td>
+                    <td>${dash(r.last_visit_date)}</td>
+                    <td title="${esc(notes)}" style="max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dash(notes)}</td>
+                </tr>`;
+            }).join('')}</tbody></table>`;
+        const total = d.total || 0;
+        const last = Math.min(total, dataRecordOffset + rows.length);
+        pager.innerHTML = `<span style="color:var(--text3); font-size:0.85rem;">${(dataRecordOffset + 1).toLocaleString('en-IN')}–${last.toLocaleString('en-IN')} of ${total.toLocaleString('en-IN')}</span>
+            <span style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-ghost btn-sm" ${dataRecordOffset === 0 ? 'disabled' : ''} onclick="pageDataRecords(-1)">Previous</button>
+                <button type="button" class="btn btn-ghost btn-sm" ${last >= total ? 'disabled' : ''} onclick="pageDataRecords(1)">Next</button>
+            </span>`;
+    } catch (e) {
+        el.innerHTML = emptyState('warning', esc(e.message || 'Failed to load imported patients'));
+        pager.innerHTML = '';
+    }
+}
+
+function pageDataRecords(dir) {
+    dataRecordOffset = Math.max(0, dataRecordOffset + dir * DATA_RECORD_PAGE);
+    loadDataRecords();
+}
+
+function onExportDatasetChange() {
+    const needsRange = document.getElementById('exportDataset').value !== 'patient_records';
+    document.querySelectorAll('#dtab-export .export-range').forEach(el => { el.style.display = needsRange ? '' : 'none'; });
+}
+
+function _ymd(dt) {
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+function setExportPreset(p) {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth();
+    const ranges = {
+        this_month: [new Date(y, m, 1), now],
+        last_month: [new Date(y, m - 1, 1), new Date(y, m, 0)],
+        this_year: [new Date(y, 0, 1), now],
+        last_year: [new Date(y - 1, 0, 1), new Date(y - 1, 11, 31)],
+    };
+    const [from, to] = ranges[p];
+    document.getElementById('exportFrom').value = _ymd(from);
+    document.getElementById('exportTo').value = _ymd(to);
+}
+
+async function downloadExport() {
+    const dataset = document.getElementById('exportDataset').value;
+    const from = document.getElementById('exportFrom').value;
+    const to = document.getElementById('exportTo').value;
+    const btn = document.getElementById('exportBtn');
+    const msgEl = document.getElementById('exportMsg');
+    let path = '/admin/data/export?dataset=' + encodeURIComponent(dataset);
+    if (dataset !== 'patient_records') {
+        if (!from || !to) { msgEl.innerHTML = '<div class="alert alert-err">Choose a From and To date.</div>'; return; }
+        path += '&date_from=' + encodeURIComponent(from) + '&date_to=' + encodeURIComponent(to);
+    }
+    btn.disabled = true;
+    msgEl.innerHTML = '<div class="loader"><div class="spin"></div>Preparing download…</div>';
+    try {
+        const r = await apiRaw(path);
+        const cd = r.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="([^"]+)"/);
+        const count = r.headers.get('X-Row-Count');
+        _saveBlob(await r.blob(), m ? m[1] : dataset + '.csv');
+        msgEl.innerHTML = `<div class="alert alert-ok">Downloaded ${esc(count || '')} row(s).</div>`;
+    } catch (e) {
+        msgEl.innerHTML = `<div class="alert alert-err">${esc(e.message || 'Download failed')}</div>`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+const SUPPORT_CATEGORY_LABELS = {
+    concern: 'Concern', feature_request: 'Feature request', storage_request: 'Data storage',
+    billing: 'Billing', other: 'Other',
+};
+const SUPPORT_STATUS_LABELS = { open: 'Sent', in_progress: 'In progress', resolved: 'Resolved' };
+
+async function sendSupportMessage() {
+    const subject = document.getElementById('supportSubject').value.trim();
+    const message = document.getElementById('supportMessage').value.trim();
+    const category = document.getElementById('supportCategory').value;
+    const out = document.getElementById('supportMsg');
+    if (!subject || !message) { out.innerHTML = '<div class="alert alert-err">Please fill in the subject and message.</div>'; return; }
+    const btn = document.getElementById('supportSendBtn');
+    btn.disabled = true;
+    try {
+        await apiPost('/admin/support/messages', { category, subject, message });
+        document.getElementById('supportSubject').value = '';
+        document.getElementById('supportMessage').value = '';
+        out.innerHTML = '<div class="alert alert-ok">Sent. The Kriya team will reply here.</div>';
+        loadSupportMessages();
+    } catch (e) {
+        out.innerHTML = `<div class="alert alert-err">${esc(e.message || 'Could not send message')}</div>`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function loadSupportMessages() {
+    const el = document.getElementById('supportList');
+    try {
+        const d = await api('/admin/support/messages');
+        const rows = d.messages || [];
+        if (!rows.length) { el.innerHTML = '<p style="color:var(--text3); font-size:0.88rem;">No messages yet.</p>'; return; }
+        el.innerHTML = rows.map(m => `
+            <div style="border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                    <strong>${esc(m.subject)}</strong>
+                    <span style="font-size:0.8rem; color:var(--text3);">${esc(SUPPORT_CATEGORY_LABELS[m.category] || m.category)} · ${esc(SUPPORT_STATUS_LABELS[m.status] || m.status)} · ${esc(_fmtDateTime(m.created_at))}</span>
+                </div>
+                <div style="white-space:pre-wrap; margin-top:6px; font-size:0.88rem;">${esc(m.message)}</div>
+                ${m.owner_reply ? `<div style="margin-top:10px; padding:10px 12px; border-left:3px solid var(--accent); background:rgba(99,102,241,.08); border-radius:6px;">
+                    <div style="font-size:0.78rem; color:var(--text3); margin-bottom:4px;">Reply from Kriya · ${esc(_fmtDateTime(m.replied_at))}</div>
+                    <div style="white-space:pre-wrap; font-size:0.88rem;">${esc(m.owner_reply)}</div></div>` : ''}
+            </div>`).join('');
+    } catch (e) {
+        el.innerHTML = `<p style="color:var(--text3);">${esc(e.message || 'Could not load messages')}</p>`;
+    }
 }
 
 // ═══════ MESSAGING USAGE (customer-safe) ═══════

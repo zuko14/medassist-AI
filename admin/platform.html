@@ -1295,6 +1295,51 @@
                 </div>
             </div>
 
+            <!-- Client Support Inbox (clinic admin -> owner) -->
+            <div class="section-card" id="supportInboxCard">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="chart-title">Client Messages <span id="supportUnreadBadge" class="badge" style="display:none; background:rgba(239,68,68,.18); color:#ef4444; margin-left:6px;"></span></div>
+                        <div class="chart-subtitle" id="supportSummary">Loading client messages...</div>
+                    </div>
+                    <select class="filter-select" id="supportFilter" onchange="loadSupportInbox()">
+                        <option value="active" selected>Open &amp; in progress</option>
+                        <option value="">All messages</option>
+                        <option value="resolved">Resolved</option>
+                    </select>
+                </div>
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr><th>Hospital / Clinic</th><th>Type</th><th>Message</th><th>Status</th><th>Received</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="supportInboxBody">
+                            <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading client messages...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Client Data Storage (imported patient records quota + add-on price) -->
+            <div class="section-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="chart-title">Client Data Storage</div>
+                        <div class="chart-subtitle" id="dataStorageSummary">Loading data storage...</div>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr><th>Hospital / Clinic</th><th>Imported Records</th><th>Limit</th><th>Usage</th><th>Storage Add-on / month</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="dataStorageBody">
+                            <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading data storage...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Subscription Lifecycle Board -->
             <div class="section-card">
                 <div class="table-toolbar">
@@ -1605,6 +1650,57 @@
                 <button class="btn-primary" onclick="submitRate()">Save Rate</button>
                 <button class="btn-secondary" onclick="clearRate()" id="rateClearBtn">Revert to plan default</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Client Data Storage Modal (Owner-only) -->
+    <div class="modal-overlay" id="dataStorageModal">
+        <div class="modal-panel" style="max-width:480px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Data Storage</h3>
+                <button class="close-btn" onclick="closeDataStorageModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="error-msg" id="dataStorageModalError">Error</div>
+            <p style="font-size:0.82rem; color:var(--text3); margin-bottom:16px;" id="dataStorageModalContext"></p>
+            <div class="form-group">
+                <label>Imported patient record limit</label>
+                <input type="number" class="form-control" id="dataStorageLimit" min="0" max="1000000" step="500" placeholder="e.g. 5000">
+            </div>
+            <div class="form-group">
+                <label>Storage add-on charge per month (₹)</label>
+                <input type="number" class="form-control" id="dataStorageAddon" min="0" step="1" placeholder="0 = included in plan">
+            </div>
+            <p style="font-size:0.78rem; color:var(--text3); margin-bottom:14px;">
+                The clinic sees a "storage filling up" banner at 90% and cannot import past the limit.
+                Lowering the limit never deletes data. The add-on is added to this clinic's next generated invoice;
+                invoices already raised are unchanged. 0 records = importing switched off.
+            </p>
+            <button class="btn-primary" onclick="submitDataStorage()">Save</button>
+        </div>
+    </div>
+
+    <!-- Client Message Reply Modal (Owner-only) -->
+    <div class="modal-overlay" id="supportReplyModal">
+        <div class="modal-panel" style="max-width:560px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Client Message</h3>
+                <button class="close-btn" onclick="closeSupportReply()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="error-msg" id="supportReplyError">Error</div>
+            <div id="supportReplyContext" style="font-size:0.88rem; color:var(--text2); margin-bottom:16px;"></div>
+            <div class="form-group">
+                <label>Your reply (shown to the clinic)</label>
+                <textarea class="form-control" id="supportReplyText" rows="5" maxlength="4000"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Status</label>
+                <select class="form-control" id="supportReplyStatus">
+                    <option value="open">Open</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="resolved">Resolved</option>
+                </select>
+            </div>
+            <button class="btn-primary" onclick="submitSupportReply()">Save</button>
         </div>
     </div>
 
@@ -2090,6 +2186,8 @@
                 loadFinance();
                 loadSubscriptions();
                 loadOutboundAudit();
+                loadDataStorageBoard();
+                loadSupportInbox();
 
             } catch (e) {
                 console.error('Error fetching platform data:', e);
@@ -3801,6 +3899,195 @@
                 loadSubscriptions();
             } catch (e) {
                 alert('Network error \u2014 please try again.');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Client Data Storage + Client Messages (additive; failures never block the dashboard)
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        let globalDataStorage = [];
+        let _dataStorageClinicId = null;
+        let globalSupportMessages = [];
+        let _supportMessageId = null;
+
+        const SUPPORT_TYPE_LABELS = {
+            concern: 'Concern', feature_request: 'Feature request', storage_request: 'Data storage',
+            billing: 'Billing', other: 'Other',
+        };
+
+        function _fmtWhen(ts) {
+            if (!ts) return '—';
+            try { return new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+            catch (e) { return '—'; }
+        }
+
+        async function loadDataStorageBoard() {
+            const tbody = document.getElementById('dataStorageBody');
+            try {
+                const res = await fetch('/platform/data-storage', { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                globalDataStorage = data.clinics || [];
+                const near = globalDataStorage.filter(r => r.storage.level !== 'ok' && r.storage.used > 0).length;
+                document.getElementById('dataStorageSummary').textContent =
+                    `${(data.total_records || 0).toLocaleString('en-IN')} imported records across ${globalDataStorage.length} clinic(s) · `
+                    + `${near} at or above ${data.warn_percent}% · default limit ${Number(data.default_limit).toLocaleString('en-IN')}`;
+                if (!globalDataStorage.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">No clinics yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = globalDataStorage.map(r => {
+                    const s = r.storage;
+                    const color = s.level === 'full' && s.used > 0 ? '#ef4444' : s.level === 'warning' ? '#f59e0b' : '#10b981';
+                    return `<tr>
+                        <td><div class="clinic-name-cell"><span class="clinic-title">${escapeHtml(r.clinic_name || 'Unnamed Hospital')}</span>
+                            <span class="clinic-phone">${escapeHtml(r.plan || '')}</span></div></td>
+                        <td style="font-weight:700">${r.count_failed ? '<span style="color:#ef4444">unavailable</span>' : s.used.toLocaleString('en-IN')}</td>
+                        <td>${s.limit === 0 ? '<span style="color:var(--text3)">Off</span>' : s.limit.toLocaleString('en-IN')}</td>
+                        <td><span class="badge" style="background:${color}22; color:${color}">${s.percent}%</span></td>
+                        <td>${r.addon_paise ? '₹' + r.addon_rupees.toLocaleString('en-IN') : '<span style="color:var(--text3)">—</span>'}</td>
+                        <td><button class="action-btn" onclick="openDataStorageModal('${escapeHtml(r.clinic_id)}')">Set Limit / Price</button></td>
+                    </tr>`;
+                }).join('');
+            } catch (e) {
+                console.error('Data storage load failed:', e);
+                document.getElementById('dataStorageSummary').textContent = 'Data storage unavailable';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Could not load data storage.</td></tr>';
+            }
+        }
+
+        function openDataStorageModal(clinicId) {
+            const row = globalDataStorage.find(r => r.clinic_id === clinicId);
+            if (!row) return;
+            _dataStorageClinicId = clinicId;
+            document.getElementById('dataStorageModalError').style.display = 'none';
+            document.getElementById('dataStorageLimit').value = row.storage.limit;
+            document.getElementById('dataStorageAddon').value = row.addon_rupees || 0;
+            document.getElementById('dataStorageModalContext').innerHTML =
+                `<strong>${escapeHtml(row.clinic_name || '')}</strong> · ${row.storage.used.toLocaleString('en-IN')} records imported (${row.storage.percent}% of limit).`;
+            document.getElementById('dataStorageModal').classList.add('active');
+        }
+
+        function closeDataStorageModal() {
+            document.getElementById('dataStorageModal').classList.remove('active');
+            _dataStorageClinicId = null;
+        }
+
+        async function submitDataStorage() {
+            const err = document.getElementById('dataStorageModalError');
+            const limit = parseInt(document.getElementById('dataStorageLimit').value, 10);
+            const addon = parseFloat(document.getElementById('dataStorageAddon').value || '0');
+            if (!Number.isInteger(limit) || limit < 0 || limit > 1000000) {
+                err.textContent = 'Limit must be a whole number between 0 and 1,000,000.'; err.style.display = 'block'; return;
+            }
+            if (!(addon >= 0)) {
+                err.textContent = 'Add-on must be 0 or more.'; err.style.display = 'block'; return;
+            }
+            try {
+                const res = await fetch(`/platform/clinics/${_dataStorageClinicId}/data-storage`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records_limit: limit, addon_rupees: addon }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    err.textContent = (typeof data.detail === 'string' && data.detail) || 'Could not save.';
+                    err.style.display = 'block';
+                    return;
+                }
+                closeDataStorageModal();
+                loadDataStorageBoard();
+            } catch (e) {
+                err.textContent = 'Network error — please try again.'; err.style.display = 'block';
+            }
+        }
+
+        async function loadSupportInbox() {
+            const tbody = document.getElementById('supportInboxBody');
+            const filter = document.getElementById('supportFilter').value;
+            try {
+                const qs = filter && filter !== 'active' ? '?status_filter=' + encodeURIComponent(filter) : '';
+                const res = await fetch('/platform/support-messages' + qs, { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                globalSupportMessages = (data.messages || []).filter(m => filter !== 'active' || m.status !== 'resolved');
+                const badge = document.getElementById('supportUnreadBadge');
+                badge.style.display = data.unread ? 'inline-flex' : 'none';
+                badge.textContent = `${data.unread} new`;
+                document.getElementById('supportSummary').textContent =
+                    `${data.open || 0} open · ${data.unread || 0} unread · concerns, feature requests and storage requests from clinic admins`;
+                if (!globalSupportMessages.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">No messages here.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = globalSupportMessages.map(m => `
+                    <tr style="${m.owner_seen_at ? '' : 'font-weight:600;'}">
+                        <td><div class="clinic-name-cell"><span class="clinic-title">${escapeHtml(m.clinic_name || 'Unknown clinic')}</span>
+                            <span class="clinic-phone">${escapeHtml(m.created_by_username || '')}</span></div></td>
+                        <td>${escapeHtml(SUPPORT_TYPE_LABELS[m.category] || m.category)}</td>
+                        <td style="max-width:360px;"><div>${escapeHtml(m.subject)}</div>
+                            <div style="font-size:0.8rem; color:var(--text3); font-weight:400; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:360px;">${escapeHtml(m.message)}</div></td>
+                        <td>${m.status === 'resolved' ? '<span class="badge status-active">Resolved</span>'
+                            : m.status === 'in_progress' ? '<span class="badge" style="background:rgba(99,102,241,.18); color:#818cf8">In progress</span>'
+                            : '<span class="badge" style="background:rgba(245,158,11,.18); color:#f59e0b">Open</span>'}</td>
+                        <td style="font-size:0.85rem; color:var(--text2)">${_fmtWhen(m.created_at)}</td>
+                        <td><button class="action-btn" onclick="openSupportReply('${escapeHtml(m.id)}')">${m.owner_reply ? 'View / Update' : 'Reply'}</button></td>
+                    </tr>`).join('');
+            } catch (e) {
+                console.error('Support inbox load failed:', e);
+                document.getElementById('supportSummary').textContent = 'Client messages unavailable';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Could not load client messages.</td></tr>';
+            }
+        }
+
+        function openSupportReply(messageId) {
+            const m = globalSupportMessages.find(x => x.id === messageId);
+            if (!m) return;
+            _supportMessageId = messageId;
+            document.getElementById('supportReplyError').style.display = 'none';
+            document.getElementById('supportReplyContext').innerHTML =
+                `<div style="margin-bottom:6px;"><strong>${escapeHtml(m.clinic_name || '')}</strong> · ${escapeHtml(SUPPORT_TYPE_LABELS[m.category] || m.category)} · ${_fmtWhen(m.created_at)} · from ${escapeHtml(m.created_by_username || '')}</div>`
+                + `<div style="font-weight:700; margin-bottom:4px;">${escapeHtml(m.subject)}</div>`
+                + `<div style="white-space:pre-wrap;">${escapeHtml(m.message)}</div>`;
+            document.getElementById('supportReplyText').value = m.owner_reply || '';
+            document.getElementById('supportReplyStatus').value = m.status === 'open' && !m.owner_reply ? 'in_progress' : m.status;
+            document.getElementById('supportReplyModal').classList.add('active');
+            if (!m.owner_seen_at) {
+                // Opening the message marks it seen; status is left as-is.
+                fetch(`/platform/support-messages/${messageId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}),
+                }).then(() => loadSupportInbox()).catch(() => {});
+            }
+        }
+
+        function closeSupportReply() {
+            document.getElementById('supportReplyModal').classList.remove('active');
+            _supportMessageId = null;
+        }
+
+        async function submitSupportReply() {
+            const err = document.getElementById('supportReplyError');
+            const reply = document.getElementById('supportReplyText').value.trim();
+            const status = document.getElementById('supportReplyStatus').value;
+            try {
+                const res = await fetch(`/platform/support-messages/${_supportMessageId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reply ? { reply, status } : { status }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    err.textContent = (typeof data.detail === 'string' && data.detail) || 'Could not save.';
+                    err.style.display = 'block';
+                    return;
+                }
+                closeSupportReply();
+                loadSupportInbox();
+            } catch (e) {
+                err.textContent = 'Network error — please try again.'; err.style.display = 'block';
             }
         }
 

@@ -65,6 +65,7 @@ from app.services.specialty_catalog import (
 )
 from app.services.analytics import analytics_service, appointment_search_filter
 from app.services.broadcast import broadcast_service
+from app.services import client_data
 from app.services.lab_reports import LabReportService
 from app.services.permissions import (
     enforce_branch_scope,
@@ -7998,9 +7999,370 @@ async def get_subscription_status(
     try:
         effective_clinic_id = enforce_clinic_access(user, clinic_id)
         clinic = await get_clinic_by_id(effective_clinic_id)
-        return {"success": True, "clinic_id": effective_clinic_id, **await get_clinic_status(clinic)}
+        status_payload = await get_clinic_status(clinic)
+        # Additive and fail-quiet: the 90% "storage filling up" banner rides
+        # on the strip this endpoint already feeds. A failure here must never
+        # take the subscription banner down with it.
+        try:
+            status_payload["data_storage"] = await client_data.clinic_quota(
+                effective_clinic_id, (clinic or {}).get("config")
+            )
+        except Exception as e:
+            logger.warning(f"Data storage quota unavailable for clinic={effective_clinic_id}: {e}")
+        return {"success": True, "clinic_id": effective_clinic_id, **status_payload}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching subscription status: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch subscription status")
+
+
+# ═══════ DATA & SUPPORT: legacy patient import, CSV export, owner messages ═══════
+# Admin-only (require_admin): bulk patient data is the clinic's whole PHI set,
+# so front-desk staff accounts cannot import or export it. Every route resolves
+# ONE clinic through enforce_clinic_access and every query carries it.
+# Imported rows go to patient_records, never patients — see
+# app/services/client_data.py for why that separation is load-bearing.
+
+
+def _client_ip(request: Optional[Request]) -> str:
+    return request.client.host if request is not None and request.client else "unknown"
+
+
+@router.get("/data/storage")
+async def get_data_storage(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Imported-record usage against the owner-set limit. Counts only."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        return {"success": True, **await client_data.clinic_quota(effective_clinic_id)}
+    except Exception as e:
+        logger.error(f"Data storage quota failed for clinic={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not load data storage usage")
+
+
+@router.get("/data/import-template")
+async def download_patient_import_template(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    # Static content, but scoped like every other /admin route so the
+    # cross-tenant matrices need no exception for it.
+    enforce_clinic_access(user, clinic_id)
+    return Response(
+        content="﻿" + client_data.IMPORT_TEMPLATE_CSV,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="patient_import_template.csv"'},
+    )
+
+
+@router.post("/data/patient-records/import")
+async def import_patient_records(
+    request: Request,
+    file: UploadFile = File(...),
+    dry_run: bool = Form(False),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Import a clinic's existing patient list (CSV from its old software).
+
+    Pipeline: size/encoding/header check -> in-memory validation (zero writes)
+    -> per-clinic lock -> quota check against rows that are actually new ->
+    batch insert (all-or-nothing). dry_run=true stops after the quota check.
+    Re-importing the same file is a no-op: rows already stored are skipped.
+    """
+    from app.services.distributed_lock import distributed_job_lock
+
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+
+    raw = await file.read(client_data.IMPORT_MAX_FILE_BYTES + 1)
+    try:
+        parsed = await asyncio.to_thread(client_data.parse_patient_csv, raw)
+    except client_data.ImportFileError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    summary = {
+        "rows_in_file": parsed.total_rows,
+        "valid_rows": len(parsed.rows),
+        "duplicates_in_file": parsed.duplicates_in_file,
+        "mapped_columns": parsed.mapped_columns,
+        "extra_columns": parsed.extra_columns,
+        "warnings": parsed.warnings,
+        "warning_count": len(parsed.warnings),
+    }
+    if parsed.errors:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "success": False,
+                "detail": f"{len(parsed.errors)} row(s) need fixing before anything is imported. Nothing was saved.",
+                "errors": parsed.errors,
+                **summary,
+            },
+        )
+
+    file_name = re.sub(r"[^\w .()-]", "_", (file.filename or "import.csv"))[:200]
+    async with distributed_job_lock(f"patient_import:{effective_clinic_id}", lease_seconds=180) as acquired:
+        if not acquired:
+            raise HTTPException(
+                status_code=409,
+                detail="Another patient import is already running for this clinic. Try again in a minute.",
+            )
+        try:
+            config = await client_data.fetch_clinic_config(effective_clinic_id) or {}
+            used = await client_data.count_records(effective_clinic_id)
+            existing = await client_data.fetch_existing_keys(effective_clinic_id)
+        except Exception as e:
+            logger.error(f"Patient import pre-check failed for clinic={effective_clinic_id}: {e}")
+            raise HTTPException(status_code=503, detail="Could not check storage right now. Nothing was imported; please retry.")
+
+        new_rows = [r for r in parsed.rows if r["dedupe_key"] not in existing]
+        skipped_existing = len(parsed.rows) - len(new_rows)
+        limit = client_data.records_limit(config)
+        quota_after = client_data.quota_state(used + len(new_rows), limit)
+        summary.update({"new_rows": len(new_rows), "already_imported": skipped_existing})
+
+        if used + len(new_rows) > limit:
+            room = max(0, limit - used)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Not enough data storage: this file adds {len(new_rows):,} new patients but only "
+                    f"{room:,} of your {limit:,} record limit remain. Nothing was imported. "
+                    "Use 'Request more storage' to contact Kriya."
+                ),
+            )
+
+        if dry_run:
+            return {"success": True, "dry_run": True, **summary, "storage_after_import": quota_after}
+
+        try:
+            batch = await client_data.import_records(
+                effective_clinic_id, user.username, file_name, parsed, new_rows, skipped_existing
+            )
+        except Exception as e:
+            logger.error(f"Patient import write failed for clinic={effective_clinic_id}: {e}")
+            raise HTTPException(status_code=500, detail="Import failed and was fully rolled back. Nothing was saved; please retry.")
+
+    await log_admin_action(
+        user=user,
+        action="PATIENT_RECORDS_IMPORT",
+        resource_type="patient_records",
+        resource_id=batch.get("id"),
+        details={"clinic_id": effective_clinic_id, "file_name": file_name,
+                 "rows_in_file": parsed.total_rows, "inserted": batch.get("inserted_count", 0),
+                 "already_imported": skipped_existing, "warnings": len(parsed.warnings)},
+        ip_address=_client_ip(request),
+    )
+    return {
+        "success": True,
+        "dry_run": False,
+        "batch_id": batch.get("id"),
+        "inserted": batch.get("inserted_count", 0),
+        **summary,
+        "storage": await client_data.clinic_quota(effective_clinic_id, config),
+    }
+
+
+@router.get("/data/patient-records")
+async def list_patient_records(
+    q: Optional[str] = Query(None, max_length=100),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=1_000_000),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Browse / search imported records (name, phone, old-software patient id)."""
+    from app.services.analytics import _SEARCH_PHONE_RE, _SEARCH_SPLIT_RE
+
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    query = (
+        supabase.table("patient_records")
+        .select("id, external_id, full_name, phone, gender, date_of_birth, age_years, "
+                "email, address, last_visit_date, notes, extra, created_at", count="exact")
+        .eq("clinic_id", effective_clinic_id)
+    )
+    # Same sanitiser as the Appointments search: user text is split on every
+    # PostgREST/LIKE metacharacter and can only ever become one ilike pattern.
+    tokens = [t for t in _SEARCH_SPLIT_RE.split(q or "") if t]
+    if sum(len(t) for t in tokens) >= 2:
+        pattern = "*" + "*".join(tokens) + "*"
+        clauses = [f"full_name.ilike.{pattern}", f"external_id.ilike.{pattern}"]
+        if _SEARCH_PHONE_RE.fullmatch((q or "").strip()):
+            digits = re.sub(r"\D", "", q or "")[-10:]
+            if len(digits) >= 3:
+                clauses.append(f"phone.ilike.*{digits}*")
+        query = query.or_(",".join(clauses))
+    try:
+        res = await sb(query.order("full_name").order("id").range(offset, offset + limit - 1))
+    except Exception as e:
+        logger.error(f"Listing patient records failed for clinic={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not load imported patients")
+    return {"success": True, "records": res.data or [], "total": res.count or 0,
+            "limit": limit, "offset": offset}
+
+
+@router.get("/data/imports")
+async def list_patient_imports(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    res = await sb(
+        supabase.table("patient_import_batches").select("*")
+        .eq("clinic_id", effective_clinic_id)
+        .order("created_at", desc=True).limit(100)
+    )
+    return {"success": True, "imports": res.data or []}
+
+
+@router.delete("/data/imports/{batch_id}")
+async def delete_patient_import(
+    batch_id: str,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Undo one import: removes that file's records (FK cascade), nothing else."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    if not is_uuid(batch_id):
+        raise HTTPException(status_code=400, detail="Invalid import id")
+    if not await client_data.delete_batch(effective_clinic_id, batch_id):
+        raise HTTPException(status_code=404, detail="Import not found")
+    await log_admin_action(
+        user=user,
+        action="PATIENT_RECORDS_IMPORT_DELETE",
+        resource_type="patient_records",
+        resource_id=batch_id,
+        details={"clinic_id": effective_clinic_id},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True, "storage": await client_data.clinic_quota(effective_clinic_id)}
+
+
+@router.get("/data/export")
+async def export_clinic_data(
+    request: Request,
+    dataset: Literal["appointments", "patients", "patient_records"],
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Download a clinic's data as CSV (opens in Excel / imports into other software).
+
+    appointments: by appointment date (WhatsApp bookings, lab tests, treatments).
+    patients:     WhatsApp patients by first-contact date (IST).
+    patient_records: every imported record (no date range).
+    """
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        client_data.validate_export_range(dataset, date_from, date_to)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        rows = await client_data.fetch_export_rows(effective_clinic_id, dataset, date_from, date_to)
+    except OverflowError:
+        raise HTTPException(
+            status_code=413,
+            detail=f"More than {client_data.EXPORT_MAX_ROWS:,} rows in this range. Choose a shorter date range.",
+        )
+    except Exception as e:
+        logger.error(f"Export {dataset} failed for clinic={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Export failed. Please retry.")
+
+    body = await asyncio.to_thread(client_data.build_csv, dataset, rows)
+    await log_admin_action(
+        user=user,
+        action="CLINIC_DATA_EXPORT",
+        resource_type=dataset,
+        details={"clinic_id": effective_clinic_id, "dataset": dataset, "rows": len(rows),
+                 "date_from": date_from.isoformat() if date_from else None,
+                 "date_to": date_to.isoformat() if date_to else None},
+        ip_address=_client_ip(request),
+    )
+    suffix = f"_{date_from.isoformat()}_to_{date_to.isoformat()}" if date_from and date_to else ""
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{dataset}{suffix}.csv"',
+            "Cache-Control": "no-store",
+            "X-Row-Count": str(len(rows)),
+        },
+    )
+
+
+class SupportMessageCreate(BaseModel):
+    category: Literal["concern", "feature_request", "storage_request", "billing", "other"]
+    subject: str = Field(..., min_length=1, max_length=150)
+    message: str = Field(..., min_length=1, max_length=4000)
+
+    @field_validator("subject", "message")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be blank")
+        return v
+
+
+@router.get("/support/messages")
+async def list_support_messages(
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """This clinic's messages to Kriya, with the owner's replies."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    res = await sb(
+        supabase.table("support_messages")
+        .select("id, category, subject, message, status, created_by_username, "
+                "owner_reply, replied_at, created_at, updated_at")
+        .eq("clinic_id", effective_clinic_id)
+        .order("created_at", desc=True).limit(100)
+    )
+    return {"success": True, "messages": res.data or []}
+
+
+@router.post("/support/messages")
+async def create_support_message(
+    body: SupportMessageCreate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Send a concern, feature request or storage request to the platform owner."""
+    effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    recent = await sb(
+        supabase.table("support_messages").select("id", count="exact")
+        .eq("clinic_id", effective_clinic_id).gte("created_at", since).limit(1)
+    )
+    if (recent.count or 0) >= client_data.SUPPORT_DAILY_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"You can send up to {client_data.SUPPORT_DAILY_LIMIT} messages a day. Please try again tomorrow.",
+        )
+    res = await sb(
+        # unscoped: insert_scoped_by_payload
+        supabase.table("support_messages").insert({
+            "clinic_id": effective_clinic_id,
+            "category": body.category,
+            "subject": body.subject,
+            "message": body.message,
+            "created_by_username": user.username,
+            "created_by_role": user.role,
+        })
+    )
+    row = (res.data or [{}])[0]
+    await log_admin_action(
+        user=user,
+        action="SUPPORT_MESSAGE_CREATE",
+        resource_type="support_message",
+        resource_id=row.get("id"),
+        details={"clinic_id": effective_clinic_id, "category": body.category},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True, "message": row}

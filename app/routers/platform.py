@@ -954,6 +954,192 @@ async def platform_update_clinic_ai_budget(
     }
 
 
+# ═══════ CLIENT DATA STORAGE (imported patient records) + SUPPORT INBOX ═══════
+
+
+class ClinicDataStorageUpdate(BaseModel):
+    records_limit: Optional[int] = Field(None, ge=0, le=1_000_000)
+    addon_rupees: Optional[float] = Field(None, ge=0, le=1_000_000)
+
+
+@router.get("/data-storage")
+async def get_platform_data_storage(
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Every clinic's imported-record usage vs. its limit, plus the add-on
+    price the owner charges for it. Sorted fullest first."""
+    from app.services import client_data
+
+    try:
+        clinics = (await sb(
+            # unscoped: platform_admin
+            supabase.table("clinics").select("id, name, plan, whatsapp_number, config, status")
+            .neq("status", "DELETED")
+        )).data or []
+    except Exception as e:
+        logger.error(f"Data storage board failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load data storage")
+
+    # ponytail: one count query per clinic; fine for tens of clinics, move to a
+    # grouped RPC if the fleet reaches hundreds.
+    counts = await asyncio.gather(
+        *(client_data.count_records(c["id"]) for c in clinics), return_exceptions=True
+    )
+    rows = []
+    for c, used in zip(clinics, counts):
+        cfg = c.get("config") or {}
+        failed = isinstance(used, BaseException)
+        state = client_data.quota_state(0 if failed else used, client_data.records_limit(cfg))
+        addon = client_data.storage_addon_paise(cfg)
+        rows.append({
+            "clinic_id": c["id"],
+            "clinic_name": c.get("name"),
+            "plan": c.get("plan"),
+            "whatsapp_number": c.get("whatsapp_number"),
+            "storage": state,
+            "count_failed": failed,
+            "addon_paise": addon,
+            "addon_rupees": addon / 100,
+        })
+    rows.sort(key=lambda r: (-r["storage"]["percent"], r["clinic_name"] or ""))
+    return {
+        "success": True,
+        "clinics": rows,
+        "default_limit": client_data.DEFAULT_PATIENT_RECORDS_LIMIT,
+        "warn_percent": client_data.STORAGE_WARN_PERCENT,
+        "total_records": sum(r["storage"]["used"] for r in rows),
+    }
+
+
+@router.patch("/clinics/{clinic_id}/data-storage")
+async def update_clinic_data_storage(
+    clinic_id: str,
+    body: ClinicDataStorageUpdate,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Set a clinic's imported-record limit and/or its monthly storage add-on price.
+
+    The add-on is added to that clinic's next generated invoice (snapshotted in
+    platform_invoices.storage_addon_paise); invoices already raised are not
+    changed. Lowering the limit below current usage never deletes anything —
+    it only blocks further imports.
+    """
+    from app.database import is_uuid
+    from app.services import client_data
+
+    if not is_uuid(clinic_id):
+        raise HTTPException(status_code=400, detail="Invalid clinic id")
+    if body.records_limit is None and body.addon_rupees is None:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    clinic_res = await sb(
+        # unscoped: platform_admin
+        supabase.table("clinics").select("id, name, config").eq("id", clinic_id).limit(1)
+    )
+    if not clinic_res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic_row = clinic_res.data[0]
+    cfg = dict(clinic_row.get("config") or {})
+    before = {"records_limit": client_data.records_limit(cfg),
+              "addon_paise": client_data.storage_addon_paise(cfg)}
+    if body.records_limit is not None:
+        cfg["patient_records_limit"] = body.records_limit
+    if body.addon_rupees is not None:
+        cfg["data_storage_addon_paise"] = int(round(body.addon_rupees * 100))
+
+    # unscoped: platform_admin
+    await sb(supabase.table("clinics").update({"config": cfg}).eq("id", clinic_id))
+    invalidate_tenant_cache()
+
+    after = {"records_limit": client_data.records_limit(cfg),
+             "addon_paise": client_data.storage_addon_paise(cfg)}
+    await log_admin_action(
+        user=owner,
+        action="update_clinic_data_storage",
+        resource_type="clinic",
+        resource_id=clinic_id,
+        details={"clinic_name": clinic_row.get("name"), "before": before, "after": after},
+        ip_address=request.client.host if request.client else "unknown",
+    )
+    return {"success": True, "clinic_id": clinic_id, **after,
+            "storage": await client_data.clinic_quota(clinic_id, cfg)}
+
+
+class SupportMessageUpdate(BaseModel):
+    status: Optional[Literal["open", "in_progress", "resolved"]] = None
+    reply: Optional[str] = Field(None, max_length=4000)
+
+
+@router.get("/support-messages")
+async def list_platform_support_messages(
+    status_filter: Optional[Literal["open", "in_progress", "resolved"]] = None,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Messages every clinic has sent the owner, newest first."""
+    query = (
+        # unscoped: platform_admin
+        supabase.table("support_messages").select("*")
+        .order("created_at", desc=True).limit(300)
+    )
+    if status_filter:
+        query = query.eq("status", status_filter)
+    try:
+        msgs = (await sb(query)).data or []
+        # unscoped: platform_admin
+        clinics = (await sb(supabase.table("clinics").select("id, name"))).data or []
+    except Exception as e:
+        logger.error(f"Support inbox load failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load support messages")
+    names = {c["id"]: c.get("name") for c in clinics}
+    for m in msgs:
+        m["clinic_name"] = names.get(m["clinic_id"])
+    return {"success": True, "messages": msgs,
+            "unread": sum(1 for m in msgs if not m.get("owner_seen_at")),
+            "open": sum(1 for m in msgs if m.get("status") != "resolved")}
+
+
+@router.patch("/support-messages/{message_id}")
+async def update_platform_support_message(
+    message_id: str,
+    body: SupportMessageUpdate,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Reply to, mark seen, and/or change the status of a clinic's message.
+    The clinic sees the reply on its Data & Support page."""
+    from app.database import is_uuid
+
+    if not is_uuid(message_id):
+        raise HTTPException(status_code=400, detail="Invalid message id")
+    now = datetime.now(timezone.utc).isoformat()
+    update: dict = {"owner_seen_at": now, "updated_at": now}
+    reply = (body.reply or "").strip()
+    if reply:
+        update["owner_reply"] = reply
+        update["replied_at"] = now
+        if body.status is None:
+            update["status"] = "in_progress"
+    if body.status is not None:
+        update["status"] = body.status
+
+    res = await sb(
+        # unscoped: unique_row_key
+        supabase.table("support_messages").update(update).eq("id", message_id)
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await log_admin_action(
+        user=owner,
+        action="update_support_message",
+        resource_type="support_message",
+        resource_id=message_id,
+        details={"status": update.get("status"), "replied": bool(reply)},
+        ip_address=request.client.host if request.client else "unknown",
+    )
+    return {"success": True, "message": res.data[0]}
+
+
 @router.get("/revenue")
 async def get_platform_revenue_analytics(
     request: Request,
@@ -2895,6 +3081,7 @@ async def generate_finance_invoices(
         is_valid_month,
         resolve_rate,
     )
+    from app.services.client_data import storage_addon_paise
 
     body = {}
     try:
@@ -2909,7 +3096,7 @@ async def generate_finance_invoices(
     try:
         clinics_res = (
             # unscoped: platform_admin
-            await sb(supabase.table("clinics").select("id, name, plan, is_active"))
+            await sb(supabase.table("clinics").select("id, name, plan, is_active, config"))
         )
         clinics = clinics_res.data or []
         plan_tiers = await _get_plan_tiers()
@@ -2931,19 +3118,26 @@ async def generate_finance_invoices(
         rate = resolve_rate(c.get("plan"), overrides.get(cid), plan_tiers)
         locations = _billable_locations((branch_census.get(cid) or {}).get("active", 0))
         amount = invoice_amount_paise(rate["rate_paise"], rate["billing_mode"], locations)
+        # Owner-set monthly charge for extra imported-record storage (0 = none).
+        addon = storage_addon_paise(c.get("config"))
 
-        to_insert.append({
+        row = {
             "clinic_id": cid,
             "period_month": month,
             "plan": c.get("plan"),
             "rate_paise": rate["rate_paise"],
             "billing_mode": rate["billing_mode"],
             "locations_billed": locations,
-            "amount_paise": amount,
+            "amount_paise": amount + addon,
             "status": "unpaid",
             "amount_paid_paise": 0,
             "updated_by": owner.username,
-        })
+        }
+        # Only sent when set, so a clinic with no add-on produces the exact
+        # row this endpoint wrote before migration 088 added the column.
+        if addon:
+            row["storage_addon_paise"] = addon
+        to_insert.append(row)
 
     created = 0
     if to_insert:

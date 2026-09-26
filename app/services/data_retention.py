@@ -362,6 +362,22 @@ class DataRetentionService:
             logger.error(f"Family members erasure error: {e}")
             results["errors"].append(f"family_members: {e}")
 
+        # 4b. Delete imported legacy records for this phone (migration 088).
+        # They are a convenience copy of the clinic's OLD software's list — the
+        # clinic's system of record still holds the originals — and their
+        # dedupe_key embeds phone+name, so redacting in place would leave PII.
+        try:
+            pr_res = await sb(
+                supabase.table("patient_records")
+                .delete()
+                .eq("clinic_id", clinic_id)
+                .eq("phone", phone)
+            )
+            results["patient_records_deleted"] = len(pr_res.data or [])
+        except Exception as e:
+            logger.error(f"Imported patient records erasure error: {e}")
+            results["errors"].append(f"patient_records: {e}")
+
         # 5. Mark the patient row itself as anonymized (but keep the shell for FK integrity)
         try:
             await sb(supabase.table("patients").update(

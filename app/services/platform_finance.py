@@ -384,6 +384,7 @@ async def finance_summary(month: Optional[str] = None) -> dict:
     from app.database import sb, supabase
     from app.routers.platform import _billable_locations, _fetch_clinic_branch_counts
     from app.services.message_accounting import _get_plan_tiers
+    from app.services.client_data import storage_addon_paise
 
     month = month or current_month()
     if not is_valid_month(month):
@@ -392,7 +393,7 @@ async def finance_summary(month: Optional[str] = None) -> dict:
     try:
         clinics_res = await sb(
             # unscoped: platform_admin
-            supabase.table("clinics").select("id, name, plan, is_active")
+            supabase.table("clinics").select("id, name, plan, is_active, config")
         )
         clinics = clinics_res.data or []
     except Exception as e:
@@ -425,8 +426,11 @@ async def finance_summary(month: Optional[str] = None) -> dict:
 
         # An inactive clinic is not billed. Its row still appears — the owner
         # needs to see that it stopped earning, not have it vanish.
+        # The storage add-on is billed on the invoice (see generate_finance_invoices),
+        # so expected MRR includes it too — otherwise billed and expected disagree.
         revenue = (
             invoice_amount_paise(rate["rate_paise"], rate["billing_mode"], locations)
+            + storage_addon_paise(c.get("config"))
             if active else 0
         )
         meta = meta_costs.get(cid, 0)
