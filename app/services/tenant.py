@@ -564,7 +564,9 @@ PLAN_FEATURES: dict[str, set[str]] = {
     },
     "derma": set(_SPECIALTY_FEATURES),
     "eye": set(_SPECIALTY_FEATURES),
-    "dental": set(_SPECIALTY_FEATURES),
+    # Multi-sitting treatment plans, doctor WhatsApp reminders, post-sitting
+    # reviews (migration 089). Dental ONLY: see dental_plans_enabled().
+    "dental": set(_SPECIALTY_FEATURES) | {"dental_treatment_plans"},
     # Fertility centres run their own hormone / semen tests (AMH, semen
     # analysis). lab_test_booking implies payments_razorpay, which the shared
     # set already carries (test_lab_test_booking_always_implies_razorpay_payments).
@@ -607,6 +609,7 @@ FEATURE_LABELS: dict[str, str] = {
     "analytics": "Analytics & Insights",
     "booking": "Appointment Booking",
     "clinical_firewall": "Clinical Safety Firewall",
+    "dental_treatment_plans": "Dental Treatment Plans & Sitting Reminders",
     "compliance_dpdp": "DPDP Consent & Compliance",
     "compliance_nmc": "NMC Telemedicine Compliance",
     "diagnostic_reports": "Diagnostic Report Delivery",
@@ -625,6 +628,21 @@ FEATURE_LABELS: dict[str, str] = {
     "specialty_treatments": "Treatments & Procedures Catalog",
     "staff_training": "Staff Training & Onboarding",
 }
+
+
+#: Features that exist for ONE plan by design and are therefore absent from the
+#: "every feature" hybrids (multispecialty, womenchild).
+DENTAL_ONLY_FEATURES: frozenset = frozenset({"dental_treatment_plans"})
+
+
+def dental_plans_enabled(clinic: Optional[dict]) -> bool:
+    """Dental treatment plans are for pure dental clinics only.
+
+    has_feature() alone is not enough: the enterprise wildcard answers True to
+    every feature, which would put dental sittings on a general hospital. The
+    owner can still switch it off for one dental clinic via clinics.features.
+    """
+    return bool(clinic) and clinic.get("plan") == "dental" and has_feature(clinic, "dental_treatment_plans")
 
 
 def has_feature(clinic: dict, feature: str) -> bool:

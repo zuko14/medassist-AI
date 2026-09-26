@@ -208,6 +208,10 @@ class ConversationState(str, Enum):
 # a paid LLM intent call on an empty string.
 READABLE_MESSAGE_TYPES = frozenset({"text", "interactive", "button"})
 
+#: Template quick-reply payloads that behave exactly like the in-chat button of
+#: the same id (scheduler.HEALTH_CHECKIN_PAYLOADS).
+TEMPLATE_BUTTON_PAYLOADS = frozenset({"checkin_ok", "checkin_concern"})
+
 # Types that carry no patient request. Replying to these is noise: a thumbs-up
 # reaction on a booking confirmation must not re-open a conversation.
 IGNORED_MESSAGE_TYPES = frozenset({"reaction", "system", "order", "ephemeral"})
@@ -645,6 +649,29 @@ class ConversationManager:
                 )
                 return
         # ── End Clinical Firewall ──────────────────────────────────────────────
+
+        # ── Dental sitting review buttons (app/services/dental_plans.py) ───────
+        # A template quick-reply arrives as message_type "button" carrying the
+        # payload we set when sending. Only the dental review prefix is claimed
+        # here; every other button and message flows on exactly as before.
+        if message_type == "button" and interactive_data:
+            from app.services import dental_plans
+
+            payload = str(interactive_data.get("id") or "")
+            if payload.startswith(dental_plans.REVIEW_PAYLOAD_PREFIX):
+                if await dental_plans.handle_review_reply(self, clinic, phone, payload):
+                    return
+
+        # A tap on a TEMPLATE quick-reply arrives as message_type "button" with
+        # the payload we set. The health check-in's two replies must reach the
+        # same handlers as the in-chat buttons, so exactly those payloads are
+        # treated as a button click; every other button keeps its old path.
+        if (
+            message_type == "button"
+            and interactive_data
+            and interactive_data.get("id") in TEMPLATE_BUTTON_PAYLOADS
+        ):
+            message_type = "interactive"
 
         # Detect intent (skip LLM inference for controlled interactive button clicks)
         if message_type == "interactive" and interactive_data:

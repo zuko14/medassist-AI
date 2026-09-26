@@ -872,6 +872,17 @@
             gap: 16px;
         }
 
+        /* ═══════ ON/OFF SWITCH ═══════ */
+        .switch { position: relative; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+        .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+        .switch .track { width: 46px; height: 26px; border-radius: 13px; background: var(--border2, #475569); transition: background .2s; position: relative; flex-shrink: 0; }
+        .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .2s; }
+        .switch input:checked + .track { background: #10b981; }
+        .switch input:checked + .track::after { transform: translateX(20px); }
+        .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .switch input:disabled + .track { opacity: .5; cursor: wait; }
+        .switch .state { font-weight: 700; font-size: 0.85rem; min-width: 28px; }
+
         /* ═══════ HAMBURGER ═══════ */
         .hamburger {
             display: none;
@@ -929,6 +940,7 @@
 
         @media (max-width: 768px) {
             .hamburger { display: flex; }
+            #notifDrawer { left: 8px !important; right: 8px; width: auto !important; top: 68px !important; }
             .sidebar { transform: translateX(-100%); }
             .sidebar.mobile-open { transform: translateX(0); }
             .overlay.show { display: block; }
@@ -1402,7 +1414,7 @@
 </div>
 
 <!-- ═══ APP ═══ -->
-<button class="hamburger" onclick="toggleSidebar()" aria-label="Toggle navigation menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></button>
+<button class="hamburger" onclick="toggleSidebar()" aria-label="Toggle navigation menu"><span id="notifBadgeMobile" aria-label="Unread notifications" style="display:none; position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; font-size:0.65rem; font-weight:800; border-radius:10px; padding:1px 5px; min-width:16px; text-align:center;">0</span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></button>
 <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
 
 <div id="app" class="app">
@@ -1414,7 +1426,7 @@
                     <h1><svg class="kriya-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><use href="#kriya-mark"/></svg>Kriya AI <span class="dot"></span></h1>
                     <span>Hospital Admin Panel</span>
                 </div>
-                <button id="notifBellBtn" onclick="toggleNotifDrawer()" style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text); position:relative; transition:all 0.2s;" title="Broadcast Notifications">
+                <button id="notifBellBtn" onclick="toggleNotifDrawer()" style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text); position:relative; transition:all 0.2s;" title="Notifications" aria-label="Notifications">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
                     <span id="notifBadge" style="display:none; position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; font-size:0.65rem; font-weight:800; border-radius:10px; padding:1px 5px; min-width:16px; text-align:center; box-shadow:0 0 6px #ef4444;">0</span>
                 </button>
@@ -1426,7 +1438,7 @@
             <div style="padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; background:var(--surface2);">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:1.1rem;"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg></span>
-                    <strong style="color:var(--text-strong); font-size:0.92rem;">System Broadcasts</strong>
+                    <strong style="color:var(--text-strong); font-size:0.92rem;">Notifications</strong>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <button onclick="markAllNotificationsRead()" style="background:none; border:none; color:var(--accent); font-size:0.75rem; font-weight:600; cursor:pointer;" title="Mark all as read">Mark all read</button>
@@ -1476,6 +1488,10 @@
             </div>
             <div class="nav-link" tabindex="0" data-page="treatments" data-specialty="1" style="display:none" onclick="go('treatments',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path></svg></span> Treatments
+            </div>
+            <!-- Dental clinics only (migration 089): multi-sitting treatment plans. -->
+            <div class="nav-link" tabindex="0" data-page="dentalplans" data-dental="nav" style="display:none" onclick="go('dentalplans',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5c-1.5-1.3-3.4-2-5-1.5C4.6 4.7 4 7 4.5 9.5c.4 2 .9 3.3 1.3 5.2.5 2.3.9 5.3 2.4 5.3 1.4 0 1.6-2.7 2.1-4.6.3-1.1.9-1.6 1.7-1.6s1.4.5 1.7 1.6c.5 1.9.7 4.6 2.1 4.6 1.5 0 1.9-3 2.4-5.3.4-1.9.9-3.2 1.3-5.2.5-2.5-.1-4.8-2.5-5.5-1.6-.5-3.5.2-5 1.5z"></path></svg></span> Treatment Plans
             </div>
             <div class="nav-link" tabindex="0" data-page="prescriptions" data-feature="booking" data-role="admin" onclick="go('prescriptions',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9.5" width="18" height="5" rx="2.5" transform="rotate(-45 12 12)"></rect><line x1="8.5" y1="15.5" x2="15.5" y2="8.5"></line></svg></span> Prescriptions
@@ -1557,13 +1573,27 @@
             </div>
 
             <div class="form-card" data-feature="reminders">
-                <h3>Patient Follow-ups</h3>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <h3 style="margin:0;">Patient Follow-ups</h3>
+                    <label class="switch" title="Turn automatic follow-up messages on or off">
+                        <input type="checkbox" id="f-followupEnabled" role="switch" aria-describedby="followupState" onchange="toggleFollowups(this)">
+                        <span class="track" aria-hidden="true"></span>
+                        <span class="state" id="followupSwitchLabel">OFF</span>
+                    </label>
+                </div>
+                <p id="followupState" style="margin:8px 0 12px; font-size:0.85rem;"></p>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 6px;">
+                    <strong style="font-size:0.9rem;">Health check-ins on day 3 and day 7</strong>
+                    <label class="switch" title="Ask patients how they are feeling 3 and 7 days after a visit">
+                        <input type="checkbox" id="f-checkinEnabled" role="switch" aria-describedby="checkinState" onchange="toggleHealthCheckins(this)">
+                        <span class="track" aria-hidden="true"></span>
+                        <span class="state" id="checkinSwitchLabel">OFF</span>
+                    </label>
+                </div>
+                <p id="checkinState" class="muted" style="margin:0 0 14px; font-size:0.85rem;">Sends "How are you feeling now?" with Feeling fine / Still have symptoms buttons. A "Still have symptoms" reply gets your clinic's phone number. Needs the approved <code>patient_health_checkin</code> WhatsApp template.</p>
                 <p class="muted" style="margin:-4px 0 14px">A message sent automatically after a patient's visit — the thing that makes this more than a booking bot. Visits are closed out automatically each night, so nobody has to mark anything.</p>
                 <div id="followupMsg"></div>
                 <div class="form-row">
-                    <div class="field">
-                        <label class="check"><input type="checkbox" id="f-followupEnabled"> Send a follow-up after each visit</label>
-                    </div>
                     <div class="field">
                         <label>Days after the visit</label>
                         <input type="number" id="f-followupDays" min="1" max="30" step="1" placeholder="1">
@@ -2072,6 +2102,13 @@
                     </div>
                     <div class="field"><label>Consultation Fee (₹)</label><input type="number" id="f-docFee" value="500"></div>
                 </div>
+                <div class="form-row" data-dental="field" style="display:none;">
+                    <div class="field">
+                        <label for="f-docWhatsapp">Doctor's WhatsApp number (for sitting reminders)</label>
+                        <input type="tel" id="f-docWhatsapp" maxlength="16" placeholder="e.g. 9876543210">
+                        <small class="muted">The doctor gets each assigned sitting and an evening schedule for tomorrow. Leave empty for no doctor messages.</small>
+                    </div>
+                </div>
                 <div class="form-row" id="docBranchRow" style="display:none;">
                     <div class="field">
                         <label>Branch</label>
@@ -2217,6 +2254,54 @@
                 <div class="tbl-wrap" id="patientList">
                     <div class="loader"><div class="spin"></div>Loading patients...</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ─── DENTAL TREATMENT PLANS (dental clinics only, migration 089) ─── -->
+        <div id="pg-dentalplans" class="sec">
+            <div class="page-head">
+                <h2>Treatment Plans</h2>
+                <p>Plan each dental treatment as a course of sittings, book every sitting with a dentist who is free, and let Kriya remind the patient and the doctor on WhatsApp and ask for a review after each sitting.</p>
+            </div>
+            <div class="stats">
+                <div class="stat"><div class="glow"></div><div class="label">Active plans</div><div class="num" id="s-dp-active">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Sittings today</div><div class="num" id="s-dp-today">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Sittings tomorrow</div><div class="num" id="s-dp-tomorrow">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Reviews (30 days)</div><div class="num" id="s-dp-reviews">—</div></div>
+            </div>
+            <div class="card" style="margin-bottom:20px;">
+                <div style="padding:14px 18px;">
+                    <strong>WhatsApp messages this month</strong>
+                    <div id="dpUsage" style="margin-top:10px;">Loading…</div>
+                </div>
+            </div>
+            <div class="form-card" id="dpSettingsCard" style="display:none;">
+                <h3>Automation settings</h3>
+                <div class="form-row">
+                    <div class="field"><label class="check"><input type="checkbox" id="dpSetReview"> Ask for a review after each sitting</label></div>
+                    <div class="field"><label class="check"><input type="checkbox" id="dpSetDigest"> Send each dentist tomorrow's schedule every evening</label></div>
+                </div>
+                <div class="field">
+                    <label for="dpSetLink">Google review link (sent to patients who rate "Excellent")</label>
+                    <input type="url" id="dpSetLink" maxlength="300" placeholder="https://g.page/r/...">
+                </div>
+                <button type="button" class="btn btn-accent" onclick="saveDentalSettings()">Save settings</button>
+            </div>
+            <div class="top-row">
+                <input type="text" class="search-bar" id="dpSearch" placeholder="Search by patient name, phone or treatment..." oninput="dpDebouncedSearch()" aria-label="Search treatment plans">
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <select id="dpStatus" onchange="dpOffset=0; loadDentalPlans()" aria-label="Plan status">
+                        <option value="active">Active</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="">All</option>
+                    </select>
+                    <button type="button" class="btn btn-accent" onclick="openNewPlan()">+ New treatment plan</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="dpList"><div class="loader"><div class="spin"></div>Loading…</div></div>
+                <div id="dpPager" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; gap:10px; flex-wrap:wrap;"></div>
             </div>
         </div>
 
@@ -2477,6 +2562,7 @@
                         <p style="color:var(--text3); font-size:0.78rem; margin-top:4px;">Leave 0 to show "Price shared after consultation". WhatsApp payment always uses the doctor's consultation fee.</p>
                     </div>
                     <div class="field"><label for="f-trtDuration">Visit duration (minutes)</label><input type="number" id="f-trtDuration" min="5" max="1440" step="5"></div>
+                    <div class="field" data-dental="field" style="display:none;"><label for="f-trtSittings">Typical sittings</label><input type="number" id="f-trtSittings" min="1" max="30" step="1" placeholder="e.g. 3 for a root canal"><small class="muted">Pre-fills new treatment plans. The actual count is set per patient.</small></div>
                 </div>
                 <div class="field">
                     <div class="lang-head">
@@ -2955,6 +3041,7 @@
                         <label class="check"><input type="checkbox" class="staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
                         <label class="check" data-perm-feature="lab_test_booking"><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
                         <label class="check" data-perm-feature="specialty_treatments"><input type="checkbox" class="staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
+                        <label class="check" data-perm-feature="dental_treatment_plans"><input type="checkbox" class="staff-perm-cb" value="DENTAL_PLANS_MANAGE"> Manage Dental Treatment Plans &amp; Sittings</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
@@ -3224,6 +3311,7 @@
                 <label class="check"><input type="checkbox" class="edit-staff-perm-cb" value="STAFF_UPDATE"> Update Staff</label>
                 <label class="check" data-perm-feature="lab_test_booking"><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
                 <label class="check" data-perm-feature="specialty_treatments"><input type="checkbox" class="edit-staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
+                <label class="check" data-perm-feature="dental_treatment_plans"><input type="checkbox" class="edit-staff-perm-cb" value="DENTAL_PLANS_MANAGE"> Manage Dental Treatment Plans &amp; Sittings</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
@@ -3237,6 +3325,92 @@
 </div>
 
 <!-- ═══ LAB CSV IMPORT MODAL ═══ -->
+<!-- Dental: new treatment plan -->
+<div class="modal-overlay" id="dpNewModal">
+    <div class="modal" style="max-width:640px;">
+        <h3>New treatment plan</h3>
+        <div class="field">
+            <label for="dpPatientQ">Find the patient (name, phone or old-software patient ID)</label>
+            <input type="text" id="dpPatientQ" placeholder="Start typing..." oninput="dpDebouncedPatientSearch()" autocomplete="off">
+            <div id="dpPatientResults" style="margin-top:6px;"></div>
+        </div>
+        <div class="form-row">
+            <div class="field"><label for="dpName">Patient name</label><input type="text" id="dpName" maxlength="100"></div>
+            <div class="field"><label for="dpPhone">Mobile number</label><input type="tel" id="dpPhone" maxlength="16" placeholder="9876543210" onchange="dpLoadHistoryHint()"></div>
+        </div>
+        <input type="hidden" id="dpRecordId">
+        <div class="field" id="dpBranchWrap" style="display:none;">
+            <label for="dpBranch">Branch</label>
+            <select id="dpBranch" onchange="dpLoadSlots('dpNew')"></select>
+        </div>
+        <div id="dpHistoryHint" style="font-size:0.85rem; margin-bottom:12px;"></div>
+        <div class="form-row">
+            <div class="field">
+                <label for="dpTreatment">Treatment</label>
+                <select id="dpTreatment" onchange="dpTreatmentChanged()"></select>
+            </div>
+            <div class="field" id="dpTreatmentNameWrap" style="display:none;"><label for="dpTreatmentName">Treatment name</label><input type="text" id="dpTreatmentName" maxlength="120"></div>
+        </div>
+        <div class="form-row">
+            <div class="field"><label for="dpPlanned">Planned sittings</label><input type="number" id="dpPlanned" min="1" max="30" value="1"></div>
+            <div class="field"><label for="dpTeeth">Tooth number(s)</label><input type="text" id="dpTeeth" maxlength="60" placeholder="e.g. 36, 37"></div>
+            <div class="field"><label for="dpQuote">Estimate (₹)</label><input type="number" id="dpQuote" min="0" step="1"></div>
+        </div>
+        <div class="field"><label for="dpNotes">Notes</label><textarea id="dpNotes" rows="2" maxlength="2000"></textarea></div>
+        <div class="field">
+            <label class="check"><input type="checkbox" id="dpConsent"> The patient agreed to receive appointment messages on WhatsApp</label>
+            <small class="muted">Required for patients who have never messaged your clinic on WhatsApp (for example patients imported from your old software). Without it only the doctor is messaged.</small>
+        </div>
+        <div class="form-row">
+            <div class="field"><label class="check"><input type="checkbox" id="dpNotifyPatient" checked> WhatsApp the patient about sittings</label></div>
+            <div class="field"><label class="check"><input type="checkbox" id="dpNotifyDoctor" checked> WhatsApp the doctor about sittings</label></div>
+        </div>
+        <div style="border-top:1px solid var(--border); margin:6px 0 14px; padding-top:12px;">
+            <strong style="font-size:0.9rem;">Book the first sitting now (optional)</strong>
+            <div class="form-row" style="margin-top:8px;">
+                <div class="field"><label for="dpNewDoctor">Doctor</label><select id="dpNewDoctor" onchange="dpLoadSlots('dpNew')"></select></div>
+                <div class="field"><label for="dpNewDate">Date</label><input type="date" id="dpNewDate" onchange="dpLoadSlots('dpNew')"></div>
+                <div class="field"><label for="dpNewSlot">Time</label><select id="dpNewSlot"><option value="">Pick a doctor and date</option></select></div>
+            </div>
+            <div class="form-row">
+                <div class="field"><label class="check"><input type="checkbox" id="dpNewSendPatient" checked> Send confirmation to patient</label></div>
+                <div class="field"><label class="check"><input type="checkbox" id="dpNewSendDoctor" checked> Notify doctor now</label></div>
+            </div>
+        </div>
+        <div id="dpNewMsg"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" onclick="closeDpModal('dpNewModal')">Cancel</button>
+            <button type="button" class="btn btn-accent" id="dpCreateBtn" onclick="submitNewPlan()">Create plan</button>
+        </div>
+    </div>
+</div>
+
+<!-- Dental: plan detail -->
+<div class="modal-overlay" id="dpPlanModal">
+    <div class="modal" style="max-width:900px;">
+        <div id="dpPlanBody"><div class="loader"><div class="spin"></div>Loading…</div></div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" onclick="closeDpModal('dpPlanModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Dental: mark a sitting done -->
+<div class="modal-overlay" id="dpDoneModal">
+    <div class="modal" style="max-width:460px;">
+        <h3>Mark sitting done</h3>
+        <input type="hidden" id="dpDoneId">
+        <div class="field"><label for="dpDoneNotes">Work done / notes</label><textarea id="dpDoneNotes" rows="3" maxlength="2000" placeholder="e.g. Canal cleaning and shaping done, temporary filling placed"></textarea></div>
+        <div class="field"><label for="dpDoneAmount">Amount collected this sitting (₹)</label><input type="number" id="dpDoneAmount" min="0" step="1"></div>
+        <small class="muted">The patient is asked for a review about an hour later (if reviews are on).</small>
+        <div id="dpDoneMsg"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" onclick="closeDpModal('dpDoneModal')">Cancel</button>
+            <button type="button" class="btn btn-accent" onclick="submitSittingDone()">Save</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal-overlay" id="labCsvModal">
     <div class="modal" style="max-width:540px;">
         <h3>Bulk Import Diagnostic Catalog</h3>
@@ -3701,6 +3875,8 @@ let myBranchId = null;
 let myStaffRole = null;
 let mySpecialty = null;
 let mySpecialtyEnabled = false;
+// migration 089: dental clinics only (plan == dental AND feature on), from /admin/me
+let myDentalPlans = false;
 // migration 082: treatment sections (Child Care / Women Care / ...) from /admin/me
 let myServiceLines = [];
 let myPlanServiceLines = [];
@@ -3730,6 +3906,14 @@ function applyFeatureVisibility() {
     // to every enterprise clinic.
     document.querySelectorAll('[data-specialty]').forEach(el => {
         el.style.display = mySpecialtyEnabled ? '' : 'none';
+    });
+    // Dental clinics only. The nav link additionally needs the permission, so
+    // a staff account without DENTAL_PLANS_MANAGE never sees a page it cannot use.
+    document.querySelectorAll('[data-dental]').forEach(el => {
+        const show = el.dataset.dental === 'nav'
+            ? (myDentalPlans && hasPermission('DENTAL_PLANS_MANAGE'))
+            : myDentalPlans;
+        el.style.display = show ? '' : 'none';
     });
     document.querySelectorAll('[data-role="admin"]').forEach(el => {
         const page = el.dataset.page;
@@ -3846,6 +4030,7 @@ async function login() {
     myStaffRole = me.staff_role || null;
     mySpecialty = me.specialty || null;
     mySpecialtyEnabled = !!me.specialty_enabled;
+    myDentalPlans = !!me.dental_plans_enabled;
     myServiceLines = Array.isArray(me.service_lines) ? me.service_lines : [];
     myPlanServiceLines = Array.isArray(me.plan_service_lines) ? me.plan_service_lines : [];
     myUsername = me.username || '';
@@ -3988,6 +4173,7 @@ async function adoptClinicPlan() {
             myFeatures = scoped.features;
             mySpecialty = scoped.specialty || null;
             mySpecialtyEnabled = !!scoped.specialty_enabled;
+            myDentalPlans = !!scoped.dental_plans_enabled;
             myServiceLines = Array.isArray(scoped.service_lines) ? scoped.service_lines : [];
             myPlanServiceLines = Array.isArray(scoped.plan_service_lines) ? scoped.plan_service_lines : [];
         }
@@ -4222,7 +4408,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage };
     if (loaders[page]) loaders[page]();
 }
 
@@ -5447,6 +5633,20 @@ function renderSubscriptionStrip(d) {
         }
     }
 
+    // ── Dental WhatsApp message limits (dental clinics only) ──
+    const dm = d.dental_messaging;
+    if (dm && dm.kinds && myRole !== 'staff') {
+        const hot = Object.values(dm.kinds).filter(k => k.limit > 0 && (k.level === 'warning' || k.level === 'full'));
+        if (hot.length) {
+            const full = hot.some(k => k.level === 'full');
+            const list = hot.map(k => `${k.label}: ${k.used.toLocaleString('en-IN')} of ${k.limit.toLocaleString('en-IN')}`).join(' · ');
+            const col = full ? '#ef4444' : '#f59e0b';
+            parts.push(card(full ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)', col, col, '\u{1F4AC}',
+                full ? 'Monthly WhatsApp message limit reached' : 'Monthly WhatsApp message limit almost used',
+                list + ' - contact Kriya (Data & Support > Messages to Kriya) for a higher limit.'));
+        }
+    }
+
     // ── Imported patient data storage (owner-set limit) ──
     // Admin-only: staff cannot import or message Kriya, so the call to action
     // would be a dead end for them. Shown from 90% (the server's warn_percent).
@@ -5476,6 +5676,522 @@ function renderSubscriptionStrip(d) {
     if (!parts.length) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
     strip.innerHTML = parts.join('');
     strip.style.display = 'block';
+}
+
+async function apiFetchJson(method, path, body) {
+    const r = await apiRaw(path, { method, headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+    return r.json().catch(() => ({}));
+}
+
+// ═══════ DENTAL TREATMENT PLANS (dental clinics only, migration 089) ═══════
+// Server: /admin/dental/* (app/routers/admin.py) + app/services/dental_plans.py.
+let dpOffset = 0;
+const DP_PAGE = 50;
+let dpDoctors = [];
+let dpTreatments = [];
+let dpCurrentPlanId = null;
+let dpPatientResults = [];
+let dpBranches = [];
+let dpCurrentPlanBranch = null;
+const DP_KIND_ORDER = ['patient', 'doctor', 'review'];
+const DP_RATING = { 3: 'Excellent', 2: 'Good', 1: 'Needs improvement' };
+
+function closeDpModal(id) { document.getElementById(id).classList.remove('open'); }
+function dpRupees(paise) { return (paise === null || paise === undefined) ? '—' : '₹' + (paise / 100).toLocaleString('en-IN'); }
+function dpDay(d) {
+    if (!d) return '—';
+    try { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }); }
+    catch (e) { return esc(d); }
+}
+function dpTime(t) {
+    if (!t) return '';
+    const [h, m] = String(t).split(':').map(Number);
+    if (isNaN(h)) return esc(t);
+    return ((h % 12) || 12) + ':' + String(m || 0).padStart(2, '0') + (h < 12 ? ' AM' : ' PM');
+}
+function dpToday() { return _ymd(new Date()); }
+
+function dpRequestMoreMessages() {
+    openStorageRequest();
+    document.getElementById('supportCategory').value = 'other';
+    document.getElementById('supportSubject').value = 'Request for more dental WhatsApp messages';
+}
+
+function renderDpUsage(m) {
+    const el = document.getElementById('dpUsage');
+    if (!m || !m.kinds) { el.textContent = 'Usage unavailable'; return; }
+    el.innerHTML = DP_KIND_ORDER.map(k => {
+        const u = m.kinds[k];
+        if (!u) return '';
+        const color = u.level === 'full' ? '#ef4444' : u.level === 'warning' ? '#f59e0b' : 'var(--accent)';
+        const off = u.limit === 0;
+        return `<div style="margin-bottom:10px;">
+            <div style="display:flex; justify-content:space-between; gap:10px; font-size:0.85rem;">
+                <span>${esc(u.label)}</span>
+                <span style="color:${u.level === 'ok' ? 'var(--text2)' : color}">${off ? 'Switched off' : `${u.used.toLocaleString('en-IN')} of ${u.limit.toLocaleString('en-IN')} (${u.percent}%)`}</span>
+            </div>
+            <div style="height:8px; background:var(--bg3, rgba(148,163,184,.2)); border-radius:5px; overflow:hidden; margin-top:4px;">
+                <div style="height:100%; width:${off ? 0 : Math.min(100, u.percent)}%; background:${color};"></div>
+            </div></div>`;
+    }).join('') + `<div style="font-size:0.8rem; color:var(--text3);">Limits are set by Kriya each month. When a limit is reached those messages pause until next month; patients still get the standard appointment reminder. <a href="#" onclick="dpRequestMoreMessages(); return false;">Request a higher limit</a></div>`;
+}
+
+async function loadDentalPage() {
+    loadDentalOverview();
+    dpOffset = 0;
+    loadDentalPlans();
+}
+
+async function loadDentalOverview() {
+    try {
+        const d = await api('/admin/dental/overview');
+        document.getElementById('s-dp-active').textContent = d.active_plans;
+        document.getElementById('s-dp-today').textContent = d.sittings_today;
+        document.getElementById('s-dp-tomorrow').textContent = d.sittings_tomorrow;
+        const r = d.reviews_30d || {};
+        const revEl = document.getElementById('s-dp-reviews');
+        revEl.textContent = r.count || 0;
+        revEl.title = `Excellent ${r.excellent || 0}, Good ${r.good || 0}, Needs improvement ${r.needs_improvement || 0}`;
+        renderDpUsage(d.messaging);
+        const card = document.getElementById('dpSettingsCard');
+        card.style.display = d.can_edit_settings ? '' : 'none';
+        if (d.can_edit_settings) {
+            document.getElementById('dpSetReview').checked = !!d.settings.dental_review_enabled;
+            document.getElementById('dpSetDigest').checked = !!d.settings.dental_doctor_digest_enabled;
+            document.getElementById('dpSetLink').value = d.settings.dental_google_review_link || '';
+        }
+    } catch (e) {
+        document.getElementById('dpUsage').textContent = e.message || 'Could not load';
+    }
+}
+
+async function saveDentalSettings() {
+    try {
+        await apiPut('/admin/dental/settings', {
+            dental_review_enabled: document.getElementById('dpSetReview').checked,
+            dental_doctor_digest_enabled: document.getElementById('dpSetDigest').checked,
+            dental_google_review_link: document.getElementById('dpSetLink').value.trim(),
+        });
+        toast('Settings saved');
+    } catch (e) { toast(e.message || 'Could not save settings', true); }
+}
+
+let _dpSearchTimer = null;
+function dpDebouncedSearch() {
+    clearTimeout(_dpSearchTimer);
+    _dpSearchTimer = setTimeout(() => { dpOffset = 0; loadDentalPlans(); }, 300);
+}
+
+async function loadDentalPlans() {
+    const el = document.getElementById('dpList');
+    const pager = document.getElementById('dpPager');
+    el.innerHTML = loading();
+    const status = document.getElementById('dpStatus').value;
+    const q = document.getElementById('dpSearch').value.trim();
+    let qs = `limit=${DP_PAGE}&offset=${dpOffset}`;
+    if (status) qs += '&status=' + encodeURIComponent(status);
+    if (q) qs += '&q=' + encodeURIComponent(q);
+    try {
+        const d = await api('/admin/dental/plans?' + qs);
+        const plans = d.plans || [];
+        if (!plans.length) {
+            el.innerHTML = emptyState('users', q ? 'No plans match your search' : 'No treatment plans here yet. Click “New treatment plan” to start one.');
+            pager.innerHTML = '';
+            return;
+        }
+        el.innerHTML = `<table>
+            <thead><tr><th>Patient</th><th>Treatment</th><th>Progress</th><th>Next sitting</th><th>Balance</th><th>Status</th></tr></thead>
+            <tbody>${plans.map(p => {
+                const s = p.summary || {};
+                const next = s.next_sitting;
+                return `<tr style="cursor:pointer;" data-id="${esc(p.id)}" onclick="openPlan(this.dataset.id)">
+                    <td><div style="font-weight:600;">${esc(p.patient_name)}</div><div style="font-size:0.8rem; color:var(--text3);">${esc(p.patient_phone)}</div></td>
+                    <td>${esc(p.treatment_name)}${p.tooth_numbers ? `<div style="font-size:0.8rem; color:var(--text3);">Tooth ${esc(p.tooth_numbers)}</div>` : ''}</td>
+                    <td>${esc(s.sittings_done)} of ${esc(p.planned_sittings)} done</td>
+                    <td>${next ? `${dpDay(next.appointment_date)} ${dpTime(next.appointment_time)}<div style="font-size:0.8rem; color:var(--text3);">${esc(next.doctor_name || '')}</div>` : (p.status === 'active' ? '<span style="color:#f59e0b;">Not booked</span>' : '—')}</td>
+                    <td>${s.balance_paise === null || s.balance_paise === undefined ? '—' : dpRupees(s.balance_paise)}</td>
+                    <td>${badge(p.status === 'active' ? 'confirmed' : p.status)}</td>
+                </tr>`;
+            }).join('')}</tbody></table>`;
+        const total = d.total || 0;
+        const last = Math.min(total, dpOffset + plans.length);
+        pager.innerHTML = `<span style="color:var(--text3); font-size:0.85rem;">${dpOffset + 1}–${last} of ${total}</span>
+            <span style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-ghost btn-sm" ${dpOffset === 0 ? 'disabled' : ''} onclick="dpOffset=Math.max(0,dpOffset-DP_PAGE); loadDentalPlans()">Previous</button>
+                <button type="button" class="btn btn-ghost btn-sm" ${last >= total ? 'disabled' : ''} onclick="dpOffset+=DP_PAGE; loadDentalPlans()">Next</button>
+            </span>`;
+    } catch (e) {
+        el.innerHTML = emptyState('warning', esc(e.message || 'Failed to load treatment plans'));
+        pager.innerHTML = '';
+    }
+}
+
+async function dpEnsureLists() {
+    const [docs, trts] = await Promise.all([api('/admin/doctors'), api('/admin/treatments')]);
+    dpDoctors = (docs || []).filter(d => d.is_active !== false);
+    dpTreatments = (trts || []).filter(t => t.is_active !== false);
+    dpBranches = [];
+    if (planAllowsFeature('multi_branch')) {
+        try { dpBranches = ((await api('/admin/branches')).branches || []).filter(b => b.is_active !== false); }
+        catch (e) { dpBranches = []; }
+    }
+}
+
+function dpBranchName(id) {
+    const b = dpBranches.find(x => String(x.id) === String(id));
+    return b ? b.name : '';
+}
+
+function dpFillBranchPicker() {
+    const wrap = document.getElementById('dpBranchWrap');
+    const sel = document.getElementById('dpBranch');
+    if (!dpBranches.length) { wrap.style.display = 'none'; sel.innerHTML = ''; return; }
+    const pinned = myRole === 'staff' && myBranchId;
+    sel.innerHTML = (pinned ? '' : '<option value="">All branches (clinic-wide)</option>') +
+        dpBranches.filter(b => !pinned || String(b.id) === String(myBranchId))
+            .map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    sel.disabled = !!pinned;
+    wrap.style.display = '';
+}
+
+function dpDoctorOptions(selected) {
+    return '<option value="">— Choose doctor —</option>' + dpDoctors.map(d =>
+        `<option value="${esc(d.id)}" ${d.id === selected ? 'selected' : ''}>${esc(d.name)}${d.whatsapp_phone ? '' : ' (no WhatsApp number)'}</option>`).join('');
+}
+
+async function openNewPlan() {
+    ['dpPatientQ', 'dpName', 'dpPhone', 'dpRecordId', 'dpTeeth', 'dpQuote', 'dpNotes', 'dpTreatmentName', 'dpNewDate'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('dpPlanned').value = 1;
+    document.getElementById('dpConsent').checked = false;
+    document.getElementById('dpNotifyPatient').checked = true;
+    document.getElementById('dpNotifyDoctor').checked = true;
+    document.getElementById('dpPatientResults').innerHTML = '';
+    document.getElementById('dpHistoryHint').innerHTML = '';
+    document.getElementById('dpNewMsg').innerHTML = '';
+    document.getElementById('dpNewSlot').innerHTML = '<option value="">Pick a doctor and date</option>';
+    document.getElementById('dpNewDate').min = dpToday();
+    document.getElementById('dpNewModal').classList.add('open');
+    try {
+        await dpEnsureLists();
+        document.getElementById('dpTreatment').innerHTML = '<option value="">— Choose treatment —</option>' +
+            dpTreatments.map(t => `<option value="${esc(t.id)}">${esc(t.name)}${t.default_sittings ? ` (${esc(t.default_sittings)} sittings)` : ''}</option>`).join('') +
+            '<option value="__other">Other (type a name)</option>';
+        document.getElementById('dpNewDoctor').innerHTML = dpDoctorOptions();
+        dpFillBranchPicker();
+        dpTreatmentChanged();
+    } catch (e) { msg('dpNewMsg', esc(e.message || 'Could not load doctors/treatments'), true); }
+}
+
+function dpTreatmentChanged() {
+    const v = document.getElementById('dpTreatment').value;
+    document.getElementById('dpTreatmentNameWrap').style.display = v === '__other' ? '' : 'none';
+    const t = dpTreatments.find(x => x.id === v);
+    if (t && t.default_sittings) document.getElementById('dpPlanned').value = t.default_sittings;
+}
+
+let _dpPatientTimer = null;
+function dpDebouncedPatientSearch() {
+    clearTimeout(_dpPatientTimer);
+    _dpPatientTimer = setTimeout(dpSearchPatient, 300);
+}
+
+async function dpSearchPatient() {
+    const q = document.getElementById('dpPatientQ').value.trim();
+    const box = document.getElementById('dpPatientResults');
+    if (q.length < 2) { box.innerHTML = ''; return; }
+    try {
+        const d = await api('/admin/dental/patient-lookup?q=' + encodeURIComponent(q));
+        dpPatientResults = d.results || [];
+        box.innerHTML = dpPatientResults.length
+            ? dpPatientResults.map((r, i) => `<button type="button" class="btn btn-ghost btn-sm" style="margin:0 6px 6px 0;" onclick="dpPickPatient(${i})">${esc(r.name || 'Unnamed')} · ${esc(r.phone)} <span style="opacity:.7">(${r.source === 'imported' ? 'imported' : 'WhatsApp'})</span></button>`).join('')
+            : '<small class="muted">No match. Type the name and number below for a new patient.</small>';
+    } catch (e) { box.innerHTML = `<small class="muted">${esc(e.message || 'Search failed')}</small>`; }
+}
+
+function dpPickPatient(i) {
+    const r = dpPatientResults[i];
+    if (!r) return;
+    document.getElementById('dpName').value = r.name || '';
+    document.getElementById('dpPhone').value = r.phone;
+    document.getElementById('dpRecordId').value = r.patient_record_id || '';
+    document.getElementById('dpPatientResults').innerHTML = '';
+    dpLoadHistoryHint();
+}
+
+async function dpLoadHistoryHint() {
+    const phone = document.getElementById('dpPhone').value.trim();
+    const el = document.getElementById('dpHistoryHint');
+    if (phone.replace(/\D/g, '').length < 10) { el.innerHTML = ''; return; }
+    try {
+        const h = await api('/admin/dental/patient-history?phone=' + encodeURIComponent(phone));
+        const parts = [];
+        parts.push(h.whatsapp_contact
+            ? '<span style="color:#10b981;">✓ This patient has messaged your clinic on WhatsApp.</span>'
+            : '<span style="color:#f59e0b;">This number has never messaged your clinic. Tick the consent box below if the patient agreed to WhatsApp messages.</span>');
+        const active = (h.plans || []).filter(p => p.status === 'active');
+        if (active.length) parts.push(`<div>Already has ${active.length} active plan(s): ${active.map(p => esc(p.treatment_name)).join(', ')}.</div>`);
+        if ((h.unlinked_bookings || []).length) {
+            parts.push('<div style="margin-top:6px;">Use a WhatsApp booking as sitting 1:</div>' + h.unlinked_bookings.slice(0, 5).map(b =>
+                `<label class="check"><input type="radio" name="dpLink" value="${esc(b.id)}"> ${dpDay(b.appointment_date)} ${dpTime(b.appointment_time)} · ${esc(b.doctor_name || '')}${b.treatment_name ? ' · ' + esc(b.treatment_name) : ''}</label>`).join('') +
+                '<label class="check"><input type="radio" name="dpLink" value="" checked> Do not link a booking</label>');
+        }
+        el.innerHTML = parts.join('');
+    } catch (e) { el.innerHTML = `<small class="muted">${esc(e.message || '')}</small>`; }
+}
+
+async function dpLoadSlots(prefix) {
+    const doctorId = document.getElementById(prefix + 'Doctor').value;
+    const date = document.getElementById(prefix + 'Date').value;
+    const sel = document.getElementById(prefix + 'Slot');
+    if (!doctorId || !date) { sel.innerHTML = '<option value="">Pick a doctor and date</option>'; return; }
+    sel.innerHTML = '<option value="">Loading…</option>';
+    const branch = prefix === 'dpNew' ? (document.getElementById('dpBranch').value || '') : (dpCurrentPlanBranch || '');
+    try {
+        const d = await api(`/admin/dental/slots?doctor_id=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}`
+            + (branch ? '&branch_id=' + encodeURIComponent(branch) : ''));
+        const reasons = { hospital_closed: 'Clinic holiday', doctor_on_leave: 'Doctor on leave', doctor_off_day: 'Doctor not working this day' };
+        sel.innerHTML = (d.slots || []).length
+            ? '<option value="">— Choose time —</option>' + d.slots.map(t => `<option value="${esc(t)}">${dpTime(t)}</option>`).join('')
+            : `<option value="">${esc(reasons[d.reason] || 'No free time this day')}</option>`;
+    } catch (e) { sel.innerHTML = `<option value="">${esc(e.message || 'Could not load')}</option>`; }
+}
+
+async function submitNewPlan() {
+    const tSel = document.getElementById('dpTreatment').value;
+    const body = {
+        patient_name: document.getElementById('dpName').value.trim(),
+        patient_phone: document.getElementById('dpPhone').value.trim(),
+        planned_sittings: parseInt(document.getElementById('dpPlanned').value, 10) || 1,
+        tooth_numbers: document.getElementById('dpTeeth').value.trim() || null,
+        notes: document.getElementById('dpNotes').value.trim() || null,
+        whatsapp_consent: document.getElementById('dpConsent').checked,
+        notify_patient: document.getElementById('dpNotifyPatient').checked,
+        notify_doctor: document.getElementById('dpNotifyDoctor').checked,
+    };
+    const quote = document.getElementById('dpQuote').value;
+    if (quote !== '') body.quoted_amount_rupees = parseFloat(quote);
+    if (tSel && tSel !== '__other') body.treatment_id = tSel;
+    else body.treatment_name = document.getElementById('dpTreatmentName').value.trim();
+    const rec = document.getElementById('dpRecordId').value;
+    if (rec) body.patient_record_id = rec;
+    const branchSel = document.getElementById('dpBranch');
+    if (branchSel && branchSel.value && document.getElementById('dpBranchWrap').style.display !== 'none') body.branch_id = branchSel.value;
+    const link = document.querySelector('input[name="dpLink"]:checked');
+    if (link && link.value) body.source_appointment_id = link.value;
+    const doc = document.getElementById('dpNewDoctor').value;
+    const date = document.getElementById('dpNewDate').value;
+    const slot = document.getElementById('dpNewSlot').value;
+    if (doc || date || slot) {
+        if (!(doc && date && slot)) { msg('dpNewMsg', 'To book the first sitting choose the doctor, date and time (or leave all three empty).', true); return; }
+        body.first_sitting = { doctor_id: doc, date, time: slot,
+            send_patient: document.getElementById('dpNewSendPatient').checked,
+            notify_doctor: document.getElementById('dpNewSendDoctor').checked };
+    }
+    if (!body.patient_name || !body.patient_phone) { msg('dpNewMsg', 'Patient name and mobile number are required.', true); return; }
+    if (!body.treatment_id && !body.treatment_name) { msg('dpNewMsg', 'Choose a treatment.', true); return; }
+    const btn = document.getElementById('dpCreateBtn');
+    btn.disabled = true;
+    try {
+        const d = await apiPost('/admin/dental/plans', body);
+        closeDpModal('dpNewModal');
+        if (d.warning) toast('Plan created, but: ' + d.warning, true);
+        else toast('Treatment plan created');
+        loadDentalOverview();
+        loadDentalPlans();
+        if (d.plan && d.plan.id) openPlan(d.plan.id);
+    } catch (e) {
+        msg('dpNewMsg', esc(e.message || 'Could not create the plan'), true);
+    } finally { btn.disabled = false; }
+}
+
+async function openPlan(planId) {
+    dpCurrentPlanId = planId;
+    document.getElementById('dpPlanBody').innerHTML = loading();
+    document.getElementById('dpPlanModal').classList.add('open');
+    try {
+        if (!dpDoctors.length) await dpEnsureLists();
+        renderPlan(await api('/admin/dental/plans/' + encodeURIComponent(planId)));
+    } catch (e) {
+        document.getElementById('dpPlanBody').innerHTML = emptyState('warning', esc(e.message || 'Could not load plan'));
+    }
+}
+
+function renderPlan(d) {
+    const p = d.plan, s = d.summary || {}, rows = d.sittings || [];
+    const active = p.status === 'active';
+    dpCurrentPlanBranch = p.branch_id || null;
+    const sittingRows = rows.map(a => {
+        const upcoming = a.status === 'confirmed';
+        return `<tr style="${a.status === 'cancelled' ? 'opacity:.55;' : ''}">
+            <td>${esc(a.sitting_number || '')}</td>
+            <td>${dpDay(a.appointment_date)} ${dpTime(a.appointment_time)}</td>
+            <td>${esc(a.doctor_name || '')}</td>
+            <td>${badge(a.status)}</td>
+            <td>${dpRupees(a.amount_collected_paise)}</td>
+            <td style="max-width:220px; white-space:pre-wrap; font-size:0.82rem;">${esc(a.sitting_notes || '')}${a.review_rating ? `<div style="color:var(--text3);">Review: ${esc(DP_RATING[a.review_rating] || a.review_rating)}</div>` : ''}</td>
+            <td style="white-space:nowrap;">
+                ${upcoming ? `<button type="button" class="btn btn-accent btn-sm" data-id="${esc(a.id)}" onclick="dpOpenDone(this.dataset.id)">Done</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-id="${esc(a.id)}" onclick="dpNotify(this.dataset.id,'patient')" ${d.patient_messageable ? '' : 'disabled title="No WhatsApp consent"'}>WhatsApp patient</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-id="${esc(a.id)}" onclick="dpNotify(this.dataset.id,'doctor')">WhatsApp doctor</button>
+                <button type="button" class="btn btn-red btn-sm" data-id="${esc(a.id)}" onclick="dpCancelSitting(this.dataset.id)">Cancel</button>` : ''}
+                ${a.status === 'completed' ? `<button type="button" class="btn btn-ghost btn-sm" data-id="${esc(a.id)}" onclick="dpOpenDone(this.dataset.id)">Edit notes</button>` : ''}
+            </td></tr>`;
+    }).join('');
+    const lastDoctor = (s.next_sitting || rows[rows.length - 1] || {}).doctor_id;
+    const quoteVal = (p.quoted_amount_paise === null || p.quoted_amount_paise === undefined) ? '' : p.quoted_amount_paise / 100;
+    document.getElementById('dpPlanBody').innerHTML = `
+        <h3 style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <span>${esc(p.patient_name)} · ${esc(p.treatment_name)}</span><span>${badge(active ? 'confirmed' : p.status)}</span>
+        </h3>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; font-size:0.86rem; margin-bottom:14px;">
+            <div><div class="muted">Phone</div>${esc(p.patient_phone)}</div>
+            <div><div class="muted">Tooth</div>${esc(p.tooth_numbers || '—')}</div>
+            ${p.branch_id ? `<div><div class="muted">Branch</div>${esc(dpBranchName(p.branch_id) || 'Branch')}</div>` : ''}
+            <div><div class="muted">Progress</div>${esc(s.sittings_done)} of ${esc(p.planned_sittings)} sittings done</div>
+            <div><div class="muted">Estimate / collected</div>${dpRupees(p.quoted_amount_paise)} / ${dpRupees(s.collected_paise)}</div>
+            <div><div class="muted">Balance</div>${s.balance_paise === null || s.balance_paise === undefined ? '—' : dpRupees(s.balance_paise)}</div>
+            <div><div class="muted">Patient WhatsApp</div>${d.patient_messageable ? '<span style="color:#10b981;">Allowed</span>' : `<span style="color:#f59e0b;">Not allowed</span> <button type="button" class="btn btn-ghost btn-sm" onclick="dpSetPlan({whatsapp_consent:true, notify_patient:true}, 'Consent recorded')">Record consent</button>`}</div>
+        </div>
+        ${p.notes ? `<div style="font-size:0.85rem; white-space:pre-wrap; margin-bottom:12px;"><span class="muted">Notes:</span> ${esc(p.notes)}</div>` : ''}
+        <div class="tbl-wrap"><table>
+            <thead><tr><th>#</th><th>When</th><th>Doctor</th><th>Status</th><th>Collected</th><th>Notes / review</th><th></th></tr></thead>
+            <tbody>${sittingRows || '<tr><td colspan="7" style="text-align:center; color:var(--text3); padding:18px;">No sittings booked yet.</td></tr>'}</tbody>
+        </table></div>
+        ${active ? `<div style="border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-top:14px;">
+            <strong style="font-size:0.9rem;">Book sitting</strong>
+            <div class="form-row" style="margin-top:8px;">
+                <div class="field"><label for="dpBookNumber">Sitting #</label><input type="number" id="dpBookNumber" min="1" max="30" value="${esc(s.next_sitting_number || '')}"></div>
+                <div class="field"><label for="dpBookDoctor">Doctor</label><select id="dpBookDoctor" onchange="dpLoadSlots('dpBook')">${dpDoctorOptions(lastDoctor)}</select></div>
+                <div class="field"><label for="dpBookDate">Date</label><input type="date" id="dpBookDate" min="${dpToday()}" onchange="dpLoadSlots('dpBook')"></div>
+                <div class="field"><label for="dpBookSlot">Time</label><select id="dpBookSlot"><option value="">Pick a doctor and date</option></select></div>
+            </div>
+            <div class="form-row">
+                <div class="field"><label class="check"><input type="checkbox" id="dpBookSendPatient" ${d.patient_messageable ? 'checked' : 'disabled'}> Send confirmation to patient</label></div>
+                <div class="field"><label class="check"><input type="checkbox" id="dpBookSendDoctor" checked> Notify doctor now</label></div>
+            </div>
+            <button type="button" class="btn btn-accent" onclick="dpBookSitting()">Book sitting</button>
+        </div>` : ''}
+        <details style="margin-top:14px;"><summary style="cursor:pointer;">Edit plan</summary>
+            <div class="form-row" style="margin-top:10px;">
+                <div class="field"><label for="dpEditPlanned">Planned sittings</label><input type="number" id="dpEditPlanned" min="1" max="30" value="${esc(p.planned_sittings)}"></div>
+                <div class="field"><label for="dpEditTeeth">Tooth number(s)</label><input type="text" id="dpEditTeeth" maxlength="60" value="${esc(p.tooth_numbers || '')}"></div>
+                <div class="field"><label for="dpEditQuote">Estimate (₹)</label><input type="number" id="dpEditQuote" min="0" value="${esc(quoteVal)}"></div>
+            </div>
+            <div class="field"><label for="dpEditNotes">Notes</label><textarea id="dpEditNotes" rows="2" maxlength="2000">${esc(p.notes || '')}</textarea></div>
+            <div class="form-row">
+                <div class="field"><label class="check"><input type="checkbox" id="dpEditNotifyPatient" ${p.notify_patient ? 'checked' : ''}> WhatsApp the patient</label></div>
+                <div class="field"><label class="check"><input type="checkbox" id="dpEditNotifyDoctor" ${p.notify_doctor ? 'checked' : ''}> WhatsApp the doctor</label></div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn btn-accent btn-sm" onclick="dpSaveEdits()">Save changes</button>
+                ${active ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dpSetPlan({status:'completed'}, 'Plan marked complete')">Mark plan complete</button>
+                <button type="button" class="btn btn-red btn-sm" onclick="dpConfirmCancelPlan()">Cancel plan</button>`
+                : `<button type="button" class="btn btn-ghost btn-sm" onclick="dpSetPlan({status:'active'}, 'Plan reopened')">Reopen plan</button>`}
+            </div>
+        </details>
+        <div id="dpPlanMsg" style="margin-top:10px;"></div>`;
+}
+
+function dpConfirmCancelPlan() {
+    if (confirm('Cancel this treatment plan? Booked sittings stay booked; cancel them separately.')) {
+        dpSetPlan({ status: 'cancelled' }, 'Plan cancelled');
+    }
+}
+
+async function dpSetPlan(changes, okText) {
+    try {
+        await apiFetchJson('PATCH', '/admin/dental/plans/' + encodeURIComponent(dpCurrentPlanId), changes);
+        toast(okText || 'Saved');
+        openPlan(dpCurrentPlanId);
+        loadDentalPlans();
+        loadDentalOverview();
+    } catch (e) { toast(e.message || 'Could not save', true); }
+}
+
+function dpSaveEdits() {
+    const q = document.getElementById('dpEditQuote').value;
+    dpSetPlan({
+        planned_sittings: parseInt(document.getElementById('dpEditPlanned').value, 10) || 1,
+        tooth_numbers: document.getElementById('dpEditTeeth').value,
+        notes: document.getElementById('dpEditNotes').value,
+        quoted_amount_rupees: q === '' ? null : parseFloat(q),
+        notify_patient: document.getElementById('dpEditNotifyPatient').checked,
+        notify_doctor: document.getElementById('dpEditNotifyDoctor').checked,
+    }, 'Plan updated');
+}
+
+async function dpBookSitting() {
+    const body = {
+        sitting_number: parseInt(document.getElementById('dpBookNumber').value, 10) || null,
+        doctor_id: document.getElementById('dpBookDoctor').value,
+        date: document.getElementById('dpBookDate').value,
+        time: document.getElementById('dpBookSlot').value,
+        send_patient: document.getElementById('dpBookSendPatient').checked,
+        notify_doctor: document.getElementById('dpBookSendDoctor').checked,
+    };
+    if (!body.doctor_id || !body.date || !body.time) { msg('dpPlanMsg', 'Choose the doctor, date and time.', true); return; }
+    try {
+        const d = await apiPost('/admin/dental/plans/' + encodeURIComponent(dpCurrentPlanId) + '/sittings', body);
+        const n = d.notified || {};
+        const sent = [n.patient ? 'patient' : null, n.doctor ? 'doctor' : null].filter(Boolean);
+        toast('Sitting booked' + (sent.length ? ' · WhatsApp sent to ' + sent.join(' and ') : ''));
+        openPlan(dpCurrentPlanId);
+        loadDentalPlans();
+        loadDentalOverview();
+    } catch (e) { msg('dpPlanMsg', esc(e.message || 'Could not book the sitting'), true); }
+}
+
+async function dpOpenDone(apptId) {
+    document.getElementById('dpDoneId').value = apptId;
+    document.getElementById('dpDoneNotes').value = '';
+    document.getElementById('dpDoneAmount').value = '';
+    document.getElementById('dpDoneMsg').innerHTML = '';
+    try {
+        const d = await api('/admin/dental/plans/' + encodeURIComponent(dpCurrentPlanId));
+        const a = (d.sittings || []).find(x => x.id === apptId);
+        if (a) {
+            document.getElementById('dpDoneNotes').value = a.sitting_notes || '';
+            if (a.amount_collected_paise !== null && a.amount_collected_paise !== undefined) {
+                document.getElementById('dpDoneAmount').value = a.amount_collected_paise / 100;
+            }
+        }
+    } catch (e) { /* the form still works empty */ }
+    document.getElementById('dpDoneModal').classList.add('open');
+}
+
+async function submitSittingDone() {
+    const id = document.getElementById('dpDoneId').value;
+    const amt = document.getElementById('dpDoneAmount').value;
+    try {
+        const d = await apiPost('/admin/dental/sittings/' + encodeURIComponent(id) + '/complete', {
+            notes: document.getElementById('dpDoneNotes').value,
+            amount_collected_rupees: amt === '' ? null : parseFloat(amt),
+        });
+        closeDpModal('dpDoneModal');
+        toast(d.plan_completed ? 'Sitting saved · all planned sittings done, plan completed' : 'Sitting saved');
+        openPlan(dpCurrentPlanId);
+        loadDentalPlans();
+        loadDentalOverview();
+    } catch (e) { msg('dpDoneMsg', esc(e.message || 'Could not save'), true); }
+}
+
+async function dpCancelSitting(apptId) {
+    if (!confirm('Cancel this sitting? To reschedule, book the same sitting number again afterwards.')) return;
+    try {
+        await apiPost('/admin/dental/sittings/' + encodeURIComponent(apptId) + '/cancel', {});
+        toast('Sitting cancelled');
+        openPlan(dpCurrentPlanId);
+        loadDentalPlans();
+        loadDentalOverview();
+    } catch (e) { toast(e.message || 'Could not cancel', true); }
+}
+
+async function dpNotify(apptId, target) {
+    try {
+        await apiPost('/admin/dental/sittings/' + encodeURIComponent(apptId) + '/notify', { target });
+        toast(target === 'patient' ? 'Sent to patient on WhatsApp' : 'Sent to doctor on WhatsApp');
+        loadDentalOverview();
+    } catch (e) { toast(e.message || 'Could not send', true); }
 }
 
 // ═══════ DATA & SUPPORT (legacy patient import, CSV export, messages to Kriya) ═══════
@@ -6529,6 +7245,8 @@ async function submitDoctor() {
             evening_end: eveEnabled ? (document.getElementById('f-docEveEnd').value || null) : null,
             slot_duration_minutes: parseInt(document.getElementById('f-docDuration').value) || 30,
         };
+        // Dental clinics only, so every other clinic's save is unchanged.
+        if (myDentalPlans) payload.whatsapp_phone = document.getElementById('f-docWhatsapp').value.trim();
 
         // Include branch_id if the dropdown is visible (supports explicit unassignment when empty)
         const branchSel = document.getElementById('f-docBranch');
@@ -6560,6 +7278,7 @@ function resetDoctorForm() {
     document.getElementById('f-docSpec').value = '';
     document.getElementById('f-docDept').value = '';
     document.getElementById('f-docFee').value = '500';
+    document.getElementById('f-docWhatsapp').value = '';
     document.getElementById('f-docMornEnabled').checked = true;
     document.getElementById('f-docEveEnabled').checked = true;
     document.getElementById('f-docMornStart').value = '09:00';
@@ -6587,6 +7306,7 @@ window.editDoctor = function(id) {
     document.getElementById('f-docSpec').value = d.specialization || '';
     document.getElementById('f-docDept').value = d.department;
     document.getElementById('f-docFee').value = d.consultation_fee;
+    document.getElementById('f-docWhatsapp').value = d.whatsapp_phone || '';
 
     const hasMorn = Boolean(d.morning_start && d.morning_start !== '00:00' && d.morning_start !== '00:00:00');
     const hasEve = Boolean(d.evening_start && d.evening_start !== '00:00' && d.evening_start !== '00:00:00');
@@ -7941,6 +8661,8 @@ window.editTreatment = function (id) {
     if (lineSelEdit) lineSelEdit.value = t.service_line || '';
     document.getElementById('f-trtPrice').value = Math.round((t.price_from_paise || 0) / 100);
     document.getElementById('f-trtDuration').value = t.duration_minutes || '';
+    const sitEl = document.getElementById('f-trtSittings');
+    if (sitEl) { sitEl.value = t.default_sittings || ''; sitEl.dataset.had = t.default_sittings ? '1' : ''; }
     document.getElementById('f-trtConcerns').value = t.concerns || '';
     document.getElementById('f-trtDesc').value = t.description || '';
     document.getElementById('f-trtDescHi').value = t.description_hi || '';
@@ -8011,6 +8733,14 @@ async function submitTreatment() {
     // Only a clinic that sees the Section field sends it, so every other
     // clinic's save is byte-for-byte what it was before migration 082.
     if (treatmentSectionsOn()) payload.service_line = document.getElementById('f-trtLine').value || null;
+    // Dental only; sent when set, or when clearing a value that was set.
+    if (myDentalPlans) {
+        const sitEl = document.getElementById('f-trtSittings');
+        const sitRaw = sitEl.value.trim();
+        const sit = sitRaw ? parseInt(sitRaw, 10) : null;
+        if (sit !== null && (isNaN(sit) || sit < 1 || sit > 30)) { toast('Typical sittings must be 1 to 30', true); return; }
+        if (sit !== null || sitEl.dataset.had) payload.default_sittings = sit;
+    }
     const doctorIds = [...document.querySelectorAll('.trt-doc-cb:checked')].map(cb => cb.value);
 
     const btn = document.getElementById('btnSaveTreatment');
@@ -9624,10 +10354,13 @@ async function loadProfile() {
         document.getElementById('f-profileStaffPhone').value = data.hospital_staff_phone || '';
 
         document.getElementById('f-followupEnabled').checked = !!data.followup_enabled;
+        document.getElementById('f-checkinEnabled').checked = !!data.health_checkins_enabled;
+        document.getElementById('checkinSwitchLabel').textContent = data.health_checkins_enabled ? 'ON' : 'OFF';
         document.getElementById('f-followupDays').value = data.followup_days || 1;
         document.getElementById('f-followupMessage').value = data.followup_message || '';
         document.getElementById('f-followupTemplate').value = data.followup_message_template_name || '';
         updateFollowupCharCount();
+        renderFollowupState();
         loadAiUsage();
     } catch (e) {
         msg('profileMsg', 'Error loading profile: ' + e.message, true);
@@ -9643,6 +10376,49 @@ function updateFollowupCharCount() {
 document.addEventListener('input', e => {
     if (e.target && e.target.id === 'f-followupMessage') updateFollowupCharCount();
 });
+
+function renderFollowupState() {
+    const on = document.getElementById('f-followupEnabled').checked;
+    const days = parseInt(document.getElementById('f-followupDays').value, 10) || 1;
+    document.getElementById('followupSwitchLabel').textContent = on ? 'ON' : 'OFF';
+    const el = document.getElementById('followupState');
+    el.style.color = on ? '#10b981' : 'var(--text3)';
+    el.textContent = on
+        ? `Follow-ups are ON — patients get a message ${days === 1 ? 'the day after' : days + ' days after'} their visit.`
+        : 'Follow-ups are OFF — no follow-up messages are sent. Visits that fall due while off are not followed up later.';
+}
+
+// Saves ONLY followup_enabled (PUT /admin/profile merges key by key), so the
+// switch takes effect at once without touching the message, days or template.
+async function toggleFollowups(el) {
+    const want = el.checked;
+    el.disabled = true;
+    try {
+        await apiPut('/admin/profile', { followup_enabled: want });
+        toast(want ? 'Patient follow-ups turned ON' : 'Patient follow-ups turned OFF');
+    } catch (e) {
+        el.checked = !want;  // the server still has the old value
+        toast('Could not change follow-ups: ' + (e.message || 'please retry'), true);
+    } finally {
+        el.disabled = false;
+        renderFollowupState();
+    }
+}
+
+async function toggleHealthCheckins(el) {
+    const want = el.checked;
+    el.disabled = true;
+    try {
+        await apiPut('/admin/profile', { health_checkins_enabled: want });
+        toast(want ? 'Health check-ins turned ON' : 'Health check-ins turned OFF');
+    } catch (e) {
+        el.checked = !want;
+        toast('Could not change health check-ins: ' + (e.message || 'please retry'), true);
+    } finally {
+        el.disabled = false;
+        document.getElementById('checkinSwitchLabel').textContent = el.checked ? 'ON' : 'OFF';
+    }
+}
 
 async function saveFollowupSettings() {
     const days = parseInt(document.getElementById('f-followupDays').value, 10);
@@ -9665,6 +10441,7 @@ async function saveFollowupSettings() {
         msg('followupMsg', (message && !template)
             ? 'Saved — but with no template name set, the built-in follow-up is sent and your wording above is NOT delivered.'
             : 'Follow-up settings saved!');
+        renderFollowupState();
     } catch (e) {
         msg('followupMsg', 'Error: ' + e.message, true);
     }
@@ -10664,14 +11441,19 @@ async function fetchNotificationCount() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const badge = document.getElementById('notifBadge');
         const count = data.unread_count || 0;
-        if (count > 0) {
-            badge.innerText = count > 99 ? '99+' : count;
-            badge.style.display = 'inline-block';
-        } else {
-            badge.style.display = 'none';
-        }
+        // The sidebar (and its bell) is off-canvas on phones, so the menu
+        // button carries the same badge.
+        ['notifBadge', 'notifBadgeMobile'].forEach(id => {
+            const badge = document.getElementById(id);
+            if (!badge) return;
+            if (count > 0) {
+                badge.innerText = count > 99 ? '99+' : count;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        });
     } catch (e) {
         // Silently ignore background polling errors
     }
@@ -10694,7 +11476,7 @@ function closeNotifDrawer() {
 
 async function fetchNotificationsList() {
     const listEl = document.getElementById('notifList');
-    listEl.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text3); font-size:0.85rem;"><div class="spin"></div>Loading broadcasts...</div>';
+    listEl.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text3); font-size:0.85rem;"><div class="spin"></div>Loading notifications...</div>';
 
     try {
         const res = await fetch(API + withScope('/admin/notifications?limit=30'), {
@@ -10709,7 +11491,7 @@ async function fetchNotificationsList() {
         const notifications = data.notifications || [];
 
         if (notifications.length === 0) {
-            listEl.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text3); font-size:0.85rem;">No broadcast alerts at this time.</div>';
+            listEl.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text3); font-size:0.85rem;">No notifications right now.</div>';
             return;
         }
 
@@ -10728,6 +11510,7 @@ async function fetchNotificationsList() {
                         ${isUnread ? '<span style="background:var(--accent); color:#fff; font-size:0.65rem; font-weight:700; padding:1px 6px; border-radius:10px;">NEW</span>' : ''}
                     </div>
                     <p style="font-size:0.82rem; color:var(--text2); line-height:1.45; white-space:pre-wrap;">${esc(n.message)}</p>
+                    ${isSupportNotification(n) ? `<button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" data-id="${esc(n.id)}" data-unread="${isUnread ? '1' : ''}" onclick="openSupportFromNotification(this.dataset.id, this.dataset.unread)">Open messages</button>` : ''}
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; font-size:0.75rem; color:var(--text3);">
                         <span>${dateStr}</span>
                         ${isUnread ? `<button onclick="markNotificationRead('${n.id}')" style="background:none; border:none; color:var(--accent2); font-weight:600; cursor:pointer; font-size:0.75rem;">Mark as read</button>` : '<span style="color:var(--text3);">Read</span>'}
@@ -10739,6 +11522,31 @@ async function fetchNotificationsList() {
     } catch (e) {
         listEl.innerHTML = '<div style="text-align:center; padding:20px; color:var(--red); font-size:0.85rem;">Network error loading alerts.</div>';
     }
+}
+
+// Written by app/routers/platform.py:_notify_clinic_of_support_update.
+const SUPPORT_NOTIFICATION_PREFIX = 'Kriya Support';
+
+function isSupportNotification(n) {
+    return !n.broadcast_id && String(n.title || '').startsWith(SUPPORT_NOTIFICATION_PREFIX);
+}
+
+async function openSupportFromNotification(notifId, unread) {
+    closeNotifDrawer();
+    if (unread) {
+        try {
+            await fetch(API + withScope(`/admin/notifications/${encodeURIComponent(notifId)}/read`), {
+                method: 'PATCH', headers: authHeaders()
+            });
+        } catch (e) { /* the badge refresh below reconciles */ }
+        fetchNotificationCount();
+    }
+    if (!pageAvailable('data')) {
+        toast('Ask your clinic admin to open Data & Support → Messages to Kriya.');
+        return;
+    }
+    go('data', null);
+    setDataTab('support');
 }
 
 async function markNotificationRead(notifId) {

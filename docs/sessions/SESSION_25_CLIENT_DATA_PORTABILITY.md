@@ -55,6 +55,26 @@ patients should ever become WhatsApp-reachable, that needs an explicit opt-in fl
 - **Support messages:** max 20/clinic/day, 4,000 chars, escaped on render in both panels. Owner opening a
   message marks it seen; replying sets status `in_progress` unless chosen otherwise.
 
+## Round 2 — notifications and the follow-up switch
+
+- **Admin bell (existing, sidebar top):** when the owner replies to or changes the status of a message,
+  `platform._notify_clinic_of_support_update` inserts one clinic-wide `admin_notifications` row
+  (`admin_id` NULL — the shape payment/callback alerts already use). Titles start with `Kriya Support`; the
+  bell shows an **Open messages** button for those, which marks it read and opens Data & Support → Messages.
+  Opening a message in the owner panel (a body-less PATCH that only marks it seen) never notifies.
+  Notification failure is logged and never fails the reply. The drawer is now titled "Notifications";
+  on phones the menu button carries the unread badge and the drawer fits the screen.
+- **Owner bell (new, top bar):** unread badge from `GET /platform/support-messages/unread-count`
+  (`owner_seen_at IS NULL`), polled every 60 s, count also shown in the browser-tab title. The dropdown
+  lists unread then open messages; clicking one opens the reply modal (which marks it seen).
+- **Patient Follow-ups switch:** the checkbox became an ON/OFF switch in the card header that saves
+  immediately with `PUT /admin/profile {followup_enabled}` — the endpoint merges key by key, so the message,
+  days and template are untouched. On failure it flips back and says so. The flag was already read by the
+  scheduler at send time (`followup_config`), so OFF stops follow-ups from the next run, including ones
+  already due. Existing semantics, now stated in the UI: visits that fall due while OFF are not followed up
+  later. The switch change is recorded in the audit log (`followup_enabled` in `update_clinic_profile`).
+  No migration.
+
 ## Deploy order
 
 1. **Apply `migrations/088_client_data_and_support.sql` first.** It is purely additive and safe with the

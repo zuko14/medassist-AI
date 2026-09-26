@@ -33,6 +33,9 @@ PERMISSIONS = frozenset({
     # Create/edit/delete/publish treatments. Deliberately in no role preset: a
     # clinic_admin grants it per staff account.
     "TREATMENTS_MANAGE",
+    # Dental clinics only (migration 089): create treatment plans, book/cancel
+    # sittings, message patient/doctor. In no role preset: granted per account.
+    "DENTAL_PLANS_MANAGE",
 })
 
 STAFF_ROLES = frozenset({

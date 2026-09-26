@@ -2,6 +2,7 @@
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -70,6 +71,41 @@ def followup_config(clinic: dict) -> dict:
             cfg.get("followup_template_name")
             or settings.followup_template_name
             or TEMPLATES["followup_message"]["name"]
+        ).strip(),
+    }
+
+
+def clinic_callback_phone(clinic: dict) -> str:
+    """The number a patient should call back: front desk, then clinic phone,
+    then its WhatsApp number (same order the WhatsApp "contact" answer uses)."""
+    from app.services.tenant import get_clinic_contact
+
+    return get_clinic_contact(
+        clinic or {}, "staff_phone",
+        get_clinic_contact(clinic or {}, "phone",
+                           (clinic or {}).get("whatsapp_number") or settings.hospital_phone),
+    )
+
+
+#: A refused health check-in is retried on this many following days.
+HEALTH_CHECKIN_RETRY_DAYS = 2
+#: Quick-reply payloads on the health check-in template, in button order.
+#: conversation.TEMPLATE_BUTTON_PAYLOADS routes them to the existing handlers.
+HEALTH_CHECKIN_PAYLOADS = ("checkin_ok", "checkin_concern")
+
+
+def health_checkin_config(clinic: dict) -> dict:
+    """Is the day+3/+7 check-in on for this clinic, and which template to use."""
+    cfg = (clinic or {}).get("config") or {}
+    enabled = cfg.get("health_checkins_enabled")
+    if not isinstance(enabled, bool):
+        enabled = settings.health_checkins_enabled_default
+    return {
+        "enabled": enabled,
+        "template": (
+            cfg.get("health_checkin_template_name")
+            or settings.health_checkin_template_name
+            or TEMPLATES["health_checkin"]["name"]
         ).strip(),
     }
 
@@ -168,6 +204,39 @@ class SchedulerService:
             self.send_health_checkins,
             CronTrigger(hour=10, minute=30),
             id="health_checkins",
+            replace_existing=True,
+        )
+
+        # ── Dental treatment plans (dental plan only; no-op for every other clinic) ──
+        # 08:30 runs before the generic 09:00 reminder: a sitting reminded here
+        # has reminder_24h_sent set, so the generic job skips it; one this job
+        # could not send is still reminded generically at 09:00.
+        self.scheduler.add_job(
+            self.dental_patient_reminders,
+            CronTrigger(hour=8, minute=30),
+            id="dental_patient_reminders",
+            replace_existing=True,
+        )
+        # Tomorrow's schedule to each dentist. The 20:30 run only retries
+        # digests the 19:00 run could not send (exactly-once per doctor/day).
+        self.scheduler.add_job(
+            self.dental_doctor_digests,
+            CronTrigger(hour="19", minute=0),
+            id="dental_doctor_digests",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            self.dental_doctor_digests,
+            CronTrigger(hour="20", minute=30),
+            id="dental_doctor_digests_retry",
+            replace_existing=True,
+        )
+        # Post-sitting review requests (09:00-21:00 window enforced inside).
+        self.scheduler.add_job(
+            self.dental_review_requests,
+            "interval",
+            minutes=30,
+            id="dental_review_requests",
             replace_existing=True,
         )
 
@@ -367,6 +436,39 @@ class SchedulerService:
         """Shutdown the scheduler."""
         self.scheduler.shutdown()
         logger.info("Scheduler shutdown")
+
+    async def dental_patient_reminders(self):
+        from app.services import dental_plans
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("dental_patient_reminders", lease_seconds=600) as acquired:
+            if acquired:
+                try:
+                    await dental_plans.run_patient_reminders()
+                except Exception as e:
+                    logger.error(f"Dental patient reminders job failed: {e}")
+
+    async def dental_doctor_digests(self):
+        from app.services import dental_plans
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("dental_doctor_digests", lease_seconds=600) as acquired:
+            if acquired:
+                try:
+                    await dental_plans.run_doctor_digests()
+                except Exception as e:
+                    logger.error(f"Dental doctor digests job failed: {e}")
+
+    async def dental_review_requests(self):
+        from app.services import dental_plans
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("dental_review_requests", lease_seconds=600) as acquired:
+            if acquired:
+                try:
+                    await dental_plans.run_review_requests()
+                except Exception as e:
+                    logger.error(f"Dental review requests job failed: {e}")
 
     async def reap_abandoned_message_claims(self):
         """Release message claims abandoned by a worker that died mid-processing.
@@ -805,7 +907,7 @@ class SchedulerService:
 
                         first_name = (appt.get("patient_name") or "there").split()[0]
                         template, components = self._followup_template_and_components(
-                            cfg, first_name
+                            cfg, first_name, clinic_callback_phone(clinic)
                         )
 
                         sent = await whatsapp_service.send_template(
@@ -855,7 +957,7 @@ class SchedulerService:
             logger.error(f"Failed to mark followup_sent for {appointment_id}: {e}")
 
     @staticmethod
-    def _followup_template_and_components(cfg: dict, first_name: str):
+    def _followup_template_and_components(cfg: dict, first_name: str, phone: Optional[str] = None):
         """Pick the follow-up template and its body parameters.
 
         A follow-up always lands outside WhatsApp's 24h customer-service window,
@@ -888,35 +990,70 @@ class SchedulerService:
                 "template to deliver it."
             )
 
+        # The clinic's own number: settings.hospital_phone is ONE platform-wide
+        # value, which told every clinic's patients to call the same number.
         return cfg["template"], TEMPLATES["followup_message"]["components_builder"](
-            first_name, settings.hospital_phone
+            first_name, phone or settings.hospital_phone
         )
 
     async def send_health_checkins(self):
-        """Send day+3 and day+7 post-discharge health check-ins."""
+        """Day+3 and day+7 post-visit health check-ins (opt-in per clinic).
+
+        Fixed 2026-09-26 - the previous version could never deliver:
+          * it selected status='confirmed' visits 3/7 days old, but
+            auto_complete_appointments marks every past visit 'completed' at
+            00:30, so it matched nothing;
+          * it sent a free-form interactive message, which Meta refuses outside
+            the 24h window (day+3/+7 almost always is);
+          * it had no plan/feature gate and no clinic switch.
+
+        Now: visits actually seen (confirmed or completed), consultations only
+        (a lab booking has no doctor to ask about), dental plan sittings
+        excluded (they get their own review), 'reminders' plan feature + the
+        clinic's own opt-in, engagement opt-out respected, sent as an approved
+        template with the two quick replies (in-window interactive fallback),
+        and retried for 2 more days when Meta refuses a send.
+        """
         from app.services.distributed_lock import distributed_job_lock
+        from app.services.tenant import has_feature
+
         async with distributed_job_lock("health_checkins", lease_seconds=300) as acquired:
             if not acquired:
                 return
+            today = _today_local()
             for offset_days, flag_field in [(3, "health_checkin_3d_sent"), (7, "health_checkin_7d_sent")]:
                 try:
-                    target_date = (datetime.now() - timedelta(days=offset_days)).strftime("%Y-%m-%d")
+                    newest = today - timedelta(days=offset_days)
+                    oldest = newest - timedelta(days=HEALTH_CHECKIN_RETRY_DAYS)
 
                     appointments = (
                         # unscoped: platform_sweep
                         await sb(supabase.table("appointments")
                         .select("*")
-                        .eq("appointment_date", target_date)
-                        .eq("status", "confirmed")
-                        .eq(flag_field, False))
+                        .gte("appointment_date", oldest.isoformat())
+                        .lte("appointment_date", newest.isoformat())
+                        .in_("status", ["confirmed", "completed"])
+                        .eq("booking_type", "consultation")
+                        .eq(flag_field, False)
+                        .limit(2000))
                     )
 
-                    for appt in appointments.data:
+                    for appt in appointments.data or []:
                         try:
-                            clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
-                            if not automated_outbound_allowed(clinic):
+                            if appt.get("treatment_plan_id"):
+                                # Dental sitting: the post-sitting review covers it.
+                                await self._burn_checkin(appt["id"], flag_field)
                                 continue
-                            lang = "en"
+
+                            clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
+                            if not clinic or not has_feature(clinic, "reminders"):
+                                continue  # not burned: an upgrade picks it up
+                            if not automated_outbound_allowed(clinic):
+                                continue  # suspended: retried after renewal
+                            if not health_checkin_config(clinic)["enabled"]:
+                                # Switched off: never send it later on switch-on.
+                                await self._burn_checkin(appt["id"], flag_field)
+                                continue
 
                             from app.services.consent import consent_service
 
@@ -925,57 +1062,27 @@ class SchedulerService:
                             ):
                                 logger.info(
                                     f"Skipping day+{offset_days} health check-in for "
-                                    f"appointment {appt['id']} — patient has opted out "
+                                    f"appointment {appt['id']} - patient has opted out "
                                     f"of engagement messages"
                                 )
-                                # unscoped: unique_row_key
-                                await sb(supabase.table("appointments").update(
-                                    {flag_field: True}
-                                ).eq("id", appt["id"]))
+                                await self._burn_checkin(appt["id"], flag_field)
                                 continue
 
-                            from app.templates.whatsapp_templates import get_message
-
-                            first_name = (appt.get("patient_name") or "there").split()[0]
-                            text = get_message(
-                                "health_checkin",
-                                lang,
-                                name=first_name,
-                                doctor=appt.get("doctor_name", ""),
-                            )
-
-                            sent = await whatsapp_service.send_interactive_buttons(
-                                clinic,
-                                appt["patient_phone"],
-                                body=text,
-                                buttons=[
-                                    {"id": "checkin_ok", "title": "Feeling fine"},
-                                    {"id": "checkin_concern", "title": "Still have symptoms"},
-                                ],
-                                _source="follow_up",
-                            )
-
+                            sent = await self._send_health_checkin(clinic, appt)
                             if not sent:
-                                # An interactive message is freeform, so Meta
-                                # refuses it outside the 24h customer-service
-                                # window — which, day+3 and day+7 after a visit,
-                                # is nearly always. Marking the flag anyway (the
-                                # previous behaviour) burned the check-in on a
-                                # send that never happened. Leave it unset so it
-                                # lands if the patient writes in, and say plainly
-                                # in the log why nothing went out.
+                                # Left unset: tomorrow's run retries while the
+                                # visit is inside the retry window.
                                 logger.warning(
                                     f"Day+{offset_days} health check-in NOT delivered for "
-                                    f"appointment {appt['id']} — patient is outside the 24h "
-                                    f"window and this check-in has no approved template"
+                                    f"appointment {appt['id']} - template "
+                                    f"'{health_checkin_config(clinic)['template']}' refused and the "
+                                    f"patient is outside the 24h window; retrying tomorrow"
                                 )
                                 continue
 
                             # unscoped: unique_row_key
-                            await sb(supabase.table("appointments").update({flag_field: True}).eq(
-                                "id", appt["id"]
-                            ))
-
+                            await sb(supabase.table("appointments").update({flag_field: True})
+                                     .eq("id", appt["id"]).eq(flag_field, False))
                             logger.info(
                                 f"Sent day+{offset_days} health check-in for appointment {appt['id']}"
                             )
@@ -984,6 +1091,49 @@ class SchedulerService:
 
                 except Exception as e:
                     logger.error(f"Error in health check-in job (day+{offset_days}): {e}")
+
+    @staticmethod
+    async def _burn_checkin(appointment_id: str, flag_field: str) -> None:
+        # unscoped: unique_row_key
+        await sb(supabase.table("appointments").update({flag_field: True}).eq("id", appointment_id))
+
+    @staticmethod
+    async def _send_health_checkin(clinic: dict, appt: dict) -> bool:
+        """Approved template first (works outside the 24h window); the old
+        interactive message only as an in-window fallback."""
+        from app.services.lab_reports import flatten_for_template_param
+        from app.templates.whatsapp_templates import get_message
+
+        first_name = ((appt.get("patient_name") or "there").split() or ["there"])[0]
+        doctor = (appt.get("doctor_name") or "").strip()
+        doctor_label = doctor if doctor.lower().startswith("dr") else (f"Dr. {doctor}" if doctor else "your doctor")
+        components = [
+            {"type": "body", "parameters": [
+                {"type": "text", "text": flatten_for_template_param(first_name, 60) or "there"},
+                {"type": "text", "text": flatten_for_template_param(doctor_label, 80) or "your doctor"},
+            ]},
+        ]
+        for idx, payload in enumerate(HEALTH_CHECKIN_PAYLOADS):
+            components.append({"type": "button", "sub_type": "quick_reply", "index": str(idx),
+                               "parameters": [{"type": "payload", "payload": payload}]})
+
+        if await whatsapp_service.send_template(
+            clinic, appt["patient_phone"], health_checkin_config(clinic)["template"],
+            components=components, _source="follow_up",
+        ):
+            return True
+
+        text = get_message("health_checkin", "en", name=first_name, doctor=doctor)
+        return bool(await whatsapp_service.send_interactive_buttons(
+            clinic,
+            appt["patient_phone"],
+            body=text,
+            buttons=[
+                {"id": "checkin_ok", "title": "Feeling fine"},
+                {"id": "checkin_concern", "title": "Still have symptoms"},
+            ],
+            _source="follow_up",
+        ))
 
     async def check_doctor_leaves(self):
         """Check for doctor leaves and notify affected patients."""

@@ -385,6 +385,7 @@ async def finance_summary(month: Optional[str] = None) -> dict:
     from app.routers.platform import _billable_locations, _fetch_clinic_branch_counts
     from app.services.message_accounting import _get_plan_tiers
     from app.services.client_data import storage_addon_paise
+    from app.services.dental_plans import messaging_addon_paise
 
     month = month or current_month()
     if not is_valid_month(month):
@@ -431,6 +432,7 @@ async def finance_summary(month: Optional[str] = None) -> dict:
         revenue = (
             invoice_amount_paise(rate["rate_paise"], rate["billing_mode"], locations)
             + storage_addon_paise(c.get("config"))
+            + (messaging_addon_paise(c.get("config")) if plan == "dental" else 0)
             if active else 0
         )
         meta = meta_costs.get(cid, 0)

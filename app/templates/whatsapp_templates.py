@@ -138,6 +138,16 @@ TEMPLATES = {
             }
         ],
     },
+    # Day+3 / day+7 health check-in (scheduler.send_health_checkins). The two
+    # quick-reply buttons carry payloads checkin_ok / checkin_concern, set per
+    # send, which conversation.py routes to the existing check-in handlers.
+    "health_checkin": {
+        "name": "patient_health_checkin",
+        "language": "en",
+        "category": "UTILITY",
+        "body": "Hello {{1}}, it has been a few days since your visit with {{2}}. How are you feeling now? Please tap an option below.",
+        "buttons": ["Feeling fine", "Still have symptoms"],
+    },
     "appointment_cancelled_doctor_leave": {
         "name": "appointment_cancelled_doctor_leave",
         "language": "en",

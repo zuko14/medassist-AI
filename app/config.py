@@ -212,6 +212,13 @@ class Settings(BaseSettings):
     # delivered and the built-in post_appointment_followup is used instead.
     followup_template_name: str = "post_appointment_followup"
     followup_message_template_name: str = ""
+    # Day+3 / day+7 health check-ins. OFF by default: they never delivered
+    # before this fix, so switching them on for every live clinic at deploy
+    # would be a new patient-facing message nobody chose. A clinic opts in from
+    # Hospital Profile -> Patient Follow-ups. The template needs 2 body
+    # variables ({{1}} first name, {{2}} doctor) and two quick-reply buttons.
+    health_checkins_enabled_default: bool = False
+    health_checkin_template_name: str = "patient_health_checkin"
     admin_alert_template_name: str = ""  # Meta utility template (1 body var) for connector alerts outside 24h window
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

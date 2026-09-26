@@ -181,18 +181,24 @@ async def test_plan_upgrade_does_not_lose_pending_followups():
 
 
 async def _run_checkins(opted_in):
+    # Self-returning builder: the sweep's filters changed when the job was
+    # fixed (date window, status in [...], booking_type); not asserted here.
+    q = MagicMock()
+    for m in ("select", "eq", "gte", "lte", "in_", "limit", "update"):
+        getattr(q, m).return_value = q
+    q.execute.return_value = MagicMock(
+        data=[_appt(status="completed", doctor_name="Dr. Rao", booking_type="consultation")])
     db = MagicMock()
-    table = MagicMock()
-    (table.select.return_value.eq.return_value.eq.return_value
-        .eq.return_value.execute.return_value) = MagicMock(
-            data=[_appt(status="confirmed", doctor_name="Dr. Rao")])
-    db.table.return_value = table
+    db.table.return_value = q
     send = AsyncMock(return_value=True)
+    # Health check-ins are opt-in per clinic (off by default) and delivered
+    # as a template.
+    clinic = {**CLINIC, "config": {"health_checkins_enabled": True}}
 
     with patch("app.services.distributed_lock.distributed_job_lock", _lock_granted), \
          patch("app.services.scheduler.supabase", db), \
-         patch("app.services.scheduler.whatsapp_service.send_interactive_buttons", send), \
-         patch("app.services.scheduler.get_clinic_by_id", AsyncMock(return_value=CLINIC)), \
+         patch("app.services.scheduler.whatsapp_service.send_template", send), \
+         patch("app.services.scheduler.get_clinic_by_id", AsyncMock(return_value=clinic)), \
          patch("app.services.consent.get_patient_by_phone",
                AsyncMock(return_value={"opted_in": opted_in})):
         await SchedulerService().send_health_checkins()

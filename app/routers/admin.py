@@ -50,6 +50,7 @@ from app.services.tenant import (
     SPECIALTY_BY_PLAN,
     cancellation_window_hours,
     get_clinic_by_id,
+    dental_plans_enabled,
     has_feature,
     invalidate_tenant_cache,
     require_feature,
@@ -729,6 +730,7 @@ async def get_current_admin(
             "features": None,
             "specialty": None,
             "specialty_enabled": False,
+            "dental_plans_enabled": False,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -746,6 +748,8 @@ async def get_current_admin(
         # from features[] (the enterprise wildcard lists every feature).
         "specialty": SPECIALTY_BY_PLAN.get(plan),
         "specialty_enabled": specialty_enabled(clinic),
+        # Dental clinics only (migration 089): shows the Treatment Plans page.
+        "dental_plans_enabled": dental_plans_enabled(clinic),
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.
@@ -1332,6 +1336,16 @@ class LeaveCreate(BaseModel):
     reason: Optional[str] = None
 
 
+def _clean_doctor_whatsapp(v: Optional[str]) -> Optional[str]:
+    """'' / None -> None; otherwise a normalised, validated +91... number."""
+    if v is None or not str(v).strip():
+        return None
+    p = normalize_phone(re.sub(r"[^\d+]", "", str(v)))
+    if not re.fullmatch(r"\+?\d{10,15}", p) or not validate_phone(p):
+        raise ValueError("Enter a valid WhatsApp number, e.g. 9876543210")
+    return p
+
+
 class DoctorCreate(BaseModel):
     name: str
     specialization: str
@@ -1348,6 +1362,13 @@ class DoctorCreate(BaseModel):
     slot_duration_minutes: int = 30
     branch_id: Optional[str] = None
     branch_session: Literal["morning", "evening", "both"] = "both"
+    # Dental clinics (migration 089): where sitting reminders are sent.
+    whatsapp_phone: Optional[str] = None
+
+    @field_validator("whatsapp_phone")
+    @classmethod
+    def _v_whatsapp_phone(cls, v: Optional[str]) -> Optional[str]:
+        return _clean_doctor_whatsapp(v)
 
 
 class DoctorUpdate(BaseModel):
@@ -1366,6 +1387,13 @@ class DoctorUpdate(BaseModel):
     slot_duration_minutes: Optional[int] = None
     branch_id: Optional[str] = None
     branch_session: Optional[Literal["morning", "evening", "both"]] = None
+    # "" clears it; omitted leaves it alone.
+    whatsapp_phone: Optional[str] = None
+
+    @field_validator("whatsapp_phone")
+    @classmethod
+    def _v_whatsapp_phone(cls, v: Optional[str]) -> Optional[str]:
+        return _clean_doctor_whatsapp(v)
 
 
 #: Matches the CHECK added by migration 080. A heading longer than this is a
@@ -1573,6 +1601,8 @@ class ClinicProfileUpdate(BaseModel):
     followup_days: Optional[int] = Field(default=None, ge=1, le=30)
     followup_message: Optional[str] = None
     followup_message_template_name: Optional[str] = None
+    # Day+3 / day+7 health check-ins (opt-in; see scheduler.send_health_checkins)
+    health_checkins_enabled: Optional[bool] = None
 
     @field_validator("name")
     @classmethod
@@ -2136,6 +2166,9 @@ async def create_doctor(
             doctor_data.pop("branch_id", None)
             doctor_data.pop("branch_session", None)
 
+        # Only sent when set, so creating a doctor never depends on migration 089.
+        if not doctor_data.get("whatsapp_phone"):
+            doctor_data.pop("whatsapp_phone", None)
         doctor_data = _apply_slot_config(doctor_data)
         _reject_empty_branch_session(doctor_data, requested_branch_session)
         doctor_data["clinic_id"] = effective_clinic_id
@@ -2771,6 +2804,8 @@ class TreatmentCreate(BaseModel):
     display_order: int = Field(default=0, ge=0, le=10_000)
     care_pathway: str = "direct"
     service_line: Optional[str] = None
+    # Dental (migration 089): typical sittings, pre-fills a new treatment plan.
+    default_sittings: Optional[int] = Field(default=None, ge=1, le=30)
 
     _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
     _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
@@ -2794,6 +2829,7 @@ class TreatmentUpdate(BaseModel):
     care_pathway: Optional[str] = None
     # Sent as "" or null to clear; omitted to leave alone.
     service_line: Optional[str] = None
+    default_sittings: Optional[int] = Field(default=None, ge=1, le=30)
 
     _v_required = field_validator("name", "category")(classmethod(lambda cls, v: _strip_required(v)))
     _v_optional = field_validator(*_TREATMENT_TEXT_FIELDS)(classmethod(lambda cls, v: _strip_optional(v)))
@@ -2899,6 +2935,9 @@ def _treatment_row(body: BaseModel, partial: bool) -> dict:
     # 082, so creating a treatment never depends on the new column.
     if not partial and data.get("service_line") is None:
         data.pop("service_line", None)
+    # Same for migration 089's default_sittings.
+    if not partial and data.get("default_sittings") is None:
+        data.pop("default_sittings", None)
     return data
 
 
@@ -5767,6 +5806,11 @@ async def get_clinic_profile(
             else settings.followup_enabled_default
         ),
         "followup_days": cfg.get("followup_days") or settings.followup_days_after_visit,
+        "health_checkins_enabled": (
+            cfg["health_checkins_enabled"]
+            if isinstance(cfg.get("health_checkins_enabled"), bool)
+            else settings.health_checkins_enabled_default
+        ),
         "followup_message": cfg.get("followup_message") or "",
         "followup_message_template_name": (
             cfg.get("followup_message_template_name")
@@ -5817,6 +5861,8 @@ async def update_clinic_profile(
     # per-clinic override (e.g. lab_report_template_name).
     if "followup_enabled" in updates and updates["followup_enabled"] is not None:
         cfg["followup_enabled"] = bool(updates["followup_enabled"])
+    if "health_checkins_enabled" in updates and updates["health_checkins_enabled"] is not None:
+        cfg["health_checkins_enabled"] = bool(updates["health_checkins_enabled"])
     if "followup_days" in updates and updates["followup_days"] is not None:
         cfg["followup_days"] = int(updates["followup_days"])
     if "followup_message" in updates and updates["followup_message"] is not None:
@@ -5859,6 +5905,9 @@ async def update_clinic_profile(
             "address_set": bool(cfg.get("address")),
             "maps_link_set": bool(cfg.get("maps_link")),
             "emergency_number_set": bool(cfg.get("emergency_number")),
+            # Who switched patient follow-ups on/off, and when, must be traceable.
+            "followup_enabled": cfg.get("followup_enabled"),
+            "health_checkins_enabled": cfg.get("health_checkins_enabled"),
         },
         ip_address=client_ip,
     )
@@ -8009,6 +8058,17 @@ async def get_subscription_status(
             )
         except Exception as e:
             logger.warning(f"Data storage quota unavailable for clinic={effective_clinic_id}: {e}")
+        # Dental clinics only: this month's dental WhatsApp message usage for
+        # the same strip (90 % / 100 % banner). Same fail-quiet contract.
+        if dental_plans_enabled(clinic):
+            try:
+                from app.services import dental_plans as _dp
+
+                status_payload["dental_messaging"] = await _dp.usage(
+                    effective_clinic_id, (clinic or {}).get("config")
+                )
+            except Exception as e:
+                logger.warning(f"Dental messaging usage unavailable for clinic={effective_clinic_id}: {e}")
         return {"success": True, "clinic_id": effective_clinic_id, **status_payload}
     except HTTPException:
         raise
@@ -8023,10 +8083,6 @@ async def get_subscription_status(
 # ONE clinic through enforce_clinic_access and every query carries it.
 # Imported rows go to patient_records, never patients — see
 # app/services/client_data.py for why that separation is load-bearing.
-
-
-def _client_ip(request: Optional[Request]) -> str:
-    return request.client.host if request is not None and request.client else "unknown"
 
 
 @router.get("/data/storage")
@@ -8366,3 +8422,635 @@ async def create_support_message(
         ip_address=_client_ip(request),
     )
     return {"success": True, "message": row}
+
+
+
+# ═══════ DENTAL TREATMENT PLANS (dental plan only, migration 089) ═══════
+# A dental course (Root Canal, implant, aligners...) is several sittings, each
+# fixed by the front desk after the dentist has seen the patient, often with a
+# different dentist. Every sitting is an appointments row booked through
+# book_appointment() from get_available_slots(), so slot protection, leave and
+# holiday rules apply unchanged. See app/services/dental_plans.py.
+#
+# Access: clinic_admin/super_admin always; staff only with DENTAL_PLANS_MANAGE.
+# Every route first proves the clinic is a dental clinic with the feature on.
+
+from app.services import dental_plans  # noqa: E402
+
+_DENTAL = require_permission("DENTAL_PLANS_MANAGE")
+
+
+async def _dental_clinic(user: AdminUser, clinic_id: str) -> dict:
+    effective = enforce_clinic_access(user, clinic_id)
+    clinic = await get_clinic_by_id(effective)
+    if not clinic or not dental_plans_enabled(clinic):
+        raise HTTPException(status_code=403, detail="Treatment plans are available for dental clinics only.")
+    return clinic
+
+
+def _dental_error(e: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(e))
+
+
+def _clean_patient_phone(v: str) -> str:
+    p = normalize_phone(re.sub(r"[^\d+]", "", str(v or "")))
+    if not re.fullmatch(r"\+?\d{10,15}", p) or not validate_phone(p):
+        raise ValueError("Enter a valid mobile number, e.g. 9876543210")
+    return p
+
+
+def _rupees_to_paise(v: Optional[float]) -> Optional[int]:
+    return None if v is None else int(round(v * 100))
+
+
+_GOOGLE_LINK_RE = re.compile(r"https://\S{4,295}")
+
+
+class DentalFirstSitting(BaseModel):
+    doctor_id: str
+    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    time: str = Field(..., pattern=r"^\d{2}:\d{2}(:\d{2})?$")
+    send_patient: bool = True
+    notify_doctor: bool = True
+
+
+class DentalPlanCreate(BaseModel):
+    patient_phone: str
+    patient_name: str = Field(..., min_length=1, max_length=100)
+    treatment_id: Optional[str] = None
+    treatment_name: Optional[str] = Field(None, max_length=120)
+    tooth_numbers: Optional[str] = Field(None, max_length=60)
+    planned_sittings: Optional[int] = Field(None, ge=1, le=30)
+    quoted_amount_rupees: Optional[float] = Field(None, ge=0, le=10_000_000)
+    notes: Optional[str] = Field(None, max_length=2000)
+    whatsapp_consent: bool = False
+    notify_patient: bool = True
+    notify_doctor: bool = True
+    patient_record_id: Optional[str] = None
+    source_appointment_id: Optional[str] = None
+    first_sitting: Optional[DentalFirstSitting] = None
+    # Multi-branch clinics (migration 090). Ignored for staff pinned to a
+    # branch: their plans always belong to their own branch.
+    branch_id: Optional[str] = None
+
+    @field_validator("patient_phone")
+    @classmethod
+    def _v_phone(cls, v: str) -> str:
+        return _clean_patient_phone(v)
+
+    @field_validator("patient_name", "treatment_name", "tooth_numbers", "notes")
+    @classmethod
+    def _v_strip(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if isinstance(v, str) else v
+
+
+class DentalPlanUpdate(BaseModel):
+    planned_sittings: Optional[int] = Field(None, ge=1, le=30)
+    tooth_numbers: Optional[str] = Field(None, max_length=60)
+    quoted_amount_rupees: Optional[float] = Field(None, ge=0, le=10_000_000)
+    notes: Optional[str] = Field(None, max_length=2000)
+    status: Optional[Literal["active", "completed", "cancelled"]] = None
+    whatsapp_consent: Optional[bool] = None
+    notify_patient: Optional[bool] = None
+    notify_doctor: Optional[bool] = None
+
+
+class DentalSittingCreate(DentalFirstSitting):
+    sitting_number: Optional[int] = Field(None, ge=1, le=30)
+
+
+class DentalSittingComplete(BaseModel):
+    notes: Optional[str] = Field(None, max_length=2000)
+    amount_collected_rupees: Optional[float] = Field(None, ge=0, le=10_000_000)
+
+
+class DentalNotify(BaseModel):
+    target: Literal["patient", "doctor"]
+
+
+class DentalSettingsUpdate(BaseModel):
+    dental_review_enabled: Optional[bool] = None
+    dental_doctor_digest_enabled: Optional[bool] = None
+    dental_google_review_link: Optional[str] = Field(None, max_length=300)
+
+    @field_validator("dental_google_review_link")
+    @classmethod
+    def _v_link(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if v and not _GOOGLE_LINK_RE.fullmatch(v):
+            raise ValueError("Enter a full https:// link, e.g. your Google review link.")
+        return v
+
+
+async def _book_and_notify(clinic: dict, plan: dict, body: DentalFirstSitting,
+                           sitting_number: Optional[int] = None) -> dict:
+    if not is_uuid(body.doctor_id):
+        raise HTTPException(status_code=400, detail="Choose a doctor.")
+    doctor = await dental_plans.get_doctor(clinic["id"], body.doctor_id)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found.")
+    try:
+        appt = await dental_plans.schedule_sitting(clinic, plan, doctor, body.date, body.time, sitting_number)
+    except dental_plans.DentalError as e:
+        raise _dental_error(e)
+    notified = {"patient": False, "doctor": False}
+    if body.send_patient:
+        notified["patient"] = await dental_plans.send_patient_confirmation(clinic, plan, appt)
+    if body.notify_doctor:
+        notified["doctor"] = await dental_plans.send_doctor_sitting(clinic, plan, appt, doctor)
+    return {"sitting": appt, "notified": notified}
+
+
+async def _plan_or_404(clinic_id: str, plan_id: str, user: AdminUser) -> dict:
+    """Branch rule (migration 090), same as appointments: staff pinned to a
+    branch reach their branch's plans and branch-less (clinic-wide) plans only."""
+    if not is_uuid(plan_id):
+        raise HTTPException(status_code=400, detail="Invalid plan id.")
+    plan = await dental_plans.get_plan(clinic_id, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Treatment plan not found.")
+    enforce_branch_scope(user, plan.get("branch_id"))
+    return plan
+
+
+async def _sitting_or_404(clinic_id: str, appointment_id: str, user: AdminUser) -> dict:
+    if not is_uuid(appointment_id):
+        raise HTTPException(status_code=400, detail="Invalid sitting id.")
+    appt = await dental_plans.get_sitting(clinic_id, appointment_id)
+    if not appt:
+        raise HTTPException(status_code=404, detail="Sitting not found.")
+    enforce_branch_scope(user, appt.get("branch_id"))
+    return appt
+
+
+@router.get("/dental/overview")
+async def dental_overview(clinic_id: str = "default", user: AdminUser = Depends(_DENTAL)):
+    """Header numbers for the Treatment Plans page + this month's message usage."""
+    clinic = await _dental_clinic(user, clinic_id)
+    cid = clinic["id"]
+    today = dental_plans.ist_now().date()
+    pinned = _staff_branch(user)
+    active = await sb(restrict_to_branch(
+        supabase.table("dental_treatment_plans").select("id", count="exact")
+        .eq("clinic_id", cid).eq("status", "active"), pinned).limit(1))
+    upcoming = await sb(restrict_to_branch(
+        supabase.table("appointments").select("appointment_date")
+        .eq("clinic_id", cid).not_.is_("treatment_plan_id", "null")
+        .eq("status", "confirmed")
+        .gte("appointment_date", today.isoformat())
+        .lte("appointment_date", (today + timedelta(days=1)).isoformat()), pinned).limit(2000))
+    rated = await sb(restrict_to_branch(
+        supabase.table("appointments").select("review_rating")
+        .eq("clinic_id", cid).not_.is_("review_rating", "null")
+        .gte("review_received_at", (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()),
+        pinned).limit(2000))
+    days = [r["appointment_date"] for r in (upcoming.data or [])]
+    ratings = [r["review_rating"] for r in (rated.data or [])]
+    return {
+        "success": True,
+        "active_plans": active.count or 0,
+        "sittings_today": days.count(today.isoformat()),
+        "sittings_tomorrow": days.count((today + timedelta(days=1)).isoformat()),
+        "reviews_30d": {
+            "count": len(ratings),
+            "excellent": ratings.count(3), "good": ratings.count(2), "needs_improvement": ratings.count(1),
+        },
+        "messaging": await dental_plans.usage(cid, clinic.get("config")),
+        "settings": dental_plans.dental_settings(clinic.get("config")),
+        "can_edit_settings": user.role in ("clinic_admin", "super_admin"),
+    }
+
+
+@router.get("/dental/plans")
+async def list_dental_plans(
+    status_filter: Optional[Literal["active", "completed", "cancelled"]] = Query(None, alias="status"),
+    q: Optional[str] = Query(None, max_length=100),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=100_000),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    from app.services.analytics import _SEARCH_PHONE_RE, _SEARCH_SPLIT_RE
+
+    clinic = await _dental_clinic(user, clinic_id)
+    query = restrict_to_branch(
+        supabase.table("dental_treatment_plans").select("*", count="exact").eq("clinic_id", clinic["id"]),
+        _staff_branch(user),
+    )
+    if status_filter:
+        query = query.eq("status", status_filter)
+    tokens = [t for t in _SEARCH_SPLIT_RE.split(q or "") if t]
+    if sum(len(t) for t in tokens) >= 2:
+        pattern = "*" + "*".join(tokens) + "*"
+        clauses = [f"patient_name.ilike.{pattern}", f"treatment_name.ilike.{pattern}"]
+        if _SEARCH_PHONE_RE.fullmatch((q or "").strip()):
+            digits = re.sub(r"\D", "", q or "")[-10:]
+            if len(digits) >= 3:
+                clauses.append(f"patient_phone.ilike.*{digits}*")
+        query = query.or_(",".join(clauses))
+    res = await sb(query.order("updated_at", desc=True).order("id").range(offset, offset + limit - 1))
+    plans = res.data or []
+    sittings_by_plan: dict = {}
+    if plans:
+        rows = (await sb(supabase.table("appointments")
+                         .select("id, treatment_plan_id, sitting_number, status, appointment_date, "
+                                 "appointment_time, doctor_name, amount_collected_paise, review_rating")
+                         .eq("clinic_id", clinic["id"]).in_("treatment_plan_id", [p["id"] for p in plans])
+                         .limit(5000))).data or []
+        for r in rows:
+            sittings_by_plan.setdefault(r["treatment_plan_id"], []).append(r)
+    return {
+        "success": True,
+        "total": res.count or 0,
+        "plans": [{**p, "summary": dental_plans.summarize(p, sittings_by_plan.get(p["id"], []))} for p in plans],
+    }
+
+
+@router.post("/dental/plans")
+async def create_dental_plan(
+    body: DentalPlanCreate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    clinic = await _dental_clinic(user, clinic_id)
+    cid = clinic["id"]
+
+    treatment = None
+    if body.treatment_id:
+        if not is_uuid(body.treatment_id):
+            raise HTTPException(status_code=400, detail="Invalid treatment.")
+        t = await sb(supabase.table("specialty_treatments").select("*")
+                     .eq("clinic_id", cid).eq("id", body.treatment_id).limit(1))
+        treatment = (t.data or [None])[0]
+        if not treatment:
+            raise HTTPException(status_code=404, detail="Treatment not found.")
+    treatment_name = (treatment or {}).get("name") or body.treatment_name
+    if not treatment_name:
+        raise HTTPException(status_code=400, detail="Choose a treatment or type its name.")
+    planned = body.planned_sittings or (treatment or {}).get("default_sittings") or 1
+
+    patient_record_id = None
+    if body.patient_record_id:
+        if not is_uuid(body.patient_record_id):
+            raise HTTPException(status_code=400, detail="Invalid patient record.")
+        rec = await sb(supabase.table("patient_records").select("id")
+                       .eq("clinic_id", cid).eq("id", body.patient_record_id).limit(1))
+        patient_record_id = body.patient_record_id if rec.data else None
+
+    branch_id = _staff_branch(user)
+    if not branch_id and body.branch_id:
+        branch_id = str((await resolve_owned_branch(user, body.branch_id, cid))["id"])
+
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "clinic_id": cid,
+        "patient_phone": body.patient_phone,
+        "patient_name": body.patient_name,
+        "patient_record_id": patient_record_id,
+        "treatment_id": (treatment or {}).get("id"),
+        "treatment_name": treatment_name,
+        "tooth_numbers": body.tooth_numbers or None,
+        "planned_sittings": planned,
+        "quoted_amount_paise": _rupees_to_paise(body.quoted_amount_rupees),
+        "notes": body.notes or None,
+        "whatsapp_consent": body.whatsapp_consent,
+        "whatsapp_consent_at": now if body.whatsapp_consent else None,
+        "consent_recorded_by": user.username if body.whatsapp_consent else None,
+        "notify_patient": body.notify_patient,
+        "notify_doctor": body.notify_doctor,
+        "created_by": user.username,
+    }
+    if branch_id:
+        row["branch_id"] = branch_id  # only sent when set (pre-090 safe)
+    # unscoped: insert_scoped_by_payload
+    plan = (await sb(supabase.table("dental_treatment_plans").insert(row))).data[0]
+
+    result: dict = {"success": True, "plan": plan}
+    try:
+        if body.source_appointment_id:
+            if not is_uuid(body.source_appointment_id):
+                raise dental_plans.DentalError("Invalid booking.")
+            await _enforce_booking_branch(user, cid, body.source_appointment_id)
+            result["linked_sitting"] = await dental_plans.link_existing_appointment(
+                cid, plan, body.source_appointment_id)
+        if body.first_sitting:
+            result.update(await _book_and_notify(clinic, plan, body.first_sitting))
+    except (dental_plans.DentalError, HTTPException) as e:
+        # The plan is kept (it is the course itself); tell the desk what failed.
+        result["warning"] = str(getattr(e, "detail", e))
+
+    await log_admin_action(
+        user=user, action="DENTAL_PLAN_CREATE", resource_type="dental_treatment_plan",
+        resource_id=plan["id"],
+        details={"clinic_id": cid, "treatment": treatment_name, "planned_sittings": planned,
+                 "whatsapp_consent": body.whatsapp_consent},
+        ip_address=_client_ip(request),
+    )
+    return result
+
+
+@router.get("/dental/plans/{plan_id}")
+async def get_dental_plan(plan_id: str, clinic_id: str = "default", user: AdminUser = Depends(_DENTAL)):
+    clinic = await _dental_clinic(user, clinic_id)
+    plan = await _plan_or_404(clinic["id"], plan_id, user)
+    sittings = await dental_plans.plan_sittings(clinic["id"], plan_id)
+    return {
+        "success": True,
+        "plan": plan,
+        "sittings": sittings,
+        "summary": dental_plans.summarize(plan, sittings),
+        "patient_messageable": await dental_plans.patient_messageable(clinic["id"], plan),
+    }
+
+
+@router.patch("/dental/plans/{plan_id}")
+async def update_dental_plan(
+    plan_id: str,
+    body: DentalPlanUpdate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    clinic = await _dental_clinic(user, clinic_id)
+    plan = await _plan_or_404(clinic["id"], plan_id, user)
+    fields = body.model_dump(exclude_unset=True)
+    update: dict = {}
+    for k in ("planned_sittings", "notify_patient", "notify_doctor"):
+        if fields.get(k) is not None:
+            update[k] = fields[k]
+    for k in ("tooth_numbers", "notes"):
+        if k in fields:
+            update[k] = (fields[k] or "").strip() or None
+    if "quoted_amount_rupees" in fields:
+        update["quoted_amount_paise"] = _rupees_to_paise(fields["quoted_amount_rupees"])
+    if fields.get("whatsapp_consent") is not None:
+        granted = fields["whatsapp_consent"]
+        update["whatsapp_consent"] = granted
+        update["whatsapp_consent_at"] = datetime.now(timezone.utc).isoformat() if granted else None
+        update["consent_recorded_by"] = user.username if granted else None
+    if fields.get("status"):
+        update["status"] = fields["status"]
+        update["completed_at"] = (datetime.now(timezone.utc).isoformat()
+                                  if fields["status"] == "completed" else None)
+    if not update:
+        return {"success": True, "plan": plan}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    res = await sb(supabase.table("dental_treatment_plans").update(update)
+                   .eq("clinic_id", clinic["id"]).eq("id", plan_id))
+    await log_admin_action(
+        user=user, action="DENTAL_PLAN_UPDATE", resource_type="dental_treatment_plan", resource_id=plan_id,
+        details={"clinic_id": clinic["id"], "fields": sorted(k for k in update if k != "updated_at")},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True, "plan": (res.data or [plan])[0]}
+
+
+@router.get("/dental/slots")
+async def dental_free_slots(
+    doctor_id: str,
+    date_str: str = Query(..., alias="date", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    branch_id: Optional[str] = None,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    """Free times for one dentist on one day (holidays, leave, off-days and
+    already-booked slots removed) - the only times a sitting can be booked at."""
+    clinic = await _dental_clinic(user, clinic_id)
+    if not is_uuid(doctor_id):
+        raise HTTPException(status_code=400, detail="Choose a doctor.")
+    doctor = await dental_plans.get_doctor(clinic["id"], doctor_id)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found.")
+    branch = _staff_branch(user)
+    if not branch and branch_id:
+        branch = str((await resolve_owned_branch(user, branch_id, clinic["id"]))["id"])
+    try:
+        slots, reason = await dental_plans.available_slots(clinic["id"], doctor, date_str, branch)
+    except dental_plans.DentalError as e:
+        raise _dental_error(e)
+    return {"success": True, "slots": [str(s)[:5] for s in (slots or [])], "reason": reason,
+            "doctor_has_whatsapp": bool(doctor.get("whatsapp_phone"))}
+
+
+@router.post("/dental/plans/{plan_id}/sittings")
+async def book_dental_sitting(
+    plan_id: str,
+    body: DentalSittingCreate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    clinic = await _dental_clinic(user, clinic_id)
+    plan = await _plan_or_404(clinic["id"], plan_id, user)
+    result = await _book_and_notify(clinic, plan, body, body.sitting_number)
+    await log_admin_action(
+        user=user, action="DENTAL_SITTING_BOOK", resource_type="appointment",
+        resource_id=result["sitting"]["id"],
+        details={"clinic_id": clinic["id"], "plan_id": plan_id,
+                 "sitting_number": result["sitting"].get("sitting_number"),
+                 "doctor": result["sitting"].get("doctor_name"), "date": body.date},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True, **result}
+
+
+@router.post("/dental/sittings/{appointment_id}/complete")
+async def complete_dental_sitting(
+    appointment_id: str,
+    body: DentalSittingComplete,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    clinic = await _dental_clinic(user, clinic_id)
+    appt = await _sitting_or_404(clinic["id"], appointment_id, user)
+    try:
+        updated = await dental_plans.complete_sitting(
+            clinic["id"], appt, body.notes, _rupees_to_paise(body.amount_collected_rupees))
+    except dental_plans.DentalError as e:
+        raise _dental_error(e)
+    plan = await dental_plans.get_plan(clinic["id"], appt["treatment_plan_id"])
+    closed = await dental_plans.close_plan_if_done(clinic["id"], plan) if plan else None
+    await log_admin_action(
+        user=user, action="DENTAL_SITTING_COMPLETE", resource_type="appointment", resource_id=appointment_id,
+        details={"clinic_id": clinic["id"], "plan_id": appt["treatment_plan_id"],
+                 "amount_collected_paise": updated.get("amount_collected_paise")},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True, "sitting": updated, "plan_completed": bool(closed)}
+
+
+@router.post("/dental/sittings/{appointment_id}/cancel")
+async def cancel_dental_sitting(
+    appointment_id: str,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    """Cancel one sitting (to reschedule: cancel, then book the same sitting
+    number again). A sitting that came from a paid WhatsApp booking goes
+    through the refund-aware cancel, exactly like the Appointments page."""
+    from app.database import cancel_appointment
+
+    clinic = await _dental_clinic(user, clinic_id)
+    appt = await _sitting_or_404(clinic["id"], appointment_id, user)
+    if appt.get("status") != "confirmed":
+        raise HTTPException(status_code=400, detail="Only an upcoming sitting can be cancelled.")
+    if appt.get("payment_id"):
+        from app.services.payment import payment_service
+
+        result = await payment_service.admin_cancel_confirmed_booking(
+            appointment_id, clinic_id=clinic["id"], admin_notes=f"Dental sitting cancelled by {user}")
+        ok = bool(result.get("success"))
+    else:
+        ok = await cancel_appointment(clinic["id"], appointment_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail="The sitting could not be cancelled. Refresh and retry.")
+    await log_admin_action(
+        user=user, action="DENTAL_SITTING_CANCEL", resource_type="appointment", resource_id=appointment_id,
+        details={"clinic_id": clinic["id"], "plan_id": appt["treatment_plan_id"]},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True}
+
+
+@router.post("/dental/sittings/{appointment_id}/notify")
+async def notify_dental_sitting(
+    appointment_id: str,
+    body: DentalNotify,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    """Send the sitting details to the patient or the assigned doctor now."""
+    clinic = await _dental_clinic(user, clinic_id)
+    appt = await _sitting_or_404(clinic["id"], appointment_id, user)
+    if appt.get("status") != "confirmed":
+        raise HTTPException(status_code=400, detail="Only an upcoming sitting can be sent.")
+    plan = await _plan_or_404(clinic["id"], appt["treatment_plan_id"], user)
+    if body.target == "patient":
+        if not await dental_plans.patient_messageable(clinic["id"], plan):
+            raise HTTPException(status_code=400, detail=(
+                "This patient has not agreed to WhatsApp messages. Record their consent on the plan first."))
+        ok = await dental_plans.send_patient_confirmation(clinic, plan, appt)
+    else:
+        doctor = (await dental_plans.get_doctor(clinic["id"], appt["doctor_id"])
+                  if appt.get("doctor_id") else None)
+        if not doctor or not doctor.get("whatsapp_phone"):
+            raise HTTPException(status_code=400, detail="Add this doctor's WhatsApp number on the Doctors page first.")
+        if not plan.get("notify_doctor"):
+            raise HTTPException(status_code=400, detail="Doctor messages are switched off for this plan.")
+        ok = await dental_plans.send_doctor_sitting(clinic, plan, appt, doctor)
+    await log_admin_action(
+        user=user, action="DENTAL_SITTING_NOTIFY", resource_type="appointment", resource_id=appointment_id,
+        details={"clinic_id": clinic["id"], "target": body.target, "sent": ok},
+        ip_address=_client_ip(request),
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail=(
+            "The message could not be sent: the monthly message limit may be reached, or the WhatsApp "
+            "template is not approved yet. Check the message usage on this page."))
+    return {"success": True}
+
+
+@router.get("/dental/patient-lookup")
+async def dental_patient_lookup(
+    q: str = Query(..., min_length=2, max_length=100),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    """Find a patient to start a plan for: WhatsApp patients + imported records."""
+    from app.services.analytics import _SEARCH_PHONE_RE, _SEARCH_SPLIT_RE
+
+    clinic = await _dental_clinic(user, clinic_id)
+    tokens = [t for t in _SEARCH_SPLIT_RE.split(q) if t]
+    if sum(len(t) for t in tokens) < 2:
+        return {"success": True, "results": []}
+    pattern = "*" + "*".join(tokens) + "*"
+    digits = re.sub(r"\D", "", q)[-10:] if _SEARCH_PHONE_RE.fullmatch(q.strip()) else ""
+    p_clauses = [f"name.ilike.{pattern}"] + ([f"phone.ilike.*{digits}*"] if len(digits) >= 3 else [])
+    r_clauses = [f"full_name.ilike.{pattern}", f"external_id.ilike.{pattern}"] + (
+        [f"phone.ilike.*{digits}*"] if len(digits) >= 3 else [])
+    pats = await sb(supabase.table("patients").select("name, phone")
+                    .eq("clinic_id", clinic["id"]).or_(",".join(p_clauses)).limit(10))
+    recs = await sb(supabase.table("patient_records").select("id, full_name, phone, external_id")
+                    .eq("clinic_id", clinic["id"]).not_.is_("phone", "null")
+                    .or_(",".join(r_clauses)).limit(10))
+    results = [{"source": "whatsapp", "name": p.get("name") or "", "phone": p["phone"]}
+               for p in (pats.data or []) if p.get("phone") and p.get("name") != "[REDACTED]"]
+    seen = {r["phone"] for r in results}
+    results += [{"source": "imported", "name": r["full_name"], "phone": r["phone"],
+                 "patient_record_id": r["id"], "external_id": r.get("external_id")}
+                for r in (recs.data or []) if r["phone"] not in seen]
+    return {"success": True, "results": results[:20]}
+
+
+@router.get("/dental/patient-history")
+async def dental_patient_history(
+    phone: str = Query(..., max_length=20),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    """Everything this clinic has for one phone number: treatment plans with
+    their sittings, plus consultation bookings not yet part of a plan (those
+    can become sitting 1 of a new plan)."""
+    clinic = await _dental_clinic(user, clinic_id)
+    try:
+        phone = _clean_patient_phone(phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    pinned = _staff_branch(user)
+    plans = (await sb(restrict_to_branch(
+        supabase.table("dental_treatment_plans").select("*")
+        .eq("clinic_id", clinic["id"]).eq("patient_phone", phone), pinned)
+        .order("created_at", desc=True).limit(50))).data or []
+    appts = (await sb(restrict_to_branch(
+        supabase.table("appointments")
+        .select("id, treatment_plan_id, sitting_number, status, appointment_date, appointment_time, "
+                "doctor_name, treatment_name, booking_type, sitting_notes, "
+                "amount_collected_paise, review_rating, branch_id")
+        .eq("clinic_id", clinic["id"]).eq("patient_phone", phone), pinned)
+        .order("appointment_date", desc=True).limit(300))).data or []
+    by_plan: dict = {}
+    for a in appts:
+        if a.get("treatment_plan_id"):
+            by_plan.setdefault(a["treatment_plan_id"], []).append(a)
+    unlinked = [a for a in appts if not a.get("treatment_plan_id")
+                and a.get("booking_type") in (None, "consultation")
+                and a.get("status") in ("confirmed", "completed")]
+    return {
+        "success": True,
+        "phone": phone,
+        "whatsapp_contact": await dental_plans.is_whatsapp_contact(clinic["id"], phone),
+        "plans": [{**p, "sittings": sorted(by_plan.get(p["id"], []), key=lambda s: s.get("sitting_number") or 0),
+                   "summary": dental_plans.summarize(p, by_plan.get(p["id"], []))} for p in plans],
+        "unlinked_bookings": unlinked[:20],
+    }
+
+
+@router.put("/dental/settings")
+async def update_dental_settings(
+    body: DentalSettingsUpdate,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(require_admin),
+):
+    """Review requests on/off, doctor daily schedule on/off, Google review link."""
+    clinic = await _dental_clinic(user, clinic_id)
+    changes = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if not changes:
+        return {"success": True, "settings": dental_plans.dental_settings(clinic.get("config"))}
+    fresh = await sb(supabase.table("clinics").select("config").eq("id", clinic["id"]).limit(1))
+    cfg = dict(((fresh.data or [{}])[0].get("config")) or {})
+    cfg.update(changes)
+    # unscoped: unique_row_key
+    await sb(supabase.table("clinics").update({"config": cfg}).eq("id", clinic["id"]))
+    invalidate_tenant_cache(clinic.get("whatsapp_number"))
+    await log_admin_action(
+        user=user, action="DENTAL_SETTINGS_UPDATE", resource_type="clinic_config", resource_id=clinic["id"],
+        details={"clinic_id": clinic["id"], "changes": changes}, ip_address=_client_ip(request),
+    )
+    return {"success": True, "settings": dental_plans.dental_settings(cfg)}

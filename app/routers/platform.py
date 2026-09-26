@@ -1129,6 +1129,14 @@ async def update_platform_support_message(
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Message not found")
+    row = res.data[0]
+
+    # Tell the clinic through its admin-panel bell. Only an explicit owner
+    # action notifies: opening a message (a body-less PATCH that just marks it
+    # seen) must not ping the clinic. Fail-quiet: the reply is already saved.
+    if reply or body.status is not None:
+        await _notify_clinic_of_support_update(row, reply)
+
     await log_admin_action(
         user=owner,
         action="update_support_message",
@@ -1137,7 +1145,234 @@ async def update_platform_support_message(
         details={"status": update.get("status"), "replied": bool(reply)},
         ip_address=request.client.host if request.client else "unknown",
     )
-    return {"success": True, "message": res.data[0]}
+    return {"success": True, "message": row}
+
+
+#: The admin panel's bell recognises this prefix and offers "Open messages".
+SUPPORT_NOTIFICATION_PREFIX = "Kriya Support"
+_SUPPORT_STATUS_WORDS = {"open": "reopened", "in_progress": "in progress", "resolved": "resolved"}
+
+
+async def _notify_clinic_of_support_update(row: dict, reply: str) -> None:
+    """One clinic-wide admin_notifications row (admin_id NULL), the same shape
+    payment and callback alerts already use, so the existing bell shows it."""
+    subject = (row.get("subject") or "your message")[:80]
+    if reply:
+        title = f"{SUPPORT_NOTIFICATION_PREFIX} replied: {subject}"
+        message = reply[:1000] + ("…" if len(reply) > 1000 else "")
+    else:
+        word = _SUPPORT_STATUS_WORDS.get(row.get("status"), row.get("status") or "updated")
+        title = f"{SUPPORT_NOTIFICATION_PREFIX}: request {word}"
+        message = f"Your message \"{subject}\" is now {word}."
+    try:
+        await sb(
+            # unscoped: insert_scoped_by_payload
+            supabase.table("admin_notifications").insert({
+                "clinic_id": row["clinic_id"],
+                "admin_id": None,
+                "title": title[:255],
+                "message": message,
+                "is_read": False,
+            })
+        )
+    except Exception as e:
+        logger.warning(f"Support reply notification failed for clinic={row.get('clinic_id')}: {e}")
+
+
+@router.get("/support-messages/unread-count")
+async def get_platform_support_unread_count(
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Badge for the owner panel's bell: messages the owner has not opened yet."""
+    try:
+        res = await sb(
+            # unscoped: platform_admin
+            supabase.table("support_messages").select("id", count="exact")
+            .is_("owner_seen_at", "null").limit(1)
+        )
+    except Exception as e:
+        logger.error(f"Support unread count failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load unread count")
+    return {"success": True, "unread": int(res.count or 0)}
+
+
+# ═══════ DENTAL MESSAGING (dental plan only, migration 089) ═══════
+# Owner-side module for the dental sitting messages Kriya pays Meta for:
+# per-clinic monthly limits (patient / doctor / review), live usage, an
+# estimated Meta cost, the monthly add-on the owner bills, and one-click
+# submission of the five dental templates to each clinic's own WhatsApp
+# Business Account.
+
+
+class DentalMessagingUpdate(BaseModel):
+    patient_limit: Optional[int] = Field(None, ge=0, le=100_000)
+    doctor_limit: Optional[int] = Field(None, ge=0, le=100_000)
+    review_limit: Optional[int] = Field(None, ge=0, le=100_000)
+    addon_rupees: Optional[float] = Field(None, ge=0, le=1_000_000)
+
+
+async def _dental_clinic_row(clinic_id: str) -> dict:
+    from app.database import is_uuid
+
+    if not is_uuid(clinic_id):
+        raise HTTPException(status_code=400, detail="Invalid clinic id")
+    res = await sb(
+        # unscoped: platform_admin
+        supabase.table("clinics").select("*").eq("id", clinic_id).limit(1)
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic = res.data[0]
+    if clinic.get("plan") != "dental":
+        raise HTTPException(status_code=400, detail="Dental messaging applies to dental clinics only.")
+    return clinic
+
+
+@router.get("/dental-messaging")
+async def get_dental_messaging(
+    month: Optional[str] = None,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Every dental clinic's dental message usage for the month, its limits,
+    the estimated Meta cost (count x current utility rate) and the add-on."""
+    import re
+
+    from app.services import dental_plans
+    from app.services.message_accounting import _get_pricing
+
+    month = month or dental_plans.current_month()
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    try:
+        clinics = (await sb(
+            # unscoped: platform_admin
+            supabase.table("clinics").select("id, name, plan, config, status, features")
+            .eq("plan", "dental")
+        )).data or []
+        clinics = [c for c in clinics if c.get("status") != "DELETED"]
+        usage_rows = []
+        if clinics:
+            usage_rows = (await sb(
+                # unscoped: platform_admin
+                supabase.table("clinic_message_quota_usage").select("clinic_id, kind, used")
+                .eq("period_month", month).in_("clinic_id", [c["id"] for c in clinics])
+            )).data or []
+        pricing = await _get_pricing()
+    except Exception as e:
+        logger.error(f"Dental messaging board failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load dental messaging")
+
+    utility_paise = int(pricing.get("utility_paise", 0) or 0)
+    used: dict = {}
+    for r in usage_rows:
+        used.setdefault(r["clinic_id"], {})[r["kind"]] = r["used"]
+    rows = []
+    for c in clinics:
+        cfg = c.get("config") or {}
+        limits = dental_plans.message_limits(cfg)
+        kinds = {k: dental_plans.quota_level(used.get(c["id"], {}).get(k, 0), limits[k])
+                 for k in dental_plans.QUOTA_KINDS}
+        total = sum(v["used"] for v in kinds.values())
+        addon = dental_plans.messaging_addon_paise(cfg)
+        rows.append({
+            "clinic_id": c["id"],
+            "clinic_name": c.get("name"),
+            "feature_enabled": (c.get("features") or {}).get("dental_treatment_plans", True) is not False,
+            "kinds": kinds,
+            "total_sent": total,
+            "est_meta_cost_paise": total * utility_paise,
+            "addon_paise": addon,
+            "addon_rupees": addon / 100,
+            "has_meta_account": bool(cfg.get("meta_access_token") and cfg.get("meta_waba_id")),
+        })
+    rows.sort(key=lambda r: -max((k["percent"] for k in r["kinds"].values()), default=0))
+    return {
+        "success": True,
+        "month": month,
+        "utility_rate_paise": utility_paise,
+        "labels": dental_plans.QUOTA_LABELS,
+        "defaults": dental_plans.DEFAULT_MESSAGE_LIMITS,
+        "clinics": rows,
+    }
+
+
+@router.patch("/clinics/{clinic_id}/dental-messaging")
+async def update_dental_messaging(
+    clinic_id: str,
+    body: DentalMessagingUpdate,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Set a dental clinic's monthly limits and/or its monthly messaging add-on.
+    The add-on is billed on the clinic's next generated invoice. A limit of 0
+    switches that message kind off."""
+    from app.services import dental_plans
+
+    clinic = await _dental_clinic_row(clinic_id)
+    fields = body.model_dump(exclude_unset=True)
+    if not any(v is not None for v in fields.values()):
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    cfg = dict(clinic.get("config") or {})
+    before = {"limits": dental_plans.message_limits(cfg), "addon_paise": dental_plans.messaging_addon_paise(cfg)}
+    limits = dict(dental_plans.message_limits(cfg))
+    for kind in dental_plans.QUOTA_KINDS:
+        if fields.get(f"{kind}_limit") is not None:
+            limits[kind] = fields[f"{kind}_limit"]
+    cfg["dental_message_limits"] = limits
+    if fields.get("addon_rupees") is not None:
+        cfg["dental_messaging_addon_paise"] = int(round(fields["addon_rupees"] * 100))
+    # unscoped: platform_admin
+    await sb(supabase.table("clinics").update({"config": cfg}).eq("id", clinic_id))
+    invalidate_tenant_cache()
+    after = {"limits": dental_plans.message_limits(cfg), "addon_paise": dental_plans.messaging_addon_paise(cfg)}
+    await log_admin_action(
+        user=owner, action="update_dental_messaging", resource_type="clinic", resource_id=clinic_id,
+        details={"clinic_name": clinic.get("name"), "before": before, "after": after},
+        ip_address=request.client.host if request.client else "unknown",
+    )
+    return {"success": True, "clinic_id": clinic_id, **after}
+
+
+@router.post("/clinics/{clinic_id}/dental-templates/submit")
+async def submit_dental_templates(
+    clinic_id: str,
+    request: Request,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Create the five dental WhatsApp templates in this clinic's own WhatsApp
+    Business Account (uses its stored Meta token + WABA id). Meta then reviews
+    them; check progress with the status endpoint."""
+    from app.services import dental_plans
+
+    clinic = await _dental_clinic_row(clinic_id)
+    try:
+        results = await dental_plans.submit_templates(clinic)
+    except dental_plans.DentalError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await log_admin_action(
+        user=owner, action="submit_dental_templates", resource_type="clinic", resource_id=clinic_id,
+        details={"clinic_name": clinic.get("name"),
+                 "results": [{"name": r["name"], "result": r["result"]} for r in results]},
+        ip_address=request.client.host if request.client else "unknown",
+    )
+    return {"success": True, "results": results}
+
+
+@router.get("/clinics/{clinic_id}/dental-templates/status")
+async def dental_templates_status(
+    clinic_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    from app.services import dental_plans
+
+    clinic = await _dental_clinic_row(clinic_id)
+    try:
+        return {"success": True, "templates": await dental_plans.template_statuses(clinic)}
+    except dental_plans.DentalError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Dental template status failed for clinic={clinic_id}: {e}")
+        raise HTTPException(status_code=502, detail="Could not reach Meta. Try again in a minute.")
 
 
 @router.get("/revenue")
@@ -3082,6 +3317,7 @@ async def generate_finance_invoices(
         resolve_rate,
     )
     from app.services.client_data import storage_addon_paise
+    from app.services.dental_plans import messaging_addon_paise
 
     body = {}
     try:
@@ -3120,6 +3356,8 @@ async def generate_finance_invoices(
         amount = invoice_amount_paise(rate["rate_paise"], rate["billing_mode"], locations)
         # Owner-set monthly charge for extra imported-record storage (0 = none).
         addon = storage_addon_paise(c.get("config"))
+        # Dental messaging add-on (migration 089); 0 for every other clinic.
+        msg_addon = messaging_addon_paise(c.get("config")) if c.get("plan") == "dental" else 0
 
         row = {
             "clinic_id": cid,
@@ -3128,7 +3366,7 @@ async def generate_finance_invoices(
             "rate_paise": rate["rate_paise"],
             "billing_mode": rate["billing_mode"],
             "locations_billed": locations,
-            "amount_paise": amount + addon,
+            "amount_paise": amount + addon + msg_addon,
             "status": "unpaid",
             "amount_paid_paise": 0,
             "updated_by": owner.username,
@@ -3137,6 +3375,8 @@ async def generate_finance_invoices(
         # row this endpoint wrote before migration 088 added the column.
         if addon:
             row["storage_addon_paise"] = addon
+        if msg_addon:
+            row["messaging_addon_paise"] = msg_addon
         to_insert.append(row)
 
     created = 0

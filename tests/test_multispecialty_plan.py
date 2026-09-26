@@ -39,7 +39,10 @@ PHONE = "+919000000077"
 def test_plan_carries_every_feature_without_the_enterprise_wildcard():
     """Enterprise-equivalent, but enumerated: a "*" plan can never be trimmed
     per tenant from the owner console, and it makes specialty_enabled() lie."""
-    assert PLAN_FEATURES[PLAN] == set(ALL_FEATURES)
+    # Dental treatment plans (migration 089) are dental-only by design.
+    from app.services.tenant import DENTAL_ONLY_FEATURES
+
+    assert PLAN_FEATURES[PLAN] == set(ALL_FEATURES) - DENTAL_ONLY_FEATURES
     assert "*" not in PLAN_FEATURES[PLAN]
 
 

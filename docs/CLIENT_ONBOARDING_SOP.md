@@ -1,8 +1,27 @@
 # Kriya AI — Client Onboarding Standard Operating Procedure (SOP)
-**Document Version:** 3.0 (All Plans — Production-Hardened Standard)  
+**Document Version:** 4.0 (All Plans — every Kriya-side step verified against the code on 2026-09-26)  
 **Provider:** Zuko Labs (Meta Tech Provider — Business ID: `1602916427428175`)  
 **Platform:** Kriya AI Multi-Tenant WhatsApp Healthcare Automation (App ID: `946290901317238`)  
 **Plans Covered:** soloclinic · diagstream · diagbooking · essential · polyclinic · enterprise · derma · eye · dental · ivf · multispecialty · womenchild
+
+---
+
+## How to Use This Document (the order, start to finish)
+
+Do the parts in this order for every new client. Tick each box; do not skip ahead — later steps need values from earlier ones.
+
+| # | Part | Who | Output you carry forward |
+|---|---|---|---|
+| 0 | **Platform Prerequisites** (once per release) | You | Migrations applied |
+| 1 | **Plan Reference Matrix** — pick the plan | You + client | Plan slug |
+| 2 | **Part A** — client's Meta steps 1–6 | Client | WABA shared with Zuko Labs |
+| 3 | **Part B** — steps 7–9 | You | Token, WABA ID, Phone Number ID, display number |
+| 4 | **Part C** — register the plan's templates | You | Templates `APPROVED` |
+| 5 | **Part D** — create the clinic in the Platform Panel, then the post-create settings | You | Clinic UUID, admin username + password |
+| 6 | **Part E** — configure the clinic's admin panel for its plan | You / clinic admin | Doctors, prices, payments live |
+| 7 | **Part F** — live end-to-end verification | You | Go-live sign-off |
+
+Keep a per-client sheet with: plan · WABA ID · Phone Number ID · display number · clinic UUID · admin username (password handed to the client, not stored) · template names used · Razorpay webhook set (yes/no).
 
 ---
 
@@ -33,27 +52,69 @@ In the Meta Cloud API ecosystem, hospitals maintain **100% legal ownership of th
 
 ---
 
+## Platform Prerequisites (check once per release, before any onboarding)
+
+These database migrations must be applied on production before the features below are used. Each is additive and safe to run while the current build is live; apply the migration **before** deploying the code that uses it.
+
+| Migration | Adds | Needed for |
+|---|---|---|
+| `088_client_data_and_support.sql` | Imported patient records, import batches, support messages, invoice storage add-on | Admin → Data & Support (import/export, messages to Kriya), owner storage limits |
+| `089_dental_treatment_plans.sql` | Dental treatment plans, sitting columns on appointments, doctor WhatsApp number, typical sittings, doctor digests, monthly message quotas, invoice messaging add-on | **Dental plan** Treatment Plans page, dental WhatsApp messages, owner Dental Messaging module |
+| `090_dental_plan_branch.sql` | Branch on dental treatment plans | Multi-branch dental clinics (branch-pinned front desk) |
+| `091_quota_functions_revoke_api_roles.sql` | Removes public-API (`anon` / `authenticated`) access to the two quota functions from 089 | Security — clears Supabase linter warnings 0028 / 0029. Run right after 089. |
+
+Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' ORDER BY name;`
+
+---
+
 ## Plan Reference Matrix
 
 Before onboarding, identify which plan matches the client's facility. Each plan determines which WhatsApp menu items the patient sees, which templates are required, and which admin panel URL the clinic admin uses.
 
-| Plan Slug | Display Name | Target Facility | WhatsApp Menu | Admin Panel URL | Message Quota |
-|---|---|---|---|---|---|
-| `soloclinic` | Solo Clinic | Single doctor / small clinic | Book · Doctors · Emergency · Staff | `/admin-panel` | 1,000 |
-| `diagstream` | Diagnostic Center | Lab-only (report delivery + lab test booking) | Book Lab Test · Emergency · Staff | `/admin-panel` | 2,000 |
-| `diagbooking` | Diagnostic Booking | Lab-test booking only (no report delivery) | Book Lab Test · Emergency · Staff | `/admin-panel` | 1,000 |
-| `essential` | Essential Hospital | Full-service hospital | Book · Services · Doctors · Emergency · Staff | `/admin-panel` | 2,500 |
-| `polyclinic` | Polyclinic | Multi-branch hospital + diagnostics | Book · Services · Doctors · 🧪 Lab Test · Emergency · Staff | `/admin-panel` | 5,000 |
-| `enterprise` | Enterprise | Unlimited (all features, wildcard) | Full menu (all features) | `/admin-panel` | 10,000 |
-| `derma` | Dermatology Clinic | Skin, hair & cosmetology specialty | ✨ Treatments · 🔍 Concern · Book · Doctors · Emergency · Staff | `/derma-panel` | 2,500 |
-| `eye` | Eye Hospital | Ophthalmology & vision care | ✨ Treatments · 🔍 Concern · Book · Doctors · Emergency · Staff | `/eye-panel` | 2,500 |
-| `dental` | Dental Clinic | Dental surgery & orthodontics | ✨ Treatments · 🔍 Concern · Book · Doctors · Emergency · Staff | `/dental-panel` | 2,500 |
-| `ivf` | IVF Centre | Fertility & reproductive medicine | ✨ Treatments · 🔍 Concern · Book · Doctors · 🧪 Lab Test · Emergency · Staff | `/ivf-panel` | 2,500 |
-| `multispecialty` | Multi-Specialty Hospital | General hospital + treatments catalogue | ✨ Treatments · 🔍 Concern · Book · Services · Doctors · 🧪 Lab Test · Emergency · Staff | `/hospital-panel` | 5,000 |
-| `womenchild` | Women & Child Hospital | Child Care + Women Care + Fertility Care, with departments & lab | 🩺 Consultation · 🔍 Not sure? · ✨ What We Treat (👶/🌸/🌱 sections) · Book · Services · Doctors · 🧪 Lab Test · Emergency · Staff | `/women-child-panel` | 5,000 |
+| Plan Slug | Dropdown label in Create Clinic | Target Facility | Admin Panel URL | Included messages / month* |
+|---|---|---|---|---|
+| `soloclinic` | SoloClinic — single doctor practice | Single doctor / small clinic | `/admin-panel` | 500 |
+| `essential` | Essential — small clinic, core booking | Clinic with several departments | `/admin-panel` | 2,500 |
+| `diagstream` | DiagStream — diagnostic / lab center | Lab with report delivery (connector) + test booking | `/admin-panel` | 1,000 |
+| `diagbooking` | Diagnostic Test Booking — lab-test booking & payments only | Lab-test booking only, no reports | `/admin-panel` | 1,000 |
+| `polyclinic` | Polyclinic — multi-department hospital | Multi-branch hospital + diagnostics | `/admin-panel` | 5,000 |
+| `enterprise` | Enterprise — large multi-branch hospital | Everything (wildcard) | `/admin-panel` | Unlimited |
+| `derma` | Dermatology & Hair | Skin, hair & cosmetology | `/derma-panel` | 2,500 |
+| `eye` | Eye Hospital | Ophthalmology | `/eye-panel` | 2,500 |
+| `dental` | Dental Clinic | Dental (with **Treatment Plans** for multi-sitting care) | `/dental-panel` | 2,500 |
+| `ivf` | IVF & Fertility Centre | Fertility + own hormone/semen tests | `/ivf-panel` | 2,500 |
+| `multispecialty` | Multi-Specialty Hospital | General hospital + treatments catalogue | `/hospital-panel` | 5,000 |
+| `womenchild` | Women & Child Hospital | Child Care + Women Care + Fertility Care | `/women-child-panel` | 5,000 |
+
+\* Defaults from the `plan_tiers` table; the owner can change them in Platform → Plan Tiers. Dental sitting messages are counted separately (Platform → Dental Messaging).
+
+**Feature matrix (from `app/services/tenant.py → PLAN_FEATURES`)**
+
+| Feature | solo | essential | diagstream | diagbooking | poly | enterprise | derma | eye | dental | ivf | multi | women-child |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Doctor booking + reminders | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Lab reports (manual upload) | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Report connector (automatic reports) | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Lab test booking | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Treatments catalogue | ❌ | ❌ | ❌ | ❌ | ❌ | override | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Multi-department | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Multi-branch | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Razorpay payments | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Insights / analytics, feedback | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Dental Treatment Plans | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+
+**Patient WhatsApp main menu — how it is built (`conversation._send_main_menu`)**
+
+The menu is assembled by rules, not a fixed list per plan:
+1. **Treatments rows first** — only when the clinic has a treatments catalogue AND at least one treatment is *shown to patients*: `✨ Our Treatments` + `🔍 Find by Concern`. If a published *Start here* (first-visit) treatment exists they become `🩺 Book Consultation` · `🔍 Not sure? Tell us` · `✨ What We Treat`.
+2. **Diagnostics-only** (lab test booking and **no active doctors**): the service types filed in the catalogue (e.g. Health Packages, Radiology) as rows, or a single `Book Lab Test`.
+3. Otherwise `Book Appointment`, then `Our Services` (**dropped** only on derma/eye/dental/ivf once treatments are published), then `Our Doctors`, then `🧪 Book Lab Test` if the plan has lab test booking.
+4. Always `Emergency` and `Talk to Staff`, then `❓ How to use` if there is room (10 rows max).
+
+So a brand-new dental clinic with no published treatments shows the general menu (Book · Our Services · Our Doctors · Emergency · Talk to Staff · How to use) until the first treatment is shown to patients.
 
 > [!NOTE]
-> **Specialty plans** (`derma`, `eye`, `dental`, `ivf`) drop the "Our Services" departments row because one department is not a menu. **Multispecialty** keeps it — a hospital with fifteen departments needs that row. The `enterprise` plan is a wildcard (`*`) — all features are always on, but the treatments catalogue must be explicitly enabled via a feature override.
+> **Specialty plans** (`derma`, `eye`, `dental`, `ivf`) drop the "Our Services" departments row (once treatments are published) because one department is not a menu. **Multispecialty** keeps it. The `enterprise` plan is a wildcard (`*`), but the treatments catalogue must be explicitly enabled via a feature override, and Dental Treatment Plans are for the `dental` plan only.
 
 ---
 
@@ -148,21 +209,31 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 
 ### Template Requirement Matrix
 
-| Template Name | Category | Plans That Need It |
-|---|---|---|
-| `lab_report_ready_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty, womenchild |
-| `lab_report_summary_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty, womenchild |
-| `appointment_reminder_24h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
-| `appointment_reminder_2h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
-| `appointment_confirmation` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
-| `appointment_cancelled_doctor_leave` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild |
-| `post_appointment_followup` | UTILITY | All plans with `reminders` feature |
-| `followup_custom_message_v1` | UTILITY | All plans with `reminders` feature |
-| `opt_out_confirmation` | UTILITY | All plans (DPDP Act 2023 compliance) |
-| `data_deletion_confirmation` | UTILITY | All plans (DPDP Act 2023 compliance) |
+| Template Name | Category | Plans That Need It | Variables | Sent by |
+|---|---|---|---|---|
+| `lab_report_ready_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty, womenchild | 2 | Report delivery (connector / manual upload) outside the 24h window |
+| `lab_report_summary_v1` | UTILITY (DOCUMENT header) | diagstream, essential, polyclinic, enterprise, multispecialty, womenchild | 3 | Report delivery with AI summary |
+| `admin_alert_v1` | UTILITY | Plans with a report connector: diagstream, polyclinic, enterprise, multispecialty, womenchild | 1 | Connector failure alerts to the clinic admin's phone |
+| `appointment_reminder_24h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild | 2 | 09:00 IST, day before |
+| `appointment_reminder_2h` | UTILITY | same as above | **2** | Hourly, 2 hours before |
+| `appointment_confirmation` | UTILITY | same as above | 5 | Dental sitting confirmation fallback (see Step 10H) |
+| `appointment_cancelled_doctor_leave` | UTILITY | same as above | 2 | 08:00 IST when a doctor's leave cancels bookings |
+| `post_appointment_followup` | UTILITY | All plans with `reminders` feature | 2 | 10:00 IST, N days after the visit (Patient Follow-ups switch) |
+| `followup_custom_message_v1` | UTILITY | All plans with `reminders` feature | 2 | Same, when the admin writes their own follow-up wording |
+| `patient_health_checkin` | UTILITY + 2 quick replies | All plans with `reminders` feature (**opt-in per clinic**) | 2 | 10:30 IST, day 3 and day 7 after the visit |
+| `dental_sitting_confirmation` | UTILITY | **dental only** | 8 | When the front desk books a sitting |
+| `dental_sitting_reminder` | UTILITY | **dental only** | 8 | 08:30 IST, day before a sitting |
+| `dental_doctor_sitting` | UTILITY | **dental only** | 7 | To the dentist when a sitting is assigned (on booking / button) |
+| `dental_doctor_schedule` | UTILITY | **dental only** | 4 | 19:00 IST (retry 20:30) — each dentist's schedule for tomorrow |
+| `dental_sitting_review` | UTILITY + 3 quick replies | **dental only** | 3 | ~1 hour after a sitting is marked done (09:00–21:00 IST) |
+| `opt_out_confirmation` | UTILITY | Optional (all plans) | — | **Not sent by the code today** — STOP/deletion replies go out as normal chat messages inside the 24h window. Register only if the client wants them on file. |
+| `data_deletion_confirmation` | UTILITY | Optional (all plans) | — | Same as above |
 
 > [!IMPORTANT]
-> **`diagstream`** and **`diagbooking`** do NOT need appointment-related templates (no doctor booking). **`diagbooking`** does NOT need lab report templates (no report connector). Specialty plans (`derma`, `eye`, `dental`, `ivf`) do NOT need lab report templates (no report connector). **`multispecialty`** and **`womenchild`** need ALL templates because they have both booking and lab report features.
+> **`diagstream`** and **`diagbooking`** do NOT need appointment-related templates (no doctor booking). **`diagbooking`** does NOT need lab report templates (no report connector). Specialty plans (`derma`, `eye`, `dental`, `ivf`) do NOT need lab report templates (no report connector). **`multispecialty`** and **`womenchild`** need ALL templates because they have both booking and lab report features. The five `dental_*` templates are for the **`dental`** plan only.
+
+> [!CAUTION]
+> **The variable count must match exactly.** The code fills a fixed number of variables per template (column "Variables"). A template approved with a different number fails every send with Meta error **`132000` (number of parameters does not match)**. Copy bodies from this document, not from memory.
 
 ---
 
@@ -223,13 +294,14 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 * **Language:** `en`
 * **Body Text:**
   ```text
-  Your appointment at <CLINIC_NAME> is in 2 hours with {{1}}. Reply CANCEL to cancel.
+  Your appointment at {{1}} is in 2 hours with {{2}}. Reply CANCEL to cancel.
   ```
 * **Variables:**
-  - `{{1}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
+  - `{{1}}` → Location — the branch name for multi-branch clinics, otherwise the clinic name (filled by the code)
+  - `{{2}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
 
-> [!IMPORTANT]
-> Replace `<CLINIC_NAME>` with the actual clinic/hospital name before submitting. Meta rejects modifications after approval.
+> [!WARNING]
+> **CORRECTED 2026-09-26.** An earlier version of this SOP registered this template with ONE variable and the clinic name typed in. The code has always sent TWO (location, doctor), so every 2-hour reminder on such a WABA failed with error `132000`. If a live client's `appointment_reminder_2h` was created from the old text, create the 2-variable version (Meta does not allow editing the variable count of an approved template: delete it, wait for the name to free up, or register it under a new name and tell engineering).
 
 ---
 
@@ -305,6 +377,25 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 | `followup_template_name` | Built-in template name | `post_appointment_followup` |
 | `followup_message_template_name` | Custom-message template name | `followup_custom_message_v1` |
 | `followup_message` | Admin's custom message text | *(set via Admin Panel textarea)* |
+| `health_checkins_enabled` | Day 3 / day 7 health check-ins (**default OFF**) | `true` *(Admin Panel switch)* |
+| `health_checkin_template_name` | Override the check-in template name | `patient_health_checkin` |
+
+> [!NOTE]
+> The built-in follow-up's `{{2}}` "call us" number is the clinic's own number: **front-desk phone** (Hospital Profile → staff phone) → clinic phone → clinic WhatsApp number. Fill in the front-desk phone during setup, otherwise patients are told to call the WhatsApp number. *(Before 2026-09-26 this was one platform-wide number for every clinic.)*
+
+#### Template 8b: Health Check-in, day 3 and day 7 (`patient_health_checkin`)
+* **Template Name:** `patient_health_checkin`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Hello {{1}}, it has been a few days since your visit with {{2}}. How are you feeling now? Please tap an option below.
+  ```
+* **Buttons (Quick Reply, in this order):** `Feeling fine` · `Still have symptoms`
+* **Variables:**
+  - `{{1}}` → Patient first name
+  - `{{2}}` → Doctor (e.g., `Dr. Rao`)
+* **Behaviour:** off until the clinic turns on **Hospital Profile → Patient Follow-ups → Health check-ins on day 3 and day 7**. Sent 10:30 IST for consultations seen 3 and 7 days earlier (lab bookings and dental plan sittings are excluded), skipped for patients who replied STOP, retried for 2 more days if Meta refuses. "Still have symptoms" replies with the clinic's number; "Feeling fine" thanks the patient.
 
 ---
 
@@ -330,11 +421,54 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 
 ---
 
+### Step 10E2: Connector Admin Alert Template (plans with a report connector)
+
+#### Template 11: Admin Alert (`admin_alert_v1`)
+* **Template Name:** `admin_alert_v1` (any name works — it is configured, not hard-coded)
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Kriya alert for your clinic: {{1}}. Please check the admin panel.
+  ```
+* **Variables:** `{{1}}` → the alert text (flattened to one line by the code)
+* **Configure:** set `admin_alert_template_name` = `admin_alert_v1` in the connector config, the clinic config, or the `ADMIN_ALERT_TEMPLATE_NAME` env var. Without it, connector failure alerts outside the 24h window are logged as `ADMIN_ALERT_UNDELIVERED` and never reach the admin.
+
+---
+
+### Step 10H: Dental Plan Templates (dental plan ONLY)
+
+Dental care is a course of **sittings** (Admin → Treatment Plans). These five templates carry every dental message. They are submitted **from the owner panel with one click** (Platform → Dental Messaging → **Submit Templates**) using the clinic's own Meta token and WABA id; use **Template Status** to watch for `APPROVED`. The definitions below are exactly what that button sends (source of truth: `app/services/dental_plans.py → DENTAL_TEMPLATES`).
+
+| # | Name | Recipient | Body | Variables |
+|---|---|---|---|---|
+| 12 | `dental_sitting_confirmation` | Patient | `Hello {{1}}, your {{2}} appointment at {{3}} is confirmed: sitting {{4}} of {{5}} with {{6}} on {{7}} at {{8}}. Please reply here or call the clinic if you need to change it.` | first name, treatment, clinic, sitting no., planned sittings, doctor, date, time |
+| 13 | `dental_sitting_reminder` | Patient | `Reminder from {{1}}: {{2}}, your {{3}} sitting {{4}} of {{5}} with {{6}} is tomorrow, {{7}} at {{8}}. Please arrive 10 minutes early.` | clinic, first name, treatment, sitting no., planned, doctor, date, time |
+| 14 | `dental_doctor_sitting` | Dentist | `Hello {{1}}, a dental sitting has been assigned to you: {{2}} for {{3}}, sitting {{4}} of {{5}}, on {{6}} at {{7}}. Please plan your chair time accordingly.` | doctor, patient, treatment, sitting no., planned, date, time |
+| 15 | `dental_doctor_schedule` | Dentist | `Hello {{1}}, your dental sittings for {{2}} at {{3}}: {{4}}. Please contact the front desk for any changes.` | doctor, date, clinic, list of sittings (one line) |
+| 16 | `dental_sitting_review` | Patient | `Thank you for visiting {{1}}, {{2}}. How was your {{3}} sitting today? Please tap an option below.` + Quick Replies **Excellent · Good · Needs improvement** | clinic, first name, treatment |
+
+**What happens if a template is not approved yet**
+
+| Message | Fallback |
+|---|---|
+| Sitting confirmation | Sent with the generic `appointment_confirmation` (register it — Step 10C) |
+| Day-before reminder | The standard 09:00 `appointment_reminder_24h` goes out instead |
+| Doctor notice / daily schedule | **Nothing** — dentists receive no WhatsApp until 14 and 15 are approved |
+| Review request | Nothing |
+
+> [!IMPORTANT]
+> * Meta may re-categorise `dental_sitting_review` as **MARKETING** (feedback requests sometimes are). It still works; it just costs more. Check the category in Template Status.
+> * **Patient consent:** a patient imported from old software or a walk-in is only messaged after the front desk ticks *"The patient agreed to receive appointment messages on WhatsApp"* on the plan (or the patient has messaged the clinic before). Otherwise only the dentist is messaged.
+> * Every dental message counts against the clinic's **monthly limits** set in Platform → Dental Messaging (patient / doctor / review). The clinic is notified at 90 % and 100 %. At 100 % those messages pause until next month; patients still get the standard reminder.
+
+---
+
 ### Step 10F: Plan-Specific Template Checklist
 
 Use this checklist to confirm which templates to register per plan:
 
-| # | Template Name | solo | diag-stream | diag-booking | essential | poly | enterprise | derma | eye | dental | ivf | multi-specialty |
+| # | Template Name | solo | diag-stream | diag-booking | essential | poly | enterprise | derma | eye | dental | ivf | multi-specialty / women-child |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | `lab_report_ready_v1` | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | 2 | `lab_report_summary_v1` | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
@@ -344,8 +478,13 @@ Use this checklist to confirm which templates to register per plan:
 | 6 | `appointment_cancelled_doctor_leave` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 7 | `post_appointment_followup` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 8 | `followup_custom_message_v1` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 9 | `opt_out_confirmation` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 10 | `data_deletion_confirmation` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 8b | `patient_health_checkin` *(if the clinic will switch check-ins on)* | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 9 | `opt_out_confirmation` *(optional)* | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| 10 | `data_deletion_confirmation` *(optional)* | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| 11 | `admin_alert_v1` *(only with a report connector)* | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 12–16 | `dental_*` (5 templates, owner-panel button) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+
+⚪ = optional: not sent by the code today.
 
 ---
 
@@ -405,7 +544,7 @@ templates = [
         'category': 'UTILITY',
         'language': 'en',
         'components': [
-            {'type': 'BODY', 'text': f'Your appointment at {clinic_name} is in 2 hours with {{{{1}}}}. Reply CANCEL to cancel.', 'example': {'body_text': [['Dr. Ramesh Sharma']]}}
+            {'type': 'BODY', 'text': 'Your appointment at {{1}} is in 2 hours with {{2}}. Reply CANCEL to cancel.', 'example': {'body_text': [[clinic_name, 'Dr. Ramesh Sharma']]}}
         ]
     },
     # 5. Outbound Booking Confirmation
@@ -424,6 +563,34 @@ templates = [
         'language': 'en',
         'components': [
             {'type': 'BODY', 'text': f'Dear patient {{{{1}}}}, we hope you are feeling better after your recent visit to {clinic_name}. Your health and recovery are important to us. If you need a follow-up appointment, please reply YES or call us at {{{{2}}}} to schedule. Wishing you good health!', 'example': {'body_text': [['Ravi Kumar', '+919490386668']]}}
+        ]
+    },
+    # 6b. Post-Visit Follow-up with the clinic's own wording
+    {
+        'name': 'followup_custom_message_v1',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': f'Dear patient {{{{1}}}}, this is a follow-up message from {clinic_name} regarding your recent visit.\n\n{{{{2}}}}\n\nIf you have any concerns, please do not hesitate to reach out. We wish you good health and a speedy recovery.', 'example': {'body_text': [['Ravi', 'Please continue the tablets for 5 more days and come back if the pain returns.']]}}
+        ]
+    },
+    # 6c. Day 3 / day 7 Health Check-in (opt-in per clinic)
+    {
+        'name': 'patient_health_checkin',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'Hello {{1}}, it has been a few days since your visit with {{2}}. How are you feeling now? Please tap an option below.', 'example': {'body_text': [['Ravi', 'Dr. Rao']]}},
+            {'type': 'BUTTONS', 'buttons': [{'type': 'QUICK_REPLY', 'text': 'Feeling fine'}, {'type': 'QUICK_REPLY', 'text': 'Still have symptoms'}]}
+        ]
+    },
+    # 6d. Connector admin alert (plans with a report connector)
+    {
+        'name': 'admin_alert_v1',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'Kriya alert for your clinic: {{1}}. Please check the admin panel.', 'example': {'body_text': [['Report connector login failed at 10:05 AM']]}}
         ]
     },
     # 7. Doctor Cancellation / Emergency Leave
@@ -466,6 +633,10 @@ print('\nAll Core Templates Submitted for Meta Review Successfully!')
 
 > [!WARNING]
 > **For diagstream / diagbooking plans:** You may skip templates 3–7 (appointment-related). For diagbooking, also skip templates 1–2 (lab report delivery). The script registers all templates — Meta silently ignores templates the clinic never triggers, so registering extras is safe but unnecessary.
+>
+> **Dental plan:** this script does NOT include the five `dental_*` templates. Submit those from Platform → Dental Messaging → **Submit Templates** (Step 10H) — same token and WABA, one click, and the definitions can never drift from the code.
+>
+> **After running:** set `lab_report_template_name` (platform panel) and `admin_alert_template_name` (connector/clinic config) to the names you registered.
 
 ---
 
@@ -490,37 +661,97 @@ curl -X POST "https://graph.facebook.com/v22.0/<PHONE_NUMBER_ID>/register" \
 ## Part D: Register Tenant in Kriya AI Platform Panel
 
 ### Step 13: Create the Clinic / Hospital
-1. Open Kriya AI Platform Panel: `https://medassist-ai-docker.onrender.com/platform-panel`
-2. Click **Create Hospital / Clinic** and fill in:
+1. Open Kriya AI Platform Panel: `https://medassist-ai-docker.onrender.com/platform-panel` and sign in with the owner credentials (`OWNER_USERNAME` / `OWNER_PASSWORD`).
+2. Click **Create Hospital / Clinic** and fill in (these are the exact fields of the form):
 
-| Field | Value | Notes |
-|---|---|---|
-| **Hospital / Clinic Name** | `Accumax Diagnostics` | Exact display name |
-| **WhatsApp Number (E.164)** | `+919281235959` | Must match registered number |
-| **Plan** | Select from dropdown | See Plan Reference Matrix above |
-| **Meta Phone Number ID** | `1296654790197336` | From Step 9 |
-| **Meta WABA ID** | `1702889104159864` | From Step 9 |
-| **Meta Permanent Access Token** | `EAAN...` | From Step 8 |
-| **Lab Report Template Name** | `lab_report_ready_v1` | Only for plans with `lab_reports` feature |
+| Field | Required | Value / example | Stored as |
+|---|---|---|---|
+| **Hospital / Clinic Name** | ✅ | `Accumax Diagnostics` | `clinics.name` |
+| **WhatsApp Number (E.164)** | ✅ | `+919281235959` — must start with `+` and match the registered number | `clinics.whatsapp_number` |
+| **Plan** | ✅ | from the dropdown (Plan Reference Matrix) | `clinics.plan` |
+| **Daily Report Limit** | shown for report plans | 50 / 100 / 200 / 300 / 500 / Unlimited | `clinics.daily_report_limit` |
+| **Meta Phone Number ID** | ✅ | `1296654790197336` (Step 9) | `phone_number_id` + config |
+| **Meta Permanent Access Token** | ✅ | `EAAN...` (Step 8) | config `meta_access_token` |
+| **Meta WABA ID** | strongly recommended | `1702889104159864` (Step 9) — **required** for dental template submission and template status checks | config `meta_waba_id` |
+| Clinic Display Name (for AI replies) | optional | defaults to the name | config |
+| Doctor / Team Name | optional | `Medical Team` | config |
+| Language · Timezone | optional | `en` · `Asia/Kolkata` | config |
+| **Front-Desk Phone** | recommended | reception number, distinct from WhatsApp | config `phone` — used as the "call us" number |
+| **Address** · Google Maps link · Emergency number | recommended | sent to patients who ask | config |
+| Razorpay Key ID / Key Secret / Webhook Secret | optional here | can instead be set later by the clinic admin (Part E6) | config |
 
-3. Click **Create Hospital / Clinic**.
+3. Click **Create Hospital / Clinic**. The result screen shows:
+   - **Clinic ID (UUID)** — copy it into the client sheet (needed for the Razorpay webhook URL, SQL settings, the doctor CLI).
+   - **Admin username and password** — generated automatically, **shown only once**. Copy both now and hand them to the clinic admin securely. If lost: Reset it with the owner API: `curl -X PUT https://medassist-ai-docker.onrender.com/platform/reset-admin-password -u '<OWNER_USERNAME>:<OWNER_PASSWORD>' -H 'Content-Type: application/json' -d '{"username": "<ADMIN_USERNAME>", "new_password": "<NEW_PASSWORD_8+_CHARS>"}'`
+
+#### What the system does automatically on Create
+| Action | Detail |
+|---|---|
+| Cloud API activation | Calls Meta `POST /{phone_number_id}/register` with PIN `123456`. If the phone later shows *Pending*, run Step 11's manual command. |
+| Admin login | One `clinic_admin` account (username = name slug + random suffix, random 16-char password). |
+| Starter treatments | derma / eye / dental / ivf: the specialty's starter list, seeded **hidden**. womenchild: Child Care, Women Care and Fertility Care lists, hidden. multispecialty: none (admin loads lists from the starter picker). |
+| Nothing else | No doctors, prices, templates or payments are created — Part E does that. |
+
+> [!CAUTION]
+> Each clinic must have its **own** Meta Phone Number ID. Reusing another clinic's ID is refused (HTTP 409) — it is what routes incoming messages to the right clinic.
+
+### Step 13b: Post-Create Settings Only Set by SQL (Supabase → SQL Editor)
+
+These per-clinic keys have **no form field**. Set the ones that apply, replacing `<CLINIC_UUID>` and the template names with the ones you registered. Changes take effect within **30 seconds** (tenant cache).
+
+```sql
+-- Lab report template (plans with lab reports). Without it the global default
+-- LAB_REPORT_TEMPLATE_NAME ('lab_report_delivery') is used, which this SOP does not register.
+UPDATE clinics SET config = config || '{"lab_report_template_name": "lab_report_ready_v1"}'::jsonb
+WHERE id = '<CLINIC_UUID>';
+
+-- AI-summary report template (only if you registered lab_report_summary_v1)
+UPDATE clinics SET config = config || '{"lab_report_summary_template_name": "lab_report_summary_v1"}'::jsonb
+WHERE id = '<CLINIC_UUID>';
+
+-- Connector failure alerts to the admin's phone (plans with a report connector)
+UPDATE clinics SET config = config || '{"admin_alert_template_name": "admin_alert_v1"}'::jsonb
+WHERE id = '<CLINIC_UUID>';
+
+-- Only if a template was registered under a different name than this SOP uses:
+-- followup_template_name, followup_message_template_name, health_checkin_template_name
+
+-- Check what is set:
+SELECT id, name, plan, config->>'lab_report_template_name' AS report_tpl,
+       config->>'admin_alert_template_name' AS alert_tpl, config->>'meta_waba_id' AS waba
+FROM clinics WHERE id = '<CLINIC_UUID>';
+```
 
 #### Plan-Specific Platform Panel Settings:
 
-| Plan | Plan Dropdown Label | Lab Report Template | Additional Notes |
+| Plan | Lab report template (Step 13b SQL) | Admin alert template (Step 13b SQL) | Auto-seeded on create |
 |---|---|---|---|
-| `soloclinic` | Solo Clinic | — | Single doctor setup |
-| `diagstream` | Diagnostic Center | `lab_report_ready_v1` | Lab-only, no doctor booking |
-| `diagbooking` | Diagnostic Booking | — | Lab test booking only, no reports |
-| `essential` | Essential Hospital | `lab_report_ready_v1` | Full-service hospital |
-| `polyclinic` | Polyclinic | `lab_report_ready_v1` | Multi-branch + diagnostics |
-| `enterprise` | Enterprise | `lab_report_ready_v1` | All features, unlimited |
-| `derma` | Dermatology Clinic | — | Treatments auto-seeded on creation |
-| `eye` | Eye Hospital | — | Treatments auto-seeded on creation |
-| `dental` | Dental Clinic | — | Treatments auto-seeded on creation |
-| `ivf` | IVF Centre | — | Treatments + lab test booking auto-seeded |
-| `multispecialty` | Multi-Specialty Hospital | `lab_report_ready_v1` | No auto-seed; admin loads starters manually |
-| `womenchild` | Women & Child Hospital | `lab_report_ready_v1` | Child Care, Women Care & Fertility Care lists auto-seeded (hidden), each under its section |
+| `soloclinic` | — | — | nothing |
+| `essential` | `lab_report_ready_v1` | — | nothing |
+| `diagstream` | `lab_report_ready_v1` | `admin_alert_v1` | nothing |
+| `diagbooking` | — | — | nothing |
+| `polyclinic` | `lab_report_ready_v1` | `admin_alert_v1` | nothing |
+| `enterprise` | `lab_report_ready_v1` | `admin_alert_v1` | nothing |
+| `derma` / `eye` / `dental` / `ivf` | — | — | specialty starter treatments (hidden) |
+| `multispecialty` | `lab_report_ready_v1` | `admin_alert_v1` | nothing (starter picker in admin) |
+| `womenchild` | `lab_report_ready_v1` | `admin_alert_v1` | Child / Women / Fertility lists (hidden) |
+
+---
+
+#### Owner settings after creating the clinic (all plans)
+
+| Where (Platform Panel) | Set | Default if you skip it |
+|---|---|---|
+| **Client Data Storage** → Set Limit / Price | Imported patient record limit and the monthly storage add-on (₹) | 5,000 records, no add-on |
+| **Subscriptions** | Subscription period, daily report limit | as created |
+| **Finance → Billing Rate** | The clinic's monthly price | plan list price |
+| **Client Messages** (bell in the top bar) | Nothing to set — clinic admins' messages arrive here, reply from the bell | — |
+
+#### Extra owner settings for the **dental** plan
+
+1. **Dental Messaging → Submit Templates** for the clinic, then **Template Status** until all five show `APPROVED` (Step 10H).
+2. **Dental Messaging → Set Limits / Price:** monthly limits for patient sitting messages, doctor reminders and review requests (defaults 1,000 / 300 / 500; 0 switches a kind off) and the monthly messaging add-on (₹), which is billed on the next generated invoice.
+3. The Dental Messaging table shows each month's usage and the estimated Meta cost (messages × the utility rate in Pricing).
 
 ---
 
@@ -532,13 +763,15 @@ After the tenant is created in the Platform Panel, the **clinic admin** (or you 
 
 **Admin Panel URL:** `https://medassist-ai-docker.onrender.com/admin-panel`
 
-1. **Login** → Use clinic WhatsApp number or credentials.
-2. **Hospital Profile** → Set operating hours, address, emergency number.
-3. **Departments** → Add departments (essential, polyclinic, enterprise, multispecialty, womenchild only).
-4. **Doctors** → Add doctors with name, department, qualification, slot duration, and schedule.
-5. **Payment Settings** → Enter Razorpay Key ID, Key Secret, and Webhook Secret.
+1. **Login** → open the plan's admin URL and sign in with the **admin username and password from Step 13**. Change the password at first login (sidebar → Change Password). Create front-desk accounts under **Staff Accounts** instead of sharing the admin login.
+2. **Hospital Profile** → bot / hospital name, address, Google Maps link, emergency number, **front-desk phone**.
+3. **Departments** → there is no separate Departments page: a department is created by typing it in the **Department** field when adding a doctor (it then appears in the patient's *Our Services* list). Multi-department plans: essential, polyclinic, enterprise, multispecialty, womenchild.
+4. **Doctors** → add each doctor with department, fee, working days, morning/evening hours and slot duration.
+5. **Payment Settings** → see **E6: Razorpay Setup** below.
 6. **Holiday Calendar** → Set public holidays and clinic closures.
-7. **Patient Follow-ups** → Enable and configure follow-up timing and message.
+7. **Patient Follow-ups** (Hospital Profile) → the **ON/OFF switch** saves instantly; set the days after the visit and, optionally, your own wording (needs `followup_custom_message_v1`). Set the **front-desk phone** in Basic Details — it is the "call us" number in follow-ups.
+8. **Health check-ins on day 3 and day 7** (same card) → OFF by default. Switch on only after `patient_health_checkin` is approved.
+9. **Data & Support** → import the clinic's existing patient list from their old software (CSV; use *Check file* first), and show the admin where to export data and message Kriya.
 
 **Additional for polyclinic / enterprise:**
 8. **Branches** → Add branch locations with address and phone.
@@ -550,11 +783,11 @@ After the tenant is created in the Platform Panel, the **clinic admin** (or you 
 
 **Admin Panel URL:** `https://medassist-ai-docker.onrender.com/admin-panel`
 
-1. **Login** → Use clinic WhatsApp number.
-2. **Hospital Profile** → Set operating hours, address.
+1. **Login** → admin username and password from Step 13 (change it at first login).
+2. **Hospital Profile** → address, maps link, emergency number, front-desk phone.
 3. **Branches** → Add branches (multi-branch supported).
 4. **Lab Tests** → Add tests with name, price, category, turnaround time.
-5. **Payment Settings** → Enter Razorpay credentials.
+5. **Payment Settings** → see **E6: Razorpay Setup** below.
 6. **Holiday Calendar** → Set closures.
 
 **Additional for diagstream:**
@@ -577,23 +810,40 @@ After the tenant is created in the Platform Panel, the **clinic admin** (or you 
 
 #### Onboarding Steps:
 
-1. **Login** → Use clinic WhatsApp number.
-2. **Hospital Profile** → Set operating hours, address, emergency number.
+1. **Login** → admin username and password from Step 13 (change it at first login).
+2. **Hospital Profile** → address, maps link, emergency number, front-desk phone.
 3. **Doctors** → Add doctors with name, qualification, slot duration, schedule.
 4. **Treatments Tab** → This appears automatically for specialty plans:
-   - **Load Starter Treatments** → Click the starter card. The system auto-seeds 10+ clinically vetted treatments specific to the specialty (dermatology, ophthalmology, dental, or fertility).
+   - **Starter treatments are already there** → seeded automatically when the clinic was created (10+ treatments for the specialty, all hidden). Only if the list is empty (seeding failed at creation) click the starter card to load them — loading is idempotent, it never duplicates.
    - **Review & Activate** → Each treatment is seeded as **hidden** (`is_active = false`). The admin must:
      - Review the name, description, and category
      - Set pricing (₹ per procedure or "Consultation" for free assessment)
      - Toggle **"Show to patients"** to make it visible on WhatsApp
    - **Add Custom Treatments** → Click "Add Treatment" to create custom treatments with AI-assisted description drafting.
    - **Link Doctors to Treatments** → Assign which doctors perform each treatment. If no doctors are linked, any available doctor can be booked.
-5. **Payment Settings** → Enter Razorpay credentials.
+5. **Payment Settings** → see **E6: Razorpay Setup** below.
 6. **Holiday Calendar** → Set closures.
 7. **Branches** → Add branch locations (specialty chains often have multiple centres).
 
+8. **Patient Follow-ups / Health check-ins / Data & Support** → as in E1 (steps 7–9).
+
 **Additional for ivf:**
-8. **Lab Tests** → Add hormone/fertility tests (AMH, semen analysis, etc.) with pricing.
+9. **Lab Tests** → Add hormone/fertility tests (AMH, semen analysis, etc.) with pricing.
+
+#### Additional for **dental** — Treatment Plans (multi-sitting courses)
+
+Dental treatments run over several **sittings** (a root canal is typically 2–4). The **Treatment Plans** page appears for the dental plan only.
+
+1. **Doctors** → for each dentist fill **Doctor's WhatsApp number (for sitting reminders)**. A dentist without it gets no WhatsApp.
+2. **Treatments** → set **Typical sittings** on each multi-sitting treatment (e.g. Root Canal 3, Implant 4). It pre-fills new plans.
+3. **Staff Accounts** → tick **Manage Dental Treatment Plans & Sittings** for each receptionist who books sittings (admins always can). A receptionist tied to one **branch** only sees that branch's plans and clinic-wide plans, and can only book that branch's dentists.
+4. **Treatment Plans → Automation settings** (admin only): review request after each sitting (on by default), dentists' evening schedule (on by default), **Google review link** (sent to patients who tap *Excellent*).
+5. **Show the front desk the daily flow:**
+   - **New treatment plan** → find the patient (WhatsApp patients and imported patients are both searchable) → treatment → planned sittings → tooth numbers → estimate → tick **patient agreed to WhatsApp messages** if they said yes → optionally book the first sitting (doctor → date → a free time). Multi-branch clinics also pick the **Branch**.
+   - A patient who booked on WhatsApp: their booking can be chosen as **sitting 1**.
+   - After each sitting: **Done** → work notes + amount collected. The plan shows collected vs estimate and the balance, and completes itself after the last planned sitting.
+   - **Book sitting** for the next visit (any free dentist — only genuinely free times are offered). Reschedule = **Cancel** the sitting, then book the same sitting number again.
+   - **WhatsApp patient / WhatsApp doctor** buttons resend the details on demand.
 
 #### Starter Treatment Categories by Plan:
 
@@ -614,10 +864,10 @@ This plan combines everything: departments, doctors, lab tests, branches **AND**
 
 #### Onboarding Steps:
 
-1. **Login** → Use clinic WhatsApp number.
-2. **Hospital Profile** → Set operating hours, address, emergency number.
-3. **Departments** → Add all OPD departments (Cardiology, Orthopaedics, ENT, etc.).
-4. **Doctors** → Add doctors, assign to departments, set schedules.
+1. **Login** → admin username and password from Step 13 (change it at first login).
+2. **Hospital Profile** → address, maps link, emergency number, front-desk phone.
+3. **Departments** → typed per doctor in the Doctors form (no separate page): Cardiology, Orthopaedics, ENT, ...
+4. **Doctors** → Add doctors with their department, set schedules.
 5. **Treatments Tab** → Unlike single-specialty plans, **no treatments are auto-seeded** because the hospital has no single specialty.
    - **Load Starter Treatments** → Click the starter card. A **specialty picker** appears. Choose which specialty's list to load:
      - `dermatology` → Loads dermatology treatments
@@ -629,9 +879,9 @@ This plan combines everything: departments, doctors, lab tests, branches **AND**
    - **Link doctors to treatments**.
 6. **Branches** → Add branch locations.
 7. **Lab Tests** → Add lab tests with pricing.
-8. **Payment Settings** → Enter Razorpay credentials.
+8. **Payment Settings** → see **E6: Razorpay Setup** below.
 9. **Holiday Calendar** → Set closures.
-10. **Patient Follow-ups** → Enable and configure.
+10. **Patient Follow-ups / Health check-ins / Data & Support** → as in E1 (steps 7–9).
 
 > [!IMPORTANT]
 > The patient WhatsApp menu for multispecialty shows **8 rows** (within Meta's 10-row limit):
@@ -649,7 +899,7 @@ For Rainbow Children's / BirthRight-style hospitals: **Child Care**, **Women Car
 
 1. **Migration 082 must be applied** before the first Women & Child clinic is created.
 2. **Hospital Profile** → Operating hours, address and the **emergency number** (for a children's hospital, the paediatric emergency line). Obstetric and newborn red flags ("water broke", "baby not moving", "convulsion") send patients here.
-3. **Departments** → Paediatrics, Neonatology, Obstetrics & Gynaecology, Fertility, and each paediatric sub-specialty the hospital runs.
+3. **Departments** → typed per doctor in the Doctors form: Paediatrics, Neonatology, Obstetrics & Gynaecology, Fertility, and each paediatric sub-specialty.
 4. **Doctors** → Add doctors, assign departments, set schedules.
 5. **Treatments tab** → Three **section tabs**: 👶 Child Care (16 starters), 🌸 Women Care (20), 🌱 Fertility Care (12), all **auto-seeded hidden** at creation. Per tab: set prices, edit, link doctors, then **Show to patients**. A treatment added while a tab is open is filed under that section.
    - First-visit rows (Paediatric / Gynaecology / Fertility Consultation) are marked **Start here** — keep them published, they lead the WhatsApp menu.
@@ -661,6 +911,21 @@ For Rainbow Children's / BirthRight-style hospitals: **Child Care**, **Women Car
 
 > [!NOTE]
 > **PCPNDT:** any question about the sex of the unborn baby is answered with a legal refusal (en/hi/te) before any AI is involved. Tell the hospital this is built in.
+
+---
+
+### E6: Razorpay Setup (every plan that takes online payment)
+
+1. In the **client's** Razorpay dashboard → Account & Settings → **API Keys**: generate a live key; copy **Key ID** and **Key Secret**.
+2. Razorpay → **Webhooks → Add New Webhook**:
+   - **URL:** `https://medassist-ai-docker.onrender.com/webhooks/razorpay/<CLINIC_UUID>` (the clinic's own UUID from Step 13 — this is how the payment is matched to the right clinic)
+   - **Secret:** create a strong secret and copy it
+   - **Events:** `payment.captured` and `payment_link.paid`
+3. Admin panel → **Payment Settings**: paste Key ID, Key Secret, Webhook Secret; choose the mode — *Full payment*, *Partial deposit* (set the %), or *No payment required*; set the **cancellation & refund cutoff** (0/2/4/6/12/24 h).
+4. There is no platform-wide fallback account: a clinic without its own keys takes payment at the counter.
+
+> [!WARNING]
+> Without the webhook, patients pay but bookings stay *pending* until the reconciliation job catches up. A wrong webhook secret is rejected and alerts the clinic admin.
 
 ---
 
@@ -683,16 +948,17 @@ python -m scripts.whatsapp_doctor --clinic <CLINIC_UUID>
 - From any phone, send `"Hi"` to the clinic's WhatsApp number.
 - **Expected response per plan:**
 
-| Plan Type | Expected Menu |
+The first "Hi" from a new number first asks for **language** and **data consent** (DPDP), then shows the menu. Expected menu after setup (built by the rules in the Plan Reference Matrix):
+
+| Plan (after setup) | Expected Menu |
 |---|---|
-| **soloclinic** | Book Appointment · Our Doctors · Emergency · Talk to Staff |
-| **diagstream / diagbooking** | Book Lab Test · Emergency · Talk to Staff |
-| **essential** | Book Appointment · Our Services · Our Doctors · Emergency · Talk to Staff |
-| **polyclinic** | Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff |
-| **derma / eye / dental** | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Doctors · Emergency · Talk to Staff |
-| **ivf** | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff |
-| **multispecialty** | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff |
-| **womenchild** | 🩺 Book Consultation · 🔍 Not sure? Tell us · ✨ What We Treat · Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff |
+| **soloclinic / essential** | Book Appointment · Our Services · Our Doctors · Emergency · Talk to Staff · ❓ How to use |
+| **diagstream / diagbooking** (no doctors) | Book Lab Test *(or one row per service type)* · Emergency · Talk to Staff · ❓ How to use |
+| **polyclinic** | Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff · ❓ How to use |
+| **derma / eye / dental** (treatments published) | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Doctors · Emergency · Talk to Staff · ❓ How to use |
+| **ivf** (treatments published) | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff · ❓ How to use |
+| **multispecialty** (treatments published) | ✨ Our Treatments · 🔍 Find by Concern · Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff · ❓ How to use |
+| **womenchild** (first-visit rows published) | 🩺 Book Consultation · 🔍 Not sure? Tell us · ✨ What We Treat · Book Appointment · Our Services · Our Doctors · 🧪 Book Lab Test · Emergency · Talk to Staff · ❓ How to use *(10 rows — the maximum)* |
 
 > [!TIP]
 > Treatment menu items (✨ Our Treatments, 🔍 Find by Concern) only appear if the clinic has at least one **active** (visible) treatment. If you just onboarded and haven't activated any treatments yet, send a test after activating at least one.
@@ -714,6 +980,41 @@ After activating treatments in the admin panel:
 
 ---
 
+### 5. Dental Verification (dental plan)
+1. Platform → Dental Messaging → **Template Status**: all five `APPROVED`.
+2. Admin → Doctors: add your own number as a test dentist's WhatsApp number.
+3. Admin → Treatment Plans → **New treatment plan** for your own phone, tick consent, book sitting 1 **tomorrow** with that dentist → you receive `dental_sitting_confirmation`.
+4. That evening at 19:00 IST the dentist number receives `dental_doctor_schedule`; next morning 08:30 the patient number receives `dental_sitting_reminder`.
+5. Click **Done** on the sitting → about an hour later (09:00–21:00) you receive `dental_sitting_review`; tap **Needs improvement** → the admin bell shows "Patient feedback needs attention".
+6. Platform → Dental Messaging shows the messages counted for the month.
+
+### 6. Health Check-in Verification (only if the clinic switched it on)
+The job runs 10:30 IST for consultations seen 3 and 7 days earlier. Tap **Still have symptoms** on the received message → the bot replies with the clinic's number.
+
+---
+
+## Outbound Message Master Reference (every automated WhatsApp message)
+
+| Message | When (IST) | Template | Plans | Clinic switch / condition |
+|---|---|---|---|---|
+| Lab report PDF | on report arrival | `lab_report_ready_v1` / `lab_report_summary_v1` (via `lab_report_template_name`) | report plans | daily report limit (Subscriptions) |
+| Connector failure alert → admin | on failure | `admin_alert_template_name` | report plans | configured template |
+| Appointment reminder, day before | 09:00 | `appointment_reminder_24h` | booking plans | `reminders` feature; skipped if a dental reminder already went |
+| Appointment reminder, 2 h before | hourly | `appointment_reminder_2h` (2 vars) | booking plans | `reminders` feature |
+| Doctor-leave cancellation | 08:00 | `appointment_cancelled_doctor_leave` | booking plans | when a doctor leave is added |
+| Post-visit follow-up | 10:00, N days after | `post_appointment_followup` / `followup_custom_message_v1` | `reminders` plans | Patient Follow-ups switch (default ON) |
+| Health check-in | 10:30, day 3 & 7 | `patient_health_checkin` | `reminders` plans | Health check-ins switch (default **OFF**) |
+| Prescription reminders | every 5 min when due | normal chat message (only lands inside the 24h window) | booking plans | per prescription |
+| Dental sitting confirmation | on booking / button | `dental_sitting_confirmation` (fallback `appointment_confirmation`) | dental | patient consent; monthly patient limit |
+| Dental sitting reminder | 08:30, day before | `dental_sitting_reminder` | dental | patient consent; monthly patient limit |
+| Dentist sitting notice | on booking / button | `dental_doctor_sitting` | dental | doctor WhatsApp number; monthly doctor limit |
+| Dentist evening schedule | 19:00 (retry 20:30) | `dental_doctor_schedule` | dental | automation setting; monthly doctor limit |
+| Sitting review | ~1 h after Done, 09:00–21:00 | `dental_sitting_review` | dental | automation setting; monthly review limit; STOP respected |
+| Storage / message limit warnings | at 90 % and 100 % | admin panel bell (no WhatsApp) | all / dental | — |
+| Owner reply to a clinic message | on reply | admin panel bell (no WhatsApp) | all | — |
+
+---
+
 ## Part G: Troubleshooting & Edge Cases
 
 | Issue / Error | Root Cause | Exact Fix |
@@ -729,6 +1030,16 @@ After activating treatments in the admin panel:
 | **Treatments not showing in WhatsApp menu** | No treatments are active (all seeded as hidden). | Admin panel → Treatments → Toggle "Show to patients" on at least one treatment. |
 | **"Our Treatments" row missing for specialty plan** | `treatment_menu_active()` returns False when zero treatments are published. | Activate at least one treatment in the admin panel. The menu row appears dynamically. |
 | **Starter treatments not seeding** | Clinic plan mismatch or treatments already exist. | Seeding is idempotent. For multispecialty and womenchild, select a list in the starter picker. |
+| **Reports fail with "template not found" for a new clinic** | `lab_report_template_name` not set → the global default `lab_report_delivery` is used, which the client's WABA does not have. | Step 13b SQL; check with `python -m scripts.whatsapp_doctor --clinic <UUID>` (line `[3] template`). |
+| **Admin password lost** | It is shown only once on Create. | Reset it with the owner API: `curl -X PUT https://medassist-ai-docker.onrender.com/platform/reset-admin-password -u '<OWNER_USERNAME>:<OWNER_PASSWORD>' -H 'Content-Type: application/json' -d '{"username": "<ADMIN_USERNAME>", "new_password": "<NEW_PASSWORD_8+_CHARS>"}'` |
+| **Paid booking stays pending** | Razorpay webhook missing, wrong URL (clinic UUID) or wrong secret. | Part E6. |
+| **`132000` / "number of parameters does not match"** | Template approved with a different number of variables than the code sends. | Compare with the Variables column of the Template Requirement Matrix. Most common: `appointment_reminder_2h` created with 1 variable (old SOP) — it needs 2. |
+| **Dental sitting messages not arriving** | Templates not approved; patient consent not recorded; monthly limit reached. | Platform → Dental Messaging → Template Status. Plan detail shows "Patient WhatsApp: Not allowed" → **Record consent**. Check the usage bars on Treatment Plans. |
+| **Dentist gets no WhatsApp** | No WhatsApp number on the doctor; plan's "WhatsApp the doctor" off; evening schedule switched off; `dental_doctor_*` not approved. | Fill the number on Doctors; check the plan and Automation settings; Template Status. |
+| **Receptionist can't see Treatment Plans** | Missing permission, or clinic is not on the dental plan. | Staff Accounts → tick *Manage Dental Treatment Plans & Sittings*. |
+| **"This doctor does not work at this plan's branch"** | The plan belongs to a branch and the dentist is not assigned there. | Branches → assign the dentist to that branch, or pick a dentist of that branch. |
+| **Health check-ins never sent** | Switched off (default), or template not approved. | Hospital Profile → Health check-ins switch; register `patient_health_checkin`. |
+| **Connector alerts never reach the admin** | `admin_alert_template_name` not set. | Register `admin_alert_v1` and set the name (Step 10E2). |
 | **Treatment booking creates duplicate appointments** | Should not happen — `uq_appointment_active_slot` constraint prevents this. | Verify the unique index exists: `SELECT indexname FROM pg_indexes WHERE indexname = 'uq_appointment_active_slot';` |
 
 ---
@@ -742,6 +1053,9 @@ Webhook URL:                   https://medassist-ai-docker.onrender.com/webhook
 Platform Panel URL:            https://medassist-ai-docker.onrender.com/platform-panel
 Default Activation PIN:        123456
 Doctor Diagnostic CLI:         python -m scripts.whatsapp_doctor --clinic <CLINIC_UUID>
+Razorpay webhook (per clinic): https://medassist-ai-docker.onrender.com/webhooks/razorpay/<CLINIC_UUID>
+                               events: payment.captured, payment_link.paid
+Dental templates:              Platform Panel -> Dental Messaging -> Submit Templates
 ```
 
 ### Admin Panel URLs by Plan:
@@ -756,17 +1070,4 @@ Women & Child:     https://medassist-ai-docker.onrender.com/women-child-panel
 ```
 
 ### Feature Summary by Plan:
-```
-                    solo  diag-s  diag-b  essential  poly  enterprise  derma  eye  dental  ivf  multi
-Booking              ✅     ❌      ❌       ✅       ✅      ✅        ✅    ✅     ✅    ✅     ✅
-Reminders            ✅     ❌      ❌       ✅       ✅      ✅        ✅    ✅     ✅    ✅     ✅
-Lab Reports          ❌     ✅      ❌       ✅       ✅      ✅        ❌    ❌     ❌    ❌     ✅
-Lab Test Booking     ❌     ✅      ✅       ❌       ✅      ✅        ❌    ❌     ❌    ✅     ✅
-Treatments           ❌     ❌      ❌       ❌       ❌      ❌*       ✅    ✅     ✅    ✅     ✅
-Multi-Department     ❌     ❌      ❌       ✅       ✅      ✅        ❌    ❌     ❌    ❌     ✅
-Multi-Branch         ❌     ✅      ✅       ❌       ✅      ✅        ✅    ✅     ✅    ✅     ✅
-Payments             ✅     ✅      ✅       ✅       ✅      ✅        ✅    ✅     ✅    ✅     ✅
-Analytics            ❌     ❌      ❌       ✅       ✅      ✅        ✅    ✅     ✅    ✅     ✅
-
-* Enterprise has all features via wildcard, but treatments catalogue requires explicit feature override.
-```
+See the verified **Feature matrix** in the Plan Reference Matrix at the top of this document (generated from `PLAN_FEATURES`).

@@ -523,3 +523,122 @@ def test_invoice_adds_storage_addon_only_where_set(
     assert rows["dental"]["storage_addon_paise"] == 49_900
     assert rows["plain"]["amount_paise"] == 500_000
     assert "storage_addon_paise" not in rows["plain"]  # byte-identical to the pre-088 row
+
+
+# ═══════ notifications: owner reply -> clinic bell, owner unread badge ═══════
+
+
+def _support_patch(body, *, notif_fails=False):
+    """PATCH one support message as the owner; returns (response, notification inserts)."""
+    notifs = []
+    msg_row = {"id": "33333333-3333-3333-3333-333333333333", "clinic_id": CLINIC,
+               "subject": "Need more storage", "status": "in_progress"}
+
+    def table(name):
+        obj = MagicMock()
+        for m in ("eq", "select", "limit"):
+            getattr(obj, m).return_value = obj
+        if name == "support_messages":
+            def _update(payload):
+                obj._rows = [{**msg_row, **payload}]
+                return obj
+            obj.update.side_effect = _update
+        elif name == "admin_notifications":
+            def _insert(payload):
+                if notif_fails:
+                    raise RuntimeError("insert failed")
+                notifs.append(payload)
+                obj._rows = [payload]
+                return obj
+            obj.insert.side_effect = _insert
+        return obj
+
+    async def fake_sb(builder):
+        return MagicMock(data=getattr(builder, "_rows", []))
+
+    with patch("app.routers.platform.supabase") as sb_mod, \
+         patch("app.routers.platform.sb", side_effect=fake_sb), \
+         patch("app.routers.platform.log_admin_action", new_callable=AsyncMock):
+        sb_mod.table.side_effect = table
+        res = client.patch(f"/platform/support-messages/{msg_row['id']}", headers=owner_auth(), json=body)
+    return res, notifs
+
+
+def test_owner_reply_notifies_the_clinic_bell():
+    res, notifs = _support_patch({"reply": "Done - limit raised to 20,000."})
+    assert res.status_code == 200, res.text
+    assert len(notifs) == 1
+    n = notifs[0]
+    assert n["clinic_id"] == CLINIC and n["admin_id"] is None and n["is_read"] is False
+    assert n["title"].startswith("Kriya Support")  # the prefix admin/index.html keys on
+    assert "Need more storage" in n["title"] and "20,000" in n["message"]
+
+
+def test_owner_resolving_without_reply_notifies_status():
+    res, notifs = _support_patch({"status": "resolved"})
+    assert res.status_code == 200
+    assert notifs[0]["title"] == "Kriya Support: request resolved"
+
+
+def test_owner_merely_opening_a_message_does_not_ping_the_clinic():
+    res, notifs = _support_patch({})
+    assert res.status_code == 200
+    assert notifs == []
+
+
+def test_notification_failure_never_fails_the_reply():
+    res, _ = _support_patch({"reply": "ok"}, notif_fails=True)
+    assert res.status_code == 200
+    assert res.json()["message"]["owner_reply"] == "ok"
+
+
+def test_owner_unread_count():
+    q = MagicMock()
+    for m in ("select", "is_", "limit"):
+        getattr(q, m).return_value = q
+
+    async def fake_sb(builder):
+        return MagicMock(data=[], count=3)
+
+    with patch("app.routers.platform.supabase") as sb_mod, \
+         patch("app.routers.platform.sb", side_effect=fake_sb):
+        sb_mod.table.return_value = q
+        res = client.get("/platform/support-messages/unread-count", headers=owner_auth())
+    assert res.status_code == 200 and res.json()["unread"] == 3
+    q.is_.assert_called_with("owner_seen_at", "null")
+    assert client.get("/platform/support-messages/unread-count").status_code == 401
+
+
+# ═══════ follow-up ON/OFF switch ═══════
+
+
+def test_followup_switch_saves_only_the_flag(as_user):
+    """The switch sends {followup_enabled} alone; every other setting survives."""
+    as_user(ADMIN)
+    cfg = {"followup_enabled": True, "followup_days": 3, "followup_message": "Get well soon",
+           "followup_message_template_name": "tpl", "address": "12 MG Road"}
+    written = {}
+
+    def _update(payload):
+        written.update(payload)
+        chain = MagicMock()
+        chain.eq.return_value = chain
+        chain.execute.return_value = MagicMock(data=[{"name": "Smile", "whatsapp_number": "+91"}])
+        return chain
+
+    with patch("app.routers.admin.get_clinic_by_id", new_callable=AsyncMock,
+               return_value={"id": CLINIC, "config": dict(cfg)}), \
+         patch("app.routers.admin.supabase") as sup, \
+         patch("app.routers.admin.invalidate_tenant_cache"), \
+         patch("app.routers.admin.log_admin_action", new_callable=AsyncMock) as audit:
+        sup.table.return_value.update.side_effect = _update
+        res = client.put("/admin/profile", json={"followup_enabled": False})
+    assert res.status_code == 200, res.text
+    assert written["config"] == {**cfg, "followup_enabled": False}
+    assert "name" not in written  # the hospital name is untouched
+    assert audit.await_args.kwargs["details"]["followup_enabled"] is False
+
+
+def test_staff_cannot_flip_followups(as_user):
+    as_user(STAFF)
+    assert client.put("/admin/profile", json={"followup_enabled": False}).status_code == 403

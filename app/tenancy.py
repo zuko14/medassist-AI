@@ -59,6 +59,8 @@ TENANT_OWNED_TABLES = frozenset({
     "catalogue_import_previews", "weekly_insights_summaries",
     # Migration 088: imported legacy patient list + clinic->owner support inbox
     "patient_records", "patient_import_batches", "support_messages",
+    # Migration 089: dental treatment plans, doctor digests, monthly quotas
+    "dental_treatment_plans", "dental_doctor_digests", "clinic_message_quota_usage",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

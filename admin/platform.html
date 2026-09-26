@@ -911,6 +911,19 @@
                     <div class="pulse-dot"></div>
                     <span id="authenticatedUser">Super-Admin</span>
                 </div>
+                <div style="position:relative;">
+                    <button class="btn-secondary" id="ownerBellBtn" onclick="toggleOwnerBell()" aria-label="Client message notifications" aria-haspopup="true" aria-expanded="false" title="Client messages" style="position:relative; padding:9px 12px;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                        <span id="ownerBellBadge" style="display:none; position:absolute; top:-5px; right:-5px; background:#ef4444; color:#fff; font-size:0.65rem; font-weight:800; border-radius:10px; padding:1px 5px; min-width:16px; text-align:center;">0</span>
+                    </button>
+                    <div id="ownerBellPanel" role="dialog" aria-label="Client messages" style="display:none; position:absolute; right:0; top:calc(100% + 8px); width:min(380px, calc(100vw - 24px)); max-height:70vh; overflow-y:auto; background:var(--surface-solid); border:1px solid var(--border2); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.55); z-index:1000;">
+                        <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                            <strong style="color:var(--text); font-size:0.92rem;">Client Messages</strong>
+                            <button onclick="scrollToSupportInbox()" style="background:none; border:none; color:var(--accent-light); font-size:0.78rem; font-weight:600; cursor:pointer;">View all</button>
+                        </div>
+                        <div id="ownerBellList" style="padding:10px; display:flex; flex-direction:column; gap:8px;"></div>
+                    </div>
+                </div>
                 <button class="btn-secondary" onclick="fetchPlatformData()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button>
                 <button class="btn-secondary" onclick="logoutOwner()">Lock Dashboard</button>
             </div>
@@ -1340,6 +1353,28 @@
                 </div>
             </div>
 
+            <!-- Dental Messaging (dental clinics only, migration 089) -->
+            <div class="section-card" id="dentalMessagingCard">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="chart-title">Dental Messaging</div>
+                        <div class="chart-subtitle" id="dentalMsgSummary">Loading dental messaging...</div>
+                    </div>
+                    <input type="month" class="filter-select" id="dentalMsgMonth" onchange="loadDentalMessaging()" aria-label="Month">
+                </div>
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr><th>Dental Clinic</th><th>Patient messages</th><th>Doctor reminders</th><th>Review requests</th><th>Est. Meta cost</th><th>Add-on / month</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="dentalMsgBody">
+                            <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="dentalTemplateResult" style="margin-top:12px; font-size:0.85rem;"></div>
+            </div>
+
             <!-- Subscription Lifecycle Board -->
             <div class="section-card">
                 <div class="table-toolbar">
@@ -1650,6 +1685,27 @@
                 <button class="btn-primary" onclick="submitRate()">Save Rate</button>
                 <button class="btn-secondary" onclick="clearRate()" id="rateClearBtn">Revert to plan default</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Dental Messaging Modal (Owner-only) -->
+    <div class="modal-overlay" id="dentalMsgModal">
+        <div class="modal-panel" style="max-width:480px">
+            <div class="modal-header">
+                <h3 style="font-size:1.2rem; font-weight:800; color:#fff;">Dental Messaging Limits</h3>
+                <button class="close-btn" onclick="closeDentalMsgModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="error-msg" id="dentalMsgModalError">Error</div>
+            <p style="font-size:0.82rem; color:var(--text3); margin-bottom:16px;" id="dentalMsgModalContext"></p>
+            <div class="form-group"><label>Patient sitting messages / month</label><input type="number" class="form-control" id="dmPatient" min="0" max="100000"></div>
+            <div class="form-group"><label>Doctor reminders / month</label><input type="number" class="form-control" id="dmDoctor" min="0" max="100000"></div>
+            <div class="form-group"><label>Review requests / month</label><input type="number" class="form-control" id="dmReview" min="0" max="100000"></div>
+            <div class="form-group"><label>Messaging add-on charge per month (₹)</label><input type="number" class="form-control" id="dmAddon" min="0" step="1" placeholder="0 = included in plan"></div>
+            <p style="font-size:0.78rem; color:var(--text3); margin-bottom:14px;">
+                0 switches that message type off. The clinic sees a warning at 90% and the messages pause at 100% until next month
+                (patients still get the standard appointment reminder). The add-on is added to this clinic's next generated invoice.
+            </p>
+            <button class="btn-primary" onclick="submitDentalMsg()">Save</button>
         </div>
     </div>
 
@@ -2136,6 +2192,7 @@
         });
 
         function logoutOwner() {
+            stopOwnerBellPolling();
             sessionStorage.removeItem('owner_auth');
             ownerAuthHeader = '';
             document.getElementById('loginOverlay').classList.remove('hidden');
@@ -2188,6 +2245,8 @@
                 loadOutboundAudit();
                 loadDataStorageBoard();
                 loadSupportInbox();
+                loadDentalMessaging();
+                startOwnerBellPolling();
 
             } catch (e) {
                 console.error('Error fetching platform data:', e);
@@ -4059,9 +4118,233 @@
                     method: 'PATCH',
                     headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
                     body: JSON.stringify({}),
-                }).then(() => loadSupportInbox()).catch(() => {});
+                }).then(() => { loadSupportInbox(); refreshOwnerBell(); }).catch(() => {});
             }
         }
+
+        // ── Dental Messaging (dental clinics only) ──
+        let globalDentalMsg = [];
+        let _dentalMsgClinicId = null;
+
+        function _dmCell(k) {
+            if (!k) return '—';
+            if (k.limit === 0) return '<span style="color:var(--text3)">Off</span>';
+            const color = k.level === 'full' ? '#ef4444' : k.level === 'warning' ? '#f59e0b' : '#10b981';
+            return `<span style="font-weight:700">${k.used.toLocaleString('en-IN')}</span> / ${k.limit.toLocaleString('en-IN')}
+                <span class="badge" style="background:${color}22; color:${color}; margin-left:4px;">${k.percent}%</span>`;
+        }
+
+        async function loadDentalMessaging() {
+            const tbody = document.getElementById('dentalMsgBody');
+            const monthEl = document.getElementById('dentalMsgMonth');
+            const qs = monthEl.value ? '?month=' + encodeURIComponent(monthEl.value) : '';
+            try {
+                const res = await fetch('/platform/dental-messaging' + qs, { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (!monthEl.value) monthEl.value = data.month;
+                globalDentalMsg = data.clinics || [];
+                const totalSent = globalDentalMsg.reduce((a, r) => a + r.total_sent, 0);
+                const totalCost = globalDentalMsg.reduce((a, r) => a + r.est_meta_cost_paise, 0);
+                const totalAddon = globalDentalMsg.reduce((a, r) => a + r.addon_paise, 0);
+                document.getElementById('dentalMsgSummary').textContent =
+                    `${globalDentalMsg.length} dental clinic(s) · ${totalSent.toLocaleString('en-IN')} messages in ${data.month} `
+                    + `· est. Meta cost ${inr(totalCost)} at ${inr(data.utility_rate_paise)}/message · add-ons ${inr(totalAddon)}/month`;
+                if (!globalDentalMsg.length) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">No dental clinics yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = globalDentalMsg.map(r => `
+                    <tr>
+                        <td><div class="clinic-name-cell"><span class="clinic-title">${escapeHtml(r.clinic_name || 'Unnamed')}</span>
+                            <span class="clinic-phone">${r.feature_enabled ? '' : 'Treatment plans switched off · '}${r.has_meta_account ? '' : 'No Meta token/WABA id'}</span></div></td>
+                        <td>${_dmCell(r.kinds.patient)}</td>
+                        <td>${_dmCell(r.kinds.doctor)}</td>
+                        <td>${_dmCell(r.kinds.review)}</td>
+                        <td>${inr(r.est_meta_cost_paise)}</td>
+                        <td>${r.addon_paise ? inr(r.addon_paise) : '<span style="color:var(--text3)">—</span>'}</td>
+                        <td style="white-space:nowrap;">
+                            <button class="action-btn" onclick="openDentalMsgModal('${escapeHtml(r.clinic_id)}')">Set Limits / Price</button>
+                            <button class="action-btn" ${r.has_meta_account ? '' : 'disabled title="Add the clinic Meta token and WABA id first"'} onclick="submitDentalTemplates('${escapeHtml(r.clinic_id)}')">Submit Templates</button>
+                            <button class="action-btn" ${r.has_meta_account ? '' : 'disabled'} onclick="checkDentalTemplates('${escapeHtml(r.clinic_id)}')">Template Status</button>
+                        </td>
+                    </tr>`).join('');
+            } catch (e) {
+                console.error('Dental messaging load failed:', e);
+                document.getElementById('dentalMsgSummary').textContent = 'Dental messaging unavailable';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">Could not load dental messaging.</td></tr>';
+            }
+        }
+
+        function openDentalMsgModal(clinicId) {
+            const r = globalDentalMsg.find(x => x.clinic_id === clinicId);
+            if (!r) return;
+            _dentalMsgClinicId = clinicId;
+            document.getElementById('dentalMsgModalError').style.display = 'none';
+            document.getElementById('dmPatient').value = r.kinds.patient.limit;
+            document.getElementById('dmDoctor').value = r.kinds.doctor.limit;
+            document.getElementById('dmReview').value = r.kinds.review.limit;
+            document.getElementById('dmAddon').value = r.addon_rupees || 0;
+            document.getElementById('dentalMsgModalContext').innerHTML =
+                `<strong>${escapeHtml(r.clinic_name || '')}</strong> · ${r.total_sent.toLocaleString('en-IN')} dental messages this month, est. Meta cost ${inr(r.est_meta_cost_paise)}.`;
+            document.getElementById('dentalMsgModal').classList.add('active');
+        }
+
+        function closeDentalMsgModal() {
+            document.getElementById('dentalMsgModal').classList.remove('active');
+            _dentalMsgClinicId = null;
+        }
+
+        async function submitDentalMsg() {
+            const err = document.getElementById('dentalMsgModalError');
+            const body = {};
+            for (const [id, key] of [['dmPatient', 'patient_limit'], ['dmDoctor', 'doctor_limit'], ['dmReview', 'review_limit']]) {
+                const v = parseInt(document.getElementById(id).value, 10);
+                if (!Number.isInteger(v) || v < 0 || v > 100000) {
+                    err.textContent = 'Limits must be whole numbers between 0 and 100,000.'; err.style.display = 'block'; return;
+                }
+                body[key] = v;
+            }
+            const addon = parseFloat(document.getElementById('dmAddon').value || '0');
+            if (!(addon >= 0)) { err.textContent = 'Add-on must be 0 or more.'; err.style.display = 'block'; return; }
+            body.addon_rupees = addon;
+            try {
+                const res = await fetch(`/platform/clinics/${_dentalMsgClinicId}/dental-messaging`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { err.textContent = (typeof data.detail === 'string' && data.detail) || 'Could not save.'; err.style.display = 'block'; return; }
+                closeDentalMsgModal();
+                loadDentalMessaging();
+            } catch (e) { err.textContent = 'Network error — please try again.'; err.style.display = 'block'; }
+        }
+
+        async function submitDentalTemplates(clinicId) {
+            const r = globalDentalMsg.find(x => x.clinic_id === clinicId);
+            if (!confirm(`Submit the 5 dental WhatsApp templates to Meta for ${r ? r.clinic_name : 'this clinic'}?\n\nMeta reviews them (usually minutes, sometimes up to a day). Until approved, patients get the standard reminder and doctors get no WhatsApp.`)) return;
+            const out = document.getElementById('dentalTemplateResult');
+            out.textContent = 'Submitting templates to Meta...';
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/dental-templates/submit`, { method: 'POST', headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { out.textContent = (typeof data.detail === 'string' && data.detail) || 'Submission failed.'; return; }
+                out.innerHTML = '<strong>Submission result:</strong> ' + (data.results || []).map(t =>
+                    `${escapeHtml(t.name)}: <b>${escapeHtml(t.result)}</b>${t.detail ? ' (' + escapeHtml(t.detail) + ')' : ''}`).join(' · ');
+            } catch (e) { out.textContent = 'Network error — please try again.'; }
+        }
+
+        async function checkDentalTemplates(clinicId) {
+            const out = document.getElementById('dentalTemplateResult');
+            out.textContent = 'Checking template status with Meta...';
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/dental-templates/status`, { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { out.textContent = (typeof data.detail === 'string' && data.detail) || 'Status check failed.'; return; }
+                const color = st => st === 'APPROVED' ? '#10b981' : (st === 'REJECTED' ? '#ef4444' : '#f59e0b');
+                out.innerHTML = '<strong>Template status:</strong> ' + (data.templates || []).map(t =>
+                    `${escapeHtml(t.name)}: <b style="color:${color(t.status)}">${escapeHtml(t.status)}</b>`).join(' · ');
+            } catch (e) { out.textContent = 'Network error — please try again.'; }
+        }
+
+        // ── Owner bell: unread client messages, polled every 60 s ──
+        let _ownerBellTimer = null;
+        const _baseTitle = document.title;
+
+        function startOwnerBellPolling() {
+            stopOwnerBellPolling();
+            refreshOwnerBell();
+            _ownerBellTimer = setInterval(refreshOwnerBell, 60000);
+        }
+
+        function stopOwnerBellPolling() {
+            if (_ownerBellTimer) { clearInterval(_ownerBellTimer); _ownerBellTimer = null; }
+            setOwnerBellCount(0);
+        }
+
+        function setOwnerBellCount(n) {
+            const badge = document.getElementById('ownerBellBadge');
+            if (!badge) return;
+            badge.textContent = n > 99 ? '99+' : String(n);
+            badge.style.display = n > 0 ? 'inline-block' : 'none';
+            // The owner tab usually sits in the background; the count in the
+            // tab title makes a new message visible from other tabs.
+            document.title = n > 0 ? `(${n}) ${_baseTitle}` : _baseTitle;
+        }
+
+        async function refreshOwnerBell() {
+            if (!ownerAuthHeader) return;
+            try {
+                const res = await fetch('/platform/support-messages/unread-count', { headers: { 'Authorization': ownerAuthHeader } });
+                if (res.status === 401) { logoutOwner(); return; }
+                if (!res.ok) return;  // transient: keep the last known badge
+                const data = await res.json();
+                const n = data.unread || 0;
+                const prev = parseInt(document.getElementById('ownerBellBadge').textContent, 10) || 0;
+                setOwnerBellCount(n);
+                if (n > prev) loadSupportInbox();  // a new message arrived: refresh the inbox table too
+            } catch (e) { /* network blip: the next tick retries */ }
+        }
+
+        async function toggleOwnerBell() {
+            const panel = document.getElementById('ownerBellPanel');
+            const btn = document.getElementById('ownerBellBtn');
+            const open = panel.style.display === 'none';
+            panel.style.display = open ? 'block' : 'none';
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (!open) return;
+            const list = document.getElementById('ownerBellList');
+            list.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text3); font-size:0.85rem;">Loading...</div>';
+            try {
+                const res = await fetch('/platform/support-messages', { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                // Unread first, then open ones; newest first within each.
+                const msgs = (data.messages || [])
+                    .filter(m => !m.owner_seen_at || m.status !== 'resolved')
+                    .sort((a, b) => (Number(!!a.owner_seen_at) - Number(!!b.owner_seen_at))
+                        || String(b.created_at).localeCompare(String(a.created_at)))
+                    .slice(0, 12);
+                msgs.forEach(m => { if (!globalSupportMessages.find(x => x.id === m.id)) globalSupportMessages.push(m); });
+                if (!msgs.length) {
+                    list.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text3); font-size:0.85rem;">No open client messages.</div>';
+                    return;
+                }
+                list.innerHTML = msgs.map(m => `
+                    <button type="button" onclick="openFromOwnerBell('${escapeHtml(m.id)}')" style="text-align:left; background:${m.owner_seen_at ? 'var(--surface2)' : 'rgba(61,139,253,.14)'}; border:1px solid ${m.owner_seen_at ? 'var(--border)' : 'rgba(61,139,253,.45)'}; border-radius:10px; padding:10px 12px; cursor:pointer; color:var(--text); width:100%;">
+                        <div style="display:flex; justify-content:space-between; gap:8px; font-size:0.78rem; color:var(--text3);">
+                            <span>${escapeHtml(m.clinic_name || 'Unknown clinic')} · ${escapeHtml(SUPPORT_TYPE_LABELS[m.category] || m.category)}</span>
+                            ${m.owner_seen_at ? '' : '<span style="background:var(--accent); color:#fff; font-weight:700; padding:0 6px; border-radius:8px;">NEW</span>'}
+                        </div>
+                        <div style="font-weight:700; font-size:0.88rem; margin-top:3px;">${escapeHtml(m.subject)}</div>
+                        <div style="font-size:0.8rem; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.message)}</div>
+                        <div style="font-size:0.72rem; color:var(--text3); margin-top:3px;">${_fmtWhen(m.created_at)}</div>
+                    </button>`).join('');
+            } catch (e) {
+                list.innerHTML = '<div style="text-align:center; padding:20px; color:var(--red); font-size:0.85rem;">Could not load messages.</div>';
+            }
+        }
+
+        function closeOwnerBell() {
+            document.getElementById('ownerBellPanel').style.display = 'none';
+            document.getElementById('ownerBellBtn').setAttribute('aria-expanded', 'false');
+        }
+
+        function openFromOwnerBell(messageId) {
+            closeOwnerBell();
+            openSupportReply(messageId);  // opening marks it seen; the badge refreshes after
+        }
+
+        function scrollToSupportInbox() {
+            closeOwnerBell();
+            document.getElementById('supportInboxCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        document.addEventListener('click', e => {
+            const panel = document.getElementById('ownerBellPanel');
+            if (panel && panel.style.display !== 'none' && !e.target.closest('#ownerBellPanel, #ownerBellBtn')) closeOwnerBell();
+        });
 
         function closeSupportReply() {
             document.getElementById('supportReplyModal').classList.remove('active');
@@ -4086,6 +4369,7 @@
                 }
                 closeSupportReply();
                 loadSupportInbox();
+                refreshOwnerBell();
             } catch (e) {
                 err.textContent = 'Network error — please try again.'; err.style.display = 'block';
             }
