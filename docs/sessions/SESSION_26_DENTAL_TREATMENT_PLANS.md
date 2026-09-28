@@ -102,3 +102,25 @@ Tests: `tests/test_scheduler_health_checkin.py` rewritten for the fixed contract
 - Which admin sections to hide for dental beyond lab/diagnostics (already hidden): awaiting client input.
 - Live clients whose `appointment_reminder_2h` was registered from the old 1-variable SOP text: check their
   WABA's template (Meta → WhatsApp Manager → Message templates) and re-register with 2 variables.
+
+
+---
+
+## Addendum (2026-09-28): photos of sitting notes + per-patient export (migration 094)
+
+**Why:** front desks do not type sitting notes; the dentist writes them on paper. Staff now photograph the paper.
+
+- **Upload:** "Mark sitting done" / "Notes / photos" modal → *Photo of written notes*. Up to 6 photos per sitting.
+  The browser shrinks each photo to ~1600 px JPEG before upload (a 4000×3000 test image went up as ~21 KB).
+  Save stores notes + amount **first**, then uploads photos; a failed photo never loses the notes.
+- **Server:** `POST /admin/dental/sittings/{id}/photos`, `DELETE .../photos/{photo_id}` (DENTAL_PLANS_MANAGE,
+  branch-scoped via `_sitting_or_404`). Type is sniffed from the bytes (JPEG/PNG/WebP only), max 3 MB read with a
+  cap, path built from ids only: `{clinic}/dental-sittings/{appointment}/{uuid}.{ext}` in the private `lab-reports`
+  bucket. Index rows in `dental_sitting_photos`; if the row insert fails the file is removed. Viewing uses 15-minute
+  signed URLs returned with `GET /admin/dental/plans/{id}` (`sittings[].photos`).
+- **Export:** plan view → *Download history* → `GET /admin/dental/patient-history/export?phone=`: one CSV row per
+  sitting (plans without sittings get one row) with estimate / collected / balance, notes, photo count and review.
+  Same query as the history view (`_dental_history`, branch-scoped), formula-safe cells (`client_data.csv_cell`),
+  audited as `DENTAL_PATIENT_EXPORT` with a masked phone.
+- **Known limits:** photos are not inside the CSV (it lists how many; they are viewed in the panel). A DPDP
+  erasure request keeps clinical records (NMC), and photos follow `sitting_notes`, which is also kept.

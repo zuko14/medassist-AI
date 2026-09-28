@@ -40,10 +40,12 @@ Interaction with the generic jobs (app/services/scheduler.py)
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from app.database import sb, supabase
@@ -900,3 +902,111 @@ async def template_statuses(clinic: dict) -> list:
                 found[t["name"]] = t
     return [{"name": n, "status": (found.get(n) or {}).get("status", "NOT_SUBMITTED"),
              "category": (found.get(n) or {}).get("category")} for n in sorted(wanted)]
+
+
+
+# ═══════ Photos of handwritten sitting notes (migration 094) ═══════
+# Staff photograph the dentist's written notes instead of typing them. Files
+# live in the private lab-reports bucket under a path built only from ids;
+# they are shown through short-lived signed URLs, never public links.
+
+PHOTO_BUCKET = "lab-reports"
+PHOTO_MAX_BYTES = 3 * 1024 * 1024          # the panel shrinks photos well below this
+PHOTO_MAX_PER_SITTING = 6
+PHOTO_URL_SECONDS = 15 * 60
+_PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+
+def sniff_image_type(data: bytes) -> Optional[str]:
+    """The real type from the file's first bytes; the browser's claim is ignored."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+async def sitting_photos(clinic_id: str, appointment_ids: list) -> dict:
+    """{appointment_id: [{id, url, created_at}]} with fresh signed URLs.
+    Never raises: a storage hiccup shows no thumbnails, not a broken plan."""
+    ids = [a for a in appointment_ids if a]
+    if not ids:
+        return {}
+    try:
+        rows = (await sb(supabase.table("dental_sitting_photos")
+                         .select("id, appointment_id, storage_path, created_at")
+                         .eq("clinic_id", _scope(clinic_id)).in_("appointment_id", ids)
+                         .order("created_at"))).data or []
+        if not rows:
+            return {}
+        signed = await asyncio.to_thread(
+            supabase.storage.from_(PHOTO_BUCKET).create_signed_urls,
+            [r["storage_path"] for r in rows], PHOTO_URL_SECONDS,
+        )
+        urls = {}
+        for item in signed or []:
+            url = item.get("signedURL") or item.get("signedUrl")
+            if item.get("path") and url:
+                urls[item["path"]] = url
+    except Exception as e:
+        logger.error(f"DENTAL_PHOTOS_LIST_FAILED clinic={clinic_id}: {e}")
+        return {}
+    out: dict = {}
+    for r in rows:
+        if r["storage_path"] in urls:
+            out.setdefault(r["appointment_id"], []).append(
+                {"id": r["id"], "url": urls[r["storage_path"]], "created_at": r["created_at"]})
+    return out
+
+
+async def add_sitting_photo(clinic_id: str, appt: dict, data: bytes, uploaded_by: str) -> dict:
+    cid = _scope(clinic_id)
+    if appt.get("status") not in ("confirmed", "completed"):
+        raise DentalError("Photos can be added to a booked or completed sitting only.")
+    if not data:
+        raise DentalError("The photo is empty.")
+    if len(data) > PHOTO_MAX_BYTES:
+        raise DentalError("The photo is larger than 3 MB. Please retake it or choose a smaller one.")
+    content_type = sniff_image_type(data)
+    if not content_type:
+        raise DentalError("Please upload a photo (JPG, PNG or WebP).")
+    count = await sb(supabase.table("dental_sitting_photos").select("id", count="exact")
+                     .eq("clinic_id", cid).eq("appointment_id", appt["id"]).limit(1))
+    if (count.count or 0) >= PHOTO_MAX_PER_SITTING:
+        raise DentalError(f"A sitting can have at most {PHOTO_MAX_PER_SITTING} photos. Delete one first.")
+
+    path = f"{cid}/dental-sittings/{appt['id']}/{uuid4().hex}.{_PHOTO_TYPES[content_type]}"
+    await asyncio.to_thread(
+        supabase.storage.from_(PHOTO_BUCKET).upload, path, data,
+        {"content-type": content_type},
+    )
+    try:
+        res = await sb(supabase.table("dental_sitting_photos").insert({
+            "clinic_id": cid, "appointment_id": appt["id"], "storage_path": path,
+            "content_type": content_type, "size_bytes": len(data), "uploaded_by": uploaded_by,
+        }))
+    except Exception:
+        # No orphan files: the index row is the only way a photo is ever found.
+        try:
+            await asyncio.to_thread(supabase.storage.from_(PHOTO_BUCKET).remove, [path])
+        except Exception as cleanup_err:
+            logger.error(f"DENTAL_PHOTO_ORPHAN path={path}: {cleanup_err}")
+        raise
+    return res.data[0]
+
+
+async def delete_sitting_photo(clinic_id: str, appointment_id: str, photo_id: str) -> bool:
+    cid = _scope(clinic_id)
+    res = await sb(supabase.table("dental_sitting_photos").delete()
+                   .eq("clinic_id", cid).eq("appointment_id", appointment_id).eq("id", photo_id))
+    if not res.data:
+        return False
+    try:
+        await asyncio.to_thread(supabase.storage.from_(PHOTO_BUCKET).remove,
+                                [r["storage_path"] for r in res.data])
+    except Exception as e:
+        # The row is gone, so the file can no longer be reached from the panel.
+        logger.error(f"DENTAL_PHOTO_FILE_NOT_REMOVED clinic={cid} photo={photo_id}: {e}")
+    return True

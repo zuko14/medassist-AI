@@ -8757,6 +8757,9 @@ async def get_dental_plan(plan_id: str, clinic_id: str = "default", user: AdminU
     clinic = await _dental_clinic(user, clinic_id)
     plan = await _plan_or_404(clinic["id"], plan_id, user)
     sittings = await dental_plans.plan_sittings(clinic["id"], plan_id)
+    photos = await dental_plans.sitting_photos(clinic["id"], [s["id"] for s in sittings])
+    for s in sittings:
+        s["photos"] = photos.get(s["id"], [])
     return {
         "success": True,
         "plan": plan,
@@ -9002,18 +9005,7 @@ async def dental_patient_history(
         phone = _clean_patient_phone(phone)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    pinned = _staff_branch(user)
-    plans = (await sb(restrict_to_branch(
-        supabase.table("dental_treatment_plans").select("*")
-        .eq("clinic_id", clinic["id"]).eq("patient_phone", phone), pinned)
-        .order("created_at", desc=True).limit(50))).data or []
-    appts = (await sb(restrict_to_branch(
-        supabase.table("appointments")
-        .select("id, treatment_plan_id, sitting_number, status, appointment_date, appointment_time, "
-                "doctor_name, treatment_name, booking_type, sitting_notes, "
-                "amount_collected_paise, review_rating, branch_id")
-        .eq("clinic_id", clinic["id"]).eq("patient_phone", phone), pinned)
-        .order("appointment_date", desc=True).limit(300))).data or []
+    plans, appts = await _dental_history(clinic, phone, user)
     by_plan: dict = {}
     for a in appts:
         if a.get("treatment_plan_id"):
@@ -9029,6 +9021,24 @@ async def dental_patient_history(
                    "summary": dental_plans.summarize(p, by_plan.get(p["id"], []))} for p in plans],
         "unlinked_bookings": unlinked[:20],
     }
+
+
+async def _dental_history(clinic: dict, phone: str, user: AdminUser) -> tuple:
+    """One patient's plans and appointments, branch-scoped for pinned staff.
+    Shared by the history view and its export so the two can never disagree."""
+    pinned = _staff_branch(user)
+    plans = (await sb(restrict_to_branch(
+        supabase.table("dental_treatment_plans").select("*")
+        .eq("clinic_id", clinic["id"]).eq("patient_phone", phone), pinned)
+        .order("created_at", desc=True).limit(50))).data or []
+    appts = (await sb(restrict_to_branch(
+        supabase.table("appointments")
+        .select("id, treatment_plan_id, sitting_number, status, appointment_date, appointment_time, "
+                "doctor_name, treatment_name, booking_type, sitting_notes, "
+                "amount_collected_paise, review_rating, branch_id")
+        .eq("clinic_id", clinic["id"]).eq("patient_phone", phone), pinned)
+        .order("appointment_date", desc=True).limit(300))).data or []
+    return plans, appts
 
 
 @router.put("/dental/settings")
@@ -9130,3 +9140,141 @@ async def message_whatsapp_lead(
         ip_address=_client_ip(request),
     )
     return {"success": True}
+
+
+# ═══════ DENTAL: sitting note photos + per-patient export (migration 094) ═══════
+
+
+@router.post("/dental/sittings/{appointment_id}/photos")
+async def upload_dental_sitting_photo(
+    appointment_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    clinic_id: str = "default",   # query, like every dental route (the panel's withScope adds it)
+    user: AdminUser = Depends(_DENTAL),
+):
+    """Attach a photo of the dentist's handwritten notes to one sitting."""
+    clinic = await _dental_clinic(user, clinic_id)
+    appt = await _sitting_or_404(clinic["id"], appointment_id, user)
+    # Read one byte past the cap: an oversized upload is refused without
+    # ever holding the whole file in memory.
+    data = await file.read(dental_plans.PHOTO_MAX_BYTES + 1)
+    try:
+        photo = await dental_plans.add_sitting_photo(clinic["id"], appt, data, user.username)
+    except dental_plans.DentalError as e:
+        raise _dental_error(e)
+    except Exception as e:
+        logger.error(f"DENTAL_PHOTO_UPLOAD_FAILED clinic={clinic['id']} sitting={appointment_id}: {e}")
+        raise HTTPException(status_code=502, detail="Could not store the photo. Please try again.")
+    await log_admin_action(
+        user=user, action="DENTAL_SITTING_PHOTO_ADD", resource_type="appointment", resource_id=appointment_id,
+        details={"clinic_id": clinic["id"], "photo_id": photo["id"], "size_bytes": photo["size_bytes"]},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True, "photo_id": photo["id"]}
+
+
+@router.delete("/dental/sittings/{appointment_id}/photos/{photo_id}")
+async def delete_dental_sitting_photo(
+    appointment_id: str,
+    photo_id: str,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    clinic = await _dental_clinic(user, clinic_id)
+    await _sitting_or_404(clinic["id"], appointment_id, user)
+    if not is_uuid(photo_id):
+        raise HTTPException(status_code=400, detail="Invalid photo id.")
+    if not await dental_plans.delete_sitting_photo(clinic["id"], appointment_id, photo_id):
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    await log_admin_action(
+        user=user, action="DENTAL_SITTING_PHOTO_DELETE", resource_type="appointment", resource_id=appointment_id,
+        details={"clinic_id": clinic["id"], "photo_id": photo_id}, ip_address=_client_ip(request),
+    )
+    return {"success": True}
+
+
+_DENTAL_EXPORT_COLUMNS = (
+    "Patient", "Phone", "Treatment", "Tooth", "Plan status", "Planned sittings", "Plan created",
+    "Estimate (Rs)", "Collected in plan (Rs)", "Balance (Rs)", "Plan notes",
+    "Sitting", "Date", "Time", "Doctor", "Sitting status", "Collected this sitting (Rs)",
+    "Work done / notes", "Note photos", "Patient review",
+)
+
+
+def _rupees(paise) -> Optional[str]:
+    return None if paise is None else f"{int(paise) / 100:.2f}"
+
+
+def build_dental_history_csv(plans: list, appts: list, photo_counts: dict) -> str:
+    """One row per sitting (a plan with no sittings still gets one row)."""
+    buf = io.StringIO()
+    buf.write("\ufeff")  # Excel needs the BOM to show Telugu/Hindi names correctly
+    w = csv.writer(buf)
+    w.writerow(_DENTAL_EXPORT_COLUMNS)
+    by_plan: dict = {}
+    for a in appts:
+        if a.get("treatment_plan_id"):
+            by_plan.setdefault(a["treatment_plan_id"], []).append(a)
+    ratings = dict(dental_plans.REVIEW_OPTIONS)
+    for p in plans:
+        sittings = sorted(by_plan.get(p["id"], []),
+                          key=lambda s: (s.get("sitting_number") or 0, s.get("appointment_date") or ""))
+        summary = dental_plans.summarize(p, sittings)
+        plan_cells = [
+            p.get("patient_name"), p.get("patient_phone"), p.get("treatment_name"), p.get("tooth_numbers"),
+            p.get("status"), p.get("planned_sittings"), str(p.get("created_at") or "")[:10],
+            _rupees(p.get("quoted_amount_paise")), _rupees(summary.get("collected_paise")),
+            _rupees(summary.get("balance_paise")), p.get("notes"),
+        ]
+        for s in sittings or [None]:
+            sitting_cells = [None] * 9 if s is None else [
+                s.get("sitting_number"), s.get("appointment_date"), str(s.get("appointment_time") or "")[:5],
+                s.get("doctor_name"), s.get("status"), _rupees(s.get("amount_collected_paise")),
+                s.get("sitting_notes"), photo_counts.get(s["id"], 0) or None,
+                ratings.get(s.get("review_rating")),
+            ]
+            w.writerow([client_data.csv_cell(v) for v in plan_cells + sitting_cells])
+    return buf.getvalue()
+
+
+@router.get("/dental/patient-history/export")
+async def export_dental_patient_history(
+    request: Request,
+    phone: str = Query(..., max_length=20),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_DENTAL),
+):
+    """One patient's treatment plans, sittings, notes and amounts as a CSV."""
+    clinic = await _dental_clinic(user, clinic_id)
+    try:
+        phone = _clean_patient_phone(phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    plans, appts = await _dental_history(clinic, phone, user)
+    if not plans:
+        raise HTTPException(status_code=404, detail="This patient has no treatment plans to export.")
+    plan_ids = {p["id"] for p in plans}
+    sitting_ids = [a["id"] for a in appts if a.get("treatment_plan_id") in plan_ids]
+    photo_counts: dict = {}
+    if sitting_ids:
+        rows = (await sb(supabase.table("dental_sitting_photos").select("appointment_id")
+                         .eq("clinic_id", clinic["id"]).in_("appointment_id", sitting_ids))).data or []
+        for r in rows:
+            photo_counts[r["appointment_id"]] = photo_counts.get(r["appointment_id"], 0) + 1
+    body = build_dental_history_csv(plans, appts, photo_counts)
+    await log_admin_action(
+        user=user, action="DENTAL_PATIENT_EXPORT", resource_type="patient", resource_id=mask_phone(phone),
+        details={"clinic_id": clinic["id"], "plans": len(plans), "sittings": len(sitting_ids)},
+        ip_address=_client_ip(request),
+    )
+    stamp = dental_plans.ist_now().strftime("%Y-%m-%d")
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="treatment_history_{phone[-4:]}_{stamp}.csv"',
+            "Cache-Control": "no-store",
+        },
+    )

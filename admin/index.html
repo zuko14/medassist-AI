@@ -1258,6 +1258,15 @@
             border-top: 1px solid var(--border);
             font-size: 0.8rem; color: var(--text3);
         }
+        /* ── Dental sitting note photos (migration 094) ─────────────────── */
+        .dp-photos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .dp-photos:empty { display: none; }
+        .dp-photo { position: relative; }
+        .dp-thumb { display: block; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border2); background: var(--surface3); }
+        .dp-photo .dp-del { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--red-border);
+            background: var(--surface-solid); color: var(--red); font-size: 13px; line-height: 1; cursor: pointer; padding: 0; }
+        .dp-photo .dp-del:focus-visible, .dp-thumb-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
         /* ── WhatsApp Leads (migration 092) ─────────────────────────────── */
         .lead-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
         .lead-grid .card { margin-bottom: 0; }
@@ -3517,11 +3526,18 @@
         <input type="hidden" id="dpDoneId">
         <div class="field"><label for="dpDoneNotes">Work done / notes</label><textarea id="dpDoneNotes" rows="3" maxlength="2000" placeholder="e.g. Canal cleaning and shaping done, temporary filling placed"></textarea></div>
         <div class="field"><label for="dpDoneAmount">Amount collected this sitting (₹)</label><input type="number" id="dpDoneAmount" min="0" step="1"></div>
+        <div class="field">
+            <label for="dpDonePhotos">Photo of written notes (optional)</label>
+            <input type="file" id="dpDonePhotos" accept="image/jpeg,image/png,image/webp,image/*" multiple onchange="dpPhotosPicked()">
+            <small class="muted">Photograph the doctor's notes instead of typing them. Up to 6 photos per sitting.</small>
+            <div id="dpDonePicked" class="muted" style="font-size:0.8rem; margin-top:4px;"></div>
+            <div id="dpDonePhotoList" class="dp-photos"></div>
+        </div>
         <small class="muted">The patient is asked for a review about an hour later (if reviews are on).</small>
         <div id="dpDoneMsg"></div>
         <div class="modal-actions">
             <button type="button" class="btn btn-ghost" onclick="closeDpModal('dpDoneModal')">Cancel</button>
-            <button type="button" class="btn btn-accent" onclick="submitSittingDone()">Save</button>
+            <button type="button" class="btn btn-accent" id="dpDoneSave" onclick="submitSittingDone()">Save</button>
         </div>
     </div>
 </div>
@@ -6145,20 +6161,24 @@ function renderPlan(d) {
             <td>${esc(a.doctor_name || '')}</td>
             <td>${badge(a.status)}</td>
             <td>${dpRupees(a.amount_collected_paise)}</td>
-            <td style="max-width:220px; white-space:pre-wrap; font-size:0.82rem;">${esc(a.sitting_notes || '')}${a.review_rating ? `<div style="color:var(--text3);">Review: ${esc(DP_RATING[a.review_rating] || a.review_rating)}</div>` : ''}</td>
+            <td style="max-width:220px; white-space:pre-wrap; font-size:0.82rem;">${esc(a.sitting_notes || '')}${(a.photos || []).length ? `<div class="dp-photos">${a.photos.map(ph =>
+                `<a class="dp-thumb-link" href="${esc(ph.url)}" target="_blank" rel="noopener noreferrer" title="Open full size"><img class="dp-thumb" src="${esc(ph.url)}" alt="Photo of sitting notes" loading="lazy"></a>`).join('')}</div>` : ''}${a.review_rating ? `<div style="color:var(--text3);">Review: ${esc(DP_RATING[a.review_rating] || a.review_rating)}</div>` : ''}</td>
             <td style="white-space:nowrap;">
                 ${upcoming ? `<button type="button" class="btn btn-accent btn-sm" data-id="${esc(a.id)}" onclick="dpOpenDone(this.dataset.id)">Done</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-id="${esc(a.id)}" onclick="dpNotify(this.dataset.id,'patient')" ${d.patient_messageable ? '' : 'disabled title="No WhatsApp consent"'}>WhatsApp patient</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-id="${esc(a.id)}" onclick="dpNotify(this.dataset.id,'doctor')">WhatsApp doctor</button>
                 <button type="button" class="btn btn-red btn-sm" data-id="${esc(a.id)}" onclick="dpCancelSitting(this.dataset.id)">Cancel</button>` : ''}
-                ${a.status === 'completed' ? `<button type="button" class="btn btn-ghost btn-sm" data-id="${esc(a.id)}" onclick="dpOpenDone(this.dataset.id)">Edit notes</button>` : ''}
+                ${a.status === 'completed' ? `<button type="button" class="btn btn-ghost btn-sm" data-id="${esc(a.id)}" onclick="dpOpenDone(this.dataset.id)">Notes / photos</button>` : ''}
             </td></tr>`;
     }).join('');
     const lastDoctor = (s.next_sitting || rows[rows.length - 1] || {}).doctor_id;
     const quoteVal = (p.quoted_amount_paise === null || p.quoted_amount_paise === undefined) ? '' : p.quoted_amount_paise / 100;
     document.getElementById('dpPlanBody').innerHTML = `
         <h3 style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-            <span>${esc(p.patient_name)} · ${esc(p.treatment_name)}</span><span>${badge(active ? 'confirmed' : p.status)}</span>
+            <span>${esc(p.patient_name)} · ${esc(p.treatment_name)}</span>
+            <span style="display:inline-flex; align-items:center; gap:8px;">${badge(active ? 'confirmed' : p.status)}
+                <button type="button" class="btn btn-ghost btn-sm" data-phone="${esc(p.patient_phone)}" onclick="dpExportHistory(this.dataset.phone)"
+                    title="All of this patient's treatment plans, sittings, notes and amounts as a spreadsheet">Download history</button></span>
         </h3>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; font-size:0.86rem; margin-bottom:14px;">
             <div><div class="muted">Phone</div>${esc(p.patient_phone)}</div>
@@ -6258,11 +6278,17 @@ async function dpBookSitting() {
     } catch (e) { msg('dpPlanMsg', esc(e.message || 'Could not book the sitting'), true); }
 }
 
+const DP_PHOTO_MAX = 6;
+let dpDonePhotoCount = 0;
+
 async function dpOpenDone(apptId) {
     document.getElementById('dpDoneId').value = apptId;
     document.getElementById('dpDoneNotes').value = '';
     document.getElementById('dpDoneAmount').value = '';
     document.getElementById('dpDoneMsg').innerHTML = '';
+    document.getElementById('dpDonePhotos').value = '';
+    document.getElementById('dpDonePicked').textContent = '';
+    dpRenderDonePhotos(apptId, []);
     try {
         const d = await api('/admin/dental/plans/' + encodeURIComponent(dpCurrentPlanId));
         const a = (d.sittings || []).find(x => x.id === apptId);
@@ -6271,25 +6297,121 @@ async function dpOpenDone(apptId) {
             if (a.amount_collected_paise !== null && a.amount_collected_paise !== undefined) {
                 document.getElementById('dpDoneAmount').value = a.amount_collected_paise / 100;
             }
+            dpRenderDonePhotos(apptId, a.photos || []);
         }
     } catch (e) { /* the form still works empty */ }
     document.getElementById('dpDoneModal').classList.add('open');
 }
 
+// Photos already attached to the sitting in the Done modal, each removable.
+function dpRenderDonePhotos(apptId, photos) {
+    dpDonePhotoCount = photos.length;
+    document.getElementById('dpDonePhotoList').innerHTML = photos.map(ph =>
+        `<div class="dp-photo">
+            <a class="dp-thumb-link" href="${esc(ph.url)}" target="_blank" rel="noopener noreferrer" title="Open full size">
+                <img class="dp-thumb" src="${esc(ph.url)}" alt="Photo of sitting notes" loading="lazy"></a>
+            <button type="button" class="dp-del" aria-label="Delete this photo" title="Delete photo"
+                data-appt="${esc(apptId)}" data-photo="${esc(ph.id)}" onclick="dpDeletePhoto(this.dataset.appt, this.dataset.photo)">×</button>
+        </div>`).join('');
+}
+
+function dpPhotosPicked() {
+    const files = [...document.getElementById('dpDonePhotos').files];
+    const room = DP_PHOTO_MAX - dpDonePhotoCount;
+    const el = document.getElementById('dpDonePicked');
+    if (!files.length) { el.textContent = ''; return; }
+    el.textContent = files.length > room
+        ? `${files.length} photo(s) chosen, but only ${Math.max(room, 0)} more fit on this sitting.`
+        : `${files.length} photo(s) will be added when you press Save.`;
+}
+
+// Phones take 3–8 MB photos; ~1600 px JPEG keeps handwriting sharp at a few
+// hundred KB. A format the browser cannot decode (e.g. HEIC in Chrome) goes up
+// unchanged and the server's own type check has the final say.
+async function dpShrinkImage(file) {
+    let bmp;
+    try { bmp = await createImageBitmap(file); } catch (e) { return file; }
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bmp.width * scale));
+    canvas.height = Math.max(1, Math.round(bmp.height * scale));
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    return blob || file;
+}
+
+async function dpUploadPhoto(apptId, file) {
+    const fd = new FormData();
+    fd.append('file', await dpShrinkImage(file), 'notes.jpg');
+    await apiRaw('/admin/dental/sittings/' + encodeURIComponent(apptId) + '/photos', { method: 'POST', body: fd });
+}
+
+async function dpDeletePhoto(apptId, photoId) {
+    if (!confirm('Delete this photo of the sitting notes?')) return;
+    try {
+        await apiDel('/admin/dental/sittings/' + encodeURIComponent(apptId) + '/photos/' + encodeURIComponent(photoId));
+        const d = await api('/admin/dental/plans/' + encodeURIComponent(dpCurrentPlanId));
+        const a = (d.sittings || []).find(x => x.id === apptId);
+        dpRenderDonePhotos(apptId, (a && a.photos) || []);
+        dpPhotosPicked();
+        openPlan(dpCurrentPlanId);
+        toast('Photo deleted');
+    } catch (e) { msg('dpDoneMsg', esc(e.message || 'Could not delete the photo'), true); }
+}
+
 async function submitSittingDone() {
     const id = document.getElementById('dpDoneId').value;
     const amt = document.getElementById('dpDoneAmount').value;
+    const btn = document.getElementById('dpDoneSave');
+    if (btn.disabled) return;
+    const files = [...document.getElementById('dpDonePhotos').files];
+    if (files.length > DP_PHOTO_MAX - dpDonePhotoCount) {
+        msg('dpDoneMsg', `A sitting can have at most ${DP_PHOTO_MAX} photos. Choose fewer or delete one first.`, true);
+        return;
+    }
+    btn.disabled = true;
+    btn.textContent = files.length ? 'Saving & uploading…' : 'Saving…';
     try {
+        // Notes and amount first: a photo problem must never lose them.
         const d = await apiPost('/admin/dental/sittings/' + encodeURIComponent(id) + '/complete', {
             notes: document.getElementById('dpDoneNotes').value,
             amount_collected_rupees: amt === '' ? null : parseFloat(amt),
         });
-        closeDpModal('dpDoneModal');
-        toast(d.plan_completed ? 'Sitting saved · all planned sittings done, plan completed' : 'Sitting saved');
+        const failed = [];
+        for (const f of files) {
+            try { await dpUploadPhoto(id, f); }
+            catch (e) { failed.push(`${f.name}: ${e.message || 'upload failed'}`); }
+        }
         openPlan(dpCurrentPlanId);
         loadDentalPlans();
         loadDentalOverview();
-    } catch (e) { msg('dpDoneMsg', esc(e.message || 'Could not save'), true); }
+        if (failed.length) {
+            // Keep the modal open so the failed photo can simply be chosen again.
+            document.getElementById('dpDonePhotos').value = '';
+            document.getElementById('dpDonePicked').textContent = '';
+            const fresh = await api('/admin/dental/plans/' + encodeURIComponent(dpCurrentPlanId)).catch(() => null);
+            const a = fresh && (fresh.sittings || []).find(x => x.id === id);
+            if (a) dpRenderDonePhotos(id, a.photos || []);
+            msg('dpDoneMsg', esc('Sitting saved, but a photo was not: ' + failed.join(' · ') + '. Choose it again and press Save.'), true);
+            return;
+        }
+        closeDpModal('dpDoneModal');
+        const photoNote = files.length ? ` · ${files.length} photo(s) added` : '';
+        toast((d.plan_completed ? 'Sitting saved · all planned sittings done, plan completed' : 'Sitting saved') + photoNote);
+    } catch (e) {
+        msg('dpDoneMsg', esc(e.message || 'Could not save'), true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+    }
+}
+
+async function dpExportHistory(phone) {
+    try {
+        const r = await apiRaw('/admin/dental/patient-history/export?phone=' + encodeURIComponent(phone));
+        _saveBlob(await r.blob(), `treatment_history_${String(phone).slice(-4)}.csv`);
+    } catch (e) { toast(e.message || 'Download failed', true); }
 }
 
 async function dpCancelSitting(apptId) {
