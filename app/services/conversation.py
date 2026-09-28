@@ -40,6 +40,7 @@ from app.services.tenant import cancellation_window_hours
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
 from app.services import specialty_flow
+from app.services import leads
 
 # Per-phone asyncio lock with Meta timeout protection
 from app.services.message_queue import (
@@ -678,6 +679,10 @@ class ConversationManager:
             intent = "button_click"
         else:
             intent = await detect_intent(message, clinic)
+
+        # Admin "Leads": what this contact asked for (a label, never the text).
+        # Here, before every early return below; background write, never raises.
+        leads.record_interest(clinic_id, phone, message_type, intent, interactive_data)
 
         # Handle interactive button responses FIRST (before guards)
         if message_type == "interactive" and interactive_data:

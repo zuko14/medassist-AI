@@ -75,7 +75,7 @@ from app.services.permissions import (
 )
 from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
-from app.utils.validators import normalize_phone, validate_phone
+from app.utils.validators import mask_phone, normalize_phone, validate_phone
 from app.database import sb  # T5.1: off-loop query execution
 from app.utils.async_tasks import spawn_background_task
 
@@ -9054,3 +9054,79 @@ async def update_dental_settings(
         details={"clinic_id": clinic["id"], "changes": changes}, ip_address=_client_ip(request),
     )
     return {"success": True, "settings": dental_plans.dental_settings(cfg)}
+
+
+# ═══════ WHATSAPP LEADS (migration 092) ═══════
+# Everyone who messaged the clinic's WhatsApp number (even just "hi"), what they
+# asked about, and whether they booked; plus a staff follow-up message inside
+# Meta's 24-hour window. See app/services/leads.py.
+#
+# Access: clinic_admin/super_admin always; staff only with LEADS_MANAGE (the
+# list is every contact's phone number, so it is not a front-desk default).
+
+from app.services import leads  # noqa: E402
+
+_LEADS = require_permission("LEADS_MANAGE")
+
+
+class LeadMessage(BaseModel):
+    phone: str = Field(..., max_length=20)
+    message: str = Field(..., min_length=1, max_length=leads.MAX_MESSAGE_CHARS)
+
+
+@router.get("/leads")
+async def get_whatsapp_leads(
+    clinic_id: str = "default",
+    segment: str = Query("all", max_length=10),
+    interest: Optional[str] = Query(None, max_length=40),
+    q: Optional[str] = Query(None, max_length=60),
+    days: int = Query(30, ge=0, le=3650),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=100_000),
+    user: AdminUser = Depends(_LEADS),
+):
+    """WhatsApp contacts of ONE clinic with interest, stage and 24h-window state."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        data = await leads.list_leads(
+            effective_clinic_id, segment=segment, interest=interest or None,
+            search=q, days=days, limit=limit, offset=offset,
+        )
+    except leads.LeadError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except Exception as e:
+        logger.error(f"LEADS_LIST_FAILED clinic={effective_clinic_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not load leads. Please try again.")
+    return {**data, "interest_labels": sorted(leads.INTEREST_LABELS), "message_max_chars": leads.MAX_MESSAGE_CHARS}
+
+
+@router.post("/leads/message")
+async def message_whatsapp_lead(
+    body: LeadMessage,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(_LEADS),
+):
+    """Staff-written WhatsApp message to a contact, only inside the 24h window."""
+    effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    try:
+        phone = _clean_patient_phone(body.phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    clinic = await get_clinic_by_id(effective_clinic_id)
+    if not clinic:
+        raise HTTPException(status_code=404, detail="Clinic not found.")
+    try:
+        await leads.send_lead_message(clinic, phone, body.message)
+    except leads.LeadError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except Exception as e:
+        logger.error(f"LEAD_MESSAGE_FAILED clinic={effective_clinic_id} phone={mask_phone(phone)}: {e}")
+        raise HTTPException(status_code=500, detail="Could not send the message. Please try again.")
+    # The body is not audited: staff-written text to a patient is personal data.
+    await log_admin_action(
+        user=user, action="LEAD_MESSAGE_SENT", resource_type="patient", resource_id=mask_phone(phone),
+        details={"clinic_id": effective_clinic_id, "chars": len(body.message.strip())},
+        ip_address=_client_ip(request),
+    )
+    return {"success": True}

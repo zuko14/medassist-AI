@@ -36,6 +36,9 @@ PERMISSIONS = frozenset({
     # Dental clinics only (migration 089): create treatment plans, book/cancel
     # sittings, message patient/doctor. In no role preset: granted per account.
     "DENTAL_PLANS_MANAGE",
+    # Admin "Leads" (migration 092): every WhatsApp contact's number plus staff
+    # follow-up messages. In no role preset: granted per account.
+    "LEADS_MANAGE",
 })
 
 STAFF_ROLES = frozenset({

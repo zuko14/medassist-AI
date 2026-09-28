@@ -1258,6 +1258,43 @@
             border-top: 1px solid var(--border);
             font-size: 0.8rem; color: var(--text3);
         }
+        /* ── WhatsApp Leads (migration 092) ─────────────────────────────── */
+        .lead-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+        .lead-grid .card { margin-bottom: 0; }
+        .lead-card-title { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); margin-bottom: 12px; }
+        .lead-bars { display: flex; flex-direction: column; gap: 4px; }
+        .lead-bar-row { display: grid; grid-template-columns: minmax(110px, 170px) minmax(0, 1fr) auto; align-items: center; gap: 12px;
+            padding: 7px 10px; border-radius: 9px; border: 1px solid transparent; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+        .lead-bar-row:hover { background: var(--accent-row); }
+        .lead-bar-row.on { background: var(--accent-glow); border-color: var(--accent-soft2); }
+        .lead-bar-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .lead-bar-row .lbl { font-size: 0.84rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lead-bar { height: 8px; border-radius: 99px; background: var(--surface3); overflow: hidden; }
+        .lead-bar > span { display: block; height: 100%; border-radius: 99px; background: var(--brand-grad); }
+        .lead-bar-row .n { font-size: 0.8rem; color: var(--text2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .lead-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+        .lead-tag { font-size: 0.72rem; font-weight: 600; padding: 3px 9px; border-radius: 99px; background: var(--surface3); color: var(--text2); white-space: nowrap; }
+        .lead-tag.dept { background: var(--blue-bg); color: var(--accent2); }
+        .lead-stage { display: inline-flex; align-items: center; gap: 6px; font-size: 0.74rem; font-weight: 700; padding: 4px 10px; border-radius: 99px; white-space: nowrap; }
+        .lead-stage::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+        .lead-stage.hot { color: var(--green); background: var(--green-bg); }
+        .lead-stage.warm { color: var(--amber); background: var(--amber-bg); }
+        .lead-stage.cold { color: var(--text3); background: var(--surface3); }
+        .lead-stage.booked { color: var(--accent2); background: var(--blue-bg); }
+        .lead-stage.dnc { color: var(--red); background: var(--red-bg); }
+        .lead-who .nm { font-weight: 600; color: var(--text-strong); }
+        .lead-who .nm.anon { font-weight: 500; color: var(--text2); font-style: italic; }
+        .lead-who .ph { font-size: 0.8rem; color: var(--text2); font-variant-numeric: tabular-nums; }
+        .lead-sub { font-size: 0.74rem; color: var(--text3); margin-top: 2px; }
+        .lead-sub.live { color: var(--green); }
+        .lead-sub.warn { color: var(--amber); }
+        .lead-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .lead-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .lead-note { font-size: 0.8rem; color: var(--text3); line-height: 1.5; }
+        .lead-count { font-size: 0.74rem; color: var(--text3); text-align: right; margin-top: 4px; font-variant-numeric: tabular-nums; }
+        @media (max-width: 900px) { .lead-grid { grid-template-columns: minmax(0, 1fr); } }
+        @media (max-width: 560px) { .lead-bar-row { grid-template-columns: minmax(90px, 120px) minmax(0, 1fr) auto; gap: 8px; } }
+
         .appt-active-filter {
             display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
             padding: 10px 14px; margin-bottom: 16px;
@@ -1476,6 +1513,9 @@
             </div>
             <div class="nav-link" tabindex="0" data-page="patients" data-feature="booking lab_test_booking" onclick="go('patients',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> Patients
+            </div>
+            <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
             </div>
             <div class="nav-link" tabindex="0" data-page="diagreports" data-feature="diagnostic_reports" onclick="go('diagreports',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span> Report Automation
@@ -2254,6 +2294,60 @@
                 <div class="tbl-wrap" id="patientList">
                     <div class="loader"><div class="spin"></div>Loading patients...</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ─── WHATSAPP LEADS (migration 092) ─── -->
+        <div id="pg-leads" class="sec">
+            <div class="page-head">
+                <h2>WhatsApp Leads</h2>
+                <p>Everyone who has messaged your WhatsApp number, even just "hi": what they asked about, whether they booked, and who you can reach right now.</p>
+            </div>
+            <div class="stats">
+                <div class="stat"><div class="glow"></div><div class="label">Contacts in period</div><div class="num" id="s-lead-active">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">New contacts</div><div class="num" id="s-lead-new">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Reachable now</div><div class="num" id="s-lead-hot">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">Not yet booked</div><div class="num" id="s-lead-open">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label" id="s-lead-booked-label">Booked</div><div class="num" id="s-lead-booked">—</div></div>
+            </div>
+            <div class="lead-grid">
+                <div class="card">
+                    <div class="lead-card-title">What patients are asking for</div>
+                    <div id="leadInterests"><div class="loader"><div class="spin"></div>Loading...</div></div>
+                </div>
+                <div class="card">
+                    <div class="lead-card-title">Departments they picked</div>
+                    <div id="leadDepts" class="lead-tags"></div>
+                    <div class="lead-card-title" style="margin-top:18px">How follow-up works</div>
+                    <p class="lead-note"><strong>Reachable now</strong> means the patient messaged within the last 24 hours. WhatsApp lets your clinic send them a message only in that window. After it closes, call them instead.</p>
+                    <p class="lead-note" style="margin-top:8px">Patients who sent STOP or declined consent are marked <strong>Do not contact</strong> and cannot be messaged.</p>
+                </div>
+            </div>
+            <div class="card appt-filters">
+                <div class="appt-search" role="search">
+                    <svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg>
+                    <input type="search" class="search-bar" id="leadSearch" maxlength="60" autocomplete="off" spellcheck="false"
+                        placeholder="Search by name or phone number" aria-label="Search leads" oninput="onLeadSearch()">
+                </div>
+                <div class="appt-filter-row">
+                    <div class="range-pick" id="leadPeriod" role="group" aria-label="Active in">
+                        <button type="button" class="btn btn-ghost btn-sm" data-days="1" aria-pressed="false" onclick="setLeadDays(1)">24 hours</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-days="7" aria-pressed="false" onclick="setLeadDays(7)">7 days</button>
+                        <button type="button" class="btn btn-ghost btn-sm on" data-days="30" aria-pressed="true" onclick="setLeadDays(30)">30 days</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-days="90" aria-pressed="false" onclick="setLeadDays(90)">90 days</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-days="0" aria-pressed="false" onclick="setLeadDays(0)">All time</button>
+                    </div>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="loadLeads()" aria-label="Refresh leads" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button>
+                </div>
+                <div class="range-pick" id="leadSegments" role="group" aria-label="Stage"></div>
+                <div class="appt-active-filter" id="leadInterestNote" role="status" style="display:none; margin-bottom:0">
+                    <span id="leadInterestNoteText"></span>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="setLeadInterest('')">Show all interests</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap" id="leadList"><div class="loader"><div class="spin"></div>Loading leads...</div></div>
+                <div class="appt-pager" id="leadPager" hidden></div>
             </div>
         </div>
 
@@ -3042,6 +3136,7 @@
                         <label class="check" data-perm-feature="lab_test_booking"><input type="checkbox" class="staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
                         <label class="check" data-perm-feature="specialty_treatments"><input type="checkbox" class="staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
                         <label class="check" data-perm-feature="dental_treatment_plans"><input type="checkbox" class="staff-perm-cb" value="DENTAL_PLANS_MANAGE"> Manage Dental Treatment Plans &amp; Sittings</label>
+                        <label class="check"><input type="checkbox" class="staff-perm-cb" value="LEADS_MANAGE"> View WhatsApp Leads &amp; message them</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
@@ -3143,6 +3238,25 @@
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeResolveMatchModal()">Cancel</button>
             <button class="btn btn-accent" id="btn-resolveSubmit" onclick="submitResolveMatch()">Save & Deliver</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ WHATSAPP LEAD MESSAGE MODAL (migration 092) ═══ -->
+<div class="modal-overlay" id="leadMsgModal" role="dialog" aria-modal="true" aria-labelledby="leadMsgTitle">
+    <div class="modal">
+        <h3 id="leadMsgTitle">Message on WhatsApp</h3>
+        <p class="lead-note" id="leadMsgTo" style="margin-bottom:14px"></p>
+        <div id="leadMsgAlert"></div>
+        <div class="field">
+            <label for="leadMsgText">Message</label>
+            <textarea id="leadMsgText" rows="6" maxlength="1000" oninput="leadMsgCount()"></textarea>
+            <div class="lead-count" id="leadMsgCount"></div>
+        </div>
+        <p class="lead-note">Sent from your clinic's WhatsApp number. The Kriya assistant answers the patient's reply as usual, so invite them to reply <strong>MENU</strong> to book, or to call the clinic.</p>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" onclick="closeLeadMessage()">Cancel</button>
+            <button type="button" class="btn btn-accent" id="leadMsgSend" onclick="sendLeadMessage()">Send</button>
         </div>
     </div>
 </div>
@@ -3312,6 +3426,7 @@
                 <label class="check" data-perm-feature="lab_test_booking"><input type="checkbox" class="edit-staff-perm-cb" value="LAB_TESTS_MANAGE"> Manage Lab Tests</label>
                 <label class="check" data-perm-feature="specialty_treatments"><input type="checkbox" class="edit-staff-perm-cb" value="TREATMENTS_MANAGE"> Manage Treatments</label>
                 <label class="check" data-perm-feature="dental_treatment_plans"><input type="checkbox" class="edit-staff-perm-cb" value="DENTAL_PLANS_MANAGE"> Manage Dental Treatment Plans &amp; Sittings</label>
+                <label class="check"><input type="checkbox" class="edit-staff-perm-cb" value="LEADS_MANAGE"> View WhatsApp Leads &amp; message them</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
@@ -3934,6 +4049,8 @@ function applyFeatureVisibility() {
                 el.style.display = (hasPermission('HOLIDAYS_CREATE') || hasPermission('HOLIDAYS_DELETE')) ? '' : 'none';
             } else if (page === 'branches') {
                 el.style.display = (hasPermission('DOCTOR_BRANCH_ASSIGN') || hasPermission('BRANCHES_MANAGE')) ? '' : 'none';
+            } else if (page === 'leads') {
+                el.style.display = hasPermission('LEADS_MANAGE') ? '' : 'none';
             } else if (page === 'staff') {
                 el.style.display = (hasPermission('STAFF_VIEW') || hasPermission('STAFF_CREATE') || hasPermission('STAFF_UPDATE')) ? '' : 'none';
             } else {
@@ -4408,7 +4525,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads };
     if (loaders[page]) loaders[page]();
 }
 
@@ -7498,6 +7615,271 @@ async function checkInAppt(id) {
 
 // ═══════ PATIENTS ═══════
 let patientCache = [];
+
+// ═══════ WHATSAPP LEADS (migration 092) ═══════
+// Rows come from GET /admin/leads (one SQL round trip, admin_whatsapp_leads).
+// Everything patient-supplied goes through esc(); row actions reference rows
+// by index, never by interpolating a phone number into an onclick.
+const LEAD_LABELS = {
+    book_appointment: 'Book appointment', followup: 'Follow-up visit', doctors: 'Doctors',
+    services: 'Services & prices', lab_tests: 'Lab tests', clinic_info: 'Location & timings',
+    reports: 'Reports', cancel: 'Cancel booking', reschedule: 'Reschedule', talk_to_staff: 'Talk to staff',
+    emergency: 'Emergency', treatments: 'Treatments', callback_request: 'Callback request',
+};
+const LEAD_STAGES = {
+    hot: 'Reachable now', warm: 'Active this week', cold: 'Inactive', booked: 'Booked', dnc: 'Do not contact',
+};
+const LEAD_SEGMENTS = [['all', 'All', 'active'], ['hot', 'Reachable now', 'hot'], ['open', 'Not yet booked', 'open'],
+                       ['booked', 'Booked', 'booked'], ['dnc', 'Do not contact', 'dnc']];
+let leadState = { segment: 'all', interest: '', q: '', days: 30, offset: 0, limit: 25 };
+let leadRows = [];
+let leadMsgMax = 1000;
+let leadSeq = 0;
+let leadSearchTimer = null;
+let leadMsgRow = null;
+
+function leadLabel(k) { return LEAD_LABELS[k] || String(k || '').replace(/_/g, ' '); }
+
+function leadAgo(iso) {
+    const t = Date.parse(iso || '');
+    if (!t) return '—';
+    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 1) return 'just now';
+    if (m < 60) return m + ' min ago';
+    const h = Math.round(m / 60);
+    if (h < 24) return h + ' h ago';
+    const d = Math.round(h / 24);
+    if (d < 31) return d + (d === 1 ? ' day ago' : ' days ago');
+    return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function leadWindowLeft(iso) {
+    const ms = Date.parse(iso || '') - Date.now();
+    if (!(ms > 0)) return '';
+    const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+    return h ? `${h} h ${m} min` : `${m} min`;
+}
+
+async function loadLeads() {
+    const el = document.getElementById('leadList');
+    const seq = ++leadSeq;
+    el.innerHTML = loading();
+    const qs = new URLSearchParams({
+        segment: leadState.segment, days: String(leadState.days),
+        limit: String(leadState.limit), offset: String(leadState.offset),
+    });
+    if (leadState.interest) qs.set('interest', leadState.interest);
+    if (leadState.q) qs.set('q', leadState.q);
+    try {
+        const data = await api('/admin/leads?' + qs.toString());
+        if (seq !== leadSeq) return;           // a newer filter change already asked again
+        leadRows = Array.isArray(data.rows) ? data.rows : [];
+        leadMsgMax = Number(data.message_max_chars) || 1000;
+        renderLeadSummary(data.summary || {});
+        renderLeadInterests(data.interests || [], data.departments || []);
+        renderLeadTable();
+        renderLeadPager(Number(data.total) || 0);
+    } catch (e) {
+        if (seq !== leadSeq) return;
+        el.innerHTML = emptyState('warning', esc(e.message || 'Failed to load leads'));
+        document.getElementById('leadPager').hidden = true;
+    }
+}
+
+function renderLeadSummary(s) {
+    const n = k => Number(s[k]) || 0;
+    const set = (id, v) => { document.getElementById(id).textContent = v; };
+    set('s-lead-active', n('active'));
+    set('s-lead-new', n('new'));
+    set('s-lead-hot', n('hot'));
+    set('s-lead-open', n('open'));
+    set('s-lead-booked', n('booked'));
+    const reachable = n('active') - n('dnc');
+    set('s-lead-booked-label', reachable > 0 ? `Booked · ${Math.round(n('booked') * 100 / reachable)}% conversion` : 'Booked');
+    document.getElementById('leadSegments').innerHTML = LEAD_SEGMENTS.map(([key, label, count]) => {
+        const on = leadState.segment === key;
+        return `<button type="button" class="btn btn-ghost btn-sm appt-chip${on ? ' on' : ''}" aria-pressed="${on}" onclick="setLeadSegment('${key}')">`
+            + `${esc(label)}<span class="count">${n(count)}</span></button>`;
+    }).join('');
+}
+
+function renderLeadInterests(interests, depts) {
+    const box = document.getElementById('leadInterests');
+    if (!interests.length) {
+        box.innerHTML = '<p class="lead-note">No requests recorded in this period yet. Every question and menu choice patients send from now on appears here.</p>';
+    } else {
+        const max = Math.max(...interests.map(i => Number(i.patients) || 0), 1);
+        box.innerHTML = '<div class="lead-bars">' + interests.map(i => {
+            const on = leadState.interest === i.label;
+            const pct = Math.max(4, Math.round((Number(i.patients) || 0) * 100 / max));
+            return `<button type="button" class="lead-bar-row${on ? ' on' : ''}" aria-pressed="${on}" data-interest="${esc(i.label)}" onclick="setLeadInterest(this.dataset.interest)"`
+                + ` title="${esc(i.requests)} request(s) from ${esc(i.patients)} patient(s)">`
+                + `<span class="lbl">${esc(leadLabel(i.label))}</span><span class="lead-bar"><span style="width:${pct}%"></span></span>`
+                + `<span class="n">${esc(i.patients)} ${Number(i.patients) === 1 ? 'patient' : 'patients'}</span></button>`;
+        }).join('') + '</div>';
+    }
+    document.getElementById('leadDepts').innerHTML = depts.length
+        ? depts.map(d => `<span class="lead-tag dept">${esc(d.label)} · ${esc(d.patients)}</span>`).join('')
+        : '<span class="lead-note">None yet</span>';
+    // style, not [hidden]: .appt-active-filter sets display:flex, which beats the attribute.
+    document.getElementById('leadInterestNote').style.display = leadState.interest ? '' : 'none';
+    document.getElementById('leadInterestNoteText').textContent = leadState.interest
+        ? 'Showing patients who asked about: ' + leadLabel(leadState.interest) : '';
+}
+
+function renderLeadTable() {
+    const el = document.getElementById('leadList');
+    if (!leadRows.length) {
+        el.innerHTML = emptyState('users', leadState.q || leadState.interest || leadState.segment !== 'all'
+            ? 'No contacts match these filters' : 'No one has messaged your WhatsApp number in this period');
+        return;
+    }
+    el.innerHTML = `<table>
+        <thead><tr><th>Contact</th><th>Stage</th><th>Asked about</th><th>Last message</th><th>Bookings</th><th>Follow up</th></tr></thead>
+        <tbody>${leadRows.map((r, i) => {
+            const name = r.name ? `<div class="nm">${esc(r.name)}</div>` : '<div class="nm anon">Name not shared</div>';
+            const tags = (r.interests || []).map(k => `<span class="lead-tag">${esc(leadLabel(k))}</span>`)
+                .concat((r.departments || []).map(d => `<span class="lead-tag dept">${esc(d)}</span>`));
+            let sub = '';
+            if (r.stage !== 'dnc' && r.window_open) sub = `<div class="lead-sub live">Window open · ${esc(leadWindowLeft(r.window_closes_at))} left</div>`;
+            else if (r.unpaid > 0 && !r.bookings) sub = '<div class="lead-sub warn">Started booking, payment pending</div>';
+            else if (r.mid_booking && r.stage !== 'booked') sub = '<div class="lead-sub warn">Left mid-booking</div>';
+            let actions;
+            if (r.stage === 'dnc') {
+                actions = '<span class="lead-note">Do not contact</span>';
+            } else {
+                const tel = String(r.phone || '').replace(/[^\d+]/g, '');
+                actions = `<a class="btn btn-ghost btn-sm" href="tel:${esc(tel)}">Call</a>`
+                    + `<button type="button" class="btn btn-ghost btn-sm" onclick="copyLeadPhone(${i})">Copy</button>`
+                    + (r.window_open
+                        ? `<button type="button" class="btn btn-accent btn-sm" onclick="openLeadMessage(${i})"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-send"/></svg> Message</button>`
+                        : `<button type="button" class="btn btn-ghost btn-sm" disabled title="WhatsApp allows a message only within 24 hours of the patient's last message. Call them instead.">Message</button>`);
+            }
+            return `<tr>
+                <td><div class="lead-who">${name}<div class="ph">${esc(r.phone)}</div></div><div class="lead-sub">First message ${esc(leadAgo(r.first_contact_at))}</div></td>
+                <td><span class="lead-stage ${esc(r.stage)}">${esc(LEAD_STAGES[r.stage] || r.stage)}</span>${sub}</td>
+                <td>${tags.length ? `<div class="lead-tags">${tags.join('')}</div>` : '<span class="lead-note">Only said hello</span>'}</td>
+                <td>${esc(leadAgo(r.last_active_at))}</td>
+                <td>${r.bookings ? esc(r.bookings) + (r.last_booking_date ? `<div class="lead-sub">Last: ${esc(r.last_booking_date)}</div>` : '') : '—'}</td>
+                <td><div class="lead-actions">${actions}</div></td>
+            </tr>`;
+        }).join('')}</tbody></table>`;
+}
+
+function renderLeadPager(total) {
+    const el = document.getElementById('leadPager');
+    const shown = leadRows.length;
+    if (!total || !shown) { el.hidden = true; el.innerHTML = ''; return; }
+    const start = leadState.offset + 1, end = leadState.offset + shown;
+    let html = `<span>Showing ${start}–${end} of ${total} contact${total === 1 ? '' : 's'}</span>`;
+    if (leadState.offset > 0 || end < total) {
+        html += `<div class="range-pick">
+            <button type="button" class="btn btn-ghost btn-sm" ${leadState.offset > 0 ? '' : 'disabled'} onclick="pageLeads(-1)">‹ Previous</button>
+            <button type="button" class="btn btn-ghost btn-sm" ${end < total ? '' : 'disabled'} onclick="pageLeads(1)">Next ›</button>
+        </div>`;
+    }
+    el.innerHTML = html;
+    el.hidden = false;
+}
+
+function pageLeads(dir) {
+    leadState.offset = Math.max(0, leadState.offset + dir * leadState.limit);
+    loadLeads();
+}
+
+function setLeadSegment(seg) { leadState.segment = seg; leadState.offset = 0; loadLeads(); }
+
+function setLeadInterest(label) {
+    leadState.interest = leadState.interest === label ? '' : (label || '');
+    leadState.offset = 0;
+    loadLeads();
+}
+
+function setLeadDays(days) {
+    leadState.days = days;
+    leadState.offset = 0;
+    document.querySelectorAll('#leadPeriod [data-days]').forEach(b => {
+        const on = Number(b.dataset.days) === days;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
+    loadLeads();
+}
+
+function onLeadSearch() {
+    clearTimeout(leadSearchTimer);
+    leadSearchTimer = setTimeout(() => {
+        leadState.q = document.getElementById('leadSearch').value.trim();
+        leadState.offset = 0;
+        loadLeads();
+    }, 300);
+}
+
+async function copyLeadPhone(i) {
+    const r = leadRows[i];
+    if (!r) return;
+    try { await navigator.clipboard.writeText(r.phone); toast('Number copied'); }
+    catch (e) { toast('Could not copy. Select the number instead.', true); }
+}
+
+function leadSuggestion(r) {
+    const hi = r.name ? `Hello ${r.name},` : 'Hello,';
+    const about = {
+        book_appointment: 'booking an appointment', followup: 'a follow-up visit', doctors: 'our doctors',
+        services: 'our services', lab_tests: 'lab tests', treatments: 'our treatments',
+        callback_request: 'a call back', talk_to_staff: 'speaking with our team',
+    }[(r.interests || [])[0]];
+    return about
+        ? `${hi} thank you for contacting us about ${about}. Can we help you with it? Reply MENU to book, or call us and we will be glad to help.`
+        : `${hi} thank you for contacting us. How can we help you? Reply MENU to see everything we offer.`;
+}
+
+function openLeadMessage(i) {
+    const r = leadRows[i];
+    if (!r || !r.window_open || r.stage === 'dnc') return;
+    leadMsgRow = r;
+    document.getElementById('leadMsgTo').textContent =
+        `To ${r.name || 'this patient'} (${r.phone}) · window closes in ${leadWindowLeft(r.window_closes_at) || 'a moment'}`;
+    document.getElementById('leadMsgAlert').innerHTML = '';
+    const ta = document.getElementById('leadMsgText');
+    ta.maxLength = leadMsgMax;
+    ta.value = leadSuggestion(r).slice(0, leadMsgMax);
+    leadMsgCount();
+    const btn = document.getElementById('leadMsgSend');
+    btn.disabled = false;
+    btn.textContent = 'Send';
+    document.getElementById('leadMsgModal').classList.add('open');
+    ta.focus();
+}
+
+function closeLeadMessage() {
+    document.getElementById('leadMsgModal').classList.remove('open');
+    leadMsgRow = null;
+}
+
+function leadMsgCount() {
+    const n = document.getElementById('leadMsgText').value.length;
+    document.getElementById('leadMsgCount').textContent = `${n} / ${leadMsgMax}`;
+}
+
+async function sendLeadMessage() {
+    const r = leadMsgRow;
+    const text = document.getElementById('leadMsgText').value.trim();
+    const btn = document.getElementById('leadMsgSend');
+    if (!r || btn.disabled) return;
+    if (!text) { msg('leadMsgAlert', 'Write a message first.', true); return; }
+    btn.disabled = true;                        // one click, one WhatsApp message
+    btn.textContent = 'Sending…';
+    try {
+        await apiPost('/admin/leads/message', { phone: r.phone, message: text });
+        closeLeadMessage();
+        toast('Message sent on WhatsApp');
+    } catch (e) {
+        msg('leadMsgAlert', esc(e.message || 'Could not send the message.'), true);
+        btn.disabled = false;
+        btn.textContent = 'Send';
+    }
+}
 
 async function loadPatients() {
     const el = document.getElementById('patientList');
