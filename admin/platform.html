@@ -1540,6 +1540,12 @@
                     <input type="checkbox" id="modalLabReportsToggle" onchange="toggleClinicFeature('lab_reports', this.checked)">
                     Lab Reports enabled
                 </label>
+                <!-- Migration 095. Opt-in, diagnostic plans only: adds the Corporate
+                     Health page (company employee-package dashboards) to this clinic's panel. -->
+                <label id="modalCorporateHealthRow" style="display:none; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer; margin-top:10px;">
+                    <input type="checkbox" id="modalCorporateHealthToggle" onchange="toggleClinicFeature('corporate_health', this.checked)">
+                    Corporate Health Insights (company employee-package dashboards)
+                </label>
             </div>
 
             <div style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
@@ -2586,6 +2592,10 @@
                     const bundledDefault = PLANS_WITH_LAB_REPORTS.includes((c.plan || '').toLowerCase());
                     const labReportsOn = 'lab_reports' in overrides ? !!overrides.lab_reports : bundledDefault;
                     document.getElementById('modalLabReportsToggle').checked = labReportsOn;
+                    // Mirrors CORPORATE_HEALTH_PLANS in app/services/tenant.py.
+                    const isDiag = ['diagstream', 'diagbooking'].includes((c.plan || '').toLowerCase());
+                    document.getElementById('modalCorporateHealthRow').style.display = isDiag ? 'flex' : 'none';
+                    document.getElementById('modalCorporateHealthToggle').checked = overrides.corporate_health === true;
                     document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
                     document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
                     document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;

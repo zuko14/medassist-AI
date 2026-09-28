@@ -66,7 +66,21 @@ These database migrations must be applied on production before the features belo
 | `093_leads_consent_declined.sql` | Adds `patients.data_consent_declined_at` and redefines `admin_whatsapp_leads()`: only STOP or an explicit "No" to the consent question is *Do not contact* | All clinics. Run **before** deploying the matching code. Production stores `data_consent=false` for patients who never answered, so 092 wrongly hid them. |
 | `094_dental_sitting_photos.sql` | `dental_sitting_photos` table: photos of handwritten sitting notes (files in the private `lab-reports` bucket under `{clinic}/dental-sittings/`) | Dental clinics. Run **before** deploying the matching code; until then the plan view shows no photos and uploads fail with a clear message. |
 
+| `095_corporate_health.sql` | `corporate_clients`, `corporate_health_reports`, `clinic_admins.corporate_client_id`: **Corporate Health** — company employee-package dashboards for diagnostic centres | Diagnostic plans (`diagstream`, `diagbooking`) after the owner switches it on. **Must be applied AND recorded in `schema_migrations` before deploying** — the startup schema pre-flight (`app/main.py`) refuses to boot when the newest file on disk (095) is ahead of the database. |
+
 Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' ORDER BY name;`
+
+If a migration was run by hand in the Supabase SQL editor, record it (the pre-flight reads this table):
+`INSERT INTO schema_migrations (name, checksum) VALUES ('095_corporate_health.sql', 'manual') ON CONFLICT DO NOTHING;`
+
+### Corporate Health (migration 095) — switching it on for a diagnostic centre
+
+1. Owner panel → clinic → **Feature Overrides** → tick *Corporate Health Insights*. Only shown for `diagstream` / `diagbooking`; the API refuses it on any other plan.
+2. The centre's admin sees **Corporate Health** in the sidebar. Staff need the *Manage Corporate Health* grant (and *Create Staff* to create company logins).
+3. **+ New company** per corporate client → **Upload reports** (drop any number of the lab's PDFs; one employee per PDF, sent 5 per request).
+4. **Company access** (or Staff Accounts → role *Company Viewer*) → create the company's login. That login sees only that company's Insights; every other `/admin` route answers 403 (`_CORPORATE_VIEWER_ROUTES` in `app/routers/admin.py`).
+
+What is stored: never the PDF, the employee name or the file name — only sex, age, collection date, lab bill ID (duplicate guard) and the 18 package values with normal/low/high status (~0.6 KB per employee). *Uploaded reports → Delete all reports* clears a company; deleting the company removes everything. Normal/abnormal is judged against the range **printed on each report**; a range the parser cannot read is shown as *unclassified*, never guessed. Scanned (image-only) PDFs are rejected — upload the LIS-generated PDF.
 
 ---
 

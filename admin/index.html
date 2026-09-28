@@ -1196,6 +1196,42 @@
         .chart-box.tall { height: 320px; }
         .chart-box canvas { max-width: 100%; }
 
+        /* --- Corporate Health (migration 095) --------------------------------
+           A company-viewer login sees ONE page. The server refuses every other
+           route for it; this only keeps the chrome from offering them. */
+        body.corp-viewer .nav-links .nav-link:not([data-page="corporate"]),
+        body.corp-viewer #notifBellBtn,
+        body.corp-viewer #notifBadgeMobile { display: none !important; }
+        #pg-corporate [hidden] { display: none !important; }
+        .corp-bar { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+        .corp-bar .corp-lbl { font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; margin-right: 2px; }
+        .corp-bar .range-pick { align-items: center; }
+        #pg-corporate .card-head .range-pick { min-width: 0; max-width: 100%; }
+        .corp-sub { font-size: 0.78rem; color: var(--text3); margin-top: 4px; }
+        .corp-drop { display: block; margin-top: 14px; border: 2px dashed var(--border2); border-radius: 16px; padding: 38px 20px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; }
+        .corp-drop:hover, .corp-drop.drag { border-color: var(--accent); background: var(--accent-soft2); }
+        .corp-drop strong { display: block; font-size: 1rem; color: var(--text-strong); margin-bottom: 6px; }
+        .corp-progress { height: 8px; border-radius: 99px; background: var(--surface2); overflow: hidden; margin: 14px 0 6px; }
+        .corp-progress > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+        .corp-meter { height: 6px; border-radius: 99px; background: var(--surface2); overflow: hidden; min-width: 70px; }
+        .corp-meter > span { display: block; height: 100%; background: var(--red); }
+        .corp-row { cursor: pointer; }
+        .corp-row.on td { background: var(--accent-soft2); }
+        .corp-panel-row td { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); background: var(--surface2); padding-top: 7px; padding-bottom: 7px; }
+        .corp-focus-kpis { display: flex; flex-wrap: wrap; gap: 22px; margin: 4px 0 16px; }
+        .corp-focus-kpis div { font-size: 0.78rem; color: var(--text3); }
+        .corp-focus-kpis b { display: block; font-size: 1.15rem; color: var(--text-strong); font-weight: 700; }
+        .corp-note { font-size: 0.8rem; color: var(--text3); margin-top: 10px; line-height: 1.5; }
+        .corp-warn { color: var(--amber); }
+        .chart-grid.corp-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        @media (max-width: 1100px) { .chart-grid.corp-three { grid-template-columns: minmax(0, 1fr); } }
+        @media print {
+            body.corp-print * { visibility: hidden; }
+            body.corp-print #pg-corporate, body.corp-print #pg-corporate * { visibility: visible; }
+            body.corp-print #pg-corporate { position: absolute; left: 0; top: 0; width: 100%; }
+            body.corp-print .no-print { display: none !important; }
+        }
+
         .card-head .chart-sub {
             display: block;
             font-size: 0.78rem;
@@ -1534,6 +1570,11 @@
             </div>
             <div class="nav-link" tabindex="0" data-page="labtests" data-feature="lab_test_booking" onclick="go('labtests',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.31L4.1 20.3a2 2 0 0 0 1.7 2.7h12.4a2 2 0 0 0 1.7-2.7L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg></span> Lab Tests / Services
+            </div>
+            <!-- Diagnostic plans + owner opt-in only (migration 095): corporate
+                 employee health packages. Also the ONLY page a company-viewer login sees. -->
+            <div class="nav-link" tabindex="0" data-page="corporate" data-corporate="nav" style="display:none" onclick="go('corporate',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"></path><polyline points="3.5 12 8 12 10 9 13 15 15 12 20.5 12"></polyline></svg></span> Corporate Health
             </div>
             <div class="nav-link" tabindex="0" data-page="treatments" data-specialty="1" style="display:none" onclick="go('treatments',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path></svg></span> Treatments
@@ -3076,6 +3117,182 @@
         </div>
 
         <!-- ─── STAFF ACCOUNTS ─── -->
+        <!-- ─── CORPORATE HEALTH (migration 095) ───
+             Lab side: companies, PDF upload, uploaded reports, company logins.
+             Company-viewer side: the Insights pane only. -->
+        <div id="pg-corporate" class="sec">
+            <div class="page-head" style="display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+                <div>
+                    <h2 id="corpTitle">Corporate Health Insights</h2>
+                    <p id="corpCaption">Employee health package results — aggregate only. Employee names and report PDFs are never stored.</p>
+                </div>
+                <div class="range-pick no-print" style="align-items:center;">
+                    <select id="corpCompany" class="search-bar" data-corp-manage style="max-width:260px; padding:6px 12px; font-size:0.85rem; height:36px; margin:0;" onchange="corpSelectCompany(this.value)" aria-label="Company"></select>
+                    <button type="button" class="btn btn-ghost btn-sm" data-corp-manage onclick="corpNewCompany()">+ New company</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="corpPrintBtn" onclick="corpPrint()" title="Print or save as PDF"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Print / PDF</button>
+                </div>
+            </div>
+
+            <div class="range-pick no-print" data-corp-manage role="tablist" style="margin-bottom:18px;">
+                <button type="button" class="btn btn-ghost btn-sm on" data-corp-tab="insights" onclick="corpTab('insights')">Insights</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-corp-tab="upload" onclick="corpTab('upload')">Upload reports</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-corp-tab="reports" onclick="corpTab('reports')">Uploaded reports</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-corp-tab="access" onclick="corpTab('access')">Company access</button>
+            </div>
+
+            <div id="corpEmpty" class="card" hidden></div>
+
+            <!-- Insights -->
+            <div id="corpPane-insights" hidden>
+                <div class="corp-bar no-print">
+                    <div class="range-pick" role="group" aria-label="Gender">
+                        <span class="corp-lbl">Gender</span>
+                        <button type="button" class="btn btn-ghost btn-sm on" data-corp-sex="" onclick="corpSetFilter('sex','',this)">All</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-corp-sex="M" onclick="corpSetFilter('sex','M',this)">Male</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-corp-sex="F" onclick="corpSetFilter('sex','F',this)">Female</button>
+                    </div>
+                    <div class="range-pick" role="group" aria-label="Age group" id="corpBandPick">
+                        <span class="corp-lbl">Age</span>
+                        <button type="button" class="btn btn-ghost btn-sm on" data-corp-band="" onclick="corpSetFilter('band','',this)">All</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-corp-band="&lt;30" onclick="corpSetFilter('band','<30',this)">&lt;30</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-corp-band="30-39" onclick="corpSetFilter('band','30-39',this)">30–39</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-corp-band="40-49" onclick="corpSetFilter('band','40-49',this)">40–49</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-corp-band="50-59" onclick="corpSetFilter('band','50-59',this)">50–59</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-corp-band="60+" onclick="corpSetFilter('band','60+',this)">60+</button>
+                    </div>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="loadCorpInsights()" aria-label="Refresh" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button>
+                </div>
+
+                <div id="corpInsightsState"></div>
+
+                <div id="corpInsightsBody" hidden>
+                    <div class="stats" id="corpKpis"></div>
+                    <p class="corp-note" id="corpSmallNote" hidden></p>
+
+                    <div class="card" style="margin-bottom:18px;">
+                        <div class="card-head"><div>
+                            <h3>Health Risk Overview</h3>
+                            <span class="chart-sub">Share of tested employees outside the lab's normal range, per test. Click a bar to explore it.</span>
+                        </div></div>
+                        <div class="chart-box tall" id="box-corp-overview"><canvas id="ch-corp-overview"></canvas></div>
+                    </div>
+
+                    <div class="card" style="margin-bottom:18px;">
+                        <div class="card-head" style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+                            <div>
+                                <h3 id="corpFocusTitle">Test Detail</h3>
+                                <span class="chart-sub" id="corpFocusSub"></span>
+                            </div>
+                            <div class="range-pick no-print" style="align-items:center;">
+                                <select id="corpFocusSel" class="search-bar" style="max-width:230px; padding:6px 12px; font-size:0.82rem; height:34px; margin:0;" onchange="corpSetFocus(this.value)" aria-label="Test"></select>
+                                <button type="button" class="btn btn-ghost btn-sm on" data-corp-status="all" onclick="corpSetStatus('all',this)">All results</button>
+                                <button type="button" class="btn btn-ghost btn-sm" data-corp-status="abnormal" onclick="corpSetStatus('abnormal',this)">Abnormal</button>
+                                <button type="button" class="btn btn-ghost btn-sm" data-corp-status="normal" onclick="corpSetStatus('normal',this)">Normal</button>
+                            </div>
+                        </div>
+                        <div class="corp-focus-kpis" id="corpFocusKpis"></div>
+                        <div class="chart-grid corp-three" id="corpFocusGrid">
+                            <div><div class="corp-lbl" style="font-size:.72rem; color:var(--text3); margin-bottom:6px;">NORMAL VS ABNORMAL</div><div class="chart-box" id="box-corp-status"><canvas id="ch-corp-status"></canvas></div></div>
+                            <div><div class="corp-lbl" style="font-size:.72rem; color:var(--text3); margin-bottom:6px;">BY GENDER</div><div class="chart-box" id="box-corp-sex"><canvas id="ch-corp-sex"></canvas></div></div>
+                            <div><div class="corp-lbl" style="font-size:.72rem; color:var(--text3); margin-bottom:6px;">BY AGE GROUP</div><div class="chart-box" id="box-corp-age"><canvas id="ch-corp-age"></canvas></div></div>
+                        </div>
+                        <p class="corp-note" id="corpFocusRanges"></p>
+                    </div>
+
+                    <div class="card" style="margin-bottom:18px;">
+                        <div class="card-head"><div>
+                            <h3>All Package Tests</h3>
+                            <span class="chart-sub">Low / high are judged against the reference range printed on each employee's own report (sex-specific where the lab prints one).</span>
+                        </div></div>
+                        <div class="tbl-wrap" id="corpTable"></div>
+                    </div>
+
+                    <div class="chart-grid">
+                        <div class="card">
+                            <div class="card-head"><div><h3>Gender Split</h3><span class="chart-sub">Employees screened in the current filter</span></div></div>
+                            <div class="chart-box" id="box-corp-gender"><canvas id="ch-corp-gender"></canvas></div>
+                        </div>
+                        <div class="card">
+                            <div class="card-head"><div><h3>Age Distribution</h3><span class="chart-sub">Employees screened, by age group</span></div></div>
+                            <div class="chart-box" id="box-corp-ages"><canvas id="ch-corp-ages"></canvas></div>
+                        </div>
+                    </div>
+                    <p class="corp-note">Aggregate data only. Percentages exclude results whose printed range could not be read ("unclassified"), which are listed per test. This dashboard is a screening summary, not a diagnosis.</p>
+                </div>
+            </div>
+
+            <!-- Upload (lab only) -->
+            <div id="corpPane-upload" hidden>
+                <div class="card">
+                    <div class="card-head"><div>
+                        <h3>Upload Employee Reports</h3>
+                        <span class="chart-sub">Select or drop the lab-generated PDFs — one employee per PDF, any number at once. Each PDF is read, its package test values are saved, and the file itself is discarded.</span>
+                    </div></div>
+                    <label class="corp-drop" id="corpDrop" for="corpFiles">
+                        <strong>Drop PDFs here or click to choose</strong>
+                        <span class="corp-sub">Uploading to: <b id="corpUploadTarget">—</b> · Duplicate reports (same bill ID) are skipped automatically</span>
+                    </label>
+                    <input type="file" id="corpFiles" accept="application/pdf,.pdf" multiple hidden onchange="corpUploadFiles(this.files); this.value='';">
+                    <div id="corpUploadProgress" hidden>
+                        <div class="corp-progress"><div id="corpUploadBar"></div></div>
+                        <div class="corp-sub" id="corpUploadText"></div>
+                    </div>
+                    <div class="tbl-wrap" id="corpUploadResults" style="margin-top:14px;"></div>
+                </div>
+            </div>
+
+            <!-- Uploaded reports (lab only) -->
+            <div id="corpPane-reports" hidden>
+                <div class="card">
+                    <div class="card-head" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <div>
+                            <h3>Uploaded Reports</h3>
+                            <span class="chart-sub" id="corpReportsSub">No names are stored — identify a report by its lab bill ID.</span>
+                        </div>
+                        <button type="button" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="corpDeleteAllReports()">Delete all reports</button>
+                    </div>
+                    <div class="tbl-wrap" id="corpReports"></div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;" id="corpReportsPager"></div>
+                </div>
+            </div>
+
+            <!-- Company access + settings (lab only) -->
+            <div id="corpPane-access" hidden>
+                <div class="card">
+                    <div class="card-head"><div>
+                        <h3>Company Logins</h3>
+                        <span class="chart-sub">A company login opens this company's Insights and nothing else — no patients, bookings or other companies.</span>
+                    </div></div>
+                    <div class="tbl-wrap" id="corpViewers"></div>
+                </div>
+                <div class="form-card">
+                    <h3>Create Company Login</h3>
+                    <div id="corpViewerMsg"></div>
+                    <div class="form-row">
+                        <div class="field"><label>Username</label><input type="text" id="f-corpViewerUser" placeholder="e.g. acme.hr"></div>
+                        <div class="field">
+                            <label>Password</label>
+                            <div style="position:relative;">
+                                <input type="text" id="f-corpViewerPass" placeholder="At least 8 characters" style="padding-right:44px;">
+                                <button type="button" class="btn-ghost" style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:2px 8px; font-size:12px;" onclick="document.getElementById('f-corpViewerPass').value = randomPassword()" aria-label="Generate password"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-shuffle"/></svg></button>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-accent" onclick="corpCreateViewer()">Create Company Login</button>
+                    <p style="color:var(--text3); font-size:0.8rem; margin-top:10px;">Copy the username and password shown after creation and share them with the company directly — they won't be shown again.</p>
+                </div>
+                <div class="form-card">
+                    <h3>Company Settings</h3>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn btn-ghost" onclick="corpRenameCompany()">Rename company</button>
+                        <button class="btn btn-ghost" id="corpActiveBtn" onclick="corpToggleCompany()">Disable company dashboard</button>
+                        <button class="btn btn-ghost" style="color:var(--red)" onclick="corpDeleteCompany()">Delete company</button>
+                    </div>
+                    <p style="color:var(--text3); font-size:0.8rem; margin-top:10px;">Disabling hides the dashboard from the company's logins but keeps the data. Deleting removes the company, all its uploaded reports, and its logins' access.</p>
+                </div>
+            </div>
+        </div>
+
         <div id="pg-staff" class="sec">
             <div class="page-head">
                 <h2>Staff Accounts</h2>
@@ -3118,16 +3335,21 @@
                             <option value="DOCTOR_SCHEDULE_MANAGER">Doctor & Schedule Manager</option>
                             <option value="BRANCH_MANAGER">Branch Manager</option>
                             <option value="CUSTOM_ROLE">Custom Permissions</option>
+                            <option value="CORPORATE_VIEWER" data-corporate="opt" hidden>Company Viewer (Corporate Health dashboard only)</option>
                         </select>
                     </div>
-                    <div class="field">
+                    <div class="field" id="f-staffCompanyWrap" style="display:none;">
+                        <label>Company</label>
+                        <select id="f-staffCompany"></select>
+                    </div>
+                    <div class="field" id="f-staffBranchWrap">
                         <label>Branch Scope</label>
                         <select id="f-staffBranch">
                             <option value="">All Branches (Tenant-wide)</option>
                         </select>
                     </div>
                 </div>
-                <div class="field" style="margin-top:10px;">
+                <div class="field" style="margin-top:10px;" id="f-staffPermsWrap">
                     <label>Extra / Delegated Permissions</label>
                     <div class="check-grid">
                         <label class="check" data-perm-feature="booking"><input type="checkbox" class="staff-perm-cb" value="DOCTORS_CREATE"> Create Doctors</label>
@@ -3149,6 +3371,7 @@
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
+                        <label class="check" data-corporate="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="CORPORATE_HEALTH_MANAGE"> Manage Corporate Health (companies &amp; report uploads)</label>
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -3439,6 +3662,7 @@
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_VIEW"> View Lab Reports</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
+                <label class="check" data-corporate="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="CORPORATE_HEALTH_MANAGE"> Manage Corporate Health (companies &amp; report uploads)</label>
             </div>
         </div>
         <div class="modal-actions">
@@ -3949,6 +4173,9 @@ function toggleTheme() {
     if (insightsData && typeof insightsVisible === 'function' && insightsVisible()) {
         renderInsights(insightsData);
     }
+    if (corpData && document.getElementById('pg-corporate')?.classList.contains('on')) {
+        renderCorpInsights();
+    }
 }
 
 // ═══════ ICONS (inline SVG, stroke-based, theme-able via currentColor) ═══════
@@ -4008,6 +4235,8 @@ let mySpecialty = null;
 let mySpecialtyEnabled = false;
 // migration 089: dental clinics only (plan == dental AND feature on), from /admin/me
 let myDentalPlans = false;
+// migration 095: diagnostic plans + owner opt-in, from /admin/me
+let myCorporateHealth = false;
 // migration 082: treatment sections (Child Care / Women Care / ...) from /admin/me
 let myServiceLines = [];
 let myPlanServiceLines = [];
@@ -4046,6 +4275,19 @@ function applyFeatureVisibility() {
             : myDentalPlans;
         el.style.display = show ? '' : 'none';
     });
+    // Corporate health (migration 095). The nav link needs the grant too; a
+    // company-viewer login always has it, since that page is all it has.
+    document.querySelectorAll('[data-corporate]').forEach(el => {
+        const kind = el.dataset.corporate;
+        const show = myCorporateHealth && (
+            kind === 'nav' ? (isCorpViewer() || hasPermission('CORPORATE_HEALTH_MANAGE'))
+            : kind === 'opt' ? hasPermission('CORPORATE_HEALTH_MANAGE')
+            : true);
+        if (el.tagName === 'OPTION') { el.hidden = !show; el.disabled = !show; }
+        else el.style.display = show ? '' : 'none';
+        if (!show && kind === 'perm') { const cb = el.querySelector('input'); if (cb) cb.checked = false; }
+    });
+    document.body.classList.toggle('corp-viewer', isCorpViewer());
     document.querySelectorAll('[data-role="admin"]').forEach(el => {
         const page = el.dataset.page;
         // This loop runs AFTER the feature loop and assigns display outright, so
@@ -4164,6 +4406,7 @@ async function login() {
     mySpecialty = me.specialty || null;
     mySpecialtyEnabled = !!me.specialty_enabled;
     myDentalPlans = !!me.dental_plans_enabled;
+    myCorporateHealth = !!me.corporate_health_enabled;
     myServiceLines = Array.isArray(me.service_lines) ? me.service_lines : [];
     myPlanServiceLines = Array.isArray(me.plan_service_lines) ? me.plan_service_lines : [];
     myUsername = me.username || '';
@@ -4185,6 +4428,14 @@ async function login() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').classList.add('open');
     applyFeatureVisibility();
+
+    // A company-viewer login (migration 095) has one page. Every other /admin
+    // route answers it 403, so none of the dashboard loaders below may run.
+    if (isCorpViewer()) {
+        go('corporate');
+        return;
+    }
+
     renderClinicScopeBanner();
     loadSubscriptionStatus();
 
@@ -4307,6 +4558,7 @@ async function adoptClinicPlan() {
             mySpecialty = scoped.specialty || null;
             mySpecialtyEnabled = !!scoped.specialty_enabled;
             myDentalPlans = !!scoped.dental_plans_enabled;
+            myCorporateHealth = !!scoped.corporate_health_enabled;
             myServiceLines = Array.isArray(scoped.service_lines) ? scoped.service_lines : [];
             myPlanServiceLines = Array.isArray(scoped.plan_service_lines) ? scoped.plan_service_lines : [];
         }
@@ -4332,6 +4584,7 @@ async function switchClinic() {
     resetConnectorBranchState();
     insightsBranchesLoaded = false;
     insightsBranchId = null;
+    corpResetState();
 
     try {
         renderDashboard(await api('/admin/stats?days=30'));
@@ -4361,6 +4614,9 @@ function logout() {
     myBranchId = null;
     myStaffRole = null;
     myUsername = '';
+    myCorporateHealth = false;
+    corpResetState();
+    document.body.classList.remove('corp-viewer');
     doctorCache = [];
     // Tenant-specific branch caches; see switchClinic().
     resetLabTestBranchState();
@@ -4528,6 +4784,585 @@ async function submitChangePassword() {
 document.getElementById('loginPass').onkeypress = e => { if (e.key === 'Enter') login(); };
 document.getElementById('loginUser').onkeypress = e => { if (e.key === 'Enter') document.getElementById('loginPass').focus(); };
 
+// ═══════ CORPORATE HEALTH (migration 095) ═══════
+// All numbers come from /insights, computed server-side
+// (app/services/corporate_health.py build_insights). This code only draws them.
+let corpCompanies = [];
+let corpCompanyId = null;
+let corpCanManage = false;
+let corpData = null;
+let corpFilter = { sex: '', band: '' };
+let corpFocus = 'hemoglobin';
+let corpFocusStatus = 'all';
+let corpActiveTab = 'insights';
+let corpReq = 0;
+let corpUploading = false;
+let corpReportsOffset = 0;
+const CORP_REPORTS_PAGE = 50;
+const CORP_BATCH = 5;  // == MAX_FILES_PER_UPLOAD on the server
+
+function isCorpViewer() { return myStaffRole === 'CORPORATE_VIEWER'; }
+
+function corpResetState() {
+    corpCompanies = []; corpCompanyId = null; corpCanManage = false; corpData = null;
+    corpFilter = { sex: '', band: '' }; corpFocus = 'hemoglobin'; corpFocusStatus = 'all';
+    corpActiveTab = 'insights'; corpReportsOffset = 0;
+    const res = document.getElementById('corpUploadResults');
+    if (res) res.innerHTML = '';
+}
+
+function randomPassword() {
+    const bytes = new Uint8Array(9);
+    crypto.getRandomValues(bytes);
+    return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 12);
+}
+
+function corpCompany() { return corpCompanies.find(c => c.id === corpCompanyId) || null; }
+function corpPath(suffix) { return '/admin/corporate-health/companies/' + encodeURIComponent(corpCompanyId) + (suffix || ''); }
+
+function corpShowEmpty(html) {
+    const el = document.getElementById('corpEmpty');
+    el.hidden = !html;
+    el.innerHTML = html || '';
+    if (html) ['insights', 'upload', 'reports', 'access'].forEach(t => { document.getElementById('corpPane-' + t).hidden = true; });
+}
+
+async function loadCorporatePage() {
+    const viewer = isCorpViewer();
+    document.querySelectorAll('#pg-corporate [data-corp-manage]').forEach(el => { el.hidden = viewer; });
+    try {
+        const res = await api('/admin/corporate-health/companies');
+        corpCompanies = res.companies || [];
+        corpCanManage = !!res.can_manage;
+    } catch (e) {
+        corpCompanies = [];
+        corpShowEmpty(emptyState('warning', esc(e.message)));
+        return;
+    }
+    renderCorpCompanySelect();
+    if (!corpCompanies.length) {
+        corpShowEmpty(corpCanManage
+            ? emptyState('building', 'No corporate clients yet. Click <strong>+ New company</strong> to add the first company, then upload its employees\' report PDFs.')
+            : emptyState('warning', 'Your company dashboard is not available right now. Please contact the lab.'));
+        return;
+    }
+    if (!corpCompany()) corpCompanyId = corpCompanies[0].id;
+    document.getElementById('corpCompany').value = corpCompanyId;
+    corpShowEmpty(null);
+    corpTab(corpActiveTab);
+}
+
+function renderCorpCompanySelect() {
+    const sel = document.getElementById('corpCompany');
+    sel.innerHTML = corpCompanies.map(c =>
+        `<option value="${esc(c.id)}">${esc(c.name)}${c.reports !== undefined ? ' · ' + c.reports + ' reports' : ''}${c.is_active === false ? ' (disabled)' : ''}</option>`
+    ).join('');
+    if (corpCompanyId) sel.value = corpCompanyId;
+}
+
+function corpSelectCompany(id) {
+    if (corpUploading) { toast('Wait for the upload to finish before switching company.', true); document.getElementById('corpCompany').value = corpCompanyId; return; }
+    corpCompanyId = id;
+    corpData = null;
+    document.getElementById('corpUploadResults').innerHTML = '';
+    corpTab(corpActiveTab);
+}
+
+function corpTab(tab) {
+    if (isCorpViewer() || !corpCanManage) tab = 'insights';
+    corpActiveTab = tab;
+    document.querySelectorAll('#pg-corporate [data-corp-tab]').forEach(b => b.classList.toggle('on', b.dataset.corpTab === tab));
+    ['insights', 'upload', 'reports', 'access'].forEach(t => { document.getElementById('corpPane-' + t).hidden = t !== tab; });
+    document.getElementById('corpPrintBtn').hidden = tab !== 'insights';
+    const c = corpCompany();
+    document.getElementById('corpTitle').textContent = c ? c.name : 'Corporate Health Insights';
+    if (tab === 'insights') loadCorpInsights();
+    else if (tab === 'upload') document.getElementById('corpUploadTarget').textContent = c ? c.name : '—';
+    else if (tab === 'reports') loadCorpReports(0);
+    else if (tab === 'access') loadCorpAccess();
+}
+
+// ─── Insights ───
+
+function corpSetFilter(kind, value, btn) {
+    corpFilter[kind] = value;
+    const attr = kind === 'sex' ? 'data-corp-sex' : 'data-corp-band';
+    document.querySelectorAll(`#pg-corporate [${attr}]`).forEach(b => b.classList.toggle('on', b === btn));
+    loadCorpInsights();
+}
+
+function corpSetFocus(key) {
+    corpFocus = key;
+    document.getElementById('corpFocusSel').value = key;  // table / chart clicks must move the picker too
+    if (corpData) renderCorpFocus();
+    document.querySelectorAll('#corpTable .corp-row').forEach(r => r.classList.toggle('on', r.dataset.key === key));
+}
+
+function corpSetStatus(status, btn) {
+    corpFocusStatus = status;
+    document.querySelectorAll('#pg-corporate [data-corp-status]').forEach(b => b.classList.toggle('on', b === btn));
+    if (corpData) renderCorpFocus();
+}
+
+async function loadCorpInsights() {
+    if (!corpCompanyId) return;
+    const q = new URLSearchParams();
+    if (corpFilter.sex) q.set('sex', corpFilter.sex);
+    if (corpFilter.band) q.set('age_band', corpFilter.band);
+    const req = ++corpReq;
+    const state = document.getElementById('corpInsightsState');
+    if (!corpData) state.innerHTML = loading();
+    try {
+        const data = await api(corpPath('/insights') + (q.toString() ? '?' + q.toString() : ''));
+        if (req !== corpReq) return;  // a newer filter click superseded this answer
+        corpData = data;
+        await chartLibReady();
+        renderCorpInsights();
+    } catch (e) {
+        if (req !== corpReq) return;
+        document.getElementById('corpInsightsBody').hidden = true;
+        state.innerHTML = emptyState('warning', 'Could not load insights: ' + esc(e.message));
+    }
+}
+
+function corpDate(d) {
+    if (!d) return '—';
+    const x = new Date(d + 'T00:00:00');
+    return isNaN(x) ? d : x.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function corpNum(n) { return Number(n || 0).toLocaleString('en-IN'); }
+
+function corpTile(label, value, sub) {
+    return `<div class="stat"><div class="glow"></div><div class="label">${label}</div><div class="num">${value}</div>${sub ? `<div class="corp-sub">${sub}</div>` : ''}</div>`;
+}
+
+function renderCorpInsights() {
+    const d = corpData;
+    if (!d) return;
+    const s = d.summary;
+    const body = document.getElementById('corpInsightsBody');
+    const state = document.getElementById('corpInsightsState');
+    const filtered = !!(corpFilter.sex || corpFilter.band);
+    document.getElementById('corpTitle').textContent = d.company.name;
+    document.getElementById('corpCaption').textContent = s.employees
+        ? `${corpNum(s.employees)} employees screened · samples collected ${corpDate(s.collected_from)}${s.collected_to !== s.collected_from ? ' – ' + corpDate(s.collected_to) : ''}`
+        : 'Employee health package results — aggregate only.';
+
+    if (!s.employees) {
+        body.hidden = true;
+        state.innerHTML = emptyState('clipboard', filtered
+            ? 'No employees match these filters.'
+            : (corpCanManage ? 'No reports uploaded for this company yet. Open <strong>Upload reports</strong> to add them.' : 'Your lab has not uploaded any reports yet.'));
+        return;
+    }
+    state.innerHTML = '';
+    body.hidden = false;
+
+    document.getElementById('corpKpis').innerHTML = [
+        corpTile('Employees Screened', corpNum(s.employees), filtered ? 'in current filter' : 'all uploaded reports'),
+        corpTile('Male', corpNum(s.male), s.male_pct + '%'),
+        corpTile('Female', corpNum(s.female), s.female_pct + '%'),
+        corpTile('Average Age', s.avg_age ?? '—', 'years'),
+        corpTile('At Least One Abnormal Result', s.with_abnormal_pct + '%', corpNum(s.with_abnormal) + ' of ' + corpNum(s.employees) + ' employees'),
+    ].join('');
+    const small = document.getElementById('corpSmallNote');
+    small.hidden = s.employees >= 10;
+    small.innerHTML = '<span class="corp-warn">Small group (' + s.employees + ' employees):</span> a single person moves these percentages a lot. Read them alongside the counts.';
+
+    const sel = document.getElementById('corpFocusSel');
+    sel.innerHTML = d.params.map(p => `<option value="${esc(p.key)}">${esc(p.panel)} — ${esc(p.label)}</option>`).join('');
+    if (!d.params.some(p => p.key === corpFocus)) corpFocus = d.params[0].key;
+    sel.value = corpFocus;
+
+    renderCorpTable();
+    const t = chartTokens();
+    renderCorpOverview(t);
+    renderCorpFocus(t);
+    const ages = d.age_bands;
+    drawChart('box-corp-gender', 'ch-corp-gender', {
+        type: 'doughnut',
+        data: { labels: ['Male', 'Female'], datasets: [{ data: [s.male, s.female], backgroundColor: [withAlpha(t.accent, 0.85), withAlpha(t.pink, 0.85)], borderColor: t.surface, borderWidth: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, cutout: '66%', plugins: { legend: { position: 'bottom', labels: { color: t.label, usePointStyle: true, boxWidth: 8 } }, tooltip: tooltipStyle(t) } }
+    }, 'No employees');
+    drawChart('box-corp-ages', 'ch-corp-ages', {
+        type: 'bar',
+        data: { labels: ages, datasets: [{ label: 'Employees', data: ages.map(b => s.age_distribution[b] || 0), backgroundColor: withAlpha(t.accent, 0.75), borderRadius: 8, maxBarThickness: 48 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: tooltipStyle(t) }, scales: { x: categoryAxis(t), y: valueAxis(t) } }
+    }, 'No employees');
+}
+
+function renderCorpOverview(t) {
+    const ranked = corpData.params.filter(p => p.tested > 0).sort((a, b) => b.abnormal_pct - a.abnormal_pct || b.abnormal - a.abnormal);
+    drawChart('box-corp-overview', 'ch-corp-overview', {
+        type: 'bar',
+        data: {
+            labels: ranked.map(p => p.label),
+            datasets: [{ label: 'Abnormal', data: ranked.map(p => p.abnormal_pct), backgroundColor: rankRamp(t.red, ranked.length), borderRadius: 6, maxBarThickness: 18 }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            onClick: (evt, els) => { if (els.length) corpSetFocus(ranked[els[0].index].key); },
+            plugins: {
+                legend: { display: false },
+                tooltip: tooltipStyle(t, { callbacks: { label: ctx => { const p = ranked[ctx.dataIndex]; return ` ${p.abnormal_pct}% abnormal — ${p.abnormal} of ${p.tested - p.unclassified} (low ${p.low}, high ${p.high})`; } } })
+            },
+            scales: { x: Object.assign(valueAxis(t, v => v + '%'), { max: 100 }), y: { grid: { display: false }, border: { display: false }, ticks: { color: t.label, autoSkip: false } } }
+        }
+    }, 'No abnormal results in this group');
+}
+
+function renderCorpTable() {
+    let html = '<table><thead><tr><th>Test</th><th>Tested</th><th>Normal</th><th>Low</th><th>High</th><th>Abnormal</th><th></th><th title="Printed range could not be read">Unclassified</th></tr></thead><tbody>';
+    let panel = null;
+    corpData.params.forEach(p => {
+        if (p.panel !== panel) { panel = p.panel; html += `<tr class="corp-panel-row"><td colspan="8">${esc(panel)}</td></tr>`; }
+        html += `<tr class="corp-row${p.key === corpFocus ? ' on' : ''}" data-key="${esc(p.key)}" onclick="corpSetFocus(this.dataset.key)">
+            <td><strong>${esc(p.label)}</strong></td>
+            <td>${corpNum(p.tested)}</td><td>${corpNum(p.normal)}</td><td>${corpNum(p.low)}</td><td>${corpNum(p.high)}</td>
+            <td><strong>${p.tested ? p.abnormal_pct + '%' : '—'}</strong></td>
+            <td><div class="corp-meter"><span style="width:${Math.min(100, p.abnormal_pct)}%"></span></div></td>
+            <td>${p.unclassified ? `<span class="corp-warn">${p.unclassified}</span>` : '0'}</td>
+        </tr>`;
+    });
+    document.getElementById('corpTable').innerHTML = html + '</tbody></table>';
+}
+
+function corpStackConfig(t, labels, groups) {
+    const keys = corpFocusStatus === 'normal' ? ['normal'] : corpFocusStatus === 'abnormal' ? ['low', 'high'] : ['normal', 'low', 'high'];
+    const color = { normal: t.green, low: t.amber, high: t.red };
+    const name = { normal: 'Normal', low: 'Low', high: 'High' };
+    return {
+        type: 'bar',
+        data: { labels, datasets: keys.map(k => ({ label: name[k], data: groups.map(g => g[k]), backgroundColor: withAlpha(color[k], 0.82), borderRadius: 6, stack: 's', maxBarThickness: 44 })) },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { color: t.label, usePointStyle: true, boxWidth: 8 } },
+                tooltip: tooltipStyle(t, { callbacks: { label: ctx => {
+                    const g = groups[ctx.dataIndex]; const n = g.normal + g.low + g.high;
+                    return ` ${ctx.dataset.label}: ${ctx.raw} of ${n}` + (n ? ` (${(Math.round(1000 * ctx.raw / n) / 10)}%)` : '');
+                } } })
+            },
+            scales: { x: Object.assign(categoryAxis(t), { stacked: true }), y: Object.assign(valueAxis(t), { stacked: true }) }
+        }
+    };
+}
+
+function renderCorpFocus(t) {
+    t = t || chartTokens();
+    const p = corpData.params.find(x => x.key === corpFocus);
+    if (!p) return;
+    const classified = p.tested - p.unclassified;
+    document.getElementById('corpFocusTitle').textContent = p.label;
+    document.getElementById('corpFocusSub').textContent = p.panel + (p.unit ? ' · values in ' + p.unit : '');
+    const st = p.stats;
+    document.getElementById('corpFocusKpis').innerHTML = [
+        ['Tested', corpNum(p.tested)],
+        ['Normal', p.normal_pct + '%'],
+        ['Abnormal', p.abnormal_pct + '%'],
+        ['Low / High', p.low + ' / ' + p.high],
+        ['Median', st ? st.median + (p.unit ? ' ' + esc(p.unit) : '') : '—'],
+        ['Range seen', st ? st.min + ' – ' + st.max : '—'],
+    ].map(([k, v]) => `<div><b>${v}</b>${k}</div>`).join('');
+
+    const statusKeys = corpFocusStatus === 'normal' ? ['normal'] : corpFocusStatus === 'abnormal' ? ['low', 'high'] : ['normal', 'low', 'high'];
+    const names = { normal: 'Normal', low: 'Low', high: 'High' }, colors = { normal: t.green, low: t.amber, high: t.red };
+    drawChart('box-corp-status', 'ch-corp-status', {
+        type: 'doughnut',
+        data: { labels: statusKeys.map(k => names[k]), datasets: [{ data: statusKeys.map(k => p[k]), backgroundColor: statusKeys.map(k => withAlpha(colors[k], 0.85)), borderColor: t.surface, borderWidth: 2 }] },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '66%',
+            plugins: {
+                legend: { position: 'bottom', labels: { color: t.label, usePointStyle: true, boxWidth: 8 } },
+                tooltip: tooltipStyle(t, { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} of ${classified}` + (classified ? ` (${Math.round(1000 * ctx.raw / classified) / 10}%)` : '') } })
+            }
+        }
+    }, 'No results for this test');
+    drawChart('box-corp-sex', 'ch-corp-sex', corpStackConfig(t, ['Male', 'Female'], [p.by_sex.M, p.by_sex.F]), 'No results for this test');
+    drawChart('box-corp-age', 'ch-corp-age', corpStackConfig(t, corpData.age_bands, corpData.age_bands.map(b => p.by_age[b])), 'No results for this test');
+
+    const sexName = { M: 'Male', F: 'Female' };
+    const ranges = (p.ranges || []).map(r => `${sexName[r.sex] || r.sex}: ${esc(r.text || '—')} (${r.count})`).join(' · ');
+    document.getElementById('corpFocusRanges').innerHTML =
+        (ranges ? 'Reference ranges used, as printed on the reports: ' + ranges + '.' : '') +
+        (p.unclassified ? ` <span class="corp-warn">${p.unclassified} result(s) unclassified</span> — the printed range could not be read, so they are not counted as normal or abnormal.` : '');
+}
+
+function corpPrint() {
+    document.body.classList.add('corp-print');
+    const done = () => { document.body.classList.remove('corp-print'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+}
+
+// ─── Companies ───
+
+async function corpNewCompany() {
+    const name = await promptDialog('Name of the company (as the employer is known, e.g. "Acme Industries Pvt Ltd").', { title: 'New corporate client', okText: 'Add company', placeholder: 'Company name' });
+    if (!name) return;
+    try {
+        const res = await apiPost('/admin/corporate-health/companies', { name });
+        toast('Company added');
+        corpCompanyId = (res.company || {}).id || corpCompanyId;
+        corpActiveTab = 'upload';
+        loadCorporatePage();
+    } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+async function corpRenameCompany() {
+    const c = corpCompany(); if (!c) return;
+    const name = await promptDialog('New name for "' + c.name + '".', { title: 'Rename company', okText: 'Rename', placeholder: c.name });
+    if (!name) return;
+    try {
+        await apiRaw(corpPath(''), { method: 'PATCH', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ name }) });
+        toast('Company renamed');
+        loadCorporatePage();
+    } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+async function corpToggleCompany() {
+    const c = corpCompany(); if (!c) return;
+    const enable = c.is_active === false;
+    if (!enable && !await confirmDialog('Hide the dashboard from "' + c.name + '" logins? The data is kept and you can enable it again.', { okText: 'Disable dashboard', danger: true })) return;
+    try {
+        await apiRaw(corpPath(''), { method: 'PATCH', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ is_active: enable }) });
+        toast(enable ? 'Company dashboard enabled' : 'Company dashboard disabled');
+        loadCorporatePage();
+    } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+async function corpDeleteCompany() {
+    const c = corpCompany(); if (!c) return;
+    const typed = await promptDialog('This permanently deletes "' + c.name + '", all ' + (c.reports || 0) + ' uploaded reports, and its logins\' access. Type the company name to confirm.', { title: 'Delete company', okText: 'Delete permanently', danger: true, placeholder: c.name });
+    if (!typed) return;
+    try {
+        await apiRaw(corpPath('?confirm=' + encodeURIComponent(typed)), { method: 'DELETE' });
+        toast('Company deleted');
+        corpCompanyId = null; corpData = null; corpActiveTab = 'insights';
+        loadCorporatePage();
+    } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+// ─── Upload ───
+
+function corpBeforeUnload(e) { e.preventDefault(); e.returnValue = ''; }
+
+async function corpUploadFiles(list) {
+    if (corpUploading || !corpCompanyId) return;
+    const all = Array.from(list || []);
+    if (!all.length) return;
+    const rows = [];
+    const queue = [];
+    all.forEach(f => {
+        if (!/\.pdf$/i.test(f.name)) rows.push({ file: f.name, status: 'rejected', reason: 'Not a PDF file.' });
+        else if (f.size > 15 * 1024 * 1024) rows.push({ file: f.name, status: 'rejected', reason: 'PDF is larger than 15 MB.' });
+        else queue.push(f);
+    });
+    // Pinned: switching the company selector mid-upload must not redirect files.
+    const companyId = corpCompanyId;
+    const path = '/admin/corporate-health/companies/' + encodeURIComponent(companyId) + '/reports';
+    corpUploading = true;
+    window.addEventListener('beforeunload', corpBeforeUnload);
+    document.getElementById('corpUploadProgress').hidden = false;
+    const bar = document.getElementById('corpUploadBar'), text = document.getElementById('corpUploadText');
+    let done = 0;
+    const tick = () => {
+        const pct = queue.length ? Math.round(100 * done / queue.length) : 100;
+        bar.style.width = pct + '%';
+        text.textContent = `Reading ${done} of ${queue.length} PDFs… Keep this tab open until it finishes.`;
+    };
+    tick();
+    renderCorpUploadResults(rows);
+    try {
+        for (let i = 0; i < queue.length; i += CORP_BATCH) {
+            const batch = queue.slice(i, i + CORP_BATCH);
+            const fd = new FormData();
+            batch.forEach(f => fd.append('files', f, f.name));
+            try {
+                const r = await apiRaw(path, { method: 'POST', body: fd });
+                const res = await r.json();
+                rows.push(...(res.results || []));
+            } catch (e) {
+                batch.forEach(f => rows.push({ file: f.name, status: 'error', reason: e.message }));
+                if (/session expired|signed in as a different user/i.test(e.message)) break;
+            }
+            done += batch.length;
+            tick();
+            renderCorpUploadResults(rows);
+        }
+    } finally {
+        corpUploading = false;
+        window.removeEventListener('beforeunload', corpBeforeUnload);
+    }
+    const n = s => rows.filter(r => r.status === s).length;
+    text.textContent = `Finished: ${n('accepted')} added · ${n('duplicate')} already uploaded · ${n('rejected') + n('error')} could not be used.`;
+    bar.style.width = '100%';
+    corpData = null;
+    try {
+        const res = await api('/admin/corporate-health/companies');
+        corpCompanies = res.companies || corpCompanies;
+        renderCorpCompanySelect();
+    } catch (e) {}
+    toast(`${n('accepted')} report(s) added`, n('accepted') === 0 && rows.length > 0);
+}
+
+function renderCorpUploadResults(rows) {
+    if (!rows.length) { document.getElementById('corpUploadResults').innerHTML = ''; return; }
+    const badgeFor = { accepted: ['badge-confirmed', 'Added'], duplicate: ['badge-pending', 'Already uploaded'], rejected: ['badge-cancelled', 'Not used'], error: ['badge-cancelled', 'Failed'] };
+    const order = { rejected: 0, error: 0, duplicate: 1, accepted: 2 };
+    const sorted = rows.slice().sort((a, b) => (order[a.status] ?? 0) - (order[b.status] ?? 0));
+    let html = '<table><thead><tr><th>File</th><th>Employee</th><th>Sex / Age</th><th>Bill ID</th><th>Tests found</th><th>Abnormal</th><th>Status</th><th>Notes</th></tr></thead><tbody>';
+    sorted.forEach(r => {
+        const [cls, label] = badgeFor[r.status] || ['badge-cancelled', r.status];
+        const notes = [];
+        if (r.reason) notes.push(esc(r.reason));
+        if (r.missing && r.missing.length) notes.push('Not in PDF: ' + esc(r.missing.length) + ' test(s)');
+        (r.warnings || []).forEach(w => notes.push('<span class="corp-warn">' + esc(w) + '</span>'));
+        html += `<tr>
+            <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(r.file)}">${esc(r.file)}</td>
+            <td>${esc(r.employee_name || '—')}</td>
+            <td>${r.sex ? esc(r.sex) + ' / ' + esc(r.age_years) : '—'}</td>
+            <td>${esc(r.bill_id || '—')}</td>
+            <td>${r.found !== undefined ? esc(r.found) + ' / 18' : '—'}</td>
+            <td>${r.abnormal !== undefined ? esc(r.abnormal) : '—'}</td>
+            <td><span class="badge ${cls}">${esc(label)}</span></td>
+            <td style="font-size:0.78rem;">${notes.join('<br>') || '—'}</td>
+        </tr>`;
+    });
+    document.getElementById('corpUploadResults').innerHTML = html + '</tbody></table>' +
+        '<p class="corp-note">Employee names are shown here only for this upload session so you can check each file. They are not saved.</p>';
+}
+
+// Drag and drop onto the upload box.
+(function initCorpDrop() {
+    const drop = document.getElementById('corpDrop');
+    if (!drop) return;
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop', e => corpUploadFiles(e.dataTransfer && e.dataTransfer.files));
+})();
+
+// ─── Uploaded reports ───
+
+async function loadCorpReports(offset) {
+    corpReportsOffset = Math.max(0, offset || 0);
+    const box = document.getElementById('corpReports');
+    box.innerHTML = loading();
+    try {
+        const res = await api(corpPath(`/reports?limit=${CORP_REPORTS_PAGE}&offset=${corpReportsOffset}`));
+        const reports = res.reports || [];
+        const total = res.total || 0;
+        document.getElementById('corpReportsSub').textContent = `${corpNum(total)} report(s). No names are stored — identify a report by its lab bill ID.`;
+        if (!reports.length) {
+            box.innerHTML = emptyState('clipboard', 'No reports uploaded for this company yet.');
+            document.getElementById('corpReportsPager').innerHTML = '';
+            return;
+        }
+        let html = '<table><thead><tr><th>Bill ID</th><th>Sex</th><th>Age</th><th>Collected</th><th>Tests</th><th>Abnormal</th><th>Unclassified</th><th>Uploaded</th><th></th></tr></thead><tbody>';
+        reports.forEach(r => {
+            html += `<tr>
+                <td><strong>${esc(r.bill_id || '—')}</strong></td>
+                <td>${r.sex === 'M' ? 'Male' : 'Female'}</td>
+                <td>${esc(r.age_years)}</td>
+                <td>${esc(corpDate(r.collected_on))}</td>
+                <td>${esc(r.found)} / 18</td>
+                <td>${esc(r.abnormal)}</td>
+                <td>${r.unclassified ? `<span class="corp-warn">${esc(r.unclassified)}</span>` : '0'}</td>
+                <td>${esc((r.created_at || '').slice(0, 10))}</td>
+                <td><button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; color:var(--red)" data-id="${esc(r.id)}" data-bill="${esc(r.bill_id || '')}" onclick="corpDeleteReport(this.dataset.id, this.dataset.bill)">Delete</button></td>
+            </tr>`;
+        });
+        box.innerHTML = html + '</tbody></table>';
+        const pager = document.getElementById('corpReportsPager');
+        const prev = corpReportsOffset > 0, next = corpReportsOffset + reports.length < total;
+        pager.innerHTML = (prev || next)
+            ? `<button class="btn btn-ghost btn-sm" ${prev ? '' : 'disabled'} onclick="loadCorpReports(${corpReportsOffset - CORP_REPORTS_PAGE})">← Previous</button>
+               <span class="corp-sub" style="align-self:center;">${corpReportsOffset + 1}–${corpReportsOffset + reports.length} of ${corpNum(total)}</span>
+               <button class="btn btn-ghost btn-sm" ${next ? '' : 'disabled'} onclick="loadCorpReports(${corpReportsOffset + CORP_REPORTS_PAGE})">Next →</button>`
+            : '';
+    } catch (e) {
+        box.innerHTML = emptyState('warning', 'Could not load reports: ' + esc(e.message));
+    }
+}
+
+async function corpDeleteReport(id, bill) {
+    if (!await confirmDialog('Delete report ' + (bill || '') + '? It is removed from this company\'s insights. You can upload the PDF again later.', { okText: 'Delete', danger: true })) return;
+    try {
+        await apiDel(corpPath('/reports/' + encodeURIComponent(id)));
+        toast('Report deleted');
+        corpData = null;
+        loadCorpReports(corpReportsOffset);
+    } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+async function corpDeleteAllReports() {
+    const c = corpCompany(); if (!c) return;
+    const typed = await promptDialog('This deletes ALL uploaded reports of "' + c.name + '" — its insights become empty. The company and its logins stay, and you can upload again. Type the company name to confirm.', { title: 'Delete all reports', okText: 'Delete all', danger: true, placeholder: c.name });
+    if (!typed) return;
+    try {
+        const r = await apiRaw(corpPath('/reports?confirm=' + encodeURIComponent(typed)), { method: 'DELETE' });
+        const res = await r.json();
+        toast(`${res.deleted || 0} report(s) deleted`);
+        corpData = null;
+        loadCorporatePage();
+    } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+// ─── Company logins ───
+
+async function loadCorpAccess() {
+    const box = document.getElementById('corpViewers');
+    box.innerHTML = loading();
+    const c = corpCompany();
+    const btn = document.getElementById('corpActiveBtn');
+    if (btn && c) btn.textContent = c.is_active === false ? 'Enable company dashboard' : 'Disable company dashboard';
+    try {
+        const res = await api(corpPath('/viewers'));
+        const viewers = res.viewers || [];
+        if (!viewers.length) { box.innerHTML = emptyState('users', 'No company logins yet. Create one below.'); return; }
+        const canEdit = hasPermission('STAFF_UPDATE');
+        let html = '<table><thead><tr><th>Username</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>';
+        viewers.forEach(v => {
+            html += `<tr>
+                <td><strong>${esc(v.username)}</strong></td>
+                <td>${v.is_active ? '<span class="badge badge-confirmed">Active</span>' : '<span class="badge badge-cancelled">Inactive</span>'}</td>
+                <td>${esc((v.created_at || '').slice(0, 10))}</td>
+                <td>${canEdit ? `<button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; margin-right:4px;" data-id="${esc(v.id)}" onclick="corpToggleViewer(this.dataset.id)">${v.is_active ? 'Deactivate' : 'Activate'}</button>
+                    <button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; color:var(--red)" data-id="${esc(v.id)}" data-u="${esc(v.username)}" onclick="corpDeleteViewer(this.dataset.id, this.dataset.u)">Delete</button>` : ''}</td>
+            </tr>`;
+        });
+        box.innerHTML = html + '</tbody></table>';
+    } catch (e) {
+        box.innerHTML = emptyState('warning', 'Could not load logins: ' + esc(e.message));
+    }
+}
+
+async function corpCreateViewer() {
+    const username = document.getElementById('f-corpViewerUser').value.trim();
+    const password = document.getElementById('f-corpViewerPass').value;
+    if (username.length < 3) { msg('corpViewerMsg', 'Username must be at least 3 characters', true); return; }
+    if (password.length < 8) { msg('corpViewerMsg', 'Password must be at least 8 characters', true); return; }
+    try {
+        await apiPost(corpPath('/viewers'), { username, password });
+        msg('corpViewerMsg', `Company login created — Username: <strong>${esc(username)}</strong>, Password: <strong>${esc(password)}</strong>. Copy these now.`);
+        document.getElementById('f-corpViewerUser').value = '';
+        document.getElementById('f-corpViewerPass').value = '';
+        loadCorpAccess();
+    } catch (e) { msg('corpViewerMsg', 'Error: ' + esc(e.message), true); }
+}
+
+async function corpToggleViewer(id) {
+    try { await apiPut('/admin/staff/' + encodeURIComponent(id) + '/toggle', {}); loadCorpAccess(); }
+    catch (e) { toast('Error: ' + e.message, true); }
+}
+
+async function corpDeleteViewer(id, username) {
+    if (!await confirmDialog('Delete the company login "' + username + '"? It is signed out immediately.', { okText: 'Delete', danger: true })) return;
+    try { await apiDel('/admin/staff/' + encodeURIComponent(id)); toast('Login deleted'); loadCorpAccess(); }
+    catch (e) { toast('Error: ' + e.message, true); }
+}
+
 // ═══════ NAV ═══════
 function go(page, el) {
     document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
@@ -4541,7 +5376,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads };
     if (loaders[page]) loaders[page]();
 }
 
@@ -10606,6 +11441,25 @@ function onStaffRoleChange() {
         cb.checked = defaults.includes(cb.value);
     });
     applyPermissionVisibility();
+    // A company viewer is bound to a company and holds no grants or branch.
+    const viewer = role === 'CORPORATE_VIEWER';
+    document.getElementById('f-staffCompanyWrap').style.display = viewer ? '' : 'none';
+    document.getElementById('f-staffBranchWrap').style.display = viewer ? 'none' : '';
+    document.getElementById('f-staffPermsWrap').style.display = viewer ? 'none' : '';
+    if (viewer) populateStaffCompanies();
+}
+
+async function populateStaffCompanies() {
+    const sel = document.getElementById('f-staffCompany');
+    try {
+        const res = await api('/admin/corporate-health/companies');
+        const list = (res.companies || []).filter(c => c.is_active !== false);
+        sel.innerHTML = list.length
+            ? list.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')
+            : '<option value="">No companies yet — add one on the Corporate Health page</option>';
+    } catch (e) {
+        sel.innerHTML = '<option value="">Could not load companies</option>';
+    }
 }
 
 function onEditStaffRoleChange() {
@@ -10636,7 +11490,8 @@ async function loadStaff() {
             const status = s.is_active
                 ? '<span class="badge badge-confirmed">Active</span>'
                 : '<span class="badge badge-cancelled">Inactive</span>';
-            const roleBadge = `<span class="badge badge-completed">${esc(s.staff_role || 'STAFF')}</span>`;
+            const isViewer = s.staff_role === 'CORPORATE_VIEWER';
+            const roleBadge = `<span class="badge badge-completed">${isViewer ? 'COMPANY VIEWER' : esc(s.staff_role || 'STAFF')}</span>`;
             const branchLabel = s.branch_id ? `<span style="font-size:0.8rem; color:var(--accent)">Branch Scoped</span>` : '<span style="font-size:0.8rem; color:var(--text3)">All Branches</span>';
             const perms = (s.permissions && s.permissions.length) ? `<span title="${esc(s.permissions.join(', '))}" style="font-size:0.75rem; color:var(--text2);">${s.permissions.length} granted</span>` : '<span style="font-size:0.75rem; color:var(--text3);">Default</span>';
 
@@ -10648,7 +11503,7 @@ async function loadStaff() {
                 <td>${status}</td>
                 <td>${esc((s.created_at || '').slice(0, 10))}</td>
                 <td>
-                    ${hasPermission('STAFF_UPDATE') ? `<button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; margin-right:4px;" onclick="openEditStaff('${s.id}')">Edit</button>
+                    ${hasPermission('STAFF_UPDATE') ? `${isViewer ? '' : `<button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; margin-right:4px;" onclick="openEditStaff('${s.id}')">Edit</button>`}
                     <button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; margin-right:4px;" onclick="toggleStaff('${s.id}')">${s.is_active ? 'Deactivate' : 'Activate'}</button>
                     <button class="btn btn-ghost" style="padding:3px 8px; font-size:0.78rem; color:var(--red)" data-u="${esc(s.username)}" onclick="deleteStaff('${s.id}', this.dataset.u)">Delete</button>` : ''}
                 </td>
@@ -10677,6 +11532,21 @@ async function createStaff() {
 
     if (!username || username.length < 3) { msg('staffMsg', 'Username must be at least 3 characters', true); return; }
     if (!password || password.length < 8) { msg('staffMsg', 'Password must be at least 8 characters', true); return; }
+
+    if (staff_role === 'CORPORATE_VIEWER') {
+        const companyId = document.getElementById('f-staffCompany').value;
+        if (!companyId) { msg('staffMsg', 'Choose the company this login is for', true); return; }
+        try {
+            await apiPost(`/admin/corporate-health/companies/${encodeURIComponent(companyId)}/viewers`, { username, password });
+            msg('staffMsg', `Company login created — Username: <strong>${esc(username)}</strong>, Password: <strong>${esc(password)}</strong>. Copy these now and share them with the company. This login sees only that company's health dashboard.`);
+            document.getElementById('f-staffUsername').value = '';
+            document.getElementById('f-staffPassword').value = '';
+            loadStaff();
+        } catch (e) {
+            msg('staffMsg', 'Error: ' + esc(e.message), true);
+        }
+        return;
+    }
 
     try {
         await apiPost('/admin/staff', {

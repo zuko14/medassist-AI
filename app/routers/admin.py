@@ -50,6 +50,7 @@ from app.services.tenant import (
     SPECIALTY_BY_PLAN,
     cancellation_window_hours,
     get_clinic_by_id,
+    corporate_health_enabled,
     dental_plans_enabled,
     has_feature,
     invalidate_tenant_cache,
@@ -417,6 +418,35 @@ async def revoke_sessions_for_user(username: str) -> None:
         logger.warning(f"Bulk session revoke failed for '{username}': {e}")
 
 
+#: The ONLY /admin routes a company-viewer login (migration 095) may call.
+#: A viewer is role="staff", and most /admin routes admit any staff account —
+#: patients, appointments, lab reports. Hiding tabs would protect none of that,
+#: so this allowlist is enforced inside verify_credentials, which every /admin
+#: dependency (require_admin, require_permission, fhir) goes through.
+_CORPORATE_VIEWER_ROUTES = (
+    ("GET", re.compile(r"^/admin/me$")),
+    ("PUT", re.compile(r"^/admin/change-password$")),
+    ("PUT", re.compile(r"^/admin/change-username$")),
+    ("GET", re.compile(r"^/admin/corporate-health/companies$")),
+    ("GET", re.compile(r"^/admin/corporate-health/companies/[^/]+/insights$")),
+)
+
+
+def _enforce_corporate_viewer_scope(request: Request, user: AdminUser) -> AdminUser:
+    from app.services.permissions import CORPORATE_VIEWER
+
+    if getattr(user, "staff_role", None) != CORPORATE_VIEWER:
+        return user
+    path = request.url.path.rstrip("/") or "/"
+    if any(request.method == m and rx.match(path) for m, rx in _CORPORATE_VIEWER_ROUTES):
+        return user
+    logger.warning(f"CORPORATE_VIEWER_DENIED user='{user.username}' {request.method} {path}")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This login can only view its company's health dashboard.",
+    )
+
+
 async def verify_credentials(
     request: Request,
     credentials: Optional[HTTPBasicCredentials] = Depends(security),
@@ -426,7 +456,16 @@ async def verify_credentials(
     Order: session cookie first, then HTTP Basic. Basic is retained so existing
     API clients and scripts keep working, and so a deployment where migration
     067 has not been applied still authenticates.
+
+    Company-viewer logins are then confined to _CORPORATE_VIEWER_ROUTES.
     """
+    user = await _authenticate_request(request, credentials)
+    return _enforce_corporate_viewer_scope(request, user)
+
+
+async def _authenticate_request(
+    request: Request, credentials: Optional[HTTPBasicCredentials]
+) -> AdminUser:
     session_token = request.cookies.get(ADMIN_SESSION_COOKIE)
     if session_token:
         session_user = await resolve_admin_session(session_token)
@@ -731,6 +770,7 @@ async def get_current_admin(
             "specialty": None,
             "specialty_enabled": False,
             "dental_plans_enabled": False,
+            "corporate_health_enabled": False,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -750,6 +790,8 @@ async def get_current_admin(
         "specialty_enabled": specialty_enabled(clinic),
         # Dental clinics only (migration 089): shows the Treatment Plans page.
         "dental_plans_enabled": dental_plans_enabled(clinic),
+        # Diagnostic plans + owner opt-in only (migration 095): Corporate Health page.
+        "corporate_health_enabled": corporate_health_enabled(clinic),
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.
@@ -1022,6 +1064,13 @@ async def create_staff(
         validate_staff_role(body.staff_role)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    if body.staff_role == "CORPORATE_VIEWER":
+        # Needs a company binding this route has no field for; created by
+        # POST /admin/corporate-health/companies/{id}/viewers instead.
+        raise HTTPException(
+            status_code=422,
+            detail="Company viewer logins are created for a company from the Corporate Health page.",
+        )
 
     try:
         resolved_permissions = resolve_permissions(body.staff_role, body.extra_permissions)
@@ -1131,6 +1180,18 @@ async def update_staff(
             raise HTTPException(
                 status_code=403, detail="You cannot edit staff outside your assigned branch."
             )
+
+    # A company viewer is bound to one company and holds no grants. Turning one
+    # into a front-desk account (or back) would carry a live session across
+    # the change with the wrong confinement, so only (de)activation is allowed.
+    is_viewer = target.get("staff_role") == "CORPORATE_VIEWER"
+    if (is_viewer and (body.staff_role not in (None, "CORPORATE_VIEWER")
+                       or body.extra_permissions or body.branch_id)) \
+            or (not is_viewer and body.staff_role == "CORPORATE_VIEWER"):
+        raise HTTPException(
+            status_code=422,
+            detail="Company viewer logins cannot change role or permissions. Delete it and create a new login instead.",
+        )
 
     update_data: dict = {}
     if body.is_active is not None:

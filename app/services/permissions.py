@@ -39,7 +39,15 @@ PERMISSIONS = frozenset({
     # Admin "Leads" (migration 092): every WhatsApp contact's number plus staff
     # follow-up messages. In no role preset: granted per account.
     "LEADS_MANAGE",
+    # Corporate employee-health insights (migration 095): add companies, upload
+    # employee report PDFs, delete them. In no role preset: granted per account.
+    "CORPORATE_HEALTH_MANAGE",
 })
+
+#: A login for a lab's CORPORATE client: sees that one company's aggregate
+#: dashboard and nothing else. Enforced for every /admin route in
+#: app.routers.admin.verify_credentials, not by hiding tabs.
+CORPORATE_VIEWER = "CORPORATE_VIEWER"
 
 STAFF_ROLES = frozenset({
     "STAFF",
@@ -52,6 +60,7 @@ STAFF_ROLES = frozenset({
     "BRANCH_MANAGER",
     "DIAGNOSTIC_OPERATOR",
     "CUSTOM_ROLE",
+    CORPORATE_VIEWER,
 })
 
 _DOCTOR_SCHEDULE_GRANTS = [
@@ -81,6 +90,7 @@ ROLE_PRESETS: dict[str, list[str]] = {
     "BRANCH_MANAGER": _DOCTOR_SCHEDULE_GRANTS + ["DOCTORS_CREATE", "DOCTORS_DELETE", "STAFF_VIEW", "REPORTS_VIEW"],
     "DIAGNOSTIC_OPERATOR": list(_DIAGNOSTIC_OPERATOR_GRANTS),
     "CUSTOM_ROLE": [],
+    CORPORATE_VIEWER: [],
 }
 
 

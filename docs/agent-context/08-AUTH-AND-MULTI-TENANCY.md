@@ -76,6 +76,11 @@ if user.role == "super_admin" and not is_valid_clinic_scope(requested_clinic_id)
 return requested_clinic_id
 ```
 
+### Company-Viewer Confinement (migration 095)
+- A login with `staff_role = CORPORATE_VIEWER` belongs to a diagnostic centre's **corporate client** (`clinic_admins.corporate_client_id`). It is `role = staff`, and most `/admin` routes admit any staff account, so hiding tabs protects nothing.
+- `verify_credentials` therefore ends with `_enforce_corporate_viewer_scope()`: such a login may call only `_CORPORATE_VIEWER_ROUTES` (`GET /admin/me`, its own password/username change, `GET /admin/corporate-health/companies`, `GET /admin/corporate-health/companies/{id}/insights`). Everything else — including `/fhir` — is 403.
+- The two corporate routes re-read the binding from `clinic_admins` on every request (active + still a viewer + company not deleted), so deactivation or a company delete takes effect immediately. A viewer can never be minted or converted through `/admin/staff`; only `POST /admin/corporate-health/companies/{id}/viewers`.
+
 ### Multi-Branch Scoping: `enforce_branch_scope(user, branch_id)`
 - If a staff member has an assigned `user.branch_id`:
   - They are strictly restricted from viewing or altering appointments, doctors, leaves, or operating hours belonging to other branches within the same clinic.

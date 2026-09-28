@@ -645,6 +645,28 @@ def dental_plans_enabled(clinic: Optional[dict]) -> bool:
     return bool(clinic) and clinic.get("plan") == "dental" and has_feature(clinic, "dental_treatment_plans")
 
 
+#: Features that belong to NO plan: off for every tenant until the platform
+#: owner switches them on for one clinic (PATCH /platform/clinics/{id}/features).
+#: Kept out of PLAN_FEATURES on purpose, so the enterprise wildcard and the
+#: "every feature" hybrid plans can never switch them on by accident.
+OPT_IN_FEATURES: dict[str, str] = {
+    "corporate_health": "Corporate Employee Health Insights",
+}
+
+#: Plans that may use corporate_health: the two diagnostic-centre plans.
+CORPORATE_HEALTH_PLANS = frozenset({"diagstream", "diagbooking"})
+
+
+def corporate_health_enabled(clinic: Optional[dict]) -> bool:
+    """Corporate employee-health insights (migration 095). Diagnostic plans
+    only, and only with an explicit owner opt-in — never has_feature(), whose
+    enterprise wildcard answers True to everything."""
+    if not clinic or clinic.get("plan") not in CORPORATE_HEALTH_PLANS:
+        return False
+    overrides = clinic.get("features") or {}
+    return isinstance(overrides, dict) and overrides.get("corporate_health") is True
+
+
 def has_feature(clinic: dict, feature: str) -> bool:
     """
     Check whether a clinic's plan includes a given feature.
