@@ -63,6 +63,7 @@ These database migrations must be applied on production before the features belo
 | `090_dental_plan_branch.sql` | Branch on dental treatment plans | Multi-branch dental clinics (branch-pinned front desk) |
 | `091_quota_functions_revoke_api_roles.sql` | Removes public-API (`anon` / `authenticated`) access to the two quota functions from 089 | Security — clears Supabase linter warnings 0028 / 0029. Run right after 089. |
 | `092_whatsapp_leads.sql` | Admin **WhatsApp Leads** page: `admin_whatsapp_leads()` (service_role only) + partial index for `lead_interest` analytics rows | All clinics. **Apply before deploying the code** — until it exists the Leads page shows "Could not load leads" (nothing else is affected). Staff need the `LEADS_MANAGE` permission; clinic admins see it automatically. |
+| `093_leads_consent_declined.sql` | Adds `patients.data_consent_declined_at` and redefines `admin_whatsapp_leads()`: only STOP or an explicit "No" to the consent question is *Do not contact* | All clinics. Run **before** deploying the matching code. Production stores `data_consent=false` for patients who never answered, so 092 wrongly hid them. |
 
 Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' ORDER BY name;`
 

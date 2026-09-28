@@ -18,11 +18,11 @@ def _clinic(cur, name):
 
 
 def _contact(cur, clinic, phone, name=None, active_hours_ago=None, created_days_ago=30,
-             opted_in=True, consent=None, state="main_menu"):
+             opted_in=True, consent=None, state="main_menu", declined=False):
     cur.execute(
-        "INSERT INTO patients (clinic_id, phone, name, opted_in, data_consent, created_at) "
-        "VALUES (%s, %s, %s, %s, %s, now() - make_interval(days => %s))",
-        (clinic, phone, name, opted_in, consent, created_days_ago),
+        "INSERT INTO patients (clinic_id, phone, name, opted_in, data_consent, created_at, data_consent_declined_at) "
+        "VALUES (%s, %s, %s, %s, %s, now() - make_interval(days => %s), CASE WHEN %s THEN now() END)",
+        (clinic, phone, name, opted_in, consent, created_days_ago, declined),
     )
     if active_hours_ago is not None:
         # handle_message sets session_expires_at = last message + 24h.
@@ -74,12 +74,13 @@ def world(real_pg_conn):
     a = _clinic(cur, "Leads A 092")
     b = _clinic(cur, "Leads B 092")
     # Clinic A
-    _contact(cur, a, "+919800000001", "Ravi", active_hours_ago=2, created_days_ago=1)  # hot, new
+    _contact(cur, a, "+919800000001", "Ravi", active_hours_ago=2, created_days_ago=1, consent=False)  # hot, new
     _contact(cur, a, "+919800000002", "Sita", active_hours_ago=72)                  # warm
     _contact(cur, a, "+919800000003", None, active_hours_ago=24 * 20)              # cold, 20 days
     _contact(cur, a, "+919800000004", "Booked Bala", active_hours_ago=5)            # booked
     _contact(cur, a, "+919800000005", "Stop Sam", active_hours_ago=1, opted_in=False)   # dnc
-    _contact(cur, a, "+919800000006", "No Consent", active_hours_ago=1, consent=False)  # dnc
+    _contact(cur, a, "+919800000006", "No Consent", active_hours_ago=1, consent=False,
+             declined=True)                                                          # dnc: said No
     _contact(cur, a, "+919800000007", "Unpaid 100%_x", active_hours_ago=30,
              state="awaiting_payment")                                                    # warm, unpaid
     _contact(cur, a, "+919800000008", "Erased", active_hours_ago=3)
@@ -135,6 +136,12 @@ def test_092_activity_window(world):
     assert "+919800000009" not in _by_phone(_leads(cur, a, days=30))   # last seen 400 days ago
     assert "+919800000009" in _by_phone(_leads(cur, a, days=0))        # all time
     assert "+919800000003" not in _by_phone(_leads(cur, a, days=7))
+
+
+def test_093_unanswered_consent_is_a_lead_with_its_number(world):
+    cur, a, _ = world
+    ravi = _by_phone(_leads(cur, a))["+919800000001"]      # data_consent=false, never answered
+    assert ravi["stage"] == "hot" and ravi["phone"] == "+919800000001"
 
 
 def test_092_do_not_contact_numbers_are_masked(world):

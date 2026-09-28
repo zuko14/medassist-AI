@@ -164,6 +164,65 @@ async def test_a_broken_recorder_cannot_stop_the_reply():
     process.assert_awaited_once()
 
 
+async def _run_handler(message, message_type):
+    manager = ConversationManager()
+    manager.whatsapp = MagicMock(send_text=AsyncMock(return_value=True))
+    label = MagicMock()
+    interest = MagicMock()
+    patches = _hook_patches("unknown")
+    for p in patches:
+        p.start()
+    try:
+        with patch("app.services.conversation.leads.record_label", label),              patch("app.services.conversation.leads.record_interest", interest),              patch("app.services.conversation.specialty_flow.offer_treatment_browse", new=AsyncMock()),              patch.object(manager, "_process_state", new=AsyncMock()) as process:
+            await manager._handle_message_locked(CLINIC, PHONE, message, message_type, "wamid.x")
+    finally:
+        for p in patches:
+            p.stop()
+    return manager, label, interest, process
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message_type", ["image", "audio", "document", "location"])
+async def test_unreadable_media_is_counted_and_still_answered(message_type):
+    manager, label, interest, process = await _run_handler("", message_type)
+    label.assert_called_once_with(CLINIC_ID, PHONE, leads.SENT_MEDIA)
+    manager.whatsapp.send_text.assert_awaited_once()        # "please type it" reply unchanged
+    interest.assert_not_called()
+    process.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message_type", ["reaction", "system"])
+async def test_reactions_and_system_events_are_not_interest(message_type):
+    manager, label, _, _ = await _run_handler("", message_type)
+    label.assert_not_called()
+    manager.whatsapp.send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_firewall_blocked_question_is_counted_label_only():
+    manager, label, interest, process = await _run_handler("what medicine should I take for fever", "text")
+    label.assert_called_once_with(CLINIC_ID, PHONE, leads.MEDICAL_QUESTION)
+    assert "medicine" not in str(label.call_args)          # never the question text
+    manager.whatsapp.send_text.assert_awaited_once()        # the safe static reply, unchanged
+    process.assert_not_awaited()
+
+
+def test_new_labels_are_valid_filters():
+    assert {leads.SENT_MEDIA, leads.MEDICAL_QUESTION} <= leads.INTEREST_LABELS
+
+
+@pytest.mark.asyncio
+async def test_record_label_writes_and_never_raises():
+    log = AsyncMock(return_value=True)
+    with patch("app.services.leads.log_analytics_event", log):
+        leads.record_label(CLINIC_ID, PHONE, leads.SENT_MEDIA)
+        await asyncio.sleep(0)
+    log.assert_awaited_once_with(CLINIC_ID, PHONE, "lead_interest", intent="sent_media", department=None)
+    with patch("app.services.leads.spawn_background_task", side_effect=RuntimeError("no loop")):
+        leads.record_label(CLINIC_ID, PHONE, leads.SENT_MEDIA)   # must not raise
+
+
 # ═══════ list ═══════
 
 
@@ -225,6 +284,39 @@ async def _send(patient, conversation, sent=True, text="Hello from Apollo"):
 
 
 @pytest.mark.asyncio
+async def test_not_answering_the_consent_question_is_not_a_refusal():
+    # Production stores data_consent=false for everyone who has not answered yet.
+    send = await _send({"phone": PHONE, "opted_in": True, "data_consent": False,
+                        "data_consent_declined_at": None}, _open())
+    send.assert_awaited_once()
+
+
+async def _consent(reply, patient):
+    manager = ConversationManager()
+    manager.whatsapp = MagicMock(send_text=AsyncMock(return_value=True),
+                                 send_interactive_buttons=AsyncMock(return_value=True))
+    update = AsyncMock(return_value=True)
+    with patch("app.services.conversation.update_patient", update),          patch.object(manager, "_send_main_menu", new=AsyncMock()),          patch.object(manager, "update_state", new=AsyncMock()):
+        await manager._handle_awaiting_consent(CLINIC, PHONE, reply, patient, "en")
+    return [c.args[2] for c in update.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_consent_no_records_a_durable_refusal_marker():
+    writes = await _consent("no", {"phone": PHONE})
+    assert writes[0] == {"data_consent": False}                       # unchanged existing write
+    assert set(writes[1]) == {"data_consent_declined_at"} and writes[1]["data_consent_declined_at"]
+
+
+@pytest.mark.asyncio
+async def test_consent_yes_clears_an_earlier_no_and_only_then():
+    writes = await _consent("yes", {"phone": PHONE, "data_consent_declined_at": "2026-09-01T00:00:00+00:00"})
+    assert writes == [{"data_consent": True, "data_consent_at": "now()"}, {"data_consent_declined_at": None}]
+    writes = await _consent("yes", {"phone": PHONE})
+    assert writes == [{"data_consent": True, "data_consent_at": "now()"}]   # no extra write normally
+
+
+@pytest.mark.asyncio
 async def test_sends_inside_the_window_as_admin_lead():
     send = await _send({"phone": PHONE, "opted_in": True, "data_consent": None}, _open())
     send.assert_awaited_once_with(CLINIC, PHONE, "Hello from Apollo", _source="admin_lead")
@@ -235,7 +327,8 @@ async def test_sends_inside_the_window_as_admin_lead():
     (None, _open(), True, "hi", 404),                                                     # never messaged THIS clinic
     ({"opted_in": True}, None, True, "hi", 409),                                          # erased: conversation purged
     ({"opted_in": False}, _open(), True, "hi", 409),                                      # sent STOP
-    ({"opted_in": True, "data_consent": False}, _open(), True, "hi", 409),                # declined consent
+    ({"opted_in": True, "data_consent": False, "data_consent_declined_at": "2026-09-28T10:00:00+00:00"},
+     _open(), True, "hi", 409),                                                           # said No to saving details
     ({"opted_in": True}, _open(hours=-1), True, "hi", 409),                               # window closed
     ({"opted_in": True}, None, True, "hi", 409),                                          # no conversation row
     ({"opted_in": True}, _open(), False, "hi", 502),                                      # Meta refused

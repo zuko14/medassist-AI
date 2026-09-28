@@ -70,10 +70,15 @@ _BUTTON_PREFIX_INTERESTS = (
     ("labsvc_", "lab_tests"),
 )
 
+# Recorded by the two handler branches that return before intent detection.
+SENT_MEDIA = "sent_media"               # voice note / photo / document / location
+MEDICAL_QUESTION = "medical_question"   # blocked by the clinical firewall
+
 INTEREST_LABELS = frozenset(
     set(_TEXT_INTERESTS.values())
     | set(_BUTTON_INTERESTS.values())
     | {label for _, label in _BUTTON_PREFIX_INTERESTS}
+    | {SENT_MEDIA, MEDICAL_QUESTION}
 )
 SEGMENTS = frozenset({"all", "hot", "open", "booked", "dnc"})
 MAX_MESSAGE_CHARS = 1000
@@ -121,9 +126,18 @@ def record_interest(
     swallows its own database errors."""
     try:
         found = classify_interest(message_type, intent, interactive_data)
-        if not found:
-            return
-        label, department = found
+    except Exception as e:
+        logger.warning(f"LEAD_INTEREST_NOT_RECORDED clinic={clinic_id}: {e}")
+        return
+    if found:
+        record_label(clinic_id, phone, *found)
+
+
+def record_label(
+    clinic_id: str, phone: str, label: Optional[str], department: Optional[str] = None
+) -> None:
+    """Background write of one interest row. Never raises, never delays."""
+    try:
         spawn_background_task(
             log_analytics_event(clinic_id, phone, EVENT_TYPE, intent=label, department=department),
             name="lead_interest",
@@ -200,7 +214,9 @@ async def send_lead_message(clinic: dict, phone: str, text: str) -> None:
     patient = await get_patient_by_phone(clinic_id, phone)
     if not patient:
         raise LeadError(404, "This number has not messaged your clinic on WhatsApp.")
-    if patient.get("opted_in") is False or patient.get("data_consent") is False:
+    # Same rule as admin_whatsapp_leads (migration 093): STOP, or an explicit
+    # "No" to saving their details. data_consent=false alone means "not answered".
+    if patient.get("opted_in") is False or patient.get("data_consent_declined_at"):
         raise LeadError(409, "This patient opted out or declined consent. Do not contact them.")
     if not _window_open(await get_conversation(clinic_id, phone)):
         raise LeadError(

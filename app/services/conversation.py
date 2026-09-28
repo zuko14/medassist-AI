@@ -613,6 +613,8 @@ class ConversationManager:
                     f"Ignoring non-request message type '{message_type}' from {mask_phone(phone)}"
                 )
                 return
+            # A voice note or photo is still a real request: admin Leads counts it.
+            leads.record_label(clinic_id, phone, leads.SENT_MEDIA)
             await self.whatsapp.send_text(
                 clinic,
                 phone,
@@ -640,6 +642,8 @@ class ConversationManager:
                 message, lang_for_firewall
             )
             if firewall_blocked and firewall_response:
+                # Admin Leads: the label only, never the question itself.
+                leads.record_label(clinic_id, phone, leads.MEDICAL_QUESTION)
                 await self.whatsapp.send_text(clinic, phone, firewall_response)
                 # Specialty clinics only: the firewall stays exactly as strict,
                 # but the patient also gets a way into the clinic's own catalogue.
@@ -1673,6 +1677,9 @@ class ConversationManager:
             await update_patient(
                 clinic["id"], phone, {"data_consent": True, "data_consent_at": "now()"}
             )
+            if patient.get("data_consent_declined_at"):
+                # A later "Yes" withdraws the earlier "No" (admin Leads, migration 093).
+                await update_patient(clinic["id"], phone, {"data_consent_declined_at": None})
             await self.whatsapp.send_text(
                 clinic,
                 phone,
@@ -1695,6 +1702,14 @@ class ConversationManager:
             "కాదు",
         ]:
             await update_patient(clinic["id"], phone, {"data_consent": False})
+            # data_consent=false also means "not answered yet" in production, so
+            # an explicit "No" gets its own marker: admin Leads never shows or
+            # contacts this patient (migration 093). Separate write on purpose:
+            # if the column were missing, only the marker is lost.
+            await update_patient(
+                clinic["id"], phone,
+                {"data_consent_declined_at": datetime.now(timezone.utc).isoformat()},
+            )
             await self.whatsapp.send_text(
                 clinic,
                 phone,
