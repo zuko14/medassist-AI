@@ -6,12 +6,13 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.database import supabase
+from app.database import is_uuid, supabase
+from app.routers import corporate_health as corp
 from app.routers.admin import (
     AdminUser,
     ConnectorCredentialsUpdate,
@@ -3490,3 +3491,121 @@ async def update_finance_invoice(
         details={"status": payload.status, "amount_paid_paise": update["amount_paid_paise"]},
     )
     return {"success": True, "invoice_id": invoice_id, **update}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Corporate Health — owner-managed (migration 095)
+# ═══════════════════════════════════════════════════════════════════════════
+# For a partner lab that only wants company dashboards (no WhatsApp, no plan
+# onboarding), the owner runs the whole workflow from here: companies, PDF
+# uploads, company-viewer logins. The data still lives under ONE host clinic
+# (every corporate table is clinic-scoped by FK), which the owner picks from
+# the diagnostic clinics that have the Corporate Health override on.
+#
+# These are thin wrappers: each one calls the canonical /admin/corporate-health
+# handler with an AdminUser pinned to the host clinic, so validation, dedupe,
+# feature gating and audit logging are the SAME code the lab panel runs.
+# Company viewers keep signing in at /admin, unchanged.
+
+
+def _corp_actor(owner: AdminUser, host_clinic_id: str) -> AdminUser:
+    """The owner, scoped down to one host clinic. corp._scope() then still runs
+    enforce_clinic_access + the corporate_health_enabled gate on it."""
+    if not is_uuid(host_clinic_id):
+        raise HTTPException(status_code=400, detail="Choose a host lab first.")
+    return AdminUser(username=owner.username, role="platform_owner",
+                     clinic_id=host_clinic_id, user_id="platform_owner_env")
+
+
+@router.get("/corporate-health/hosts")
+async def corporate_health_hosts(owner: AdminUser = Depends(verify_owner_credentials)):
+    """Diagnostic clinics that can host corporate companies, and whether the
+    owner has switched the feature on for each."""
+    from app.services.tenant import CORPORATE_HEALTH_PLANS, corporate_health_enabled
+
+    res = await sb(
+        # unscoped: platform owner listing eligible host clinics across tenants
+        supabase.table("clinics").select("id, name, plan, features")
+        .in_("plan", sorted(CORPORATE_HEALTH_PLANS)).order("name"))
+    return {"hosts": [{"id": c["id"], "name": c.get("name"), "plan": c.get("plan"),
+                       "enabled": corporate_health_enabled(c)} for c in res.data or []]}
+
+
+@router.get("/corporate-health/companies")
+async def owner_corp_list_companies(host_clinic_id: str, owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.list_companies(clinic_id=host_clinic_id, user=_corp_actor(owner, host_clinic_id))
+
+
+@router.post("/corporate-health/companies")
+async def owner_corp_create_company(body: corp.CompanyIn, request: Request, host_clinic_id: str,
+                                    owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.create_company(body, request, clinic_id=host_clinic_id,
+                                     user=_corp_actor(owner, host_clinic_id))
+
+
+@router.patch("/corporate-health/companies/{company_id}")
+async def owner_corp_update_company(company_id: str, body: corp.CompanyPatch, request: Request, host_clinic_id: str,
+                                    owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.update_company(company_id, body, request, clinic_id=host_clinic_id,
+                                     user=_corp_actor(owner, host_clinic_id))
+
+
+@router.delete("/corporate-health/companies/{company_id}")
+async def owner_corp_delete_company(company_id: str, request: Request, host_clinic_id: str,
+                                    confirm: str = Query(...),
+                                    owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.delete_company(company_id, request, clinic_id=host_clinic_id, confirm=confirm,
+                                     user=_corp_actor(owner, host_clinic_id))
+
+
+@router.post("/corporate-health/companies/{company_id}/reports")
+async def owner_corp_upload_reports(company_id: str, request: Request, host_clinic_id: str,
+                                    files: List[UploadFile] = File(...),
+                                    owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.upload_reports(company_id, request, files=files, clinic_id=host_clinic_id,
+                                     user=_corp_actor(owner, host_clinic_id))
+
+
+@router.get("/corporate-health/companies/{company_id}/reports")
+async def owner_corp_list_reports(company_id: str, host_clinic_id: str,
+                                  limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                                  owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.list_reports(company_id, clinic_id=host_clinic_id, limit=limit, offset=offset,
+                                   user=_corp_actor(owner, host_clinic_id))
+
+
+@router.delete("/corporate-health/companies/{company_id}/reports/{report_id}")
+async def owner_corp_delete_report(company_id: str, report_id: str, request: Request, host_clinic_id: str,
+                                   owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.delete_report(company_id, report_id, request, clinic_id=host_clinic_id,
+                                    user=_corp_actor(owner, host_clinic_id))
+
+
+@router.delete("/corporate-health/companies/{company_id}/reports")
+async def owner_corp_delete_all_reports(company_id: str, request: Request, host_clinic_id: str,
+                                        confirm: str = Query(...),
+                                        owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.delete_all_reports(company_id, request, clinic_id=host_clinic_id, confirm=confirm,
+                                         user=_corp_actor(owner, host_clinic_id))
+
+
+@router.get("/corporate-health/companies/{company_id}/insights")
+async def owner_corp_insights(company_id: str, host_clinic_id: str,
+                              sex: Optional[str] = Query(None, pattern="^[MF]$"),
+                              age_band: Optional[str] = Query(None),
+                              owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.insights(company_id, clinic_id=host_clinic_id, sex=sex, age_band=age_band,
+                               user=_corp_actor(owner, host_clinic_id))
+
+
+@router.get("/corporate-health/companies/{company_id}/viewers")
+async def owner_corp_list_viewers(company_id: str, host_clinic_id: str,
+                                  owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.list_viewers(company_id, clinic_id=host_clinic_id, user=_corp_actor(owner, host_clinic_id))
+
+
+@router.post("/corporate-health/companies/{company_id}/viewers")
+async def owner_corp_create_viewer(company_id: str, body: corp.ViewerIn, request: Request, host_clinic_id: str,
+                                   owner: AdminUser = Depends(verify_owner_credentials)):
+    return await corp.create_viewer(company_id, body, request, clinic_id=host_clinic_id,
+                                    user=_corp_actor(owner, host_clinic_id))

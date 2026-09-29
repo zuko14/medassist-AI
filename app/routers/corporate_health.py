@@ -44,10 +44,20 @@ def _is_viewer(user: AdminUser) -> bool:
     return getattr(user, "staff_role", None) == CORPORATE_VIEWER
 
 
+def _is_admin(user: AdminUser) -> bool:
+    """clinic_admin / super_admin, or the platform owner acting through the
+    /platform/corporate-health wrappers. The owner's AdminUser is built there,
+    pinned to ONE host clinic (clinic_id), and its user_id is the env sentinel
+    no clinic_admins row can carry (ids are UUIDs)."""
+    if user.role == "platform_owner":
+        return user.user_id == "platform_owner_env" and bool(user.clinic_id)
+    return user.role in ("super_admin", "clinic_admin")
+
+
 def _can_manage(user: AdminUser) -> bool:
     if _is_viewer(user):
         return False
-    return user.role in ("super_admin", "clinic_admin") or "CORPORATE_HEALTH_MANAGE" in (user.permissions or [])
+    return _is_admin(user) or "CORPORATE_HEALTH_MANAGE" in (user.permissions or [])
 
 
 def _unique_error(e: Exception) -> bool:
@@ -312,7 +322,7 @@ async def create_viewer(company_id: str, body: ViewerIn, request: Request, clini
     """A login for the company (e.g. its HR head). Creating a login is a staff
     action, so a delegated manager also needs STAFF_CREATE."""
     scope = await _manager_scope(user, clinic_id)
-    if user.role not in ("super_admin", "clinic_admin") and "STAFF_CREATE" not in (user.permissions or []):
+    if not _is_admin(user) and "STAFF_CREATE" not in (user.permissions or []):
         raise HTTPException(status_code=403, detail="Missing permission: STAFF_CREATE")
     company = await _company(scope, company_id)
     if body.username.lower() in _reserved_usernames():

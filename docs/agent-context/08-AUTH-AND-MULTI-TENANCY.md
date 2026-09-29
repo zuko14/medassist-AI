@@ -79,7 +79,8 @@ return requested_clinic_id
 ### Company-Viewer Confinement (migration 095)
 - A login with `staff_role = CORPORATE_VIEWER` belongs to a diagnostic centre's **corporate client** (`clinic_admins.corporate_client_id`). It is `role = staff`, and most `/admin` routes admit any staff account, so hiding tabs protects nothing.
 - `verify_credentials` therefore ends with `_enforce_corporate_viewer_scope()`: such a login may call only `_CORPORATE_VIEWER_ROUTES` (`GET /admin/me`, its own password/username change, `GET /admin/corporate-health/companies`, `GET /admin/corporate-health/companies/{id}/insights`). Everything else — including `/fhir` — is 403.
-- The two corporate routes re-read the binding from `clinic_admins` on every request (active + still a viewer + company not deleted), so deactivation or a company delete takes effect immediately. A viewer can never be minted or converted through `/admin/staff`; only `POST /admin/corporate-health/companies/{id}/viewers`.
+- The two corporate routes re-read the binding from `clinic_admins` on every request (active + still a viewer + company not deleted), so deactivation or a company delete takes effect immediately. A viewer can never be minted or converted through `/admin/staff`; only `POST /admin/corporate-health/companies/{id}/viewers` (or its owner wrapper below).
+- Owner-managed corporate health: `/platform/corporate-health/*` (owner Basic auth) builds `AdminUser(role="platform_owner", clinic_id=<host_clinic_id>, user_id="platform_owner_env")` and calls the `/admin/corporate-health` handlers. `corporate_health._is_admin()` accepts `platform_owner` only with that env sentinel id AND a pinned clinic, so `enforce_clinic_access` + the feature gate still confine it to the one host lab; a `clinic_admins` row can never carry the sentinel (ids are UUIDs).
 
 ### Multi-Branch Scoping: `enforce_branch_scope(user, branch_id)`
 - If a staff member has an assigned `user.branch_id`:

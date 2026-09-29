@@ -642,3 +642,91 @@ def test_owner_can_enable_only_on_diagnostic_plans(plan, expected):
     finally:
         app.dependency_overrides.pop(platform.verify_owner_credentials, None)
     assert r.status_code == expected
+
+
+# ═══════ owner-managed (/platform/corporate-health) ═══════
+
+OWNER = AdminUser("owner", role="platform_owner", user_id="platform_owner_env")
+P = "/platform/corporate-health"
+
+
+@pytest.fixture
+def as_owner():
+    from app.routers import platform
+
+    app.dependency_overrides[platform.verify_owner_credentials] = lambda: OWNER
+    yield
+    app.dependency_overrides.pop(platform.verify_owner_credentials, None)
+
+
+def test_owner_routes_need_owner_auth():
+    assert client.get(f"{P}/hosts").status_code in (401, 503)
+    assert client.get(f"{P}/companies", params={"host_clinic_id": CLINIC}).status_code in (401, 503)
+
+
+def test_owner_host_must_be_a_uuid(as_owner):
+    assert client.get(f"{P}/companies", params={"host_clinic_id": "default"}).status_code == 400
+
+
+def test_owner_is_refused_when_host_has_feature_off(as_owner):
+    with _enabled({"id": CLINIC, "plan": "diagstream", "features": {}}):
+        assert client.get(f"{P}/companies", params={"host_clinic_id": CLINIC}).status_code == 403
+
+
+def test_owner_lists_companies_of_the_pinned_host_only(as_owner):
+    lister = AsyncMock(return_value=[{"id": COMPANY, "name": "Acme", "is_active": True, "reports": 3}])
+    with _enabled(), patch(f"{R}.ch.list_companies", lister):
+        r = client.get(f"{P}/companies", params={"host_clinic_id": CLINIC})
+    assert r.status_code == 200 and r.json()["can_manage"] is True
+    assert lister.call_args.args == (CLINIC,)
+
+
+def test_owner_upload_is_scoped_and_audited_as_owner(as_owner):
+    with _enabled(), _company(), patch(f"{R}.ch.ingest_pdf", AsyncMock(return_value={"status": "accepted"})) as ingest, \
+            patch(f"{R}.log_admin_action", AsyncMock()) as audit:
+        r = client.post(f"{P}/companies/{COMPANY}/reports", params={"host_clinic_id": CLINIC},
+                        files=[("files", ("a.pdf", b"%PDF-a", "application/pdf"))])
+    assert r.status_code == 200 and r.json()["counts"]["accepted"] == 1
+    assert ingest.call_args.args == (CLINIC, COMPANY, b"%PDF-a", "owner")
+    actor = audit.call_args.args[0]
+    assert (actor.role, actor.clinic_id, actor.username) == ("platform_owner", CLINIC, "owner")
+
+
+def test_owner_creates_viewer_bound_to_host_and_company(as_owner):
+    sb_mock = AsyncMock(side_effect=[MagicMock(data=[]), MagicMock(data=[{"id": "new"}])])
+    with _enabled(), _company(), patch(f"{R}.sb", sb_mock), patch(f"{R}.supabase") as fake, \
+            patch(f"{R}.log_admin_action", AsyncMock()):
+        r = client.post(f"{P}/companies/{COMPANY}/viewers", params={"host_clinic_id": CLINIC},
+                        json={"username": "acme.hr", "password": "longenough1"})
+    assert r.status_code == 200
+    row = fake.table.return_value.insert.call_args.args[0]
+    assert (row["clinic_id"], row["staff_role"], row["corporate_client_id"]) == (CLINIC, "CORPORATE_VIEWER", COMPANY)
+
+
+def test_owner_delete_company_still_needs_the_typed_name(as_owner):
+    with _enabled(), _company("Acme Ltd"), patch(f"{R}.sb", AsyncMock()) as sb_mock:
+        r = client.delete(f"{P}/companies/{COMPANY}", params={"host_clinic_id": CLINIC, "confirm": "Acme"})
+    assert r.status_code == 400
+    sb_mock.assert_not_called()
+
+
+def test_platform_owner_role_from_a_db_row_is_not_an_admin():
+    from app.routers.corporate_health import _is_admin
+
+    assert _is_admin(AdminUser("owner", role="platform_owner", clinic_id=CLINIC, user_id="platform_owner_env"))
+    # a clinic_admins row can never carry the env sentinel id; an unpinned owner is not an admin either
+    assert not _is_admin(AdminUser("x", role="platform_owner", clinic_id=CLINIC, user_id="u9"))
+    assert not _is_admin(AdminUser("owner", role="platform_owner", clinic_id=None, user_id="platform_owner_env"))
+
+
+def test_owner_hosts_lists_diagnostic_labs_with_their_flag(as_owner):
+    from app.routers import platform
+
+    rows = [{"id": CLINIC, "name": "Taiyo", "plan": "diagstream", "features": {"corporate_health": True}},
+            {"id": OTHER_CLINIC, "name": "Other", "plan": "diagbooking", "features": {}}]
+    with patch.object(platform, "sb", AsyncMock(return_value=MagicMock(data=rows))), \
+            patch.object(platform, "supabase") as fake:
+        r = client.get(f"{P}/hosts")
+    assert r.status_code == 200
+    assert [(h["id"], h["enabled"]) for h in r.json()["hosts"]] == [(CLINIC, True), (OTHER_CLINIC, False)]
+    assert fake.table.return_value.select.return_value.in_.call_args.args == ("plan", ["diagbooking", "diagstream"])

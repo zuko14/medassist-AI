@@ -818,6 +818,182 @@
 
         /* Last row keeps a hairline that then floats above the card padding. */
         tbody tr:last-child td { border-bottom: none; }
+
+        /* ==================================================================
+           GLASS DIALOG - centred, full-width reading surface for long feeds
+           (Outbound Message Audit). Same tokens as the rest of the panel.
+           ================================================================== */
+        .glass-overlay {
+            position: fixed; inset: 0; z-index: 950;
+            display: flex; align-items: center; justify-content: center;
+            padding: 24px;
+            background: radial-gradient(ellipse 70% 60% at 50% 40%, rgba(61,139,253,0.10), transparent 70%), rgba(2,6,12,0.64);
+            backdrop-filter: blur(10px) saturate(140%);
+            -webkit-backdrop-filter: blur(10px) saturate(140%);
+            opacity: 0; visibility: hidden;
+            transition: opacity .25s ease, visibility .25s ease;
+        }
+        .glass-overlay.active { opacity: 1; visibility: visible; }
+        .glass-dialog {
+            position: relative;
+            width: min(1180px, 100%);
+            max-height: min(88vh, 900px);
+            display: flex; flex-direction: column;
+            background: linear-gradient(160deg, rgba(36,58,82,0.80) 0%, rgba(14,25,38,0.88) 60%, rgba(10,19,30,0.92) 100%);
+            border: 1px solid var(--border2);
+            border-radius: 22px;
+            box-shadow: inset 0 1px 0 var(--rim), 0 40px 120px rgba(0,0,0,0.65), 0 0 60px rgba(61,139,253,0.10);
+            backdrop-filter: blur(28px) saturate(160%);
+            -webkit-backdrop-filter: blur(28px) saturate(160%);
+            overflow: hidden;
+            transform: translateY(14px) scale(.985);
+            transition: transform .3s cubic-bezier(.2,.8,.2,1);
+        }
+        .glass-overlay.active .glass-dialog { transform: none; }
+        .glass-dialog::before {
+            content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+            background: var(--brand-grad); opacity: .85;
+        }
+        .glass-head {
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+            padding: 24px 28px 16px;
+        }
+        .glass-eyebrow {
+            font-size: .7rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+            color: var(--mint); opacity: .75; margin-bottom: 6px;
+        }
+        .glass-head h3 { font-size: 1.35rem; font-weight: 700; color: #fff; letter-spacing: -0.02em; }
+        .glass-toolbar {
+            display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+            padding: 0 28px 14px;
+        }
+        .glass-toolbar .search-box { min-width: 220px; }
+        .glass-body {
+            flex: 1; min-height: 0; overflow: auto;
+            margin: 0 16px 16px; border: 1px solid var(--border); border-radius: 14px;
+            background: rgba(4,10,17,0.35);
+        }
+        .glass-body .custom-table th { position: sticky; top: 0; z-index: 1; background: rgba(22,36,52,0.96); }
+        .glass-body .custom-table tbody tr { cursor: default; }
+        .glass-foot { padding: 0 28px 18px; font-size: .78rem; color: var(--text3); }
+        .glass-close {
+            width: 38px; height: 38px; flex-shrink: 0;
+            display: inline-flex; align-items: center; justify-content: center;
+            border-radius: 12px; border: 1px solid var(--border); background: var(--surface2);
+            color: var(--text2); cursor: pointer; transition: all .2s;
+        }
+        .glass-close:hover { color: #fff; border-color: var(--border2); background: var(--surface-hover); }
+        .glass-close:focus-visible, .corp-tab:focus-visible, .audit-open:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
+        .audit-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+        .glass-dialog .audit-chips { padding: 0 28px 16px; }
+        .audit-chip {
+            background: var(--surface2); border: 1px solid var(--border); border-radius: 12px;
+            padding: 8px 14px; min-width: 112px;
+        }
+        .audit-chip-label { font-size: .68rem; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; }
+        .audit-chip-val { font-weight: 700; font-size: 1.05rem; color: #fff; font-variant-numeric: tabular-nums; }
+        .audit-chip-sub { font-size: .74rem; color: var(--text3); font-variant-numeric: tabular-nums; }
+
+        .audit-compact { padding: 18px 24px; }
+        .audit-compact .table-toolbar { margin-bottom: 12px; }
+        .audit-open {
+            display: inline-flex; align-items: center; gap: 8px;
+            width: auto; padding: 10px 18px; font-size: .88rem;
+        }
+
+        @media (max-width: 720px) {
+            .glass-overlay { padding: 0; align-items: stretch; }
+            .glass-dialog { max-height: 100vh; height: 100%; border-radius: 0; }
+            .glass-head { padding: 20px 16px 12px; }
+            .glass-toolbar, .glass-dialog .audit-chips, .glass-foot { padding-left: 16px; padding-right: 16px; }
+            .glass-body { margin: 0 8px 8px; }
+        }
+
+        /* ==================================================================
+           CORPORATE HEALTH - owner-managed company dashboards (migration 095)
+           ================================================================== */
+        .corp-hint { font-size: .82rem; color: var(--text3); margin: -6px 0 14px; line-height: 1.5; }
+        .corp-hint b { color: var(--text2); font-weight: 600; }
+        .corp-new {
+            display: none; gap: 10px; align-items: center; flex-wrap: wrap;
+            padding: 14px; margin-bottom: 16px;
+            border: 1px dashed var(--border2); border-radius: 12px; background: rgba(4,10,17,0.25);
+        }
+        .corp-new.open { display: flex; }
+        .corp-new .form-control { flex: 1; min-width: 220px; padding: 10px 14px; }
+        .btn-inline { width: auto; padding: 10px 18px; font-size: .88rem; }
+        .btn-primary:disabled, .btn-secondary:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+        .modal-panel.corp-panel { max-width: 880px; }
+        .corp-sub { font-size: .82rem; color: var(--text3); margin-top: 4px; }
+        .corp-tabs {
+            display: flex; gap: 4px; padding: 4px; margin-bottom: 22px; overflow-x: auto;
+            background: rgba(4,10,17,0.35); border: 1px solid var(--border); border-radius: 12px;
+        }
+        .corp-tab {
+            flex: 1; white-space: nowrap; padding: 9px 14px; border-radius: 9px; border: 0;
+            background: transparent; color: var(--text2); font-family: inherit; font-size: .84rem; font-weight: 600;
+            cursor: pointer; transition: background .2s, color .2s;
+        }
+        .corp-tab:hover { color: #fff; }
+        .corp-tab.active { background: var(--surface-hover); color: #fff; box-shadow: inset 0 1px 0 var(--rim); }
+        .corp-pane[hidden] { display: none; }
+        .corp-drop {
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+            padding: 34px 20px; text-align: center; cursor: pointer;
+            border: 1.5px dashed var(--border2); border-radius: 16px;
+            background: radial-gradient(ellipse at 50% 0%, rgba(61,139,253,0.10), transparent 70%), rgba(4,10,17,0.25);
+            color: var(--text2); transition: border-color .2s, background-color .2s;
+        }
+        .corp-drop:hover, .corp-drop.drag { border-color: var(--accent); background-color: rgba(61,139,253,0.08); }
+        .corp-drop strong { color: #fff; font-size: 1rem; }
+        .corp-drop .i { width: 28px; height: 28px; color: var(--accent-light); }
+        .corp-note { font-size: .78rem; color: var(--text3); margin-top: 10px; line-height: 1.5; }
+        .corp-progress { margin-top: 16px; }
+        .corp-bar-track { height: 6px; border-radius: 6px; background: var(--surface2); overflow: hidden; }
+        .corp-bar { height: 100%; width: 0; background: var(--brand-grad); transition: width .3s ease; }
+        .corp-progress-text { font-size: .8rem; color: var(--text2); margin-top: 8px; }
+        .corp-table { font-size: .84rem; }
+        .corp-table td, .corp-table th { padding: 10px 12px; }
+        .corp-table tbody tr { cursor: default; }
+        .pill { display: inline-flex; padding: 3px 9px; border-radius: 20px; font-size: .72rem; font-weight: 700; letter-spacing: .03em; white-space: nowrap; }
+        .pill-ok { background: var(--green-bg); color: var(--green); }
+        .pill-warn { background: var(--amber-bg); color: var(--amber); }
+        .pill-bad { background: var(--red-bg); color: var(--red); }
+        .pill-mute { background: var(--surface2); color: var(--text3); }
+        .corp-creds {
+            margin-top: 16px; padding: 16px; border-radius: 14px;
+            border: 1px solid var(--accent-border);
+            background: linear-gradient(160deg, rgba(61,139,253,0.12), rgba(16,185,129,0.06));
+        }
+        .corp-creds-row { display: flex; gap: 10px; font-size: .86rem; padding: 3px 0; }
+        .corp-creds-row span:first-child { color: var(--text3); min-width: 88px; }
+        .corp-creds-row code { color: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+        .corp-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+        .corp-meter { height: 6px; border-radius: 6px; background: var(--green-bg); overflow: hidden; min-width: 80px; }
+        .corp-meter > i { display: block; height: 100%; background: var(--red); opacity: .8; }
+        .corp-danger {
+            margin-top: 24px; padding: 16px; border-radius: 14px;
+            border: 1px solid rgba(242,85,95,0.35); background: var(--red-bg);
+        }
+        .corp-danger h4 { color: #fca5a5; font-size: .92rem; margin-bottom: 6px; }
+        .corp-toast {
+            position: fixed; left: 50%; bottom: 28px; z-index: 1000;
+            transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+            padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; color: #fff;
+            background: rgba(14,25,38,0.92); border: 1px solid var(--border2);
+            box-shadow: var(--shadow-lg); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            transition: opacity .25s, transform .25s;
+        }
+        .corp-toast.show { opacity: 1; transform: translate(-50%, 0); }
+        .corp-toast.err { border-color: rgba(242,85,95,0.5); color: #fca5a5; }
+        @media (max-width: 720px) {
+            .corp-kpis { grid-template-columns: repeat(2, 1fr); }
+            .modal-panel.corp-panel { padding: 20px 16px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .glass-overlay, .glass-dialog, .corp-bar, .corp-toast { transition: none; }
+        }
     </style>
 </head>
 <body>
@@ -1410,50 +1586,50 @@
                 </div>
             </div>
 
-            <!-- Granular Outbound Audit Feed -->
-            <div class="section-card">
+            <!-- Corporate Health Insights — owner-managed company dashboards (migration 095) -->
+            <div class="section-card" id="corpHealthCard">
                 <div class="table-toolbar">
-                    <div class="toolbar-left">
-                        <div class="chart-title">Outbound Message Audit Feed</div>
-                        <div class="chart-subtitle" id="auditSummary">Loading outbound audit feed...</div>
+                    <div class="toolbar-left" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                        <div class="chart-title">Corporate Health Insights</div>
+                        <div class="chart-subtitle" id="corpSummary">Company dashboards you run for partner labs: create the company, upload the report PDFs, hand over a login.</div>
                     </div>
-                    <div style="display:flex; gap:10px;">
-                        <select class="filter-select" id="auditClassFilter" onchange="loadOutboundAudit()">
-                            <option value="">All classes</option>
-                            <option value="LAB_REPORT">Lab Report</option>
-                            <option value="PRESCRIPTION">Prescription</option>
-                            <option value="APPOINTMENT_REMINDER">Appointment Reminder</option>
-                            <option value="FOLLOW_UP">Follow-Up</option>
-                            <option value="BOOKING_CONFIRMATION">Booking Confirmation</option>
-                            <option value="BROADCAST">Broadcast</option>
-                            <option value="OTHER">Other</option>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                        <select class="filter-select" id="corpHostSelect" onchange="onCorpHostChange()" aria-label="Host lab">
+                            <option value="">Loading host labs…</option>
                         </select>
-                        <select class="filter-select" id="auditDaysFilter" onchange="loadOutboundAudit()">
-                            <option value="1">Last 24 hours</option>
-                            <option value="7" selected>Last 7 days</option>
-                            <option value="30">Last 30 days</option>
-                        </select>
+                        <button class="btn-primary btn-inline" id="corpNewBtn" onclick="toggleCorpNewForm()" disabled>+ New company</button>
                     </div>
                 </div>
-                <div id="auditTotals" style="display:flex; flex-wrap:wrap; gap:10px; padding:0 4px 14px;"></div>
+                <div class="corp-hint" id="corpHostHint"></div>
+                <div class="corp-new" id="corpNewForm">
+                    <input type="text" class="form-control" id="corpNewName" maxlength="120" placeholder="Company name, e.g. Acme Corp – 2026 Annual Camp" onkeydown="if(event.key==='Enter')createCorpCompany()">
+                    <button class="btn-primary btn-inline" id="corpNewSubmit" onclick="createCorpCompany()">Create company</button>
+                    <button class="btn-secondary" onclick="toggleCorpNewForm(false)">Cancel</button>
+                </div>
                 <div class="table-responsive">
                     <table class="custom-table">
                         <thead>
-                            <tr>
-                                <th>Sent At</th>
-                                <th>Hospital / Clinic</th>
-                                <th>Class</th>
-                                <th>Patient</th>
-                                <th>Recipient</th>
-                                <th>Delivery</th>
-                                <th>Est. Cost</th>
-                            </tr>
+                            <tr><th>Company</th><th>Reports</th><th>Dashboard</th><th>Created</th><th>Actions</th></tr>
                         </thead>
-                        <tbody id="auditFeedBody">
-                            <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">Loading outbound audit feed...</td></tr>
+                        <tbody id="corpCompaniesBody">
+                            <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text3)">Choose a host lab to see its companies.</td></tr>
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            <!-- Outbound Message Audit — compact card; the full feed opens in #auditModal -->
+            <div class="section-card audit-compact">
+                <div class="table-toolbar">
+                    <div class="toolbar-left" style="flex-direction:column; align-items:flex-start; gap:2px;">
+                        <div class="chart-title">Outbound Message Audit</div>
+                        <div class="chart-subtitle" id="auditSummary">Loading outbound audit feed...</div>
+                    </div>
+                    <button class="btn-primary audit-open" onclick="openAuditModal()" aria-haspopup="dialog" aria-controls="auditModal">
+                        <svg class="i" aria-hidden="true" focusable="false"><use href="#i-list"/></svg> View all
+                    </button>
+                </div>
+                <div class="audit-chips" id="auditTotals"></div>
             </div>
 
             <!-- CallMedex Processing Centers -->
@@ -1495,6 +1671,174 @@
             Kriya AI Platform Super-Admin Governance Engine &bull; Protected by HTTPBasic Owner Session & Security Headers
         </footer>
     </div>
+
+    <!-- Outbound Message Audit — full feed (glass dialog) -->
+    <div class="glass-overlay" id="auditModal" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle" aria-hidden="true"
+         onclick="if (event.target === this) closeAuditModal()">
+        <div class="glass-dialog">
+            <div class="glass-head">
+                <div>
+                    <div class="glass-eyebrow">Messaging · Compliance ledger</div>
+                    <h3 id="auditModalTitle">Outbound Message Audit</h3>
+                    <div class="chart-subtitle" id="auditModalSummary" style="margin-top:4px;">Loading…</div>
+                </div>
+                <button class="glass-close" onclick="closeAuditModal()" aria-label="Close audit feed"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="glass-toolbar">
+                <div class="search-box">
+                    <span class="search-icon"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg></span>
+                    <input type="search" id="auditSearch" placeholder="Search clinic, patient or number" oninput="renderAuditRows()" aria-label="Search the audit feed">
+                </div>
+                <select class="filter-select" id="auditClassFilter" onchange="loadOutboundAudit()" aria-label="Message class">
+                    <option value="">All classes</option>
+                    <option value="LAB_REPORT">Lab Report</option>
+                    <option value="PRESCRIPTION">Prescription</option>
+                    <option value="APPOINTMENT_REMINDER">Appointment Reminder</option>
+                    <option value="FOLLOW_UP">Follow-Up</option>
+                    <option value="BOOKING_CONFIRMATION">Booking Confirmation</option>
+                    <option value="BROADCAST">Broadcast</option>
+                    <option value="OTHER">Other</option>
+                </select>
+                <select class="filter-select" id="auditDeliveryFilter" onchange="renderAuditRows()" aria-label="Delivery status">
+                    <option value="">Any delivery</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="failed">Failed</option>
+                </select>
+                <select class="filter-select" id="auditDaysFilter" onchange="loadOutboundAudit()" aria-label="Time window">
+                    <option value="1">Last 24 hours</option>
+                    <option value="7" selected>Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                </select>
+                <button class="btn-secondary" onclick="loadOutboundAudit()" aria-label="Refresh" style="display:inline-flex; align-items:center; gap:6px;"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button>
+            </div>
+            <div class="audit-chips" id="auditModalTotals"></div>
+            <div class="glass-body">
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Sent At</th>
+                            <th>Hospital / Clinic</th>
+                            <th>Class</th>
+                            <th>Patient</th>
+                            <th>Recipient</th>
+                            <th>Delivery</th>
+                            <th>Est. Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditFeedBody">
+                        <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">Loading outbound audit feed...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="glass-foot" id="auditModalFoot">Showing the newest 200 messages in the window. Press Esc to close.</div>
+        </div>
+    </div>
+
+    <!-- Corporate Health — company workspace (side panel) -->
+    <div class="modal-overlay" id="corpModal" onclick="if (event.target === this) closeCorpModal()">
+        <div class="modal-panel corp-panel" role="dialog" aria-modal="true" aria-labelledby="corpModalTitle">
+            <div class="modal-header">
+                <div>
+                    <h3 id="corpModalTitle" style="font-size:1.3rem; font-weight:800; color:#fff;">Company</h3>
+                    <div class="corp-sub" id="corpModalSub"></div>
+                </div>
+                <button class="close-btn" onclick="closeCorpModal()" aria-label="Close"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="corp-tabs" role="tablist">
+                <button class="corp-tab" role="tab" data-tab="upload" onclick="corpShowTab('upload')">Upload reports</button>
+                <button class="corp-tab" role="tab" data-tab="reports" onclick="corpShowTab('reports')">Uploaded</button>
+                <button class="corp-tab" role="tab" data-tab="access" onclick="corpShowTab('access')">Company login</button>
+                <button class="corp-tab" role="tab" data-tab="insights" onclick="corpShowTab('insights')">Insights</button>
+                <button class="corp-tab" role="tab" data-tab="settings" onclick="corpShowTab('settings')">Settings</button>
+            </div>
+
+            <div class="corp-pane" data-pane="upload" hidden>
+                <label class="corp-drop" id="corpDrop" for="corpFileInput">
+                    <svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg>
+                    <strong>Drop report PDFs here, or click to choose</strong>
+                    <span style="font-size:.82rem;">One employee per PDF · up to 15 MB each · any number of files</span>
+                </label>
+                <input type="file" id="corpFileInput" accept=".pdf,application/pdf" multiple hidden onchange="corpUploadFiles(this.files); this.value='';">
+                <div class="corp-note">Each PDF is read, then discarded. Only sex, age, collection date, bill ID and the 18 test values are kept — never the PDF, the employee's name or the file name. A report already uploaded (same bill ID) is skipped.</div>
+                <div class="corp-progress" id="corpUploadProgress" hidden>
+                    <div class="corp-bar-track"><div class="corp-bar" id="corpUploadBar"></div></div>
+                    <div class="corp-progress-text" id="corpUploadText"></div>
+                </div>
+                <div class="table-responsive" id="corpUploadResults" style="margin-top:14px;"></div>
+            </div>
+
+            <div class="corp-pane" data-pane="reports" hidden>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+                    <div class="corp-sub" id="corpReportsSummary">Loading…</div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-secondary" id="corpPrevBtn" onclick="corpReportsPage(-1)">‹ Newer</button>
+                        <button class="btn-secondary" id="corpNextBtn" onclick="corpReportsPage(1)">Older ›</button>
+                    </div>
+                </div>
+                <div class="table-responsive"><table class="custom-table corp-table">
+                    <thead><tr><th>Bill ID</th><th>Sex / Age</th><th>Collected</th><th>Tests</th><th>Abnormal</th><th>Uploaded</th><th></th></tr></thead>
+                    <tbody id="corpReportsBody"></tbody>
+                </table></div>
+            </div>
+
+            <div class="corp-pane" data-pane="access" hidden>
+                <div class="corp-note" style="margin:0 0 16px;">The company signs in at the lab admin link below and sees <b>only</b> this company's aggregate insights — no patient list, no names, nothing else in the panel.</div>
+                <div class="error-msg" id="corpViewerError"></div>
+                <div class="form-group">
+                    <label for="corpViewerUser">Username</label>
+                    <input type="text" class="form-control" id="corpViewerUser" maxlength="64" placeholder="e.g. acme.hr" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="corpViewerPass">Password</label>
+                    <div style="position:relative;">
+                        <input type="password" class="form-control" id="corpViewerPass" placeholder="At least 8 characters" autocomplete="new-password" style="padding-right:80px;">
+                        <button type="button" class="close-btn" style="position:absolute; right:44px; top:50%; transform:translateY(-50%); font-size:14px;" onclick="togglePwd('corpViewerPass', this)" aria-label="Show password"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-eye"/></svg></button>
+                        <button type="button" class="close-btn" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:14px;" onclick="corpGeneratePassword()" aria-label="Generate password"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-shuffle"/></svg></button>
+                    </div>
+                </div>
+                <button class="btn-primary" id="corpViewerSubmit" onclick="createCorpViewer()">Create company login</button>
+                <div id="corpCreds"></div>
+                <div class="table-responsive" style="margin-top:22px;"><table class="custom-table corp-table">
+                    <thead><tr><th>Username</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+                    <tbody id="corpViewersBody"></tbody>
+                </table></div>
+            </div>
+
+            <div class="corp-pane" data-pane="insights" hidden>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+                    <select class="filter-select" id="corpInsSex" onchange="loadCorpInsights()" aria-label="Sex">
+                        <option value="">All employees</option><option value="M">Male</option><option value="F">Female</option>
+                    </select>
+                    <select class="filter-select" id="corpInsAge" onchange="loadCorpInsights()" aria-label="Age group">
+                        <option value="">All ages</option>
+                    </select>
+                </div>
+                <div id="corpInsightsBody"></div>
+            </div>
+
+            <div class="corp-pane" data-pane="settings" hidden>
+                <div class="form-group">
+                    <label for="corpRename">Company name</label>
+                    <input type="text" class="form-control" id="corpRename" maxlength="120">
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn-primary btn-inline" onclick="saveCorpCompany()">Save name</button>
+                    <button class="btn-secondary" id="corpActiveBtn" onclick="toggleCorpActive()">Disable dashboard</button>
+                </div>
+                <div class="corp-note">Disabling keeps every report and login but the company sees "dashboard disabled" until you enable it again.</div>
+                <div class="corp-danger">
+                    <h4>Danger zone</h4>
+                    <div class="corp-note" style="margin:0 0 12px;">Typing the company name is required for both actions. Neither can be undone.</div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="action-btn action-btn-danger" style="margin:0" onclick="clearCorpReports()">Delete all reports</button>
+                        <button class="action-btn action-btn-danger" style="margin:0" onclick="deleteCorpCompany()">Delete company &amp; its logins' access</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="corp-toast" id="corpToast" role="status" aria-live="polite"></div>
 
     <!-- Clinic Drill-down Modal -->
     <div class="modal-overlay" id="detailModal">
@@ -2249,6 +2593,7 @@
                 loadFinance();
                 loadSubscriptions();
                 loadOutboundAudit();
+                loadCorporateHosts();
                 loadDataStorageBoard();
                 loadSupportInbox();
                 loadDentalMessaging();
@@ -2641,6 +2986,8 @@
                     const data = await res.json().catch(() => ({}));
                     throw new Error(data.detail || res.status);
                 }
+                // The Corporate Health section's host-lab list is exactly this flag.
+                if (feature === 'corporate_health') loadCorporateHosts();
             } catch (e) {
                 alert(`Failed to update feature: ${e.message}`);
                 // Revert the checkbox to reflect the unsaved state
@@ -4389,6 +4736,11 @@
         // Granular Outbound Audit Feed
         // ═══════════════════════════════════════════════════════════════════════════
 
+        // The card on the page is a compact summary; the full feed lives in the
+        // #auditModal glass dialog. Both render from the one fetch below.
+        let _auditData = null;
+        let _auditOpener = null;
+
         async function loadOutboundAudit() {
             const cls = document.getElementById('auditClassFilter').value;
             const days = document.getElementById('auditDaysFilter').value;
@@ -4401,38 +4753,64 @@
                 renderOutboundAudit(await res.json());
             } catch (e) {
                 console.error('Audit feed load failed:', e);
+                _auditData = null;
                 document.getElementById('auditSummary').textContent = 'Outbound audit feed unavailable';
+                document.getElementById('auditModalSummary').textContent = 'Outbound audit feed unavailable';
                 document.getElementById('auditFeedBody').innerHTML =
                     '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">Could not load the audit feed.</td></tr>';
             }
         }
 
         function renderOutboundAudit(data) {
+            _auditData = data;
             const entries = data.entries || [];
             const totals = data.totals || {};
             const labels = data.class_labels || {};
+            const failed = entries.filter(e => e.delivery_status !== 'delivered').length;
 
-            document.getElementById('auditSummary').textContent =
-                `${entries.length} message(s) shown \u00b7 last ${data.period_days} day(s) \u00b7 `
-                + `\u20b9${((data.total_cost_paise || 0) / 100).toFixed(2)} estimated Meta cost`;
+            const summary = `${entries.length} message(s) · last ${data.period_days} day(s) · `
+                + `₹${((data.total_cost_paise || 0) / 100).toFixed(2)} estimated Meta cost`
+                + (failed ? ` · ${failed} failed` : '');
+            document.getElementById('auditSummary').textContent = summary;
+            document.getElementById('auditModalSummary').textContent = summary;
 
-            document.getElementById('auditTotals').innerHTML = Object.keys(totals)
-                .filter(k => totals[k].count > 0)
-                .sort((a, b) => totals[b].count - totals[a].count)
-                .map(k => `
-                    <div style="background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:8px 14px;">
-                        <div style="font-size:0.72rem; color:var(--text3); text-transform:uppercase; letter-spacing:.04em">${escapeHtml(labels[k] || k)}</div>
-                        <div style="font-weight:800; font-size:1.05rem">${totals[k].count}</div>
-                        <div style="font-size:0.75rem; color:var(--text3)">\u20b9${(totals[k].cost_paise / 100).toFixed(2)}</div>
-                    </div>`).join('');
+            const keys = Object.keys(totals).filter(k => totals[k].count > 0)
+                .sort((a, b) => totals[b].count - totals[a].count);
+            const chips = keys.length ? keys.map(k => `
+                    <div class="audit-chip">
+                        <div class="audit-chip-label">${escapeHtml(labels[k] || k)}</div>
+                        <div class="audit-chip-val">${totals[k].count}</div>
+                        <div class="audit-chip-sub">₹${(totals[k].cost_paise / 100).toFixed(2)}</div>
+                    </div>`).join('')
+                : '<div class="corp-note" style="margin:0">No outbound messages in this window.</div>';
+            document.getElementById('auditTotals').innerHTML = chips;
+            document.getElementById('auditModalTotals').innerHTML = chips;
+            renderAuditRows();
+        }
 
+        function renderAuditRows() {
             const tbody = document.getElementById('auditFeedBody');
-            if (!entries.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">No outbound messages in this window.</td></tr>';
+            const foot = document.getElementById('auditModalFoot');
+            const entries = (_auditData && _auditData.entries) || [];
+            const q = document.getElementById('auditSearch').value.trim().toLowerCase();
+            const delivery = document.getElementById('auditDeliveryFilter').value;
+            const rows = entries.filter(e => {
+                const ok = e.delivery_status === 'delivered';
+                if (delivery === 'delivered' && !ok) return false;
+                if (delivery === 'failed' && ok) return false;
+                if (!q) return true;
+                return [e.clinic_name, e.clinic_id, e.patient_name, e.recipient_phone, e.source_class_label, e.source_class]
+                    .some(v => v && String(v).toLowerCase().includes(q));
+            });
+            foot.textContent = `Showing ${rows.length} of ${entries.length} message(s) — the newest 200 in the window. Press Esc to close.`;
+
+            if (!rows.length) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text3)">${
+                    entries.length ? 'No messages match these filters.' : 'No outbound messages in this window.'}</td></tr>`;
                 return;
             }
 
-            tbody.innerHTML = entries.map(e => {
+            tbody.innerHTML = rows.map(e => {
                 let when = e.sent_at || '';
                 try {
                     when = new Date(e.sent_at).toLocaleString('en-IN',
@@ -4441,17 +4819,645 @@
                 const delivered = e.delivery_status === 'delivered';
                 return `
                     <tr>
-                        <td style="font-size:0.82rem; color:var(--text2); white-space:nowrap">${escapeHtml(when)}</td>
-                        <td style="font-size:0.85rem">${escapeHtml(e.clinic_name || e.clinic_id || '\u2014')}</td>
-                        <td><span class="badge" style="background:rgba(99,102,241,.15); color:#818cf8">${escapeHtml(e.source_class_label || e.source_class)}</span></td>
-                        <td>${escapeHtml(e.patient_name || '\u2014')}</td>
+                        <td style="font-size:0.82rem; color:var(--text2); white-space:nowrap">${escapeHtml(String(when))}</td>
+                        <td style="font-size:0.85rem">${escapeHtml(e.clinic_name || e.clinic_id || '—')}</td>
+                        <td><span class="badge" style="background:rgba(99,102,241,.15); color:#818cf8">${escapeHtml(e.source_class_label || e.source_class || '')}</span></td>
+                        <td>${escapeHtml(e.patient_name || '—')}</td>
                         <td style="font-family:monospace; font-size:0.82rem">${escapeHtml(e.recipient_phone || '')}</td>
                         <td>${delivered
-                            ? '<span class="badge status-active">\u2713 Delivered</span>'
-                            : '<span class="badge" style="background:rgba(239,68,68,.18); color:#ef4444">\u2717 Failed</span>'}</td>
-                        <td style="font-weight:600">\u20b9${(e.estimated_cost_paise / 100).toFixed(2)}</td>
+                            ? '<span class="badge status-active">✓ Delivered</span>'
+                            : '<span class="badge" style="background:rgba(239,68,68,.18); color:#ef4444">✗ Failed</span>'}</td>
+                        <td style="font-weight:600">₹${((e.estimated_cost_paise || 0) / 100).toFixed(2)}</td>
                     </tr>`;
             }).join('');
+        }
+
+        function openAuditModal() {
+            _auditOpener = document.activeElement;
+            const modal = document.getElementById('auditModal');
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.style.overflow = 'hidden';
+            if (!_auditData) loadOutboundAudit(); else renderAuditRows();
+            setTimeout(() => document.getElementById('auditSearch').focus(), 60);
+        }
+
+        function closeAuditModal() {
+            const modal = document.getElementById('auditModal');
+            if (!modal.classList.contains('active')) return;
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.style.overflow = '';
+            if (_auditOpener && _auditOpener.focus) _auditOpener.focus();
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
+            if (document.getElementById('auditModal').classList.contains('active')) closeAuditModal();
+            else if (document.getElementById('corpModal').classList.contains('active')) closeCorpModal();
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Corporate Health — owner-managed company dashboards (migration 095)
+        // Every call goes to /platform/corporate-health/*?host_clinic_id=<lab>,
+        // which runs the SAME handlers as the lab panel, pinned to that lab.
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        const CORP_BATCH = 5;  // == MAX_FILES_PER_UPLOAD on the server
+        const CORP_PAGE = 50;
+        const CORP_HOST_KEY = 'kriya.owner.corpHost';
+        let corpHosts = [];
+        let corpHostId = '';
+        let corpCompanies = [];
+        let corpCompany = null;
+        let corpUploading = false;
+        let corpReportsOffset = 0;
+        let corpToastTimer = null;
+
+        function corpEsc(v) { return escapeHtml(v === null || v === undefined ? '' : String(v)); }
+
+        function corpToast(msg, isErr) {
+            const el = document.getElementById('corpToast');
+            el.textContent = msg;
+            el.classList.toggle('err', !!isErr);
+            el.classList.add('show');
+            clearTimeout(corpToastTimer);
+            corpToastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+        }
+
+        function corpDetail(data, status) {
+            const d = data && data.detail;
+            if (Array.isArray(d)) return d.map(x => (x && x.msg ? String(x.msg).replace(/^Value error, /, '') : '')).filter(Boolean).join('; ') || ('HTTP ' + status);
+            return d ? String(d) : ('HTTP ' + status);
+        }
+
+        // hostId is pinned by callers that run long (uploads) so a host switch mid-way cannot redirect them.
+        async function corpFetch(path, opts = {}, hostId = corpHostId) {
+            if (!hostId) throw new Error('Choose a host lab first.');
+            const sep = path.includes('?') ? '&' : '?';
+            const res = await fetch('/platform/corporate-health' + path + sep + 'host_clinic_id=' + encodeURIComponent(hostId), {
+                ...opts, headers: { 'Authorization': ownerAuthHeader, ...(opts.headers || {}) }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(corpDetail(data, res.status));
+            return data;
+        }
+
+        function corpDate(v) {
+            if (!v) return '—';
+            const d = new Date(v);
+            return isNaN(d) ? String(v) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        function corpHostName(id) {
+            const h = corpHosts.find(x => x.id === id);
+            return h ? (h.name || 'Unnamed lab') : '';
+        }
+
+        async function loadCorporateHosts() {
+            const sel = document.getElementById('corpHostSelect');
+            try {
+                const res = await fetch('/platform/corporate-health/hosts', { headers: { 'Authorization': ownerAuthHeader } });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(corpDetail(data, res.status));
+                corpHosts = data.hosts || [];
+            } catch (e) {
+                console.error('Corporate hosts load failed:', e);
+                sel.innerHTML = '<option value="">Host labs unavailable</option>';
+                document.getElementById('corpHostHint').textContent = 'Could not load host labs: ' + e.message;
+                document.getElementById('corpNewBtn').disabled = true;
+                return;
+            }
+            const enabled = corpHosts.filter(h => h.enabled);
+            if (!enabled.some(h => h.id === corpHostId)) {
+                let saved = '';
+                try { saved = localStorage.getItem(CORP_HOST_KEY) || ''; } catch (e) { /* storage blocked */ }
+                corpHostId = enabled.some(h => h.id === saved) ? saved : (enabled[0] ? enabled[0].id : '');
+            }
+            const off = corpHosts.filter(h => !h.enabled);
+            sel.innerHTML = (enabled.length
+                ? enabled.map(h => `<option value="${corpEsc(h.id)}">${corpEsc(h.name || 'Unnamed lab')}</option>`).join('')
+                : '<option value="">No host lab enabled</option>')
+                + (off.length ? '<optgroup label="Corporate Health off">'
+                    + off.map(h => `<option value="${corpEsc(h.id)}" disabled>${corpEsc(h.name || 'Unnamed lab')}</option>`).join('')
+                    + '</optgroup>' : '');
+            sel.value = corpHostId;
+            document.getElementById('corpNewBtn').disabled = !corpHostId;
+            renderCorpHint();
+            if (corpHostId) loadCorpCompanies();
+            else {
+                corpCompanies = [];
+                document.getElementById('corpSummary').textContent = 'Company dashboards you run for partner labs: create the company, upload the report PDFs, hand over a login.';
+                document.getElementById('corpCompaniesBody').innerHTML =
+                    '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text3)">No host lab yet.</td></tr>';
+            }
+        }
+
+        function renderCorpHint() {
+            const hint = document.getElementById('corpHostHint');
+            if (!corpHostId) {
+                hint.innerHTML = 'Companies are stored under a diagnostic lab. Open a <b>Diagnostic Stream</b> or <b>Diagnostic Test Booking</b> clinic from the leaderboard and tick <b>Corporate Health Insights</b> — it then appears here. That lab’s WhatsApp, plan and billing are not touched.';
+                return;
+            }
+            hint.innerHTML = `Hosted under <b>${corpEsc(corpHostName(corpHostId))}</b>. Company logins sign in at <b>${corpEsc(location.origin)}/admin</b> and see only their own dashboard.`;
+        }
+
+        function onCorpHostChange() {
+            const sel = document.getElementById('corpHostSelect');
+            if (corpUploading) {
+                sel.value = corpHostId;
+                corpToast('An upload is running — wait for it to finish.', true);
+                return;
+            }
+            corpHostId = sel.value;
+            try { localStorage.setItem(CORP_HOST_KEY, corpHostId); } catch (e) { /* storage blocked */ }
+            document.getElementById('corpNewBtn').disabled = !corpHostId;
+            toggleCorpNewForm(false);
+            renderCorpHint();
+            loadCorpCompanies();
+        }
+
+        async function loadCorpCompanies() {
+            const hostId = corpHostId;
+            const body = document.getElementById('corpCompaniesBody');
+            if (!hostId) return;
+            try {
+                const data = await corpFetch('/companies', {}, hostId);
+                if (hostId !== corpHostId) return;  // host switched while loading
+                corpCompanies = data.companies || [];
+            } catch (e) {
+                if (hostId !== corpHostId) return;
+                body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--red)">${corpEsc(e.message)}</td></tr>`;
+                return;
+            }
+            const reports = corpCompanies.reduce((n, c) => n + (c.reports || 0), 0);
+            document.getElementById('corpSummary').textContent =
+                `${corpCompanies.length} compan${corpCompanies.length === 1 ? 'y' : 'ies'} · ${reports.toLocaleString('en-IN')} employee report(s) · ${corpHostName(hostId)}`;
+            if (!corpCompanies.length) {
+                body.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text3)">No companies yet — use “+ New company”.</td></tr>';
+                return;
+            }
+            body.innerHTML = corpCompanies.map(c => `
+                <tr onclick="openCorpCompany('${corpEsc(c.id)}')">
+                    <td><div class="clinic-title">${corpEsc(c.name)}</div></td>
+                    <td style="font-weight:600">${corpEsc((c.reports || 0).toLocaleString('en-IN'))}</td>
+                    <td>${c.is_active ? '<span class="pill pill-ok">Live</span>' : '<span class="pill pill-mute">Disabled</span>'}</td>
+                    <td style="color:var(--text2); font-size:.85rem">${corpEsc(corpDate(c.created_at))}</td>
+                    <td><button class="action-btn" onclick="event.stopPropagation(); openCorpCompany('${corpEsc(c.id)}')">Manage</button></td>
+                </tr>`).join('');
+            if (corpCompany) {  // keep an open workspace in sync with fresh counts/status
+                const fresh = corpCompanies.find(c => c.id === corpCompany.id);
+                if (fresh) { corpCompany = fresh; renderCorpModalHeader(); }
+            }
+        }
+
+        function toggleCorpNewForm(force) {
+            const form = document.getElementById('corpNewForm');
+            const open = force === undefined ? !form.classList.contains('open') : force;
+            form.classList.toggle('open', open && !!corpHostId);
+            if (open) setTimeout(() => document.getElementById('corpNewName').focus(), 30);
+        }
+
+        async function createCorpCompany() {
+            const input = document.getElementById('corpNewName');
+            const btn = document.getElementById('corpNewSubmit');
+            const name = input.value.replace(/\s+/g, ' ').trim();
+            if (name.length < 2 || name.length > 120) { corpToast('Company name must be 2 to 120 characters.', true); return; }
+            btn.disabled = true;
+            try {
+                const res = await corpFetch('/companies', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+                });
+                input.value = '';
+                toggleCorpNewForm(false);
+                corpToast('Company created');
+                await loadCorpCompanies();
+                if (res.company && res.company.id) openCorpCompany(res.company.id, 'upload');
+            } catch (e) {
+                corpToast(e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function renderCorpModalHeader() {
+            if (!corpCompany) return;
+            document.getElementById('corpModalTitle').textContent = corpCompany.name;
+            document.getElementById('corpModalSub').innerHTML =
+                `${corpEsc(corpHostName(corpHostId))} · ${corpEsc((corpCompany.reports || 0).toLocaleString('en-IN'))} report(s) · `
+                + (corpCompany.is_active ? '<span class="pill pill-ok">Live</span>' : '<span class="pill pill-mute">Disabled</span>');
+        }
+
+        function openCorpCompany(id, tab) {
+            const c = corpCompanies.find(x => x.id === id);
+            if (!c) return;
+            if (corpUploading && (!corpCompany || corpCompany.id !== id)) {
+                corpToast('An upload is running — wait for it to finish.', true);
+                return;
+            }
+            const switching = !corpCompany || corpCompany.id !== id;
+            corpCompany = c;
+            if (switching) {
+                document.getElementById('corpUploadResults').innerHTML = '';
+                document.getElementById('corpUploadProgress').hidden = true;
+                document.getElementById('corpCreds').innerHTML = '';
+                document.getElementById('corpViewerError').style.display = 'none';
+                document.getElementById('corpViewerUser').value = '';
+                document.getElementById('corpViewerPass').value = '';
+                document.getElementById('corpInsSex').value = '';
+                document.getElementById('corpInsAge').value = '';
+            }
+            renderCorpModalHeader();
+            document.getElementById('corpModal').classList.add('active');
+            corpShowTab(tab || (c.reports ? 'insights' : 'upload'));
+        }
+
+        function closeCorpModal() {
+            if (corpUploading) { corpToast('Upload in progress — keep this panel open until it finishes.', true); return; }
+            document.getElementById('corpModal').classList.remove('active');
+        }
+
+        function corpShowTab(tab) {
+            document.querySelectorAll('#corpModal .corp-tab').forEach(b => {
+                const on = b.dataset.tab === tab;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            document.querySelectorAll('#corpModal .corp-pane').forEach(p => { p.hidden = p.dataset.pane !== tab; });
+            if (tab === 'reports') loadCorpReports(0);
+            else if (tab === 'access') loadCorpViewers();
+            else if (tab === 'insights') loadCorpInsights();
+            else if (tab === 'settings') {
+                document.getElementById('corpRename').value = corpCompany.name;
+                document.getElementById('corpActiveBtn').textContent = corpCompany.is_active ? 'Disable dashboard' : 'Enable dashboard';
+            }
+        }
+
+        function corpPath(suffix) { return '/companies/' + encodeURIComponent(corpCompany.id) + (suffix || ''); }
+
+        // ─── Upload ───
+
+        function corpBeforeUnload(e) { e.preventDefault(); e.returnValue = ''; }
+
+        (function wireCorpDrop() {
+            const drop = document.getElementById('corpDrop');
+            ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+            ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+            drop.addEventListener('drop', e => corpUploadFiles(e.dataTransfer.files));
+        })();
+
+        async function corpUploadFiles(list) {
+            if (corpUploading || !corpCompany || !corpHostId) return;
+            const all = Array.from(list || []);
+            if (!all.length) return;
+            const rows = [];
+            const queue = [];
+            all.forEach(f => {
+                if (!/\.pdf$/i.test(f.name)) rows.push({ file: f.name, status: 'rejected', reason: 'Not a PDF file.' });
+                else if (f.size > 15 * 1024 * 1024) rows.push({ file: f.name, status: 'rejected', reason: 'PDF is larger than 15 MB.' });
+                else queue.push(f);
+            });
+            // Pinned: nothing that happens in the UI mid-upload can redirect files.
+            const hostId = corpHostId;
+            const path = corpPath('/reports');
+            corpUploading = true;
+            window.addEventListener('beforeunload', corpBeforeUnload);
+            document.getElementById('corpUploadProgress').hidden = false;
+            const bar = document.getElementById('corpUploadBar'), text = document.getElementById('corpUploadText');
+            let done = 0;
+            const tick = () => {
+                bar.style.width = (queue.length ? Math.round(100 * done / queue.length) : 100) + '%';
+                text.textContent = `Reading ${done} of ${queue.length} PDFs… Keep this panel open until it finishes.`;
+            };
+            tick();
+            renderCorpUploadResults(rows);
+            try {
+                for (let i = 0; i < queue.length; i += CORP_BATCH) {
+                    const batch = queue.slice(i, i + CORP_BATCH);
+                    const fd = new FormData();
+                    batch.forEach(f => fd.append('files', f, f.name));
+                    try {
+                        const res = await corpFetch(path, { method: 'POST', body: fd }, hostId);
+                        rows.push(...(res.results || []));
+                    } catch (e) {
+                        batch.forEach(f => rows.push({ file: f.name, status: 'error', reason: e.message }));
+                        if (/owner credentials|not authenticated|not enabled/i.test(e.message)) break;
+                    }
+                    done += batch.length;
+                    tick();
+                    renderCorpUploadResults(rows);
+                }
+            } finally {
+                corpUploading = false;
+                window.removeEventListener('beforeunload', corpBeforeUnload);
+            }
+            const n = s => rows.filter(r => r.status === s).length;
+            text.textContent = `Finished: ${n('accepted')} added · ${n('duplicate')} already uploaded · ${n('rejected') + n('error')} could not be used.`;
+            bar.style.width = '100%';
+            corpToast(`${n('accepted')} report(s) added`, n('accepted') === 0 && rows.length > 0);
+            loadCorpCompanies();
+        }
+
+        function renderCorpUploadResults(rows) {
+            const box = document.getElementById('corpUploadResults');
+            if (!rows.length) { box.innerHTML = ''; return; }
+            const badge = { accepted: ['pill-ok', 'Added'], duplicate: ['pill-warn', 'Already uploaded'], rejected: ['pill-bad', 'Not used'], error: ['pill-bad', 'Failed'] };
+            const order = { rejected: 0, error: 0, duplicate: 1, accepted: 2 };
+            const sorted = rows.slice().sort((a, b) => (order[a.status] ?? 0) - (order[b.status] ?? 0));
+            box.innerHTML = '<table class="custom-table corp-table"><thead><tr><th>File</th><th>Employee</th><th>Sex / Age</th><th>Bill ID</th><th>Tests</th><th>Abnormal</th><th>Status</th><th>Notes</th></tr></thead><tbody>'
+                + sorted.map(r => {
+                    const [cls, label] = badge[r.status] || ['pill-bad', r.status];
+                    const notes = [];
+                    if (r.reason) notes.push(corpEsc(r.reason));
+                    if (r.missing && r.missing.length) notes.push('Not in PDF: ' + corpEsc(r.missing.length) + ' test(s)');
+                    (r.warnings || []).forEach(w => notes.push('<span style="color:var(--amber)">' + corpEsc(w) + '</span>'));
+                    return `<tr>
+                        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${corpEsc(r.file)}">${corpEsc(r.file)}</td>
+                        <td>${corpEsc(r.employee_name || '—')}</td>
+                        <td>${r.sex ? corpEsc(r.sex) + ' / ' + corpEsc(r.age_years) : '—'}</td>
+                        <td>${corpEsc(r.bill_id || '—')}</td>
+                        <td>${r.found !== undefined ? corpEsc(r.found) + ' / 18' : '—'}</td>
+                        <td>${r.abnormal !== undefined ? corpEsc(r.abnormal) : '—'}</td>
+                        <td><span class="pill ${cls}">${corpEsc(label)}</span></td>
+                        <td style="font-size:.78rem;">${notes.join('<br>') || '—'}</td>
+                    </tr>`;
+                }).join('') + '</tbody></table>';
+        }
+
+        // ─── Uploaded reports ───
+
+        async function loadCorpReports(offset) {
+            const company = corpCompany;
+            const body = document.getElementById('corpReportsBody');
+            corpReportsOffset = Math.max(0, offset);
+            body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text3)">Loading…</td></tr>';
+            let data;
+            try {
+                data = await corpFetch(corpPath(`/reports?limit=${CORP_PAGE}&offset=${corpReportsOffset}`));
+            } catch (e) {
+                body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--red)">${corpEsc(e.message)}</td></tr>`;
+                return;
+            }
+            if (company !== corpCompany) return;
+            const reports = data.reports || [], total = data.total || 0;
+            document.getElementById('corpReportsSummary').textContent = total
+                ? `${corpReportsOffset + 1}–${corpReportsOffset + reports.length} of ${total.toLocaleString('en-IN')} report(s)` : 'No reports uploaded yet.';
+            document.getElementById('corpPrevBtn').disabled = corpReportsOffset === 0;
+            document.getElementById('corpNextBtn').disabled = corpReportsOffset + reports.length >= total;
+            body.innerHTML = reports.length ? reports.map(r => `
+                <tr>
+                    <td style="font-family:monospace">${corpEsc(r.bill_id || '—')}</td>
+                    <td>${corpEsc(r.sex)} / ${corpEsc(r.age_years)}</td>
+                    <td>${corpEsc(corpDate(r.collected_on))}</td>
+                    <td>${corpEsc(r.found)}${r.unclassified ? ` <span class="pill pill-mute" title="Reference range could not be read">${corpEsc(r.unclassified)} unclassified</span>` : ''}</td>
+                    <td>${r.abnormal ? `<span class="pill pill-bad">${corpEsc(r.abnormal)}</span>` : '<span class="pill pill-ok">0</span>'}</td>
+                    <td style="color:var(--text2)">${corpEsc(corpDate(r.created_at))}</td>
+                    <td><button class="action-btn action-btn-danger" style="margin:0" onclick="deleteCorpReport('${corpEsc(r.id)}')" aria-label="Delete report"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg></button></td>
+                </tr>`).join('')
+                : '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text3)">No reports uploaded yet.</td></tr>';
+        }
+
+        function corpReportsPage(dir) { loadCorpReports(corpReportsOffset + dir * CORP_PAGE); }
+
+        async function deleteCorpReport(id) {
+            if (!confirm('Delete this report? It is removed from the company’s insights immediately.')) return;
+            try {
+                await corpFetch(corpPath('/reports/' + encodeURIComponent(id)), { method: 'DELETE' });
+                corpToast('Report deleted');
+                loadCorpReports(corpReportsOffset);
+                loadCorpCompanies();
+            } catch (e) { corpToast(e.message, true); }
+        }
+
+        // ─── Company logins ───
+
+        function corpRandomPassword() {
+            const bytes = new Uint8Array(12);
+            crypto.getRandomValues(bytes);
+            return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 14);
+        }
+
+        function corpGeneratePassword() {
+            const input = document.getElementById('corpViewerPass');
+            input.value = corpRandomPassword();
+            input.type = 'text';
+        }
+
+        function showCorpCreds(username, password, heading) {
+            const url = location.origin + '/admin';
+            const box = document.getElementById('corpCreds');
+            box.innerHTML = `<div class="corp-creds">
+                    <div style="font-weight:700; color:#fff; margin-bottom:8px;">${corpEsc(heading)}</div>
+                    <div class="corp-creds-row"><span>Login link</span><code>${corpEsc(url)}</code></div>
+                    <div class="corp-creds-row"><span>Username</span><code>${corpEsc(username)}</code></div>
+                    <div class="corp-creds-row"><span>Password</span><code>${corpEsc(password)}</code></div>
+                    <div style="display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap:wrap;">
+                        <button class="btn-secondary" id="corpCopyBtn">Copy login details</button>
+                        <span class="corp-note" style="margin:0">The password is shown only now. Share it privately.</span>
+                    </div>
+                </div>`;
+            document.getElementById('corpCopyBtn').onclick = () => {
+                const text = `${corpCompany ? corpCompany.name + ' — health insights dashboard\n' : ''}Login: ${url}\nUsername: ${username}\nPassword: ${password}`;
+                navigator.clipboard.writeText(text).then(() => corpToast('Login details copied'), () => corpToast('Copy failed — select the text instead', true));
+            };
+        }
+
+        async function loadCorpViewers() {
+            const company = corpCompany;
+            const body = document.getElementById('corpViewersBody');
+            body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text3)">Loading…</td></tr>';
+            let viewers;
+            try {
+                viewers = (await corpFetch(corpPath('/viewers'))).viewers || [];
+            } catch (e) {
+                body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--red)">${corpEsc(e.message)}</td></tr>`;
+                return;
+            }
+            if (company !== corpCompany) return;
+            body.innerHTML = viewers.length ? viewers.map(v => `
+                <tr>
+                    <td style="font-weight:600; color:#fff">${corpEsc(v.username)}</td>
+                    <td>${v.is_active ? '<span class="pill pill-ok">Active</span>' : '<span class="pill pill-mute">Disabled</span>'}</td>
+                    <td style="color:var(--text2)">${corpEsc(corpDate(v.created_at))}</td>
+                    <td style="white-space:nowrap">
+                        <button class="action-btn" data-u="${corpEsc(v.username)}" onclick="resetCorpViewer(this.dataset.u)">Reset password</button>
+                        <button class="action-btn ${v.is_active ? 'action-btn-danger' : ''}" onclick="toggleCorpViewer('${corpEsc(v.id)}')">${v.is_active ? 'Disable' : 'Enable'}</button>
+                    </td>
+                </tr>`).join('')
+                : '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text3)">No login yet for this company.</td></tr>';
+        }
+
+        async function createCorpViewer() {
+            const err = document.getElementById('corpViewerError');
+            const btn = document.getElementById('corpViewerSubmit');
+            const username = document.getElementById('corpViewerUser').value.trim();
+            const password = document.getElementById('corpViewerPass').value;
+            err.style.display = 'none';
+            const fail = m => { err.textContent = m; err.style.display = 'block'; };
+            if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(username) || username.length < 3 || username.length > 64)
+                return fail('Username: 3–64 letters, digits, dot, dash or underscore; must start and end with a letter or digit.');
+            if (password.length < 8) return fail('Password must be at least 8 characters.');
+            btn.disabled = true;
+            try {
+                await corpFetch(corpPath('/viewers'), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
+                });
+                document.getElementById('corpViewerUser').value = '';
+                document.getElementById('corpViewerPass').value = '';
+                document.getElementById('corpViewerPass').type = 'password';
+                showCorpCreds(username, password, 'Company login created');
+                corpToast('Company login created');
+                loadCorpViewers();
+            } catch (e) {
+                fail(e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Reuses the owner's existing account endpoints (same ones the Clinic Admin
+        // Accounts table uses): reset also revokes the login's live sessions.
+        async function resetCorpViewer(username) {
+            if (!confirm(`Generate a new password for "${username}"? Their current sessions are signed out.`)) return;
+            const password = corpRandomPassword();
+            try {
+                const res = await fetch('/platform/reset-admin-password', {
+                    method: 'PUT',
+                    headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, new_password: password })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(corpDetail(data, res.status));
+                showCorpCreds(username, password, 'Password reset');
+                corpToast('Password reset');
+            } catch (e) { corpToast(e.message, true); }
+        }
+
+        async function toggleCorpViewer(id) {
+            try {
+                const res = await fetch(`/platform/clinic-admins/${encodeURIComponent(id)}/toggle`, {
+                    method: 'PUT', headers: { 'Authorization': ownerAuthHeader }
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(corpDetail(data, res.status));
+                corpToast(data.is_active ? 'Login enabled' : 'Login disabled');
+                loadCorpViewers();
+            } catch (e) { corpToast(e.message, true); }
+        }
+
+        // ─── Insights (owner preview; the company sees the full charted dashboard) ───
+
+        async function loadCorpInsights() {
+            const company = corpCompany;
+            const box = document.getElementById('corpInsightsBody');
+            const sex = document.getElementById('corpInsSex').value;
+            const age = document.getElementById('corpInsAge').value;
+            const qs = new URLSearchParams();
+            if (sex) qs.set('sex', sex);
+            if (age) qs.set('age_band', age);
+            box.innerHTML = '<div class="corp-note">Loading insights…</div>';
+            let d;
+            try {
+                d = await corpFetch(corpPath('/insights' + (qs.toString() ? '?' + qs : '')));
+            } catch (e) {
+                box.innerHTML = `<div class="corp-note" style="color:var(--red)">${corpEsc(e.message)}</div>`;
+                return;
+            }
+            if (company !== corpCompany) return;
+            const ageSel = document.getElementById('corpInsAge');
+            if (ageSel.options.length <= 1 && Array.isArray(d.age_bands)) {
+                ageSel.innerHTML = '<option value="">All ages</option>' + d.age_bands.map(b => `<option value="${corpEsc(b)}">${corpEsc(b)} yrs</option>`).join('');
+                ageSel.value = age;
+            }
+            const s = d.summary || {};
+            if (!s.employees) {
+                box.innerHTML = `<div class="corp-note">${sex || age ? 'No employees match these filters.' : 'No reports yet — upload PDFs to build the dashboard.'}</div>`;
+                return;
+            }
+            const kpi = (label, val, sub) => `<div class="mini-stat"><div class="stat-label" style="font-size:.7rem; color:var(--text3); text-transform:uppercase">${corpEsc(label)}</div><div class="mini-stat-val">${corpEsc(val)}</div>${sub ? `<div class="corp-note" style="margin:2px 0 0">${corpEsc(sub)}</div>` : ''}</div>`;
+            const period = s.collected_from ? `${corpDate(s.collected_from)} – ${corpDate(s.collected_to)}` : '';
+            let html = `<div class="corp-kpis">
+                    ${kpi('Employees', s.employees.toLocaleString('en-IN'), period)}
+                    ${kpi('Male / Female', `${s.male} / ${s.female}`, `${s.male_pct}% / ${s.female_pct}%`)}
+                    ${kpi('Average age', s.avg_age ?? '—', 'years')}
+                    ${kpi('≥ 1 abnormal', `${s.with_abnormal_pct}%`, `${s.with_abnormal} employee(s)`)}
+                </div>`;
+            if ((sex || age) && s.employees < 10) {
+                html += '<div class="error-msg" style="display:block; background:var(--amber-bg); border-color:var(--amber); color:var(--amber)">Fewer than 10 employees in this group — figures may point to individuals. The company sees the same warning.</div>';
+            }
+            html += '<div class="table-responsive"><table class="custom-table corp-table"><thead><tr><th>Test</th><th>Tested</th><th>Normal</th><th>Abnormal</th><th>Low</th><th>High</th><th>Unclassified</th></tr></thead><tbody>'
+                + (d.params || []).map(p => `<tr>
+                    <td><div style="font-weight:600; color:#fff">${corpEsc(p.label)}</div><div class="corp-note" style="margin:0">${corpEsc(p.panel)}${p.unit ? ' · ' + corpEsc(p.unit) : ''}</div></td>
+                    <td>${corpEsc(p.tested)}</td>
+                    <td>${p.tested ? corpEsc(p.normal_pct) + '%' : '—'}</td>
+                    <td>${p.tested ? `<div style="display:flex; align-items:center; gap:8px;"><div class="corp-meter" style="flex:1"><i style="width:${Math.min(100, Math.max(0, Number(p.abnormal_pct) || 0))}%"></i></div><span style="min-width:44px; text-align:right">${corpEsc(p.abnormal_pct)}%</span></div>` : '—'}</td>
+                    <td>${corpEsc(p.low)}</td>
+                    <td>${corpEsc(p.high)}</td>
+                    <td style="color:var(--text3)">${corpEsc(p.unclassified)}</td>
+                </tr>`).join('')
+                + '</tbody></table></div>'
+                + '<div class="corp-note">Abnormal % excludes unclassified results (reference range not readable). The company login shows this with charts, sex and age breakdowns.</div>';
+            box.innerHTML = html;
+        }
+
+        // ─── Settings ───
+
+        function corpConfirmName(action) {
+            const typed = prompt(`${action}\n\nType the company name to confirm:\n${corpCompany.name}`);
+            if (typed === null) return null;
+            if (typed.replace(/\s+/g, ' ').trim().toLowerCase() !== corpCompany.name.toLowerCase()) {
+                corpToast('The name did not match — nothing was changed.', true);
+                return null;
+            }
+            return typed;
+        }
+
+        async function saveCorpCompany() {
+            const name = document.getElementById('corpRename').value.replace(/\s+/g, ' ').trim();
+            if (name === corpCompany.name) return;
+            if (name.length < 2 || name.length > 120) { corpToast('Company name must be 2 to 120 characters.', true); return; }
+            try {
+                await corpFetch(corpPath(), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+                corpCompany.name = name;
+                renderCorpModalHeader();
+                corpToast('Name saved');
+                loadCorpCompanies();
+            } catch (e) { corpToast(e.message, true); }
+        }
+
+        async function toggleCorpActive() {
+            const next = !corpCompany.is_active;
+            if (!next && !confirm('Disable this dashboard? The company login will see "dashboard disabled" until you enable it again.')) return;
+            try {
+                await corpFetch(corpPath(), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: next }) });
+                corpCompany.is_active = next;
+                renderCorpModalHeader();
+                document.getElementById('corpActiveBtn').textContent = next ? 'Disable dashboard' : 'Enable dashboard';
+                corpToast(next ? 'Dashboard enabled' : 'Dashboard disabled');
+                loadCorpCompanies();
+            } catch (e) { corpToast(e.message, true); }
+        }
+
+        async function clearCorpReports() {
+            const typed = corpConfirmName('Delete ALL uploaded reports of this company. The company and its logins stay.');
+            if (typed === null) return;
+            try {
+                const res = await corpFetch(corpPath('/reports?confirm=' + encodeURIComponent(typed)), { method: 'DELETE' });
+                corpToast(`${res.deleted || 0} report(s) deleted`);
+                loadCorpCompanies();
+            } catch (e) { corpToast(e.message, true); }
+        }
+
+        async function deleteCorpCompany() {
+            const typed = corpConfirmName('Delete this company and every report under it. Its logins lose access and are signed out.');
+            if (typed === null) return;
+            try {
+                await corpFetch(corpPath('?confirm=' + encodeURIComponent(typed)), { method: 'DELETE' });
+                corpToast('Company deleted');
+                corpCompany = null;
+                document.getElementById('corpModal').classList.remove('active');
+                loadCorpCompanies();
+            } catch (e) { corpToast(e.message, true); }
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
