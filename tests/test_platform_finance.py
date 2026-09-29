@@ -313,6 +313,7 @@ async def test_finance_summary_computes_mrr_expenses_and_both_profit_lines():
         {"id": "aura", "name": "Aura", "plan": "derma", "is_active": True},
     ]
     fake_supabase = MagicMock()
+    fake_supabase.table.return_value.select.return_value.eq.return_value = fake_supabase.table.return_value.select.return_value  # 096: listings add .eq("account_type", "tenant")
     fake_supabase.table.return_value.select.return_value.execute.return_value.data = clinics
 
     with patch("app.database.supabase", fake_supabase), \
@@ -367,6 +368,7 @@ async def test_inactive_clinic_is_shown_but_not_billed():
         {"id": "churned", "name": "Churned", "plan": "polyclinic", "is_active": False},
     ]
     fake_supabase = MagicMock()
+    fake_supabase.table.return_value.select.return_value.eq.return_value = fake_supabase.table.return_value.select.return_value  # 096: listings add .eq("account_type", "tenant")
     fake_supabase.table.return_value.select.return_value.execute.return_value.data = clinics
 
     with patch("app.database.supabase", fake_supabase), \
@@ -430,6 +432,7 @@ def test_messaging_usage_payload_shape_is_unchanged(
         {"clinic_id": "c1", "category": "utility"},
         {"clinic_id": "c1", "category": "marketing"},
     ]
+    mock_supabase.table.return_value.select.return_value.eq.return_value = mock_supabase.table.return_value.select.return_value  # 096: listings add .eq("account_type", "tenant")
     mock_supabase.table.return_value.select.return_value.execute.return_value.data = [
         {"id": "c1", "name": "Alpha", "plan": "polyclinic", "is_active": True},
     ]
@@ -542,6 +545,7 @@ def test_invoice_generation_is_idempotent_and_skips_inactive_clinics(
     def table_router(name):
         m = MagicMock()
         if name == "clinics":
+            m.select.return_value.eq.return_value = m.select.return_value  # 096: listings add .eq("account_type", "tenant")
             m.select.return_value.execute.return_value.data = [
                 {"id": "already", "name": "Already Billed", "plan": "derma", "is_active": True},
                 {"id": "fresh", "name": "Fresh", "plan": "derma", "is_active": True},

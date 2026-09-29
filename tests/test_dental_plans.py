@@ -484,6 +484,7 @@ def test_invoice_adds_messaging_addon_for_dental_only(mock_supabase, mock_tiers,
     def table_router(name):
         m = MagicMock()
         if name == "clinics":
+            m.select.return_value.eq.return_value = m.select.return_value  # 096: listings add .eq("account_type", "tenant")
             m.select.return_value.execute.return_value.data = [
                 {"id": "dent", "name": "Smile", "plan": "dental", "is_active": True,
                  "config": {"dental_messaging_addon_paise": 29_900}},

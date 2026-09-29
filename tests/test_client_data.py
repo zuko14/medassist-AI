@@ -496,6 +496,7 @@ def test_invoice_adds_storage_addon_only_where_set(
     def table_router(name):
         m = MagicMock()
         if name == "clinics":
+            m.select.return_value.eq.return_value = m.select.return_value  # 096: listings add .eq("account_type", "tenant")
             m.select.return_value.execute.return_value.data = [
                 {"id": "dental", "name": "Smile", "plan": "p", "is_active": True,
                  "config": {"data_storage_addon_paise": 49_900}},

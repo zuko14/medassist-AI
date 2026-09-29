@@ -550,7 +550,8 @@ async def get_platform_usage(days: int = 30) -> dict:
     try:
         clinics_res = (
             await sb(supabase.table("clinics")
-            .select("id, name, plan, is_active"))
+            .select("id, name, plan, is_active")
+            .eq("account_type", "tenant"))
         )
         clinics = clinics_res.data or []
     except Exception as e:

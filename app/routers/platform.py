@@ -345,7 +345,8 @@ async def get_platform_overview(
         clinics_res = (
             # unscoped: platform_admin
             await sb(supabase.table("clinics")
-            .select("id, name, whatsapp_number, plan, is_active, created_at"))
+            .select("id, name, whatsapp_number, plan, is_active, created_at")
+            .eq("account_type", "tenant"))
         )
         clinics = clinics_res.data or []
 
@@ -562,7 +563,7 @@ async def get_platform_branch_changes(
     try:
         clinics_res = (
             # unscoped: platform_admin
-            await sb(supabase.table("clinics").select("id, name, plan"))
+            await sb(supabase.table("clinics").select("id, name, plan").eq("account_type", "tenant"))
         )
         clinic_map = {c["id"]: c for c in (clinics_res.data or [])}
 
@@ -680,7 +681,8 @@ async def get_platform_clinics_leaderboard(
             await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, is_active, created_at, "
                     "daily_report_limit, subscription_start_date, subscription_end_date, "
-                    "grace_period_days, subscription_status, last_renewed_at"))
+                    "grace_period_days, subscription_status, last_renewed_at")
+            .eq("account_type", "tenant"))
         )
         clinics = clinics_res.data or []
         start_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -986,7 +988,7 @@ async def get_platform_data_storage(
         clinics = (await sb(
             # unscoped: platform_admin
             supabase.table("clinics").select("id, name, plan, whatsapp_number, config, status")
-            .neq("status", "DELETED")
+            .neq("status", "DELETED").eq("account_type", "tenant")
         )).data or []
     except Exception as e:
         logger.error(f"Data storage board failed: {e}")
@@ -2107,7 +2109,7 @@ async def get_plan_tiers(
         try:
             clinics_res = (
                 # unscoped: platform_admin
-                await sb(supabase.table("clinics").select("plan, is_active"))
+                await sb(supabase.table("clinics").select("plan, is_active").eq("account_type", "tenant"))
             )
             for c in clinics_res.data or []:
                 if c.get("is_active") is False:
@@ -2671,7 +2673,8 @@ async def get_platform_subscriptions(
             await sb(supabase.table("clinics")
             .select("id, name, plan, is_active, whatsapp_number, daily_report_limit, "
                     "subscription_start_date, subscription_end_date, grace_period_days, "
-                    "subscription_status, last_renewed_at"))
+                    "subscription_status, last_renewed_at")
+            .eq("account_type", "tenant"))
         )
         clinics = res.data or []
     except Exception as e:
@@ -2884,7 +2887,7 @@ async def get_finance_rates(
     try:
         clinics_res = (
             # unscoped: platform_admin
-            await sb(supabase.table("clinics").select("id, name, plan, is_active"))
+            await sb(supabase.table("clinics").select("id, name, plan, is_active").eq("account_type", "tenant"))
         )
         clinics = clinics_res.data or []
         plan_tiers = await _get_plan_tiers()
@@ -3344,7 +3347,7 @@ async def generate_finance_invoices(
     try:
         clinics_res = (
             # unscoped: platform_admin
-            await sb(supabase.table("clinics").select("id, name, plan, is_active, config"))
+            await sb(supabase.table("clinics").select("id, name, plan, is_active, config").eq("account_type", "tenant"))
         )
         clinics = clinics_res.data or []
         plan_tiers = await _get_plan_tiers()
@@ -3519,16 +3522,89 @@ def _corp_actor(owner: AdminUser, host_clinic_id: str) -> AdminUser:
 
 @router.get("/corporate-health/hosts")
 async def corporate_health_hosts(owner: AdminUser = Depends(verify_owner_credentials)):
-    """Diagnostic clinics that can host corporate companies, and whether the
-    owner has switched the feature on for each."""
+    """Everything that can hold corporate companies: dashboard-only partner labs
+    (096) and registered diagnostic clinics, with whether the feature is on."""
     from app.services.tenant import CORPORATE_HEALTH_PLANS, corporate_health_enabled
 
     res = await sb(
         # unscoped: platform owner listing eligible host clinics across tenants
-        supabase.table("clinics").select("id, name, plan, features")
+        supabase.table("clinics").select("id, name, plan, features, account_type")
         .in_("plan", sorted(CORPORATE_HEALTH_PLANS)).order("name"))
     return {"hosts": [{"id": c["id"], "name": c.get("name"), "plan": c.get("plan"),
+                       "partner": c.get("account_type") == "corporate_partner",
                        "enabled": corporate_health_enabled(c)} for c in res.data or []]}
+
+
+class CorporatePartnerIn(corp.CompanyIn):
+    """A dashboard-only partner lab. Same name rules as a company."""
+
+
+async def _partner_rows() -> list:
+    res = await sb(
+        # unscoped: platform owner listing dashboard-only partner labs
+        supabase.table("clinics").select("id, name, config").eq("account_type", "corporate_partner"))
+    return res.data or []
+
+
+def _same_name(a: str, b: str) -> bool:
+    return " ".join((a or "").split()).lower() == " ".join((b or "").split()).lower()
+
+
+@router.post("/corporate-health/partners")
+async def create_corporate_partner(body: CorporatePartnerIn, request: Request,
+                                   owner: AdminUser = Depends(verify_owner_credentials)):
+    """A lab that only wants Corporate Health: no WhatsApp number, no Meta
+    registration, no plan, no billing. It is a clinics row because every
+    corporate table and login is clinic-scoped, marked corporate_partner so the
+    owner's tenant listings, finance and broadcasts skip it (migration 096)."""
+    if any(_same_name(p.get("name"), body.name) for p in await _partner_rows()):
+        raise HTTPException(status_code=409, detail="A partner lab with this name already exists.")
+    row = {
+        "name": body.name,
+        # whatsapp_number is UNIQUE NOT NULL. This is not a phone number, so no
+        # inbound message can ever be routed here; the DB also forbids a
+        # phone_number_id on a partner (clinics_partner_not_routable).
+        "whatsapp_number": f"corporate-partner:{secrets.token_hex(8)}",
+        "plan": "diagstream",
+        "account_type": "corporate_partner",
+        "features": {"corporate_health": True},
+        "config": {"clinic_name": body.name},
+        "is_active": True,
+    }
+    try:
+        res = await sb(
+            # unscoped: owner creating a dashboard-only partner clinic row
+            supabase.table("clinics").insert(row))
+    except Exception as e:
+        logger.error(f"corporate partner create failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Could not create the partner lab.")
+    partner = (res.data or [{}])[0]
+    invalidate_tenant_cache()
+    await log_admin_action(user=owner, action="corporate_partner_create", resource_type="clinic",
+                           resource_id=partner.get("id"), details={"name": body.name},
+                           ip_address=request.client.host if request.client else "unknown")
+    return {"success": True, "partner": {"id": partner.get("id"), "name": partner.get("name")}}
+
+
+@router.patch("/corporate-health/partners/{partner_id}")
+async def rename_corporate_partner(partner_id: str, body: CorporatePartnerIn, request: Request,
+                                   owner: AdminUser = Depends(verify_owner_credentials)):
+    partners = await _partner_rows()
+    partner = next((p for p in partners if p["id"] == partner_id), None)
+    if not partner:  # also refuses every real tenant: only partner rows are renamable here
+        raise HTTPException(status_code=404, detail="Partner lab not found")
+    if any(p["id"] != partner_id and _same_name(p.get("name"), body.name) for p in partners):
+        raise HTTPException(status_code=409, detail="A partner lab with this name already exists.")
+    config = {**(partner.get("config") or {}), "clinic_name": body.name}
+    await sb(
+        # unscoped: owner renaming a dashboard-only partner row by id
+        supabase.table("clinics").update({"name": body.name, "config": config})
+        .eq("id", partner_id).eq("account_type", "corporate_partner"))
+    invalidate_tenant_cache()
+    await log_admin_action(user=owner, action="corporate_partner_rename", resource_type="clinic",
+                           resource_id=partner_id, details={"from": partner.get("name"), "to": body.name},
+                           ip_address=request.client.host if request.client else "unknown")
+    return {"success": True}
 
 
 @router.get("/corporate-health/companies")

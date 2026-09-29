@@ -55,6 +55,7 @@ def test_platform_overview_success(mock_supabase, mock_log_action):
         mock_obj = MagicMock()
         if table_name == "clinics":
             mock_obj.select.return_value = mock_clinics
+            mock_clinics.eq.return_value = mock_clinics  # 096: listings add .eq("account_type", "tenant")
         elif table_name == "patients":
             mock_obj.select.return_value = mock_patients
         elif table_name == "appointments":
@@ -97,6 +98,7 @@ def test_platform_clinics_leaderboard(mock_supabase, mock_log_action):
         mock_obj = MagicMock()
         if table_name == "clinics":
             mock_obj.select.return_value = mock_clinics
+            mock_clinics.eq.return_value = mock_clinics  # 096: listings add .eq("account_type", "tenant")
         elif table_name == "appointments":
             mock_obj.select.return_value.eq.return_value.gte.return_value = mock_appts
         elif table_name == "patients":
@@ -138,6 +140,7 @@ def test_platform_department_analytics(mock_supabase, mock_log_action):
         mock_obj = MagicMock()
         if table_name == "clinics":
             mock_obj.select.return_value = mock_clinics
+            mock_clinics.eq.return_value = mock_clinics  # 096: listings add .eq("account_type", "tenant")
         elif table_name == "appointments":
             mock_obj.select.return_value.gte.return_value = mock_appts
         return mock_obj
@@ -480,6 +483,7 @@ def test_platform_messaging_usage_success(mock_supabase, mock_log_action):
         mock_obj = MagicMock()
         if table_name == "clinics":
             mock_obj.select.return_value = mock_clinics
+            mock_clinics.eq.return_value = mock_clinics  # 096: listings add .eq("account_type", "tenant")
             mock_obj.select.return_value.execute.return_value.data = mock_clinics.execute.return_value.data
         elif table_name == "outbound_message_ledger":
             # scan_outbound_ledger() pages the select -- PostgREST silently

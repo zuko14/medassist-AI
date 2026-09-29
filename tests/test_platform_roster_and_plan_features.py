@@ -55,6 +55,7 @@ def test_leaderboard_reports_doctor_and_department_counts(mock_supabase, _log):
     def table_router(name):
         m = MagicMock()
         if name == "clinics":
+            m.select.return_value.eq.return_value = m.select.return_value  # 096: listings add .eq("account_type", "tenant")
             m.select.return_value.execute.return_value.data = [
                 {
                     "id": "c1", "name": "Alpha", "whatsapp_number": "+91999",
@@ -106,6 +107,7 @@ def test_roster_scan_pages_past_the_1000_row_cap(mock_supabase, _log):
     def table_router(name):
         m = MagicMock()
         if name == "clinics":
+            m.select.return_value.eq.return_value = m.select.return_value  # 096: listings add .eq("account_type", "tenant")
             m.select.return_value.execute.return_value.data = [
                 {
                     "id": "c1", "name": "Mega", "whatsapp_number": "+91777",
@@ -138,6 +140,7 @@ def test_leaderboard_survives_roster_query_failure(mock_supabase, _log):
     def table_router(name):
         m = MagicMock()
         if name == "clinics":
+            m.select.return_value.eq.return_value = m.select.return_value  # 096: listings add .eq("account_type", "tenant")
             m.select.return_value.execute.return_value.data = [
                 {
                     "id": "c1", "name": "Alpha", "whatsapp_number": "+91999",
@@ -199,6 +202,7 @@ def test_plan_tiers_expose_bundled_features_and_adoption(mock_supabase, _log):
         if name == "plan_tiers":
             m.select.return_value.order.return_value.execute.return_value.data = tiers
         elif name == "clinics":
+            m.select.return_value.eq.return_value = m.select.return_value  # 096: listings add .eq("account_type", "tenant")
             m.select.return_value.execute.return_value.data = [
                 {"plan": "polyclinic", "is_active": True},
                 {"plan": "polyclinic", "is_active": True},

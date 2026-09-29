@@ -394,7 +394,7 @@ async def finance_summary(month: Optional[str] = None) -> dict:
     try:
         clinics_res = await sb(
             # unscoped: platform_admin
-            supabase.table("clinics").select("id, name, plan, is_active, config")
+            supabase.table("clinics").select("id, name, plan, is_active, config").eq("account_type", "tenant")
         )
         clinics = clinics_res.data or []
     except Exception as e:

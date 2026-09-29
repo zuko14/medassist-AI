@@ -120,6 +120,7 @@ class BroadcastService:
                 supabase.table("clinics")
                 .select("id, name, is_active, status")
                 .eq("is_active", True)
+                .eq("account_type", "tenant")  # 096: dashboard-only partners get no announcements
             )
             clinics_res = await sb(clinics_query)
             all_active_clinics = [

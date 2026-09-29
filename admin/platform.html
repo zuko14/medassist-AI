@@ -1597,10 +1597,17 @@
                         <select class="filter-select" id="corpHostSelect" onchange="onCorpHostChange()" aria-label="Host lab">
                             <option value="">Loading host labs…</option>
                         </select>
+                        <button class="btn-secondary" onclick="toggleCorpPartnerForm()" title="A lab that wants only these dashboards — no WhatsApp, no plan">+ Partner lab</button>
                         <button class="btn-primary btn-inline" id="corpNewBtn" onclick="toggleCorpNewForm()" disabled>+ New company</button>
                     </div>
                 </div>
                 <div class="corp-hint" id="corpHostHint"></div>
+                <div class="corp-new" id="corpPartnerForm">
+                    <input type="text" class="form-control" id="corpPartnerName" maxlength="120" placeholder="Partner lab name, e.g. Taiyo Labs" onkeydown="if(event.key==='Enter')createCorpPartner()">
+                    <button class="btn-primary btn-inline" id="corpPartnerSubmit" onclick="createCorpPartner()">Create partner lab</button>
+                    <button class="btn-secondary" onclick="toggleCorpPartnerForm(false)">Cancel</button>
+                    <div class="corp-note" style="flex-basis:100%; margin:2px 0 0;">Dashboard-only: no WhatsApp number, no Meta registration, no plan, never billed or listed as a hospital. You upload its companies' reports and hand each company a login.</div>
+                </div>
                 <div class="corp-new" id="corpNewForm">
                     <input type="text" class="form-control" id="corpNewName" maxlength="120" placeholder="Company name, e.g. Acme Corp – 2026 Annual Camp" onkeydown="if(event.key==='Enter')createCorpCompany()">
                     <button class="btn-primary btn-inline" id="corpNewSubmit" onclick="createCorpCompany()">Create company</button>
@@ -4932,15 +4939,15 @@
             if (!enabled.some(h => h.id === corpHostId)) {
                 let saved = '';
                 try { saved = localStorage.getItem(CORP_HOST_KEY) || ''; } catch (e) { /* storage blocked */ }
-                corpHostId = enabled.some(h => h.id === saved) ? saved : (enabled[0] ? enabled[0].id : '');
+                const first = enabled.find(h => h.partner) || enabled[0];
+                corpHostId = enabled.some(h => h.id === saved) ? saved : (first ? first.id : '');
             }
-            const off = corpHosts.filter(h => !h.enabled);
-            sel.innerHTML = (enabled.length
-                ? enabled.map(h => `<option value="${corpEsc(h.id)}">${corpEsc(h.name || 'Unnamed lab')}</option>`).join('')
-                : '<option value="">No host lab enabled</option>')
-                + (off.length ? '<optgroup label="Corporate Health off">'
-                    + off.map(h => `<option value="${corpEsc(h.id)}" disabled>${corpEsc(h.name || 'Unnamed lab')}</option>`).join('')
-                    + '</optgroup>' : '');
+            const opt = (h, dis) => `<option value="${corpEsc(h.id)}"${dis ? ' disabled' : ''}>${corpEsc(h.name || 'Unnamed lab')}</option>`;
+            const group = (label, list, dis) => list.length ? `<optgroup label="${label}">${list.map(h => opt(h, dis)).join('')}</optgroup>` : '';
+            sel.innerHTML = (enabled.length ? '' : '<option value="">No partner lab yet</option>')
+                + group('Partner labs — dashboard only', enabled.filter(h => h.partner))
+                + group('Registered diagnostic clinics', enabled.filter(h => !h.partner))
+                + group('Registered — Corporate Health off', corpHosts.filter(h => !h.enabled), true);
             sel.value = corpHostId;
             document.getElementById('corpNewBtn').disabled = !corpHostId;
             renderCorpHint();
@@ -4956,10 +4963,66 @@
         function renderCorpHint() {
             const hint = document.getElementById('corpHostHint');
             if (!corpHostId) {
-                hint.innerHTML = 'Companies are stored under a diagnostic lab. Open a <b>Diagnostic Stream</b> or <b>Diagnostic Test Booking</b> clinic from the leaderboard and tick <b>Corporate Health Insights</b> — it then appears here. That lab’s WhatsApp, plan and billing are not touched.';
+                hint.innerHTML = 'Start with <b>+ Partner lab</b> (e.g. Taiyo Labs) — dashboard-only, no WhatsApp number, no plan. A registered diagnostic clinic with <b>Corporate Health Insights</b> ticked can also hold companies.';
                 return;
             }
-            hint.innerHTML = `Hosted under <b>${corpEsc(corpHostName(corpHostId))}</b>. Company logins sign in at <b>${corpEsc(location.origin)}/admin</b> and see only their own dashboard.`;
+            const host = corpHosts.find(h => h.id === corpHostId) || {};
+            hint.innerHTML = (host.partner
+                ? `<b>${corpEsc(host.name)}</b> · partner lab, dashboard only (no WhatsApp, no plan, not billed) · <a href="#" onclick="renameCorpPartner(); return false;" style="color:var(--accent-light)">Rename</a>. `
+                : `Hosted under registered clinic <b>${corpEsc(host.name)}</b>. `)
+                + `Company logins sign in at <b>${corpEsc(location.origin)}/admin</b> and see only their own company's dashboard.`;
+        }
+
+        function toggleCorpPartnerForm(force) {
+            const form = document.getElementById('corpPartnerForm');
+            const open = force === undefined ? !form.classList.contains('open') : force;
+            form.classList.toggle('open', open);
+            if (open) { toggleCorpNewForm(false); setTimeout(() => document.getElementById('corpPartnerName').focus(), 30); }
+        }
+
+        async function corpPartnerRequest(path, method, name) {
+            const res = await fetch('/platform/corporate-health/partners' + path, {
+                method, headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(corpDetail(data, res.status));
+            return data;
+        }
+
+        async function createCorpPartner() {
+            const input = document.getElementById('corpPartnerName');
+            const btn = document.getElementById('corpPartnerSubmit');
+            const name = input.value.replace(/\s+/g, ' ').trim();
+            if (name.length < 2 || name.length > 120) { corpToast('Partner lab name must be 2 to 120 characters.', true); return; }
+            if (corpUploading) { corpToast('An upload is running — wait for it to finish.', true); return; }
+            btn.disabled = true;
+            try {
+                const res = await corpPartnerRequest('', 'POST', name);
+                input.value = '';
+                toggleCorpPartnerForm(false);
+                corpHostId = res.partner.id;
+                try { localStorage.setItem(CORP_HOST_KEY, corpHostId); } catch (e) { /* storage blocked */ }
+                corpToast('Partner lab created');
+                await loadCorporateHosts();
+                toggleCorpNewForm(true);
+            } catch (e) {
+                corpToast(e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function renameCorpPartner() {
+            const host = corpHosts.find(h => h.id === corpHostId);
+            if (!host || !host.partner) return;
+            const name = (prompt('Rename partner lab', host.name) || '').replace(/\s+/g, ' ').trim();
+            if (!name || name === host.name) return;
+            try {
+                await corpPartnerRequest('/' + encodeURIComponent(host.id), 'PATCH', name);
+                corpToast('Partner lab renamed');
+                await loadCorporateHosts();
+            } catch (e) { corpToast(e.message, true); }
         }
 
         function onCorpHostChange() {
