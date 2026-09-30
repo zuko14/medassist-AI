@@ -183,7 +183,7 @@ Protected by `verify_owner_credentials` (checks `OWNER_USERNAME` / `OWNER_PASSWO
 | `POST`, `PATCH` | `/platform/clinics/{clinic_id}/ai-budget` | Updates monthly AI dollar spending cap for a tenant. |
 | `DELETE` | `/platform/clinics/{clinic_id}` | Soft/hard delete with cascading cleanup. |
 | `GET` | `/platform/clinics/{clinic_id}/deletion-preview` | Pre-flight impact assessment (counts appointments, patients, and financial records affected). |
-| `GET` | `/platform/clinic-admins` | Lists admin credentials across all clinic tenants. |
+| `GET` | `/platform/clinic-admins` | Lists admin credentials across all clinic tenants, with server-resolved `clinic_name` / `clinic_account_type` (partner labs are absent from `/platform/clinics`). |
 | `POST` | `/platform/clinic-admins` | Direct creation of tenant administrator. |
 | `PUT` | `/platform/reset-admin-password` | Emergency password reset for any clinic administrator. |
 | `GET` | `/platform/revenue` | Aggregated subscription revenue, platform fees, and transaction volume. |

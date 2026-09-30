@@ -896,6 +896,8 @@
         .audit-chip-sub { font-size: .74rem; color: var(--text3); font-variant-numeric: tabular-nums; }
 
         .audit-compact { padding: 18px 24px; }
+        /* Add Admin opens from inside #staffModal, so it must sit above the glass layer (950). */
+        #createAdminModal { z-index: 960; }
         .audit-compact .table-toolbar { margin-bottom: 12px; }
         .audit-open {
             display: inline-flex; align-items: center; gap: 8px;
@@ -1269,31 +1271,21 @@
                 </div>
             </div>
 
-            <!-- Clinic Admin Accounts -->
-            <div class="section-card">
+            <!-- Clinic Admin Accounts — compact card; the full list opens in #staffModal -->
+            <div class="section-card audit-compact">
                 <div class="table-toolbar">
-                    <div class="toolbar-left">
+                    <div class="toolbar-left" style="flex-direction:column; align-items:flex-start; gap:2px;">
                         <div class="chart-title">Clinic Admin Accounts</div>
+                        <div class="chart-subtitle" id="staffSummary">Loading admin accounts...</div>
                     </div>
-                    <button class="btn-primary" style="width:auto; padding:10px 18px;" onclick="openCreateAdminModal()">+ Add Admin</button>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-secondary audit-open" onclick="openCreateAdminModal()">+ Add Admin</button>
+                        <button class="btn-primary audit-open" onclick="openStaffModal()" aria-haspopup="dialog" aria-controls="staffModal">
+                            <svg class="i" aria-hidden="true" focusable="false"><use href="#i-list"/></svg> View all
+                        </button>
+                    </div>
                 </div>
-                <div class="table-responsive">
-                    <table class="custom-table">
-                        <thead>
-                            <tr>
-                                <th>Username</th>
-                                <th>Hospital / Clinic</th>
-                                <th>Role</th>
-                                <th>Status</th>
-                                <th>Created</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="clinicAdminsBody">
-                            <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading admin accounts...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+                <div class="audit-chips" id="staffTotals"></div>
             </div>
 
             <!-- WhatsApp Usage & Meta Cost Tracker -->
@@ -1738,6 +1730,61 @@
                 </table>
             </div>
             <div class="glass-foot" id="auditModalFoot">Showing the newest 200 messages in the window. Press Esc to close.</div>
+        </div>
+    </div>
+
+    <!-- Clinic Admin Accounts — full staff list (glass dialog) -->
+    <div class="glass-overlay" id="staffModal" role="dialog" aria-modal="true" aria-labelledby="staffModalTitle" aria-hidden="true"
+         onclick="if (event.target === this) closeStaffModal()">
+        <div class="glass-dialog">
+            <div class="glass-head">
+                <div>
+                    <div class="glass-eyebrow">Access · Staff logins</div>
+                    <h3 id="staffModalTitle">Clinic Admin Accounts</h3>
+                    <div class="chart-subtitle" id="staffModalSummary" style="margin-top:4px;">Loading…</div>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <button class="btn-primary audit-open" onclick="openCreateAdminModal()">+ Add Admin</button>
+                    <button class="glass-close" onclick="closeStaffModal()" aria-label="Close staff list"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+                </div>
+            </div>
+            <div class="glass-toolbar">
+                <div class="search-box">
+                    <span class="search-icon"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg></span>
+                    <input type="search" id="staffSearch" placeholder="Search username, clinic or ID" oninput="renderStaffRows()" aria-label="Search staff accounts">
+                </div>
+                <select class="filter-select" id="staffClinicFilter" onchange="renderStaffRows()" aria-label="Hospital / clinic">
+                    <option value="">All clinics</option>
+                </select>
+                <select class="filter-select" id="staffRoleFilter" onchange="renderStaffRows()" aria-label="Role">
+                    <option value="">All roles</option>
+                </select>
+                <select class="filter-select" id="staffStatusFilter" onchange="renderStaffRows()" aria-label="Status">
+                    <option value="">Any status</option>
+                    <option value="active">Active</option>
+                    <option value="disabled">Disabled</option>
+                </select>
+                <button class="btn-secondary" onclick="loadClinicAdmins()" aria-label="Refresh" style="display:inline-flex; align-items:center; gap:6px;"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button>
+            </div>
+            <div class="audit-chips" id="staffModalTotals"></div>
+            <div class="glass-body">
+                <table class="custom-table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Hospital / Clinic</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clinicAdminsBody">
+                        <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Loading admin accounts...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="glass-foot" id="staffModalFoot">Press Esc to close.</div>
         </div>
     </div>
 
@@ -3067,29 +3114,104 @@
             navigator.clipboard.writeText(id).catch(() => {});
         }
 
+        // The card on the page is a compact summary; the full list lives in the
+        // #staffModal glass dialog. Both render from the one fetch below.
+        let _staffAdmins = null;
+        let _staffOpener = null;
+
         async function loadClinicAdmins() {
             try {
                 const res = await fetch('/platform/clinic-admins', { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 renderClinicAdmins(data.admins || []);
             } catch (e) {
                 console.error('Error fetching clinic admins:', e);
+                if (_staffAdmins) return;  // keep the last good list on a failed refresh
+                document.getElementById('staffSummary').textContent = 'Admin accounts unavailable';
+                document.getElementById('staffModalSummary').textContent = 'Admin accounts unavailable';
+                document.getElementById('clinicAdminsBody').innerHTML =
+                    '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">Could not load admin accounts.</td></tr>';
             }
         }
 
+        // Server-resolved name first: /platform/clinics is tenant-only, so a
+        // corporate partner lab is only nameable from the admin row itself.
+        function staffClinicName(a) {
+            if (!a.clinic_id) return '— Platform —';
+            const c = globalClinicsData.find(x => x.id === a.clinic_id);
+            return a.clinic_name || (c && c.name) || 'Unknown';
+        }
+
         function renderClinicAdmins(admins) {
+            _staffAdmins = admins;
+            const active = admins.filter(a => a.is_active).length;
+            const clinics = new Set(admins.map(a => a.clinic_id || '')).size;
+            const summary = `${admins.length} account(s) · ${active} active · ${admins.length - active} disabled · ${clinics} clinic(s)`;
+            document.getElementById('staffSummary').textContent = summary;
+            document.getElementById('staffModalSummary').textContent = summary;
+
+            const roles = {};
+            admins.forEach(a => { roles[a.role] = (roles[a.role] || 0) + 1; });
+            const chip = (label, val, sub) => `
+                    <div class="audit-chip">
+                        <div class="audit-chip-label">${escapeHtml(label)}</div>
+                        <div class="audit-chip-val">${val}</div>
+                        ${sub ? `<div class="audit-chip-sub">${escapeHtml(sub)}</div>` : ''}
+                    </div>`;
+            const chips = admins.length
+                ? chip('Accounts', admins.length, `${active} active`)
+                  + Object.keys(roles).sort((x, y) => roles[y] - roles[x]).map(r => chip(String(r).replace(/_/g, ' '), roles[r])).join('')
+                : '<div class="corp-note" style="margin:0">No admin accounts yet.</div>';
+            document.getElementById('staffTotals').innerHTML = chips;
+            document.getElementById('staffModalTotals').innerHTML = chips;
+
+            // Filter options follow the data; keep the current pick if it still exists.
+            const fill = (id, allLabel, pairs) => {
+                const sel = document.getElementById(id);
+                const cur = sel.value;
+                sel.innerHTML = `<option value="">${allLabel}</option>` + pairs
+                    .map(([v, l]) => `<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join('');
+                sel.value = pairs.some(([v]) => v === cur) ? cur : '';
+            };
+            const clinicPairs = {};
+            admins.forEach(a => { clinicPairs[a.clinic_id || '__platform'] = staffClinicName(a); });
+            fill('staffClinicFilter', 'All clinics',
+                Object.entries(clinicPairs).sort((x, y) => x[1].localeCompare(y[1])));
+            fill('staffRoleFilter', 'All roles', Object.keys(roles).sort().map(r => [r, r]));
+            renderStaffRows();
+        }
+
+        function renderStaffRows() {
             const tbody = document.getElementById('clinicAdminsBody');
-            if (admins.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">No admin accounts yet.</td></tr>`;
+            const admins = _staffAdmins || [];
+            const q = document.getElementById('staffSearch').value.trim().toLowerCase();
+            const clinic = document.getElementById('staffClinicFilter').value;
+            const role = document.getElementById('staffRoleFilter').value;
+            const status = document.getElementById('staffStatusFilter').value;
+            const rows = admins.filter(a => {
+                if (clinic && (a.clinic_id || '__platform') !== clinic) return false;
+                if (role && a.role !== role) return false;
+                if (status === 'active' && !a.is_active) return false;
+                if (status === 'disabled' && a.is_active) return false;
+                if (!q) return true;
+                return [a.username, staffClinicName(a), a.clinic_id, a.role]
+                    .some(v => v && String(v).toLowerCase().includes(q));
+            });
+            document.getElementById('staffModalFoot').textContent =
+                `Showing ${rows.length} of ${admins.length} account(s). Press Esc to close.`;
+
+            if (!rows.length) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text3)">${
+                    admins.length ? 'No accounts match these filters.' : 'No admin accounts yet.'}</td></tr>`;
                 return;
             }
-            const clinicMap = {};
-            globalClinicsData.forEach(c => { clinicMap[c.id] = c.name; });
 
-            tbody.innerHTML = admins.map(a => {
-                const clinicName = a.clinic_id ? escapeHtml(clinicMap[a.clinic_id] || 'Unknown') : '— Platform —';
-                const clinicIdDisplay = a.clinic_id 
-                    ? `<div style="font-size:0.75rem; font-family:monospace; color:var(--cyan); cursor:pointer; margin-top:2px;" onclick="copyClinicId('${a.clinic_id}')" title="Click to copy Clinic UUID">ID: ${a.clinic_id}</div>` 
+            tbody.innerHTML = rows.map(a => {
+                const partner = a.clinic_account_type === 'corporate_partner'
+                    ? ' <span class="badge" style="background:rgba(168,85,247,.15); color:#c084fc; margin-left:4px">Partner lab</span>' : '';
+                const clinicIdDisplay = a.clinic_id
+                    ? `<div style="font-size:0.75rem; font-family:monospace; color:var(--cyan); cursor:pointer; margin-top:2px;" onclick="copyClinicId('${escapeHtml(a.clinic_id)}')" title="Click to copy Clinic UUID">ID: ${escapeHtml(a.clinic_id)}</div>`
                     : '';
                 const statusBadge = a.is_active
                     ? `<span class="badge status-active">Active</span>`
@@ -3099,16 +3221,35 @@
                     <tr>
                         <td style="font-weight:700">${escapeHtml(a.username)}</td>
                         <td>
-                            <div>${clinicName}</div>
+                            <div>${escapeHtml(staffClinicName(a))}${partner}</div>
                             ${clinicIdDisplay}
                         </td>
                         <td>${escapeHtml(a.role)}</td>
                         <td>${statusBadge}</td>
                         <td style="font-size:0.82rem; color:var(--text2)">${created}</td>
-                        <td><button class="action-btn" onclick="toggleClinicAdmin('${a.id}')">${a.is_active ? 'Disable' : 'Enable'}</button></td>
+                        <td><button class="action-btn" onclick="toggleClinicAdmin('${escapeHtml(a.id)}')">${a.is_active ? 'Disable' : 'Enable'}</button></td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        function openStaffModal() {
+            _staffOpener = document.activeElement;
+            const modal = document.getElementById('staffModal');
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.style.overflow = 'hidden';
+            if (!_staffAdmins) loadClinicAdmins(); else renderStaffRows();
+            setTimeout(() => document.getElementById('staffSearch').focus(), 60);
+        }
+
+        function closeStaffModal() {
+            const modal = document.getElementById('staffModal');
+            if (!modal.classList.contains('active')) return;
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.style.overflow = '';
+            if (_staffOpener && _staffOpener.focus) _staffOpener.focus();
         }
 
         async function toggleClinicAdmin(id) {
@@ -4860,7 +5001,9 @@
 
         document.addEventListener('keydown', e => {
             if (e.key !== 'Escape') return;
-            if (document.getElementById('auditModal').classList.contains('active')) closeAuditModal();
+            if (document.getElementById('createAdminModal').classList.contains('active')) return;
+            if (document.getElementById('staffModal').classList.contains('active')) closeStaffModal();
+            else if (document.getElementById('auditModal').classList.contains('active')) closeAuditModal();
             else if (document.getElementById('corpModal').classList.contains('active')) closeCorpModal();
         });
 

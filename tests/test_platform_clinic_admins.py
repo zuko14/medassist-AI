@@ -116,3 +116,28 @@ async def test_reset_admin_password_rate_limited():
         with pytest.raises(HTTPException) as exc:
             await reset_clinic_admin_password(body=body, request=_mock_request(), owner=_owner())
     assert exc.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_list_clinic_admins_resolves_partner_lab_names():
+    """/platform/clinics is tenant-only (migration 096), so the page could not
+    name a corporate partner lab's staff. The list resolves names itself."""
+    admins_tbl, clinics_tbl = MagicMock(), MagicMock()
+    admins_tbl.select.return_value.order.return_value.execute.return_value = MagicMock(data=[
+        {"id": "a1", "clinic_id": "p1", "username": "taiyo", "role": "staff", "is_active": True, "created_at": "2026-09-29"},
+        {"id": "a2", "clinic_id": None, "username": "ops", "role": "clinic_admin", "is_active": True, "created_at": "2026-09-01"},
+    ])
+    clinics_tbl.select.return_value.in_.return_value.execute.return_value = MagicMock(
+        data=[{"id": "p1", "name": "Taiyo Labs", "account_type": "corporate_partner"}]
+    )
+    mock_sb = MagicMock()
+    mock_sb.table.side_effect = lambda name: clinics_tbl if name == "clinics" else admins_tbl
+
+    with patch("app.routers.platform.supabase", mock_sb), patch("app.routers.platform.log_admin_action"):
+        result = await list_clinic_admins(request=_mock_request(), owner=_owner())
+
+    partner, platform_level = result["admins"]
+    assert partner["clinic_name"] == "Taiyo Labs"
+    assert partner["clinic_account_type"] == "corporate_partner"
+    assert platform_level["clinic_name"] is None
+    clinics_tbl.select.return_value.in_.assert_called_once_with("id", ["p1"])

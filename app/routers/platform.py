@@ -222,7 +222,27 @@ async def list_clinic_admins(
         .select("id, clinic_id, username, role, is_active, created_at")
         .order("created_at", desc=True))
     )
-    return {"success": True, "admins": res.data or []}
+    admins = res.data or []
+
+    # Resolve clinic names here, not from the page's /platform/clinics list:
+    # that list is tenant-only (migration 096), so staff of a corporate
+    # partner lab rendered as "Unknown". A failed lookup degrades to no name.
+    ids = sorted({a["clinic_id"] for a in admins if a.get("clinic_id")})
+    clinics: dict = {}
+    if ids:
+        try:
+            rows = (await sb(
+                # unscoped: platform_admin resolving names for the owner's staff list
+                supabase.table("clinics").select("id, name, account_type").in_("id", ids)
+            )).data or []
+            clinics = {c["id"]: c for c in rows}
+        except Exception as e:
+            logger.warning(f"Clinic name lookup for admin list failed: {e}")
+    for a in admins:
+        c = clinics.get(a.get("clinic_id")) or {}
+        a["clinic_name"] = c.get("name")
+        a["clinic_account_type"] = c.get("account_type")
+    return {"success": True, "admins": admins}
 
 
 @router.post("/clinic-admins")
