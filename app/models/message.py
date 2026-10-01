@@ -28,6 +28,8 @@ class WhatsAppMessage(BaseModel):
     text: Optional[WhatsAppText] = None
     button: Optional[WhatsAppButton] = None
     interactive: Optional[WhatsAppInteractive] = None
+    # A shared location pin: {"latitude", "longitude", "name"?, "address"?}.
+    location: Optional[dict] = None
 
 
 class WhatsAppContact(BaseModel):

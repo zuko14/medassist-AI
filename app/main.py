@@ -11,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 from app.config import settings
-from app.routers import webhook, health, admin, clinics, platform, corporate_health
+from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection
 from app.routers.integrations import router as integrations_router
 from app.integrations.callmedex.api.router import (
     router as callmedex_router,
@@ -362,6 +362,7 @@ app.include_router(health.router)
 app.include_router(admin.router)
 # Corporate employee-health insights (/admin/corporate-health, migration 095)
 app.include_router(corporate_health.router)
+app.include_router(home_collection.router)
 app.include_router(clinics.router)
 app.include_router(platform.router)
 # FHIR R4 interoperability API (HMIS / ABDM integration)

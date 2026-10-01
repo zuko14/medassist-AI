@@ -186,6 +186,24 @@ Patient types "book lab test" or taps "Lab Tests / Services"
        └─► 11. Sends confirmation card with preparation instructions & fasting notice
 ```
 
+### Home sample collection branch (migration 097, `app/services/home_collection_flow.py`)
+Only when the plan is `diagstream`/`diagbooking`, the centre enabled it in settings, and the test is sample-based (`home_collection.is_home_collectable`: scans/X-ray/cardiac excluded). Everything happens inside `confirming_collection_date`, keyed by `context["lab_step"]`:
+```
+date tap → hc_mode [🏡 Home | 🏥 Visit Centre]
+   Visit Centre → who → name → booking (unchanged path)
+   Home → hc_slot (open slots in the collection window minus capacity/notice)
+        → who → name → _finalize_lab_booking intercepts (intercept_finalize)
+        → hc_location (Meta location_request_message; inbound `location` messages are routed here
+          only in this step — elsewhere they keep the unsupported-media reply; a pasted Maps link works)
+          → service-radius check → hc_address (typed house/landmark) → hc_contact (this number / another)
+        → hc_confirm (summary with fee; re-checks enabled + slot still open)
+        → booking: paid → create_booking_with_payment(home_collection=…) adds the fee;
+                   counter → book_appointment with visit columns
+        → confirmation (_notify_payment_confirmed, home copy) → home_collection.auto_assign
+          (least busy in slot, then day; branch-pinned first; CAS write) → patient told who is coming
+```
+Phlebotomist status updates (en_route / collected / failed) send best-effort WhatsApp updates (free-form, so only inside Meta's 24h window).
+
 ---
 
 ## Flow 5: Razorpay Online Payment & Webhook Lifecycle

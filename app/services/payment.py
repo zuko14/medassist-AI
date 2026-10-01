@@ -98,6 +98,14 @@ def resolve_payment_mode(clinic: dict) -> tuple[str, int]:
 class PaymentService:
     """Razorpay payment integration for appointment booking."""
 
+    #: Columns a home sample collection may set on the booking (migration 097).
+    #: Anything else in the dict is ignored, so a status can never ride in.
+    HOME_COLLECTION_COLUMNS = frozenset({
+        "collection_mode", "collection_slot", "collection_address",
+        "collection_landmark", "collection_lat", "collection_lng",
+        "collection_contact_phone", "home_collection_fee_paise", "collection_status",
+    })
+
     def __init__(self):
         self._razorpay_base = "https://api.razorpay.com/v1"
 
@@ -126,6 +134,7 @@ class PaymentService:
         doctor_id: Optional[str] = None,
         treatment_id: Optional[str] = None,
         treatment_name: Optional[str] = None,
+        home_collection: Optional[dict] = None,
     ) -> dict:
         """Create a pending_payment booking and a Razorpay order.
 
@@ -138,6 +147,10 @@ class PaymentService:
                     doctor's full consultation_fee is charged now (the rest is
                     collected at the clinic). Defaults to 100 (full fee).
             doctor_id: Optional doctor UUID. If omitted, resolved from doctor_name.
+            home_collection: lab tests only (migration 097). The visit columns
+                    from home_collection_flow.booking_fields(); its
+                    home_collection_fee_paise is added to the test price
+                    before any deposit is taken.
 
         Returns:
             dict with keys: success, booking_id, booking_ref,
@@ -148,10 +161,14 @@ class PaymentService:
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
 
         # ── Determine fee based on booking type ──
+        if booking_type != "lab_test":
+            home_collection = None
         if booking_type == "lab_test":
             amount_paise = await self._get_lab_test_fee_paise(clinic_id, lab_test_id)
             if not amount_paise or amount_paise <= 0:
                 return {"success": False, "reason": "lab_test_price_unavailable"}
+            if home_collection:
+                amount_paise += max(0, int(home_collection.get("home_collection_fee_paise") or 0))
         else:
             amount_paise = await self._get_doctor_fee_paise(clinic_id, doctor_name)
         if deposit_percent < 100:
@@ -224,6 +241,10 @@ class PaymentService:
         if booking_type == "lab_test":
             booking_data["lab_test_id"] = lab_test_id
             booking_data["lab_test_name"] = lab_test_name
+            if home_collection:
+                booking_data.update({
+                    k: v for k, v in home_collection.items() if k in self.HOME_COLLECTION_COLUMNS
+                })
         # Specialty treatment tag (migration 077). The row stays
         # booking_type='consultation', so uq_appointment_active_slot, the
         # doctor_id guard above, reminders, expiry and refunds all apply.
@@ -2235,6 +2256,21 @@ class PaymentService:
 
             clinic = await get_clinic_by_id(clinic_id_val)
 
+            # The fast-poll and expiry-recovery paths pass a partial row (no
+            # booking_type, lab_test_name, collection_* ...), so a lab test
+            # confirmed there was announced with doctor copy, and a home
+            # collection lost its visit details. Read the whole row once.
+            if booking.get("id") and "booking_type" not in booking:
+                try:
+                    full = await sb(
+                        supabase.table("appointments").select("*")
+                        .eq("clinic_id", clinic_id_val).eq("id", booking["id"]).limit(1)
+                    )
+                    if full.data:
+                        booking = {**full.data[0], **booking}
+                except Exception as reload_err:
+                    logger.warning(f"Could not reload booking {booking.get('id')} for confirmation: {reload_err}")
+
             # Resolve patient language
             lang = "en"
             try:
@@ -2273,7 +2309,30 @@ class PaymentService:
                 booking.get("appointment_time", ""),
             )
 
-            if booking.get("booking_type") == "lab_test":
+            is_home = (
+                booking.get("booking_type") == "lab_test"
+                and booking.get("collection_mode") == "home"
+            )
+            if is_home:
+                from app.services.home_collection_flow import confirmation_lines
+
+                header = {
+                    "hi": "✅ *भुगतान सफल — होम सैंपल कलेक्शन बुक हो गया!*",
+                    "te": "✅ *చెల్లింపు నిర్ధారించబడింది — హోమ్ శాంపిల్ కలెక్షన్ బుక్ అయింది!*",
+                }.get(lang, "✅ *Payment Confirmed — Home Sample Collection Booked!*")
+                msg = (
+                    f"{header}\n\n"
+                    f"📋 *Ref:* {ref_code}\n"
+                    f"🧪 {booking.get('lab_test_name', 'N/A')}\n"
+                    f"👤 {booking.get('patient_name', '')}\n"
+                    f"📅 {date_display}\n"
+                    f"💰 ₹{amount_rupees:.0f}"
+                    + confirmation_lines(
+                        booking.get("collection_slot"), booking.get("collection_address"), lang
+                    )
+                    + "\n\n"
+                )
+            elif booking.get("booking_type") == "lab_test":
                 test_name = booking.get("lab_test_name", "N/A")
                 if lang == "hi":
                     msg = (
@@ -2345,8 +2404,11 @@ class PaymentService:
             if policy_line:
                 msg += "\n\n" + policy_line
 
-            # Append location details
-            if booking.get("branch_id"):
+            # Append location details (not for a home visit: the patient is
+            # not coming to the centre).
+            if is_home:
+                pass
+            elif booking.get("branch_id"):
                 try:
                     branch = await get_branch_by_id(booking["branch_id"])
                     if branch:
@@ -2475,6 +2537,8 @@ class PaymentService:
                         f"💰 *Paid:* ₹{amount_rupees:.0f}\n"
                         f"🆔 *Payment ID:* {booking.get('payment_id', 'N/A')}"
                     )
+                    if is_home:
+                        admin_notif_msg += f"\n🏡 *Home collection:* {booking.get('collection_slot')}"
                 else:
                     admin_notif_msg = (
                         f"✅ *New Payment & Booking Confirmed!*\n\n"
@@ -2510,6 +2574,8 @@ class PaymentService:
                         )
                     if booking.get("treatment_name") and booking.get("booking_type") != "lab_test":
                         in_app_msg += f" Treatment: {booking['treatment_name']}."
+                    if is_home:
+                        in_app_msg += f" Home collection {booking.get('collection_slot')}."
                     notif_row = {
                         "clinic_id": clinic_id_val,
                         "admin_id": None,
@@ -2540,6 +2606,17 @@ class PaymentService:
                     await analytics_res
             except Exception as analytics_err:
                 logger.warning(f"Could not log analytics event: {analytics_err}")
+
+            # Home sample collection (migration 097): hand the visit to a
+            # phlebotomist. After the patient's confirmation, so their
+            # "assigned" message arrives second. Never raises; anything it
+            # misses is picked up by the scheduler's assignment sweep.
+            if is_home and booking.get("id"):
+                from app.services import home_collection
+
+                await home_collection.auto_assign(
+                    str(clinic_id_val), str(booking["id"]), alert_if_none=True
+                )
 
             # Log confirmation dispatched event
             if booking.get("id"):

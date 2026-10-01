@@ -207,6 +207,20 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── Home sample collection (migration 097): assign confirmed visits
+        # that still have no phlebotomist. Confirmation assigns immediately;
+        # this catches the rest (no phlebotomist active yet, a failed attempt,
+        # a phlebotomist deleted). No-op for every clinic without home visits.
+        self.scheduler.add_job(
+            self.assign_home_collections,
+            "interval",
+            minutes=5,
+            id="home_collection_assign",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # ── Dental treatment plans (dental plan only; no-op for every other clinic) ──
         # 08:30 runs before the generic 09:00 reminder: a sitting reminded here
         # has reminder_24h_sent set, so the generic job skips it; one this job
@@ -436,6 +450,19 @@ class SchedulerService:
         """Shutdown the scheduler."""
         self.scheduler.shutdown()
         logger.info("Scheduler shutdown")
+
+    async def assign_home_collections(self):
+        from app.services import home_collection
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("home_collection_assign", lease_seconds=240) as acquired:
+            if acquired:
+                try:
+                    n = await home_collection.assign_pending_sweep()
+                    if n:
+                        logger.info(f"Home collection sweep assigned {n} visit(s)")
+                except Exception as e:
+                    logger.error(f"Home collection assignment sweep failed: {e}")
 
     async def dental_patient_reminders(self):
         from app.services import dental_plans

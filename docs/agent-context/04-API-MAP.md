@@ -123,6 +123,17 @@ All `/admin` endpoints require authentication via either a session token in head
 - `PUT /admin/lab-collection-window`: Configures home collection and walk-in sample operating windows.
 - `DELETE /admin/lab-collection-window`: Clears branch override, inheriting clinic defaults.
 
+### E2. Home Sample Collection (`app/routers/home_collection.py`, migration 097)
+Plan-gated to `diagstream`/`diagbooking` (`tenant.home_collection_available`). Manager = clinic_admin/super_admin or staff with `HOME_COLLECTION_MANAGE`; branch-pinned staff are confined to their branch.
+- `GET|PUT /admin/home-collection/settings?branch_id=`: Manager. `config.home_collection` on the branch (override) or clinic: `enabled`, fee, free-above threshold, slot length (30/60/90/120), slot capacity, same-day notice, service radius + centre lat/lng. Off by default.
+- `GET /admin/home-collection/visits?date=&branch_id=`: Manager. Home bookings for a day with phlebotomist, map link, pay/collect amount, allowed next statuses.
+- `GET /admin/home-collection/phlebotomists?date=`: Manager. Roster with the day's load.
+- `POST /admin/home-collection/visits/{id}/assign`: Manager. (Re)assign; refuses inactive or other-branch phlebotomists; compare-and-set write.
+- `POST /admin/home-collection/auto-assign`: Manager. Runs auto-assignment for upcoming unassigned visits.
+- `GET /admin/home-collection/my?date=`: PHLEBOTOMIST only. Own visits; re-reads the account (active + role) every request.
+- `POST /admin/home-collection/visits/{id}/status`: PHLEBOTOMIST (own visits only, others 404) or manager. Moves along `assigned→en_route→collected→delivered`, `→failed` (reason required); patient gets a WhatsApp update.
+- `POST/PUT /admin/staff` accept optional `full_name`, `phone`; both required for `staff_role=PHLEBOTOMIST`, which holds no permissions and cannot change role. Deactivating a phlebotomist releases and re-assigns their upcoming visits. `GET /admin/me` adds `home_collection_available`.
+
 ### F. Reports & Deliveries
 - `GET /admin/lab-reports`: Lists processed patient diagnostic reports.
 - `POST /admin/lab-reports/upload`: Manual PDF upload by clinic staff; generates AI clinical summary, stores in Supabase Storage (`lab-reports` bucket), writes to `lab_reports`, and delivers via WhatsApp.

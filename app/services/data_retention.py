@@ -272,6 +272,19 @@ class DataRetentionService:
                 .eq("patient_phone", phone))
             )
             results["appointments_anonymized"] = len(appt_res.data or [])
+            # Home sample collections (migration 097): where the patient lives
+            # and how to reach them. Matched by the ids just anonymized, since
+            # their patient_phone is already "[REDACTED]".
+            home_ids = [r["id"] for r in (appt_res.data or []) if r.get("collection_mode") == "home"]
+            if home_ids:
+                await sb(supabase.table("appointments").update({
+                    "collection_address": "[REDACTED]",
+                    "collection_landmark": None,
+                    "collection_lat": None,
+                    "collection_lng": None,
+                    "collection_contact_phone": "[REDACTED]",
+                    "collection_notes": None,
+                }).eq("clinic_id", clinic_id).in_("id", home_ids))
         except Exception as e:
             logger.error(f"Appointment anonymization error: {e}")
             results["errors"].append(f"appointments: {e}")

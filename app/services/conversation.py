@@ -40,6 +40,7 @@ from app.services.tenant import cancellation_window_hours
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
 from app.services import specialty_flow
+from app.services import home_collection_flow
 from app.services import leads
 
 # Per-phone asyncio lock with Meta timeout protection
@@ -247,6 +248,8 @@ _LAB_STEP_CLEARED = {
     "lab_collection_date": None,
     "lab_family": None,
     "lab_pending_name": None,
+    # Home sample collection (migration 097): see home_collection_flow.
+    **home_collection_flow.HC_CLEARED,
 }
 
 
@@ -397,6 +400,9 @@ class ConversationManager:
         # No-op for every clinic that never sets these keys.
         if new_state in specialty_flow.TREATMENT_RESET_STATES:
             specialty_flow.clear_treatment_context(merged)
+            # Same for a half-finished home collection: an address or slot
+            # from an abandoned booking must never ride into the next one.
+            merged.update(home_collection_flow.HC_CLEARED)
 
         update_payload = {
             "state": new_state,
@@ -607,6 +613,21 @@ class ConversationManager:
         # empty body or answer a media message with a state-machine error.
         # State is deliberately left untouched: they can retype and carry on
         # exactly where they left off.
+        # A location pin is a real answer in exactly one place: the home sample
+        # collection step that asked for it (migration 097). Anywhere else it
+        # keeps the unsupported-media reply below.
+        if (
+            message_type == "location"
+            and interactive_data
+            and session.get("state") == "confirming_collection_date"
+            and (session.get("context") or {}).get("lab_step") == "hc_location"
+        ):
+            await self._handle_confirming_collection_date(
+                clinic, phone, "", "location", session.get("context") or {},
+                patient, lang, interactive_data,
+            )
+            return
+
         if message_type not in READABLE_MESSAGE_TYPES:
             if message_type in IGNORED_MESSAGE_TYPES:
                 logger.info(
@@ -1242,9 +1263,14 @@ class ConversationManager:
         # free text the classifier may call anything (doctor_availability at a
         # diagnostics-only clinic restarts the whole lab flow). Navigation,
         # cancel and the always-first handlers above still win.
+        # Home collection's typed answers (location link, address, phone
+        # number) need the same protection.
         if (
             state == "confirming_collection_date"
-            and context.get("lab_step") == "name"
+            and (
+                context.get("lab_step") == "name"
+                or context.get("lab_step") in home_collection_flow.TYPED_STEPS
+            )
             and not interactive_data
             and (message or "").strip()
             and message.strip().lower() not in LAB_BOOKING_KEYWORDS
@@ -5832,6 +5858,9 @@ class ConversationManager:
             instructions_line += "\n⚠️ *Fasting Required:* 10-12 hours fasting before collection."
         if test.get("prep_instructions"):
             instructions_line += f"\n📋 *Prep:* {test['prep_instructions']}"
+        # Sets context["hc_available"]; adds nothing unless this centre
+        # collects this test at home (migration 097).
+        instructions_line += await home_collection_flow.annotate_test(clinic, context, test, lang)
 
         body = (
             f"*{test['name']}*\n"
@@ -5897,6 +5926,9 @@ class ConversationManager:
                 await self.update_state(clinic, phone, "confirming_collection_date", context)
                 return
             context["lab_collection_date"] = picked
+            if context.get("hc_available"):
+                await home_collection_flow.ask_mode(self, clinic, phone, context, lang)
+                return
             await self._ask_lab_test_patient(clinic, phone, context, patient, lang)
             return
 
@@ -5908,6 +5940,11 @@ class ConversationManager:
                 "te": "కొనసాగడానికి దయచేసి పైన ఉన్న తేదీ బటన్‌లలో ఒకదాన్ని నొక్కండి.",
             }.get(lang, "Please tap one of the date buttons above.")
             await self.whatsapp.send_text(clinic, phone, msg)
+            return
+
+        if await home_collection_flow.handle_step(
+            self, clinic, phone, message, context, patient, lang, interactive_data
+        ):
             return
 
         if button_id in ("labfor_self", "labfor_other"):
@@ -6075,6 +6112,17 @@ class ConversationManager:
         """Write the lab booking once date and patient name are both known."""
         from app.services.payment import payment_service, resolve_payment_mode
 
+        # A home collection still needs the location, address and contact.
+        if await home_collection_flow.intercept_finalize(
+            self, clinic, phone, context, lang, patient_name
+        ):
+            return
+        home = (
+            home_collection_flow.booking_fields(context)
+            if context.get("hc_mode") == "home" and context.get("hc_ready")
+            else None
+        )
+
         # A diagnostic centre with no Razorpay keys used to reach
         # create_booking_with_payment anyway, which asked Razorpay for a payment
         # link with empty credentials, took a 401, cancelled the row it had just
@@ -6114,6 +6162,7 @@ class ConversationManager:
             # full price, and the booking never linked to the patient record.
             patient_id=(patient or {}).get("id"),
             deposit_percent=deposit_percent,
+            home_collection=home,
         )
 
         if not result.get("success"):
@@ -6147,11 +6196,17 @@ class ConversationManager:
             if payment_mode == "partial" and deposit_percent < 100
             else ""
         )
+        home_line = (
+            f"Home collection: *{home['collection_slot']}*\n"
+            f"Address: {home['collection_address']}\n"
+            if home else ""
+        )
         pay_msg = (
             f"🧪 *Lab Test Booking Reserved*\n\n"
             f"Test: *{context.get('lab_test_name')}*\n"
             f"Patient: *{patient_name}*\n"
             f"Date: *{selected_date}*\n"
+            f"{home_line}"
             f"Amount: *₹{amount_rupees}*\n\n"
             f"{deposit_note}"
             f"Please complete your payment within {settings.booking_hold_minutes} minutes to confirm:\n"
@@ -6186,6 +6241,11 @@ class ConversationManager:
         """
         from app.database import get_lab_collection_window
 
+        home = (
+            home_collection_flow.booking_fields(context)
+            if context.get("hc_mode") == "home" and context.get("hc_ready")
+            else None
+        )
         appointment_data = {
             "patient_id": (patient or {}).get("id"),
             "patient_phone": phone,
@@ -6200,6 +6260,11 @@ class ConversationManager:
             "lab_test_name": context.get("lab_test_name"),
             "amount_paise": context.get("lab_test_price_paise"),
         }
+        if home:
+            appointment_data.update(home)
+            appointment_data["amount_paise"] = (
+                int(context.get("lab_test_price_paise") or 0) + home["home_collection_fee_paise"]
+            )
         if context.get("branch_id"):
             appointment_data["branch_id"] = context["branch_id"]
             appointment_data["branch_name"] = context.get("branch_name") or ""
@@ -6227,8 +6292,8 @@ class ConversationManager:
         date_display = datetime.strptime(selected_date, "%Y-%m-%d").strftime("%a, %d %b %Y")
 
         price_line = ""
-        if context.get("lab_test_price_paise"):
-            rupees = context["lab_test_price_paise"] // 100
+        if appointment_data.get("amount_paise"):
+            rupees = appointment_data["amount_paise"] // 100
             price_line = {
                 "en": f"\n💰 ₹{rupees} — payable at the centre",
                 "hi": f"\n💰 ₹{rupees} — केंद्र पर देय",
@@ -6237,10 +6302,15 @@ class ConversationManager:
 
         window_line = ""
         try:
-            window = await get_lab_collection_window(
-                clinic, branch_id=context.get("branch_id")
-            )
-            window_line = f"\n🏠 {self._collection_hours_on(window, selected_date, lang)}"
+            if home:
+                window_line = home_collection_flow.confirmation_lines(
+                    home["collection_slot"], home["collection_address"], lang
+                )
+            else:
+                window = await get_lab_collection_window(
+                    clinic, branch_id=context.get("branch_id")
+                )
+                window_line = f"\n🏠 {self._collection_hours_on(window, selected_date, lang)}"
         except Exception as e:
             # The booking is already written; a missing window must not turn a
             # confirmed test into an error message.
@@ -6276,6 +6346,11 @@ class ConversationManager:
         await self.whatsapp.send_text(
             clinic, phone, confirm_text, _source="booking_confirmation"
         )
+        if home:
+            # Confirmed already (no payment step), so assign now. Never raises.
+            from app.services import home_collection
+
+            await home_collection.auto_assign(clinic["id"], appointment["id"], alert_if_none=True)
 
         await self.update_state(
             clinic, phone, "main_menu", {"menu_shown": False, **_LAB_STEP_CLEARED}

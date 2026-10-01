@@ -308,6 +308,17 @@ async def process_message(message, display_phone: str, phone_number_id: str = No
                 reply = message.interactive.list_reply
                 content = reply.get("title", "")
                 interactive_data = {"id": reply.get("id"), "type": "list_reply"}
+        elif message_type == "location" and isinstance(message.location, dict):
+            # A shared pin (home sample collection). The address stays out of
+            # `content` so it is never written to the processing log below.
+            loc = message.location
+            interactive_data = {
+                "type": "location",
+                "latitude": loc.get("latitude"),
+                "longitude": loc.get("longitude"),
+                "name": (loc.get("name") or "")[:200],
+                "address": (loc.get("address") or "")[:300],
+            }
 
         # Truncate content for safe logging (prevent log injection)
         safe_phone = phone[:6] + "..." if len(phone) > 6 else phone

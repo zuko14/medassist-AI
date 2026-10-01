@@ -42,12 +42,20 @@ PERMISSIONS = frozenset({
     # Corporate employee-health insights (migration 095): add companies, upload
     # employee report PDFs, delete them. In no role preset: granted per account.
     "CORPORATE_HEALTH_MANAGE",
+    # Home sample collection (migration 097): settings, the day's visits and
+    # (re)assigning them to phlebotomists. In no role preset: granted per account.
+    "HOME_COLLECTION_MANAGE",
 })
 
 #: A login for a lab's CORPORATE client: sees that one company's aggregate
 #: dashboard and nothing else. Enforced for every /admin route in
 #: app.routers.admin.verify_credentials, not by hiding tabs.
 CORPORATE_VIEWER = "CORPORATE_VIEWER"
+
+#: A diagnostic centre's field phlebotomist (migration 097): sees only the home
+#: sample collections assigned to them. Confined the same way as
+#: CORPORATE_VIEWER, in app.routers.admin.verify_credentials.
+PHLEBOTOMIST = "PHLEBOTOMIST"
 
 STAFF_ROLES = frozenset({
     "STAFF",
@@ -61,6 +69,7 @@ STAFF_ROLES = frozenset({
     "DIAGNOSTIC_OPERATOR",
     "CUSTOM_ROLE",
     CORPORATE_VIEWER,
+    PHLEBOTOMIST,
 })
 
 _DOCTOR_SCHEDULE_GRANTS = [
@@ -91,6 +100,7 @@ ROLE_PRESETS: dict[str, list[str]] = {
     "DIAGNOSTIC_OPERATOR": list(_DIAGNOSTIC_OPERATOR_GRANTS),
     "CUSTOM_ROLE": [],
     CORPORATE_VIEWER: [],
+    PHLEBOTOMIST: [],
 }
 
 

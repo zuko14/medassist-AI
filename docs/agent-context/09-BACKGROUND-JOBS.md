@@ -42,6 +42,7 @@ All jobs are configured in [`app/services/scheduler.py`](file:///c:/Users/chait/
 | `recover_pending_inbound_messages`| Every 1 minute | `recover_pending_inbound_messages`| Sweeps durable queue for messages left in `received` or `processing` due to container crashes. |
 | `reap_abandoned_message_claims` | Every 60 seconds | `reap_abandoned_message_claims`| Reaps stuck worker claim leases on `inbound_messages` where worker heartbeat timed out. |
 | `connector_polling` | Every 1 minute | `run_all_connectors` | Evaluates configured external LIS/MocDoc connectors and triggers polling runs. |
+| `home_collection_assign` | Every 5 minutes | `assign_home_collections` | Migration 097. Assigns confirmed, upcoming home sample collections that still have no phlebotomist (`home_collection.assign_pending_sweep`, ≤200/tick, CAS on `phlebotomist_id IS NULL`). Primary assignment happens at confirmation; this is the safety net. Lock `home_collection_assign` (240s lease). |
 | `connector_storage_cleanup` | Daily at 02:00 IST | `cleanup_expired_storage` | Deletes temporary report PDF files stored on disk older than 90 days. |
 
 ---

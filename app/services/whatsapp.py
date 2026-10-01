@@ -689,6 +689,45 @@ class WhatsAppService:
             )
             return False
 
+    async def send_location_request(
+        self, clinic: dict, phone: str, body: str, _source: str = "conversation",
+    ) -> bool:
+        """Ask the patient to share their location: WhatsApp shows a
+        "Send location" button that opens the map picker. Returns False when
+        it could not be sent, so the caller can fall back to typed instructions."""
+        if not await self._can_send_freeform(clinic, phone):
+            logger.warning(
+                f"Cannot send location request to {self._mask_phone(phone)}: session expired"
+            )
+            return False
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": phone,
+            "type": "interactive",
+            "interactive": {
+                "type": "location_request_message",
+                "body": {"text": body[:1024]},
+                "action": {"name": "send_location"},
+            },
+        }
+        try:
+            result = await self._make_request(clinic, "messages", payload)
+            # An interactive message, billed like one; the ledger's CHECK
+            # (migration 032) has no location_request type.
+            await self._log_to_ledger(
+                clinic, phone, "interactive_buttons", _source,
+                send_success=True, meta_message_id=self._extract_meta_message_id(result),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send location request: {e}")
+            await self._log_to_ledger(
+                clinic, phone, "interactive_buttons", _source, send_success=False,
+            )
+            return False
+
     async def send_location(
         self, clinic: dict, phone: str, lat: float, lng: float, name: str, address: str,
         _source: str = "conversation",

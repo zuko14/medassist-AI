@@ -1213,6 +1213,44 @@
         .corp-drop strong { display: block; font-size: 1rem; color: var(--text-strong); margin-bottom: 6px; }
         .corp-progress { height: 8px; border-radius: 99px; background: var(--surface2); overflow: hidden; margin: 14px 0 6px; }
         .corp-progress > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+
+        /* --- Home sample collection (migration 097) ------------------------
+           A phlebotomist login sees ONE page. The server refuses every other
+           route for it; this only keeps the chrome from offering them. */
+        body.phleb-view .nav-links .nav-link:not([data-page="homecollect"]),
+        body.phleb-view #notifBellBtn,
+        body.phleb-view #notifBadgeMobile { display: none !important; }
+        #pg-homecollect [hidden] { display: none !important; }
+        .hc-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .hc-bar input[type="date"], .hc-bar select { width: auto; min-width: 150px; }
+        .hc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 18px; align-items: start; }
+        @media (max-width: 1100px) { .hc-grid { grid-template-columns: minmax(0, 1fr); } }
+        .hc-off { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+                  border: 1px solid var(--amber); background: var(--amber-bg); color: var(--text); }
+        .hc-addr { max-width: 280px; font-size: 0.82rem; color: var(--text2); line-height: 1.4; }
+        .hc-addr a, .hc-link { color: var(--accent2); font-weight: 600; text-decoration: none; }
+        .hc-sub { display: block; font-size: 0.74rem; color: var(--text3); margin-top: 2px; }
+        .hc-tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 600;
+                  background: var(--amber-bg); color: var(--amber); margin-left: 6px; }
+        .hc-tag.ok { background: var(--green-bg); color: var(--green); }
+        .hc-phleb-row { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+                        padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .hc-phleb-row:last-child { border-bottom: 0; }
+        .hc-load { font-size: 0.78rem; color: var(--text3); white-space: nowrap; }
+        .hc-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .hc-actions .btn { padding: 4px 10px; font-size: 0.78rem; text-decoration: none; }
+        .hc-me { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+        .hc-me h3 { margin: 0; font-size: 1.15rem; color: var(--text-strong); }
+        .hc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+        .hc-visit { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+                    padding: 16px; display: flex; flex-direction: column; gap: 10px;
+                    backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur)); box-shadow: var(--shadow); }
+        .hc-visit.done { opacity: 0.72; }
+        .hc-visit-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .hc-slot { font-size: 1.05rem; font-weight: 700; color: var(--text-strong); letter-spacing: -0.01em; }
+        .hc-name { font-size: 1rem; font-weight: 600; color: var(--text-strong); }
+        .hc-line { font-size: 0.86rem; color: var(--text2); line-height: 1.45; }
+        .hc-visit .hc-actions .btn { flex: 1 1 auto; justify-content: center; padding: 9px 12px; font-size: 0.85rem; }
         .corp-meter { height: 6px; border-radius: 99px; background: var(--surface2); overflow: hidden; min-width: 70px; }
         .corp-meter > span { display: block; height: 100%; background: var(--red); }
         .corp-row { cursor: pointer; }
@@ -1570,6 +1608,11 @@
             </div>
             <div class="nav-link" tabindex="0" data-page="labtests" data-feature="lab_test_booking" onclick="go('labtests',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.31L4.1 20.3a2 2 0 0 0 1.7 2.7h12.4a2 2 0 0 0 1.7-2.7L14 9.31V2"></path><line x1="8.5" y1="2" x2="15.5" y2="2"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg></span> Lab Tests / Services
+            </div>
+            <!-- Diagnostic plans only (migration 097): home sample collection.
+                 Also the ONLY page a phlebotomist login sees. -->
+            <div class="nav-link" tabindex="0" data-page="homecollect" data-homecollect="nav" style="display:none" onclick="go('homecollect',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"></path><path d="M12 11.5c-1.4 1.7-2.2 2.9-2.2 3.9a2.2 2.2 0 0 0 4.4 0c0-1-.8-2.2-2.2-3.9z"></path></svg></span> <span id="hcNavLabel">Home Collections</span>
             </div>
             <!-- Diagnostic plans + owner opt-in only (migration 095): corporate
                  employee health packages. Also the ONLY page a company-viewer login sees. -->
@@ -2900,6 +2943,98 @@
         </div>
 
         <!-- ─── PRESCRIPTIONS ─── -->
+        <!-- ─── HOME SAMPLE COLLECTION (diagnostic plans, migration 097) ─── -->
+        <div id="pg-homecollect" class="sec">
+            <div class="page-head">
+                <h2 id="hcTitle">Home Collections</h2>
+                <p id="hcSubtitle">Home sample collections booked on WhatsApp. Each confirmed visit is assigned to a phlebotomist automatically; reassign any visit here.</p>
+            </div>
+
+            <div id="hcManager">
+                <div class="card hc-off" id="hcOffBanner" hidden>
+                    <span><strong>Home collection is switched off.</strong> Patients are not offered it on WhatsApp until you turn it on below.</span>
+                    <button type="button" class="btn btn-accent btn-sm" onclick="document.getElementById('hcSettingsCard').scrollIntoView({behavior:'smooth'})">Set it up</button>
+                </div>
+                <div class="stats">
+                    <div class="stat"><div class="glow"></div><div class="label">Visits</div><div class="num" id="hc-s-total">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Unassigned</div><div class="num" id="hc-s-unassigned">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Assigned</div><div class="num" id="hc-s-assigned">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">On the way</div><div class="num" id="hc-s-en_route">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Collected</div><div class="num" id="hc-s-collected">—</div></div>
+                    <div class="stat"><div class="glow"></div><div class="label">Not collected</div><div class="num" id="hc-s-failed">—</div></div>
+                </div>
+                <div class="card">
+                    <div class="hc-bar">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="hcShiftDay(-1)" aria-label="Previous day">‹</button>
+                        <input type="date" id="hcDate" aria-label="Visit date" onchange="loadHomeCollections()">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="hcShiftDay(1)" aria-label="Next day">›</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="hcSetToday()">Today</button>
+                        <select id="hcBranch" aria-label="Branch" onchange="loadHomeCollections()" hidden></select>
+                        <span style="flex:1"></span>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="loadHomeCollections()" aria-label="Refresh" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button>
+                        <button type="button" class="btn btn-accent btn-sm" onclick="hcAutoAssign()">Auto-assign unassigned</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-head"><h3>Visits</h3><span id="hcCount" style="color:var(--text3); font-size:0.8rem;"></span></div>
+                    <div class="tbl-wrap" id="hcVisits"><div class="loader"><div class="spin"></div>Loading visits...</div></div>
+                </div>
+                <div class="hc-grid">
+                    <div class="card">
+                        <div class="card-head">
+                            <h3>Phlebotomists</h3>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="hcAddPhlebotomist()">+ Add phlebotomist</button>
+                        </div>
+                        <div id="hcPhlebs"><div class="loader"><div class="spin"></div>Loading...</div></div>
+                        <p style="color:var(--text3); font-size:0.78rem; margin-top:10px;">A phlebotomist signs in at this same address and sees only the visits assigned to them, with navigation, call and status buttons. A branch-scoped phlebotomist only receives that branch's visits.</p>
+                    </div>
+                    <div class="form-card" id="hcSettingsCard">
+                        <h3>Home collection settings</h3>
+                        <div id="hcSettingsMsg"></div>
+                        <div class="field" id="hcSetBranchWrap" hidden>
+                            <label>Applies to</label>
+                            <select id="hcSetBranch" onchange="loadHcSettings()"></select>
+                        </div>
+                        <label class="check" style="margin:8px 0 14px;"><input type="checkbox" id="hcEnabled"> Offer home sample collection to patients on WhatsApp</label>
+                        <div class="form-row">
+                            <div class="field"><label>Home collection fee (₹)</label><input type="number" id="hcFee" min="0" max="5000" step="1" placeholder="0 = free"></div>
+                            <div class="field"><label>Free for tests priced at or above (₹)</label><input type="number" id="hcFreeAbove" min="0" step="1" placeholder="0 = never free"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="field"><label>Visit slot length</label>
+                                <select id="hcSlotMinutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option></select>
+                            </div>
+                            <div class="field"><label>Max visits per slot</label><input type="number" id="hcCapacity" min="0" max="500" step="1" placeholder="0 = no limit"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="field"><label>Same-day notice (minutes)</label><input type="number" id="hcLead" min="0" max="1440" step="5"></div>
+                            <div class="field"><label>Service radius (km)</label><input type="number" id="hcRadius" min="0" max="200" step="1" placeholder="0 = no limit"></div>
+                        </div>
+                        <div class="field">
+                            <label>Centre location (for the service radius)</label>
+                            <input type="text" id="hcCentre" placeholder="e.g. 17.7231, 83.3012">
+                            <span class="hc-sub">In Google Maps, long-press your centre and copy the two numbers shown. Needed only if you set a radius.</span>
+                        </div>
+                        <p style="color:var(--text3); font-size:0.8rem; margin:10px 0 0;">Visit times follow the <strong>sample collection window</strong> on the Lab Tests page. Scans, X-rays and ECG are never offered at home.</p>
+                        <div style="display:flex; gap:10px; margin-top:14px;">
+                            <button class="btn btn-accent" onclick="saveHcSettings()">Save settings</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="hcField" hidden>
+                <div class="hc-me">
+                    <h3 id="hcMe">My collections</h3>
+                    <div class="hc-bar">
+                        <div class="range-pick" id="hcDays" role="group" aria-label="Day"></div>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="loadMyCollections()" aria-label="Refresh" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button>
+                    </div>
+                </div>
+                <div id="hcMyVisits" class="hc-list"><div class="loader"><div class="spin"></div>Loading your visits...</div></div>
+            </div>
+        </div>
+
         <div id="pg-prescriptions" class="sec">
             <div class="page-head">
                 <h2>Prescription Reminders</h2>
@@ -3336,6 +3471,7 @@
                             <option value="BRANCH_MANAGER">Branch Manager</option>
                             <option value="CUSTOM_ROLE">Custom Permissions</option>
                             <option value="CORPORATE_VIEWER" data-corporate="opt" hidden>Company Viewer (Corporate Health dashboard only)</option>
+                            <option value="PHLEBOTOMIST" data-homecollect="opt" hidden>Phlebotomist (home sample collection only)</option>
                         </select>
                     </div>
                     <div class="field" id="f-staffCompanyWrap" style="display:none;">
@@ -3348,6 +3484,10 @@
                             <option value="">All Branches (Tenant-wide)</option>
                         </select>
                     </div>
+                </div>
+                <div class="form-row" id="f-staffContactWrap" style="display:none;">
+                    <div class="field"><label>Full name (shown to patients)</label><input type="text" id="f-staffFullName" maxlength="120" placeholder="e.g. Suresh Kumar"></div>
+                    <div class="field"><label>Mobile number (patients may call)</label><input type="tel" id="f-staffPhone" maxlength="20" placeholder="e.g. 9876543210"></div>
                 </div>
                 <div class="field" style="margin-top:10px;" id="f-staffPermsWrap">
                     <label>Extra / Delegated Permissions</label>
@@ -3372,6 +3512,7 @@
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                         <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
                         <label class="check" data-corporate="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="CORPORATE_HEALTH_MANAGE"> Manage Corporate Health (companies &amp; report uploads)</label>
+                        <label class="check" data-homecollect="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="HOME_COLLECTION_MANAGE"> Manage Home Collections (assign phlebotomists, settings)</label>
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -3622,8 +3763,13 @@
                     <option value="DOCTOR_SCHEDULE_MANAGER">Doctor & Schedule Manager</option>
                     <option value="BRANCH_MANAGER">Branch Manager</option>
                     <option value="CUSTOM_ROLE">Custom Permissions</option>
+                    <option value="PHLEBOTOMIST" disabled>Phlebotomist</option>
                 </select>
             </div>
+        </div>
+        <div class="form-row">
+            <div class="field"><label>Full name</label><input type="text" id="m-editStaffFullName" maxlength="120"></div>
+            <div class="field"><label>Mobile number</label><input type="tel" id="m-editStaffPhone" maxlength="20"></div>
         </div>
         <div class="form-row">
             <div class="field">
@@ -3663,6 +3809,7 @@
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="REPORTS_RESOLVE"> Resolve / Release Held Reports</label>
                 <label class="check" data-perm-feature="diagnostic_reports"><input type="checkbox" class="edit-staff-perm-cb" value="CONNECTOR_MANAGE"> Manage Report Connector</label>
                 <label class="check" data-corporate="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="CORPORATE_HEALTH_MANAGE"> Manage Corporate Health (companies &amp; report uploads)</label>
+                <label class="check" data-homecollect="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="HOME_COLLECTION_MANAGE"> Manage Home Collections (assign phlebotomists, settings)</label>
             </div>
         </div>
         <div class="modal-actions">
@@ -4237,6 +4384,8 @@ let mySpecialtyEnabled = false;
 let myDentalPlans = false;
 // migration 095: diagnostic plans + owner opt-in, from /admin/me
 let myCorporateHealth = false;
+// migration 097: diagnostic plans only, from /admin/me
+let myHomeCollection = false;
 // migration 082: treatment sections (Child Care / Women Care / ...) from /admin/me
 let myServiceLines = [];
 let myPlanServiceLines = [];
@@ -4288,6 +4437,21 @@ function applyFeatureVisibility() {
         if (!show && kind === 'perm') { const cb = el.querySelector('input'); if (cb) cb.checked = false; }
     });
     document.body.classList.toggle('corp-viewer', isCorpViewer());
+    // Home sample collection (migration 097). A phlebotomist login has only
+    // that page (server-enforced); managers need the grant.
+    document.querySelectorAll('[data-homecollect]').forEach(el => {
+        const kind = el.dataset.homecollect;
+        const show = myHomeCollection && (
+            kind === 'nav' ? (isPhlebotomist() || hasPermission('HOME_COLLECTION_MANAGE'))
+            : kind === 'opt' ? hasPermission('STAFF_CREATE')
+            : true);
+        if (el.tagName === 'OPTION') { el.hidden = !show; el.disabled = !show; }
+        else el.style.display = show ? '' : 'none';
+        if (!show && kind === 'perm') { const cb = el.querySelector('input'); if (cb) cb.checked = false; }
+    });
+    document.body.classList.toggle('phleb-view', isPhlebotomist());
+    const hcLabel = document.getElementById('hcNavLabel');
+    if (hcLabel) hcLabel.textContent = isPhlebotomist() ? 'My Collections' : 'Home Collections';
     document.querySelectorAll('[data-role="admin"]').forEach(el => {
         const page = el.dataset.page;
         // This loop runs AFTER the feature loop and assigns display outright, so
@@ -4407,6 +4571,7 @@ async function login() {
     mySpecialtyEnabled = !!me.specialty_enabled;
     myDentalPlans = !!me.dental_plans_enabled;
     myCorporateHealth = !!me.corporate_health_enabled;
+    myHomeCollection = !!me.home_collection_available;
     myServiceLines = Array.isArray(me.service_lines) ? me.service_lines : [];
     myPlanServiceLines = Array.isArray(me.plan_service_lines) ? me.plan_service_lines : [];
     myUsername = me.username || '';
@@ -4433,6 +4598,11 @@ async function login() {
     // route answers it 403, so none of the dashboard loaders below may run.
     if (isCorpViewer()) {
         go('corporate');
+        return;
+    }
+    // Same for a phlebotomist login (migration 097): their visits only.
+    if (isPhlebotomist()) {
+        go('homecollect');
         return;
     }
 
@@ -4559,6 +4729,7 @@ async function adoptClinicPlan() {
             mySpecialtyEnabled = !!scoped.specialty_enabled;
             myDentalPlans = !!scoped.dental_plans_enabled;
             myCorporateHealth = !!scoped.corporate_health_enabled;
+            myHomeCollection = !!scoped.home_collection_available;
             myServiceLines = Array.isArray(scoped.service_lines) ? scoped.service_lines : [];
             myPlanServiceLines = Array.isArray(scoped.plan_service_lines) ? scoped.plan_service_lines : [];
         }
@@ -4585,6 +4756,7 @@ async function switchClinic() {
     insightsBranchesLoaded = false;
     insightsBranchId = null;
     corpResetState();
+    hcResetState();
 
     try {
         renderDashboard(await api('/admin/stats?days=30'));
@@ -4615,8 +4787,11 @@ function logout() {
     myStaffRole = null;
     myUsername = '';
     myCorporateHealth = false;
+    myHomeCollection = false;
     corpResetState();
+    hcResetState();
     document.body.classList.remove('corp-viewer');
+    document.body.classList.remove('phleb-view');
     doctorCache = [];
     // Tenant-specific branch caches; see switchClinic().
     resetLabTestBranchState();
@@ -5363,6 +5538,333 @@ async function corpDeleteViewer(id, username) {
     catch (e) { toast('Error: ' + e.message, true); }
 }
 
+// ═══════ HOME SAMPLE COLLECTION (migration 097) ═══════
+// Every decision (assignment, allowed status moves, what a phlebotomist may
+// see) is made server-side in app/routers/home_collection.py; this only draws.
+const HC_STATUS = {
+    unassigned: ['Unassigned', 'badge-pending'],
+    assigned: ['Assigned', 'badge-completed'],
+    en_route: ['On the way', 'badge-pending'],
+    collected: ['Collected', 'badge-confirmed'],
+    delivered: ['At the lab', 'badge-confirmed'],
+    failed: ['Not collected', 'badge-failed'],
+    pending_payment: ['Awaiting payment', 'badge-inactive'],
+    cancelled: ['Cancelled', 'badge-cancelled'],
+};
+const HC_ACTION = {
+    en_route: 'Start trip',
+    collected: 'Sample collected',
+    delivered: 'Handed to lab',
+    failed: "Couldn't collect",
+};
+let hcDay = null;
+let hcPhlebs = [];
+let hcBranchesLoaded = false;
+let hcMyKnown = null;
+let hcTimer = null;
+
+function isPhlebotomist() { return myStaffRole === 'PHLEBOTOMIST'; }
+
+function hcResetState() {
+    hcDay = null; hcPhlebs = []; hcBranchesLoaded = false; hcMyKnown = null;
+    if (hcTimer) { clearInterval(hcTimer); hcTimer = null; }
+}
+
+function hcToday() {
+    // The IST calendar day, which is the server's: a laptop clock on UTC
+    // would show yesterday's visits before 05:30.
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+}
+
+function hcDateLabel(d) {
+    const dt = new Date(d + 'T00:00:00');
+    return isNaN(dt) ? d : dt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function hcBadge(v) {
+    const key = (v.status === 'confirmed' || v.status === 'completed') ? v.collection_status : v.status;
+    const [label, cls] = HC_STATUS[key] || [key || '—', 'badge-inactive'];
+    return `<span class="badge ${cls}">${esc(label)}</span>`;
+}
+
+function hcRupees(paise) { return '₹' + Math.round((paise || 0) / 100); }
+
+function hcStartAutoRefresh() {
+    if (hcTimer) return;
+    hcTimer = setInterval(() => {
+        if (!document.getElementById('pg-homecollect').classList.contains('on') || document.hidden) return;
+        if (isPhlebotomist()) loadMyCollections(true); else loadHomeCollections(true);
+    }, 60000);
+}
+
+async function loadHomeCollectPage() {
+    const field = isPhlebotomist();
+    document.getElementById('hcManager').hidden = field;
+    document.getElementById('hcField').hidden = !field;
+    document.getElementById('hcTitle').textContent = field ? 'My Collections' : 'Home Collections';
+    document.getElementById('hcSubtitle').textContent = field
+        ? 'Home visits assigned to you. Call the patient before you leave, then update each visit as you go.'
+        : 'Home sample collections booked on WhatsApp. Each confirmed visit is assigned to a phlebotomist automatically; reassign any visit here.';
+    if (!hcDay) hcDay = hcToday();
+    hcStartAutoRefresh();
+    if (field) { await loadMyCollections(); return; }
+    document.getElementById('hcDate').value = hcDay;
+    await hcLoadBranches();
+    await Promise.all([loadHomeCollections(), loadHcSettings()]);
+}
+
+async function hcLoadBranches() {
+    if (hcBranchesLoaded) return;
+    hcBranchesLoaded = true;
+    let branches = [];
+    if (planAllowsFeature('multi_branch')) {
+        try { branches = ((await api('/admin/branches')).branches || []).filter(b => b.is_active !== false); }
+        catch (e) { branches = []; }
+    }
+    const pinned = myRole === 'staff' && myBranchId;
+    const visible = pinned ? branches.filter(b => b.id === myBranchId) : branches;
+    const filter = document.getElementById('hcBranch');
+    filter.hidden = visible.length < 1;
+    filter.innerHTML = (pinned ? '' : '<option value="">All branches</option>')
+        + visible.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    document.getElementById('hcSetBranchWrap').hidden = visible.length < 1;
+    document.getElementById('hcSetBranch').innerHTML = (pinned ? '' : '<option value="">All branches (shared settings)</option>')
+        + visible.map(b => `<option value="${esc(b.id)}">${esc(b.name)} (own settings)</option>`).join('');
+}
+
+function hcShiftDay(n) {
+    const d = new Date((hcDay || hcToday()) + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    hcDay = d.toISOString().slice(0, 10);
+    document.getElementById('hcDate').value = hcDay;
+    loadHomeCollections();
+}
+
+function hcSetToday() {
+    hcDay = hcToday();
+    document.getElementById('hcDate').value = hcDay;
+    loadHomeCollections();
+}
+
+async function loadHomeCollections(silent) {
+    hcDay = document.getElementById('hcDate').value || hcToday();
+    const branch = document.getElementById('hcBranch').value;
+    const q = '?date=' + encodeURIComponent(hcDay) + (branch ? '&branch_id=' + encodeURIComponent(branch) : '');
+    const box = document.getElementById('hcVisits');
+    if (!silent) box.innerHTML = '<div class="loader"><div class="spin"></div>Loading visits...</div>';
+    try {
+        const [data, ph] = await Promise.all([
+            api('/admin/home-collection/visits' + q),
+            api('/admin/home-collection/phlebotomists?date=' + encodeURIComponent(hcDay)),
+        ]);
+        hcPhlebs = ph.phlebotomists || [];
+        hcRenderVisits(data.visits || [], data.summary || {});
+        hcRenderPhlebs();
+    } catch (e) {
+        box.innerHTML = emptyState('warning', 'Could not load visits: ' + esc(e.message));
+    }
+}
+
+function hcRenderVisits(visits, summary) {
+    const live = visits.filter(v => v.status === 'confirmed' || v.status === 'completed');
+    document.getElementById('hc-s-total').textContent = live.length;
+    ['unassigned', 'assigned', 'en_route', 'collected', 'failed'].forEach(k => {
+        let n = summary[k] || 0;
+        if (k === 'collected') n += summary.delivered || 0;
+        document.getElementById('hc-s-' + k).textContent = n;
+    });
+    document.getElementById('hcCount').textContent = hcDateLabel(hcDay) + ' · ' + visits.length + ' booking' + (visits.length === 1 ? '' : 's');
+    const box = document.getElementById('hcVisits');
+    if (!visits.length) {
+        box.innerHTML = emptyState('calendar', 'No home collections on ' + esc(hcDateLabel(hcDay)) + '.');
+        return;
+    }
+    let html = '<table><thead><tr><th>Slot</th><th>Patient</th><th>Test</th><th>Address</th><th>Contact</th><th>Phlebotomist</th><th>Status</th><th>Update</th></tr></thead><tbody>';
+    visits.forEach(v => {
+        const liveBooking = v.status === 'confirmed';
+        const finished = ['collected', 'delivered'].includes(v.collection_status);
+        const eligible = hcPhlebs.filter(p => p.is_active && (!p.branch_id || !v.branch_id || p.branch_id === v.branch_id));
+        let phlebCell = esc(v.phlebotomist_name || '') || '<span style="color:var(--text3)">—</span>';
+        if (liveBooking && !finished) {
+            phlebCell = eligible.length
+                ? `<select aria-label="Phlebotomist" onchange="hcAssign('${esc(v.id)}', this.value, this)" style="min-width:150px">`
+                  + (v.phlebotomist_id ? '' : '<option value="">Choose…</option>')
+                  + eligible.map(p => `<option value="${esc(p.id)}" ${p.id === v.phlebotomist_id ? 'selected' : ''}>${esc(p.name)} (${p.total})</option>`).join('')
+                  + '</select>'
+                : '<span style="color:var(--amber);font-size:0.8rem">No active phlebotomist</span>';
+        }
+        const actions = liveBooking && v.phlebotomist_id
+            ? (v.next_statuses || []).map(st => `<button class="btn btn-ghost" onclick="hcSetStatus('${esc(v.id)}','${st}')">${esc(HC_ACTION[st] || st)}</button>`).join('')
+            : '';
+        const pay = v.paid_online ? '<span class="hc-tag ok">Paid</span>' : (v.collect_paise ? `<span class="hc-tag">Collect ${hcRupees(v.collect_paise)}</span>` : '');
+        html += `<tr>
+            <td style="white-space:nowrap;font-weight:600">${esc(v.collection_slot || '—')}</td>
+            <td>${esc(v.patient_name || '—')}<span class="hc-sub">${esc(v.booking_ref || '')}${v.branch_name ? ' · ' + esc(v.branch_name) : ''}</span></td>
+            <td>${esc(v.lab_test_name || '—')}${v.fasting_required ? '<span class="hc-tag">Fasting</span>' : ''}${pay}</td>
+            <td><div class="hc-addr">${esc(v.collection_address || '')}${v.collection_landmark ? `<span class="hc-sub">📌 ${esc(v.collection_landmark)}</span>` : ''}${v.collection_lat != null ? `<a href="${esc(v.maps_link)}" target="_blank" rel="noopener">Open in Maps ↗</a>` : ''}</div></td>
+            <td style="white-space:nowrap">${v.collection_contact_phone ? `<a class="hc-link" href="tel:${esc(v.collection_contact_phone)}">${esc(v.collection_contact_phone)}</a>` : '—'}</td>
+            <td>${phlebCell}</td>
+            <td>${hcBadge(v)}${v.collection_notes ? `<span class="hc-sub" title="${esc(v.collection_notes)}">${esc(v.collection_notes.slice(0, 40))}</span>` : ''}</td>
+            <td><div class="hc-actions">${actions}</div></td>
+        </tr>`;
+    });
+    box.innerHTML = html + '</tbody></table>';
+}
+
+function hcRenderPhlebs() {
+    const box = document.getElementById('hcPhlebs');
+    if (!hcPhlebs.length) {
+        box.innerHTML = emptyState('users', 'No phlebotomists yet. Add one so visits can be assigned automatically.');
+        return;
+    }
+    box.innerHTML = hcPhlebs.map(p => `<div class="hc-phleb-row">
+        <div><strong>${esc(p.name)}</strong>${p.is_active ? '' : ' <span class="badge badge-inactive">Inactive</span>'}
+            <span class="hc-sub">${p.phone ? `<a class="hc-link" href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : 'No phone set'}${p.branch_id ? ' · branch-scoped' : ''}</span></div>
+        <span class="hc-load">${p.done}/${p.total} done</span>
+    </div>`).join('');
+}
+
+async function hcAssign(visitId, phlebId, sel) {
+    if (!phlebId) return;
+    sel.disabled = true;
+    try {
+        await apiPost('/admin/home-collection/visits/' + encodeURIComponent(visitId) + '/assign', { phlebotomist_id: phlebId });
+        toast('Visit assigned. The patient has been told who is coming.');
+    } catch (e) { toast('Error: ' + e.message, true); }
+    loadHomeCollections(true);
+}
+
+async function hcAutoAssign() {
+    try {
+        const r = await apiPost('/admin/home-collection/auto-assign', {});
+        if (r.assigned) toast(`Assigned ${r.assigned} visit(s).` + (r.remaining ? ` ${r.remaining} still need a phlebotomist.` : ''));
+        else toast(r.remaining ? 'No phlebotomist is available for the remaining visits.' : 'Nothing to assign.', !!r.remaining);
+    } catch (e) { toast('Error: ' + e.message, true); }
+    loadHomeCollections(true);
+}
+
+async function hcSetStatus(visitId, status) {
+    let note = null;
+    if (status === 'failed') {
+        note = await promptDialog('Why could the sample not be collected? The patient is told the team will contact them.', {
+            title: "Couldn't collect", okText: 'Save', placeholder: 'e.g. Patient not at home', danger: true });
+        if (!note) return;
+    } else if (!await confirmDialog('Mark this visit as "' + (HC_ACTION[status] || status) + '"? The patient gets a WhatsApp update.', { title: 'Update visit', okText: 'Update' })) {
+        return;
+    }
+    try {
+        await apiPost('/admin/home-collection/visits/' + encodeURIComponent(visitId) + '/status', { status, note });
+        toast('Visit updated');
+    } catch (e) { toast('Error: ' + e.message, true); }
+    if (isPhlebotomist()) loadMyCollections(true); else loadHomeCollections(true);
+}
+
+function hcAddPhlebotomist() {
+    go('staff');
+    document.getElementById('f-staffRole').value = 'PHLEBOTOMIST';
+    onStaffRoleChange();
+    document.getElementById('staffFormCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── settings ──
+function hcSettingsQuery() {
+    const b = document.getElementById('hcSetBranch').value;
+    return b ? '?branch_id=' + encodeURIComponent(b) : '';
+}
+
+async function loadHcSettings() {
+    try {
+        const r = await api('/admin/home-collection/settings' + hcSettingsQuery());
+        const s = r.settings || {};
+        document.getElementById('hcEnabled').checked = !!s.enabled;
+        document.getElementById('hcFee').value = s.fee_rupees || 0;
+        document.getElementById('hcFreeAbove').value = s.free_above_rupees || 0;
+        document.getElementById('hcSlotMinutes').value = String(s.slot_minutes || 60);
+        document.getElementById('hcCapacity').value = s.slot_capacity || 0;
+        document.getElementById('hcLead').value = s.lead_minutes ?? 60;
+        document.getElementById('hcRadius').value = s.max_distance_km || 0;
+        document.getElementById('hcCentre').value = (s.centre_lat != null && s.centre_lng != null) ? `${s.centre_lat}, ${s.centre_lng}` : '';
+        document.getElementById('hcOffBanner').hidden = !!s.enabled;
+        document.getElementById('hcSettingsMsg').innerHTML = (r.source !== 'branch' && document.getElementById('hcSetBranch').value)
+            ? '<div class="alert">This branch uses the shared settings. Saving creates its own.</div>' : '';
+    } catch (e) {
+        msg('hcSettingsMsg', 'Could not load settings: ' + esc(e.message), true);
+    }
+}
+
+async function saveHcSettings() {
+    const num = id => parseInt(document.getElementById(id).value || '0', 10) || 0;
+    const centre = document.getElementById('hcCentre').value.trim();
+    let centre_lat = null, centre_lng = null;
+    if (centre) {
+        const m = centre.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
+        if (!m) { msg('hcSettingsMsg', 'Centre location must look like 17.7231, 83.3012', true); return; }
+        centre_lat = parseFloat(m[1]); centre_lng = parseFloat(m[2]);
+    }
+    if (num('hcRadius') && centre_lat === null) { msg('hcSettingsMsg', 'Add the centre location to use a service radius.', true); return; }
+    try {
+        await apiPut('/admin/home-collection/settings' + hcSettingsQuery(), {
+            enabled: document.getElementById('hcEnabled').checked,
+            fee_rupees: num('hcFee'),
+            free_above_rupees: num('hcFreeAbove'),
+            slot_minutes: num('hcSlotMinutes'),
+            slot_capacity: num('hcCapacity'),
+            lead_minutes: num('hcLead'),
+            max_distance_km: num('hcRadius'),
+            centre_lat, centre_lng,
+        });
+        msg('hcSettingsMsg', 'Saved. WhatsApp bookings use these settings from now on.');
+        document.getElementById('hcOffBanner').hidden = document.getElementById('hcEnabled').checked;
+    } catch (e) { msg('hcSettingsMsg', 'Error: ' + esc(e.message), true); }
+}
+
+// ── phlebotomist view ──
+async function loadMyCollections(silent) {
+    const box = document.getElementById('hcMyVisits');
+    if (!silent) box.innerHTML = '<div class="loader"><div class="spin"></div>Loading your visits...</div>';
+    try {
+        const r = await api('/admin/home-collection/my?date=' + encodeURIComponent(hcDay || hcToday()));
+        const today = hcToday();
+        document.getElementById('hcMe').textContent = (r.me && r.me.name ? r.me.name + ' · ' : '') + hcDateLabel(r.date);
+        const counts = Object.fromEntries((r.upcoming || []).map(u => [u.date, u.count]));
+        const days = [today, ...Object.keys(counts).filter(d => d !== today)].slice(0, 7);
+        document.getElementById('hcDays').innerHTML = days.map(d =>
+            `<button type="button" class="btn btn-ghost btn-sm ${d === r.date ? 'on' : ''}" aria-pressed="${d === r.date}" onclick="hcDay='${d}'; loadMyCollections()">${d === today ? 'Today' : esc(hcDateLabel(d))}${counts[d] ? ' (' + counts[d] + ')' : ''}</button>`).join('');
+        const visits = r.visits || [];
+        const ids = new Set(visits.map(v => v.id));
+        if (silent && hcMyKnown && r.date === today && [...ids].some(id => !hcMyKnown.has(id))) {
+            toast('New home collection assigned to you');
+            if (navigator.vibrate) navigator.vibrate(200);
+        }
+        if (r.date === today) hcMyKnown = ids;
+        if (!visits.length) {
+            box.innerHTML = emptyState('calendar', 'No visits assigned to you on ' + esc(hcDateLabel(r.date)) + '.');
+            return;
+        }
+        box.innerHTML = visits.map(v => {
+            const done = ['collected', 'delivered', 'failed'].includes(v.collection_status);
+            const pay = v.paid_online ? '<span class="hc-tag ok">Paid online</span>'
+                : (v.collect_paise ? `<span class="hc-tag">Collect ${hcRupees(v.collect_paise)} at home</span>` : '');
+            const steps = (v.next_statuses || []).map(st =>
+                `<button class="btn ${st === 'failed' ? 'btn-ghost' : 'btn-accent'}" onclick="hcSetStatus('${esc(v.id)}','${st}')">${esc(HC_ACTION[st] || st)}</button>`).join('');
+            return `<div class="hc-visit ${done ? 'done' : ''}">
+                <div class="hc-visit-top"><span class="hc-slot">${esc(v.collection_slot || '')}</span>${hcBadge(v)}</div>
+                <div><div class="hc-name">${esc(v.patient_name || 'Patient')}</div><span class="hc-sub">${esc(v.booking_ref || '')}</span></div>
+                <div class="hc-line">🧪 ${esc(v.lab_test_name || '')}${v.sample_type ? ' · ' + esc(v.sample_type) : ''}${v.fasting_required ? '<span class="hc-tag">Fasting</span>' : ''} ${pay}</div>
+                <div class="hc-line">📍 ${esc(v.collection_address || '')}${v.collection_landmark ? `<span class="hc-sub">📌 ${esc(v.collection_landmark)}</span>` : ''}</div>
+                ${v.collection_notes ? `<div class="hc-line" style="color:var(--text3)">📝 ${esc(v.collection_notes)}</div>` : ''}
+                <div class="hc-actions">
+                    ${v.collection_lat != null ? `<a class="btn btn-ghost" href="${esc(v.maps_link)}" target="_blank" rel="noopener">🧭 Navigate</a>` : ''}
+                    ${v.collection_contact_phone ? `<a class="btn btn-ghost" href="tel:${esc(v.collection_contact_phone)}">📞 Call</a>` : ''}
+                </div>
+                ${steps ? `<div class="hc-actions">${steps}</div>` : ''}
+            </div>`;
+        }).join('');
+    } catch (e) {
+        box.innerHTML = emptyState('warning', 'Could not load your visits: ' + esc(e.message));
+    }
+}
+
 // ═══════ NAV ═══════
 function go(page, el) {
     document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
@@ -5376,7 +5878,7 @@ function go(page, el) {
     document.getElementById('sidebar').classList.remove('mobile-open');
     document.getElementById('overlay').classList.remove('show');
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads };
     if (loaders[page]) loaders[page]();
 }
 
@@ -7745,9 +8247,12 @@ function bookingReasonLine(b) {
 function bookingSubjectCell(b) {
     const reason = bookingReasonLine(b);
     if (b.booking_type === 'lab_test') {
+        const home = b.collection_mode === 'home'
+            ? '<span class="hc-tag ok" title="Home sample collection">Home · ' + esc(b.collection_slot || '') + '</span>'
+            : '';
         return '<span style="background:rgba(56,189,248,.14);color:#38bdf8;padding:2px 7px;'
             + 'border-radius:4px;font-size:11px;font-weight:600">'
-            + (esc(b.lab_test_name) || 'Lab Test') + '</span>' + reason;
+            + (esc(b.lab_test_name) || 'Lab Test') + '</span>' + home + reason;
     }
     const doctor = esc(b.doctor_name) || '—';
     if (!b.treatment_name) return doctor + reason;
@@ -11395,6 +11900,7 @@ function resetBranchForm() {
 }
 
 const ROLE_PRESETS = {
+    'PHLEBOTOMIST': [],
     'STAFF': [],
     'RECEPTIONIST': [],
     'FRONT_DESK': [],
@@ -11443,9 +11949,12 @@ function onStaffRoleChange() {
     applyPermissionVisibility();
     // A company viewer is bound to a company and holds no grants or branch.
     const viewer = role === 'CORPORATE_VIEWER';
+    // A phlebotomist holds no grants, but patients are told their name and number.
+    const phleb = role === 'PHLEBOTOMIST';
     document.getElementById('f-staffCompanyWrap').style.display = viewer ? '' : 'none';
     document.getElementById('f-staffBranchWrap').style.display = viewer ? 'none' : '';
-    document.getElementById('f-staffPermsWrap').style.display = viewer ? 'none' : '';
+    document.getElementById('f-staffPermsWrap').style.display = (viewer || phleb) ? 'none' : '';
+    document.getElementById('f-staffContactWrap').style.display = phleb ? '' : 'none';
     if (viewer) populateStaffCompanies();
 }
 
@@ -11492,11 +12001,13 @@ async function loadStaff() {
                 : '<span class="badge badge-cancelled">Inactive</span>';
             const isViewer = s.staff_role === 'CORPORATE_VIEWER';
             const roleBadge = `<span class="badge badge-completed">${isViewer ? 'COMPANY VIEWER' : esc(s.staff_role || 'STAFF')}</span>`;
+            const contactLine = (s.full_name || s.phone)
+                ? `<span class="hc-sub">${esc(s.full_name || '')}${s.full_name && s.phone ? ' · ' : ''}${esc(s.phone || '')}</span>` : '';
             const branchLabel = s.branch_id ? `<span style="font-size:0.8rem; color:var(--accent)">Branch Scoped</span>` : '<span style="font-size:0.8rem; color:var(--text3)">All Branches</span>';
             const perms = (s.permissions && s.permissions.length) ? `<span title="${esc(s.permissions.join(', '))}" style="font-size:0.75rem; color:var(--text2);">${s.permissions.length} granted</span>` : '<span style="font-size:0.75rem; color:var(--text3);">Default</span>';
 
             html += `<tr>
-                <td><strong>${esc(s.username)}</strong></td>
+                <td><strong>${esc(s.username)}</strong>${contactLine}</td>
                 <td>${roleBadge}</td>
                 <td>${branchLabel}</td>
                 <td>${perms}</td>
@@ -11548,17 +12059,28 @@ async function createStaff() {
         return;
     }
 
+    const full_name = document.getElementById('f-staffFullName').value.trim() || null;
+    const phone = document.getElementById('f-staffPhone').value.trim() || null;
+    if (staff_role === 'PHLEBOTOMIST' && (!full_name || !phone)) {
+        msg('staffMsg', 'A phlebotomist needs a full name and mobile number: patients are told who is coming and can call them.', true);
+        return;
+    }
+
     try {
         await apiPost('/admin/staff', {
             username,
             password,
             staff_role,
             branch_id,
-            extra_permissions
+            extra_permissions: staff_role === 'PHLEBOTOMIST' ? [] : extra_permissions,
+            full_name,
+            phone
         });
         msg('staffMsg', `Staff login created — Username: <strong>${esc(username)}</strong>, Password: <strong>${esc(password)}</strong>. Copy these now and hand them to your staff member.`);
         document.getElementById('f-staffUsername').value = '';
         document.getElementById('f-staffPassword').value = '';
+        document.getElementById('f-staffFullName').value = '';
+        document.getElementById('f-staffPhone').value = '';
         document.querySelectorAll('.staff-perm-cb').forEach(cb => cb.checked = false);
         loadStaff();
     } catch (e) {
@@ -11574,6 +12096,12 @@ function openEditStaff(staffId) {
     document.getElementById('m-editStaffRole').value = s.staff_role || 'STAFF';
     document.getElementById('m-editStaffBranch').value = s.branch_id || '';
     document.getElementById('m-editStaffStatus').value = s.is_active ? 'true' : 'false';
+    document.getElementById('m-editStaffFullName').value = s.full_name || '';
+    document.getElementById('m-editStaffPhone').value = s.phone || '';
+    // A phlebotomist login keeps its role (the server refuses a change).
+    const roleSel = document.getElementById('m-editStaffRole');
+    roleSel.disabled = s.staff_role === 'PHLEBOTOMIST';
+    roleSel.querySelector('option[value="PHLEBOTOMIST"]').disabled = s.staff_role !== 'PHLEBOTOMIST';
     const held = s.permissions || [];
     document.querySelectorAll('.edit-staff-perm-cb').forEach(cb => {
         cb.checked = held.includes(cb.value);
@@ -11592,13 +12120,17 @@ async function submitEditStaff() {
     const branch_id = document.getElementById('m-editStaffBranch').value || null;
     const is_active = document.getElementById('m-editStaffStatus').value === 'true';
     const extra_permissions = Array.from(document.querySelectorAll('.edit-staff-perm-cb:checked')).map(cb => cb.value);
+    const full_name = document.getElementById('m-editStaffFullName').value.trim();
+    const phone = document.getElementById('m-editStaffPhone').value.trim();
 
     try {
         await apiPut('/admin/staff/' + staffId, {
             staff_role,
             branch_id,
             is_active,
-            extra_permissions
+            extra_permissions: staff_role === 'PHLEBOTOMIST' ? [] : extra_permissions,
+            full_name,
+            phone
         });
         closeEditStaffModal();
         toast('Staff account updated successfully!');

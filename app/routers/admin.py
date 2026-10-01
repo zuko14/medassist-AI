@@ -53,6 +53,7 @@ from app.services.tenant import (
     corporate_health_enabled,
     dental_plans_enabled,
     has_feature,
+    home_collection_available,
     invalidate_tenant_cache,
     require_feature,
     specialty_enabled,
@@ -432,6 +433,32 @@ _CORPORATE_VIEWER_ROUTES = (
 )
 
 
+#: A phlebotomist login (migration 097) works its own home-collection visits
+#: and nothing else: no patient list, no bookings, no reports.
+_PHLEBOTOMIST_ROUTES = (
+    ("GET", re.compile(r"^/admin/me$")),
+    ("PUT", re.compile(r"^/admin/change-password$")),
+    ("PUT", re.compile(r"^/admin/change-username$")),
+    ("GET", re.compile(r"^/admin/home-collection/my$")),
+    ("POST", re.compile(r"^/admin/home-collection/visits/[^/]+/status$")),
+)
+
+
+def _enforce_phlebotomist_scope(request: Request, user: AdminUser) -> AdminUser:
+    from app.services.permissions import PHLEBOTOMIST
+
+    if getattr(user, "staff_role", None) != PHLEBOTOMIST:
+        return user
+    path = request.url.path.rstrip("/") or "/"
+    if any(request.method == m and rx.match(path) for m, rx in _PHLEBOTOMIST_ROUTES):
+        return user
+    logger.warning(f"PHLEBOTOMIST_DENIED user='{user.username}' {request.method} {path}")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This login can only see its own home sample collections.",
+    )
+
+
 def _enforce_corporate_viewer_scope(request: Request, user: AdminUser) -> AdminUser:
     from app.services.permissions import CORPORATE_VIEWER
 
@@ -457,10 +484,11 @@ async def verify_credentials(
     API clients and scripts keep working, and so a deployment where migration
     067 has not been applied still authenticates.
 
-    Company-viewer logins are then confined to _CORPORATE_VIEWER_ROUTES.
+    Company-viewer logins are then confined to _CORPORATE_VIEWER_ROUTES, and
+    phlebotomist logins to _PHLEBOTOMIST_ROUTES.
     """
     user = await _authenticate_request(request, credentials)
-    return _enforce_corporate_viewer_scope(request, user)
+    return _enforce_phlebotomist_scope(request, _enforce_corporate_viewer_scope(request, user))
 
 
 async def _authenticate_request(
@@ -771,6 +799,7 @@ async def get_current_admin(
             "specialty_enabled": False,
             "dental_plans_enabled": False,
             "corporate_health_enabled": False,
+            "home_collection_available": False,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -792,6 +821,8 @@ async def get_current_admin(
         "dental_plans_enabled": dental_plans_enabled(clinic),
         # Diagnostic plans + owner opt-in only (migration 095): Corporate Health page.
         "corporate_health_enabled": corporate_health_enabled(clinic),
+        # Diagnostic plans only (migration 097): Home Collections page.
+        "home_collection_available": home_collection_available(clinic),
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.
@@ -1016,6 +1047,9 @@ class StaffCreate(BaseModel):
     staff_role: str = "STAFF"
     extra_permissions: list[str] = Field(default_factory=list)
     branch_id: Optional[str] = None
+    # migration 097. Required for a PHLEBOTOMIST: given to the patient.
+    full_name: Optional[str] = Field(None, max_length=120)
+    phone: Optional[str] = Field(None, max_length=20)
 
 
 class StaffUpdate(BaseModel):
@@ -1023,6 +1057,32 @@ class StaffUpdate(BaseModel):
     extra_permissions: Optional[list[str]] = None
     branch_id: Optional[str] = None
     is_active: Optional[bool] = None
+    full_name: Optional[str] = Field(None, max_length=120)
+    phone: Optional[str] = Field(None, max_length=20)
+
+
+def _staff_contact(full_name: Optional[str], phone: Optional[str], required: bool) -> dict:
+    """Validated full_name / phone for a staff row. A phlebotomist's are
+    shown to patients, so both are required for that role."""
+    from app.services.home_collection_flow import normalize_contact
+
+    out: dict = {}
+    name = " ".join((full_name or "").split())
+    if name:
+        if len(name) < 2:
+            raise HTTPException(status_code=422, detail="Full name is too short.")
+        out["full_name"] = name
+    if phone:
+        normalized = normalize_contact(phone)
+        if not normalized:
+            raise HTTPException(status_code=422, detail="Enter a valid 10-digit Indian mobile number.")
+        out["phone"] = normalized
+    if required and not (out.get("full_name") and out.get("phone")):
+        raise HTTPException(
+            status_code=422,
+            detail="A phlebotomist needs a full name and mobile number: patients are told who is coming.",
+        )
+    return out
 
 
 @router.get("/staff")
@@ -1034,7 +1094,7 @@ async def list_staff(
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     # unscoped: tenant-scoped operation with verified clinic authorization
     query = supabase.table("clinic_admins").select(
-        "id, username, role, staff_role, permissions, branch_id, is_active, created_at"
+        "id, username, role, staff_role, permissions, branch_id, is_active, created_at, full_name, phone"
     ).eq("role", "staff")
     query = query.eq("clinic_id", effective_clinic_id)
     result = await sb(query.order("created_at", desc=True).limit(2000))
@@ -1072,6 +1132,9 @@ async def create_staff(
             detail="Company viewer logins are created for a company from the Corporate Health page.",
         )
 
+    is_phleb = body.staff_role == "PHLEBOTOMIST"
+    contact = _staff_contact(body.full_name, body.phone, required=is_phleb)
+
     try:
         resolved_permissions = resolve_permissions(body.staff_role, body.extra_permissions)
     except ValueError as e:
@@ -1082,6 +1145,10 @@ async def create_staff(
         granter_permissions=user.permissions,
         granter_role=user.role,
     )
+    if is_phleb:
+        # Confined to its own visits (verify_credentials); a grant would be
+        # unusable and misleading.
+        final_permissions = []
 
     if body.branch_id:
         branch_check = (
@@ -1127,6 +1194,7 @@ async def create_staff(
                 "permissions": final_permissions,
                 "branch_id": body.branch_id,
                 "is_active": True,
+                **contact,
             }
         ))
     )
@@ -1165,7 +1233,7 @@ async def update_staff(
     res = (
     # unscoped: login authentication by username
         await sb(supabase.table("clinic_admins")
-        .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active, username")
+        .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active, username, full_name, phone")
         .eq("id", staff_id))
     )
     if not res.data or res.data[0]["role"] != "staff":
@@ -1193,9 +1261,29 @@ async def update_staff(
             detail="Company viewer logins cannot change role or permissions. Delete it and create a new login instead.",
         )
 
+    # A phlebotomist login is confined to its own visits; a live session would
+    # keep the old confinement across a role change, so it is not offered.
+    is_phleb = target.get("staff_role") == "PHLEBOTOMIST"
+    if (is_phleb and (body.staff_role not in (None, "PHLEBOTOMIST") or body.extra_permissions)) \
+            or (not is_phleb and body.staff_role == "PHLEBOTOMIST"):
+        raise HTTPException(
+            status_code=422,
+            detail="A phlebotomist login cannot change role. Delete it and create a new login instead.",
+        )
+
     update_data: dict = {}
     if body.is_active is not None:
         update_data["is_active"] = body.is_active
+    if body.full_name is not None or body.phone is not None:
+        contact = _staff_contact(
+            body.full_name if body.full_name is not None else target.get("full_name"),
+            body.phone if body.phone is not None else target.get("phone"),
+            required=is_phleb,
+        )
+        if body.full_name is not None:
+            update_data["full_name"] = contact.get("full_name")
+        if body.phone is not None:
+            update_data["phone"] = contact.get("phone")
 
     if body.staff_role is not None or body.extra_permissions is not None:
         new_role = body.staff_role or target.get("staff_role") or "CUSTOM_ROLE"
@@ -1273,7 +1361,7 @@ async def toggle_staff(
     res = (
     # unscoped: login authentication by username
         await sb(supabase.table("clinic_admins")
-        .select("id, clinic_id, is_active, role, branch_id, username")
+        .select("id, clinic_id, is_active, role, branch_id, username, staff_role")
         .eq("id", staff_id))
     )
     if not res.data or res.data[0]["role"] != "staff":
@@ -1296,6 +1384,16 @@ async def toggle_staff(
     # just stop the next login.
     if not new_status and target.get("username"):
         await revoke_sessions_for_user(target["username"])
+
+    # A deactivated phlebotomist's upcoming home visits go to someone else
+    # (migration 097). Best effort: the assignment sweep retries anything left.
+    if not new_status and target.get("staff_role") == "PHLEBOTOMIST":
+        from app.services import home_collection
+
+        try:
+            await home_collection.release_visits_of(str(target["clinic_id"]), staff_id)
+        except Exception as e:
+            logger.error(f"Could not release home visits of deactivated phlebotomist {staff_id}: {e}")
 
     client_ip = request.client.host if (request and request.client) else "unknown"
     await log_admin_action(

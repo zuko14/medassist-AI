@@ -667,6 +667,25 @@ def corporate_health_enabled(clinic: Optional[dict]) -> bool:
     return isinstance(overrides, dict) and overrides.get("corporate_health") is True
 
 
+#: Plans that may offer home sample collection (migration 097): the two
+#: diagnostic-centre plans. A plan list, not a PLAN_FEATURES entry, for the same
+#: reason as CORPORATE_HEALTH_PLANS: the enterprise wildcard and the hybrid
+#: hospital plans must not grow a phlebotomist workflow nobody sold them.
+HOME_COLLECTION_PLANS = frozenset({"diagstream", "diagbooking"})
+
+
+def home_collection_available(clinic: Optional[dict]) -> bool:
+    """Whether this centre's plan includes home sample collection. The centre
+    still has to switch it on (config.home_collection.enabled) before any
+    patient is offered it."""
+    return (
+        bool(clinic)
+        and clinic.get("plan") in HOME_COLLECTION_PLANS
+        and (clinic.get("account_type") or "tenant") == "tenant"
+        and has_feature(clinic, "lab_test_booking")
+    )
+
+
 def has_feature(clinic: dict, feature: str) -> bool:
     """
     Check whether a clinic's plan includes a given feature.
