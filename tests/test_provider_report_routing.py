@@ -98,7 +98,7 @@ def _table_page(rows, header_index=2):
     page.wait_for_timeout = AsyncMock(return_value=None)
 
     async def _evaluate(script, arg=None):
-        if "getElementById('pendingprint')" in script:
+        if arg == "pendingprint":
             return True          # tab click
         if "ths[i].innerText" in script:
             return header_index  # provider column lookup

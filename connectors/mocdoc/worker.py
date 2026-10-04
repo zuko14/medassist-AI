@@ -502,6 +502,19 @@ class MocDocConnector(HospitalConnector):
 
         We loop up to 5 times to handle cascading modals.
         """
+        # Step 0: Remove the fixed page-notice banner (e.g. "Your subscription
+        # ... ends on ...") — it overlays the tab bar and intercepts clicks.
+        # It is an informational alert; removing it changes nothing server-side.
+        try:
+            removed = await self._page.evaluate(
+                "(sel) => { const n = document.querySelectorAll(sel); n.forEach(e => e.remove()); return n.length; }",
+                S.PAGE_NOTICE_BANNER,
+            )
+            if removed:
+                logger.info(f"Removed MocDoc page-notice banner ({S.PAGE_NOTICE_BANNER})")
+        except Exception as e:
+            logger.debug(f"Page-notice banner removal skipped: {e}")
+
         # Step 1: Wait for loading spinner to disappear
         loading = self._page.locator("#ms-loading-modal.show, #ms-loading-modal.in")
         try:
@@ -606,6 +619,17 @@ class MocDocConnector(HospitalConnector):
         await self._dismiss_all_modals()
         return True
 
+    async def _on_pending_print(self) -> bool:
+        """True once the AJAX-loaded 'Pending Print Order' heading is visible."""
+        try:
+            await self._page.wait_for_selector(
+                f"text={S.PENDING_PRINT_HEADING}", state="visible", timeout=15000
+            )
+            await self._page.wait_for_timeout(2000)  # let the table rows render
+            return True
+        except Exception:
+            return False
+
     async def fetch_new_reports(self) -> list[ReportMetadata]:
         """Navigate to lab reports page, parse the Pending Print table.
 
@@ -652,36 +676,46 @@ class MocDocConnector(HospitalConnector):
             """)
             await self._page.wait_for_timeout(500)
 
+            # A click only counts once the "Pending Print Order" heading is
+            # visible. Without this check, a click that silently missed would
+            # leave us parsing Pending Accession (unapproved) rows.
             try:
-                # Try JS click first (bypasses overlay)
-                clicked = await self._page.evaluate("""
-                    const tab = document.getElementById('pendingprint');
-                    if (tab) { tab.click(); return true; }
-                    return false;
-                """)
-                if clicked:
+                # JS click first — a DOM click is not blocked by overlays.
+                # Must be a function: a bare top-level `return` is a
+                # SyntaxError, which is what kept this path dead until Oct 2026.
+                clicked = await self._page.evaluate(
+                    "(id) => { const t = document.getElementById(id); if (t) { t.click(); return true; } return false; }",
+                    S.PENDING_PRINT_TAB_ID,
+                )
+                if clicked and await self._on_pending_print():
                     logger.info(f"Clicked 'Pending Print' tab via JS (attempt {attempt+1})")
                     tab_clicked = True
-                    await self._page.wait_for_timeout(3000)
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"JS tab click attempt {attempt+1} failed: {e}")
 
             try:
                 # Fallback: Playwright click with short timeout
                 tab = self._page.locator(S.PENDING_PRINT_TAB).first
                 await tab.click(timeout=5000)
-                logger.info(f"Clicked 'Pending Print' tab via Playwright (attempt {attempt+1})")
-                tab_clicked = True
-                await self._page.wait_for_timeout(3000)
-                break
-            except Exception:
-                logger.warning(f"Tab click attempt {attempt+1} failed — retrying")
-                await self._page.wait_for_timeout(1000)
+                if await self._on_pending_print():
+                    logger.info(f"Clicked 'Pending Print' tab via Playwright (attempt {attempt+1})")
+                    tab_clicked = True
+                    break
+            except Exception as e:
+                logger.warning(f"Tab click attempt {attempt+1} failed — retrying: {e}")
+            await self._dismiss_all_modals()
+            await self._page.wait_for_timeout(1000)
 
         if not tab_clicked:
-            logger.error("TAB_NOT_FOUND: Could not click Pending Print tab after 3 attempts")
-            return reports
+            # Raise, never return []: an empty list is recorded as a
+            # "Success, 0 found" run, which hid a 4-day delivery outage
+            # (Sep 30 – Oct 4 2026). A raise marks the run failed and alerts.
+            logger.error("TAB_NOT_FOUND: Could not open Pending Print tab after 3 attempts")
+            raise RuntimeError(
+                "MocDoc 'Pending Print' tab could not be opened — a new MocDoc "
+                "popup/overlay or UI change is likely blocking it"
+            )
 
         # Dismiss modals that may appear after tab click
         await self._dismiss_all_modals()
@@ -689,7 +723,7 @@ class MocDocConnector(HospitalConnector):
         # Try to set "Show entries" to 100 (show all rows)
         try:
             # Force the dropdown to 100 via JS and trigger the change event
-            changed = await self._page.evaluate("""
+            changed = await self._page.evaluate("""() => {
                 const select = document.querySelector('select[name$="_length"], .dataTables_length select');
                 if (select) {
                     select.value = '100';
@@ -697,7 +731,7 @@ class MocDocConnector(HospitalConnector):
                     return true;
                 }
                 return false;
-            """)
+            }""")
             if changed:
                 await self._page.wait_for_timeout(3000)
                 await self._dismiss_all_modals()

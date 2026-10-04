@@ -26,6 +26,11 @@ DASHBOARD_URL_PATH = "/frontoffice/home"
 MAINTENANCE_MODAL_OK = "button:has-text('OK')"
 MAINTENANCE_MODAL_UNDERSTAND = "button:has-text('I Understand')"
 
+# "Your subscription for <clinic> ends on <date>. Please renew..." banner
+# (seen Oct 2026). A position:fixed, z-index:1040 dismissible alert that sits
+# on top of the lab tab bar and swallows real clicks on "Pending Print".
+PAGE_NOTICE_BANNER = "#dr_body_notice"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # LAB REPORTS PAGE
 # URL pattern: /investigation/listbydate/order/{clinic_slug}?cat=Laboratory
@@ -34,6 +39,7 @@ LAB_REPORTS_URL_TEMPLATE = "/investigation/listbydate/order/{clinic_slug}?cat=La
 
 # Tab navigation — "Pending Print" shows approved, ready-to-download reports
 PENDING_PRINT_TAB = "a:has-text('Pending Print'), li:has-text('Pending Print') a"
+PENDING_PRINT_TAB_ID = "pendingprint"
 
 # Page title text that confirms we're on the right tab
 PENDING_PRINT_HEADING = "Pending Print Order"

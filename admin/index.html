@@ -1447,6 +1447,102 @@
         @media (max-width: 560px) {
             #pg-insights .stats { grid-template-columns: minmax(0, 1fr); }
         }
+        /* ═══════ REPORT DELIVERY QUEUES — compact cards + glass dialogs ═══════
+           Ported from the owner panel's Outbound Message Audit dialog. Sits at
+           450: above the sidebar (200), below .modal-overlay (500) so Resolve &
+           Send / confirm dialogs opened from inside a queue land on top. */
+        .diag-compact-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 18px; margin-bottom: 20px;
+        }
+        .diag-compact-grid .card.diag-compact { margin-bottom: 0; display: flex; flex-direction: column; gap: 14px; }
+        .diag-compact-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+        .diag-compact-head h3 { font-size: 1rem; font-weight: 600; color: var(--text-strong); }
+        .diag-compact-sub { color: var(--text3); font-size: 0.8rem; margin-top: 2px; }
+        .diag-compact-head .badge { flex-shrink: 0; }
+        .diag-open { align-self: flex-start; margin-top: auto; display: inline-flex; align-items: center; gap: 6px; }
+        .diag-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .diag-chip {
+            background: var(--surface2); border: 1px solid var(--border); border-radius: 12px;
+            padding: 6px 12px; min-width: 92px; text-align: left; cursor: pointer;
+            color: inherit; font: inherit; transition: border-color .2s;
+        }
+        .diag-chip:hover { border-color: var(--border2); }
+        .diag-chip-label { font-size: .66rem; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; }
+        .diag-chip-val { font-weight: 700; font-size: 1rem; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+
+        .glass-overlay {
+            position: fixed; inset: 0; z-index: 450;
+            display: flex; align-items: center; justify-content: center;
+            padding: 24px;
+            background: radial-gradient(ellipse 70% 60% at 50% 40%, rgba(61,139,253,0.10), transparent 70%), rgba(2,6,12,0.64);
+            backdrop-filter: blur(10px) saturate(140%);
+            -webkit-backdrop-filter: blur(10px) saturate(140%);
+            opacity: 0; visibility: hidden;
+            transition: opacity .25s ease, visibility .25s ease;
+        }
+        .glass-overlay.active { opacity: 1; visibility: visible; }
+        .glass-dialog {
+            position: relative;
+            width: min(1180px, 100%);
+            max-height: min(88vh, 900px);
+            display: flex; flex-direction: column;
+            background: linear-gradient(160deg, rgba(36,58,82,0.80) 0%, rgba(14,25,38,0.88) 60%, rgba(10,19,30,0.92) 100%);
+            border: 1px solid var(--border2);
+            border-radius: 22px;
+            box-shadow: inset 0 1px 0 var(--rim), 0 40px 120px rgba(0,0,0,0.65), 0 0 60px rgba(61,139,253,0.10);
+            backdrop-filter: blur(28px) saturate(160%);
+            -webkit-backdrop-filter: blur(28px) saturate(160%);
+            overflow: hidden;
+            transform: translateY(14px) scale(.985);
+            transition: transform .3s cubic-bezier(.2,.8,.2,1);
+        }
+        .glass-overlay.active .glass-dialog { transform: none; }
+        .glass-dialog::before {
+            content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+            background: var(--brand-grad); opacity: .85;
+        }
+        .glass-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 28px 16px; }
+        .glass-eyebrow {
+            font-size: .7rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+            color: var(--mint); opacity: .75; margin-bottom: 6px;
+        }
+        .glass-head h3 { font-size: 1.35rem; font-weight: 700; color: var(--text-strong); letter-spacing: -0.02em; }
+        .glass-sub { color: var(--text3); font-size: .82rem; margin-top: 4px; }
+        .glass-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 0 28px 14px; }
+        .glass-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; }
+        .glass-body {
+            flex: 1; min-height: 0; overflow: auto;
+            margin: 0 16px 16px; border: 1px solid var(--border); border-radius: 14px;
+            background: rgba(4,10,17,0.35);
+        }
+        .glass-body .tbl-wrap { overflow: visible; border-radius: 0; }
+        .glass-body th { position: sticky; top: 0; z-index: 1; background: rgba(22,36,52,0.96); }
+        .glass-foot { padding: 0 28px 18px; font-size: .78rem; color: var(--text3); }
+        .glass-close {
+            width: 38px; height: 38px; flex-shrink: 0;
+            display: inline-flex; align-items: center; justify-content: center;
+            border-radius: 12px; border: 1px solid var(--border); background: var(--surface2);
+            color: var(--text2); cursor: pointer; transition: all .2s;
+        }
+        .glass-close:hover { color: var(--text-strong); border-color: var(--border2); }
+        .glass-close:focus-visible, .diag-open:focus-visible, .diag-chip:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+        :root[data-theme="light"] .glass-overlay { background: rgba(7,24,32,0.38); }
+        :root[data-theme="light"] .glass-dialog {
+            background: linear-gradient(160deg, rgba(255,255,255,0.96) 0%, rgba(240,247,248,0.97) 100%);
+            box-shadow: inset 0 1px 0 var(--rim), 0 30px 90px rgba(7,24,32,0.28);
+        }
+        :root[data-theme="light"] .glass-body { background: rgba(255,255,255,0.6); }
+        :root[data-theme="light"] .glass-body th { background: #ECF4F5; }
+        @media (max-width: 640px) {
+            .glass-overlay { padding: 10px; }
+            .glass-dialog { max-height: 94vh; border-radius: 18px; }
+            .glass-head { padding: 18px 16px 12px; }
+            .glass-toolbar { padding: 0 16px 12px; }
+            .glass-toolbar-actions { margin-left: 0; }
+            .glass-body { margin: 0 8px 10px; }
+            .glass-foot { padding: 0 16px 14px; }
+        }
     </style>
 </head>
 <body>
@@ -1850,67 +1946,43 @@
                     <div class="stat" style="border-color:rgba(255,200,87,0.3)" title="Reports delivered today whose AI summary did NOT reach the patient. Outside WhatsApp's 24h window the delivery template carries no summary text — configure an approved 3-variable summary template to include it."><div class="glow" style="background:var(--amber)"></div><div class="label">Sent Without Summary</div><div class="num" id="s-diag-nosummary" style="color:var(--amber)">0</div></div>
                 </div>
 
-                <!-- Needs Review Triage Table -->
-                <div class="card" style="border-left:4px solid var(--amber);">
-                    <div class="card-head">
-                        <div>
-                            <h3 style="color:var(--amber);">Needs-Review Triage Queue</h3>
-                            <p style="color:var(--text3); font-size:0.8rem; margin-top:2px;">Reports requiring phone or identity verification before WhatsApp delivery</p>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <!-- Flushes reports parked by the old verification gate. A walk-in's
-                                 number is never in the patient list, so that gate held every
-                                 report; delivery is automatic now and this clears the backlog. -->
-                            <button class="btn btn-sm btn-accent" id="releaseWalkinsBtn"
-                                    onclick="releaseHeldWalkins()"
-                                    title="Send all walk-in reports that were held because the phone number was not in your patient list">
-                                Send held walk-ins
-                            </button>
-                            <button class="btn btn-sm btn-ghost" id="dismissAllReviewBtn"
-                                    onclick="dismissAllReviewReports()"
-                                    style="color:var(--text3); border:1px solid rgba(255,255,255,0.15);"
-                                    title="Dismiss all unresolved reports from the triage queue">
-                                Dismiss All
-                            </button>
+                <!-- Report delivery queues — compact cards. Each full table opens in a
+                     glass dialog (same pattern as the owner panel's Outbound Message
+                     Audit). The table containers keep their ids, so every render
+                     function writes into the dialog unchanged. -->
+                <div class="diag-compact-grid">
+                    <div class="card diag-compact" style="border-left:4px solid var(--amber);">
+                        <div class="diag-compact-head">
+                            <div>
+                                <h3 style="color:var(--amber);">Needs-Review Triage Queue</h3>
+                                <p class="diag-compact-sub">Reports requiring phone or identity verification before WhatsApp delivery</p>
+                            </div>
                             <span id="diagReviewCountBadge" class="badge badge-pending">0 Pending</span>
                         </div>
+                        <button class="btn btn-sm btn-ghost diag-open" onclick="openDiagGlass('diagReviewModal')" aria-haspopup="dialog" aria-controls="diagReviewModal"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-list"/></svg> View all</button>
                     </div>
-                    <div class="tbl-wrap" id="diagReviewQueue">
-                        <div class="loader"><div class="spin"></div>Loading triage queue...</div>
-                    </div>
-                </div>
 
-                <!-- Undelivered / Failed Reports Table -->
-                <div class="card" style="border-left:4px solid var(--red);">
-                    <div class="card-head">
-                        <div>
-                            <h3 style="color:var(--red);">Failed Deliveries Queue</h3>
-                            <p style="color:var(--text3); font-size:0.8rem; margin-top:2px;">Reports where delivery failed due to network, recipient, or storage issues</p>
+                    <div class="card diag-compact" style="border-left:4px solid var(--red);">
+                        <div class="diag-compact-head">
+                            <div>
+                                <h3 style="color:var(--red);">Failed Deliveries Queue</h3>
+                                <p class="diag-compact-sub">Reports where delivery failed due to network, recipient, or storage issues</p>
+                            </div>
+                            <span id="diagFailedCountBadge" class="badge badge-failed">0 Failed</span>
                         </div>
-                        <span id="diagFailedCountBadge" class="badge badge-failed">0 Failed</span>
+                        <button class="btn btn-sm btn-ghost diag-open" onclick="openDiagGlass('diagFailedModal')" aria-haspopup="dialog" aria-controls="diagFailedModal"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-list"/></svg> View all</button>
                     </div>
-                    <div class="tbl-wrap" id="diagFailedQueue">
-                        <div class="loader"><div class="spin"></div>Loading failed deliveries...</div>
-                    </div>
-                </div>
 
-                <!-- WhatsApp Delivery Log Table -->
-                <div class="card">
-                    <div class="card-head" style="flex-wrap:wrap; gap:10px;">
-                        <div>
-                            <h3>WhatsApp Delivery Log</h3>
-                            <p style="color:var(--text3); font-size:0.8rem; margin-top:2px;">Real-time per-report delivery status and Meta webhook confirmations</p>
+                    <div class="card diag-compact">
+                        <div class="diag-compact-head">
+                            <div>
+                                <h3>WhatsApp Delivery Log</h3>
+                                <p class="diag-compact-sub">Real-time per-report delivery status and Meta webhook confirmations</p>
+                            </div>
+                            <span id="diagDeliveryCountBadge" class="badge badge-confirmed">— Events</span>
                         </div>
-                        <div style="display:flex; gap:6px; flex-wrap:wrap;" id="diagFilterButtons">
-                            <button class="btn btn-sm diag-filter-btn active" id="df-all" onclick="filterDiagDeliveries('all')">All</button>
-                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-delivered" onclick="filterDiagDeliveries('delivered')">Delivered</button>
-                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-pending" onclick="filterDiagDeliveries('pending')">Awaiting Receipt</button>
-                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-failed" onclick="filterDiagDeliveries('failed')">Failed</button>
-                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-needs_review" onclick="filterDiagDeliveries('needs_review')">Unmatched</button>
-                        </div>
-                    </div>
-                    <div class="tbl-wrap" id="diagDeliveryLog">
-                        <div class="loader"><div class="spin"></div>Loading delivery log...</div>
+                        <div class="diag-chips" id="diagDeliveryChips"></div>
+                        <button class="btn btn-sm btn-ghost diag-open" onclick="openDiagGlass('diagDeliveryModal')" aria-haspopup="dialog" aria-controls="diagDeliveryModal"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-list"/></svg> View all</button>
                     </div>
                 </div>
 
@@ -3580,6 +3652,99 @@
         </div>
 
     </main>
+</div>
+
+<!-- ═══ REPORT DELIVERY QUEUES — glass dialogs opened from the dashboard cards ═══ -->
+<div class="glass-overlay" id="diagReviewModal" role="dialog" aria-modal="true" aria-labelledby="diagReviewModalTitle" aria-hidden="true"
+     onclick="if (event.target === this) closeDiagGlass()">
+    <div class="glass-dialog">
+        <div class="glass-head">
+            <div>
+                <div class="glass-eyebrow">Report delivery · Triage</div>
+                <h3 id="diagReviewModalTitle" style="color:var(--amber);">Needs-Review Triage Queue</h3>
+                <div class="glass-sub">Reports requiring phone or identity verification before WhatsApp delivery</div>
+            </div>
+            <button class="glass-close" onclick="closeDiagGlass()" aria-label="Close triage queue"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+        </div>
+        <div class="glass-toolbar">
+            <span id="diagReviewModalCount" class="badge badge-pending">0 Pending</span>
+            <div class="glass-toolbar-actions">
+                            <!-- Flushes reports parked by the old verification gate. A walk-in's
+                                 number is never in the patient list, so that gate held every
+                                 report; delivery is automatic now and this clears the backlog. -->
+                            <button class="btn btn-sm btn-accent" id="releaseWalkinsBtn"
+                                    onclick="releaseHeldWalkins()"
+                                    title="Send all walk-in reports that were held because the phone number was not in your patient list">
+                                Send held walk-ins
+                            </button>
+                            <button class="btn btn-sm btn-ghost" id="dismissAllReviewBtn"
+                                    onclick="dismissAllReviewReports()"
+                                    style="color:var(--text3); border:1px solid rgba(255,255,255,0.15);"
+                                    title="Dismiss all unresolved reports from the triage queue">
+                                Dismiss All
+                            </button>
+                            <button class="btn btn-sm btn-ghost" onclick="loadDiagnosticDashboard()" aria-label="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button>
+            </div>
+        </div>
+        <div class="glass-body">
+            <div class="tbl-wrap" id="diagReviewQueue">
+                <div class="loader"><div class="spin"></div>Loading triage queue...</div>
+            </div>
+        </div>
+        <div class="glass-foot">Press Esc to close.</div>
+    </div>
+</div>
+<div class="glass-overlay" id="diagFailedModal" role="dialog" aria-modal="true" aria-labelledby="diagFailedModalTitle" aria-hidden="true"
+     onclick="if (event.target === this) closeDiagGlass()">
+    <div class="glass-dialog">
+        <div class="glass-head">
+            <div>
+                <div class="glass-eyebrow">Report delivery · Failures</div>
+                <h3 id="diagFailedModalTitle" style="color:var(--red);">Failed Deliveries Queue</h3>
+                <div class="glass-sub">Reports where delivery failed due to network, recipient, or storage issues</div>
+            </div>
+            <button class="glass-close" onclick="closeDiagGlass()" aria-label="Close failed deliveries"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+        </div>
+        <div class="glass-toolbar">
+            <span id="diagFailedModalCount" class="badge badge-failed">0 Failed</span>
+            <div class="glass-toolbar-actions"><button class="btn btn-sm btn-ghost" onclick="loadDiagnosticDashboard()" aria-label="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button></div>
+        </div>
+        <div class="glass-body">
+            <div class="tbl-wrap" id="diagFailedQueue">
+                <div class="loader"><div class="spin"></div>Loading failed deliveries...</div>
+            </div>
+        </div>
+        <div class="glass-foot">Press Esc to close.</div>
+    </div>
+</div>
+<div class="glass-overlay" id="diagDeliveryModal" role="dialog" aria-modal="true" aria-labelledby="diagDeliveryModalTitle" aria-hidden="true"
+     onclick="if (event.target === this) closeDiagGlass()">
+    <div class="glass-dialog">
+        <div class="glass-head">
+            <div>
+                <div class="glass-eyebrow">Report delivery · WhatsApp</div>
+                <h3 id="diagDeliveryModalTitle">WhatsApp Delivery Log</h3>
+                <div class="glass-sub">Real-time per-report delivery status and Meta webhook confirmations</div>
+            </div>
+            <button class="glass-close" onclick="closeDiagGlass()" aria-label="Close delivery log"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+        </div>
+        <div class="glass-toolbar">
+            <div style="display:flex; gap:6px; flex-wrap:wrap;" id="diagFilterButtons">
+                            <button class="btn btn-sm diag-filter-btn active" id="df-all" onclick="filterDiagDeliveries('all')">All</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-delivered" onclick="filterDiagDeliveries('delivered')">Delivered</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-pending" onclick="filterDiagDeliveries('pending')">Awaiting Receipt</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-failed" onclick="filterDiagDeliveries('failed')">Failed</button>
+                            <button class="btn btn-sm btn-ghost diag-filter-btn" id="df-needs_review" onclick="filterDiagDeliveries('needs_review')">Unmatched</button>
+                        </div>
+            <div class="glass-toolbar-actions"><button class="btn btn-sm btn-ghost" onclick="loadDiagnosticDashboard()" aria-label="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button></div>
+        </div>
+        <div class="glass-body">
+            <div class="tbl-wrap" id="diagDeliveryLog">
+                <div class="loader"><div class="spin"></div>Loading delivery log...</div>
+            </div>
+        </div>
+        <div class="glass-foot">Press Esc to close.</div>
+    </div>
 </div>
 
 <!-- ═══ RESOLVE MATCH MODAL ═══ -->
@@ -12907,10 +13072,69 @@ async function loadDiagnosticDashboard() {
     }
 }
 
+// ── Report delivery queues: glass dialogs (owner-panel audit pattern) ──────
+function _mirrorDiagBadge(fromId, toId) {
+    const a = document.getElementById(fromId), b = document.getElementById(toId);
+    if (a && b) { b.textContent = a.textContent; b.className = a.className; }
+}
+
+function renderDiagDeliverySummary() {
+    const counts = { delivered: 0, pending: 0, failed: 0, needs_review: 0 };
+    (_allDiagDeliveries || []).forEach(d => { counts[getDeliveryItemState(d)]++; });
+    const total = (_allDiagDeliveries || []).length;
+    const badge = document.getElementById('diagDeliveryCountBadge');
+    if (badge) badge.textContent = total + (total === 1 ? ' Event' : ' Events');
+    const chips = document.getElementById('diagDeliveryChips');
+    if (!chips) return;
+    const defs = [
+        ['delivered', 'Delivered', 'var(--green)'],
+        ['pending', 'Awaiting Receipt', 'var(--text-strong)'],
+        ['failed', 'Failed', 'var(--red)'],
+        ['needs_review', 'Unmatched', 'var(--amber)'],
+    ];
+    chips.innerHTML = defs.map(([key, label, color]) =>
+        `<button type="button" class="diag-chip" onclick="filterDiagDeliveries('${key}'); openDiagGlass('diagDeliveryModal')" aria-label="View ${label} deliveries">` +
+        `<div class="diag-chip-label">${label}</div><div class="diag-chip-val" style="color:${color}">${counts[key]}</div></button>`
+    ).join('');
+}
+
+let _diagGlassOpen = null;
+let _diagGlassOpener = null;
+
+function openDiagGlass(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    if (_diagGlassOpen && _diagGlassOpen !== modal) closeDiagGlass();
+    _diagGlassOpener = document.activeElement;
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    _diagGlassOpen = modal;
+    setTimeout(() => { const c = modal.querySelector('.glass-close'); if (c) c.focus(); }, 60);
+}
+
+function closeDiagGlass() {
+    const modal = _diagGlassOpen;
+    if (!modal) return;
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    _diagGlassOpen = null;
+    if (_diagGlassOpener && _diagGlassOpener.focus) _diagGlassOpener.focus();
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !_diagGlassOpen) return;
+    // A dialog opened from inside a queue (Resolve & Send, confirm) owns Esc first.
+    if (document.querySelector('.modal-overlay.open')) return;
+    closeDiagGlass();
+});
+
 function renderDiagReviewQueue(items) {
     const el = document.getElementById('diagReviewQueue');
     document.getElementById('diagReviewCountBadge').textContent = items.length + ' Pending';
     document.getElementById('diagReviewCountBadge').className = items.length > 0 ? 'badge badge-pending' : 'badge badge-confirmed';
+    _mirrorDiagBadge('diagReviewCountBadge', 'diagReviewModalCount');
 
     if (!items || items.length === 0) {
         el.innerHTML = emptyState('success', 'All clear! No reports pending verification.');
@@ -12943,6 +13167,7 @@ function renderDiagFailedQueue(labFailures, connectorFailures) {
     const el = document.getElementById('diagFailedQueue');
     const totalFailed = (labFailures.length || 0) + (connectorFailures.length || 0);
     document.getElementById('diagFailedCountBadge').textContent = totalFailed + ' Failed';
+    _mirrorDiagBadge('diagFailedCountBadge', 'diagFailedModalCount');
 
     if (totalFailed === 0) {
         el.innerHTML = emptyState('success', 'All clear! Zero failed deliveries.');
@@ -12982,6 +13207,7 @@ function renderDiagFailedQueue(labFailures, connectorFailures) {
 }
 
 let _allDiagDeliveries = [];
+let _diagDeliveriesLoaded = false;
 let _diagDeliveryFilter = 'all';
 
 function getDeliveryItemState(d) {
@@ -13034,7 +13260,7 @@ function applyDiagDeliveryFilter() {
     const el = document.getElementById('diagDeliveryLog');
     if (!el) return;
 
-    if (!_allDiagDeliveries || _allDiagDeliveries.length === 0) {
+    if (!_diagDeliveriesLoaded) {
         loadDiagDeliveries();
         return;
     }
@@ -13057,9 +13283,13 @@ async function loadDiagDeliveries() {
     try {
         const res = await api('/admin/lab-reports/deliveries');
         _allDiagDeliveries = res.deliveries || [];
+        _diagDeliveriesLoaded = true;
+        renderDiagDeliverySummary();
         applyDiagDeliveryFilter();
     } catch (e) {
         el.innerHTML = emptyState('warning', 'Failed to load delivery log.');
+        const badge = document.getElementById('diagDeliveryCountBadge');
+        if (badge) badge.textContent = 'Unavailable';
     }
 }
 
