@@ -51,6 +51,7 @@ from app.services.tenant import (
     cancellation_window_hours,
     get_clinic_by_id,
     corporate_health_enabled,
+    ai_receptionist_enabled,
     dental_plans_enabled,
     has_feature,
     home_collection_available,
@@ -800,6 +801,7 @@ async def get_current_admin(
             "dental_plans_enabled": False,
             "corporate_health_enabled": False,
             "home_collection_available": False,
+            "ai_receptionist_enabled": False,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -823,6 +825,8 @@ async def get_current_admin(
         "corporate_health_enabled": corporate_health_enabled(clinic),
         # Diagnostic plans only (migration 097): Home Collections page.
         "home_collection_available": home_collection_available(clinic),
+        # Owner opt-in only (migration 098): the AI Receptionist control room.
+        "ai_receptionist_enabled": ai_receptionist_enabled(clinic),
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.

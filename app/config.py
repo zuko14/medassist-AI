@@ -221,6 +221,38 @@ class Settings(BaseSettings):
     health_checkin_template_name: str = "patient_health_checkin"
     admin_alert_template_name: str = ""  # Meta utility template (1 body var) for connector alerts outside 24h window
 
+    # -- AI voice receptionist (migration 098, app/voice/) -----------------------
+    # Dormant unless VOICE_ENABLED=true AND the platform owner switches
+    # clinics.features.ai_receptionist on for a clinic AND maps an Exophone.
+    voice_enabled: bool = False
+    voice_stream_token: str = ""          # secret query param ?k= on the Exotel Voicebot URL
+    voice_public_wss_url: str = ""        # e.g. wss://<host>/voice/exotel/stream (shown in owner panel)
+    voice_max_concurrent_calls: int = 20  # per process; extra calls are sent to reception
+    voice_max_call_seconds: int = 600
+    voice_silence_reprompt_seconds: int = 8
+    voice_conf_clarify_below: float = 0.6
+    voice_llm_model: str = "google/gemini-2.0-flash-001"   # via OpenRouter (ai_gateway)
+    voice_llm_timeout_seconds: float = 3.0
+    voice_payment_link_template_name: str = "kriya_payment_link"  # Meta UTILITY template, 8 body vars
+    voice_transcript_retention_days: int = 30
+    sarvam_api_key: str = ""
+    sarvam_stt_url: str = "wss://api.sarvam.ai/speech-to-text/ws"
+    sarvam_stt_model: str = "saaras:v3"
+    sarvam_stt_mode: str = "transcribe"
+    sarvam_tts_url: str = "wss://api.sarvam.ai/text-to-speech/ws"
+    sarvam_tts_model: str = "bulbul:v3"
+    sarvam_tts_speaker: str = "priya"
+    exotel_account_sid: str = ""
+    exotel_api_key: str = ""
+    exotel_api_token: str = ""
+    exotel_api_host: str = "api.exotel.com"   # Mumbai cluster: api.in.exotel.com
+    exotel_outbound_flow_url: str = ""        # http://my.exotel.com/<sid>/exoml/start_voice/<app_id>
+    # Cost rates copied from YOUR invoices. 0 = not configured: the panels show
+    # "rate not set" instead of a made-up cost.
+    voice_stt_paise_per_minute: int = 0
+    voice_tts_paise_per_1k_chars: int = 0
+    voice_telephony_paise_per_minute: int = 0
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

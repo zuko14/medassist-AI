@@ -651,7 +651,19 @@ def dental_plans_enabled(clinic: Optional[dict]) -> bool:
 #: "every feature" hybrid plans can never switch them on by accident.
 OPT_IN_FEATURES: dict[str, str] = {
     "corporate_health": "Corporate Employee Health Insights",
+    "ai_receptionist": "AI Voice Receptionist",
 }
+
+def ai_receptionist_enabled(clinic: Optional[dict]) -> bool:
+    """AI voice receptionist (migration 098). Any plan, but ONLY with an
+    explicit owner opt-in (clinics.features.ai_receptionist is True) - never
+    has_feature(), whose enterprise wildcard answers True to everything - and
+    never for a dashboard-only corporate partner account."""
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return False
+    overrides = clinic.get("features") or {}
+    return isinstance(overrides, dict) and overrides.get("ai_receptionist") is True
+
 
 #: Plans that may use corporate_health: the two diagnostic-centre plans.
 CORPORATE_HEALTH_PLANS = frozenset({"diagstream", "diagbooking"})
