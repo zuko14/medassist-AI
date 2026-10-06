@@ -14,6 +14,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from app.config import settings  # noqa: E402
 from app.voice.audio import PcmChunker  # noqa: E402

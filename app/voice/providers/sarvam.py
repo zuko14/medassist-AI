@@ -38,12 +38,16 @@ def _headers() -> dict:
 
 
 class _SarvamSTTStream:
-    def __init__(self, ws):
+    def __init__(self, ws, sample_rate: int = 8000):
         self.ws = ws
+        self.sample_rate = sample_rate
 
     async def send(self, pcm: bytes) -> None:
-        await self.ws.send(json.dumps({"audio": {"data": base64.b64encode(pcm).decode("ascii"),
-                                                 "encoding": "audio/wav"}}))
+        await self.ws.send(json.dumps({"audio": {
+            "data": base64.b64encode(pcm).decode("ascii"),
+            "encoding": "audio/wav",
+            "sample_rate": self.sample_rate,
+        }}))
 
     async def events(self) -> AsyncIterator[tuple]:
         async for raw in self.ws:
@@ -61,8 +65,9 @@ class _SarvamSTTStream:
                 elif sig == "END_SPEECH":
                     yield ("speech_end", None)
             elif kind == "error":
-                logger.error(f"SARVAM_STT_ERROR code={data.get('code')} {str(data.get('error'))[:200]}")
-                yield ("error", data.get("code"))
+                msg_err = data.get("message") or data.get("error")
+                logger.error(f"SARVAM_STT_ERROR code={data.get('code')} {str(msg_err)[:200]}")
+                yield ("error", data.get("code") or msg_err)
 
     async def close(self) -> None:
         try:
@@ -78,7 +83,7 @@ class SarvamSTT:
              "vad_signals": "true", "high_vad_sensitivity": "true"}
         ws = await asyncio.wait_for(connect(f"{settings.sarvam_stt_url}?{urlencode(q)}",
                                             additional_headers=_headers(), max_size=2 ** 22), timeout=5)
-        return _SarvamSTTStream(ws)
+        return _SarvamSTTStream(ws, sample_rate=sample_rate)
 
 
 class SarvamTTS:
