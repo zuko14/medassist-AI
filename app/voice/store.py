@@ -14,6 +14,7 @@ from typing import Optional
 from app.config import settings
 from app.database import sb, supabase
 from app.tenancy import is_valid_clinic_scope
+from .phone import to_e164
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +68,21 @@ async def resolve_number(exophone: str) -> Optional[dict]:
     """The active voice_numbers row for a dialled Exophone, or None. Fails closed."""
     if not exophone:
         return None
-    try:
-        res = await sb(
-            # unscoped: global_auth_lookup
-            supabase.table("voice_numbers").select("*").eq("exophone", exophone).eq("is_active", True).limit(1)
-        )
-    except Exception as e:
-        logger.error(f"VOICE_NUMBER_LOOKUP_FAILED: {e}")
-        return None
-    return (res.data or [None])[0]
+    candidates = [exophone]
+    norm = to_e164(exophone)
+    if norm and norm not in candidates:
+        candidates.append(norm)
+    for num in candidates:
+        try:
+            res = await sb(
+                # unscoped: global_auth_lookup
+                supabase.table("voice_numbers").select("*").eq("exophone", num).eq("is_active", True).limit(1)
+            )
+            if res.data:
+                return res.data[0]
+        except Exception as e:
+            logger.error(f"VOICE_NUMBER_LOOKUP_FAILED for {num}: {e}")
+    return None
 
 
 async def create_call(clinic_id: str, fields: dict) -> Optional[dict]:

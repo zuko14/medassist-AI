@@ -40,30 +40,43 @@ def parse(raw) -> StreamEvent:
     if kind == "connected":
         return StreamEvent("connected")
     if kind == "start":
-        st = msg.get("start") or {}
-        fmt = st.get("media_format") or {}
+        st = msg.get("start") if isinstance(msg.get("start"), dict) else {}
+        fmt = st.get("media_format") or msg.get("media_format") or {}
         try:
-            rate = int(fmt.get("sample_rate") or 8000)
+            rate = int(fmt.get("sample_rate") or msg.get("sample_rate") or 8000)
         except (TypeError, ValueError):
             rate = 8000
-        custom = st.get("custom_parameters") or {}
-        return StreamEvent("start", stream_sid=st.get("stream_sid") or sid, call_sid=st.get("call_sid"),
-                           from_number=st.get("from"), to_number=st.get("to"),
-                           custom=custom if isinstance(custom, dict) else {}, sample_rate=rate)
+        custom = st.get("custom_parameters") or msg.get("custom_parameters") or {}
+        return StreamEvent(
+            "start",
+            stream_sid=st.get("stream_sid") or msg.get("stream_sid") or sid,
+            call_sid=st.get("call_sid") or msg.get("call_sid"),
+            from_number=st.get("from") or msg.get("from") or msg.get("From"),
+            to_number=st.get("to") or msg.get("to") or msg.get("To"),
+            custom=custom if isinstance(custom, dict) else {},
+            sample_rate=rate,
+        )
     if kind == "media":
-        payload = (msg.get("media") or {}).get("payload") or ""
+        payload = (msg.get("media") or {}).get("payload") if isinstance(msg.get("media"), dict) else msg.get("payload") or ""
         try:
             audio = base64.b64decode(payload, validate=False)
         except (ValueError, TypeError) as e:
             raise ValueError(f"bad media payload: {e}") from e
-        return StreamEvent("media", stream_sid=sid, audio=audio)
+        return StreamEvent("media", stream_sid=sid or (msg.get("media") or {}).get("stream_sid"), audio=audio)
     if kind == "dtmf":
-        return StreamEvent("dtmf", stream_sid=sid, digit=str((msg.get("dtmf") or {}).get("digit") or ""))
+        digit = str((msg.get("dtmf") or {}).get("digit") if isinstance(msg.get("dtmf"), dict) else msg.get("digit") or "")
+        return StreamEvent("dtmf", stream_sid=sid, digit=digit)
     if kind == "mark":
-        return StreamEvent("mark", stream_sid=sid, mark=(msg.get("mark") or {}).get("name"))
+        mark_name = (msg.get("mark") or {}).get("name") if isinstance(msg.get("mark"), dict) else msg.get("mark")
+        return StreamEvent("mark", stream_sid=sid, mark=mark_name)
     if kind == "stop":
-        st = msg.get("stop") or {}
-        return StreamEvent("stop", stream_sid=sid, call_sid=st.get("call_sid"), reason=st.get("reason"))
+        st = msg.get("stop") if isinstance(msg.get("stop"), dict) else {}
+        return StreamEvent(
+            "stop",
+            stream_sid=st.get("stream_sid") or sid,
+            call_sid=st.get("call_sid") or msg.get("call_sid"),
+            reason=st.get("reason") or msg.get("reason"),
+        )
     raise ValueError(f"unknown event {kind!r}")
 
 

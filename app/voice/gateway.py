@@ -196,7 +196,9 @@ class CallRunner:
 
 async def _wait_start(ws) -> X.StreamEvent:
     while True:
-        ev = X.parse(await asyncio.wait_for(ws.receive_text(), timeout=10))
+        raw = await asyncio.wait_for(ws.receive_text(), timeout=10)
+        ev = X.parse(raw)
+        logger.info(f"VOICE_STREAM_EVENT kind={ev.kind}")
         if ev.kind == "start":
             return ev
 
@@ -204,7 +206,7 @@ async def _wait_start(ws) -> X.StreamEvent:
 async def admit(ev: X.StreamEvent):
     """(call_row, clinic, number_row, refusal_reason). Refusal => the caller goes to reception."""
     caller = to_e164(ev.from_number) or (ev.from_number or "unknown")
-    exophone = to_e164(ev.to_number)
+    exophone = to_e164(ev.to_number) or ev.to_number
     existing = None
     for _ in range(3):  # an outbound row is written just after Exotel accepts the dial
         existing = await store.get_call_by_sid(ev.call_sid)
@@ -214,6 +216,7 @@ async def admit(ev: X.StreamEvent):
     number = await store.resolve_number(existing.get("exophone") if existing else exophone)
     clinic_id = existing["clinic_id"] if existing else (number or {}).get("clinic_id")
     if not clinic_id:
+        logger.warning(f"VOICE_UNKNOWN_NUMBER exophone={exophone} raw_to={ev.to_number} from={mask(caller)}")
         return None, None, None, "unknown_number"
     try:
         clinic = await get_clinic_by_id(clinic_id)
@@ -239,8 +242,8 @@ async def admit(ev: X.StreamEvent):
         call = {**existing, **fields}
     else:
         call = await store.create_call(clinic_id, {**fields, "direction": "inbound", "caller_phone": caller,
-                                                   "branch_id": (number or {}).get("branch_id"),
-                                                   "language": store.voice_config(clinic)["primary_language"]})
+                                                    "branch_id": (number or {}).get("branch_id"),
+                                                    "language": store.voice_config(clinic)["primary_language"]})
         if not call:
             return None, clinic, number, "db_unavailable"
     return call, clinic, number, reason
@@ -249,14 +252,18 @@ async def admit(ev: X.StreamEvent):
 @router.websocket("/voice/exotel/stream")
 async def exotel_stream(ws: WebSocket, k: str = ""):
     if not settings.voice_enabled or not token_ok(k):
+        logger.warning(f"VOICE_STREAM_REJECTED enabled={settings.voice_enabled} token_ok={token_ok(k)}")
         await ws.close(code=1008)
         return
     await ws.accept()
+    logger.info("VOICE_STREAM_CONNECTED")
     try:
         ev = await _wait_start(ws)
-    except Exception:
+    except Exception as e:
+        logger.error(f"VOICE_STREAM_WAIT_START_FAILED: {type(e).__name__}: {e}")
         await ws.close()
         return
+    logger.info(f"VOICE_STREAM_START call_sid={ev.call_sid} to={ev.to_number} from={mask(ev.from_number)}")
     call, clinic, number, refusal = await admit(ev)
     if refusal:
         logger.info(f"VOICE_NOT_ANSWERED reason={refusal} to={ev.to_number} from={mask(ev.from_number)}")
