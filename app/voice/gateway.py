@@ -251,17 +251,23 @@ async def admit(ev: X.StreamEvent):
 
 @router.websocket("/voice/exotel/stream")
 async def exotel_stream(ws: WebSocket, k: str = ""):
-    if not settings.voice_enabled or not token_ok(k):
-        logger.warning(f"VOICE_STREAM_REJECTED enabled={settings.voice_enabled} token_ok={token_ok(k)}")
+    # Exotel may move ?k= from the handshake URL into start.custom_parameters, so an
+    # absent handshake token is re-checked on the start frame; a wrong one is rejected now.
+    if not settings.voice_enabled or (k and not token_ok(k)):
+        logger.warning(f"VOICE_STREAM_REJECTED enabled={settings.voice_enabled} k_present={bool(k)} token_ok={token_ok(k)}")
         await ws.close(code=1008)
         return
     await ws.accept()
-    logger.info("VOICE_STREAM_CONNECTED")
+    logger.info(f"VOICE_STREAM_CONNECTED handshake_token={bool(k)}")
     try:
         ev = await _wait_start(ws)
     except Exception as e:
         logger.error(f"VOICE_STREAM_WAIT_START_FAILED: {type(e).__name__}: {e}")
         await ws.close()
+        return
+    if not k and not token_ok(str(ev.custom.get("k") or "")):
+        logger.warning(f"VOICE_STREAM_REJECTED start_token_ok=False custom_keys={sorted(ev.custom)}")
+        await ws.close(code=1008)
         return
     logger.info(f"VOICE_STREAM_START call_sid={ev.call_sid} to={ev.to_number} from={mask(ev.from_number)}")
     call, clinic, number, refusal = await admit(ev)

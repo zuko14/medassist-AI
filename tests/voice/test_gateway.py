@@ -150,6 +150,37 @@ async def test_bad_token_is_rejected_before_accept():
     assert ws.closed
 
 
+def _start_with_custom(custom):
+    return json.dumps({**START, "start": {**START["start"], "custom_parameters": custom}})
+
+
+@pytest.mark.asyncio
+async def test_token_in_start_custom_parameters_is_admitted():
+    """Exotel can strip ?k= from the handshake and deliver it in start.custom_parameters."""
+    ws = FakeWS()
+    ws.inbox.put_nowait(_start_with_custom({"k": "tok"}))
+    admit = AsyncMock(return_value=(None, None, None, "feature_disabled"))
+    with patch.object(gateway.settings, "voice_enabled", True), \
+         patch.object(gateway.settings, "voice_stream_token", "tok"), \
+         patch("app.voice.gateway.admit", new=admit):
+        await gateway.exotel_stream(ws, k="")
+    admit.assert_awaited_once()
+
+
+@pytest.mark.parametrize("custom", [{}, {"k": "wrong"}])
+@pytest.mark.asyncio
+async def test_missing_token_everywhere_is_rejected_before_admission(custom):
+    ws = FakeWS()
+    ws.inbox.put_nowait(_start_with_custom(custom))
+    admit = AsyncMock()
+    with patch.object(gateway.settings, "voice_enabled", True), \
+         patch.object(gateway.settings, "voice_stream_token", "tok"), \
+         patch("app.voice.gateway.admit", new=admit):
+        await gateway.exotel_stream(ws, k="")
+    admit.assert_not_awaited()
+    assert ws.closed and not ws.sent
+
+
 @pytest.mark.parametrize("row, code", [
     ({"status": "completed", "handoff_reason": None}, 302),
     ({"status": "handed_off", "handoff_reason": "caller_requested_human"}, 200),
