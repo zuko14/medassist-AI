@@ -90,6 +90,75 @@ def _parse_test_details(expanded_text: str) -> dict:
     }
 
 
+# ── Partial-approval top-ups ────────────────────────────────────────────────
+# An order's download modal lists only the tests that have results. When a
+# lab approves 5 of 10 tests, the first poll sends those 5; the other 5 appear
+# in the modal hours later. Each order's delivered test names are recorded
+# (integration_processed_reports.test_names), so a later poll sends exactly
+# the newly approved tests, under their own id, and never the old ones again.
+
+TOPUP_ID_SEPARATOR = "_u"
+
+
+def _norm_test_name(text: str) -> str:
+    return " ".join((text or "").split()).upper()
+
+
+def _is_modal_test_label(name: str) -> bool:
+    """False for the modal's header row and its "Download By ..." options."""
+    return bool(name) and name != "TEST NAME" and not name.startswith("DOWNLOAD BY")
+
+
+def _topup_report_id(base_id: str, new_tests) -> str:
+    """Stable id for one top-up: same new-test set → same id → API dedup holds."""
+    import hashlib
+    digest = hashlib.sha1("|".join(sorted(new_tests)).encode()).hexdigest()[:10]
+    return f"{base_id}{TOPUP_ID_SEPARATOR}{digest}"
+
+
+def _belongs_to_order(external_report_id: str, base_id: str) -> bool:
+    return external_report_id == base_id or external_report_id.startswith(
+        base_id + TOPUP_ID_SEPARATOR
+    )
+
+
+def _topup_report_name(new_tests) -> str:
+    """Single-line WhatsApp template param naming the newly approved tests."""
+    names = sorted(new_tests)
+    label = ", ".join(names)
+    if len(label) > 60:
+        label = f"{names[0][:40]} +{len(names) - 1} more"
+    return f"Updated: {label}"
+
+
+def _plan_delivery(modal_tests: set, delivered: Optional[set], base_seen: bool) -> tuple[str, set]:
+    """Decide what to do with one order's download modal.
+
+    modal_tests: normalised test names the modal offers (approved tests).
+    delivered:   test names already delivered for this order; None means the
+                 order was delivered before per-test tracking existed.
+    base_seen:   the order's base id is already recorded as processed.
+
+    Returns (action, tests):
+      ("send_all", T)  first delivery of this order — tick all of T
+      ("send_new", T)  top-up — tick only T, untick everything else
+      ("baseline", T)  legacy order: record T as delivered, send nothing
+      ("skip", ∅)      nothing new
+    """
+    if not modal_tests:
+        # Modal unreadable: behave exactly as before per-test tracking.
+        return ("skip", set()) if base_seen else ("send_all", set())
+    if not base_seen:
+        return "send_all", set(modal_tests)
+    if delivered is None:
+        # ponytail: legacy orders adopt today's test list without sending, so
+        # deploy cannot blast every Pending Print order again. Tests approved
+        # between their first send and the deploy need a manual resend.
+        return "baseline", set(modal_tests)
+    new = modal_tests - delivered
+    return ("send_new", new) if new else ("skip", set())
+
+
 class MocDocConnector(HospitalConnector):
     """Playwright-based browser automation for MocDoc HMIS.
 
@@ -1026,11 +1095,20 @@ class MocDocConnector(HospitalConnector):
         meta.report_no = report_no
         meta.sample_id = test_details.get("sample_id")
 
-        # Check if already processed (full ID check)
-        if full_id in self._processed_ids:
-            logger.info(f"Already processed this run: {full_id}")
-            await self._click_hide(target_row)
-            return None
+        # What has this order already delivered? An order that was sent before
+        # may still have newly approved tests, so "already processed" is no
+        # longer decided here — the download modal decides (see _plan_delivery).
+        try:
+            order_state = await self._order_delivery_state(full_id)
+        except Exception as e:
+            # Lookup failed (DB blip, or test_names column not migrated yet):
+            # fall back to the original whole-order rule.
+            logger.warning(f"Per-test delivery lookup failed for {full_id} ({e}) — whole-order dedup only")
+            order_state = None
+            if full_id in self._processed_ids:
+                logger.info(f"Already processed: {full_id}")
+                await self._click_hide(target_row)
+                return None
 
         # Find and extract test name from the expanded content
         # Look for text that appears before the report number
@@ -1062,10 +1140,10 @@ class MocDocConnector(HospitalConnector):
             return None
 
         # Handle download modal
-        pdf_bytes = await self._handle_download_modal(full_id)
+        pdf_bytes = await self._handle_download_modal(full_id, meta, order_state)
 
         if pdf_bytes:
-            self._processed_ids.add(full_id)
+            self._processed_ids.add(meta.external_report_id)
 
         # Collapse the row
         await self._click_hide(target_row)
@@ -1075,7 +1153,141 @@ class MocDocConnector(HospitalConnector):
 
         return pdf_bytes
 
-    async def _handle_download_modal(self, report_id: str) -> Optional[bytes]:
+    async def _order_delivery_state(self, base_id: str) -> tuple[bool, Optional[set]]:
+        """(base id already processed?, test names delivered so far).
+
+        Delivered names are None when the order was processed before per-test
+        tracking existed. Raises on lookup failure — the caller falls back.
+        """
+        from app.database import supabase
+        res = await sb(
+            supabase.table("integration_processed_reports")
+            .select("external_report_id, test_names")
+            .eq("clinic_id", self.clinic_id)
+            .eq("connector_type", self.connector_type)
+            .like("external_report_id", f"{base_id}%")
+        )
+        rows = [
+            r for r in (res.data or [])
+            if _belongs_to_order(r.get("external_report_id") or "", base_id)
+        ]
+        if not rows:
+            return False, set()
+        base = next((r for r in rows if r["external_report_id"] == base_id), None)
+        if base is not None and base.get("test_names") is None:
+            return True, None  # delivered before per-test tracking
+        return True, {_norm_test_name(n) for r in rows for n in (r.get("test_names") or [])}
+
+    async def _record_baseline(self, base_id: str, tests: set) -> None:
+        """Adopt a legacy order's current test list as already delivered."""
+        from app.database import supabase
+        await sb(
+            supabase.table("integration_processed_reports")
+            .update({"test_names": sorted(tests)})
+            .eq("clinic_id", self.clinic_id)
+            .eq("connector_type", self.connector_type)
+            .eq("external_report_id", base_id)
+            .is_("test_names", "null")
+        )
+
+    async def _read_modal_tests(self) -> list[dict]:
+        """Every test row in the download modal: {idx, name, checked, disabled}.
+
+        Live markup (Accumx, Oct 2026): each test is
+        <input class="dwnld-item-order" data-invname="LIPID PROFILE">; the
+        header is .dwnld-item-all and the "Download By" options have their own
+        classes. Row text is only the fallback if that class ever disappears.
+        """
+        rows = await self._page.evaluate("""() => {
+            const m = document.getElementById('download-modal');
+            if (!m) return [];
+            const byClass = m.querySelector('input.dwnld-item-order') !== null;
+            return Array.from(m.querySelectorAll('tr')).map((tr, idx) => {
+                const cb = byClass ? tr.querySelector('input.dwnld-item-order')
+                                   : tr.querySelector('input[type=checkbox]');
+                if (!cb) return null;
+                const text = (byClass && cb.dataset.invname) || tr.innerText || '';
+                return {idx, text, checked: cb.checked, disabled: cb.disabled};
+            }).filter(Boolean);
+        }""")
+        out = []
+        for r in rows or []:
+            name = _norm_test_name(r.get("text"))
+            if _is_modal_test_label(name):
+                out.append({"idx": r["idx"], "name": name,
+                            "checked": bool(r.get("checked")), "disabled": bool(r.get("disabled"))})
+        return out
+
+    async def _select_tests(self, wanted: set) -> bool:
+        """Tick exactly `wanted` among the modal's test rows; verify by re-reading."""
+        rows = self._page.locator("#download-modal tr")
+        for t in await self._read_modal_tests():
+            if t["disabled"] or t["checked"] == (t["name"] in wanted):
+                continue
+            # A real click, so MocDoc's own handlers see the change.
+            await rows.nth(t["idx"]).locator("input[type=checkbox]").first.set_checked(
+                t["name"] in wanted, timeout=5000
+            )
+        await self._page.wait_for_timeout(300)
+        after = await self._read_modal_tests()
+        ticked = {t["name"] for t in after if t["checked"] and not t["disabled"]}
+        return ticked == wanted
+
+    async def _apply_delivery_plan(
+        self, base_id: str, meta: ReportMetadata, order_state
+    ) -> bool:
+        """Decide which tests to download and tick them. False = do not download.
+
+        Sets meta.external_report_id / test_names / report_name for the send.
+        """
+        tests = [t for t in await self._read_modal_tests() if not t["disabled"]]
+        modal_tests = {t["name"] for t in tests}
+
+        if order_state is None:
+            # Lookup failed earlier and the order is not known-processed:
+            # original behaviour, whole modal, base id, nothing recorded.
+            meta.external_report_id = base_id
+            meta.test_names = sorted(modal_tests) or None
+            return True
+
+        base_seen, delivered = order_state
+        action, send = _plan_delivery(modal_tests, delivered, base_seen)
+        logger.info(
+            f"{base_id}: modal offers {len(modal_tests)} test(s), "
+            f"{'legacy' if delivered is None else len(delivered)} delivered → {action} {len(send)}"
+        )
+
+        if action in ("skip", "baseline"):
+            meta.external_report_id = base_id
+            self._processed_ids.add(base_id)  # runner counts this as skipped, not failed
+            if action == "baseline":
+                try:
+                    await self._record_baseline(base_id, send)
+                except Exception as e:
+                    logger.warning(f"Could not record test baseline for {base_id}: {e}")
+            return False
+
+        if action == "send_all":
+            meta.external_report_id = base_id
+            meta.test_names = sorted(send) or None
+            return True  # modal default: everything ticked, as before
+
+        # send_new: only the newly approved tests, under their own id. The id is
+        # set first so a failure below is recorded (and alerted) against it,
+        # not silently counted as "already processed" under the base id.
+        meta.external_report_id = _topup_report_id(base_id, send)
+        if not await self._select_tests(send):
+            raise RuntimeError(
+                f"Could not tick exactly the {len(send)} new test(s) for {base_id} — "
+                f"not downloading, to avoid resending old results"
+            )
+        meta.test_names = sorted(send)
+        meta.report_name = _topup_report_name(send)
+        return True
+
+    async def _handle_download_modal(
+        self, report_id: str, meta: Optional[ReportMetadata] = None, order_state=None
+    ) -> Optional[bytes]:
         """Handle the download modal: verify checkboxes, click Select, wait for download.
 
         Handles the "Download Failed - Patient Due Pending / Account Balance
@@ -1125,6 +1337,18 @@ class MocDocConnector(HospitalConnector):
                 logger.error(f"Could not save debug files: {e}")
 
             return None
+
+        if meta is not None:
+            try:
+                go = await self._apply_delivery_plan(report_id, meta, order_state)
+            except Exception as e:
+                logger.error(f"TEST_SELECTION_FAILED for {report_id}: {e}")
+                await self._close_download_modal()
+                return None
+            if not go:
+                await self._close_download_modal()
+                return None
+            report_id = meta.external_report_id
 
         # Click "Select" to trigger download (or bill payment error)
         await select_btn.click()

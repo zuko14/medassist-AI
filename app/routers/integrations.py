@@ -8,6 +8,7 @@ validates the request and calls LabReportService.upload_and_send() — the
 exact same function that the admin panel uses for manual uploads.
 """
 
+import json
 import logging
 import secrets
 from typing import Optional
@@ -142,6 +143,7 @@ async def receive_lab_report(
     match_source: Optional[str] = Form(default=None),
     matched_patient_id: Optional[str] = Form(default=None),
     sample_id: Optional[str] = Form(default=None),
+    test_names: Optional[str] = Form(default=None),
     file: UploadFile = File(...),
     x_integration_secret: Optional[str] = Header(None),
 ):
@@ -398,22 +400,40 @@ async def receive_lab_report(
 
     # Step 4: Record the processed report (idempotency)
     lab_report_id = saved_record.get("id")
+    processed_row = {
+        "clinic_id": clinic_id,
+        "connector_type": connector_type,
+        "external_report_id": external_report_id,
+        "patient_phone": patient_phone,
+        "patient_name": patient_name,
+        "report_name": report_name,
+        "lab_report_id": lab_report_id,
+    }
+    # Which tests this PDF held (MocDoc), so the connector sends only tests
+    # approved later. Malformed input is dropped, never fatal.
     try:
-        # unscoped: recording processed report in idempotency tracking log with explicit clinic_id
-        await sb(supabase.table("integration_processed_reports").insert(
-            {
-                "clinic_id": clinic_id,
-                "connector_type": connector_type,
-                "external_report_id": external_report_id,
-                "patient_phone": patient_phone,
-                "patient_name": patient_name,
-                "report_name": report_name,
-                "lab_report_id": lab_report_id,
-            }
-        ))
+        parsed_tests = json.loads(test_names) if test_names else None
+    except ValueError:
+        parsed_tests = None
+    if isinstance(parsed_tests, list) and all(isinstance(t, str) for t in parsed_tests):
+        processed_row["test_names"] = parsed_tests
+    try:
+        # unscoped: insert_scoped_by_payload
+        await sb(supabase.table("integration_processed_reports").insert(processed_row))
     except Exception as e:
-        # Don't fail the whole request — the report is already sent
-        logger.error(f"Failed to record processed report: {e}")
+        if "test_names" not in processed_row:
+            # Don't fail the whole request — the report is already sent
+            logger.error(f"Failed to record processed report: {e}")
+        else:
+            # Most likely migration 099 not applied yet. The idempotency row
+            # matters far more than the test list — record it without.
+            logger.warning(f"Recording test_names failed ({e}) — retrying without")
+            processed_row.pop("test_names")
+            try:
+                # unscoped: insert_scoped_by_payload
+                await sb(supabase.table("integration_processed_reports").insert(processed_row))
+            except Exception as e2:
+                logger.error(f"Failed to record processed report: {e2}")
 
     return LabReportResponse(
         success=True,

@@ -5,6 +5,7 @@ interface. MedAssist AI never knows which HMIS the report came from — it just
 receives a PDF + metadata via the internal API.
 """
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -45,6 +46,9 @@ class ReportMetadata:
         # report goes to this desk number and NOT to the patient. patient_phone
         # is rewritten to it, so this field is what records *why*.
         self.routed_recipient = routed_recipient
+        # Tests contained in this PDF (MocDoc). Recorded by the API so a later
+        # poll can send just the tests approved after this one.
+        self.test_names: Optional[list] = None
 
     def __repr__(self) -> str:
         return (
@@ -135,6 +139,8 @@ class HospitalConnector(ABC):
             post_data["sample_id"] = meta.sample_id
         if meta.provider:
             post_data["provider"] = meta.provider
+        if meta.test_names:
+            post_data["test_names"] = json.dumps(meta.test_names)
         if meta.routed_recipient:
             # Tells the API this destination is a configured TPA desk, not a
             # patient — it re-verifies the claim against the clinic's own

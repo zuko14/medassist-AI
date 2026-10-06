@@ -375,3 +375,35 @@ class TestCallMedexSampleBarcodeDedup:
         assert resp.status_code == 200
         upload.assert_awaited_once()
         assert upload.await_args.kwargs["sample_barcode"] is None
+
+    # MocDoc partial approvals: the tests a PDF held are recorded so a later
+    # poll can send just the tests approved after it.
+    def test_delivered_test_names_are_recorded(self, client_and_mocks):
+        client, sb_mock, _ = client_and_mocks
+        t = self._db(sb_mock, [])
+        resp = self._post(client, test_names='["UREA", "URIC ACID"]')
+        assert resp.status_code == 200
+        row = t.insert.call_args.args[0]
+        assert row["test_names"] == ["UREA", "URIC ACID"]
+        assert row["external_report_id"] == "VAM-1_2922"
+
+    def test_missing_test_names_column_still_records_idempotency_row(self, client_and_mocks):
+        # Deploy order: API live before migration 099 — the processed row (the
+        # only thing stopping a resend) must still be written.
+        from unittest.mock import MagicMock
+        client, sb_mock, _ = client_and_mocks
+        t = self._db(sb_mock, [])
+        t.insert.return_value.execute.side_effect = [
+            Exception('column "test_names" does not exist'), MagicMock(data=[{}]),
+        ]
+        resp = self._post(client, test_names='["UREA"]')
+        assert resp.status_code == 200
+        assert t.insert.call_count == 2
+        assert "test_names" not in t.insert.call_args_list[1].args[0]
+
+    def test_malformed_test_names_are_ignored(self, client_and_mocks):
+        client, sb_mock, _ = client_and_mocks
+        t = self._db(sb_mock, [])
+        resp = self._post(client, test_names="not json")
+        assert resp.status_code == 200
+        assert "test_names" not in t.insert.call_args.args[0]
