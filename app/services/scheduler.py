@@ -440,6 +440,16 @@ class SchedulerService:
                 replace_existing=True,
             )
 
+        # AI voice receptionist (migration 098): only when VOICE_ENABLED=true.
+        if settings.voice_enabled:
+            self.scheduler.add_job(self.voice_outbound_dispatch, "interval", minutes=2,
+                                   id="voice_outbound_dispatch", replace_existing=True,
+                                   max_instances=1, coalesce=True)
+            self.scheduler.add_job(self.voice_lead_autoqueue, CronTrigger(minute=15),
+                                   id="voice_lead_autoqueue", replace_existing=True)
+            self.scheduler.add_job(self.voice_retention_purge, CronTrigger(hour=3, minute=45),
+                                   id="voice_retention_purge", replace_existing=True)
+
         self.scheduler.start()
         logger.info(
             "Scheduler started (connector polling in-process: "
@@ -450,6 +460,52 @@ class SchedulerService:
         """Shutdown the scheduler."""
         self.scheduler.shutdown()
         logger.info("Scheduler shutdown")
+
+    async def voice_outbound_dispatch(self):
+        from app.services.distributed_lock import distributed_job_lock
+        from app.voice import outbound
+
+        async with distributed_job_lock("voice_outbound_dispatch", lease_seconds=110) as acquired:
+            if acquired:
+                try:
+                    n = await outbound.dispatch_due()
+                    if n:
+                        logger.info(f"Voice outbound: placed {n} call(s)")
+                except Exception as e:
+                    logger.error(f"Voice outbound dispatch failed: {e}")
+
+    async def voice_lead_autoqueue(self):
+        from app.services.distributed_lock import distributed_job_lock
+        from app.voice import outbound
+
+        async with distributed_job_lock("voice_lead_autoqueue", lease_seconds=600) as acquired:
+            if acquired:
+                try:
+                    n = await outbound.autoqueue_leads()
+                    if n:
+                        logger.info(f"Voice outbound: queued {n} lead follow-up(s)")
+                except Exception as e:
+                    logger.error(f"Voice lead auto-queue failed: {e}")
+
+    async def voice_retention_purge(self):
+        """DPDP minimisation: drop call timelines (transcripts) after the retention
+        window. voice_calls rows keep the outcome/intents/cost for analytics."""
+        from datetime import datetime, timedelta, timezone
+        from app.database import sb, supabase
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("voice_retention_purge", lease_seconds=600) as acquired:
+            if acquired:
+                try:
+                    cutoff = (datetime.now(timezone.utc)
+                              - timedelta(days=settings.voice_transcript_retention_days)).isoformat()
+                    # unscoped: platform_sweep
+                    await sb(supabase.table("voice_call_events").delete().lt("ts", cutoff))
+                    # unscoped: platform_sweep
+                    await sb(supabase.table("voice_calls").update({"dialog": {}, "handoff_packet": None})
+                             .lt("started_at", cutoff))
+                except Exception as e:
+                    logger.error(f"Voice retention purge failed: {e}")
 
     async def assign_home_collections(self):
         from app.services import home_collection
