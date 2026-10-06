@@ -2241,6 +2241,33 @@ class PaymentService:
                 f"payload={json.dumps(payload, default=str)}"
             )
 
+    async def _send_confirmation_template(
+        self, clinic: dict, booking: dict, date_display: str, time_display: str
+    ) -> bool:
+        """Approved UTILITY template `appointment_confirmation` for a patient whose
+        24h WhatsApp window is closed (e.g. booked by phone through app/voice and
+        paid the link). True only when Meta accepted the message."""
+        from app.services.whatsapp import whatsapp_service
+        from app.templates.whatsapp_templates import TEMPLATES
+
+        tpl = TEMPLATES["appointment_confirmation"]
+        is_lab = booking.get("booking_type") == "lab_test"
+        who = (booking.get("lab_test_name") if is_lab else booking.get("doctor_name")) or ""
+        dept = "Lab Test" if is_lab else (booking.get("department") or "")
+        hospital = (clinic or {}).get("name") or settings.hospital_name
+        try:
+            return bool(await whatsapp_service.send_template(
+                clinic,
+                booking.get("patient_phone"),
+                tpl["name"],
+                language=tpl["language"],
+                components=tpl["components_builder"](who, dept, date_display, time_display, hospital),
+                _source="booking_confirmation",
+            ))
+        except Exception as e:
+            logger.warning(f"Confirmation template failed for booking {booking.get('id')}: {e}")
+            return False
+
     async def _notify_payment_confirmed(self, booking: dict) -> None:
         """Send WhatsApp confirmation message to the patient and admin alerts after payment is verified."""
         clinic_id_val = booking.get("clinic_id") or "default"
@@ -2446,9 +2473,20 @@ class PaymentService:
             patient_notified = False
             for attempt in range(2):
                 try:
-                    await whatsapp_service.send_text(
+                    sent = await whatsapp_service.send_text(
                         clinic, patient_phone, msg, _source="booking_confirmation"
                     )
+                    # send_text returns False (it does not raise) when the 24h
+                    # window is closed. That is always the case for a patient who
+                    # booked by PHONE (app/voice) and then paid the link, so use
+                    # the approved template instead of recording a delivery that
+                    # never happened. A template refusal ends the retries and
+                    # falls through to the admin alert below.
+                    if sent is False:
+                        if not await self._send_confirmation_template(
+                            clinic, booking, date_display, slot_time_display
+                        ):
+                            break
                     patient_notified = True
                     logger.info(
                         f"Sent payment confirmation to {patient_phone[:6]}*** (attempt {attempt + 1})"

@@ -45,6 +45,11 @@ PERMISSIONS = frozenset({
     # Home sample collection (migration 097): settings, the day's visits and
     # (re)assigning them to phlebotomists. In no role preset: granted per account.
     "HOME_COLLECTION_MANAGE",
+    # AI voice receptionist (migration 098). VIEW = call list, transcripts and
+    # analytics (patient data); MANAGE = settings, lexicon, takeover, outbound
+    # calls, test console. In no role preset: granted per account.
+    "VOICE_VIEW",
+    "VOICE_MANAGE",
 })
 
 #: A login for a lab's CORPORATE client: sees that one company's aggregate

@@ -1958,6 +1958,30 @@
                 </div>
                 <div id="modalAiBudgetStatus" style="font-size:0.8rem; margin-top:6px; color:var(--text3);"></div>
             </div>
+            <!-- Migration 098: AI voice receptionist. Off until the owner enables it here. -->
+            <div style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">AI Voice Receptionist</h4>
+                <p style="color:var(--text3); font-size:0.78rem; margin-bottom:12px;">Answers this clinic's calls on its forwarded number. Enable only after pricing is agreed and an Exophone is mapped below.</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalVoiceToggle" onchange="toggleClinicFeature('ai_receptionist', this.checked)">
+                    AI receptionist enabled
+                </label>
+                <div id="modalVoiceUsage" style="font-size:0.8rem; color:var(--text3); margin:10px 0;"></div>
+                <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+                    <input type="number" id="modalVoiceBudget" min="0" step="100" placeholder="Monthly voice budget (Rs, 0 = no cap)" class="form-control" style="flex:1;">
+                    <button class="btn-primary" style="width:auto; padding:8px 16px;" onclick="saveVoiceBudget()">Save Budget</button>
+                </div>
+                <div id="modalVoiceNumbers" style="font-size:0.82rem; color:var(--text2); margin-bottom:8px;"></div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;">
+                    <input id="vnExophone" class="form-control" maxlength="20" placeholder="Exophone +9140...">
+                    <input id="vnReception" class="form-control" maxlength="20" placeholder="Reception number">
+                    <input id="vnPublished" class="form-control" maxlength="20" placeholder="Published hospital number">
+                    <input id="vnBranch" class="form-control" maxlength="40" placeholder="Branch id (optional)">
+                    <input id="vnLabel" class="form-control" maxlength="60" placeholder="Label">
+                    <button class="btn-primary" style="width:auto; padding:8px 16px;" onclick="addVoiceNumber()">Map Number</button>
+                </div>
+                <div id="modalVoiceStatus" style="font-size:0.8rem; margin-top:6px; color:var(--text3);"></div>
+            </div>
         </div>
     </div>
 
@@ -2995,6 +3019,8 @@
                     const isDiag = ['diagstream', 'diagbooking'].includes((c.plan || '').toLowerCase());
                     document.getElementById('modalCorporateHealthRow').style.display = isDiag ? 'flex' : 'none';
                     document.getElementById('modalCorporateHealthToggle').checked = overrides.corporate_health === true;
+                    document.getElementById('modalVoiceToggle').checked = overrides.ai_receptionist === true;
+                    loadVoiceForModal(clinicId);
                     document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
                     document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
                     document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;
@@ -3081,6 +3107,67 @@
                     statusEl.style.color = 'var(--red, #f87171)';
                 }
             }
+        }
+
+
+        async function loadVoiceForModal(clinicId) {
+            const usageEl = document.getElementById('modalVoiceUsage');
+            const numsEl = document.getElementById('modalVoiceNumbers');
+            if (!usageEl) return;
+            try {
+                const res = await fetch('/platform/voice/overview', { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) throw new Error(res.status);
+                const data = await res.json();
+                const c = (data.clinics || []).find(x => x.id === clinicId);
+                const p = data.platform || {};
+                const rs = v => 'Rs ' + Math.round((v || 0) / 100);
+                if (!c) { usageEl.innerText = 'Not available for this account type.'; numsEl.innerHTML = ''; return; }
+                document.getElementById('modalVoiceBudget').value = c.budget_paise ? Math.round(c.budget_paise / 100) : '';
+                usageEl.innerText = `This month: ${c.calls} calls, ${c.minutes} min, cost ${p.rates_configured ? rs(c.cost_paise) : 'rates not set'}`
+                    + (c.budget_paise ? ` of ${rs(c.budget_paise)}` : ' (no cap)')
+                    + ` | Platform: voice ${p.voice_enabled ? 'ON' : 'OFF'}, Sarvam ${p.sarvam_configured ? 'ok' : 'missing'}, Exotel ${p.exotel_configured ? 'ok' : 'missing'}`;
+                numsEl.innerHTML = (c.numbers || []).length
+                    ? c.numbers.map(n => `<div>${escapeHtml(n.exophone)} &rarr; reception ${escapeHtml(n.reception_number || '-')} ${n.label ? '(' + escapeHtml(n.label) + ')' : ''} ${n.is_active ? '' : '[inactive]'} <button class="btn-secondary" style="padding:2px 8px" onclick="toggleVoiceNumber('${escapeHtml(n.id)}', ${!n.is_active})">${n.is_active ? 'Deactivate' : 'Activate'}</button></div>`).join('')
+                    : 'No Exophone mapped yet. Calls cannot reach the AI until one is mapped.';
+            } catch (e) {
+                usageEl.innerText = `Could not load voice data: ${e.message}`;
+            }
+        }
+
+        function voiceStatus(text, ok) {
+            const el = document.getElementById('modalVoiceStatus');
+            el.innerText = text;
+            el.style.color = ok ? 'var(--green)' : 'var(--red, #f87171)';
+        }
+
+        async function voiceCall(url, method, body) {
+            const res = await fetch(url, { method, headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.status); }
+            return res.json();
+        }
+
+        async function saveVoiceBudget() {
+            if (!_modalClinicId) return;
+            const rupees = parseFloat(document.getElementById('modalVoiceBudget').value || '0');
+            if (isNaN(rupees) || rupees < 0) { voiceStatus('Enter a budget in rupees (0 = no cap).', false); return; }
+            try { await voiceCall(`/platform/voice/clinics/${_modalClinicId}/budget`, 'PUT', { monthly_budget_paise: Math.round(rupees * 100) }); voiceStatus('Budget saved.', true); loadVoiceForModal(_modalClinicId); }
+            catch (e) { voiceStatus(`Error: ${e.message}`, false); }
+        }
+
+        async function addVoiceNumber() {
+            if (!_modalClinicId) return;
+            const v = id => document.getElementById(id).value.trim() || null;
+            try {
+                await voiceCall('/platform/voice/numbers', 'POST', { clinic_id: _modalClinicId, exophone: v('vnExophone'), reception_number: v('vnReception'), published_number: v('vnPublished'), branch_id: v('vnBranch'), label: v('vnLabel') });
+                voiceStatus('Number mapped.', true);
+                ['vnExophone', 'vnReception', 'vnPublished', 'vnBranch', 'vnLabel'].forEach(id => { document.getElementById(id).value = ''; });
+                loadVoiceForModal(_modalClinicId);
+            } catch (e) { voiceStatus(`Error: ${e.message}`, false); }
+        }
+
+        async function toggleVoiceNumber(id, active) {
+            try { await voiceCall(`/platform/voice/numbers/${id}`, 'PATCH', { is_active: active }); loadVoiceForModal(_modalClinicId); }
+            catch (e) { voiceStatus(`Error: ${e.message}`, false); }
         }
 
         function escapeHtml(str) {

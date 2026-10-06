@@ -894,10 +894,16 @@ async def update_clinic_feature(
 
     clinic_res = (
         # unscoped: platform super-admin fetching feature flags for specified clinic_id
-        await sb(supabase.table("clinics").select("features, plan").eq("id", clinic_id))
+        await sb(supabase.table("clinics").select("features, plan, account_type").eq("id", clinic_id))
     )
     if not clinic_res.data:
         raise HTTPException(status_code=404, detail="Clinic not found")
+    if (body.feature == "ai_receptionist" and body.enabled
+            and (clinic_res.data[0].get("account_type") or "tenant") != "tenant"):
+        raise HTTPException(
+            status_code=400,
+            detail="The AI receptionist is only available to hospital/clinic tenants.",
+        )
     if (body.feature == "corporate_health" and body.enabled
             and clinic_res.data[0].get("plan") not in CORPORATE_HEALTH_PLANS):
         raise HTTPException(

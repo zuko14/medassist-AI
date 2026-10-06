@@ -12,6 +12,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection
+from app.routers import voice_admin, voice_platform
+from app.voice import gateway as voice_gateway
 from app.routers.integrations import router as integrations_router
 from app.integrations.callmedex.api.router import (
     router as callmedex_router,
@@ -363,6 +365,12 @@ app.include_router(admin.router)
 # Corporate employee-health insights (/admin/corporate-health, migration 095)
 app.include_router(corporate_health.router)
 app.include_router(home_collection.router)
+# AI voice receptionist (migration 098). The gateway refuses every stream unless
+# VOICE_ENABLED=true and VOICE_STREAM_TOKEN matches; the admin/platform routes
+# refuse clinics the owner has not enabled.
+app.include_router(voice_gateway.router)
+app.include_router(voice_admin.router)
+app.include_router(voice_platform.router)
 app.include_router(clinics.router)
 app.include_router(platform.router)
 # FHIR R4 interoperability API (HMIS / ABDM integration)

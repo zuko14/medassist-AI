@@ -1,0 +1,45 @@
+"""Kriya's own confidence policy. Model confidence is an input, never the decision.
+
+final = min(asr, nlu)          (conservative: the weakest link decides)
+final <  clarify_below         -> treated as "not understood" (focused clarification, 3 strikes -> human)
+final >= clarify_below         -> the dialog proceeds; every transactional step
+                                  STILL requires an explicit spoken "yes" to a
+                                  read-back (dialog.py), whatever the confidence.
+LLM fallback is consulted only when the rules found nothing and the utterance
+has real words in it.
+
+Thresholds come from settings (VOICE_CONF_CLARIFY_BELOW) and are tuned from the
+evaluation reports, not guessed.
+"""
+
+from dataclasses import replace
+
+from .dates import norm
+from .nlu_rules import NLUResult
+
+POLICY_VERSION = "policy-2026.10.06"
+
+FILLERS = frozenset({"umm", "um", "hmm", "hm", "uh", "ah", "aa", "aaa", "huh", "hello", "halo",
+                     "హలో", "हेलो", "हैलो", "ఆ", "अ"})
+
+
+def asr_confidence(text: str) -> float:
+    t = norm(text)
+    words = [w.strip(".,!?") for w in t.split()]
+    words = [w for w in words if w]
+    if not words or len(t) < 2:
+        return 0.0
+    if all(w in FILLERS for w in words):
+        return 0.3
+    return 1.0
+
+
+def needs_llm(nlu: NLUResult, text: str) -> bool:
+    return nlu.confidence == 0.0 and len(norm(text).split()) >= 2
+
+
+def gate(nlu: NLUResult, asr_conf: float, clarify_below: float) -> NLUResult:
+    final = min(asr_conf, nlu.confidence)
+    if final < clarify_below:
+        return NLUResult([], {}, final, "none")
+    return replace(nlu, confidence=final)
