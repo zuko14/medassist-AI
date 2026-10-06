@@ -271,13 +271,16 @@ def test_08_multi_tenant_cascade_delete(real_pg_conn, clean_db):
     assert cur.fetchone()[0] == 0
 
 
-def test_09_transaction_rollback_preserves_consistency(real_pg_conn, clean_db):
+def test_09_transaction_rollback_preserves_consistency(real_pg_conn, real_postgres_uri, clean_db):
     """Invariant 9: Transaction rollback on failure leaves zero orphaned state."""
     clinic_id = get_default_clinic_id(real_pg_conn.cursor())
 
+    # The full URI, not real_pg_conn.dsn: psycopg2 masks the password in .dsn
+    # ("password=xxx"), so a second login only worked on password-less local
+    # Postgres and failed on CI's postgres:16 service.
+    conn2 = psycopg2.connect(real_postgres_uri)
     try:
         # Create non-autocommit transaction
-        conn2 = psycopg2.connect(real_pg_conn.dsn)
         conn2.autocommit = False
         cur2 = conn2.cursor()
 
