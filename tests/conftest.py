@@ -26,6 +26,8 @@ _FORCED_TEST_CREDENTIALS = {
     "RAZORPAY_KEY_ID": "",
     "RAZORPAY_KEY_SECRET": "",
     "RAZORPAY_WEBHOOK_SECRET": "",
+    "OWNER_USERNAME": "test_owner",
+    "OWNER_PASSWORD": "test_owner_password_12345",
 }
 if os.environ.get("KRIYA_TEST_LIVE") != "1":
     os.environ.update(_FORCED_TEST_CREDENTIALS)

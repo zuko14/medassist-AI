@@ -68,11 +68,13 @@ These database migrations must be applied on production before the features belo
 
 | `095_corporate_health.sql` | `corporate_clients`, `corporate_health_reports`, `clinic_admins.corporate_client_id`: **Corporate Health** — company employee-package dashboards for diagnostic centres | Diagnostic plans (`diagstream`, `diagbooking`) after the owner switches it on. **Must be applied AND recorded in `schema_migrations` before deploying** — the startup schema pre-flight (`app/main.py`) refuses to boot when the newest file on disk (095) is ahead of the database. |
 | `096_corporate_partner_accounts.sql` | `clinics.account_type` (`tenant` default \| `corporate_partner`) + CHECK that a partner never has a `phone_number_id`: **dashboard-only partner labs** for Corporate Health (no WhatsApp, no plan, not billed) | Additive; every existing clinic becomes `tenant` (unchanged). **Apply AND record before deploying** — the code filters owner listings on this column and the pre-flight refuses to boot at disk 096 / DB 095. |
+| `097_home_collection.sql` | `home_collection_requests`, `home_collection_slots`, `clinic_admins.is_phlebotomist`: **Home Sample Collection** for diagnostic centres | Diagnostic plans (`diagstream`, `diagbooking`). Phlebotomist field app at `/phleb-panel`. |
+| `098_voice_receptionist.sql` | `voice_numbers`, `voice_calls`, `voice_events`, `voice_lexicon`, `voice_outbound_jobs`: **AI Voice Receptionist** (inbound phone calls via Exotel + Sarvam) | All plans after owner opt-in and Exophone mapping. **Must be applied AND recorded in `schema_migrations` before enabling `VOICE_ENABLED=true`**. |
 
 Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' ORDER BY name;`
 
 If a migration was run by hand in the Supabase SQL editor, record it (the pre-flight reads this table):
-`INSERT INTO schema_migrations (name, checksum) VALUES ('095_corporate_health.sql', 'manual') ON CONFLICT DO NOTHING;`
+`INSERT INTO schema_migrations (name, checksum) VALUES ('098_voice_receptionist.sql', 'manual') ON CONFLICT DO NOTHING;`
 
 ### Corporate Health (migration 095) — switching it on for a diagnostic centre
 
@@ -238,7 +240,8 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 | `admin_alert_v1` | UTILITY | Plans with a report connector: diagstream, polyclinic, enterprise, multispecialty, womenchild | 1 | Connector failure alerts to the clinic admin's phone |
 | `appointment_reminder_24h` | UTILITY | soloclinic, essential, polyclinic, enterprise, derma, eye, dental, ivf, multispecialty, womenchild | 2 | 09:00 IST, day before |
 | `appointment_reminder_2h` | UTILITY | same as above | **2** | Hourly, 2 hours before |
-| `appointment_confirmation` | UTILITY | same as above | 5 | Dental sitting confirmation fallback (see Step 10H) |
+| `appointment_confirmation` | UTILITY | same as above | 5 | Booking confirmation (free appointments, dental sitting fallback, or payment confirmation fallback when the 24h WhatsApp window is closed) |
+| `kriya_payment_link` | UTILITY | All booking plans with AI Voice Receptionist / phone booking enabled | 8 | Sent via WhatsApp when a phone caller books a paid slot outside the 24h window |
 | `appointment_cancelled_doctor_leave` | UTILITY | same as above | 2 | 08:00 IST when a doctor's leave cancels bookings |
 | `post_appointment_followup` | UTILITY | All plans with `reminders` feature | 2 | 10:00 IST, N days after the visit (Patient Follow-ups switch) |
 | `followup_custom_message_v1` | UTILITY | All plans with `reminders` feature | 2 | Same, when the admin writes their own follow-up wording |
@@ -343,6 +346,28 @@ Templates are required for any proactive outbound message sent outside the 24-ho
   - `{{3}}` → Date (e.g., `05 Sep 2026`)
   - `{{4}}` → Slot Time (e.g., `10:30 AM`)
   - `{{5}}` → Hospital / Clinic Name
+
+#### Template 5b: Voice Booking Payment Link (`kriya_payment_link`)
+* **Template Name:** `kriya_payment_link`
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Hello {{1}}, your slot for {{2}} on {{3}} at {{4}} is held for {{5}} minutes. Please pay Rs {{6}} using the link below to confirm your booking: {{7}}
+
+  Thank you for choosing {{8}}. Please contact our reception desk if you have any questions.
+  ```
+* **Variables (8 Variables — must match exactly):**
+  - `{{1}}` → Patient Full Name (e.g., `Ramesh Kumar` or `Patient`)
+  - `{{2}}` → Doctor & Specialty or Lab Test (e.g., `Dr. Srinivas Rao (Cardiology)` or `Lipid Profile`)
+  - `{{3}}` → Appointment Date (e.g., `2026-10-07`)
+  - `{{4}}` → Slot Time (e.g., `10:30 AM` or `-`)
+  - `{{5}}` → Slot Hold Duration in minutes (e.g., `15`)
+  - `{{6}}` → Amount in Rupees (e.g., `800`)
+  - `{{7}}` → Razorpay Payment Link (e.g., `https://rzp.io/i/abcdef123`)
+  - `{{8}}` → Hospital / Clinic Name (e.g., `ABC Hospitals`)
+* **Why this is needed:** When an inbound phone caller talks to the AI Voice Receptionist (`app/voice`), they do not have an open 24-hour customer service window on WhatsApp. To message them the Razorpay payment link for paid consultations/tests, Meta requires this pre-approved `UTILITY` template.
+* **Payment Confirmation:** When the caller completes the Razorpay payment, `app/services/payment.py` automatically confirms the appointment and delivers the confirmation using Template 5 (`appointment_confirmation`) outside the 24h window.
 
 #### Template 6: Doctor Cancellation / Leave (`appointment_cancelled_doctor_leave`)
 * **Template Name:** `appointment_cancelled_doctor_leave`
@@ -497,6 +522,7 @@ Use this checklist to confirm which templates to register per plan:
 | 3 | `appointment_reminder_24h` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 4 | `appointment_reminder_2h` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 5 | `appointment_confirmation` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 5b | `kriya_payment_link` *(if AI Voice Receptionist is on)* | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 6 | `appointment_cancelled_doctor_leave` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 7 | `post_appointment_followup` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 8 | `followup_custom_message_v1` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -576,6 +602,15 @@ templates = [
         'language': 'en',
         'components': [
             {'type': 'BODY', 'text': 'Your appointment with {{1}} ({{2}}) is confirmed for {{3}} at {{4}}. Reply CANCEL to cancel. - {{5}}', 'example': {'body_text': [['Dr. Ramesh Sharma', 'Cardiology', '05 Sep 2026', '10:30 AM', clinic_name]]}}
+        ]
+    },
+    # 5b. Voice / Phone Booking Payment Link (Outbound outside 24h window)
+    {
+        'name': 'kriya_payment_link',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'Hello {{1}}, your slot for {{2}} on {{3}} at {{4}} is held for {{5}} minutes. Please pay Rs {{6}} using the link below to confirm your booking: {{7}}\n\nThank you for choosing {{8}}. Please contact our reception desk if you have any questions.', 'example': {'body_text': [['Ramesh Kumar', 'Dr. Srinivas Rao (Cardiology)', '2026-10-07', '10:30 AM', '15', '800', 'https://rzp.io/i/sample123', clinic_name]]}}
         ]
     },
     # 6. Post-Visit Follow-up Default
