@@ -24,6 +24,12 @@ from app.config import settings
 logger = logging.getLogger("kriya.ai_gateway")
 
 
+#: Work a patient is waiting on in real time: never blocked by the admin
+#: spend cap. Voice usage (task_type "voice_*") has its own per-clinic budget
+#: (app/voice/usage.py) and is excluded from the admin sum below.
+PATIENT_FACING_TASKS = frozenset({"patient_chat", "voice_nlu"})
+
+
 class SpendCapExceededError(Exception):
     """Raised when an administrative AI feature exceeds the clinic's monthly budget."""
     pass
@@ -163,6 +169,7 @@ async def check_admin_spend_cap(clinic_id: Optional[str]) -> Tuple[bool, int, in
                 .select("cost_paise")
                 .eq("clinic_id", cleaned_id)
                 .neq("task_type", "patient_chat")
+                .not_.like("task_type", "voice_%")
                 .gte("created_at", month_start)
                 .range(offset, offset + PAGE_SIZE - 1)
             )
@@ -212,6 +219,7 @@ async def call_ai_gateway(
     max_tokens: int = 500,
     temperature: float = 0.2,
     response_format: Optional[Dict[str, str]] = None,
+    max_attempts: int = 2,
 ) -> Dict[str, Any]:
     """Execute completion via OpenRouter with native multi-model fallback and spend tracking.
 
@@ -219,7 +227,7 @@ async def call_ai_gateway(
     Checks spend cap before calling external LLM.
     """
     # Enforce spend cap for admin features
-    if task_type != "patient_chat":
+    if task_type not in PATIENT_FACING_TASKS:
         is_exceeded, current_spend, budget = await check_admin_spend_cap(clinic_id)
         if is_exceeded:
             raise SpendCapExceededError(
@@ -253,8 +261,11 @@ async def call_ai_gateway(
         "Content-Type": "application/json",
     }
 
-    # Retry logic: max 2 attempts (req_timeout each, 2s backoff)
-    for attempt in range(2):
+    # Retry logic: max_attempts (default 2; voice passes 1 because a caller
+    # cannot wait for a 2 s backoff), req_timeout each, 2s backoff.
+    max_attempts = max(1, int(max_attempts))
+    last_try = max_attempts - 1
+    for attempt in range(max_attempts):
         try:
             async with httpx.AsyncClient(timeout=req_timeout) as client:
                 response = await client.post(
@@ -289,14 +300,14 @@ async def call_ai_gateway(
                     return data
 
                 if response.status_code == 429:
-                    if attempt < 1:
+                    if attempt < last_try:
                         logger.warning(f"OpenRouter 429 on {task_type}. Retrying in 2s...")
                         await asyncio.sleep(2)
                         continue
                     raise RuntimeError("OpenRouter rate limit exceeded (429)")
 
                 if response.status_code in (502, 503, 504):
-                    if attempt < 1:
+                    if attempt < last_try:
                         logger.warning(f"OpenRouter {response.status_code} on {task_type}. Retrying in 2s...")
                         await asyncio.sleep(2)
                         continue
@@ -306,7 +317,7 @@ async def call_ai_gateway(
                 raise RuntimeError(f"OpenRouter API returned HTTP {response.status_code}: {error_text}")
 
         except httpx.TimeoutException as te:
-            if attempt < 1:
+            if attempt < last_try:
                 logger.warning(f"OpenRouter timeout on {task_type}. Retrying in 2s...")
                 await asyncio.sleep(2)
                 continue
@@ -325,7 +336,7 @@ async def call_ai_gateway(
             raise
 
         except Exception as e:
-            if attempt >= 1 or "rate limit" in str(e).lower() or "service error" in str(e).lower():
+            if attempt >= last_try or "rate limit" in str(e).lower() or "service error" in str(e).lower():
                 record_ai_usage_bg(
                     clinic_id=clinic_id,
                     task_type=task_type,
