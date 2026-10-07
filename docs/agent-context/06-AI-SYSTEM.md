@@ -19,7 +19,7 @@ Patient WhatsApp Inbound
           ↓ (Natural Language / Intent / Symptom Triage)
 [AI Gateway / ILLMProvider]
      ├── Primary: OpenRouter (deepseek/deepseek-chat)
-     ├── Fallback: OpenRouter (google/gemini-2.0-flash-001)
+     ├── Fallback: OpenRouter (google/gemini-2.5-flash-lite)
      └── Tertiary: Local Rule Fallbacks
           ↓
 [Structured Output Extraction] (Intent, Department, Doctor, Slot)
@@ -35,7 +35,7 @@ Patient WhatsApp Inbound
 - **File**: [`app/services/ai_engine.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/services/ai_engine.py) (`OpenRouterService`), [`app/services/ai_gateway.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/services/ai_gateway.py) (`call_ai_gateway`)
 - **Base URL**: `https://openrouter.ai/api/v1/chat/completions`
 - **Primary Model**: `deepseek/deepseek-chat` (or configured via `OPENROUTER_MODEL`)
-- **Fallback Model**: `google/gemini-2.0-flash-001` (configured via `OPENROUTER_FALLBACK_MODEL`)
+- **Fallback Model**: `google/gemini-2.5-flash-lite` (configured via `OPENROUTER_FALLBACK_MODEL`). The previous default `google/gemini-2.0-flash-001` was retired on OpenRouter (HTTP 404 "No endpoints found", seen 2026-10-06); any env var still naming it must be updated.
 - **Attribution Headers**:
   - `HTTP-Referer`: `https://kriya.health`
   - `X-Title`: `Kriya AI Healthcare OS`
@@ -117,3 +117,14 @@ Beyond patient chat, the LLM is leveraged for several administrative tasks via `
 | **Catalog Auto-Classifier** | `POST /admin/lab-tests/auto-classify` | `deepseek/deepseek-chat` | Categorizes raw test lists into clinical departments (Biochemistry, Hematology, Pathology). |
 | **Treatment Copywriter** | `POST /admin/treatments/ai-description` | `deepseek/deepseek-chat` | Drafts procedure overviews, patient expectations, and FAQ bullet points for aesthetic and specialty clinics. |
 | **Executive Insights Summary** | `POST /admin/insights/summary/generate` | `deepseek/deepseek-chat` | Analyzes 30-day booking volume, cancellation patterns, and revenue to produce a 3-bullet management briefing. |
+
+---
+
+## 7. VOICE RECEPTIONIST NLU (`app/voice/`, added 2026-10-06, revised 2026-10-07)
+
+- Speech is never LLM-written: every sentence comes from `app/voice/responses.py` templates.
+- Understanding order per turn: zero-LLM safety screen (`safety.py`) -> deterministic rules (`nlu_rules.py`) -> LLM classifier (`nlu_llm.py`) only when rules find nothing.
+- LLM: `VOICE_LLM_MODEL` (default `google/gemini-3.1-flash-lite`), backup `VOICE_LLM_FALLBACK_MODEL` (default `openai/gpt-4.1-mini`), 3 s timeout, 1 attempt, JSON mode. `deepseek/deepseek-chat` is NOT usable here: it returned no valid JSON in JSON mode (0/4, 2026-10-07).
+- The LLM output is validated: it may never emit EMERGENCY / CLINICAL_QUERY / GREETING, and never an AFFIRM while a booking/cancel confirmation is pending (`expect == "confirm"`). It receives the question Kriya just asked (`EXPECTING`) as context.
+- Usage is in `ai_usage_ledger` with `task_type = 'voice_nlu'`; a run of `success = false` rows there means the LLM fallback is dead and every unmatched utterance becomes "not understood".
+

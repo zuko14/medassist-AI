@@ -240,7 +240,7 @@ async def call_ai_gateway(
         raise ValueError("OPENROUTER_API_KEY is not configured")
 
     primary = primary_model or settings.openrouter_model or "deepseek/deepseek-chat"
-    fallback = fallback_model or getattr(settings, "openrouter_fallback_model", "google/gemini-2.0-flash-001")
+    fallback = fallback_model or getattr(settings, "openrouter_fallback_model", "google/gemini-2.5-flash-lite")
     req_timeout = timeout or float(settings.openrouter_timeout or 10)
 
     # OpenRouter native models fallback list

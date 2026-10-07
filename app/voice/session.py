@@ -25,7 +25,8 @@ from . import store
 from .dates import IST, today_ist
 from .dialog import DIALOG_VERSION, DialogEngine, new_state
 from .intents import TAXONOMY_VERSION
-from .lexicon import LEXICON_VERSION, SPECIALTIES, apply_pronunciations
+from .lexicon import (LEXICON_VERSION, SPECIALTIES, apply_pronunciations, find_specialties, resolve_department,
+                      tenant_department_for)
 from .nlu_llm import PROMPT_VERSION, understand_llm
 from .nlu_rules import NLU_RULES_VERSION, NluContext, understand
 from .policy import POLICY_VERSION, asr_confidence, gate, needs_llm
@@ -133,7 +134,33 @@ class CallSession:
     async def start(self, outbound: bool = False, interest: Optional[str] = None) -> Reply:
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {"versions": VERSIONS})
         await self._event("system", "CALL_STARTED", status="ok", data={"mode": self.ctx.mode})
-        return await self._emit(self.engine.greeting(self.state, outbound=outbound, interest=interest))
+        name, slots = None, {}
+        if outbound:
+            name, slots = await self._lead_context(interest)
+        return await self._emit(self.engine.greeting(self.state, outbound=outbound, interest=interest,
+                                                     name=name, slots=slots))
+
+    async def _lead_context(self, interest: Optional[str]) -> tuple:
+        """(name, booking slots) for a lead call: greet them by name and, when their
+        interest is one of this clinic's departments, skip asking it again."""
+        name, slots = None, {}
+        try:
+            prof = await self.tools.caller_profile()
+            raw = " ".join(((prof or {}).get("name") or "").split())
+            # WhatsApp display names can be emoji or nicknames: speak only a plain 1-3 word name.
+            if raw and len(raw) <= 30 and len(raw.split()) <= 3 and all(c.isalpha() or c in " .'" for c in raw):
+                name = raw
+        except Exception:
+            pass
+        if interest:
+            ctx = await self._context()
+            dept = tenant_department_for(interest, ctx.tenant_entries, ctx.departments)
+            if not dept:
+                specs = find_specialties(interest)
+                dept = resolve_department(specs[0], ctx.departments) if specs else None
+            if dept:
+                slots["department"] = dept
+        return name, slots
 
     async def handle(self, text: str, stt_lang: Optional[str] = None) -> Reply:
         text = (text or "").strip()
@@ -155,7 +182,7 @@ class CallSession:
         ctx = await self._context()
         nlu = understand(text, ctx, self.state.get("expect"))
         if needs_llm(nlu, text):
-            nlu, tokens, cost = await understand_llm(text, ctx, self.ctx.clinic_id)
+            nlu, tokens, cost = await understand_llm(text, ctx, self.ctx.clinic_id, self.state.get("expect"))
             self.llm_tokens += tokens
             self.llm_cost_paise += cost
         nlu = gate(nlu, asr_confidence(text), settings.voice_conf_clarify_below)

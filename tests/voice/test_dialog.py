@@ -233,26 +233,99 @@ def test_cancel_unverified_never_claims_cancelled():
     assert "couldn't cancel" in r
 
 
-def test_human_request_transfers():
+def test_human_request_is_offered_self_service_once_then_transfers():
     t = FakeTools()
     c = Conv(t, lang="en-IN")
     r = c.say("I want to talk to the receptionist.")
+    assert "book your appointment myself" in r and c.control == "continue"
+    assert not [x for x in t.calls if x[0] == "handoff"]
+    r = c.say("receptionist please")                      # asked twice: always honoured
     assert "connecting you" in r and c.control == "transfer"
     assert ("handoff", "caller_requested_human") in t.calls
 
 
+def test_human_offer_accepted_transfers_and_declined_keeps_helping():
+    t = FakeTools()
+    c = Conv(t, lang="en-IN")
+    c.say("connect me to reception")
+    assert "connecting you" in c.say("yes") and c.control == "transfer"
+    c2 = Conv(FakeTools(), lang="en-IN")
+    c2.say("connect me to reception")
+    assert "how can i help" in c2.say("no").lower() and c2.control == "continue"
+
+
+def test_human_request_mid_booking_transfers_immediately():
+    c = Conv(FakeTools(), lang="en-IN")
+    c.say("I need a heart doctor tomorrow")
+    r = c.say("just connect me to the receptionist")
+    assert "connecting you" in r and c.control == "transfer"
+
+
 def test_after_hours_handoff_becomes_callback():
     c = Conv(FakeTools(handoff_mode="callback"), lang="en-IN")
-    r = c.say("connect me to a person")
+    c.say("connect me to a person")
+    r = c.say("yes")
     assert "call you back" in r and c.control == "end"
+
+
+def test_production_hello_calls_are_answered_not_transferred():
+    """CALL-20261007-5B274E: 'హలో.', 'హలో.', then mis-heard words -> transferred in 5 s."""
+    c = Conv(FakeTools())
+    assert "వింటున్నాను" in c.say("హలో.")
+    c.say("హలో.")
+    assert c.control == "continue" and c.state.get("misses_total", 0) == 0
+    r = c.say("కార్డియోలజీ డిపార్ట్మెంట్లో అపాయింట్మెంట్ ఉంటాదా?")
+    assert c.control == "continue" and "రోజు" in r          # booking started: asks the day
+
+
+def test_production_okay_and_aa_confirm_the_booking():
+    """CALL-20261006-0883EB: 'ఓకే.' / 'ఆ.' to 'బుక్ చేయమంటారా?' were not understood -> transferred."""
+    t = FakeTools(slots=SLOTS[:1])
+    c = Conv(t)
+    c.say("Naaku repu heart doctor appointment kavali morning")
+    assert "బుక్ అయింది" in c.say("ఓకే.")
+    t2 = FakeTools(slots=SLOTS[:1])
+    c2 = Conv(t2)
+    c2.say("Naaku repu heart doctor appointment kavali morning")
+    assert "బుక్ అయింది" in c2.say("ఆ.")
+
+
+def test_production_other_information_asks_which_topic():
+    """CALL-20261006-81F8B1: Kriya's own menu option 'వేరే సమాచారం కావాలి' was not understood twice."""
+    t = FakeTools()
+    c = Conv(t)
+    r = c.say("వేరే సమాచారం కావాలి.")
+    assert "టైమింగ్స్" in r and c.state["expect"] == "info_topic"
+
+
+def test_production_free_slots_question_starts_booking():
+    """CALL-20261006-A40DAD: 'డాక్టర్ స్లాట్స్ ఖాళీ ఉన్నాయా?' -> not understood -> transferred."""
+    c = Conv(FakeTools())
+    r = c.say("డాక్టర్ స్లాట్స్ ఖాళీ ఉన్నాయా?")
+    assert "ఏ డాక్టర్" in r and c.control == "continue"
+
+
+def test_opening_date_alone_starts_booking():
+    c = Conv(FakeTools())
+    r = c.say("ఈరోజు.")
+    assert "ఏ డాక్టర్" in r and c.state["task"]["slots"].get("date")
+
+
+def test_real_gibberish_still_escalates_after_three_misses():
+    c = Conv(FakeTools())
+    for u in ("ఏం చేస్తున్నావ్?", "ఏం చేస్తున్నావ్?", "ఏం చేస్తున్నావ్?"):
+        c.say(u)
+    assert c.control == "transfer"
 
 
 def test_three_misunderstandings_escalate():
     t = FakeTools()
     c = Conv(t, lang="en-IN")
-    c.say("hmm umm")
+    c.say("hmm umm")                  # a filler is answered patiently, not counted
+    assert c.control == "continue" and c.state.get("misses_total", 0) == 0
     c.say("blah")
     c.say("zzz")
+    c.say("qwerty")
     assert c.control == "transfer" and ("handoff", "repeated_misunderstanding") in t.calls
 
 
@@ -343,7 +416,7 @@ def test_every_template_renders_in_every_language():
               "d1": "Dr. A", "d2": "Dr. B", "t1": "10:00", "t2": "17:00", "fee": 50000, "amount": 50000,
               "price": 30000, "ref": "KR-1", "hold": 10, "test": "CBC", "patient": "Ravi", "specialty": "ENT",
               "text": "x", "token": "5", "ahead": 2, "interest": "cardiology", "emergency": "108",
-              "whatsapp_sent": True,
+              "whatsapp_sent": True, "name": "Ravi",
               "appt": {"doctor_name": "Dr. X", "date": "2026-10-09", "time": "10:30", "status": "pending_payment"},
               "appts": [{"doctor_name": "Dr. X", "date": "2026-10-09", "time": "10:30"}]}
     labels = {k: v["label"] for k, v in SPECIALTIES.items()}

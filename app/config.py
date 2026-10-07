@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     openrouter_model: str = "deepseek/deepseek-chat"
     openrouter_base_url: str = "https://openrouter.ai/api/v1/chat/completions"
     openrouter_timeout: int = 8
-    openrouter_fallback_model: str = "google/gemini-2.0-flash-001"
+    openrouter_fallback_model: str = "google/gemini-2.5-flash-lite"  # gemini-2.0-flash-001 was retired on OpenRouter (HTTP 404)
     ai_usd_to_inr_rate: float = 87.0
     ai_default_monthly_budget_paise: int = 50000  # Rs 500 admin monthly spend cap
 
@@ -231,7 +231,9 @@ class Settings(BaseSettings):
     voice_max_call_seconds: int = 600
     voice_silence_reprompt_seconds: int = 8
     voice_conf_clarify_below: float = 0.6
-    voice_llm_model: str = "google/gemini-2.0-flash-001"   # via OpenRouter (ai_gateway)
+    voice_llm_model: str = "google/gemini-3.1-flash-lite"   # via OpenRouter; best te/hi accuracy in 2026-10-07 test, all <3 s
+    # Must support JSON mode: deepseek-chat (the WhatsApp model) returned no valid JSON in 4/4 tries.
+    voice_llm_fallback_model: str = "openai/gpt-4.1-mini"
     voice_llm_timeout_seconds: float = 3.0
     voice_payment_link_template_name: str = "kriya_payment_link"  # Meta UTILITY template, 8 body vars
     voice_transcript_retention_days: int = 30
@@ -239,6 +241,9 @@ class Settings(BaseSettings):
     sarvam_stt_url: str = "wss://api.sarvam.ai/speech-to-text/ws"
     sarvam_stt_model: str = "saaras:v3"
     sarvam_stt_mode: str = "transcribe"
+    # true: STT auto-detects the caller's language (te/hi/en callers on one number);
+    # false: STT is locked to the clinic's main language (better for single-language clinics).
+    voice_stt_auto_language: bool = True
     sarvam_tts_url: str = "wss://api.sarvam.ai/text-to-speech/ws"
     sarvam_tts_model: str = "bulbul:v3"
     sarvam_tts_speaker: str = "priya"

@@ -15,9 +15,11 @@ from typing import Optional, Protocol
 
 from .intents import WORKFLOW_OF
 from .nlu_rules import SUPPORTED_LANGS, NLUResult, looks_english, script_language
+from .policy import is_filler
 
-DIALOG_VERSION = "dialog-2026.10.06"
+DIALOG_VERSION = "dialog-2026.10.07"
 MAX_FAILURES = 3
+MAX_IDLE = 2          # "hello?" / "hmm" turns answered patiently before they count as misses
 
 
 @dataclass
@@ -66,6 +68,7 @@ def new_state(lang: str) -> dict:
 _SLOT_KEYS = ("department", "specialty", "doctor_ids", "date", "time_period", "clock_time",
               "relation", "patient_name")
 _REPLAN_KEYS = ("department", "doctor_ids", "date", "time_period", "clock_time")
+_ANSWER_KEYS = frozenset(_SLOT_KEYS) | {"option_index", "booking_ref", "info_topic"}
 _EMPTY = NLUResult([], {}, 1.0)
 
 
@@ -77,11 +80,15 @@ class DialogEngine:
 
     # ---- entry points ----
 
-    def greeting(self, state: dict, outbound: bool = False, interest: Optional[str] = None) -> TurnOutput:
+    def greeting(self, state: dict, outbound: bool = False, interest: Optional[str] = None,
+                 name: Optional[str] = None, slots: Optional[dict] = None) -> TurnOutput:
         if outbound:
-            state["offer"] = {"wf": "BOOKING", "slots": {}}
+            # A "yes" goes straight to the department the lead asked about (no re-asking).
+            state["offer"] = {"wf": "BOOKING", "slots": dict(slots or {})}
             state["expect"] = "offer"
-            out = TurnOutput([Say("greeting_outbound", {**self._c(), "interest": interest})])
+            say = Say("greeting_outbound", {**self._c(), "interest": interest, "name": name})
+            state["last_question"] = asdict(say)
+            out = TurnOutput([say])
         else:
             out = TurnOutput([Say("greeting", self._c())])
         return self._finish(state, out)
@@ -110,7 +117,7 @@ class DialogEngine:
             return None
         votes = state["lang_votes"]
         votes[code] = votes.get(code, 0) + 1
-        if votes[code] >= 2:
+        if votes[code] >= 2 or (state.get("turns", 0) == 0 and len(text.split()) >= 2):
             state["lang"], state["lang_votes"] = code, {}
             return Say("language_switched")
         return None
@@ -150,7 +157,31 @@ class DialogEngine:
             if not biz:
                 out.says.extend(self._reprompt(state))
                 return out
+        # "Hello?" / "hmm" / a bare "okay" with nothing asked: the caller is checking the line.
+        # Answer patiently instead of counting a misunderstanding (production calls were being
+        # transferred within seconds because three "hello"s counted as three misses).
+        opening_ack = not state.get("task") and not expect and intents and set(intents) <= {"AFFIRM"}
+        if (not biz and not (ents.keys() & _ANSWER_KEYS) and not nlu.language_request
+                and (is_filler(text) or opening_ack)):
+            state["idle"] = state.get("idle", 0) + 1
+            if state["idle"] <= MAX_IDLE:
+                if expect:
+                    out.says.extend(self._reprompt(state) or [Say("listening")])
+                else:
+                    out.says.append(Say("listening" if state["idle"] == 1 else "clarify"))
+                return out
+        else:
+            state["idle"] = 0
+
         if "HUMAN_AGENT_REQUEST" in biz:
+            # First plain request at the start of a call: offer to do it ourselves, once.
+            # Asking again (or after any misunderstanding / mid-task) transfers immediately.
+            if (biz == ["HUMAN_AGENT_REQUEST"] and not state.get("human_offered") and not state.get("task")
+                    and not state.get("misses_total")):
+                state["human_offered"] = True
+                state["offer"] = {"wf": "HUMAN", "reason": "caller_requested_human"}
+                self._ask(state, out, "offer", Say("offer_self_help"))
+                return out
             await self._handoff(state, out, "caller_requested_human")
             return out
         if "GOODBYE" in intents and not biz and expect not in ("confirm", "option", "patient_name"):
@@ -169,6 +200,10 @@ class DialogEngine:
                 state["expect"] = None
                 return await self._run(state, out, nlu, text)
             if "DENY" in intents:
+                if offer.get("wf") == "HUMAN":       # "no, don't transfer" -> they want us to help
+                    state["expect"] = None
+                    out.says.append(Say("how_can_help"))
+                    return out
                 return self._anything_else(state, out)
             if not (ents.keys() & set(_SLOT_KEYS)):
                 state["offer"] = offer
@@ -205,7 +240,9 @@ class DialogEngine:
                 state["queue"] = [{"wf": w, "intent": i} for w, i in todo[1:] if w != first]
 
         if not state.get("task"):
-            if ents.get("department") or ents.get("doctor_ids") or ents.get("specialty"):
+            if any(ents.get(k) for k in ("department", "doctor_ids", "specialty", "date", "time_period",
+                                         "clock_time")):
+                # "Today" / "tomorrow evening" as an opening line at a hospital means an appointment.
                 state["task"] = {"wf": "BOOKING", "intent": "BOOK_APPOINTMENT", "slots": {}}
             else:
                 return self._miss(state, out, Say("clarify" if state["failures"] == 0 else "didnt_catch"))
@@ -644,7 +681,16 @@ class DialogEngine:
 
     async def _wf_info(self, state, out, nlu, text) -> bool:
         task = state["task"]
-        answer = await self.tools.info(nlu.entities.get("info_topic") or task["slots"].get("topic"))
+        topic = nlu.entities.get("info_topic") or task["slots"].get("topic")
+        if not topic:
+            # "I need some information": ask which, rather than reading every FAQ aloud.
+            if state.get("expect") == "info_topic":
+                self._miss(state, out, Say("ask_info_topic"))
+                state["expect"] = "info_topic"
+                return False
+            return self._ask(state, out, "info_topic", Say("ask_info_topic"))
+        state["expect"] = None
+        answer = await self.tools.info(topic)
         if answer:
             out.says.append(Say("info_answer", {"text": answer}))
             task["outcome"] = "answered"

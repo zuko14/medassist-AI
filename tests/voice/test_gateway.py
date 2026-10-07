@@ -195,3 +195,60 @@ def test_passthru_always_fails_safe_to_reception(row, code):
          patch("app.voice.gateway.store.get_call_by_sid", new=AsyncMock(return_value=row)):
         r = TestClient(app).get("/voice/exotel/passthru?k=tok&CallSid=CA1", follow_redirects=False)
     assert r.status_code == code
+
+
+async def _run_until_stopped(ws, stt, ps, script):
+    for p in ps:
+        p.start()
+    try:
+        ws.inbox.put_nowait(json.dumps(START))
+        task = asyncio.create_task(gateway.exotel_stream(ws, k="tok"))
+        await _until(lambda: stt.streams and "mark" in ws.kinds())
+        await script(stt.streams[0])
+        ws.inbox.put_nowait(json.dumps({"event": "stop", "stream_sid": "S1",
+                                        "stop": {"call_sid": "CA1", "reason": "callended"}}))
+        await asyncio.wait_for(task, 5)
+    finally:
+        for p in ps:
+            p.stop()
+
+
+@pytest.mark.asyncio
+async def test_hello_over_the_greeting_replays_it_instead_of_a_turn():
+    """Production: callers say "hello?" as the line connects; the greeting was cut and the
+    "hello" counted as a misunderstanding. Now the greeting is said again in full."""
+    tools = FakeTools(slots=SLOTS)
+    stt, ps = _patches(tools, AsyncMock())
+    handle = AsyncMock()
+    ps.append(patch.object(CallSession, "handle", new=handle))
+    ws = FakeWS(echo_marks=False)
+
+    async def script(stream):
+        stream.say("హలో.")
+        await _until(lambda: ws.kinds().count("mark") >= 2)
+
+    await _run_until_stopped(ws, stt, ps, script)
+    assert "clear" in ws.kinds()                 # stopped talking over the caller...
+    assert ws.kinds().count("mark") >= 2         # ...then said the greeting again
+    handle.assert_not_awaited()                  # "hello" never reached the dialog
+
+
+@pytest.mark.asyncio
+async def test_real_speech_over_kriya_still_interrupts_and_is_answered():
+    tools = FakeTools(slots=SLOTS)
+    stt, ps = _patches(tools, AsyncMock())
+    ws = FakeWS(echo_marks=False)
+    seen = []
+    real_handle = CallSession.handle
+
+    async def spy(self, text, lang=None):
+        seen.append(text)
+        return await real_handle(self, text, lang)
+    ps.append(patch.object(CallSession, "handle", new=spy))
+
+    async def script(stream):
+        stream.say("Naaku repu heart doctor appointment kavali")
+        await _until(lambda: seen)
+
+    await _run_until_stopped(ws, stt, ps, script)
+    assert "clear" in ws.kinds() and seen == ["Naaku repu heart doctor appointment kavali"]

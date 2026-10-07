@@ -179,3 +179,28 @@ Commit: `test(voice): synthetic understanding benchmark and Sarvam live smoke sc
 optional: `VOICE_LLM_MODEL`, `VOICE_MAX_CONCURRENT_CALLS`, `SARVAM_TTS_SPEAKER`, `SARVAM_STT_MODEL`.
 
 ## Phase 2 (not started) — see README §8
+
+---
+
+## Post-launch fixes — 2026-10-07 (from the first 8 real calls)
+
+Evidence: `voice_calls` / `voice_call_events` for Aura Dental Hospital, 2026-10-06/07. 7 of 8 calls were
+handed to staff; 6 for `repeated_misunderstanding` (some within 3–5 s). Root causes, all fixed:
+
+| # | Root cause (seen in prod) | Fix |
+|---|---|---|
+| 1 | LLM fallback 100% dead: `google/gemini-2.0-flash-001` retired on OpenRouter (HTTP 404 in `ai_usage_ledger`, 6/6 voice_nlu calls). | `VOICE_LLM_MODEL=google/gemini-3.1-flash-lite`, backup `VOICE_LLM_FALLBACK_MODEL=openai/gpt-4.1-mini` (JSON-capable; deepseek-chat is not). Platform `OPENROUTER_FALLBACK_MODEL` default also moved off the dead id. |
+| 2 | "హలో" / "హ్మ్" / "ఓకే" counted as misunderstandings; 3 in a few seconds = transfer. | `policy.is_filler`; dialog answers fillers/bare acks patiently (`listening`, then menu) for 2 turns before they count. |
+| 3 | Caller's "hello?" as the line connects barged in and cut the greeting; they never heard it. | Gateway: a filler that interrupts Kriya replays the interrupted sentence instead of becoming a turn (max 2). Real speech still interrupts instantly. |
+| 4 | "ఓకే." / "ఆ." to "బుక్ చేయమంటారా?" not understood → booking lost to a transfer. | Lexicon: ఓకే, అలాగే, తప్పకుండా, ఓకే/ఆ/హా short replies (Telugu "ఆ" only as a whole reply — it also means "that"). |
+| 5 | "వేరే సమాచారం కావాలి" (Kriya's own menu option) and "డాక్టర్ స్లాట్స్ ఖాళీ ఉన్నాయా?" not understood. | INFO words → asks which topic; AVAIL / doctor+want → booking; bare date at opening → booking. |
+| 6 | First "reception" mention (incl. mis-heard STT) transferred instantly. | First plain request at call start: Kriya offers once to do it herself; yes / asking again / mid-task / after any miss → transfer. |
+| 7 | STT locked to the clinic language: Hindi/English callers transcribed as Telugu. | `VOICE_STT_AUTO_LANGUAGE=true` (default) → Sarvam `language-code=unknown`; first substantive caller turn switches language immediately. |
+| 8 | Lead calls asked the department again and greeted no one by name. | Outbound greeting uses the patient's plain name (WhatsApp emoji names are not spoken) and pre-fills the department from the lead's interest. |
+
+Verification: `tests/voice` 199 passed, full suite 4051 passed / 0 failed (regression tests replay the exact production utterances),
+`scripts/voice_eval.py --check` 19120 cases 100%, LLM models checked live on 16 real te/hi/en utterances.
+Admin UI: AI Receptionist page restyled with the panel's own components (screens checked at 1440 px and 390 px).
+
+Ops after deploy: if Render sets `VOICE_LLM_MODEL` or `OPENROUTER_FALLBACK_MODEL` to `google/gemini-2.0-flash-001`,
+delete or update it. Then watch `ai_usage_ledger where task_type='voice_nlu'` for `success=true`.
