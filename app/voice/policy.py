@@ -17,10 +17,18 @@ from dataclasses import replace
 from .dates import norm
 from .nlu_rules import NLUResult
 
-POLICY_VERSION = "policy-2026.10.06"
+POLICY_VERSION = "policy-2026.10.07"
 
-FILLERS = frozenset({"umm", "um", "hmm", "hm", "uh", "ah", "aa", "aaa", "huh", "hello", "halo",
-                     "హలో", "हेलो", "हैलो", "ఆ", "अ"})
+# Sounds that carry no request. Telugu "ఆ" and Hindi "हाँ" are NOT here: they mean "yes".
+FILLERS = frozenset({"umm", "um", "hmm", "hm", "uh", "ah", "aaa", "huh", "hello", "halo", "hallo", "helo",
+                     "హలో", "హలో హలో", "హ్మ్", "ఉమ్", "అ", "हेलो", "हैलो", "हम्म", "अ"})
+
+
+def is_filler(text: str) -> bool:
+    """'Hello?', 'hmm', 'హలో హలో': the caller is checking the line, not asking anything."""
+    words = [w.strip(".,!?।") for w in norm(text).split()]
+    words = [w for w in words if w]
+    return bool(words) and all(w in FILLERS for w in words)
 
 
 def asr_confidence(text: str) -> float:

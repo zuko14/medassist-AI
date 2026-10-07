@@ -1378,6 +1378,34 @@
         @media (max-width: 900px) { .lead-grid { grid-template-columns: minmax(0, 1fr); } }
         @media (max-width: 560px) { .lead-bar-row { grid-template-columns: minmax(90px, 120px) minmax(0, 1fr) auto; gap: 8px; } }
 
+        /* ── AI Receptionist (migration 098). Built only from the panel's own
+           pieces: .field inputs, .range-pick tabs, .day-picker, label.check. */
+        #pg-voice .vc-tabs { margin-bottom: 18px; }
+        #pg-voice .stat .num.vc-text { font-size: 1.05rem; font-weight: 600; color: var(--text2); letter-spacing: 0; line-height: 1.35; }
+        #pg-voice .stat .lead-sub { margin-top: 8px; }
+        .vc-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 18px; }
+        .vc-inline { display: grid; grid-template-columns: repeat(var(--vc-cols, 2), minmax(0, 1fr)) auto; gap: 12px; align-items: end; margin-bottom: 10px; }
+        .vc-inline .field { margin-bottom: 0; }
+        .vc-inline .btn { height: 46px; white-space: nowrap; }
+        .vc-section { padding: 18px 0 4px; border-top: 1px solid var(--border); }
+        .vc-section:first-child { border-top: 0; padding-top: 0; }
+        .vc-section h3 { font-size: 0.95rem; font-weight: 650; color: var(--text-strong); margin: 0 0 4px; }
+        .vc-section > .lead-note { margin-bottom: 14px; }
+        .vc-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 18px; border-top: 1px solid var(--border); }
+        .vc-chat { display: flex; flex-direction: column; gap: 10px; min-height: 160px; max-height: 420px; overflow-y: auto;
+            padding: 16px; margin: 4px 0 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface2); }
+        .vc-chat .empty { margin: auto; color: var(--text3); font-size: 0.85rem; text-align: center; }
+        .vc-msg { max-width: min(78%, 560px); padding: 10px 14px; border-radius: 14px; font-size: 0.9rem; line-height: 1.5; }
+        .vc-msg .who { display: block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.7; margin-bottom: 2px; }
+        .vc-msg.kriya { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
+        .vc-msg.caller { align-self: flex-end; background: var(--accent-soft2); border: 1px solid var(--accent-border); color: var(--text-strong); border-bottom-right-radius: 4px; }
+        .vc-msg.sys { align-self: center; max-width: 100%; font-size: 0.8rem; color: var(--text3); padding: 4px 8px; }
+        @media (max-width: 640px) {
+            .vc-inline { grid-template-columns: minmax(0, 1fr); }
+            .vc-inline .btn { width: 100%; justify-content: center; }
+            .vc-msg { max-width: 92%; }
+        }
+
         .appt-active-filter {
             display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
             padding: 10px 14px; margin-bottom: 16px;
@@ -2478,16 +2506,16 @@
                 <div class="stat"><div class="glow"></div><div class="label">Automation score</div><div class="num" id="vc-s-auto">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Handed to staff</div><div class="num" id="vc-s-handoff">—</div></div>
                 <div class="stat"><div class="glow"></div><div class="label">Avg call quality</div><div class="num" id="vc-s-quality">—</div></div>
-                <div class="stat"><div class="glow"></div><div class="label">This month's cost</div><div class="num" id="vc-s-cost">—</div></div>
+                <div class="stat"><div class="glow"></div><div class="label">This month's cost</div><div class="num" id="vc-s-cost">—</div><div class="lead-sub" id="vc-s-cost-sub"></div></div>
             </div>
-            <div class="card" style="display:flex;gap:8px;flex-wrap:wrap" role="tablist" aria-label="AI Receptionist sections">
-                <button type="button" class="btn btn-ghost btn-sm" data-vtab="live" onclick="vcTab('live')">Live</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-vtab="calls" onclick="vcTab('calls')">Calls</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-vtab="analytics" onclick="vcTab('analytics')">Analytics</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-vtab="outbound" onclick="vcTab('outbound')">Outbound</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-vtab="knowledge" data-vmanage="1" onclick="vcTab('knowledge')">Knowledge</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-vtab="settings" data-vmanage="1" onclick="vcTab('settings')">Settings</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-vtab="test" data-vmanage="1" onclick="vcTab('test')">Test console</button>
+            <div class="range-pick vc-tabs" role="group" aria-label="AI Receptionist sections">
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="live" aria-pressed="false" onclick="vcTab('live')">Live</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="calls" aria-pressed="false" onclick="vcTab('calls')">Calls</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="analytics" aria-pressed="false" onclick="vcTab('analytics')">Analytics</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="outbound" aria-pressed="false" onclick="vcTab('outbound')">Outbound</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="knowledge" data-vmanage="1" aria-pressed="false" onclick="vcTab('knowledge')">Knowledge</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="settings" data-vmanage="1" aria-pressed="false" onclick="vcTab('settings')">Settings</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="test" data-vmanage="1" aria-pressed="false" onclick="vcTab('test')">Test console</button>
             </div>
             <div class="card" id="vcPane"><div class="loader"><div class="spin"></div>Loading...</div></div>
             <div class="card" id="vcDetail" hidden></div>
@@ -9337,6 +9365,8 @@ function leadWindowLeft(iso) {
 let vcState = { tab: 'live', testCall: null, liveTimer: null };
 const VC_MONEY = p => (p === null || p === undefined) ? '—' : '₹' + (Number(p) / 100).toFixed(0);
 const VC_TIME = t => t ? new Date(t).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+const VC_LEX_KIND = { specialty_synonym: 'Department word', doctor_alias: 'Doctor nickname', test_alias: 'Lab test word', pronunciation: 'Pronunciation' };
+const VC_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 async function loadVoicePage() {
     vcTab(vcState.tab);
@@ -9346,15 +9376,22 @@ async function loadVoicePage() {
         document.getElementById('vc-s-auto').textContent = a.autonomy_overall === null ? '—' : a.autonomy_overall + '%';
         document.getElementById('vc-s-handoff').textContent = (a.by_status || {}).handed_off || 0;
         document.getElementById('vc-s-quality').textContent = a.avg_quality === null ? '—' : a.avg_quality;
-        document.getElementById('vc-s-cost').textContent = u.rates_configured ? VC_MONEY(u.cost_paise)
-            + (u.budget_paise ? ' / ' + VC_MONEY(u.budget_paise) : '') : 'rates not set';
+        // A sentence is not a number: "rates not set" goes under the tile, not in the 2rem figure.
+        const cost = document.getElementById('vc-s-cost'), costSub = document.getElementById('vc-s-cost-sub');
+        cost.textContent = u.rates_configured ? VC_MONEY(u.cost_paise) : '—';
+        costSub.textContent = !u.rates_configured ? 'Rates not set yet'
+            : (u.budget_paise ? 'of ' + VC_MONEY(u.budget_paise) + ' budget' : 'No monthly cap');
     } catch (e) { /* tabs show their own errors */ }
 }
 
 function vcTab(tab) {
     vcState.tab = tab;
     clearInterval(vcState.liveTimer);
-    document.querySelectorAll('[data-vtab]').forEach(b => b.classList.toggle('btn-accent', b.dataset.vtab === tab));
+    document.querySelectorAll('[data-vtab]').forEach(b => {
+        const on = b.dataset.vtab === tab;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
     document.getElementById('vcDetail').hidden = true;
     ({ live: vcLive, calls: vcCalls, analytics: vcAnalytics, outbound: vcOutbound, knowledge: vcKnowledge,
        settings: vcSettings, test: vcTest })[tab]();
@@ -9444,7 +9481,11 @@ async function vcOutbound() {
     pane.innerHTML = loading();
     try {
         const d = await api('/admin/voice/outbound');
-        pane.innerHTML = (hasPermission('VOICE_MANAGE') ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><input class="form-control" id="vcOutPhone" maxlength="20" placeholder="Patient phone" aria-label="Patient phone"><input class="form-control" id="vcOutInterest" maxlength="60" placeholder="Interest (e.g. cardiology)" aria-label="Interest"><button type="button" class="btn btn-accent btn-sm" onclick="vcCallNow()">Call with Kriya</button></div><p class="lead-note">Only people who contacted your clinic and did not opt out can be called, inside your outbound hours.</p>` : '')
+        pane.innerHTML = (hasPermission('VOICE_MANAGE') ? `<div class="lead-card-title">Ask Kriya to call a lead</div>`
+            + `<div class="vc-inline"><div class="field"><label for="vcOutPhone">Patient phone</label><input id="vcOutPhone" type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="+91 98765 43210"></div>`
+            + `<div class="field"><label for="vcOutInterest">What they asked about</label><input id="vcOutInterest" maxlength="60" autocomplete="off" placeholder="e.g. cardiology, knee pain"></div>`
+            + `<button type="button" class="btn btn-accent" onclick="vcCallNow()">Call with Kriya</button></div>`
+            + `<p class="lead-note" style="margin-bottom:18px">Kriya greets them by name, mentions what they asked about, and books the appointment on the call. Only people who contacted your clinic and did not opt out can be called, inside your outbound hours.</p>` : '')
             + `<div class="table-wrap"><table><thead><tr><th>Phone</th><th>Purpose</th><th>Status</th><th>Attempts</th><th>Next try</th><th>Note</th></tr></thead><tbody>`
             + ((d.jobs || []).map(j => `<tr><td>${esc(j.patient_phone)}</td><td>${esc(j.purpose)}</td><td>${badge(j.status)}</td><td>${esc(j.attempts)}</td><td>${esc(VC_TIME(j.next_attempt_at))}</td><td>${esc(j.last_error || '')}</td></tr>`).join('') || '<tr><td colspan="6">No outbound calls yet.</td></tr>')
             + '</tbody></table></div>';
@@ -9464,9 +9505,11 @@ async function vcKnowledge() {
     try {
         const d = await api('/admin/voice/lexicon');
         pane.innerHTML = `<p class="lead-note">Teach Kriya your words. Example: “gunde OPD” → department “Cardiology”; “pedda doctor” → doctor “Dr. Ramesh Kumar”; “KIMS” pronounced “కిమ్స్”.</p>`
-            + `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0"><select class="form-control" id="vcLexKind" aria-label="Kind"><option value="specialty_synonym">Department word</option><option value="doctor_alias">Doctor nickname</option><option value="test_alias">Lab test word</option><option value="pronunciation">Pronunciation</option></select>`
-            + `<input class="form-control" id="vcLexPhrase" maxlength="80" placeholder="What callers say" aria-label="Phrase"><input class="form-control" id="vcLexCanon" maxlength="120" placeholder="Exact department / doctor / test name, or how to pronounce" aria-label="Meaning"><button type="button" class="btn btn-accent btn-sm" onclick="vcLexAdd()">Add</button></div>`
-            + `<div class="table-wrap"><table><tbody>${(d.entries || []).map(e => `<tr><td>${esc(e.kind)}</td><td>${esc(e.phrase)}</td><td>${esc(e.canonical)}</td><td><button type="button" class="btn btn-ghost btn-sm" onclick="vcLexDel('${esc(e.id)}')">Delete</button></td></tr>`).join('') || '<tr><td>No entries yet.</td></tr>'}</tbody></table></div>`;
+            + `<div class="vc-inline" style="--vc-cols:3;margin-top:14px"><div class="field"><label for="vcLexKind">Type</label><select id="vcLexKind"><option value="specialty_synonym">Department word</option><option value="doctor_alias">Doctor nickname</option><option value="test_alias">Lab test word</option><option value="pronunciation">Pronunciation</option></select></div>`
+            + `<div class="field"><label for="vcLexPhrase">What callers say</label><input id="vcLexPhrase" maxlength="80" autocomplete="off" placeholder="e.g. gunde OPD"></div>`
+            + `<div class="field"><label for="vcLexCanon">What it means</label><input id="vcLexCanon" maxlength="120" autocomplete="off" placeholder="Exact department, doctor or test name"></div>`
+            + `<button type="button" class="btn btn-accent" onclick="vcLexAdd()">Add</button></div>`
+            + `<div class="table-wrap" style="margin-top:18px"><table><thead><tr><th>Type</th><th>Callers say</th><th>Means</th><th></th></tr></thead><tbody>${(d.entries || []).map(e => `<tr><td>${esc(VC_LEX_KIND[e.kind] || e.kind)}</td><td>${esc(e.phrase)}</td><td>${esc(e.canonical)}</td><td style="text-align:right"><button type="button" class="btn btn-ghost btn-sm" onclick="vcLexDel('${esc(e.id)}')">Delete</button></td></tr>`).join('') || '<tr><td colspan="4">No entries yet.</td></tr>'}</tbody></table></div>`;
     } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
 }
 
@@ -9485,19 +9528,29 @@ async function vcSettings() {
     pane.innerHTML = loading();
     try {
         const { settings: s } = await api('/admin/voice/settings');
-        const f = (id, label, val, attrs = '') => `<label class="lead-note" style="display:block;margin:8px 0">${label}<input class="form-control" id="${id}" value="${esc(val ?? '')}" ${attrs}></label>`;
-        pane.innerHTML = `<div class="lead-grid"><div>`
-            + `<label class="lead-note" style="display:block;margin:8px 0">Main language<select class="form-control" id="vcSetLang"><option value="te-IN">Telugu</option><option value="hi-IN">Hindi</option><option value="en-IN">English</option></select></label>`
-            + f('vcSetName', 'Assistant name', s.assistant_name, 'maxlength="30"') + f('vcSetSpeaker', 'Voice (Sarvam speaker id, blank = default)', s.speaker, 'maxlength="30"')
-            + f('vcSetPace', 'Speaking pace (0.5–2.0)', s.pace, 'type="number" step="0.1" min="0.5" max="2"') + f('vcSetEmerg', 'Emergency number told to callers', s.emergency_number, 'maxlength="20"')
-            + `</div><div>` + f('vcSetHs', 'Reception opens (transfers allowed)', s.reception_hours.start, 'type="time"') + f('vcSetHe', 'Reception closes', s.reception_hours.end, 'type="time"')
-            + f('vcSetHd', 'Reception days', s.reception_hours.days, 'maxlength="40"')
-            + `<label class="lead-note" style="display:block;margin:8px 0"><input type="checkbox" id="vcSetAuto" ${s.outbound.auto_leads ? 'checked' : ''}> Call new WhatsApp leads automatically</label>`
-            + f('vcSetOs', 'Outbound calls from', s.outbound.window_start, 'type="time"') + f('vcSetOe', 'Outbound calls until', s.outbound.window_end, 'type="time"')
-            + f('vcSetCap', 'Max outbound calls per day', s.outbound.daily_cap, 'type="number" min="0" max="500"')
-            + `</div></div><p class="lead-note">Monthly budget: ${s.monthly_budget_paise ? VC_MONEY(s.monthly_budget_paise) : 'no cap'} (set by Kriya). When it is used up, calls go straight to your reception.</p>`
-            + `<button type="button" class="btn btn-accent" onclick="vcSaveSettings()">Save</button>`;
+        const f = (id, label, val, attrs = '', hint = '') => `<div class="field"><label for="${id}">${label}</label><input id="${id}" value="${esc(val ?? '')}" ${attrs}>${hint ? `<div class="lead-sub">${hint}</div>` : ''}</div>`;
+        const days = String(s.reception_hours.days || '').split(',').map(d => d.trim().slice(0, 3));
+        pane.innerHTML = `<div class="vc-section"><h3>Voice and language</h3><p class="lead-note">How Kriya sounds. Callers who speak Hindi or English are answered in their language automatically.</p><div class="vc-form">`
+            + `<div class="field"><label for="vcSetLang">Main language</label><select id="vcSetLang"><option value="te-IN">Telugu</option><option value="hi-IN">Hindi</option><option value="en-IN">English</option></select></div>`
+            + f('vcSetName', 'Assistant name', s.assistant_name, 'maxlength="30" autocomplete="off"')
+            + f('vcSetSpeaker', 'Voice', s.speaker, 'maxlength="30" autocomplete="off" placeholder="Default voice"', 'Sarvam speaker id. Leave blank for the default.')
+            + `<div class="field"><label for="vcSetPace">Speaking pace</label><select id="vcSetPace"><option value="0.85">Slower</option><option value="1">Normal</option><option value="1.15">Faster</option></select></div>`
+            + f('vcSetEmerg', 'Emergency number told to callers', s.emergency_number, 'type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="e.g. 108 or your casualty line"')
+            + `</div></div>`
+            + `<div class="vc-section"><h3>Reception hours</h3><p class="lead-note">When a caller asks for a person inside these hours, Kriya transfers the call. Outside them, it takes a callback request for your team.</p><div class="vc-form">`
+            + f('vcSetHs', 'Opens', s.reception_hours.start, 'type="time"') + f('vcSetHe', 'Closes', s.reception_hours.end, 'type="time"')
+            + `</div><div class="field"><label>Open on</label><div class="day-picker" id="vcSetDays">${VC_DAYS.map(d => `<label><input type="checkbox" value="${d}" ${days.includes(d) ? 'checked' : ''}>${d}</label>`).join('')}</div></div></div>`
+            + `<div class="vc-section"><h3>Lead calls</h3><p class="lead-note">Kriya calls people who asked about your services on WhatsApp but did not book, and books them on the call.</p>`
+            + `<div class="field"><label class="check"><input type="checkbox" id="vcSetAuto" ${s.outbound.auto_leads ? 'checked' : ''}> Call new WhatsApp leads automatically</label></div><div class="vc-form">`
+            + f('vcSetOs', 'Calls from', s.outbound.window_start, 'type="time"') + f('vcSetOe', 'Calls until', s.outbound.window_end, 'type="time"')
+            + f('vcSetCap', 'Max calls per day', s.outbound.daily_cap, 'type="number" min="0" max="500"')
+            + `</div></div>`
+            + `<div class="vc-actions"><button type="button" class="btn btn-accent" onclick="vcSaveSettings()">Save settings</button><span class="lead-note">Monthly budget: ${s.monthly_budget_paise ? VC_MONEY(s.monthly_budget_paise) : 'no cap'} (set by Kriya). When it is used up, calls go straight to your reception.</span></div>`;
         document.getElementById('vcSetLang').value = s.primary_language;
+        // Keep a custom pace someone set earlier selectable instead of silently snapping it.
+        const pace = document.getElementById('vcSetPace'), p = String(Number(s.pace) || 1);
+        if (![...pace.options].some(o => o.value === p)) pace.add(new Option(`Custom (${p})`, p));
+        pace.value = p;
         vcState.settings = s;
     } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
 }
@@ -9505,10 +9558,12 @@ async function vcSettings() {
 async function vcSaveSettings() {
     const v = id => document.getElementById(id).value.trim();
     const s = vcState.settings || {};
+    const days = [...document.querySelectorAll('#vcSetDays input:checked')].map(i => i.value);
+    if (!days.length) { toast('Pick at least one day reception is open.', true); return; }
     const body = {
         primary_language: v('vcSetLang'), assistant_name: v('vcSetName'), speaker: v('vcSetSpeaker') || null,
         pace: Number(v('vcSetPace')) || 1.0, emergency_number: v('vcSetEmerg') || null,
-        reception_hours: { start: v('vcSetHs'), end: v('vcSetHe'), days: v('vcSetHd') },
+        reception_hours: { start: v('vcSetHs'), end: v('vcSetHe'), days: days.join(',') },
         outbound: { auto_leads: document.getElementById('vcSetAuto').checked, window_start: v('vcSetOs'),
                     window_end: v('vcSetOe'), max_attempts: (s.outbound || {}).max_attempts || 2, daily_cap: Number(v('vcSetCap')) || 0 },
     };
@@ -9518,26 +9573,34 @@ async function vcSaveSettings() {
 function vcTest() {
     vcState.testCall = null;
     document.getElementById('vcPane').innerHTML = `<p class="lead-note">Talk to Kriya in text. It reads your real doctors, slots, fees and reports, but bookings, cancellations and sends are <strong>simulated</strong> and marked so in the call's trace.</p>`
-        + `<input class="form-control" id="vcTestPhone" maxlength="20" placeholder="Pretend caller phone (optional)" aria-label="Caller phone" style="margin-bottom:8px">`
-        + `<div id="vcTestLog" style="min-height:120px;margin:8px 0"></div><div style="display:flex;gap:8px"><input class="form-control" id="vcTestIn" maxlength="400" placeholder="Type what the caller says, e.g. Naaku repu heart doctor kavali" aria-label="Caller says" onkeydown="if(event.key==='Enter')vcTestSay()"><button type="button" class="btn btn-accent btn-sm" onclick="vcTestSay()">Say</button><button type="button" class="btn btn-ghost btn-sm" onclick="vcTest()">New call</button></div>`;
+        + `<div class="vc-form" style="margin-top:14px"><div class="field"><label for="vcTestPhone">Pretend caller phone (optional)</label><input id="vcTestPhone" type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="Use a real patient's number to test their bookings"></div></div>`
+        + `<div class="vc-chat" id="vcTestLog" aria-live="polite"><div class="empty">Type what a caller would say. Kriya answers here.</div></div>`
+        + `<div class="vc-inline" style="grid-template-columns:minmax(0,1fr) auto auto"><div class="field"><label for="vcTestIn">Caller says</label><input id="vcTestIn" maxlength="400" autocomplete="off" placeholder="e.g. Naaku repu heart doctor kavali" onkeydown="if(event.key==='Enter')vcTestSay()"></div>`
+        + `<button type="button" class="btn btn-accent" onclick="vcTestSay()">Say</button><button type="button" class="btn btn-ghost" onclick="vcTest()">New call</button></div>`;
+}
+
+function vcTestAdd(cls, who, text) {
+    const log = document.getElementById('vcTestLog');
+    log.querySelector('.empty')?.remove();
+    log.insertAdjacentHTML('beforeend', `<div class="vc-msg ${cls}">${who ? `<span class="who">${esc(who)}</span>` : ''}${text}</div>`);
+    log.scrollTop = log.scrollHeight;
 }
 
 async function vcTestSay() {
-    const log = document.getElementById('vcTestLog');
     const input = document.getElementById('vcTestIn');
     const text = input.value.trim();
     try {
         if (!vcState.testCall) {
             const r = await apiPost('/admin/voice/test-turn', { caller_phone: document.getElementById('vcTestPhone').value || null });
             vcState.testCall = r.call_id;
-            log.innerHTML += r.say.map(t => `<div><strong>Kriya:</strong> ${esc(t)}</div>`).join('');
+            r.say.forEach(t => vcTestAdd('kriya', 'Kriya', esc(t)));
             if (!text) return;
         }
         input.value = '';
-        log.innerHTML += `<div><strong>Caller:</strong> ${esc(text)}</div>`;
+        vcTestAdd('caller', 'Caller', esc(text));
         const r = await apiPost('/admin/voice/test-turn', { call_id: vcState.testCall, text });
-        log.innerHTML += r.say.map(t => `<div><strong>Kriya:</strong> ${esc(t)}</div>`).join('')
-            + (r.control !== 'continue' ? `<div class="lead-note">Call ${r.control === 'transfer' ? 'transferred to reception' : 'ended'}. <a href="#" onclick="vcOpen('${esc(r.call_id)}');return false">Open trace</a></div>` : '');
+        r.say.forEach(t => vcTestAdd('kriya', 'Kriya', esc(t)));
+        if (r.control !== 'continue') vcTestAdd('sys', '', `Call ${r.control === 'transfer' ? 'transferred to reception' : 'ended'}. <a href="#" onclick="vcOpen('${esc(r.call_id)}');return false">Open trace</a>`);
     } catch (e) { toast(e.message, true); }
 }
 

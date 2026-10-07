@@ -50,9 +50,37 @@ def test_llm_output_is_validated_not_trusted():
     r = nlu_llm._validate({"intents": ["BOOK_APPOINTMENT", "DROP_TABLES", "AFFIRM"], "specialty": "CARDIOLOGY",
                            "date": "2020-01-01", "time_period": "MIDNIGHT", "relation": "BOSS",
                            "confidence": 0.99}, c)
-    assert r.intents == ["BOOK_APPOINTMENT"]
+    assert r.intents == ["BOOK_APPOINTMENT", "AFFIRM"]
     assert r.entities == {"specialty": "CARDIOLOGY", "department": "Cardiology"}
     assert r.confidence == 0.9 and r.source == "llm"
+
+
+def test_llm_cannot_raise_emergencies_or_turn_greetings_into_transfers():
+    c = NluContext(now=NOW)
+    for raw in ({"intents": ["GREETING"], "confidence": 0.8}, {"intents": ["EMERGENCY"], "confidence": 0.9},
+                {"intents": ["CLINICAL_QUERY"], "confidence": 0.9}):
+        assert nlu_llm._validate(raw, c).intents == []
+    r = nlu_llm._validate({"intents": ["SERVICE_AVAILABILITY", "DEPARTMENT_INFORMATION"], "confidence": 0.8}, c)
+    assert r.intents == ["DOCTOR_AVAILABILITY"]
+
+
+def test_llm_can_never_consent_to_a_transaction():
+    """While Kriya waits for 'shall I book/cancel?', only a yes the rules heard counts."""
+    r = nlu_llm._validate({"intents": ["AFFIRM"], "confidence": 0.9}, NluContext(now=NOW), expect="confirm")
+    assert r.intents == [] and r.confidence == 0.0
+
+
+@pytest.mark.asyncio
+async def test_llm_uses_live_backup_model_and_question_context():
+    gw = AsyncMock(return_value={"choices": [{"message": {"content": '{"intents": ["GENERAL_INFORMATION"], "confidence": 0.8}'}}],
+                                 "usage": {"total_tokens": 50}})
+    with patch("app.voice.nlu_llm.call_ai_gateway", new=gw):
+        r, tokens, _ = await nlu_llm.understand_llm("vere samacharam kavali", NluContext(now=NOW), CLINIC["id"],
+                                                   expect="anything_else")
+    assert r.intents == ["GENERAL_INFORMATION"] and tokens == 50
+    kw = gw.await_args.kwargs
+    assert kw["fallback_model"] == nlu_llm.settings.voice_llm_fallback_model
+    assert "whether they need anything else" in gw.await_args.args[0][1]["content"]
 
 
 @pytest.mark.asyncio
@@ -227,3 +255,58 @@ def test_voice_config_merges_and_hours():
     assert store.within_hours(cfg["reception_hours"], datetime(2026, 10, 6, 10, 0, tzinfo=IST)) is True
     assert store.within_hours(cfg["reception_hours"], datetime(2026, 10, 6, 19, 0, tzinfo=IST)) is False
     assert store.within_hours(cfg["reception_hours"], datetime(2026, 10, 11, 10, 0, tzinfo=IST)) is False  # Sunday
+
+
+# ---- outbound lead calls ----
+
+def _lead_session(profile):
+    s = CallSession(ctx(), tools=FakeTools(profile=profile), now=NOW)
+    return s
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("profile, spoken", [
+    ({"name": "Ravi Kumar"}, "Ravi Kumar"),
+    ({"name": "Chaitu 😎🔥"}, None),          # WhatsApp display names are not spoken
+    ({"name": "~"}, None),
+    (None, None),
+])
+async def test_lead_call_greets_by_plain_name_and_preselects_department(profile, spoken):
+    s = _lead_session(profile)
+    with patch("app.database.get_doctors", new=AsyncMock(return_value=DOCS)), \
+         patch("app.voice.session.store.load_lexicon", new=AsyncMock(return_value=[])):
+        name, slots = await s._lead_context("heart problem / cardiology")
+    assert name == spoken
+    assert slots == {"department": "Cardiology"}
+
+
+@pytest.mark.asyncio
+async def test_lead_yes_goes_straight_to_the_day_question():
+    s = _lead_session({"name": "Ravi Kumar"})
+    with patch("app.database.get_doctors", new=AsyncMock(return_value=DOCS)), \
+         patch("app.voice.session.store.load_lexicon", new=AsyncMock(return_value=[])), \
+         patch("app.voice.session.store.update_call", new=AsyncMock()), \
+         patch("app.voice.session.store.add_event", new=AsyncMock()), \
+         patch("app.voice.session.store.get_call", new=AsyncMock(return_value={})), \
+         patch("app.voice.session.understand_llm", new=AsyncMock(side_effect=AssertionError("rules must hear this"))):
+        g = await s.start(outbound=True, interest="cardiology")
+        assert "Ravi Kumar గారు" in g.texts[0]
+        r = await s.handle("ఆ, చెప్పండి")
+    assert "ఏ రోజు" in " ".join(r.texts)            # department not asked again
+
+
+def test_stt_auto_detects_language_by_default():
+    from app.voice.providers import sarvam
+    from urllib.parse import parse_qs, urlparse
+    seen = {}
+
+    async def fake_connect(url, **kw):
+        seen.update(parse_qs(urlparse(url).query))
+        return MagicMock()
+    import asyncio
+    with patch.object(sarvam, "connect", new=fake_connect):
+        asyncio.run(sarvam.SarvamSTT().open("te-IN"))
+        assert seen["language-code"] == ["unknown"]
+        with patch.object(sarvam.settings, "voice_stt_auto_language", False):
+            asyncio.run(sarvam.SarvamSTT().open("te-IN"))
+    assert seen["language-code"] == ["te-IN"]

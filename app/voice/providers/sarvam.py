@@ -78,7 +78,7 @@ class _SarvamSTTStream:
 
 class SarvamSTT:
     async def open(self, language: Optional[str], sample_rate: int = 8000) -> _SarvamSTTStream:
-        q = {"language-code": language if language in _LANGS else "unknown", "model": settings.sarvam_stt_model,
+        q = {"language-code": "unknown" if settings.voice_stt_auto_language or language not in _LANGS else language, "model": settings.sarvam_stt_model,
              "mode": settings.sarvam_stt_mode, "sample_rate": str(sample_rate), "input_audio_codec": "pcm_s16le",
              "vad_signals": "true", "high_vad_sensitivity": "true"}
         ws = await asyncio.wait_for(connect(f"{settings.sarvam_stt_url}?{urlencode(q)}",

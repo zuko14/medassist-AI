@@ -27,6 +27,7 @@ from . import exotel_protocol as X
 from . import store
 from .audio import PcmChunker, seconds_of
 from .phone import mask, to_e164
+from .policy import is_filler
 from .providers import get_providers
 from .session import CallSession
 from .tools import CallContext
@@ -62,6 +63,9 @@ class CallRunner:
         self.control = "continue"
         self.finished = asyncio.Event()
         self.caller_hung_up = False
+        self.reply = None             # what Kriya is (or was last) saying
+        self.interrupted = None       # reply cut off by caller speech, until we know what they said
+        self.resumes = 0
 
     @property
     def speaking(self) -> bool:
@@ -103,6 +107,7 @@ class CallRunner:
 
     async def respond(self, reply, heard_at: Optional[float] = None) -> None:
         await self.stop_speaking(clear=False)
+        self.reply = reply
         self.control = reply.control
         self.speak_task = asyncio.create_task(self._speak(reply.texts, heard_at))
 
@@ -140,6 +145,7 @@ class CallRunner:
             if self.finished.is_set():
                 return
             if kind == "speech_start" and self.speaking and self.control == "continue":
+                self.interrupted = self.reply
                 await self.stop_speaking(clear=True)          # barge-in
                 await store.add_event(self.session.ctx.clinic_id, self.session.ctx.call_id, "system",
                                       "BARGE_IN", status="ok")
@@ -149,6 +155,20 @@ class CallRunner:
                 self.last_activity, self.silences = heard, 0
                 if self.control != "continue":
                     continue
+                if is_filler(text) and (self.interrupted is not None or self.speaking):
+                    # "Hello?" said over Kriya (typically as the call connects): not a request.
+                    # Finish what was being said instead of answering the filler, so the
+                    # caller actually hears the greeting / question. Bounded to avoid loops.
+                    replay, self.interrupted = self.interrupted, None
+                    await store.add_event(self.session.ctx.clinic_id, self.session.ctx.call_id, "system",
+                                          "FILLER_OVER_SPEECH", status="ok", text=text)
+                    if replay is not None and self.resumes < 2:
+                        self.resumes += 1
+                        await self.respond(replay, heard)
+                        continue
+                    if self.speaking:
+                        continue
+                self.interrupted = None
                 reply = await self.session.handle(text, lang)
                 await self.respond(reply, heard)
             elif kind == "error":

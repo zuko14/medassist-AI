@@ -15,7 +15,7 @@ from typing import Optional
 from .dates import first_index, has_any, norm, parse_clock_time, parse_date, parse_time_period
 from .lexicon import find_specialties, match_doctors, resolve_department, tenant_department_for
 
-NLU_RULES_VERSION = "nlu-rules-2026.10.06"
+NLU_RULES_VERSION = "nlu-rules-2026.10.07"
 
 SUPPORTED_LANGS = ("te-IN", "hi-IN", "en-IN")
 DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE")
@@ -53,7 +53,11 @@ W = {
     "WANT": ("kavali", "kaavali", "కావాలి", "chahiye", "chaiye", "चाहिए", "need", "needs", "want", "wants", "dikhana",
              "dikhaana", "consult", "kalavali", "కలవాలి", "milna", "मिलना", "दिखाना"),
     "AVAIL": ("available", "availability", "unnara", "unnaru", "undara", "ఉన్నారా", "అందుబాటులో",
-              "milenge", "slots", "slot", "free", "मिलेंगे", "उपलब्ध"),
+              "milenge", "slots", "slot", "free", "मिलेंगे", "उपलब्ध", "స్లాట్", "ఖాళీ", "khali",
+              "खाली", "स्लॉट"),
+    "DOCTOR": ("doctor", "doctors", "dr", "daktar", "డాక్టర్", "డాక్టరు", "వైద్యు", "डॉक्टर", "डाक्टर"),
+    "INFO": ("information", "info", "details", "samacharam", "సమాచారం", "వివరాలు", "జానకారీ",
+             "jankari", "jaankari", "जानकारी", "डिटेल"),
     "CANCEL": ("cancel", "cancellation", "రద్దు", "క్యాన్సిల్", "radd", "रद्द", "कैंसिल"),
     "RESCHEDULE": ("reschedule", "postpone", "prepone", "marchandi", "మార్చండి", "మార్చాలి",
                    "badal", "badalna", "बदल", "बदलना"),
@@ -76,20 +80,30 @@ W = {
     "REFUND": ("refund", "రీఫండ్", "रिफंड", "paisa wapas", "पैसा वापस"),
     "HUMAN": ("human", "receptionist", "reception", "person", "staff", "operator", "someone", "manishi",
               "మనిషి", "రిసెప్షన్", "इंसान", "किसी से बात", "रिसेप्शन"),
-    "CALLBACK": ("call back", "callback", "call me back", "call me later", "తర్వాత కాల్", "baad mein call", "बाद में कॉल"),
+    "CALLBACK": ("call back", "callback", "call me back", "call me later", "తర్వాత కాల్", "baad mein call", "बाद में कॉल",
+                 "busy", "బిజీ", "बिज़ी", "बिजी"),
     "COMPLAINT": ("complaint", "complain", "ఫిర్యాదు", "शिकायत"),
     "ASK_IF_AI": ("are you a robot", "are you ai", "are you an ai", "are you a bot", "are you human",
                   "are you a machine", "robot aa", "robot ha", "రోబోట్", "रोबोट", "मशीन हो"),
     "AFFIRM": ("yes", "yeah", "yep", "ok", "okay", "sure", "haa", "haan", "han", "avunu", "అవును", "సరే",
                "sare", "=హా", "=हाँ", "=हां", "=जी", "theek hai", "ठीक", "confirm", "cheyyandi", "cheyandi",
-               "చేయండి", "kar do", "kardo", "karo", "pakka", "correct", "right"),
+               "చేయండి", "kar do", "kardo", "karo", "pakka", "correct", "right",
+               "ఓకే", "ఓకై", "అలాగే", "alage", "=ఔను", "కరెక్ట్", "తప్పకుండా", "చెయ్యండి", "బుక్ చేయండి",
+               "ओके", "ज़रूर", "जरूर", "बिल्कुल", "alright", "go ahead", "please do", "of course"),
     "DENY": ("no", "nope", "vaddu", "వద్దు", "kaadu", "కాదు", "ledu", "లేదు", "nahi", "nahin", "नहीं",
-             "mat", "don't", "dont"),
+             "mat", "don't", "dont", "వద్దండి", "అక్కర్లేదు", "=నో", "=मत", "नको", "not needed"),
     "GOODBYE": ("bye", "goodbye", "thank you", "thanks", "dhanyavadalu", "ధన్యవాదాలు", "shukriya",
-                "धन्यवाद", "that's all", "thats all", "anthe", "అంతే", "bas", "=बस"),
+                "धन्यवाद", "that's all", "thats all", "anthe", "అంతే", "bas", "=बस", "=బై", "=बाय", "థాంక్స్",
+                "थैंक्स"),
     "REPEAT": ("repeat", "malli cheppandi", "మళ్ళీ చెప్పండి", "phir se", "dobara", "दोबारा", "फिर से",
                "pardon", "come again"),
 }
+
+# Yes only when it is (nearly) the whole reply: "ఆ" is also "that" ("ఆ డాక్టర్"), "హా" a filler.
+SHORT_AFFIRM = frozenset({"ఆ", "ఆఁ", "ఆ ఆ", "హా", "హాఁ", "హాం", "హా అండి", "ఆ అండి", "aa", "haa", "ha",
+                          "ఓకే అండి", "ఓకే సార్", "సరే అండి", "సరే సార్", "सही", "हाँ जी", "जी हाँ",
+                          "ఆ చెప్పండి", "హా చెప్పండి", "ఆ ఓకే", "హా ఓకే", "ఆ సరే", "హా సరే", "ఆ చేయండి",
+                          "హా చేయండి", "aa cheppandi", "haa cheppandi", "हाँ बताइए", "हाँ बोलिए"})
 
 FIRST = ("first", "1st", "modati", "modatidi", "మొదటి", "మొదటిది", "pehla", "pehle", "पहला", "पहले")
 SECOND = ("second", "2nd", "rendo", "rendava", "రెండో", "రెండవ", "doosra", "dusra", "दूसरा", "दूसरे")
@@ -276,9 +290,19 @@ def understand(text: str, ctx: NluContext, expect: Optional[str] = None) -> NLUR
         elif has_any(t, W["WANT"]) or d:
             pos["BOOK_APPOINTMENT"] = first_index(t, W["WANT"]) if has_any(t, W["WANT"]) else 0
 
+    # Nothing business-like yet: "are doctor slots free?", "naaku doctor kavali" -> booking;
+    # "I need other information" -> hospital information (the dialog asks which).
+    if not pos:
+        if has_any(t, W["AVAIL"]) or (has_any(t, W["DOCTOR"]) and has_any(t, W["WANT"])):
+            pos["BOOK_APPOINTMENT"] = max(0, first_index(t, W["AVAIL"] + W["DOCTOR"]))
+        elif has_any(t, W["INFO"]):
+            pos["GENERAL_INFORMATION"] = first_index(t, W["INFO"])
+
     for act in ("AFFIRM", "DENY", "GOODBYE", "REPEAT"):
         if has_any(t, W[act]):
             pos.setdefault(act, first_index(t, W[act]))
+    if " ".join(re.sub(r"[.,!?।;:'\"-]", " ", t).split()) in SHORT_AFFIRM:  # not \W: it eats Indic vowel signs
+        pos.setdefault("AFFIRM", 0)
     if lang_req:
         pos["LANGUAGE_CHANGE"] = 0
     if expect == "confirm" and "AFFIRM" in pos:

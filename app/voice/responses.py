@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.10.06"
+TEMPLATES_VERSION = "templates-2026.10.07"
 
 T: dict = {
     "greeting": {
@@ -23,9 +23,25 @@ T: dict = {
         "hi": "नमस्ते, {hospital} में कॉल करने के लिए धन्यवाद। मैं {assistant} बोल रही हूँ। बताइए, मैं आपकी क्या मदद करूँ?",
     },
     "greeting_outbound": {
-        "te": "నమస్కారం, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {interest_sentence}మీకు అపాయింట్మెంట్ బుక్ చేయడంలో సహాయం చేయమంటారా?",
-        "en": "Namaste, this is {assistant} calling from {hospital}. {interest_sentence}Can I help you book an appointment?",
-        "hi": "नमस्ते, मैं {hospital} से {assistant} बोल रही हूँ। {interest_sentence}क्या मैं आपकी अपॉइंटमेंट बुक करने में मदद करूँ?",
+        "te": "నమస్కారం{who}, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {interest_sentence}మీకు అపాయింట్మెంట్ బుక్ చేయడంలో సహాయం చేయమంటారా?",
+        "en": "Namaste{who}, this is {assistant} calling from {hospital}. {interest_sentence}Can I help you book an appointment?",
+        "hi": "नमस्ते{who}, मैं {hospital} से {assistant} बोल रही हूँ। {interest_sentence}क्या मैं आपकी अपॉइंटमेंट बुक करने में मदद करूँ?",
+    },
+    "who": {"te": "{name} గారు", "en": "{name}", "hi": "{name} जी"},
+    "listening": {
+        "te": "చెప్పండి, నేను వింటున్నాను. మీకు ఏం సహాయం కావాలి?",
+        "en": "Yes, I'm listening. How can I help you?",
+        "hi": "जी, मैं सुन रही हूँ। बताइए, क्या मदद चाहिए?",
+    },
+    "offer_self_help": {
+        "te": "నేనే మీకు అపాయింట్మెంట్ బుక్ చేయగలను, రిపోర్ట్స్, ఫీజులు, టైమింగ్స్ కూడా చెప్పగలను. ఏం కావాలో చెప్పండి. లేదా రిసెప్షన్‌కి కనెక్ట్ చేయమంటారా?",
+        "en": "I can book your appointment myself, and help with reports, fees and timings. Tell me what you need, or shall I connect you to reception?",
+        "hi": "मैं खुद आपका अपॉइंटमेंट बुक कर सकती हूँ, और रिपोर्ट, फीस, टाइमिंग की जानकारी भी दे सकती हूँ। बताइए क्या चाहिए, या रिसेप्शन से जोड़ दूँ?",
+    },
+    "ask_info_topic": {
+        "te": "తప్పకుండా. ఏ సమాచారం కావాలి? హాస్పిటల్ టైమింగ్స్, అడ్రస్, లేదా డాక్టర్ ఫీజులా?",
+        "en": "Sure. What would you like to know: our timings, our address, or doctor fees?",
+        "hi": "ज़रूर। क्या जानकारी चाहिए: टाइमिंग, पता, या डॉक्टर की फीस?",
     },
     "interest_sentence": {
         "te": "మీరు ఇటీవల {interest} గురించి అడిగారు. ",
@@ -445,6 +461,7 @@ def realize(key: str, lang: str, today: date, specialty_labels: Optional[dict] =
     q["fee_sentence"] = render("fee_sentence", lang, fee=q["fee"]) + " " if q.get("fee") else ""
     q["wa_sentence"] = " " + render("wa_sentence", lang) if p.get("whatsapp_sent") else ""
     q["emergency_sentence"] = " " + render("emergency_sentence", lang, emergency=p["emergency"]) if p.get("emergency") else ""
+    q["who"] = " " + render("who", lang, name=p["name"]) if p.get("name") else ""
     q["interest_sentence"] = render("interest_sentence", lang, interest=p["interest"]) + " " if p.get("interest") else ""
     if q.get("specialty") and specialty_labels and q["specialty"] in specialty_labels:
         q["specialty"] = specialty_labels[q["specialty"]].get(short(lang)) or specialty_labels[q["specialty"]]["en"]
