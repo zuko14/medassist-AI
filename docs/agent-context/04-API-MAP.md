@@ -56,6 +56,13 @@ All routes are registered in [`app/main.py`](file:///c:/Users/chait/OneDrive/Des
   3. Updates associated `appointments(status='confirmed', payment_id=...)`.
 - **Side Effects**: Triggers `whatsapp_service.send_text()` sending booking confirmation receipt with appointment details to patient.
 
+### `POST /webhooks/phonepe/{clinic_id}` (2026-10-07)
+- **File**: `app/routers/phonepe_webhook.py` -> `PaymentService.process_phonepe_webhook`.
+- **Auth**: `Authorization` must equal `sha256("<phonepe_webhook_username>:<phonepe_webhook_password>")` of the clinic in the path. No unscoped variant exists.
+- **Trust**: the body only names `merchantOrderId` (= appointments.id); the payment is re-read from PhonePe Order Status with the clinic's own API credentials before `_settle_captured_payment` runs.
+- **Responses**: 400 bad auth/JSON; 503 when Order Status is unreachable (redelivery); 200 otherwise (including ignored/foreign orders).
+- **Refund events**: `pg.refund.failed` alerts the clinic admin; both refund events are logged to `payment_events`.
+
 ---
 
 ## 4. SYSTEM HEALTH & METRICS ENDPOINTS
@@ -147,8 +154,8 @@ Plan-gated to `diagstream`/`diagbooking` (`tenant.home_collection_available`). M
 ### G. Clinic Settings, Integrations & Connectors
 - `GET /admin/profile`: Fetches clinic name, address, working hours, UPI ID, logo URL.
 - `PUT /admin/profile`: Updates clinic operational profile.
-- `GET /admin/settings/payment`: Fetches Razorpay credentials status and payment modes (`full`, `partial`, `pay_at_clinic`).
-- `PUT /admin/settings/payment`: Updates Razorpay key ID, key secret, and deposit percentages.
+- `GET /admin/settings/payment`: Active `payment_gateway`, per-gateway `*_configured`, Razorpay + PhonePe credentials (secrets masked), `phonepe_webhook_path`, payment mode (`full`, `partial`, `none`), cancellation window.
+- `PUT /admin/settings/payment`: Partial update of gateway, Razorpay/PhonePe credentials (blank = keep), `phonepe_env` (`production`|`sandbox`), mode, deposit %, cancellation window. Switching to a gateway whose credentials are incomplete (mode != none) is a 422.
 - `GET /admin/connectors`: Lists configured external connectors (MocDoc, Lab LIS).
 - `GET /admin/connectors/types`: Available connector integrations.
 - `PUT /admin/connectors`: Configures or updates connector credentials (stored encrypted via Fernet).

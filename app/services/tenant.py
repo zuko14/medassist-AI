@@ -621,7 +621,7 @@ FEATURE_LABELS: dict[str, str] = {
     "multi_branch": "Multi-Branch Support",
     "multi_department": "Multi-Department Routing",
     "multilingual": "Multilingual Replies",
-    "payments_razorpay": "Razorpay Payments",
+    "payments_razorpay": "Online Payments (Razorpay / PhonePe)",
     "pii_sanitization": "PII Sanitization",
     "reminders": "Automated Reminders",
     "roster_management": "Doctor Roster & Leave",

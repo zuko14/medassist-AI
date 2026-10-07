@@ -22,6 +22,7 @@ from app.integrations.callmedex.api.router import (
 from app.integrations.callmedex.api.v1_router import v1_router as callmedex_v1_router
 from app.routers.fhir import router as fhir_router
 from app.routers.razorpay_webhook import router as razorpay_router
+from app.routers.phonepe_webhook import router as phonepe_router
 from app.services.scheduler import scheduler_service
 from app.utils.logger import setup_logging
 from app.utils.security import SECURITY_HEADERS
@@ -377,6 +378,8 @@ app.include_router(platform.router)
 app.include_router(fhir_router)
 # Razorpay payment webhook (/webhooks/razorpay)
 app.include_router(razorpay_router)
+# PhonePe payment webhook (/webhooks/phonepe/{clinic_id})
+app.include_router(phonepe_router)
 # Internal integration API (connector → MedAssist)
 app.include_router(integrations_router)
 # CallMedex internal integration API (/internal/integrations/callmedex)

@@ -62,7 +62,7 @@ The Kriya AI persistence layer runs on **Supabase PostgreSQL 15+**. Schema modif
 | `processed_messages`| Yes (`clinic_id`) | `id` (UUID) | `clinic_id` | Idempotency deduplication gate with UNIQUE(message_id, clinic_id) |
 | `failed_messages` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id` | Dead-letter queue for lock timeouts and unhandled exceptions |
 | `appointments` | Yes (`clinic_id`) | `id` (UUID) | `patient_id`, `doctor_id`, `branch_id`, `lab_test_id` | Master booking record: OPD consultations and lab tests |
-| `payment_events` | Yes (`clinic_id`) | `id` (UUID) | `booking_id`, `clinic_id` | Ledger of Razorpay payment callbacks, captures, and refunds |
+| `payment_events` | Yes (`clinic_id`) | `id` (UUID) | `booking_id`, `clinic_id` | Ledger of Razorpay/PhonePe payment callbacks, captures, and refunds |
 | `lab_tests` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `branch_id` | Diagnostic test catalogue, prices, categories, preparation notes |
 | `lab_reports` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `patient_id` | Ingested lab reports, PDF storage file path, delivery receipts |
 | `specialty_treatments`| Yes (`clinic_id`)| `id` (UUID)| `clinic_id` | Specialty clinical treatment packages (IVF, Derma, Dental, etc.) |
@@ -101,7 +101,7 @@ The Kriya AI persistence layer runs on **Supabase PostgreSQL 15+**. Schema modif
 ## 3. Core Table Definitions & Constraints
 
 ### 3.1 `appointments` (Core Operational Entity)
-- **Columns**: `id` (UUID PK), `clinic_id` (UUID NOT NULL), `patient_id` (UUID), `doctor_id` (UUID NULL for lab tests), `branch_id` (UUID), `lab_test_id` (UUID NULL for OPD), `appointment_date` (DATE NOT NULL), `appointment_time` (TIME NOT NULL), `status` (VARCHAR NOT NULL), `booking_ref` (VARCHAR NOT NULL), `payment_status` (VARCHAR DEFAULT 'pending'), `amount_paise` (INTEGER), `razorpay_payment_link_id` (VARCHAR), `queue_token` (VARCHAR), `followup_sent` (BOOLEAN DEFAULT FALSE), `created_at`, `updated_at`.
+- **Columns**: `id` (UUID PK), `clinic_id` (UUID NOT NULL), `patient_id` (UUID), `doctor_id` (UUID NULL for lab tests), `branch_id` (UUID), `lab_test_id` (UUID NULL for OPD), `appointment_date` (DATE NOT NULL), `appointment_time` (TIME NOT NULL), `status` (VARCHAR NOT NULL), `booking_ref` (VARCHAR NOT NULL), `payment_status` (VARCHAR DEFAULT 'pending'), `amount_paise` (INTEGER), `razorpay_payment_link_id` (VARCHAR), `payment_gateway` (TEXT NULL = razorpay, 'phonepe'; migration 100), `gateway_order_id` (TEXT, PhonePe orderId; migration 100), `queue_token` (VARCHAR), `followup_sent` (BOOLEAN DEFAULT FALSE), `created_at`, `updated_at`.
 - **Status Lifecycle States**:
   - `pending_payment`: Held for 10 minutes awaiting online payment.
   - `pending_review`: Held awaiting staff review.

@@ -36,7 +36,7 @@ All jobs are configured in [`app/services/scheduler.py`](file:///c:/Users/chait/
 | `inbound_messages_purge` | Daily at 03:30 IST | `purge_inbound_messages` | Purges processed entries from `inbound_messages` older than retention window. |
 | `catalogue_import_previews_purge` | Daily at 04:00 IST | `purge_expired_catalogue_import_previews` | Deletes uncommitted CSV price-list import staging records. |
 | `expire_stale_bookings` | Every 1 minute | `expire_stale_bookings` | Cancels bookings stuck in `pending_payment` for >30 mins; checks Razorpay for missed webhooks. |
-| `poll_recent_pending_payments` | Every 30 seconds | `poll_recent_pending_payments`| Fast-polls Razorpay API for payments created in the last 5 minutes to bypass webhook delays. |
+| `poll_recent_pending_payments` | Every 30 seconds | `poll_recent_pending_payments`| Fast-polls the booking's gateway (Razorpay payment link, or PhonePe Order Status when `gateway_order_id` is set) for payments created in the last 5 minutes. |
 | `payment_reconciliation` | Daily at 23:00 IST | `daily_payment_reconciliation`| Reconciles all day's confirmed appointments against Razorpay capture logs; flags mismatches. |
 | `lab_report_retry` | Every 5 minutes | `_retry_pending_lab_reports` | Retries failed WhatsApp PDF document dispatches for diagnostic reports. |
 | `recover_pending_inbound_messages`| Every 1 minute | `recover_pending_inbound_messages`| Sweeps durable queue for messages left in `received` or `processing` due to container crashes. |

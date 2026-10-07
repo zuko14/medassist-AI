@@ -252,9 +252,45 @@ Booking requires payment (doctor fee or lab test fee)
        └─► 14. Return HTTP 200 (503 only when the idempotency read itself fails)
 ```
 
+### Flow 5b: PhonePe gateway (added 2026-10-07, migration 100)
+
+A clinic picks its gateway in Payment Settings (`clinics.config.payment_gateway`,
+`razorpay` when unset). `resolve_payment_mode()` only returns full/partial when the
+ACTIVE gateway's credentials are complete. Every money path follows the BOOKING's
+gateway (`appointments.payment_gateway`, NULL = razorpay), never the clinic's current
+choice, so a switch cannot strand a hold or misroute a refund.
+
+```text
+create_booking_with_payment (gateway=phonepe)
+  INSERT appointments (pending_payment, payment_gateway='phonepe')
+  POST {pg}/checkout/v2/pay  merchantOrderId = appointments.id, expireAfter = hold (300-3600s),
+                             redirectUrl = wa.me/<clinic number>
+  UPDATE gateway_order_id = PhonePe orderId   (failure -> row cancelled, reason gateway_error)
+  patient gets redirectUrl on WhatsApp
+POST /webhooks/phonepe/{clinic_id}   (no unscoped route)
+  Authorization == sha256("user:pass") of THIS clinic, else 400 + throttled admin alert
+  checkout.order.completed -> GET {pg}/checkout/v2/order/{id}/status   (body never trusted)
+      COMPLETED + int amount -> _settle_captured_payment (same rules as Razorpay:
+                                scoped idempotency, amount mismatch -> pending_review,
+                                late payment -> PhonePe refund, terminal guard, CAS confirm)
+      PENDING/FAILED -> ignored 200;  status API error -> 503 (PhonePe redelivers)
+  pg.refund.failed -> payment_events gateway_refund_failed + admin alert (refund manually)
+  pg.refund.completed -> payment_events gateway_refund_completed
+poll_recent_pending_payments / expire_stale_bookings
+  PhonePe rows WITH gateway_order_id -> Order Status; paid -> confirm; unknown -> skip expiry
+  PhonePe rows WITHOUT gateway_order_id (crash before order) -> plain expiry
+initiate_refund / late-payment refund
+  POST {pg}/payments/v2/refund  merchantRefundId = "RF-" + sha256(idempotency key)[:40]
+  create error -> GET refund/{id}/status; existing PENDING/COMPLETED = success (no 2nd refund)
+```
+`_settle_captured_payment` never applies a payment to a booking billed on the other
+gateway. OAuth tokens are cached per process per credential set (secret hash in key).
+Tests: `tests/test_phonepe_payment.py` (fake PhonePe over httpx.MockTransport).
+
 ### Refunds & the cancellation window (verified 2026-09-23, Session 20)
 
-`PaymentService.initiate_refund(..., enforce_window=True)` is the single refund path.
+`PaymentService.initiate_refund(..., enforce_window=True)` is the single refund path
+(it refunds through the booking's own gateway: Razorpay or PhonePe).
 
 | Caller | enforce_window | Why |
 | :--- | :--- | :--- |

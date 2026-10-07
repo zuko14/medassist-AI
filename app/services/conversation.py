@@ -4027,6 +4027,7 @@ class ConversationManager:
                     )
 
                     hold_mins = getattr(settings, "booking_hold_minutes", 10)
+                    gateway_name = result.get("gateway_name", "Razorpay")
 
                     payment_msg = {
                         "en": (
@@ -4037,7 +4038,7 @@ class ConversationManager:
                             f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_en}"
                             f"⏱️ *This slot is held for {hold_mins} minutes.* Pay before it expires.\n\n"
-                            f"👉 Click below to pay securely via Razorpay:\n"
+                            f"👉 Click below to pay securely via {gateway_name}:\n"
                             f"{result['payment_link']}\n\n"
                             f"_Amount is refundable if cancelled {settings.refund_window_hours}+ hours before appointment. "
                             f"No-show bookings are non-refundable._"
@@ -4050,7 +4051,7 @@ class ConversationManager:
                             f"💰 राशि: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_hi}"
                             f"⏱️ *यह स्लॉट {hold_mins} मिनट के लिए होल्ड है।* समय से पहले भुगतान करें।\n\n"
-                            f"👉 Razorpay से सुरक्षित भुगतान करें:\n"
+                            f"👉 {gateway_name} से सुरक्षित भुगतान करें:\n"
                             f"{result['payment_link']}\n\n"
                             f"_अपॉइंटमेंट से {settings.refund_window_hours}+ घंटे पहले रद्द करने पर राशि वापस की जाएगी। "
                             f"नो-शो बुकिंग पर रिफंड नहीं होगा।_"
@@ -4063,7 +4064,7 @@ class ConversationManager:
                             f"💰 మొత్తం: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_te}"
                             f"⏱️ *ఈ స్లాట్ {hold_mins} నిమిషాలు హోల్డ్ చేయబడింది.* గడువులోపు చెల్లించండి.\n\n"
-                            f"👉 Razorpay ద్వారా సురక్షితంగా చెల్లించండి:\n"
+                            f"👉 {gateway_name} ద్వారా సురక్షితంగా చెల్లించండి:\n"
                             f"{result['payment_link']}\n\n"
                             f"_అపాయింట్‌మెంట్‌కు {settings.refund_window_hours}+ గంటల ముందు రద్దు చేస్తే మొత్తం రీఫండ్ అవుతుంది. "
                             f"నో-షో బుకింగ్‌లు రీఫండ్ కావు._"
@@ -4079,7 +4080,7 @@ class ConversationManager:
                             f"💰 Amount: ₹{amount_rupees:.0f}\n\n"
                             f"{deposit_note_en}"
                             f"⏱️ *This slot is held for {hold_mins} minutes.* Pay before it expires.\n\n"
-                            f"👉 Click below to pay securely via Razorpay:\n"
+                            f"👉 Click below to pay securely via {gateway_name}:\n"
                             f"{result['payment_link']}\n\n"
                             f"_Refundable if cancelled {settings.refund_window_hours}+ hours before appointment. "
                             f"No-show bookings are non-refundable._"
@@ -4119,7 +4120,7 @@ class ConversationManager:
                         )
                     else:
                         await self._suggest_other_doctors(clinic, phone, context, lang)
-                elif result.get("reason") == "razorpay_error":
+                elif result.get("reason") in ("razorpay_error", "gateway_error"):
                     error_msg = {
                         "en": "We're having trouble connecting to the payment gateway right now. Please try again in a few minutes or contact the clinic.",
                         "hi": "भुगतान गेटवे से जुड़ने में समस्या आ रही है। कृपया कुछ समय बाद पुनः प्रयास करें या क्लिनिक से संपर्क करें।",

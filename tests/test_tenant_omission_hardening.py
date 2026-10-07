@@ -297,7 +297,9 @@ def test_idempotency_failure_does_not_widen_past_the_tenant():
     """
     from app.services.payment import PaymentService
 
-    src = inspect.getsource(PaymentService.process_payment_webhook)
+    # The check lives in _settle_captured_payment, shared by the Razorpay and
+    # PhonePe webhooks since PhonePe support was added.
+    src = inspect.getsource(PaymentService._settle_captured_payment)
     assert "retrying global check" not in src
     assert "IDEMPOTENCY_CHECK_FAILED" in src
     # The refusal must be non-2xx so Razorpay redelivers a transient failure.

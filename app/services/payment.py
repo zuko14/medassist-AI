@@ -16,8 +16,22 @@ MULTI-TENANT RAZORPAY:
       "razorpay_key_secret":   "<secret>",
       "razorpay_webhook_secret": "<webhook_secret>"
     }
-  If a clinic has no per-clinic keys, the global settings (env vars) are used as a
-  transparent fallback — so single-clinic deployments need zero changes.
+  There is no global fallback (see get_razorpay_creds).
+
+TWO GATEWAYS (Razorpay | PhonePe):
+  clinics.config.payment_gateway picks the gateway NEW bookings are charged
+  through ("razorpay" when unset). Each booking records its own gateway in
+  appointments.payment_gateway (migration 100; NULL = razorpay, every row
+  older than PhonePe support), and confirmation, polling, expiry recovery and
+  refunds always follow the BOOKING's gateway — never the clinic's current
+  choice — so switching gateways cannot strand an in-flight payment or send a
+  refund to the wrong account. Both credential sets stay stored for that reason.
+
+  PhonePe (PG v2 Standard Checkout): OAuth client credentials, merchantOrderId
+  = appointments.id, webhook authenticated by SHA256(username:password). A
+  PhonePe webhook is only a hint: the order is re-read from PhonePe's Order
+  Status API before any booking is confirmed, so a leaked webhook header can
+  never confirm an unpaid booking.
 """
 
 import asyncio
@@ -84,8 +98,7 @@ def resolve_payment_mode(clinic: dict) -> tuple[str, int]:
     falls back to free direct booking instead of silently blocking bookings.
     """
     cfg = clinic.get("config") or {}
-    key_id, key_secret, _ = get_razorpay_creds(clinic)
-    configured = bool(key_id and key_secret)
+    configured = gateway_configured(clinic, active_gateway(clinic))
 
     mode = cfg.get("payment_mode") or ("full" if configured else "none")
     if mode in ("full", "partial") and not configured:
@@ -93,6 +106,57 @@ def resolve_payment_mode(clinic: dict) -> tuple[str, int]:
 
     percent = cfg.get("payment_deposit_percent", 100) if mode == "partial" else 100
     return mode, percent
+
+
+GATEWAY_LABELS = {"razorpay": "Razorpay", "phonepe": "PhonePe"}
+
+#: Every PhonePe credential a clinic must save before PhonePe can take money.
+#: The webhook pair is required too: without it every PhonePe webhook fails
+#: authentication and confirmations wait on the 30-second poll alone.
+PHONEPE_REQUIRED = ("client_id", "client_secret", "client_version", "webhook_username", "webhook_password")
+
+#: (OAuth base, PG base) per environment — PhonePe PG v2 Standard Checkout.
+PHONEPE_HOSTS = {
+    "production": ("https://api.phonepe.com/apis/identity-manager", "https://api.phonepe.com/apis/pg"),
+    "sandbox": ("https://api-preprod.phonepe.com/apis/pg-sandbox", "https://api-preprod.phonepe.com/apis/pg-sandbox"),
+}
+
+
+def active_gateway(clinic: Optional[dict]) -> str:
+    """Gateway this clinic charges NEW bookings through. Anything but an
+    explicit "phonepe" is Razorpay, so every pre-existing clinic is unchanged."""
+    cfg = (clinic or {}).get("config") or {}
+    return "phonepe" if cfg.get("payment_gateway") == "phonepe" else "razorpay"
+
+
+def booking_gateway(booking: Optional[dict]) -> str:
+    """Gateway a booking was actually charged through (NULL = razorpay)."""
+    return "phonepe" if (booking or {}).get("payment_gateway") == "phonepe" else "razorpay"
+
+
+def get_phonepe_creds(clinic: Optional[dict]) -> dict:
+    """A clinic's own PhonePe credentials. Like Razorpay, no global fallback."""
+    cfg = (clinic or {}).get("config") or {}
+    creds = {k: str(cfg.get(f"phonepe_{k}") or "").strip() for k in PHONEPE_REQUIRED}
+    creds["env"] = "sandbox" if cfg.get("phonepe_env") == "sandbox" else "production"
+    return creds
+
+
+def gateway_configured(clinic: Optional[dict], gateway: str) -> bool:
+    if gateway == "phonepe":
+        creds = get_phonepe_creds(clinic)
+        return all(creds[k] for k in PHONEPE_REQUIRED)
+    key_id, key_secret, _ = get_razorpay_creds(clinic or {})
+    return bool(key_id and key_secret)
+
+
+class PhonePeError(RuntimeError):
+    """A PhonePe API call that did not succeed (HTTP error or refused state)."""
+
+
+#: OAuth tokens per credential set: key -> (access_token, expires_at epoch s).
+#: Per process; a second instance simply fetches its own token.
+_phonepe_tokens: dict[tuple, tuple[str, float]] = {}
 
 
 class PaymentService:
@@ -157,7 +221,8 @@ class PaymentService:
             razorpay_payment_link_id, payment_link, amount_paise,
             hold_expires_at, reason
         """
-        # ── Resolve per-clinic Razorpay credentials ──
+        # ── Resolve the clinic's gateway and its credentials ──
+        gateway = active_gateway(clinic)
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
 
         # ── Determine fee based on booking type ──
@@ -238,6 +303,10 @@ class PaymentService:
         }
         if doctor_id:
             booking_data["doctor_id"] = doctor_id
+        # Only PhonePe rows carry the column; a Razorpay row stays NULL exactly
+        # as before, so the Razorpay path never depends on migration 100.
+        if gateway == "phonepe":
+            booking_data["payment_gateway"] = "phonepe"
         if booking_type == "lab_test":
             booking_data["lab_test_id"] = lab_test_id
             booking_data["lab_test_name"] = lab_test_name
@@ -290,6 +359,11 @@ class PaymentService:
             )
             return {"success": False, "reason": "insert_failed"}
 
+        if gateway == "phonepe":
+            return await self._start_phonepe_checkout(
+                clinic or {}, booking_id, booking_ref, amount_paise, hold_expires_at
+            )
+
         # ── Create Razorpay Payment Link ──
         # (Payment Links attach captured payments to a payment_link_id, not
         # an order_id — no separate Order object is needed for this flow.)
@@ -330,6 +404,8 @@ class PaymentService:
                 "payment_link": payment_link,
                 "amount_paise": amount_paise,
                 "hold_expires_at": hold_expires_at,
+                "gateway": "razorpay",
+                "gateway_name": GATEWAY_LABELS["razorpay"],
             }
 
         except Exception as e:
@@ -488,6 +564,55 @@ class PaymentService:
             logger.error("Razorpay webhook: missing payment_id")
             return {"status": "error", "code": 400, "reason": "missing_fields"}
 
+        booking_ref = (
+            notes.get("booking_ref")
+            or payment_link_entity.get("reference_id")
+            or (payment_entity.get("description") or "")
+            .replace("Appointment booking ", "")
+            .strip()
+        )
+        return await self._settle_captured_payment(
+            gateway="razorpay",
+            payment_id=payment_id,
+            amount_paid=amount_paid,
+            clinic_id=clinic_id,
+            provider_event_id=rz_event_id,
+            payment_link_id=payment_link_id,
+            raw_payload=payload,
+            # Tried in order, each one clinic-scoped (Step 5).
+            lookups=[
+                ("razorpay_payment_link_id", payment_link_id),
+                ("id", notes.get("booking_id")),
+                ("booking_ref", booking_ref),
+            ],
+        )
+
+    async def _settle_captured_payment(
+        self,
+        *,
+        gateway: str,
+        payment_id: str,
+        amount_paid: Optional[int],
+        clinic_id: Optional[str],
+        provider_event_id: Optional[str],
+        payment_link_id: Optional[str],
+        raw_payload: dict,
+        lookups: list[tuple[str, Optional[str]]],
+    ) -> dict:
+        """Apply one VERIFIED captured payment to its booking.
+
+        Shared by both gateways, and only ever reached after the caller has
+        authenticated the payment: Razorpay by HMAC-verifying the webhook body,
+        PhonePe by re-reading the order from PhonePe's Order Status API. Holds
+        every money rule — scoped idempotency, scoped lookup, amount mismatch,
+        late-payment refund, terminal-state guard, CAS confirm — exactly once.
+
+        A booking charged through the OTHER gateway never matches, so a payment
+        on one gateway can never settle a booking billed on the other.
+        """
+        rz_event_id = provider_event_id
+        label = GATEWAY_LABELS[gateway]
+
         # ── Step 4: Idempotency check (scoped) ──
         use_clinic_scope = clinic_id if (clinic_id and str(clinic_id).strip().lower() not in ("default", "none", "null", "")) else None
 
@@ -590,44 +715,23 @@ class PaymentService:
                 q = q.eq("clinic_id", use_clinic_scope)
             return q
 
-        if payment_link_id:
+        for column, value in lookups:
+            if not value:
+                continue
             try:
-                booking_result = (
-                    await sb(_build_booking_query()
-                    .eq("razorpay_payment_link_id", payment_link_id))
-                )
+                booking_result = await sb(_build_booking_query().eq(column, value))
             except Exception as e:
-                logger.warning(f"Lookup by payment_link_id failed: {e}")
-
-        if not booking_result or not booking_result.data:
-            booking_id_from_notes = notes.get("booking_id")
-            if booking_id_from_notes:
-                try:
-                    booking_result = (
-                        await sb(_build_booking_query()
-                        .eq("id", booking_id_from_notes))
-                    )
-                except Exception as e:
-                    logger.warning(f"Lookup by booking_id failed: {e}")
-
-        if not booking_result or not booking_result.data:
-            booking_ref = (
-                notes.get("booking_ref")
-                or payment_link_entity.get("reference_id")
-                or (
-                    payment_entity.get("description", "")
-                    .replace("Appointment booking ", "")
-                    .strip()
+                logger.warning(f"Lookup by {column} failed: {e}")
+                booking_result = None
+            if booking_result and booking_result.data:
+                if booking_gateway(booking_result.data[0]) == gateway:
+                    break
+                logger.error(
+                    f"GATEWAY_MISMATCH booking={booking_result.data[0].get('id')} "
+                    f"billed_on={booking_gateway(booking_result.data[0])} paid_on={gateway} "
+                    f"payment_id={payment_id} — not applying"
                 )
-            )
-            if booking_ref:
-                try:
-                    booking_result = (
-                        await sb(_build_booking_query()
-                        .eq("booking_ref", booking_ref))
-                    )
-                except Exception as e:
-                    logger.warning(f"Lookup by booking_ref failed: {e}")
+                booking_result = None
 
         if not booking_result or not booking_result.data:
             # Do NOT widen the search (Rule 5). A tenant holding its own valid
@@ -649,7 +753,8 @@ class PaymentService:
                     "payment_id": payment_id,
                     "payment_link_id": payment_link_id,
                     "error": "no_booking_found_in_clinic",
-                    "raw": payload,
+                    "gateway": gateway,
+                    "raw": raw_payload,
                 },
                 clinic_id=use_clinic_scope,
                 provider_event_id=rz_event_id,
@@ -660,6 +765,7 @@ class PaymentService:
                 await send_admin_alert(
                     clinic_id,
                     f"Payment received with no matching booking\n\n"
+                    f"Gateway: {label}\n"
                     f"Payment ID: {payment_id}\n"
                     f"Requires manual reconciliation.",
                 )
@@ -817,6 +923,7 @@ class PaymentService:
                 booking_id=booking_id,
                 reason="Payment received after slot hold expired",
                 clinic=clinic,
+                gateway=gateway,
             )
             if not refund.get("success"):
                 # The money is still captured. Marking the row 'refunded' here
@@ -827,7 +934,7 @@ class PaymentService:
                     clinic,
                     f"LATE PAYMENT REFUND FAILED for {booking.get('booking_ref')}: "
                     f"{amount_paid / 100:.0f} INR captured on a {current_status} booking. "
-                    f"Refund payment {payment_id} manually in the Razorpay dashboard.",
+                    f"Refund payment {payment_id} manually in the {label} dashboard.",
                 )
                 await self._notify_late_payment_refund_failed(booking, clinic)
                 return {
@@ -888,7 +995,7 @@ class PaymentService:
                     await self._alert_admin(
                         f"Payment {payment_id} ({(amount_paid or 0) / 100:.0f} INR) was captured "
                         f"for booking {booking.get('booking_ref', booking_id)}, which is already "
-                        f"{current_status}. It was NOT applied. Refund it from the Razorpay dashboard."
+                        f"{current_status}. It was NOT applied. Refund it from the {label} dashboard."
                     )
                 return {"status": "ok", "code": 200, "reason": f"terminal_state_{current_status}"}
 
@@ -991,7 +1098,9 @@ class PaymentService:
         stale = (
             # unscoped: platform_sweep
             await sb(supabase.table("appointments")
-            .select("id, clinic_id, booking_ref, patient_phone, hold_expires_at, razorpay_payment_link_id, amount_paise, doctor_name, department, appointment_date, appointment_time")
+            # "*" so payment_gateway comes back without naming a column that
+            # only exists from migration 100 on.
+            .select("*")
             .eq("status", "pending_payment")
             .lt("hold_expires_at", now)
             .limit(200))
@@ -1022,17 +1131,25 @@ class PaymentService:
                         )
 
                 key_id, key_secret, _ = get_razorpay_creds(clinic_for_booking)
+                gateway = booking_gateway(booking)
 
-                # ── Recovery path: check Razorpay before expiring ──
-                if payment_link_id:
-                    link_status = await self._check_payment_link_status(
-                        payment_link_id, key_id=key_id, key_secret=key_secret
-                    )
+                # ── Recovery path: check the gateway before expiring ──
+                # A PhonePe row with no gateway_order_id never got an order
+                # (crash between insert and order creation): nothing to ask.
+                if payment_link_id or (gateway == "phonepe" and booking.get("gateway_order_id")):
+                    if gateway == "phonepe":
+                        link_status = await self._check_phonepe_payment(
+                            clinic_for_booking, booking_id
+                        )
+                    else:
+                        link_status = await self._check_payment_link_status(
+                            payment_link_id, key_id=key_id, key_secret=key_secret
+                        )
 
                     if link_status["status"] == "paid":
                         # Webhook was missed — recover by confirming
                         logger.info(
-                            f"Recovery: booking {booking_id} was paid on Razorpay but webhook missed. Confirming."
+                            f"Recovery: booking {booking_id} was paid on {GATEWAY_LABELS[gateway]} but webhook missed. Confirming."
                         )
 
                         payment_id = link_status["payment_id"] or f"recovery_{payment_link_id}"
@@ -1061,6 +1178,7 @@ class PaymentService:
                             "recovery_confirmed",
                             {
                                 "razorpay_order_status": "paid",
+                                "gateway": gateway,
                                 "payment_id": payment_id,
                                 "recovery_reason": "webhook_missed",
                             },
@@ -1145,12 +1263,7 @@ class PaymentService:
             recent_pending = (
                 # unscoped: platform_sweep
                 await sb(supabase.table("appointments")
-                .select(
-                    "id, clinic_id, booking_ref, patient_phone, "
-                    "razorpay_payment_link_id, amount_paise, doctor_name, "
-                    "department, appointment_date, appointment_time, "
-                    "patient_name, branch_id"
-                )
+                .select("*")  # see expire_stale_bookings: payment_gateway
                 .eq("status", "pending_payment")
                 .gte("created_at", five_min_ago)
                 .order("created_at", desc=True)
@@ -1166,7 +1279,8 @@ class PaymentService:
         confirmed = 0
         for booking in recent_pending.data:
             payment_link_id = booking.get("razorpay_payment_link_id")
-            if not payment_link_id:
+            gateway = booking_gateway(booking)
+            if not (payment_link_id or (gateway == "phonepe" and booking.get("gateway_order_id"))):
                 continue
 
             booking_id = booking["id"]
@@ -1187,11 +1301,15 @@ class PaymentService:
                             f"poll_recent: could not fetch clinic {clinic_id_for_booking}: {ce}"
                         )
 
-                key_id, key_secret, _ = get_razorpay_creds(clinic_for_booking)
-
-                link_status = await self._check_payment_link_status(
-                    payment_link_id, key_id=key_id, key_secret=key_secret
-                )
+                if gateway == "phonepe":
+                    link_status = await self._check_phonepe_payment(
+                        clinic_for_booking, booking_id
+                    )
+                else:
+                    key_id, key_secret, _ = get_razorpay_creds(clinic_for_booking)
+                    link_status = await self._check_payment_link_status(
+                        payment_link_id, key_id=key_id, key_secret=key_secret
+                    )
 
                 if link_status["status"] != "paid":
                     continue
@@ -1239,6 +1357,7 @@ class PaymentService:
                         "payment_id": payment_id,
                         "amount_paise": booking.get("amount_paise"),
                         "confirmation_source": "fast_poll",
+                        "gateway": gateway,
                     },
                     clinic_id=clinic_id_for_booking,
                 )
@@ -1395,16 +1514,25 @@ class PaymentService:
             },
         )
 
-        # ── Call Razorpay Refund API ──
+        # ── Call the gateway the booking was PAID through ──
+        gateway = booking_gateway(booking)
         try:
-            refund_result = await self._create_razorpay_refund(
-                payment_id=booking["payment_id"],
-                amount_paise=booking["amount_paise"],
-                reason=reason,
-                idempotency_key=effective_idempotency_key,
-                key_id=key_id,
-                key_secret=key_secret,
-            )
+            if gateway == "phonepe":
+                refund_result = await self._create_phonepe_refund(
+                    clinic or {},
+                    merchant_order_id=booking_id,
+                    amount_paise=booking["amount_paise"],
+                    idempotency_key=effective_idempotency_key,
+                )
+            else:
+                refund_result = await self._create_razorpay_refund(
+                    payment_id=booking["payment_id"],
+                    amount_paise=booking["amount_paise"],
+                    reason=reason,
+                    idempotency_key=effective_idempotency_key,
+                    key_id=key_id,
+                    key_secret=key_secret,
+                )
 
             refund_id = refund_result.get("id", "")
 
@@ -1424,6 +1552,7 @@ class PaymentService:
                 {
                     "refund_id": refund_id,
                     "amount_paise": booking["amount_paise"],
+                    "gateway": gateway,
                     "razorpay_response": refund_result,
                 },
             )
@@ -1451,7 +1580,7 @@ class PaymentService:
             )
             return {
                 "success": False,
-                "reason": f"razorpay_error: {str(e)[:200]}",
+                "reason": f"{gateway}_error: {str(e)[:200]}",
                 "refund_id": "",
                 "amount_inr": amount_inr,
                 "is_late": False,
@@ -1465,26 +1594,36 @@ class PaymentService:
         booking_id: str,
         reason: str,
         clinic: Optional[dict] = None,
+        gateway: str = "razorpay",
     ) -> dict:
-        """Issue an immediate refund by Razorpay payment_id directly.
+        """Issue an immediate refund of one captured payment directly.
 
         Useful for late payments where internal booking is expired or cancelled,
-        bypassing booking status checks.
+        bypassing booking status checks. Razorpay refunds by payment_id;
+        PhonePe refunds by merchantOrderId, which is the booking id.
         """
         key_id, key_secret, _ = get_razorpay_creds(clinic or {})
         effective_key_id = key_id
         effective_key_secret = key_secret
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{self._razorpay_base}/payments/{payment_id}/refund",
-                    json={"amount": amount_paise, "notes": {"reason": reason[:255]}},
-                    headers={"X-Razorpay-Idempotency-Key": f"late-{payment_id}"},
-                    auth=(effective_key_id, effective_key_secret),
-                    timeout=15.0,
+            if gateway == "phonepe":
+                data = await self._create_phonepe_refund(
+                    clinic or {},
+                    merchant_order_id=booking_id,
+                    amount_paise=amount_paise,
+                    idempotency_key=f"late-{payment_id}",
                 )
-                resp.raise_for_status()
-                data = resp.json()
+            else:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        f"{self._razorpay_base}/payments/{payment_id}/refund",
+                        json={"amount": amount_paise, "notes": {"reason": reason[:255]}},
+                        headers={"X-Razorpay-Idempotency-Key": f"late-{payment_id}"},
+                        auth=(effective_key_id, effective_key_secret),
+                        timeout=15.0,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
             await self._log_payment_event(
                 booking_id,
                 "auto_refund_issued",
@@ -2081,6 +2220,397 @@ class PaymentService:
             )
             response.raise_for_status()
             return response.json()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHONEPE (PG v2 Standard Checkout)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _phonepe_http(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=15.0)
+
+    @staticmethod
+    def _phonepe_token_key(creds: dict) -> tuple:
+        # The secret is part of the key, so rotating it in the panel cannot
+        # keep serving a token minted from the old one.
+        return (
+            creds["env"], creds["client_id"], creds["client_version"],
+            hashlib.sha256(creds["client_secret"].encode("utf-8")).hexdigest(),
+        )
+
+    async def _phonepe_token(self, creds: dict) -> str:
+        key = self._phonepe_token_key(creds)
+        cached = _phonepe_tokens.get(key)
+        if cached and cached[1] - 120 > time.time():
+            return cached[0]
+        auth_base, _ = PHONEPE_HOSTS[creds["env"]]
+        async with self._phonepe_http() as client:
+            resp = await client.post(
+                f"{auth_base}/v1/oauth/token",
+                data={
+                    "client_id": creds["client_id"],
+                    "client_version": creds["client_version"],
+                    "client_secret": creds["client_secret"],
+                    "grant_type": "client_credentials",
+                },
+            )
+        if resp.is_error:
+            raise PhonePeError(f"PhonePe auth HTTP {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        token = data.get("access_token")
+        if not token:
+            raise PhonePeError("PhonePe auth returned no access_token")
+        expires_at = float(data.get("expires_at") or 0)
+        if expires_at > 1e12:  # documented as epoch seconds; tolerate millis
+            expires_at /= 1000
+        if expires_at <= time.time():
+            expires_at = time.time() + 300
+        _phonepe_tokens[key] = (token, expires_at)
+        return token
+
+    async def _phonepe_call(
+        self, creds: dict, method: str, path: str, body: Optional[dict] = None
+    ) -> dict:
+        if not all(creds.get(k) for k in ("client_id", "client_secret", "client_version")):
+            raise PhonePeError("PhonePe API credentials not configured")
+        token = await self._phonepe_token(creds)
+        _, pg_base = PHONEPE_HOSTS[creds["env"]]
+        async with self._phonepe_http() as client:
+            resp = await client.request(
+                method,
+                f"{pg_base}{path}",
+                json=body,
+                headers={"Authorization": f"O-Bearer {token}", "Accept": "application/json"},
+            )
+        if resp.status_code == 401:
+            _phonepe_tokens.pop(self._phonepe_token_key(creds), None)
+        if resp.is_error:
+            raise PhonePeError(f"PhonePe {method} {path} HTTP {resp.status_code}: {resp.text[:300]}")
+        return resp.json()
+
+    @staticmethod
+    def _phonepe_redirect_url(clinic: dict) -> str:
+        """Where PhonePe sends the patient after paying: back to this clinic's
+        WhatsApp chat, where the confirmation is about to arrive."""
+        digits = "".join(c for c in str(clinic.get("whatsapp_number") or "") if c.isdigit())
+        if digits:
+            return f"https://wa.me/{digits}"
+        return getattr(settings, "hospital_website", "") or "https://www.phonepe.com"
+
+    async def _start_phonepe_checkout(
+        self,
+        clinic: dict,
+        booking_id: str,
+        booking_ref: str,
+        amount_paise: int,
+        hold_expires_at: str,
+    ) -> dict:
+        """Create the PhonePe order for an already-inserted pending_payment row.
+
+        merchantOrderId is the booking id: unique, permanent, and how every
+        later status check, webhook and refund finds the booking. Failure
+        cancels the row (releasing the slot), exactly like the Razorpay path.
+        """
+        try:
+            order = await self._phonepe_call(
+                get_phonepe_creds(clinic),
+                "POST",
+                "/checkout/v2/pay",
+                {
+                    "merchantOrderId": booking_id,
+                    "amount": amount_paise,
+                    # The order lives as long as the slot hold (PhonePe: 300-3600s),
+                    # so a link cannot be paid long after its slot was released.
+                    "expireAfter": min(3600, max(300, settings.booking_hold_minutes * 60)),
+                    "metaInfo": {"udf1": booking_ref},
+                    "paymentFlow": {
+                        "type": "PG_CHECKOUT",
+                        "merchantUrls": {"redirectUrl": self._phonepe_redirect_url(clinic)},
+                    },
+                },
+            )
+            checkout_url = order.get("redirectUrl")
+            if not checkout_url:
+                raise PhonePeError(f"PhonePe returned no checkout URL (state={order.get('state')})")
+            phonepe_order_id = order.get("orderId") or booking_id
+
+            # gateway_order_id is what tells the sweeps an order exists to ask
+            # PhonePe about (the role razorpay_payment_link_id plays).
+            # unscoped: unique_row_key
+            await sb(supabase.table("appointments").update(
+                {"gateway_order_id": phonepe_order_id}
+            ).eq("id", booking_id))
+
+            await self._log_payment_event(
+                booking_id,
+                "payment_link_created",
+                {
+                    "gateway": "phonepe",
+                    "merchant_order_id": booking_id,
+                    "phonepe_order_id": phonepe_order_id,
+                    "amount_paise": amount_paise,
+                    "booking_ref": booking_ref,
+                },
+            )
+            return {
+                "success": True,
+                "booking_id": booking_id,
+                "booking_ref": booking_ref,
+                "razorpay_payment_link_id": None,
+                "payment_link": checkout_url,
+                "amount_paise": amount_paise,
+                "hold_expires_at": hold_expires_at,
+                "gateway": "phonepe",
+                "gateway_name": GATEWAY_LABELS["phonepe"],
+            }
+        except Exception as e:
+            logger.error(f"PhonePe order creation failed for booking {booking_id}: {e}")
+            try:
+                # unscoped: unique_row_key
+                await sb(supabase.table("appointments").update({"status": "cancelled"}).eq(
+                    "id", booking_id
+                ))
+                await self._log_payment_event(
+                    booking_id,
+                    "payment_link_creation_failed",
+                    {"gateway": "phonepe", "error": str(e)[:500]},
+                )
+            except Exception:
+                pass
+            return {"success": False, "reason": "gateway_error"}
+
+    async def _check_phonepe_payment(self, clinic: dict, merchant_order_id: str) -> dict:
+        """PhonePe Order Status, in the shape of _check_payment_link_status.
+
+        {"status": "paid"|"pending"|"failed"|"unknown", "payment_id", "amount"}.
+        "unknown" (API error) must never be read as unpaid: callers skip.
+        """
+        try:
+            data = await self._phonepe_call(
+                get_phonepe_creds(clinic),
+                "GET",
+                f"/checkout/v2/order/{merchant_order_id}/status?details=false",
+            )
+        except Exception as e:
+            logger.error(f"Error checking PhonePe order status for {merchant_order_id}: {e}")
+            return {"status": "unknown", "payment_id": "", "amount": None}
+        state = str(data.get("state") or "").upper()
+        status = {"COMPLETED": "paid", "PENDING": "pending", "FAILED": "failed"}.get(state, "unknown")
+        if status == "paid" and not isinstance(data.get("amount"), int):
+            # A payment whose amount cannot be compared is not one to confirm.
+            logger.error(f"PhonePe order {merchant_order_id} COMPLETED without an integer amount")
+            status = "unknown"
+        done = next(
+            (d for d in (data.get("paymentDetails") or []) if str(d.get("state")).upper() == "COMPLETED"),
+            {},
+        )
+        return {
+            "status": status,
+            # transactionId identifies the money movement; orderId is the
+            # fallback so a confirmed booking never carries an empty payment_id.
+            "payment_id": done.get("transactionId") or data.get("orderId") or "",
+            "amount": data.get("amount"),
+        }
+
+    async def _create_phonepe_refund(
+        self,
+        clinic: dict,
+        merchant_order_id: str,
+        amount_paise: int,
+        idempotency_key: str,
+    ) -> dict:
+        """Refund a PhonePe order. Returns {"id": refundId, "state", ...}.
+
+        PhonePe has no idempotency header; merchantRefundId is the idempotency
+        key. It is derived deterministically from the caller's key, so a retry
+        of the same business refund reuses it, PhonePe refuses the duplicate,
+        and the status lookup below reports the refund that already exists —
+        never a second refund.
+        """
+        creds = get_phonepe_creds(clinic)
+        merchant_refund_id = "RF-" + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:40]
+        try:
+            data = await self._phonepe_call(
+                creds,
+                "POST",
+                "/payments/v2/refund",
+                {
+                    "merchantRefundId": merchant_refund_id,
+                    "originalMerchantOrderId": merchant_order_id,
+                    "amount": amount_paise,
+                },
+            )
+        except Exception as create_err:
+            # A timeout may hide an accepted refund, and a retry is refused as a
+            # duplicate: either way, ask PhonePe before calling it a failure.
+            try:
+                data = await self._phonepe_call(
+                    creds, "GET", f"/payments/v2/refund/{merchant_refund_id}/status"
+                )
+            except Exception:
+                raise create_err
+        state = str(data.get("state") or "").upper()
+        if state not in ("PENDING", "CONFIRMED", "COMPLETED"):
+            raise PhonePeError(f"PhonePe refund {merchant_refund_id} state {state or 'missing'}")
+        return {
+            "id": data.get("refundId") or merchant_refund_id,
+            "state": state,
+            "merchant_refund_id": merchant_refund_id,
+        }
+
+    @staticmethod
+    def verify_phonepe_authorization(header: str, username: str, password: str) -> bool:
+        """PhonePe webhook auth: Authorization == SHA256("username:password")."""
+        if not header or not username or not password:
+            return False
+        expected = hashlib.sha256(f"{username}:{password}".encode("utf-8")).hexdigest()
+        got = header.strip()
+        if got.lower().startswith("sha256 "):
+            got = got[7:].strip()
+        return hmac.compare_digest(expected.encode("ascii"), got.lower().encode("utf-8"))
+
+    async def process_phonepe_webhook(
+        self,
+        raw_body: bytes,
+        authorization: str,
+        clinic: dict,
+        alert_limiter: Optional["PersistentRateLimiter"] = None,
+        alert_key: Optional[str] = None,
+    ) -> dict:
+        """Process a PhonePe webhook for ONE clinic (resolved from the URL).
+
+        Nothing in the body is trusted: an order event only names the
+        merchantOrderId, and the payment is then read back from PhonePe's
+        Order Status API with this clinic's own credentials before
+        _settle_captured_payment applies it.
+        """
+        clinic_id = (clinic or {}).get("id")
+        creds = get_phonepe_creds(clinic)
+        if not is_valid_clinic_scope(clinic_id) or not self.verify_phonepe_authorization(
+            authorization, creds["webhook_username"], creds["webhook_password"]
+        ):
+            await self._log_payment_event_raw(
+                None,
+                "signature_failed",
+                {"gateway": "phonepe", "clinic_id": clinic_id, "body_length": len(raw_body),
+                 "authorization_provided": bool(authorization)},
+            )
+            logger.warning("⚠️ PhonePe webhook AUTHORIZATION FAILED — possible spoofing attempt")
+            should_alert = True
+            if alert_limiter is not None:
+                should_alert = not await asyncio.to_thread(
+                    alert_limiter.check_and_record, alert_key or "global"
+                )
+            if should_alert:
+                await self._alert_admin(
+                    clinic,
+                    "🚨 PhonePe webhook authorization FAILED. Check the webhook username/password "
+                    "in Payment Settings, or this may be a spoofing attempt.",
+                )
+            return {"status": "error", "code": 400, "reason": "signature_failed"}
+
+        try:
+            payload = json.loads(raw_body)
+        except json.JSONDecodeError:
+            logger.error("PhonePe webhook: invalid JSON body")
+            return {"status": "error", "code": 400, "reason": "invalid_json"}
+        if not isinstance(payload, dict):
+            return {"status": "error", "code": 400, "reason": "invalid_json"}
+
+        event = str(payload.get("event") or "")
+        body = payload.get("payload") or {}
+        if not isinstance(body, dict):
+            body = {}
+
+        if event in ("pg.refund.completed", "pg.refund.failed"):
+            return await self._apply_phonepe_refund_event(clinic, event, body)
+        if event != "checkout.order.completed":
+            # checkout.order.failed needs nothing: the hold expires on its own.
+            logger.info(f"PhonePe webhook: ignoring event '{event}'")
+            return {"status": "ignored", "code": 200}
+
+        merchant_order_id = str(body.get("merchantOrderId") or "")
+        try:
+            uuid.UUID(merchant_order_id)
+        except ValueError:
+            # Not an order Kriya created (the merchant account may also serve
+            # the clinic's website). Nothing of ours to apply it to.
+            logger.info(f"PhonePe webhook: order {merchant_order_id!r} is not a Kriya booking")
+            return {"status": "ignored", "code": 200, "reason": "foreign_order"}
+
+        status = await self._check_phonepe_payment(clinic, merchant_order_id)
+        if status["status"] == "unknown":
+            # Non-2xx so PhonePe redelivers; the fast poll covers it meanwhile.
+            return {"status": "error", "code": 503, "reason": "status_check_failed"}
+        if status["status"] != "paid":
+            logger.warning(
+                f"PhonePe webhook said completed but Order Status says {status['status']} "
+                f"for {merchant_order_id} — not applying"
+            )
+            return {"status": "ignored", "code": 200, "reason": f"order_{status['status']}"}
+
+        return await self._settle_captured_payment(
+            gateway="phonepe",
+            payment_id=status["payment_id"],
+            amount_paid=status["amount"],
+            clinic_id=clinic_id,
+            provider_event_id=None,
+            payment_link_id=None,
+            raw_payload=payload,
+            lookups=[("id", merchant_order_id)],
+        )
+
+    async def _apply_phonepe_refund_event(self, clinic: dict, event: str, body: dict) -> dict:
+        """Record PhonePe's final refund outcome; a FAILED refund goes to a human.
+
+        Refunds are accepted as PENDING and settle later. Kriya already told
+        the patient a refund was initiated, so a failure here is money the
+        patient was promised and did not get — the admin must act on it.
+        """
+        booking_id = str(body.get("originalMerchantOrderId") or "")
+        try:
+            uuid.UUID(booking_id)
+        except ValueError:
+            return {"status": "ignored", "code": 200, "reason": "foreign_order"}
+        try:
+            res = await sb(
+                supabase.table("appointments")
+                .select("id, booking_ref, payment_id, amount_paise")
+                .eq("clinic_id", clinic["id"])
+                .eq("id", booking_id)
+                .limit(1)
+            )
+        except Exception as e:
+            logger.error(f"PhonePe refund webhook lookup failed for {booking_id}: {e}")
+            return {"status": "error", "code": 503, "reason": "lookup_failed"}
+        if not res.data:
+            return {"status": "ignored", "code": 200, "reason": "booking_not_found"}
+        booking = res.data[0]
+        details = {
+            "gateway": "phonepe",
+            "merchant_refund_id": body.get("merchantRefundId"),
+            "refund_id": body.get("refundId"),
+            "state": body.get("state"),
+            "amount_paise": body.get("amount"),
+            "error_code": body.get("errorCode"),
+        }
+        if event == "pg.refund.failed":
+            await self._log_payment_event(
+                booking_id, "gateway_refund_failed", details, clinic_id=clinic["id"]
+            )
+            amount = (body.get("amount") or booking.get("amount_paise") or 0) / 100
+            await self._alert_admin(
+                clinic,
+                f"🚨 PhonePe REFUND FAILED for booking {booking.get('booking_ref')}\n"
+                f"Amount: Rs.{amount:.0f}\n"
+                f"Refund ID: {body.get('refundId') or body.get('merchantRefundId')}\n"
+                f"The patient was told a refund is on its way. Refund it manually from the "
+                f"PhonePe dashboard and inform the patient.",
+            )
+            return {"status": "ok", "code": 200, "reason": "refund_failed_alerted"}
+        await self._log_payment_event(
+            booking_id, "gateway_refund_completed", details, clinic_id=clinic["id"]
+        )
+        return {"status": "ok", "code": 200, "reason": "refund_completed"}
 
     async def _resolve_event_clinic_id(
         self, booking_id: Optional[str], clinic_id: Optional[str]
@@ -2745,6 +3275,7 @@ class PaymentService:
                     date=date_display or "N/A",
                     amount=f"{float(amount):.0f}",
                     refund_id=refund.get("refund_id") or "pending",
+                    gateway=GATEWAY_LABELS[booking_gateway(booking)],
                 )
             elif refund and refund.get("is_late"):
                 hours = refund.get("window_hours")

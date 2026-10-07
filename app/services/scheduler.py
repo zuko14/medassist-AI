@@ -1299,7 +1299,7 @@ class SchedulerService:
                                         f"Doctor-leave cancellation of {appt.get('booking_ref')} "
                                         f"could not be refunded automatically "
                                         f"({refund.get('reason')}). Refund payment "
-                                        f"{appt['payment_id']} manually in Razorpay.",
+                                        f"{appt['payment_id']} manually in the payment gateway dashboard.",
                                     )
                             if not (refund and refund.get("success")):
                                 # unscoped: unique_row_key

@@ -1727,6 +1727,15 @@ class PaymentSettingsUpdate(BaseModel):
     razorpay_key_id: Optional[str] = None
     razorpay_key_secret: Optional[str] = None
     razorpay_webhook_secret: Optional[str] = None
+    #: Gateway NEW bookings are charged through. Existing bookings keep the
+    #: gateway they were charged on (appointments.payment_gateway).
+    payment_gateway: Optional[Literal["razorpay", "phonepe"]] = None
+    phonepe_client_id: Optional[str] = None
+    phonepe_client_secret: Optional[str] = None
+    phonepe_client_version: Optional[str] = None
+    phonepe_webhook_username: Optional[str] = None
+    phonepe_webhook_password: Optional[str] = None
+    phonepe_env: Optional[Literal["production", "sandbox"]] = None
     payment_mode: Optional[Literal["full", "partial", "none"]] = None
     payment_deposit_percent: Optional[int] = None
     #: Hours before the slot up to which a cancellation is still refundable.
@@ -6092,14 +6101,29 @@ async def get_payment_settings(
             return None
         return "•" * max(0, len(secret) - 4) + secret[-4:]
 
+    from app.services.payment import active_gateway, gateway_configured
+
     key_id = cfg.get("razorpay_key_id")
     key_secret = cfg.get("razorpay_key_secret")
-    default_mode = "full" if (key_id and key_secret) else "none"
+    gateway = active_gateway(clinic)
+    default_mode = "full" if gateway_configured(clinic, gateway) else "none"
 
     return {
+        "payment_gateway": gateway,
+        "razorpay_configured": gateway_configured(clinic, "razorpay"),
+        "phonepe_configured": gateway_configured(clinic, "phonepe"),
         "razorpay_key_id": key_id,
         "razorpay_key_secret_masked": _mask(key_secret),
         "razorpay_webhook_secret_masked": _mask(cfg.get("razorpay_webhook_secret")),
+        # Client ID / version / webhook username identify, they do not
+        # authenticate on their own, so they are shown like the Razorpay key id.
+        "phonepe_client_id": cfg.get("phonepe_client_id"),
+        "phonepe_client_version": cfg.get("phonepe_client_version"),
+        "phonepe_client_secret_masked": _mask(cfg.get("phonepe_client_secret")),
+        "phonepe_webhook_username": cfg.get("phonepe_webhook_username"),
+        "phonepe_webhook_password_masked": _mask(cfg.get("phonepe_webhook_password")),
+        "phonepe_env": "sandbox" if cfg.get("phonepe_env") == "sandbox" else "production",
+        "phonepe_webhook_path": f"/webhooks/phonepe/{clinic['id']}",
         "payment_mode": cfg.get("payment_mode", default_mode),
         "payment_deposit_percent": cfg.get("payment_deposit_percent"),
         # Resolved through the same helper the refund gate and the booking
@@ -6117,7 +6141,8 @@ async def update_payment_settings(
     clinic_id: str = "default",
     user: AdminUser = Depends(require_admin),
 ):
-    """Self-service update of a clinic's own Razorpay keys and payment mode.
+    """Self-service update of a clinic's own gateway (Razorpay | PhonePe), its
+    keys, and the payment mode.
     A clinic_admin may only update their own clinic (enforced via
     enforce_clinic_access); a plan without payments_razorpay is rejected.
     Lab-test-booking plans (diagstream, diagbooking) DO hold that feature —
@@ -6134,9 +6159,15 @@ async def update_payment_settings(
         else body.dict(exclude_unset=True)
     )
 
-    for key in ("razorpay_key_id", "razorpay_key_secret", "razorpay_webhook_secret"):
+    for key in (
+        "razorpay_key_id", "razorpay_key_secret", "razorpay_webhook_secret",
+        "phonepe_client_id", "phonepe_client_secret", "phonepe_client_version",
+        "phonepe_webhook_username", "phonepe_webhook_password",
+    ):
         if key in updates and updates[key] and updates[key].strip():
             cfg[key] = updates[key].strip()
+    if updates.get("phonepe_env"):
+        cfg["phonepe_env"] = updates["phonepe_env"]
 
     if "payment_mode" in updates and updates["payment_mode"] is not None:
         cfg["payment_mode"] = updates["payment_mode"]
@@ -6150,6 +6181,30 @@ async def update_payment_settings(
         and updates["cancellation_window_hours"] is not None
     ):
         cfg["cancellation_window_hours"] = updates["cancellation_window_hours"]
+
+    if updates.get("payment_gateway"):
+        from app.services.payment import active_gateway, gateway_configured
+
+        # SWITCHING to a gateway without its credentials would make
+        # resolve_payment_mode() quietly fall back to "none": the clinic would
+        # stop collecting payment with no error anywhere. Refuse instead.
+        # Re-saving the current gateway is unchanged behaviour.
+        candidate = {**clinic, "config": cfg}
+        if (
+            updates["payment_gateway"] != active_gateway(clinic)
+            and cfg.get("payment_mode", "full") != "none"
+            and not gateway_configured(candidate, updates["payment_gateway"])
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Enter all PhonePe credentials (Client ID, Client Secret, Client Version, "
+                    "Webhook Username and Webhook Password) before selecting PhonePe"
+                    if updates["payment_gateway"] == "phonepe"
+                    else "Enter the Razorpay Key ID and Key Secret before selecting Razorpay"
+                ),
+            )
+        cfg["payment_gateway"] = updates["payment_gateway"]
 
     final_mode = cfg.get("payment_mode", "full")
     final_percent = cfg.get("payment_deposit_percent")
@@ -6182,7 +6237,10 @@ async def update_payment_settings(
         resource_id=target_clinic_id,
         details={
             "payment_mode": cfg.get("payment_mode"),
+            "payment_gateway": cfg.get("payment_gateway", "razorpay"),
             "razorpay_configured": bool(cfg.get("razorpay_key_id")),
+            "phonepe_configured": bool(cfg.get("phonepe_client_id")),
+            "phonepe_env": cfg.get("phonepe_env"),
             "cancellation_window_hours": cfg.get("cancellation_window_hours"),
         },
         ip_address=client_ip,

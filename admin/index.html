@@ -3251,18 +3251,64 @@
         <div id="pg-paysettings" class="sec">
             <div class="page-head">
                 <h2>Payment Settings</h2>
-                <p>Manage your own Razorpay keys and how patients pay for bookings</p>
+                <p>Choose your payment gateway (Razorpay or PhonePe), manage its keys, and decide how patients pay for bookings</p>
             </div>
 
             <div class="form-card">
-                <h3>Razorpay Credentials</h3>
+                <h3>Payment Gateway</h3>
                 <div id="paySettingsMsg"></div>
-                <div class="form-row">
-                    <div class="field"><label>Key ID</label><input type="text" id="f-payKeyId" placeholder="rzp_live_xxxxxx"></div>
-                    <div class="field"><label>Key Secret</label><input type="password" id="f-payKeySecret" placeholder="Leave blank to keep existing"></div>
+                <p style="color:var(--text3);font-size:0.88rem;margin:0 0 14px">
+                    New bookings are charged through the gateway you select. Bookings already paid
+                    are always refunded through the gateway they were paid on, so keep the other
+                    gateway's keys saved until its refunds are done.
+                </p>
+                <div class="field radio-cards">
+                    <label class="check"><input type="radio" name="payGateway" value="razorpay" id="f-payGwRazorpay" onchange="renderPayGateway()"> Razorpay <span id="f-payGwRazorpayState"></span></label>
+                    <label class="check"><input type="radio" name="payGateway" value="phonepe" id="f-payGwPhonepe" onchange="renderPayGateway()"> PhonePe Payment Gateway <span id="f-payGwPhonepeState"></span></label>
                 </div>
-                <div class="form-row">
-                    <div class="field"><label>Webhook Secret</label><input type="password" id="f-payWebhookSecret" placeholder="Leave blank to keep existing"></div>
+
+                <div id="f-payRazorpayBox">
+                    <h3 style="margin-top:24px">Razorpay Credentials</h3>
+                    <div class="form-row">
+                        <div class="field"><label>Key ID</label><input type="text" id="f-payKeyId" placeholder="rzp_live_xxxxxx"></div>
+                        <div class="field"><label>Key Secret</label><input type="password" id="f-payKeySecret" placeholder="Leave blank to keep existing"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="field"><label>Webhook Secret</label><input type="password" id="f-payWebhookSecret" placeholder="Leave blank to keep existing"></div>
+                    </div>
+                </div>
+
+                <div id="f-payPhonepeBox" style="display:none">
+                    <h3 style="margin-top:24px">PhonePe Credentials</h3>
+                    <p style="color:var(--text3);font-size:0.85rem;margin:0 0 12px">
+                        From the PhonePe Business Dashboard &rarr; Developer Settings (API keys).
+                    </p>
+                    <div class="form-row">
+                        <div class="field"><label>Client ID</label><input type="text" id="f-ppClientId" placeholder="Client ID" autocomplete="off"></div>
+                        <div class="field"><label>Client Version</label><input type="text" id="f-ppClientVersion" placeholder="e.g. 1" autocomplete="off"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="field"><label>Client Secret</label><input type="password" id="f-ppClientSecret" placeholder="Leave blank to keep existing" autocomplete="new-password"></div>
+                        <div class="field"><label>Environment</label>
+                            <select id="f-ppEnv">
+                                <option value="production">Production (live payments)</option>
+                                <option value="sandbox">Sandbox (testing only)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="field"><label>Webhook Username</label><input type="text" id="f-ppWebhookUser" placeholder="Username you set in PhonePe" autocomplete="off"></div>
+                        <div class="field"><label>Webhook Password</label><input type="password" id="f-ppWebhookPass" placeholder="Leave blank to keep existing" autocomplete="new-password"></div>
+                    </div>
+                    <div class="field">
+                        <label>Webhook URL &mdash; paste in PhonePe Dashboard &rarr; Developer Settings &rarr; Webhooks</label>
+                        <input type="text" id="f-ppWebhookUrl" readonly onclick="this.select()">
+                    </div>
+                    <p style="color:var(--text3);font-size:0.85rem;margin:6px 0 0">
+                        Use the same username and password there, and enable the events
+                        <code>checkout.order.completed</code>, <code>checkout.order.failed</code>,
+                        <code>pg.refund.completed</code> and <code>pg.refund.failed</code>.
+                    </p>
                 </div>
 
                 <h3 style="margin-top:24px">How should patients pay?</h3>
@@ -8430,15 +8476,15 @@ function renderUsageCard(d) {
 // lets front-desk staff answer "where is my money?" without opening Razorpay.
 const REFUND_STATE_CELL = {
     refunded:  '<span style="color:#10b981;font-size:11px;font-weight:600">Refunded</span>',
-    initiated: '<span title="Refund started but Razorpay has not confirmed it yet — open the audit trail" style="color:#f59e0b;font-size:11px;font-weight:600">⏳ Initiated</span>',
-    failed:    '<span title="Razorpay rejected the refund — open the audit trail" style="color:#ef4444;font-size:11px;font-weight:600">Refund failed</span>',
+    initiated: '<span title="Refund started but the payment gateway has not confirmed it yet — open the audit trail" style="color:#f59e0b;font-size:11px;font-weight:600">⏳ Initiated</span>',
+    failed:    '<span title="The payment gateway rejected the refund — open the audit trail" style="color:#ef4444;font-size:11px;font-weight:600">Refund failed</span>',
     not_refunded: '<span title="Cancelled after the refund cutoff, or the refund needs a human" style="color:#f59e0b;font-size:11px;font-weight:600">Not refunded</span>',
     none:      '<span style="color:var(--text-muted,#9ca3af)">—</span>',
 };
 
 function refundCell(a) {
     if (a.refund_id) {
-        return '<span title="Razorpay refund reference" '
+        return '<span title="Payment gateway refund reference" '
             + 'style="background:rgba(16,185,129,.14);color:#10b981;padding:3px 8px;'
             + 'border-radius:4px;font-weight:600;font-size:11px;font-family:monospace">'
             + '↩ ' + esc(a.refund_id) + '</span>';
@@ -12210,7 +12256,7 @@ async function showPaymentEvents(bookingId) {
 }
 
 async function adminConfirmBooking(bookingId) {
-    const ok = await confirmDialog('Manually CONFIRM this booking? Only do this after verifying payment in Razorpay dashboard.', { title: 'Confirm booking', okText: 'Confirm Booking' });
+    const ok = await confirmDialog('Manually CONFIRM this booking? Only do this after verifying the payment in your payment gateway dashboard (Razorpay / PhonePe).', { title: 'Confirm booking', okText: 'Confirm Booking' });
     if (!ok) return;
     try {
         const r = await apiPost('/admin/bookings/' + bookingId + '/confirm', { admin_notes: 'Manual confirmation from admin panel' });
@@ -12859,6 +12905,23 @@ async function saveProfile() {
 async function loadPaymentSettings() {
     try {
         const data = await api('/admin/settings/payment');
+        const gw = data.payment_gateway === 'phonepe' ? 'phonepe' : 'razorpay';
+        document.getElementById(gw === 'phonepe' ? 'f-payGwPhonepe' : 'f-payGwRazorpay').checked = true;
+        const stateBadge = ok => ok
+            ? '<span class="badge badge-confirmed" style="margin-left:6px">Configured</span>'
+            : '<span class="badge badge-pending" style="margin-left:6px">Not set up</span>';
+        document.getElementById('f-payGwRazorpayState').innerHTML = stateBadge(data.razorpay_configured);
+        document.getElementById('f-payGwPhonepeState').innerHTML = stateBadge(data.phonepe_configured);
+        document.getElementById('f-ppClientId').value = data.phonepe_client_id || '';
+        document.getElementById('f-ppClientVersion').value = data.phonepe_client_version || '';
+        document.getElementById('f-ppWebhookUser').value = data.phonepe_webhook_username || '';
+        document.getElementById('f-ppEnv').value = data.phonepe_env === 'sandbox' ? 'sandbox' : 'production';
+        document.getElementById('f-ppClientSecret').placeholder =
+            data.phonepe_client_secret_masked ? 'Saved: ' + data.phonepe_client_secret_masked : 'Leave blank to keep existing';
+        document.getElementById('f-ppWebhookPass').placeholder =
+            data.phonepe_webhook_password_masked ? 'Saved: ' + data.phonepe_webhook_password_masked : 'Leave blank to keep existing';
+        document.getElementById('f-ppWebhookUrl').value = data.phonepe_webhook_path ? API + data.phonepe_webhook_path : '';
+        renderPayGateway();
         document.getElementById('f-payKeyId').value = data.razorpay_key_id || '';
         document.getElementById('f-payKeySecret').placeholder =
             data.razorpay_key_secret_masked ? 'Saved: ' + data.razorpay_key_secret_masked : 'Leave blank to keep existing';
@@ -12883,9 +12946,16 @@ async function loadPaymentSettings() {
     }
 }
 
+function renderPayGateway() {
+    const phonepe = document.getElementById('f-payGwPhonepe').checked;
+    document.getElementById('f-payPhonepeBox').style.display = phonepe ? '' : 'none';
+    document.getElementById('f-payRazorpayBox').style.display = phonepe ? 'none' : '';
+}
+
 async function savePaymentSettings() {
     const mode = document.querySelector('input[name="payMode"]:checked')?.value || 'none';
-    const body = { payment_mode: mode };
+    const gateway = document.querySelector('input[name="payGateway"]:checked')?.value || 'razorpay';
+    const body = { payment_mode: mode, payment_gateway: gateway };
 
     const keyId = document.getElementById('f-payKeyId').value.trim();
     const keySecret = document.getElementById('f-payKeySecret').value.trim();
@@ -12893,6 +12963,18 @@ async function savePaymentSettings() {
     if (keyId) body.razorpay_key_id = keyId;
     if (keySecret) body.razorpay_key_secret = keySecret;
     if (webhookSecret) body.razorpay_webhook_secret = webhookSecret;
+
+    // Blank PhonePe fields keep what is saved, exactly like the Razorpay ones.
+    const pp = {
+        phonepe_client_id: 'f-ppClientId', phonepe_client_version: 'f-ppClientVersion',
+        phonepe_client_secret: 'f-ppClientSecret', phonepe_webhook_username: 'f-ppWebhookUser',
+        phonepe_webhook_password: 'f-ppWebhookPass',
+    };
+    for (const [key, id] of Object.entries(pp)) {
+        const v = document.getElementById(id).value.trim();
+        if (v) body[key] = v;
+    }
+    body.phonepe_env = document.getElementById('f-ppEnv').value === 'sandbox' ? 'sandbox' : 'production';
 
     if (mode === 'partial') {
         const percent = parseInt(document.getElementById('f-payPercent').value, 10);
@@ -12908,6 +12990,8 @@ async function savePaymentSettings() {
         msg('paySettingsMsg', 'Payment settings saved!');
         document.getElementById('f-payKeySecret').value = '';
         document.getElementById('f-payWebhookSecret').value = '';
+        document.getElementById('f-ppClientSecret').value = '';
+        document.getElementById('f-ppWebhookPass').value = '';
         loadPaymentSettings();
     } catch (e) {
         msg('paySettingsMsg', 'Error: ' + e.message, true);

@@ -59,6 +59,12 @@ This document inventories all external service integrations, APIs, protocols, an
    - Generates and schedules confirmed appointment.
 4. **Refund Processing**: Initiates instant refunds for cancelled appointments or rejected booking requests via Razorpay Refunds API, updating `appointments.refund_id`.
 
+### PhonePe Payment Gateway (alternative, per clinic — 2026-10-07)
+- PG v2 Standard Checkout over raw `httpx` (no SDK). Hosts: prod `api.phonepe.com/apis/identity-manager` (OAuth) + `api.phonepe.com/apis/pg`; sandbox `api-preprod.phonepe.com/apis/pg-sandbox` for both.
+- Credentials in `clinics.config`: `phonepe_client_id`, `phonepe_client_secret`, `phonepe_client_version`, `phonepe_webhook_username`, `phonepe_webhook_password`, `phonepe_env`. No global fallback.
+- Selected by `clinics.config.payment_gateway = 'phonepe'`; each booking stores its gateway (migration 100). See Flow 5b in 02-SYSTEM-FLOWS.
+- Not implemented: PhonePe's optional HMAC webhook mode (`x-phonepe-checksum-*`); configure SHA256 username/password auth in the PhonePe dashboard.
+
 ---
 
 ## 4. MOCDOC HMIS & LABORATORY CONNECTOR

@@ -984,6 +984,19 @@ For Rainbow Children's / BirthRight-style hospitals: **Child Care**, **Women Car
 > [!WARNING]
 > Without the webhook, patients pay but bookings stay *pending* until the reconciliation job catches up. A wrong webhook secret is rejected and alerts the clinic admin.
 
+### E6b: PhonePe Setup (alternative to Razorpay — lower fees)
+
+1. In the **client's** PhonePe Business Dashboard → **Developer Settings → API Keys**: copy **Client ID**, **Client Secret** and **Client Version**.
+2. PhonePe → **Developer Settings → Webhooks → Create Webhook**:
+   - **URL:** `https://medassist-ai-docker.onrender.com/webhooks/phonepe/<CLINIC_UUID>` (also shown, ready to copy, on the Payment Settings page)
+   - **Username / Password:** create both (letters and digits) and copy them
+   - **Events:** `checkout.order.completed`, `checkout.order.failed`, `pg.refund.completed`, `pg.refund.failed`
+3. Admin panel → **Payment Settings** → select **PhonePe Payment Gateway**, paste all five values, keep **Environment = Production** (use *Sandbox* only with PhonePe test keys), choose the payment mode, **Save**. Saving refuses PhonePe until all five values are present.
+4. Test once with a real ₹1-₹10 consultation fee: pay → WhatsApp confirmation within seconds → cancel → refund receipt.
+
+> [!IMPORTANT]
+> Switching gateways only affects **new** bookings. Bookings already paid are refunded through the gateway they were paid on, so keep the previous gateway's keys saved until those refunds are done.
+
 ---
 
 ## Part F: Live End-to-End Verification (1 Minute)
@@ -1090,6 +1103,7 @@ The job runs 10:30 IST for consultations seen 3 and 7 days earlier. Tap **Still 
 | **Reports fail with "template not found" for a new clinic** | `lab_report_template_name` not set → the global default `lab_report_delivery` is used, which the client's WABA does not have. | Step 13b SQL; check with `python -m scripts.whatsapp_doctor --clinic <UUID>` (line `[3] template`). |
 | **Admin password lost** | It is shown only once on Create. | Reset it with the owner API: `curl -X PUT https://medassist-ai-docker.onrender.com/platform/reset-admin-password -u '<OWNER_USERNAME>:<OWNER_PASSWORD>' -H 'Content-Type: application/json' -d '{"username": "<ADMIN_USERNAME>", "new_password": "<NEW_PASSWORD_8+_CHARS>"}'` |
 | **Paid booking stays pending** | Razorpay webhook missing, wrong URL (clinic UUID) or wrong secret. | Part E6. |
+| **PhonePe payment not confirming** | Webhook URL/username/password mismatch (admin gets an "authorization FAILED" alert), or wrong Environment. The 30s poll still confirms when API keys are right. | Part E6b. |
 | **`132000` / "number of parameters does not match"** | Template approved with a different number of variables than the code sends. | Compare with the Variables column of the Template Requirement Matrix. Most common: `appointment_reminder_2h` created with 1 variable (old SOP) — it needs 2. |
 | **Dental sitting messages not arriving** | Templates not approved; patient consent not recorded; monthly limit reached. | Platform → Dental Messaging → Template Status. Plan detail shows "Patient WhatsApp: Not allowed" → **Record consent**. Check the usage bars on Treatment Plans. |
 | **Dentist gets no WhatsApp** | No WhatsApp number on the doctor; plan's "WhatsApp the doctor" off; evening schedule switched off; `dental_doctor_*` not approved. | Fill the number on Doctors; check the plan and Automation settings; Template Status. |
