@@ -235,6 +235,8 @@ class Settings(BaseSettings):
     # Must support JSON mode: deepseek-chat (the WhatsApp model) returned no valid JSON in 4/4 tries.
     voice_llm_fallback_model: str = "openai/gpt-4.1-mini"
     voice_llm_timeout_seconds: float = 3.0
+    # Grounded answer to a caller's question (app/voice/knowledge.py); on timeout a fixed sentence is used.
+    voice_knowledge_timeout_seconds: float = 6.0
     voice_payment_link_template_name: str = "kriya_payment_link"  # Meta UTILITY template, 8 body vars
     voice_transcript_retention_days: int = 30
     sarvam_api_key: str = ""

@@ -9917,15 +9917,72 @@ async function vcCallNow(phone, interest) {
 async function vcKnowledge() {
     const pane = document.getElementById('vcPane');
     pane.innerHTML = loading();
+    let kb = null;
+    try { kb = await api('/admin/voice/knowledge'); } catch (e) { kb = { error: e.message }; }
     try {
         const d = await api('/admin/voice/lexicon');
-        pane.innerHTML = `<p class="lead-note">Teach Kriya your words. Example: “gunde OPD” → department “Cardiology”; “pedda doctor” → doctor “Dr. Ramesh Kumar”; “KIMS” pronounced “కిమ్స్”.</p>`
+        const manage = hasPermission('VOICE_MANAGE');
+        const s = (kb && kb.summary) || null;
+        const LANGS = { '': 'Any language', te: 'Telugu', hi: 'Hindi', en: 'English' };
+        pane.innerHTML = `<div class="vc-section"><h3>What Kriya knows about your hospital</h3>`
+            + (s ? `<p class="lead-note">Callers can ask anything about your hospital and Kriya answers from your own records, in their language, without transferring the call: <strong>${s.treatments}</strong> treatments, <strong>${s.doctors}</strong> doctors (qualifications, experience, fees, days), ${s.departments.length} departments${s.has_hours ? ', timings' : ''}${s.has_location ? ', address' : ''}, and the answers you add below. Keep treatment descriptions and doctor profiles up to date: that is what Kriya says.</p>`
+                : `<p class="lead-note">${esc((kb && kb.error) || 'Could not load the summary.')}</p>`)
+            + `<p class="lead-note">Kriya never gives medical advice, and never says a price, number or doctor that is not in your records.</p></div>`
+            + `<div class="vc-section"><h3>Your answers</h3><p class="lead-note">For anything not in your records: parking, insurance, EMI, offers, visiting rules. Kriya says your answer word for word when a caller asks that question.</p>`
+            + (manage ? `<div class="vc-inline" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto auto"><div class="field"><label for="vcKbQ">Caller asks</label><input id="vcKbQ" maxlength="200" autocomplete="off" placeholder="e.g. Is there parking?"></div>`
+                + `<div class="field"><label for="vcKbA">Kriya answers</label><input id="vcKbA" maxlength="600" autocomplete="off" placeholder="e.g. Yes, free car and bike parking in the basement."></div>`
+                + `<div class="field"><label for="vcKbL">Language</label><select id="vcKbL">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>`
+                + `<button type="button" class="btn btn-accent" onclick="vcKbAdd()">Add</button></div>` : '')
+            + `<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Caller asks</th><th>Kriya answers</th><th>Language</th><th></th></tr></thead><tbody>`
+            + (((kb && kb.entries) || []).map(e => `<tr><td>${esc(e.question)}</td><td>${esc(e.answer)}</td><td>${esc(LANGS[e.language || ''] || e.language)}</td><td style="text-align:right">${manage ? `<button type="button" class="btn btn-ghost btn-sm" onclick="vcKbDel('${esc(e.id)}')">Delete</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4">No answers yet.</td></tr>')
+            + `</tbody></table></div></div>`
+            + `<div class="vc-section"><h3>Ask Kriya</h3><p class="lead-note">Try a question the way a caller would say it. Uses your live records.</p>`
+            + `<div class="vc-inline" style="grid-template-columns:minmax(0,1fr) auto auto"><div class="field"><label for="vcAskQ">Question</label><input id="vcAskQ" maxlength="400" autocomplete="off" placeholder="e.g. Root canal ki enni sittings?" onkeydown="if(event.key==='Enter')vcKbAsk()"></div>`
+            + `<div class="field"><label for="vcAskL">Answer in</label><select id="vcAskL"><option value="te">Telugu</option><option value="hi">Hindi</option><option value="en">English</option></select></div>`
+            + `<button type="button" class="btn btn-accent" id="vcAskGo" onclick="vcKbAsk()">Ask</button></div><div id="vcAskOut" aria-live="polite"></div></div>`
+            + `<div class="vc-section"><h3>Words your callers use</h3>`
+            + `<p class="lead-note">Teach Kriya your words. Example: “gunde OPD” → department “Cardiology”; “pedda doctor” → doctor “Dr. Ramesh Kumar”; “KIMS” pronounced “కిమ్స్”.</p>`
             + `<div class="vc-inline" style="--vc-cols:3;margin-top:14px"><div class="field"><label for="vcLexKind">Type</label><select id="vcLexKind"><option value="specialty_synonym">Department word</option><option value="doctor_alias">Doctor nickname</option><option value="test_alias">Lab test word</option><option value="pronunciation">Pronunciation</option></select></div>`
             + `<div class="field"><label for="vcLexPhrase">What callers say</label><input id="vcLexPhrase" maxlength="80" autocomplete="off" placeholder="e.g. gunde OPD"></div>`
             + `<div class="field"><label for="vcLexCanon">What it means</label><input id="vcLexCanon" maxlength="120" autocomplete="off" placeholder="Exact department, doctor or test name"></div>`
             + `<button type="button" class="btn btn-accent" onclick="vcLexAdd()">Add</button></div>`
-            + `<div class="table-wrap" style="margin-top:18px"><table><thead><tr><th>Type</th><th>Callers say</th><th>Means</th><th></th></tr></thead><tbody>${(d.entries || []).map(e => `<tr><td>${esc(VC_LEX_KIND[e.kind] || e.kind)}</td><td>${esc(e.phrase)}</td><td>${esc(e.canonical)}</td><td style="text-align:right"><button type="button" class="btn btn-ghost btn-sm" onclick="vcLexDel('${esc(e.id)}')">Delete</button></td></tr>`).join('') || '<tr><td colspan="4">No entries yet.</td></tr>'}</tbody></table></div>`;
+            + `<div class="table-wrap" style="margin-top:18px"><table><thead><tr><th>Type</th><th>Callers say</th><th>Means</th><th></th></tr></thead><tbody>${(d.entries || []).map(e => `<tr><td>${esc(VC_LEX_KIND[e.kind] || e.kind)}</td><td>${esc(e.phrase)}</td><td>${esc(e.canonical)}</td><td style="text-align:right"><button type="button" class="btn btn-ghost btn-sm" onclick="vcLexDel('${esc(e.id)}')">Delete</button></td></tr>`).join('') || '<tr><td colspan="4">No entries yet.</td></tr>'}</tbody></table></div></div>`;
     } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
+}
+
+async function vcKbAdd() {
+    const v = id => document.getElementById(id).value.trim();
+    if (v('vcKbQ').length < 3 || v('vcKbA').length < 2) { toast('Write the question and the answer.', true); return; }
+    try {
+        await apiPost('/admin/voice/knowledge', { question: v('vcKbQ'), answer: v('vcKbA'), language: v('vcKbL') || null });
+        toast('Saved. Kriya uses it on the next call.');
+        vcKnowledge();
+    } catch (e) { toast(e.message, true); }
+}
+
+async function vcKbDel(id) {
+    if (!await confirmDialog('Delete this answer? Kriya stops saying it.', { title: 'Delete answer', danger: true, okText: 'Delete' })) return;
+    try { await apiDel('/admin/voice/knowledge/' + encodeURIComponent(id)); vcKnowledge(); } catch (e) { toast(e.message, true); }
+}
+
+const VC_KB_SOURCE = { qa: 'your answer', ai: 'your records (checked)', template: 'your records', none: '—', safety: 'safety rule' };
+
+async function vcKbAsk() {
+    const q = (document.getElementById('vcAskQ').value || '').trim();
+    if (q.length < 2) return;
+    const out = document.getElementById('vcAskOut');
+    const btn = document.getElementById('vcAskGo');
+    btn.disabled = true;
+    out.innerHTML = loading();
+    try {
+        const r = await apiPost('/admin/voice/knowledge/ask', { question: q, language: document.getElementById('vcAskL').value });
+        out.innerHTML = r.source === 'safety'
+            ? `<div class="alert" style="margin-top:10px">Kriya does not answer this: it is a medical question (${esc(r.blocked)}). It offers to book a doctor instead.</div>`
+            : r.text
+                ? `<div class="alert" style="margin-top:10px"><strong>Kriya:</strong> ${esc(r.text)}<div class="lead-sub">From ${esc(VC_KB_SOURCE[r.source] || r.source)}</div></div>`
+                : `<div class="alert" style="margin-top:10px">Kriya would say it doesn't have that detail and your team can tell them. Add the answer under "Your answers".</div>`;
+    } catch (e) { out.innerHTML = emptyState('warning', esc(e.message)); }
+    finally { btn.disabled = false; }
 }
 
 async function vcLexAdd() {

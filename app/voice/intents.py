@@ -6,7 +6,7 @@ executes autonomously today; every other intent is answered honestly
 ("I'll connect you to our staff") and routed to a human — never guessed at.
 """
 
-TAXONOMY_VERSION = "intents-2026.10.06"
+TAXONOMY_VERSION = "intents-2026.10.08"
 
 ALL_INTENTS = (
     "GREETING", "GENERAL_INFORMATION", "HOSPITAL_INFORMATION", "DEPARTMENT_INFORMATION",
@@ -20,6 +20,9 @@ ALL_INTENTS = (
     "PRESCRIPTION_DELIVERY", "PHARMACY_INFORMATION", "FOLLOW_UP_REMINDER", "HEALTH_CAMP",
     "CORPORATE_SCREENING", "DOCTOR_LEAVE", "SERVICE_AVAILABILITY", "COMPLAINT", "FEEDBACK",
     "CALLBACK_REQUEST", "HUMAN_AGENT_REQUEST", "EMERGENCY", "CLINICAL_QUERY", "UNKNOWN", "MULTI_INTENT",
+    # A question about the hospital's services, treatments, doctors, facilities or policies:
+    # answered from its records mid-call (dialog._answer_question), never a workflow of its own.
+    "KNOWLEDGE_QUESTION",
     # dialog acts (not business intents)
     "AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE", "ASK_IF_AI",
 )

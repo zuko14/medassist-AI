@@ -23,12 +23,12 @@ from app.config import settings
 from . import responses as R
 from . import store
 from .dates import IST, today_ist
-from .dialog import DIALOG_VERSION, DialogEngine, new_state
+from .dialog import DIALOG_VERSION, DialogEngine, Say, TurnOutput, new_state
 from .intents import TAXONOMY_VERSION
 from .lexicon import (LEXICON_VERSION, SPECIALTIES, apply_pronunciations, find_specialties, resolve_department,
                       tenant_department_for)
 from .nlu_llm import PROMPT_VERSION, understand_llm
-from .nlu_rules import NLU_RULES_VERSION, NluContext, understand
+from .nlu_rules import NLU_RULES_VERSION, NluContext, gurmukhi_to_devanagari, is_question, understand
 from .policy import POLICY_VERSION, asr_confidence, gate, needs_llm
 from .safety import SAFETY_VERSION, screen
 from .tools import TOOLS_VERSION, CallContext, KriyaTools
@@ -69,6 +69,9 @@ class CallSession:
         self._lexicon: list = []
         self.llm_tokens = 0
         self.llm_cost_paise = 0
+        # Set by the audio gateway: speak something NOW, before this turn's reply is ready
+        # ("one moment, let me check" while a question is being answered). None elsewhere.
+        self.interim = None
         self.failed_verifications = 0
 
     # ---- helpers ----
@@ -81,11 +84,19 @@ class CallSession:
             except Exception:
                 doctors = []
             self._lexicon = await store.load_lexicon(self.ctx.clinic_id)
+            treatments = []
+            try:
+                from app.database import sb, supabase
+                res = await sb(supabase.table("specialty_treatments").select("name, short_name")
+                               .eq("clinic_id", self.ctx.clinic_id).eq("is_active", True).limit(200))
+                treatments = [n for r in res.data or [] for n in (r.get("name"), r.get("short_name")) if n]
+            except Exception:
+                pass
             self._nlu_ctx = NluContext(
                 doctors=[{"id": d["id"], "name": d.get("name") or "", "department": d.get("department") or ""}
                          for d in doctors],
                 departments=sorted({d.get("department") for d in doctors if d.get("department")}),
-                tenant_entries=self._lexicon, now=self.now)
+                tenant_entries=self._lexicon, now=self.now, treatments=treatments)
         return self._nlu_ctx
 
     def _render(self, out) -> list:
@@ -136,6 +147,9 @@ class CallSession:
     async def start(self, outbound: bool = False, interest: Optional[str] = None) -> Reply:
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {"versions": VERSIONS})
         await self._event("system", "CALL_STARTED", status="ok", data={"mode": self.ctx.mode})
+        preload = getattr(self.tools, "preload_knowledge", None)
+        if preload:
+            preload()
         name, slots = None, {}
         if outbound:
             name, slots = await self._lead_context(interest)
@@ -167,6 +181,12 @@ class CallSession:
     async def handle(self, text: str, stt_lang: Optional[str] = None) -> Reply:
         text = (text or "").strip()
         await self._event("turn_user", "CALLER_SAID", text=text, data={"stt_language": stt_lang})
+        # STT sometimes writes a short Telugu/Hindi reply in Gurmukhi ("ਹਾਂ ਹਾਂ" for "haa haa").
+        # Read it as Devanagari (before the safety screen, so nothing is missed there), and never
+        # let it vote to switch the call's language.
+        converted = gurmukhi_to_devanagari(text)
+        from_gurmukhi = converted != text
+        text = converted
 
         call = await store.get_call(self.ctx.clinic_id, self.ctx.call_id)
         if call and (call.get("automation_paused") or call.get("takeover_requested_at")):
@@ -180,7 +200,7 @@ class CallSession:
             out = await self.engine.emergency(self.state) if verdict == "emergency" else self.engine.clinical(self.state)
             return await self._emit(out)
 
-        switched = self.engine.observe_language(self.state, text)
+        switched = None if from_gurmukhi else self.engine.observe_language(self.state, text)
         ctx = await self._context()
         nlu = understand(text, ctx, self.state.get("expect"))
         if needs_llm(nlu, text):
@@ -191,6 +211,12 @@ class CallSession:
         await self._event("nlu", "INTENT_DETECTED" if nlu.intents else "NOT_UNDERSTOOD",
                           status="ok" if nlu.confidence else "fail", data=nlu.to_dict(),
                           text=None if nlu.intents else text)  # feeds "top failure phrases"
+        if self.interim and ("KNOWLEDGE_QUESTION" in nlu.intents
+                             or ("DOCTOR_INFORMATION" in nlu.intents and is_question(text))):
+            try:
+                await self.interim(self._render(TurnOutput([Say("kb_checking")])))
+            except Exception as e:
+                logger.warning(f"VOICE_INTERIM_FAILED call={self.ctx.call_ref}: {e}")
         out = await self.engine.turn(self.state, nlu, text)
         if switched:
             out.says.insert(0, switched)
@@ -220,10 +246,12 @@ class CallSession:
         last = outcomes[-1]["outcome"] if outcomes else ("abandoned" if status == "dropped" else None)
         if any(o.get("wf") == "HUMAN" for o in outcomes) and status == "completed":
             status = "handed_off"
-        cost = store.usage_cost_paise(stt_seconds, tts_chars, telephony_seconds) + self.llm_cost_paise
+        llm_tokens = self.llm_tokens + int(getattr(self.tools, "llm_tokens", 0) or 0)
+        llm_cost = self.llm_cost_paise + int(getattr(self.tools, "llm_cost_paise", 0) or 0)
+        cost = store.usage_cost_paise(stt_seconds, tts_chars, telephony_seconds) + llm_cost
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {
             "status": status, "outcome": last, "ended_at": datetime.now(IST).isoformat(),
             "telephony_seconds": int(telephony_seconds), "stt_seconds": round(stt_seconds, 2),
-            "tts_chars": int(tts_chars), "llm_tokens": self.llm_tokens, "cost_paise": int(cost),
+            "tts_chars": int(tts_chars), "llm_tokens": llm_tokens, "cost_paise": int(cost),
             "quality": self.quality(avg_turn_ms), "dialog": self.state})
         await self._event("system", "CALL_ENDED", status="ok", data={"status": status, "outcome": last})

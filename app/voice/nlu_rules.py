@@ -15,7 +15,7 @@ from typing import Optional
 from .dates import first_index, has_any, norm, parse_clock_time, parse_date, parse_time_period
 from .lexicon import find_specialties, match_doctors, resolve_department, tenant_department_for
 
-NLU_RULES_VERSION = "nlu-rules-2026.10.07"
+NLU_RULES_VERSION = "nlu-rules-2026.10.08"
 
 SUPPORTED_LANGS = ("te-IN", "hi-IN", "en-IN")
 DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE")
@@ -27,6 +27,7 @@ class NluContext:
     departments: list = field(default_factory=list)      # clinic's own department names
     tenant_entries: list = field(default_factory=list)   # voice_lexicon_entries rows
     now: Optional[datetime] = None
+    treatments: list = field(default_factory=list)       # this clinic's treatment names
 
 
 @dataclass
@@ -95,6 +96,19 @@ W = {
     "GOODBYE": ("bye", "goodbye", "thank you", "thanks", "dhanyavadalu", "ధన్యవాదాలు", "shukriya",
                 "धन्यवाद", "that's all", "thats all", "anthe", "అంతే", "bas", "=बस", "=బై", "=बाय", "థాంక్స్",
                 "थैंक्स"),
+    # A question about the hospital itself (answered from its records, app/voice/knowledge.py).
+    "SERVICES": ("services", "service", "treatments", "treatment", "facilities", "facility", "procedures",
+                 "procedure", "specialities", "specialties", "sittings", "sitting", "qualification",
+                 "qualifications", "experience", "insurance", "cashless", "parking", "emi",
+                 "సర్వీస", "సేవలు", "ట్రీట్మెంట్", "ట్రీట్‌మెంట్", "చికిత్స", "సిట్టింగ్", "అనుభవం",
+                 "క్వాలిఫికేషన్", "ఇన్సూరెన్స్", "పార్కింగ్", "సౌకర్య",
+                 "सेवा", "सेवाएं", "सर्विस", "इलाज", "ट्रीटमेंट", "सुविधा", "सिटिंग", "अनुभव", "इंश्योरेंस",
+                 "बीमा", "पार्किंग"),
+    "QUESTION": ("what", "which", "how", "does", "do you", "is there", "are there", "tell me", "explain",
+                 "kya", "kaun", "kaunsa", "kaise", "emiti", "enni", "ela", "cheptara",
+                 "ఏమి", "=ఏం", "ఏమేమి", "ఎటువంటి", "ఎలాంటి", "ఎన్ని", "ఎలా", "ఏవి", "ఏవేవి", "ఉన్నాయా",
+                 "ఉందా", "చేస్తారా", "చేస్తారు", "చెప్తారా", "చెప్పండి",
+                 "क्या", "कौन", "कितनी", "कितने", "कैसे", "बताइए", "बताओ", "होता है", "करते हैं", "है क्या"),
     "REPEAT": ("repeat", "malli cheppandi", "మళ్ళీ చెప్పండి", "phir se", "dobara", "दोबारा", "फिर से",
                "pardon", "come again"),
 }
@@ -137,6 +151,31 @@ ROMAN_INDIC_MARKERS = ("kavali", "kaavali", "cheyyandi", "cheyandi", "naaku", "n
                        "ji", "lo", "ki", "ka", "ke", "mein", "chesi", "pampandi")
 
 _BOOKING_REF = re.compile(r"\b([A-Z]{2,8}-?[A-Z0-9]{4,10})\b")
+
+
+def is_question(text: str) -> bool:
+    """Phrased as a question ("what / ఏమేమి / क्या ... ?"), not a request."""
+    return "?" in (text or "") or has_any(norm(text), W["QUESTION"])
+
+
+def gurmukhi_to_devanagari(text: str) -> str:
+    """Gurmukhi letters -> the Devanagari ones (the blocks are parallel, offset
+    0x100), so "ਹਾਂ ਹਾਂ" reads as "हां हां". Tippi -> anusvara; addak and
+    yakash have no Devanagari sign and are dropped."""
+    if not any(0x0A00 <= ord(c) <= 0x0A7F for c in text or ""):
+        return text
+    out = []
+    for c in text:
+        o = ord(c)
+        if o == 0x0A70:
+            out.append("ं")
+        elif o in (0x0A71, 0x0A75):
+            continue
+        elif 0x0A00 <= o <= 0x0A6F:
+            out.append(chr(o - 0x100))
+        else:
+            out.append(c)
+    return "".join(out)
 
 
 def language_request(text: str) -> Optional[str]:
@@ -289,6 +328,18 @@ def understand(text: str, ctx: NluContext, expect: Optional[str] = None) -> NLUR
             hit("DOCTOR_AVAILABILITY", "AVAIL")
         elif has_any(t, W["WANT"]) or d:
             pos["BOOK_APPOINTMENT"] = first_index(t, W["WANT"]) if has_any(t, W["WANT"]) else 0
+
+    # "What services do you have?", "what treatments does she do?", "root canal entha?":
+    # a question about the hospital, never a booking or a doctor's consultation fee.
+    treatment_hit = any(len(n) >= 4 and norm(n) in t for n in ctx.treatments)
+    asking = has_any(t, W["QUESTION"]) or "?" in text
+    busy = transactional | {"BOOK_APPOINTMENT", "APPOINTMENT_STATUS", "DOCTOR_AVAILABILITY", "LAB_TEST_SEARCH",
+                            "REPORT_STATUS", "REPORT_DELIVERY"}
+    if ((has_any(t, W["SERVICES"]) and (asking or "FEES" in pos)) or (treatment_hit and (asking or "FEES" in pos)))             and not (pos.keys() & busy):
+        at = [i for i in (first_index(t, W["SERVICES"]), pos.get("FEES", -1)) if i >= 0]
+        if treatment_hit:
+            pos.pop("FEES", None)  # a treatment's price, not the doctor's consultation fee
+        pos["KNOWLEDGE_QUESTION"] = min(at) if at else 0
 
     # Nothing business-like yet: "are doctor slots free?", "naaku doctor kavali" -> booking;
     # "I need other information" -> hospital information (the dialog asks which).

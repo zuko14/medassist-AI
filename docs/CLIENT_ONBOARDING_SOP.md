@@ -71,6 +71,7 @@ These database migrations must be applied on production before the features belo
 | `097_home_collection.sql` | `home_collection_requests`, `home_collection_slots`, `clinic_admins.is_phlebotomist`: **Home Sample Collection** for diagnostic centres | Diagnostic plans (`diagstream`, `diagbooking`). Phlebotomist field app at `/phleb-panel`. |
 | `098_voice_receptionist.sql` | `voice_numbers`, `voice_calls`, `voice_events`, `voice_lexicon`, `voice_outbound_jobs`: **AI Voice Receptionist** (inbound phone calls via Exotel + Sarvam) | All plans after owner opt-in and Exophone mapping. **Must be applied AND recorded in `schema_migrations` before enabling `VOICE_ENABLED=true`**. |
 | `101_phlebotomist_off_dates.sql` | `clinic_admins.off_dates DATE[] NOT NULL DEFAULT '{}'`: **phlebotomist leave days** for Home Sample Collection | Additive, no behaviour change until a centre marks someone on leave. **Apply AND record before deploying** — the roster query selects this column and the pre-flight refuses to boot at disk 101 / DB 100. |
+| `102_voice_knowledge_entries.sql` | `voice_knowledge_entries`: **clinic-written answers** the AI receptionist speaks (parking, insurance, offers...) | Additive. **Apply AND record before deploying** — the pre-flight refuses to boot at disk 102 / DB 101. Until applied on a DB, calls still answer from the records (the Q&A source is skipped). |
 
 Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' ORDER BY name;`
 

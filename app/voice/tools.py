@@ -15,6 +15,7 @@ Rules every method follows:
   * mode == "test": writes are simulated and labelled simulated=True in the trace.
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -72,6 +73,9 @@ class KriyaTools:
         self.ctx = ctx
         self._profile = None
         self._profile_loaded = False
+        self._kb_task = None         # knowledge.load(), once per call, started as the call connects
+        self.llm_tokens = 0          # grounded answers; added to the call's usage by the session
+        self.llm_cost_paise = 0
 
     # ---- plumbing ----
 
@@ -240,6 +244,33 @@ class KriyaTools:
             await whatsapp_service.send_text(self.ctx.clinic, self.ctx.caller_phone, text, _source="voice_info")
         await self._trace("HOSPITAL_INFO", "ok" if text else "skipped", t0, {"topic": topic})
         return _speakable(text) if text else None
+
+    def preload_knowledge(self) -> None:
+        """Start reading this clinic's records in the background (the greeting
+        hides the time), so a question later in the call is answered fast."""
+        if self._kb_task is None:
+            from . import knowledge
+            self._kb_task = asyncio.ensure_future(knowledge.load(self.ctx.clinic, self.ctx.branch_id))
+
+    async def answer_question(self, question, lang, entities=None, focus=None):
+        """A caller's question about this hospital, answered from its own records
+        (app/voice/knowledge.py). None when the lookup itself failed."""
+        from . import knowledge
+        t0 = time.monotonic()
+        try:
+            self.preload_knowledge()
+            kb = await self._kb_task
+            res = await knowledge.answer(question, kb, (lang or "en").split("-")[0], self.ctx.clinic_id,
+                                         entities or {}, focus or {})
+        except Exception as e:
+            await self._trace("KNOWLEDGE_ANSWER", "fail", t0, {"error": str(e)[:200]})
+            return None
+        self.llm_tokens += int(res.get("tokens") or 0)
+        self.llm_cost_paise += int(res.get("cost_paise") or 0)
+        await self._trace("KNOWLEDGE_ANSWER", "ok" if res.get("text") else "skipped", t0,
+                          {"source": res.get("source"), "rejected": res.get("reject"),
+                           "facts": len(kb.get("facts") or []), "answer": (res.get("text") or "")[:300]})
+        return res
 
     async def queue_status(self):
         from app.database import get_patient_queue_status

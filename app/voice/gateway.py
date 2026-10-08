@@ -29,7 +29,7 @@ from .audio import PcmChunker, seconds_of
 from .phone import mask, to_e164
 from .policy import is_filler
 from .providers import get_providers
-from .session import CallSession
+from .session import CallSession, Reply
 from .tools import CallContext
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,13 @@ class CallRunner:
         self.reply = None             # what Kriya is (or was last) saying
         self.interrupted = None       # reply cut off by caller speech, until we know what they said
         self.resumes = 0
+        self._heard: Optional[float] = None
+        self._filler = None           # "one moment, let me check" playing while a question is answered
+        session.interim = self._interim
+
+    async def _interim(self, texts: list) -> None:
+        await self.respond(Reply(texts=texts), self._heard)
+        self._filler = self.reply
 
     @property
     def speaking(self) -> bool:
@@ -169,8 +176,17 @@ class CallRunner:
                     if self.speaking:
                         continue
                 self.interrupted = None
+                self._heard, self._filler = heard, None
                 reply = await self.session.handle(text, lang)
-                await self.respond(reply, heard)
+                filler, self._filler = self._filler, None
+                if filler is not None and self.speaking:
+                    # Let "one moment" finish instead of cutting it off mid-word.
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self.speak_task), timeout=8)
+                    except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                        pass
+                # Latency is measured once, at the first audio the caller heard (the filler, if any).
+                await self.respond(reply, None if filler is not None else heard)
             elif kind == "error":
                 await self.respond(await self.session.silence(2))  # polite close; passthru transfers
                 self.control = "transfer"

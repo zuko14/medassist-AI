@@ -22,7 +22,7 @@ from .nlu_rules import NluContext, NLUResult
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "voice-nlu-prompt-2026.10.07"
+PROMPT_VERSION = "voice-nlu-prompt-2026.10.08"
 # Emergencies and clinical questions are decided ONLY by the zero-LLM safety screen (it runs
 # first); a greeting is not a request. Anything else unhandled still goes to staff honestly.
 _ALLOWED = sorted(set(ALL_INTENTS) - {"LANGUAGE_CHANGE", "MULTI_INTENT", "UNKNOWN", "GREETING", "EMERGENCY",
@@ -48,7 +48,10 @@ SYSTEM = (
     "(SELF|MOTHER|FATHER|SPOUSE|CHILD|OTHER|null), info_topic (hours|location|contact|null), "
     "confidence (0..1). EXPECTING says what the receptionist just asked; read short replies in that "
     "light. Yes/okay/fine in any language = AFFIRM, no/not needed = DENY, wanting doctor slots or a "
-    "consultation = BOOK_APPOINTMENT, asking for hospital details = GENERAL_INFORMATION. "
+    "consultation = BOOK_APPOINTMENT, asking for hospital details = GENERAL_INFORMATION, a question about "
+    "the hospital's services, treatments, procedures, sittings, prices of a treatment, a doctor's "
+    "qualifications / experience / what they treat, facilities, insurance, parking or policies = "
+    "KNOWLEDGE_QUESTION (a question, not a request to book). "
     "Use [] and nulls when unsure; never guess."
 )
 

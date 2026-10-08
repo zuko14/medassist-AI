@@ -14,10 +14,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Optional, Protocol
 
 from .intents import WORKFLOW_OF
-from .nlu_rules import SUPPORTED_LANGS, NLUResult, looks_english, script_language
+from .nlu_rules import SUPPORTED_LANGS, NLUResult, is_question, looks_english, script_language
 from .policy import is_filler
 
-DIALOG_VERSION = "dialog-2026.10.08"
+DIALOG_VERSION = "dialog-2026.10.08b"
 MAX_FAILURES = 3
 MAX_IDLE = 2          # "hello?" / "hmm" turns answered patiently before they count as misses
 
@@ -57,6 +57,7 @@ class Tools(Protocol):
     async def queue_status(self) -> Optional[dict]: ...
     async def create_callback(self, reason: str) -> dict: ...
     async def handoff(self, reason: str) -> dict: ...
+    async def answer_question(self, question: str, lang: str, entities: dict, focus: dict) -> Optional[dict]: ...
 
 
 def new_state(lang: str) -> dict:
@@ -191,6 +192,17 @@ class DialogEngine:
             out.control = "end"
             return out
 
+        # A question about the hospital ("what services do you have?", "what treatments does she
+        # do?"), asked at any point: answer it from the clinic's records, then carry on exactly
+        # where the call was. Never a miss, never a handoff on its own.
+        if "KNOWLEDGE_QUESTION" in biz or ("DOCTOR_INFORMATION" in biz and is_question(text)):
+            biz = [b for b in biz if b not in ("KNOWLEDGE_QUESTION", "DOCTOR_INFORMATION")]
+            # Only question: answer, then resume. Question + request ("...and book me for
+            # tomorrow"): answer, then the request is handled below as usual.
+            await self._answer_question(state, out, text, ents, follow_up=not biz)
+            if not biz:
+                return out
+
         if expect == "offer" and not biz:
             offer = state.get("offer") or {}
             state["offer"] = None
@@ -279,6 +291,30 @@ class DialogEngine:
         if out.control == "continue" and not state.get("task") and not state.get("expect"):
             self._anything_else(state, out)
         return out
+
+    async def _answer_question(self, state: dict, out: TurnOutput, text: str, ents: dict,
+                               follow_up: bool = True) -> None:
+        task = state.get("task") or {}
+        slots = task.get("slots") or {}
+        sel = slots.get("selected") or {}
+        focus = {k: v for k, v in (("doctor_name", sel.get("doctor_name")),
+                                   ("department", slots.get("department") or sel.get("department"))) if v}
+        ask = getattr(self.tools, "answer_question", None)
+        try:
+            res = await ask(text, state["lang"], dict(ents), focus) if ask else None
+        except Exception:
+            res = None
+        state["failures"], state["idle"] = 0, 0          # understood: not a miss
+        answered = bool(res and res.get("text"))
+        out.says.append(Say("kb_answer", {"text": res["text"]}) if answered else Say("kb_unknown"))
+        state["outcomes"].append({"wf": "KNOWLEDGE", "outcome": "answered" if answered else "not_answered"})
+        if not follow_up:
+            return
+        if state.get("expect"):
+            out.says.extend(self._reprompt(state))      # back to the question that was pending
+        elif not state.get("task"):
+            dept = ents.get("department") or focus.get("department")
+            self._offer(state, out, {"wf": "BOOKING", "slots": {"department": dept} if dept else {}})
 
     def _finish(self, state: dict, out: TurnOutput) -> TurnOutput:
         state["last_says"] = [asdict(s) for s in out.says]

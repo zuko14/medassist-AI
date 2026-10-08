@@ -122,9 +122,17 @@ Beyond patient chat, the LLM is leveraged for several administrative tasks via `
 
 ## 7. VOICE RECEPTIONIST NLU (`app/voice/`, added 2026-10-06, revised 2026-10-07)
 
-- Speech is never LLM-written: every sentence comes from `app/voice/responses.py` templates.
+- Speech is template-written (`app/voice/responses.py`) with ONE exception, added 2026-10-08 by owner decision: answers to callers' questions about the hospital (`app/voice/knowledge.py`, below).
 - Understanding order per turn: zero-LLM safety screen (`safety.py`) -> deterministic rules (`nlu_rules.py`) -> LLM classifier (`nlu_llm.py`) only when rules find nothing.
 - LLM: `VOICE_LLM_MODEL` (default `google/gemini-3.1-flash-lite`), backup `VOICE_LLM_FALLBACK_MODEL` (default `openai/gpt-4.1-mini`), 3 s timeout, 1 attempt, JSON mode. `deepseek/deepseek-chat` is NOT usable here: it returned no valid JSON in JSON mode (0/4, 2026-10-07).
 - The LLM output is validated: it may never emit EMERGENCY / CLINICAL_QUERY / GREETING, and never an AFFIRM while a booking/cancel confirmation is pending (`expect == "confirm"`). It receives the question Kriya just asked (`EXPECTING`) as context.
 - Usage is in `ai_usage_ledger` with `task_type = 'voice_nlu'`; a run of `success = false` rows there means the LLM fallback is dead and every unmatched utterance becomes "not understood".
+
+### Knowledge answers (`app/voice/knowledge.py`, 2026-10-08, migration 102)
+- Trigger: intent `KNOWLEDGE_QUESTION` (rules: service/treatment/facility word + question word, or a clinic treatment name + question/price; LLM classifier may also emit it) or LLM `DOCTOR_INFORMATION` phrased as a question. Handled by `DialogEngine._answer_question` at ANY step: answer, then re-ask the pending question (or offer a booking). Never counts as a miss, never hands off by itself.
+- Facts (per call, `KriyaTools.preload_knowledge()` at call start, sources read in parallel, ~1 s): hours/location/contact (faq_engine), doctors (qualifications, experience, languages, fee, days, sessions), `specialty_treatments` (+ `treatment_doctors`), lab catalogue categories, home collection, `voice_knowledge_entries` (clinic-written Q&A). Capped at 14,000 chars.
+- Order: clinic Q&A clear match (spoken verbatim) -> grounded LLM (`task_type='voice_knowledge'`, `VOICE_KNOWLEDGE_TIMEOUT_SECONDS` default 6) checked by `verify()` (every number must appear in the facts or the question; a capitalised Latin name after a doctor title must be a clinic doctor; medicine/dosage words only if the clinic's own text has them; must cite real fact ids; <=450 chars; no URLs) -> fixed sentence from the records -> "I don't have that detail".
+- The zero-LLM safety screen still runs first: clinical questions never reach this code. The gateway speaks `kb_checking` ("one moment, let me check") while the answer is computed (`CallSession.interim`).
+- Trace: tool event `KNOWLEDGE_ANSWER` with `source` (qa|ai|template|none), `rejected` reason and the spoken answer.
+- STT sometimes returns short Telugu/Hindi replies in Gurmukhi; `nlu_rules.gurmukhi_to_devanagari` reads them as Devanagari before safety + NLU, and such turns never vote to switch the call language.
 

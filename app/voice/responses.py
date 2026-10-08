@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.10.08"
+TEMPLATES_VERSION = "templates-2026.10.08b"
 
 T: dict = {
     "greeting": {
@@ -26,6 +26,17 @@ T: dict = {
         "te": "నమస్కారం{who}, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {interest_sentence}{pitch_sentence}మీకు అపాయింట్మెంట్ బుక్ చేయడంలో సహాయం చేయమంటారా?",
         "en": "Namaste{who}, this is {assistant} calling from {hospital}. {interest_sentence}{pitch_sentence}Can I help you book an appointment?",
         "hi": "नमस्ते{who}, मैं {hospital} से {assistant} बोल रही हूँ। {interest_sentence}{pitch_sentence}क्या मैं आपकी अपॉइंटमेंट बुक करने में मदद करूँ?",
+    },
+    # An answer about the hospital from its own records (app/voice/knowledge.py: clinic Q&A,
+    # a verified grounded sentence, or a fixed sentence built from the records).
+    "kb_answer": {"te": "{text}", "en": "{text}", "hi": "{text}"},
+    # Spoken at once while the answer is looked up (gateway interim), so the line is never silent.
+    "kb_checking": {"te": "ఒక్క క్షణం, చూసి చెబుతాను.", "en": "One moment, let me check.",
+                    "hi": "एक पल, देखकर बताती हूँ।"},
+    "kb_unknown": {
+        "te": "క్షమించండి, ఆ వివరం ప్రస్తుతం నా దగ్గర లేదు. మా టీమ్ మీకు చెప్పగలరు.",
+        "en": "Sorry, I don't have that detail right now. Our team can tell you.",
+        "hi": "माफ़ कीजिए, यह जानकारी अभी मेरे पास नहीं है। हमारी टीम आपको बता सकती है।",
     },
     # A lead said no to booking now: leave the door open on WhatsApp.
     "lead_declined": {

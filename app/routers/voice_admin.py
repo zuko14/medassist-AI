@@ -312,6 +312,74 @@ async def delete_lexicon(entry_id: str, request: Request, clinic_id: str = "defa
     return {"success": True}
 
 
+# ---- knowledge: what Kriya knows about this hospital (migration 102) ----
+
+class KnowledgeIn(BaseModel):
+    question: str = Field(min_length=3, max_length=200)
+    answer: str = Field(min_length=2, max_length=600)
+    language: Optional[str] = Field(None, pattern=r"^(te|hi|en)$")
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=2, max_length=400)
+    language: str = Field("en", pattern=r"^(te|hi|en)$")
+
+
+@router.get("/knowledge")
+async def list_knowledge(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """The clinic's own Q&A, plus a summary of what Kriya reads from its records."""
+    from app.voice import knowledge
+    scope, clinic = await _scope(user, clinic_id, "VOICE_VIEW")
+    res = await sb(supabase.table("voice_knowledge_entries").select("*").eq("clinic_id", scope)
+                   .order("created_at", desc=True).limit(500))
+    kb = await knowledge.load(clinic, None)
+    return {"entries": res.data or [],
+            "summary": {"doctors": len(kb["doctors"]), "treatments": len(kb["treatments"]),
+                        "departments": kb["departments"], "facts": len(kb["facts"]),
+                        "has_hours": any(f["kind"] == "hours" for f in kb["facts"]),
+                        "has_location": any(f["kind"] == "location" for f in kb["facts"])}}
+
+
+@router.post("/knowledge")
+async def add_knowledge(body: KnowledgeIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _scope(user, clinic_id, "VOICE_MANAGE")
+    row = {"question": " ".join(body.question.split()), "answer": " ".join(body.answer.split()),
+           "language": body.language, "clinic_id": scope, "created_by": user.username}
+    try:
+        # unscoped: insert_scoped_by_payload
+        res = await sb(supabase.table("voice_knowledge_entries").insert(row))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not save the answer.")
+    await log_admin_action(user, "voice_knowledge_add", "voice_knowledge", res.data[0]["id"], ip_address=_ip(request))
+    return {"entry": res.data[0]}
+
+
+@router.delete("/knowledge/{entry_id}")
+async def delete_knowledge(entry_id: str, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _scope(user, clinic_id, "VOICE_MANAGE")
+    res = await sb(supabase.table("voice_knowledge_entries").delete().eq("clinic_id", scope).eq("id", entry_id))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await log_admin_action(user, "voice_knowledge_delete", "voice_knowledge", entry_id, ip_address=_ip(request))
+    return {"success": True}
+
+
+@router.post("/knowledge/ask")
+async def ask_knowledge(body: AskIn, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """Ask Kriya a question as a caller would, and see the answer and where it came from."""
+    from app.voice import knowledge
+    from app.voice.safety import screen
+    scope, clinic = await _scope(user, clinic_id, "VOICE_VIEW")
+    verdict = screen(body.question, body.language)
+    if verdict:
+        return {"text": None, "source": "safety", "blocked": verdict}
+    kb = await knowledge.load(clinic, None)
+    res = await knowledge.answer(body.question, kb, body.language, scope)
+    return {"text": res["text"], "source": res["source"], "rejected": res["reject"]}
+
+
 @router.get("/numbers")
 async def list_numbers(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _scope(user, clinic_id, "VOICE_VIEW")

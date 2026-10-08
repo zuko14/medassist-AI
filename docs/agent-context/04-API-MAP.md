@@ -142,6 +142,11 @@ Plan-gated to `diagstream`/`diagbooking` (`tenant.home_collection_available`). M
 - `POST /admin/home-collection/visits/{id}/status`: PHLEBOTOMIST (own visits only, others 404) or manager. Moves along `assigned→en_route→collected→delivered`, `→failed` (reason required); patient gets a WhatsApp update.
 - `POST/PUT /admin/staff` accept optional `full_name`, `phone`; both required for `staff_role=PHLEBOTOMIST`, which holds no permissions and cannot change role. Deactivating a phlebotomist releases and re-assigns their upcoming visits. `GET /admin/me` adds `home_collection_available`.
 
+### E4. AI Receptionist knowledge (`app/routers/voice_admin.py`, migration 102)
+- `GET /admin/voice/knowledge` (VOICE_VIEW): clinic Q&A entries + summary of what Kriya reads from the records.
+- `POST /admin/voice/knowledge` / `DELETE /admin/voice/knowledge/{id}` (VOICE_MANAGE): clinic-written Q&A (`voice_knowledge_entries`, tenant-owned), audited.
+- `POST /admin/voice/knowledge/ask` (VOICE_VIEW): preview an answer with live records; the safety screen runs first. Costs AI tokens like a call.
+
 ### E3. AI Receptionist lead calls (`app/routers/voice_admin.py`, `app/voice/outbound.py`, migration 098)
 Owner opt-in (`clinics.features.ai_receptionist`); VOICE_MANAGE to queue, VOICE_VIEW to list. Dispatch runs every 2 min only when `VOICE_ENABLED=true` (`voice_outbound_dispatch`).
 - `POST /admin/voice/outbound`: one call. Only a `patients` row of this clinic that has not opted out.

@@ -65,7 +65,7 @@ TENANT_OWNED_TABLES = frozenset({
     "corporate_clients", "corporate_health_reports",
     # Migration 098: AI voice receptionist
     "voice_numbers", "voice_calls", "voice_call_events", "voice_lexicon_entries",
-    "voice_outbound_jobs",
+    "voice_outbound_jobs", "voice_knowledge_entries",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning
