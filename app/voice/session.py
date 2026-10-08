@@ -60,7 +60,9 @@ class CallSession:
         emergency = self.cfg.get("emergency_number") or (ctx.clinic.get("config") or {}).get("emergency_number")
         self.engine = DialogEngine(self.tools, {
             "hospital": ctx.clinic.get("name") or "", "assistant": self.cfg.get("assistant_name") or "Kriya",
-            "emergency": emergency, "hold_minutes": settings.booking_hold_minutes})
+            "emergency": emergency, "hold_minutes": settings.booking_hold_minutes,
+            "pitch": (self.cfg.get("outbound") or {}).get("pitch") or {},
+            "whatsapp": ctx.clinic.get("whatsapp_number")})
         self.state = dialog_state or new_state(self.cfg.get("primary_language") or "te-IN")
         self.now = now
         self._nlu_ctx: Optional[NluContext] = None

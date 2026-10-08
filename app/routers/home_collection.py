@@ -121,6 +121,8 @@ class SettingsIn(BaseModel):
     max_distance_km: int = Field(0, ge=0, le=200)
     centre_lat: Optional[float] = Field(None, ge=-90, le=90)
     centre_lng: Optional[float] = Field(None, ge=-180, le=180)
+    # Empty = visits follow the lab's sample collection window.
+    windows: list[dict] = Field(default_factory=list, max_length=hc.MAX_WINDOWS)
 
 
 def _settings_out(s: dict) -> dict:
@@ -164,6 +166,12 @@ async def put_settings(
         raise HTTPException(status_code=422, detail=f"slot_minutes must be one of {hc.SLOT_MINUTES_ALLOWED}")
     if body.max_distance_km and (body.centre_lat is None or body.centre_lng is None):
         raise HTTPException(status_code=422, detail="A service radius needs the centre's location (latitude and longitude).")
+    windows = hc.normalize_windows(body.windows)
+    if len(windows) != len(body.windows):
+        raise HTTPException(
+            status_code=422,
+            detail="Each visit window needs a start before its end (HH:MM), and windows must not overlap.",
+        )
     settings = hc.normalize_settings({
         "enabled": body.enabled,
         "fee_paise": body.fee_rupees * 100,
@@ -174,6 +182,7 @@ async def put_settings(
         "max_distance_km": body.max_distance_km,
         "centre_lat": body.centre_lat,
         "centre_lng": body.centre_lng,
+        "windows": windows,
     })
     if branch_id:
         branch = await resolve_owned_branch(user, branch_id, scope)
@@ -256,10 +265,57 @@ async def list_phlebotomists(
     return {
         "date": day,
         "phlebotomists": [
-            {**p, "name": hc.display_name(p), **load.get(str(p["id"]), {"total": 0, "done": 0})}
+            {
+                **p,
+                "name": hc.display_name(p),
+                "off_dates": hc.upcoming_off_dates(p.get("off_dates")),
+                "off_on_date": hc.is_off(p, day),
+                **load.get(str(p["id"]), {"total": 0, "done": 0}),
+            }
             for p in sorted(phlebs, key=lambda p: hc.display_name(p).lower())
         ],
     }
+
+
+class OffDatesIn(BaseModel):
+    #: The phlebotomist's complete list of upcoming leave days (replaces it).
+    dates: list[str] = Field(default_factory=list, max_length=120)
+
+
+@router.put("/phlebotomists/{phleb_id}/off-dates")
+async def set_off_dates(
+    phleb_id: str,
+    body: OffDatesIn,
+    request: Request,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Mark a phlebotomist on leave. Visits already assigned to them on a newly
+    added date are handed to an available colleague (admins are alerted when
+    nobody is free); when every phlebotomist serving a branch is off, that
+    date offers no home slots on WhatsApp."""
+    scope, _ = await _manager_scope(user, clinic_id)
+    if not is_uuid(phleb_id):
+        raise HTTPException(status_code=404, detail="Phlebotomist not found")
+    phleb = next((p for p in await hc.list_phlebotomists(scope, active_only=False) if str(p["id"]) == phleb_id), None)
+    if not phleb:
+        raise HTTPException(status_code=404, detail="Phlebotomist not found")
+    if user.role == "staff" and getattr(user, "branch_id", None) and str(phleb.get("branch_id") or "") != str(user.branch_id):
+        raise HTTPException(status_code=403, detail="Branch staff can only manage their own branch's phlebotomists.")
+    bad = [d for d in body.dates if d not in hc.upcoming_off_dates([d], "0000-00-00")]
+    if bad:
+        raise HTTPException(status_code=422, detail="Dates must be YYYY-MM-DD.")
+    dates = hc.upcoming_off_dates(body.dates)
+    before = set(hc.upcoming_off_dates(phleb.get("off_dates")))
+    await sb(
+        supabase.table("clinic_admins").update({"off_dates": dates})
+        .eq("clinic_id", scope).eq("id", phleb_id)
+    )
+    added = sorted(set(dates) - before)
+    released = await hc.release_visits_of(scope, phleb_id, added) if added else 0
+    await log_admin_action(user, "set_phlebotomist_off_dates", "clinic_admin", phleb_id,
+                           {"dates": dates, "added": added, "released_visits": released}, _ip(request))
+    return {"success": True, "off_dates": dates, "released_visits": released}
 
 
 async def _owned_visit(scope: str, visit_id: str, user: AdminUser) -> dict:
@@ -294,6 +350,8 @@ async def assign_visit(
         raise HTTPException(status_code=404, detail="Phlebotomist not found or inactive")
     if not hc.eligible_for(phleb, visit):
         raise HTTPException(status_code=422, detail="That phlebotomist works at a different branch.")
+    if hc.is_off(phleb, visit.get("appointment_date")):
+        raise HTTPException(status_code=422, detail="That phlebotomist is on leave on this visit's date.")
     if visit.get("status") != "confirmed":
         raise HTTPException(status_code=409, detail="Only a confirmed booking can be assigned.")
     if not await hc.assign(scope, visit, phleb):

@@ -17,7 +17,7 @@ from .intents import WORKFLOW_OF
 from .nlu_rules import SUPPORTED_LANGS, NLUResult, looks_english, script_language
 from .policy import is_filler
 
-DIALOG_VERSION = "dialog-2026.10.07"
+DIALOG_VERSION = "dialog-2026.10.08"
 MAX_FAILURES = 3
 MAX_IDLE = 2          # "hello?" / "hmm" turns answered patiently before they count as misses
 
@@ -86,7 +86,9 @@ class DialogEngine:
             # A "yes" goes straight to the department the lead asked about (no re-asking).
             state["offer"] = {"wf": "BOOKING", "slots": dict(slots or {})}
             state["expect"] = "offer"
-            say = Say("greeting_outbound", {**self._c(), "interest": interest, "name": name})
+            state["outbound"] = True
+            say = Say("greeting_outbound", {**self._c(), "interest": interest, "name": name,
+                                            "pitch": self.clinic.get("pitch") or {}})
             state["last_question"] = asdict(say)
             out = TurnOutput([say])
         else:
@@ -204,6 +206,10 @@ class DialogEngine:
                     state["expect"] = None
                     out.says.append(Say("how_can_help"))
                     return out
+                if state.get("outbound") and not state.get("lead_declined_told"):
+                    # A lead who is not booking today still learns they can book on WhatsApp.
+                    state["lead_declined_told"] = True
+                    out.says.append(Say("lead_declined", {"wa_number": self.clinic.get("whatsapp")}))
                 return self._anything_else(state, out)
             if not (ents.keys() & set(_SLOT_KEYS)):
                 state["offer"] = offer

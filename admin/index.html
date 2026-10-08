@@ -1223,6 +1223,45 @@
         #pg-homecollect [hidden] { display: none !important; }
         .hc-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
         .hc-bar input[type="date"], .hc-bar select { width: auto; min-width: 150px; }
+        .hc-toolbar { display: flex; flex-direction: column; gap: 14px; }
+        .hc-tool-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .hc-tool-row[hidden] { display: none; }
+        .hc-tool-label { font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text3); min-width: 54px; }
+        .hc-strip-wrap { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+        .hc-strip { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px; min-width: 0; }
+        .hc-strip::-webkit-scrollbar { display: none; }
+        .hc-nav { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 10px; border: 1px solid var(--border);
+            background: var(--surface); color: var(--text2); font-size: 1.1rem; cursor: pointer; }
+        .hc-nav:hover { border-color: var(--border2); color: var(--text-strong); }
+        .hc-day { flex: 0 0 auto; min-width: 64px; padding: 8px 12px; border-radius: 12px; cursor: pointer; text-align: center;
+            border: 1px solid var(--border); background: var(--surface); color: var(--text2); line-height: 1.15;
+            transition: border-color .15s, background .15s, transform .15s; }
+        .hc-day:hover { border-color: var(--border2); transform: translateY(-1px); }
+        .hc-day .wd { display: block; font-size: .66rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); }
+        .hc-day .dn { display: block; font-size: 1.05rem; font-weight: 700; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+        .hc-day.on { background: var(--brand-grad); border-color: transparent; }
+        .hc-day.on .wd, .hc-day.on .dn { color: #fff; }
+        .hc-day.today:not(.on) { border-color: var(--accent2); }
+        .hc-cal { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; height: 38px; border-radius: 10px;
+            border: 1px solid var(--border); background: var(--surface); color: var(--text2); cursor: pointer; }
+        .hc-cal input[type="date"] { border: 0; background: transparent; color: var(--text-strong); width: auto; min-width: 0; padding: 0; height: auto; }
+        .hc-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+        .hc-pill { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+            color: var(--text2); font-size: .82rem; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s; }
+        .hc-pill:hover { border-color: var(--border2); color: var(--text-strong); }
+        .hc-pill.on { background: rgba(16,185,129,.14); border-color: var(--accent2); color: var(--text-strong); }
+        .hc-day:focus-visible, .hc-pill:focus-visible, .hc-nav:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+        .hc-leave-note { font-size: .82rem; color: var(--amber); font-weight: 600; }
+        .hc-tag.off { background: var(--amber-bg, rgba(245,158,11,.14)); color: var(--amber); }
+        .hc-leave-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; padding: 10px 0 4px; }
+        .hc-leave-form .field { margin: 0; }
+        .hc-leave-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 6px; font-size: .72rem;
+            background: var(--amber-bg, rgba(245,158,11,.14)); color: var(--amber); margin: 4px 4px 0 0; }
+        .hc-leave-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: .9rem; line-height: 1; padding: 0 4px; }
+        .hc-win-row { display: flex; gap: 8px; align-items: end; margin-bottom: 8px; }
+        .hc-win-row .field { margin: 0; flex: 1; }
+        .hc-presets { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
+        @media (max-width: 640px) { .hc-tool-label { min-width: 100%; } }
         .hc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 18px; align-items: start; }
         @media (max-width: 1100px) { .hc-grid { grid-template-columns: minmax(0, 1fr); } }
         .hc-off { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
@@ -1489,6 +1528,8 @@
         .diag-compact-sub { color: var(--text3); font-size: 0.8rem; margin-top: 2px; }
         .diag-compact-head .badge { flex-shrink: 0; }
         .diag-open { align-self: flex-start; margin-top: auto; display: inline-flex; align-items: center; gap: 6px; }
+        .card.lab-catalog-card { display: flex; flex-direction: column; gap: 14px; }
+        .lab-catalog-card .diag-chip { min-width: 150px; text-align: left; }
         .diag-chips { display: flex; flex-wrap: wrap; gap: 8px; }
         .diag-chip {
             background: var(--surface2); border: 1px solid var(--border); border-radius: 12px;
@@ -1608,6 +1649,7 @@
   <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.3 10.3 0 0 1 12 19c-6.4 0-10-7-10-7a18.6 18.6 0 0 1 5.1-5.9M9.9 4.2A10.4 10.4 0 0 1 12 4c6.4 0 10 7 10 7a18.7 18.7 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 1 1-4.2-4.2"/><line x1="2" y1="2" x2="22" y2="22"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
   <symbol id="i-megaphone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
   <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
@@ -2972,9 +3014,6 @@
                 </div>
             </div>
 
-            <!-- migration 080/083: one tab per service type the catalogue uses -->
-            <div class="toggle-group" id="labTypeTabs" role="tablist" aria-label="Service types" style="display:none; flex-wrap:wrap; max-width:100%;"></div>
-
             <div class="card" id="labAutoClassifyCard" style="display:none; margin-bottom:20px;">
                 <div class="card-head"><h3>✨ Organise your catalogue</h3></div>
                 <div style="padding:16px;">
@@ -2988,13 +3027,9 @@
             </div>
 
             <div class="top-row">
-                <input type="text" class="search-bar" id="labTestSearch" placeholder="Search lab tests by name or sample type..." oninput="filterLabTests()">
-                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-left:auto;">
                     <select id="labTestBranchFilter" class="search-bar" style="display:none; max-width:200px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="changeLabTestBranch()" aria-label="Filter catalog by branch">
                         <option value="">All branches</option>
-                    </select>
-                    <select id="labTestCategoryFilter" class="search-bar" style="max-width:220px; padding:6px 12px; font-size:0.8rem; height:34px; margin:0;" onchange="filterLabTests()" aria-label="Filter catalog by service type">
-                        <option value="">All service types</option>
                     </select>
                     <button class="btn btn-ghost" id="btnCatalogueCleanup" onclick="openCatalogueCleanupModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg> Clean-Up Suggestions</button>
                     <button class="btn btn-ghost" id="btnPriceListImport" onclick="openPriceListImportModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-download"/></svg> Import Price List</button>
@@ -3003,19 +3038,18 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-head">
-                    <h3>Test Catalog</h3>
-                    <span id="labTestCount" style="color:var(--text3); font-size:0.8rem;"></span>
+            <!-- The full catalogue (1,000+ rows at a big lab) lives in the View all
+                 dialog below; the page shows one line per service type. -->
+            <div class="card diag-compact lab-catalog-card">
+                <div class="diag-compact-head">
+                    <div>
+                        <h3>Test Catalog</h3>
+                        <p class="diag-compact-sub">Every test and scan patients can book on WhatsApp, by service type. Open one to search, edit or delete.</p>
+                    </div>
+                    <span id="labTestCount" class="badge badge-confirmed">—</span>
                 </div>
-                <div id="labBulkBar" role="region" aria-label="Selected tests" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; margin-bottom:10px; border-radius:10px; background:var(--surface); border:1px solid var(--border);">
-                    <span id="labBulkText" aria-live="polite" style="font-weight:600; color:var(--text-strong)"></span>
-                    <button type="button" class="btn" style="padding:4px 10px; font-size:0.8rem; background:var(--surface); min-width:auto" onclick="clearLabSelection()">Clear</button>
-                    <button type="button" id="btnLabBulkDelete" class="btn btn-red" style="padding:4px 12px; font-size:0.8rem; min-width:auto; margin-left:auto" onclick="bulkDeleteLabTests()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg> Delete selected</button>
-                </div>
-                <div class="tbl-wrap" id="labTestList">
-                    <div class="loader"><div class="spin"></div>Loading lab tests...</div>
-                </div>
+                <div class="diag-chips" id="labCatalogChips"></div>
+                <button type="button" class="btn btn-sm btn-ghost diag-open" onclick="openLabCatalog('')" aria-haspopup="dialog" aria-controls="labCatalogModal"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-list"/></svg> View all</button>
             </div>
 
             <!-- Add/Edit Lab Test Form Card -->
@@ -3093,15 +3127,28 @@
                     <div class="stat"><div class="glow"></div><div class="label">Collected</div><div class="num" id="hc-s-collected">—</div></div>
                     <div class="stat"><div class="glow"></div><div class="label">Not collected</div><div class="num" id="hc-s-failed">—</div></div>
                 </div>
-                <div class="card">
-                    <div class="hc-bar">
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="hcShiftDay(-1)" aria-label="Previous day">‹</button>
-                        <input type="date" id="hcDate" aria-label="Visit date" onchange="loadHomeCollections()">
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="hcShiftDay(1)" aria-label="Next day">›</button>
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="hcSetToday()">Today</button>
+                <div class="card hc-toolbar">
+                    <div class="hc-tool-row">
+                        <div class="hc-tool-label">Day</div>
+                        <div class="hc-strip-wrap">
+                            <button type="button" class="hc-nav" onclick="hcShiftDay(-1)" aria-label="Previous day">‹</button>
+                            <div class="hc-strip" id="hcDayStrip" role="group" aria-label="Visit day"></div>
+                            <button type="button" class="hc-nav" onclick="hcShiftDay(1)" aria-label="Next day">›</button>
+                        </div>
+                        <label class="hc-cal" title="Pick any date">
+                            <svg class="i" aria-hidden="true" focusable="false"><use href="#i-calendar"/></svg>
+                            <input type="date" id="hcDate" aria-label="Pick a visit date" onchange="loadHomeCollections()">
+                        </label>
+                    </div>
+                    <div class="hc-tool-row" id="hcBranchRow" hidden>
+                        <div class="hc-tool-label">Branch</div>
+                        <div class="hc-pills" id="hcBranchPills" role="group" aria-label="Branch"></div>
                         <select id="hcBranch" aria-label="Branch" onchange="loadHomeCollections()" hidden></select>
+                    </div>
+                    <div class="hc-tool-row hc-tool-actions">
+                        <div id="hcLeaveNote" class="hc-leave-note" hidden></div>
                         <span style="flex:1"></span>
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="loadHomeCollections()" aria-label="Refresh" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="loadHomeCollections()" aria-label="Refresh" title="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button>
                         <button type="button" class="btn btn-accent btn-sm" onclick="hcAutoAssign()">Auto-assign unassigned</button>
                     </div>
                 </div>
@@ -3145,7 +3192,26 @@
                             <input type="text" id="hcCentre" placeholder="e.g. 17.7231, 83.3012">
                             <span class="hc-sub">In Google Maps, long-press your centre and copy the two numbers shown. Needed only if you set a radius.</span>
                         </div>
-                        <p style="color:var(--text3); font-size:0.8rem; margin:10px 0 0;">Visit times follow the <strong>sample collection window</strong> on the Lab Tests page. Scans, X-rays and ECG are never offered at home.</p>
+                        <div class="field" style="margin-top:6px;">
+                            <label>Home visit hours</label>
+                            <div class="hc-pills" role="radiogroup" aria-label="Home visit hours">
+                                <button type="button" class="hc-pill" id="hcHoursSame" role="radio" onclick="hcSetHoursMode(false)">Same as sample collection window</button>
+                                <button type="button" class="hc-pill" id="hcHoursCustom" role="radio" onclick="hcSetHoursMode(true)">Custom hours</button>
+                            </div>
+                        </div>
+                        <div id="hcWindowsBox" hidden>
+                            <div class="hc-presets">
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="hcPreset([['07:00','11:00']])">Morning</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="hcPreset([['12:00','16:00']])">Afternoon</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="hcPreset([['16:00','20:00']])">Evening</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="hcPreset([['07:00','11:00'],['16:00','19:00']])">Morning + evening</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="hcPreset([['07:00','19:00']])">Full day</button>
+                            </div>
+                            <div id="hcWindows"></div>
+                            <button type="button" class="btn btn-ghost btn-sm" id="hcAddWindow" onclick="hcAddWindowRow()">+ Add another time window</button>
+                            <span class="hc-sub">Up to 3 windows a day, e.g. 7–11 AM and 4–7 PM. Set them to match your phlebotomists' shifts.</span>
+                        </div>
+                        <p id="hcHoursNote" style="color:var(--text3); font-size:0.8rem; margin:10px 0 0;"></p>
                         <div style="display:flex; gap:10px; margin-top:14px;">
                             <button class="btn btn-accent" onclick="saveHcSettings()">Save settings</button>
                         </div>
@@ -3850,6 +3916,47 @@
             </div>
         </div>
         <div class="glass-foot">Press Esc to close.</div>
+    </div>
+</div>
+
+<!-- ═══ LAB TEST CATALOGUE (View all) ═══ -->
+<div class="glass-overlay" id="labCatalogModal" role="dialog" aria-modal="true" aria-labelledby="labCatalogModalTitle" aria-hidden="true"
+     onclick="if (event.target === this) closeDiagGlass()">
+    <div class="glass-dialog">
+        <div class="glass-head">
+            <div>
+                <div class="glass-eyebrow">Tests &amp; services · WhatsApp catalogue</div>
+                <h3 id="labCatalogModalTitle">Test Catalog</h3>
+                <div class="glass-sub" id="labCatalogModalSub">Search, edit or remove any test. Patients see these service types on WhatsApp.</div>
+            </div>
+            <button class="glass-close" onclick="closeDiagGlass()" aria-label="Close test catalog"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+        </div>
+        <div class="glass-toolbar">
+            <!-- migration 080/083: one tab per service type the catalogue uses -->
+            <div class="toggle-group" id="labTypeTabs" role="tablist" aria-label="Service types" style="display:none; flex-wrap:wrap; max-width:100%; margin:0;"></div>
+        </div>
+        <div class="glass-toolbar">
+            <input type="search" class="search-bar" id="labTestSearch" placeholder="Search by test name, sample type or service type..." oninput="filterLabTests()" aria-label="Search tests" style="flex:1 1 260px; margin:0;">
+            <select id="labTestCategoryFilter" hidden onchange="filterLabTests()" aria-label="Filter catalog by service type">
+                <option value="">All service types</option>
+            </select>
+            <span id="labCatalogShown" class="glass-sub" aria-live="polite" style="margin:0;"></span>
+            <div class="glass-toolbar-actions">
+                <button class="btn btn-sm btn-ghost" onclick="closeDiagGlass(); openAddLabTestModal()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg> Add test</button>
+                <button class="btn btn-sm btn-ghost" onclick="loadLabTests()" aria-label="Refresh"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg> Refresh</button>
+            </div>
+        </div>
+        <div class="glass-body">
+            <div id="labBulkBar" role="region" aria-label="Selected tests" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; margin-bottom:10px; border-radius:10px; background:var(--surface); border:1px solid var(--border);">
+                <span id="labBulkText" aria-live="polite" style="font-weight:600; color:var(--text-strong)"></span>
+                <button type="button" class="btn" style="padding:4px 10px; font-size:0.8rem; background:var(--surface); min-width:auto" onclick="clearLabSelection()">Clear</button>
+                <button type="button" id="btnLabBulkDelete" class="btn btn-red" style="padding:4px 12px; font-size:0.8rem; min-width:auto; margin-left:auto" onclick="bulkDeleteLabTests()"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg> Delete selected</button>
+            </div>
+            <div class="tbl-wrap" id="labTestList">
+                <div class="loader"><div class="spin"></div>Loading lab tests...</div>
+            </div>
+        </div>
+        <div class="glass-foot">Shift-click to tick a range. Press Esc to close.</div>
     </div>
 </div>
 
@@ -5908,12 +6015,60 @@ async function hcLoadBranches() {
     const pinned = myRole === 'staff' && myBranchId;
     const visible = pinned ? branches.filter(b => b.id === myBranchId) : branches;
     const filter = document.getElementById('hcBranch');
-    filter.hidden = visible.length < 1;
     filter.innerHTML = (pinned ? '' : '<option value="">All branches</option>')
         + visible.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    // The select stays the source of truth; the pills drive it.
+    document.getElementById('hcBranchRow').hidden = visible.length < (pinned ? 2 : 1);
+    hcRenderBranchPills();
     document.getElementById('hcSetBranchWrap').hidden = visible.length < 1;
     document.getElementById('hcSetBranch').innerHTML = (pinned ? '' : '<option value="">All branches (shared settings)</option>')
         + visible.map(b => `<option value="${esc(b.id)}">${esc(b.name)} (own settings)</option>`).join('');
+}
+
+function hcRenderBranchPills() {
+    const sel = document.getElementById('hcBranch');
+    document.getElementById('hcBranchPills').innerHTML = [...sel.options].map(o =>
+        `<button type="button" class="hc-pill ${o.value === sel.value ? 'on' : ''}" aria-pressed="${o.value === sel.value}" data-value="${esc(o.value)}" onclick="hcPickBranch(this.dataset.value)">${esc(o.textContent)}</button>`
+    ).join('');
+}
+
+function hcPickBranch(value) {
+    const sel = document.getElementById('hcBranch');
+    sel.value = value;
+    hcRenderBranchPills();
+    loadHomeCollections();
+}
+
+function hcAddDays(day, n) {
+    const d = new Date(day + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+}
+
+// Seven days around the chosen one; the calendar button reaches any other date.
+function hcRenderDayStrip() {
+    const today = hcToday();
+    const start = hcAddDays(hcDay, -2);
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+        const d = hcAddDays(start, i);
+        const dt = new Date(d + 'T00:00:00Z');
+        const wd = d === today ? 'Today' : d === hcAddDays(today, 1) ? 'Tmrw'
+            : dt.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'UTC' });
+        const dn = dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+        html += `<button type="button" class="hc-day ${d === hcDay ? 'on' : ''} ${d === today ? 'today' : ''}" aria-pressed="${d === hcDay}" aria-label="${esc(hcDateLabel(d))}" onclick="hcPickDay('${d}')"><span class="wd">${esc(wd)}</span><span class="dn">${esc(dn)}</span></button>`;
+    }
+    const strip = document.getElementById('hcDayStrip');
+    strip.innerHTML = html;
+    // On a phone only a few days fit: keep the chosen one in view.
+    const on = strip.querySelector('.hc-day.on');
+    if (on) strip.scrollLeft = on.offsetLeft - strip.offsetLeft - (strip.clientWidth - on.offsetWidth) / 2;
+}
+
+function hcPickDay(d) {
+    hcDay = d;
+    document.getElementById('hcDate').value = d;
+    loadHomeCollections();
 }
 
 function hcShiftDay(n) {
@@ -5932,6 +6087,7 @@ function hcSetToday() {
 
 async function loadHomeCollections(silent) {
     hcDay = document.getElementById('hcDate').value || hcToday();
+    hcRenderDayStrip();
     const branch = document.getElementById('hcBranch').value;
     const q = '?date=' + encodeURIComponent(hcDay) + (branch ? '&branch_id=' + encodeURIComponent(branch) : '');
     const box = document.getElementById('hcVisits');
@@ -5967,7 +6123,7 @@ function hcRenderVisits(visits, summary) {
     visits.forEach(v => {
         const liveBooking = v.status === 'confirmed';
         const finished = ['collected', 'delivered'].includes(v.collection_status);
-        const eligible = hcPhlebs.filter(p => p.is_active && (!p.branch_id || !v.branch_id || p.branch_id === v.branch_id));
+        const eligible = hcPhlebs.filter(p => p.is_active && !p.off_on_date && (!p.branch_id || !v.branch_id || p.branch_id === v.branch_id));
         let phlebCell = esc(v.phlebotomist_name || '') || '<span style="color:var(--text3)">—</span>';
         if (liveBooking && !finished) {
             phlebCell = eligible.length
@@ -5975,7 +6131,7 @@ function hcRenderVisits(visits, summary) {
                   + (v.phlebotomist_id ? '' : '<option value="">Choose…</option>')
                   + eligible.map(p => `<option value="${esc(p.id)}" ${p.id === v.phlebotomist_id ? 'selected' : ''}>${esc(p.name)} (${p.total})</option>`).join('')
                   + '</select>'
-                : '<span style="color:var(--amber);font-size:0.8rem">No active phlebotomist</span>';
+                : '<span style="color:var(--amber);font-size:0.8rem">No phlebotomist available</span>';
         }
         const actions = liveBooking && v.phlebotomist_id
             ? (v.next_statuses || []).map(st => `<button class="btn btn-ghost" onclick="hcSetStatus('${esc(v.id)}','${st}')">${esc(HC_ACTION[st] || st)}</button>`).join('')
@@ -5997,15 +6153,73 @@ function hcRenderVisits(visits, summary) {
 
 function hcRenderPhlebs() {
     const box = document.getElementById('hcPhlebs');
+    const active = hcPhlebs.filter(p => p.is_active);
+    const note = document.getElementById('hcLeaveNote');
+    const allOff = active.length && active.every(p => p.off_on_date);
+    note.hidden = !allOff;
+    note.textContent = allOff ? `⚠ Every phlebotomist is on leave on ${hcDateLabel(hcDay)}, so WhatsApp offers no home visits that day.` : '';
     if (!hcPhlebs.length) {
         box.innerHTML = emptyState('users', 'No phlebotomists yet. Add one so visits can be assigned automatically.');
         return;
     }
-    box.innerHTML = hcPhlebs.map(p => `<div class="hc-phleb-row">
-        <div><strong>${esc(p.name)}</strong>${p.is_active ? '' : ' <span class="badge badge-inactive">Inactive</span>'}
-            <span class="hc-sub">${p.phone ? `<a class="hc-link" href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : 'No phone set'}${p.branch_id ? ' · branch-scoped' : ''}</span></div>
-        <span class="hc-load">${p.done}/${p.total} done</span>
-    </div>`).join('');
+    const canEdit = !(myRole === 'staff' && myBranchId);
+    box.innerHTML = hcPhlebs.map(p => {
+        const editable = p.is_active && (canEdit || p.branch_id === myBranchId);
+        const leave = (p.off_dates || []).map(d =>
+            `<span class="hc-leave-chip">${esc(hcDateLabel(d))}${editable ? `<button type="button" aria-label="Remove leave on ${esc(hcDateLabel(d))}" onclick="hcRemoveLeave('${esc(p.id)}','${d}')">×</button>` : ''}</span>`).join('');
+        return `<div class="hc-phleb-row" style="flex-wrap:wrap">
+        <div style="min-width:0"><strong>${esc(p.name)}</strong>${p.is_active ? '' : ' <span class="badge badge-inactive">Inactive</span>'}${p.off_on_date ? ' <span class="hc-tag off">On leave</span>' : ''}
+            <span class="hc-sub">${p.phone ? `<a class="hc-link" href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : 'No phone set'}${p.branch_id ? ' · branch-scoped' : ''}</span>
+            ${leave ? `<div>${leave}</div>` : ''}</div>
+        <div style="display:flex; align-items:center; gap:8px">
+            <span class="hc-load">${p.done}/${p.total} done</span>
+            ${editable ? `<button type="button" class="btn btn-ghost btn-sm" aria-expanded="false" onclick="hcToggleLeaveForm('${esc(p.id)}', this)">Leave…</button>` : ''}
+        </div>
+        <div class="hc-leave-form" id="hcLeave-${esc(p.id)}" hidden style="flex-basis:100%">
+            <div class="field"><label for="hcLeaveFrom-${esc(p.id)}">From</label><input type="date" id="hcLeaveFrom-${esc(p.id)}" min="${hcToday()}" value="${esc(hcDay >= hcToday() ? hcDay : hcToday())}"></div>
+            <div class="field"><label for="hcLeaveTo-${esc(p.id)}">To</label><input type="date" id="hcLeaveTo-${esc(p.id)}" min="${hcToday()}"></div>
+            <button type="button" class="btn btn-accent btn-sm" onclick="hcAddLeave('${esc(p.id)}')">Mark on leave</button>
+        </div>
+    </div>`;
+    }).join('');
+}
+
+function hcToggleLeaveForm(id, btn) {
+    const f = document.getElementById('hcLeave-' + id);
+    f.hidden = !f.hidden;
+    btn.setAttribute('aria-expanded', String(!f.hidden));
+}
+
+async function hcSaveLeave(p, dates, done) {
+    try {
+        const r = await apiPut('/admin/home-collection/phlebotomists/' + encodeURIComponent(p.id) + '/off-dates', { dates });
+        toast(done + (r.released_visits ? ` ${r.released_visits} of their visit(s) were handed to another phlebotomist.` : ''));
+    } catch (e) { toast('Error: ' + e.message, true); }
+    loadHomeCollections(true);
+}
+
+async function hcAddLeave(id) {
+    const p = hcPhlebs.find(x => x.id === id);
+    if (!p) return;
+    const from = document.getElementById('hcLeaveFrom-' + id).value;
+    const to = document.getElementById('hcLeaveTo-' + id).value || from;
+    if (!from) { toast('Pick the first day of leave.', true); return; }
+    if (to < from) { toast('"To" must be on or after "From".', true); return; }
+    const days = [];
+    for (let d = from; d <= to && days.length <= 60; d = hcAddDays(d, 1)) days.push(d);
+    if (days.length > 60) { toast('Mark at most 60 days at a time.', true); return; }
+    const ok = await confirmDialog(
+        `Mark ${p.name} on leave ${from === to ? 'on ' + hcDateLabel(from) : 'from ' + hcDateLabel(from) + ' to ' + hcDateLabel(to)}? `
+        + 'Their visits on those days go to another phlebotomist. If nobody else serves the branch, patients are not offered home collection on those days.',
+        { title: 'Phlebotomist leave', okText: 'Mark on leave' });
+    if (!ok) return;
+    await hcSaveLeave(p, [...new Set([...(p.off_dates || []), ...days])], `${p.name} marked on leave.`);
+}
+
+async function hcRemoveLeave(id, day) {
+    const p = hcPhlebs.find(x => x.id === id);
+    if (!p) return;
+    await hcSaveLeave(p, (p.off_dates || []).filter(d => d !== day), `${p.name} is available on ${hcDateLabel(day)} again.`);
 }
 
 async function hcAssign(visitId, phlebId, sel) {
@@ -6051,6 +6265,48 @@ function hcAddPhlebotomist() {
 }
 
 // ── settings ──
+let hcWindows = [];        // [[start, end], ...] while editing custom hours
+let hcCustomHours = false;
+
+function hcSetHoursMode(custom) {
+    // Leaving custom mode keeps what was typed, in case they switch back.
+    if (!custom && hcCustomHours) hcReadWindows();
+    hcCustomHours = !!custom;
+    if (hcCustomHours && !hcWindows.length) hcWindows = [['07:00', '11:00']];
+    ['hcHoursSame', 'hcHoursCustom'].forEach((id, i) => {
+        const on = i === 1 ? hcCustomHours : !hcCustomHours;
+        const b = document.getElementById(id);
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', String(on));
+    });
+    document.getElementById('hcWindowsBox').hidden = !hcCustomHours;
+    document.getElementById('hcHoursNote').innerHTML = hcCustomHours
+        ? 'Patients are offered home visits only inside these hours, on the days in your <strong>sample collection window</strong>. Scans, X-rays and ECG are never offered at home.'
+        : 'Home visits follow the <strong>sample collection window</strong> on the Lab Tests page. Scans, X-rays and ECG are never offered at home.';
+    hcRenderWindows();
+}
+
+function hcRenderWindows() {
+    const box = document.getElementById('hcWindows');
+    box.innerHTML = hcWindows.map(([a, b], i) => `<div class="hc-win-row">
+        <div class="field"><label for="hcWinS${i}">From</label><input type="time" id="hcWinS${i}" value="${esc(a || '')}"></div>
+        <div class="field"><label for="hcWinE${i}">To</label><input type="time" id="hcWinE${i}" value="${esc(b || '')}"></div>
+        ${hcWindows.length > 1 ? `<button type="button" class="btn btn-ghost btn-sm" aria-label="Remove time window ${i + 1}" onclick="hcRemoveWindow(${i})">Remove</button>` : ''}
+    </div>`).join('');
+    document.getElementById('hcAddWindow').hidden = hcWindows.length >= 3;
+}
+
+function hcReadWindows() {
+    hcWindows = hcWindows.map((w, i) => {
+        const s = document.getElementById('hcWinS' + i), e = document.getElementById('hcWinE' + i);
+        return [s ? s.value : w[0], e ? e.value : w[1]];
+    });
+}
+
+function hcAddWindowRow() { hcReadWindows(); if (hcWindows.length < 3) hcWindows.push(['', '']); hcRenderWindows(); }
+function hcRemoveWindow(i) { hcReadWindows(); hcWindows.splice(i, 1); hcRenderWindows(); }
+function hcPreset(ranges) { hcWindows = ranges.map(r => r.slice()); hcRenderWindows(); }
+
 function hcSettingsQuery() {
     const b = document.getElementById('hcSetBranch').value;
     return b ? '?branch_id=' + encodeURIComponent(b) : '';
@@ -6068,6 +6324,8 @@ async function loadHcSettings() {
         document.getElementById('hcLead').value = s.lead_minutes ?? 60;
         document.getElementById('hcRadius').value = s.max_distance_km || 0;
         document.getElementById('hcCentre').value = (s.centre_lat != null && s.centre_lng != null) ? `${s.centre_lat}, ${s.centre_lng}` : '';
+        hcWindows = (s.windows || []).map(w => [w.start, w.end]);
+        hcSetHoursMode(hcWindows.length > 0);
         document.getElementById('hcOffBanner').hidden = !!s.enabled;
         document.getElementById('hcSettingsMsg').innerHTML = (r.source !== 'branch' && document.getElementById('hcSetBranch').value)
             ? '<div class="alert">This branch uses the shared settings. Saving creates its own.</div>' : '';
@@ -6086,6 +6344,21 @@ async function saveHcSettings() {
         centre_lat = parseFloat(m[1]); centre_lng = parseFloat(m[2]);
     }
     if (num('hcRadius') && centre_lat === null) { msg('hcSettingsMsg', 'Add the centre location to use a service radius.', true); return; }
+    let windows = [];
+    if (hcCustomHours) {
+        hcReadWindows();
+        windows = hcWindows.filter(([a, b]) => a || b).map(([start, end]) => ({ start, end }));
+        if (!windows.length) { msg('hcSettingsMsg', 'Add at least one home visit time window, or choose "Same as sample collection window".', true); return; }
+        const sorted = windows.slice().sort((x, y) => x.start.localeCompare(y.start));
+        for (let i = 0; i < sorted.length; i++) {
+            if (!sorted[i].start || !sorted[i].end || sorted[i].start >= sorted[i].end) {
+                msg('hcSettingsMsg', 'Each time window needs a start time before its end time.', true); return;
+            }
+            if (i && sorted[i].start < sorted[i - 1].end) {
+                msg('hcSettingsMsg', 'Time windows must not overlap.', true); return;
+            }
+        }
+    }
     try {
         await apiPut('/admin/home-collection/settings' + hcSettingsQuery(), {
             enabled: document.getElementById('hcEnabled').checked,
@@ -6096,6 +6369,7 @@ async function saveHcSettings() {
             lead_minutes: num('hcLead'),
             max_distance_km: num('hcRadius'),
             centre_lat, centre_lng,
+            windows,
         });
         msg('hcSettingsMsg', 'Saved. WhatsApp bookings use these settings from now on.');
         document.getElementById('hcOffBanner').hidden = document.getElementById('hcEnabled').checked;
@@ -9531,11 +9805,106 @@ async function vcOutbound() {
             + `<div class="vc-inline"><div class="field"><label for="vcOutPhone">Patient phone</label><input id="vcOutPhone" type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="+91 98765 43210"></div>`
             + `<div class="field"><label for="vcOutInterest">What they asked about</label><input id="vcOutInterest" maxlength="60" autocomplete="off" placeholder="e.g. cardiology, knee pain"></div>`
             + `<button type="button" class="btn btn-accent" onclick="vcCallNow()">Call with Kriya</button></div>`
-            + `<p class="lead-note" style="margin-bottom:18px">Kriya greets them by name, mentions what they asked about, and books the appointment on the call. Only people who contacted your clinic and did not opt out can be called, inside your outbound hours.</p>` : '')
-            + `<div class="table-wrap"><table><thead><tr><th>Phone</th><th>Purpose</th><th>Status</th><th>Attempts</th><th>Next try</th><th>Note</th></tr></thead><tbody>`
-            + ((d.jobs || []).map(j => `<tr><td>${esc(j.patient_phone)}</td><td>${esc(j.purpose)}</td><td>${badge(j.status)}</td><td>${esc(j.attempts)}</td><td>${esc(VC_TIME(j.next_attempt_at))}</td><td>${esc(j.last_error || '')}</td></tr>`).join('') || '<tr><td colspan="6">No outbound calls yet.</td></tr>')
+            + `<p class="lead-note" style="margin-bottom:18px">Kriya greets them by name, mentions what they asked about, tells them about your services, and books the appointment on the call. If they are not ready, Kriya tells them they can book any time on your WhatsApp. Calls go out one by one, inside your outbound hours.</p>`
+            + vcBulkPanel() : '')
+            + `<div class="lead-card-title" style="margin-top:18px">Call queue</div>`
+            + `<div class="table-wrap"><table><thead><tr><th>Phone</th><th>Asked about</th><th>Status</th><th>Attempts</th><th>Next try</th><th>Note</th></tr></thead><tbody>`
+            + ((d.jobs || []).map(j => {
+                const ctx = j.context || {};
+                const src = ctx.consent ? `<div class="lead-sub">Imported · ${esc(ctx.consent.source || '')}</div>` : (j.created_by === 'auto_leads' ? '<div class="lead-sub">WhatsApp lead</div>' : '');
+                return `<tr><td>${esc(j.patient_phone)}${src}</td><td>${esc(ctx.interest || '—')}</td><td>${badge(j.status)}</td><td>${esc(j.attempts)}</td>`
+                    + `<td>${esc(VC_TIME(j.next_attempt_at))}</td><td>${esc(vcJobNote(j))}</td></tr>`;
+            }).join('') || '<tr><td colspan="6">No outbound calls yet.</td></tr>')
             + '</tbody></table></div>';
     } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
+}
+
+const VC_JOB_ERR = {
+    disabled: 'AI receptionist was switched off', do_not_contact: 'Opted out — not called',
+    no_number: 'No Exotel number is set up for outbound calls', dial_failed: 'Could not place the call',
+    db_write: 'Will retry shortly',
+    HTTPStatusError: 'Exotel refused the call (older attempt) — contact Kriya support',
+    exotel_http_401: 'Exotel rejected the API key — contact Kriya support',
+    exotel_http_403: 'Exotel does not allow this call (account or number restriction) — contact Kriya support',
+    exotel_http_400: 'Exotel refused the call request — contact Kriya support',
+    exotel_http_404: 'Exotel account or flow not found — contact Kriya support',
+    exotel_http_429: 'Exotel is busy — will retry',
+};
+
+// Why a queued call has not been placed yet, in words staff can act on.
+function vcJobNote(j) {
+    if (j.last_error) return VC_JOB_ERR[j.last_error] || ('Last try: ' + j.last_error.replace(/_/g, ' '));
+    if (j.status !== 'queued') return '';
+    const at = Date.parse(j.next_attempt_at || '');
+    if (at > Date.now() + 60000) return 'Scheduled — waits for your calling hours, daily limit or the call before it';
+    return 'Due — Kriya places it within 2 minutes';
+}
+
+function vcBulkPanel() {
+    return `<details class="vc-section" id="vcBulk" style="margin-top:6px"><summary class="lead-card-title" style="cursor:pointer">Import a list of numbers to call</summary>`
+        + `<p class="lead-note">One person per line: <code>phone, what they asked about</code> (the second part is optional). You can also load a CSV file with those two columns. Up to 500 at a time.</p>`
+        + `<div class="field"><label for="vcBulkText">Numbers</label><textarea id="vcBulkText" rows="6" placeholder="9876543210, knee pain&#10;+91 91234 56789, full body checkup&#10;9988776655" oninput="vcBulkCount()"></textarea><div class="lead-sub" id="vcBulkCount"></div></div>`
+        + `<div class="vc-inline" style="grid-template-columns:auto minmax(0,1fr)"><div class="field"><label for="vcBulkFile">Or load a CSV</label><input type="file" id="vcBulkFile" accept=".csv,.txt,text/csv,text/plain" onchange="vcBulkLoadFile(this)"></div>`
+        + `<div class="field"><label for="vcBulkInterest">Asked about (for lines without one)</label><input id="vcBulkInterest" maxlength="60" autocomplete="off" placeholder="e.g. health checkup"></div></div>`
+        + `<div class="field"><label class="check"><input type="checkbox" id="vcBulkConsent" onchange="document.getElementById('vcBulkSourceWrap').hidden = !this.checked"> Everyone on this list asked us to contact them</label>`
+        + `<div class="lead-sub">Tick only when true, e.g. walk-in enquiries or health camp sign-ups. Without it, only people who already messaged or booked with you are called. People who opted out are never called.</div></div>`
+        + `<div class="field" id="vcBulkSourceWrap" hidden><label for="vcBulkSource">Where these contacts came from</label><input id="vcBulkSource" maxlength="60" autocomplete="off" list="vcBulkSources" placeholder="e.g. Health camp, 5 Oct">`
+        + `<datalist id="vcBulkSources"><option value="Walk-in enquiry"><option value="Health camp sign-up"><option value="Doctor referral"><option value="Website enquiry form"><option value="Phone enquiry"></datalist></div>`
+        + `<div class="vc-actions"><button type="button" class="btn btn-accent" id="vcBulkGo" onclick="vcBulkQueue()">Queue calls</button></div>`
+        + `<div id="vcBulkResult" aria-live="polite"></div></details>`;
+}
+
+// "phone, interest" per line; a header row or blank lines are ignored.
+function vcBulkParse() {
+    const fallback = (document.getElementById('vcBulkInterest').value || '').trim() || null;
+    return (document.getElementById('vcBulkText').value || '').split(/\r?\n/).map(line => {
+        const [phone, ...rest] = line.split(/[,;\t]/);
+        const interest = rest.join(' ').replace(/^"|"$/g, '').trim();
+        return { phone: (phone || '').replace(/["']/g, '').trim(), interest: interest.slice(0, 60) || fallback };
+    }).filter(c => /\d{6,}/.test(c.phone.replace(/\D/g, '')));
+}
+
+function vcBulkCount() {
+    const n = vcBulkParse().length;
+    document.getElementById('vcBulkCount').textContent = n ? `${n} number${n === 1 ? '' : 's'} found` + (n > 500 ? ' — only the first 500 are queued' : '') : '';
+}
+
+function vcBulkLoadFile(input) {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    if (f.size > 1024 * 1024) { toast('That file is larger than 1 MB.', true); input.value = ''; return; }
+    const r = new FileReader();
+    r.onload = () => { document.getElementById('vcBulkText').value = String(r.result || ''); vcBulkCount(); };
+    r.readAsText(f);
+}
+
+async function vcBulkQueue() {
+    const contacts = vcBulkParse().slice(0, 500);
+    if (!contacts.length) { toast('Add at least one phone number.', true); return; }
+    const consent = document.getElementById('vcBulkConsent').checked;
+    const source = (document.getElementById('vcBulkSource').value || '').trim();
+    if (consent && source.length < 3) { toast('Say where these contacts came from.', true); return; }
+    const ok = await confirmDialog(`Queue AI follow-up calls to ${contacts.length} people? Kriya calls them one by one inside your outbound hours, up to your daily limit.`,
+        { title: 'Queue lead calls', okText: 'Queue calls' });
+    if (!ok) return;
+    const btn = document.getElementById('vcBulkGo');
+    btn.disabled = true;
+    try {
+        const r = await apiPost('/admin/voice/outbound/bulk', { contacts, consent_attested: consent, source: consent ? source : null });
+        const skipped = r.skipped || [];
+        document.getElementById('vcBulkResult').innerHTML = `<div class="alert" style="margin-top:12px">${r.queued} call${r.queued === 1 ? '' : 's'} queued.`
+            + (skipped.length ? ` ${skipped.length} skipped:</div><div class="table-wrap"><table><tbody>${skipped.slice(0, 200).map(s => `<tr><td>${esc(s.phone)}</td><td>${esc(s.reason)}</td></tr>`).join('')}</tbody></table></div>` : '</div>');
+        toast(`${r.queued} call(s) queued`);
+        if (r.queued) {
+            document.getElementById('vcBulkText').value = '';
+            vcBulkCount();
+            const keep = document.getElementById('vcBulkResult').innerHTML;
+            await vcOutbound();
+            document.getElementById('vcBulk').open = true;
+            document.getElementById('vcBulkResult').innerHTML = keep;
+        }
+    } catch (e) { toast(e.message, true); }
+    finally { const b = document.getElementById('vcBulkGo'); if (b) b.disabled = false; }
 }
 
 async function vcCallNow(phone, interest) {
@@ -9590,9 +9959,16 @@ async function vcSettings() {
             + `<div class="field"><label class="check"><input type="checkbox" id="vcSetAuto" ${s.outbound.auto_leads ? 'checked' : ''}> Call new WhatsApp leads automatically</label></div><div class="vc-form">`
             + f('vcSetOs', 'Calls from', s.outbound.window_start, 'type="time"') + f('vcSetOe', 'Calls until', s.outbound.window_end, 'type="time"')
             + f('vcSetCap', 'Max calls per day', s.outbound.daily_cap, 'type="number" min="0" max="500"')
+            + `<div class="field"><label for="vcSetConc">Calls at a time</label><select id="vcSetConc">${[1, 2, 3, 4, 5].map(n => `<option value="${n}">${n === 1 ? '1 (one by one)' : n}</option>`).join('')}</select></div>`
+            + `</div>`
+            + `<div class="lead-card-title" style="margin-top:14px">What Kriya says about your services</div>`
+            + `<p class="lead-note">Said word for word right after the greeting on every lead call, e.g. “We have 24-hour pharmacy, all lab tests and free home sample collection.” Keep it to one or two short sentences. Write each language the way it should be spoken; a language left blank is skipped. Kriya also tells people who are not ready to book that they can book on your WhatsApp number.</p>`
+            + `<div class="vc-form">`
+            + ['te', 'hi', 'en'].map(l => `<div class="field"><label for="vcPitch-${l}">${{ te: 'Telugu', hi: 'Hindi', en: 'English' }[l]}</label><textarea id="vcPitch-${l}" rows="3" maxlength="300">${esc(((s.outbound.pitch || {})[l]) || '')}</textarea></div>`).join('')
             + `</div></div>`
             + `<div class="vc-actions"><button type="button" class="btn btn-accent" onclick="vcSaveSettings()">Save settings</button><span class="lead-note">Monthly budget: ${s.monthly_budget_paise ? VC_MONEY(s.monthly_budget_paise) : 'no cap'} (set by Kriya). When it is used up, calls go straight to your reception.</span></div>`;
         document.getElementById('vcSetLang').value = s.primary_language;
+        document.getElementById('vcSetConc').value = String(Math.min(5, Math.max(1, Number(s.outbound.concurrent) || 1)));
         // Keep a custom pace someone set earlier selectable instead of silently snapping it.
         const pace = document.getElementById('vcSetPace'), p = String(Number(s.pace) || 1);
         if (![...pace.options].some(o => o.value === p)) pace.add(new Option(`Custom (${p})`, p));
@@ -9611,7 +9987,9 @@ async function vcSaveSettings() {
         pace: Number(v('vcSetPace')) || 1.0, emergency_number: v('vcSetEmerg') || null,
         reception_hours: { start: v('vcSetHs'), end: v('vcSetHe'), days: days.join(',') },
         outbound: { auto_leads: document.getElementById('vcSetAuto').checked, window_start: v('vcSetOs'),
-                    window_end: v('vcSetOe'), max_attempts: (s.outbound || {}).max_attempts || 2, daily_cap: Number(v('vcSetCap')) || 0 },
+                    window_end: v('vcSetOe'), max_attempts: (s.outbound || {}).max_attempts || 2, daily_cap: Number(v('vcSetCap')) || 0,
+                    concurrent: Number(v('vcSetConc')) || 1,
+                    pitch: { te: v('vcPitch-te'), hi: v('vcPitch-hi'), en: v('vcPitch-en') } },
     };
     try { await apiPut('/admin/voice/settings', body); toast('Saved'); } catch (e) { toast(e.message, true); }
 }
@@ -10301,12 +10679,22 @@ function renderLabTypeTabs(inUse) {
     const sel = document.getElementById('labTestCategoryFilter');
     if (!tabs || !sel) return;
     const all = labTestsCache || [];
-    if (!inUse.length) { tabs.style.display = 'none'; return; }
     const current = sel.value;
     const count = v => v === '__none__'
         ? all.filter(t => !(t.category || '').trim()).length
         : all.filter(t => (t.category || '').trim().toLowerCase() === v.toLowerCase()).length;
     const unfiled = count('__none__');
+    // Page summary: one chip per service type, each opening the catalogue on it.
+    const chips = document.getElementById('labCatalogChips');
+    if (chips) {
+        const chip = (value, label, n) =>
+            `<button type="button" class="diag-chip" data-value="${esc(value)}" onclick="openLabCatalog(this.dataset.value)" aria-label="View ${esc(label)}: ${n} tests">`
+            + `<div class="diag-chip-label">${esc(label)}</div><div class="diag-chip-val">${n}</div></button>`;
+        chips.innerHTML = chip('', 'All tests', all.length)
+            + inUse.map(c => chip(c, labTypeEmoji(c) + ' ' + c, count(c))).join('')
+            + (unfiled && inUse.length ? chip('__none__', 'Unfiled', unfiled) : '');
+    }
+    if (!inUse.length) { tabs.style.display = 'none'; return; }
     const btn = (value, label, n) =>
         `<button type="button" class="toggle-btn ${current === value ? 'on' : ''}" role="tab" aria-selected="${current === value}" data-value="${esc(value)}" onclick="setLabTypeTab(this.dataset.value)">${esc(label)} <span style="opacity:0.7">(${n})</span></button>`;
     tabs.innerHTML = btn('', 'All', all.length)
@@ -10321,6 +10709,11 @@ window.setLabTypeTab = function (value) {
     sel.value = value || '';
     renderLabTypeTabs(labCategoriesInUse());
     filterLabTests();
+};
+
+window.openLabCatalog = function (value) {
+    setLabTypeTab(value || '');
+    openDiagGlass('labCatalogModal');
 };
 
 function renderLabAutoClassifyCard() {
@@ -10568,6 +10961,10 @@ function filterLabTests() {
             (t.category || '').toLowerCase().includes(q)
         );
     }
+    const shown = document.getElementById('labCatalogShown');
+    if (shown) shown.textContent = `${rows.length} of ${labTestsCache.length} shown`;
+    const title = document.getElementById('labCatalogModalTitle');
+    if (title) title.textContent = cat && cat !== '__none__' ? cat : (cat ? 'Unfiled tests' : 'Test Catalog');
     renderLabTestsTable(rows);
 }
 
@@ -10619,6 +11016,8 @@ function resetLabTestForm() {
 window.editLabTest = function(id) {
     const test = labTestsCache.find(t => t.id === id);
     if (!test) return;
+    // The form is on the page, under the catalogue dialog.
+    if (_diagGlassOpen) closeDiagGlass();
     document.getElementById('f-labTestId').value = test.id;
     const draftBtn = document.getElementById('btnAiDraftDetails');
     if (draftBtn) {

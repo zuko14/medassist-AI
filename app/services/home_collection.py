@@ -62,9 +62,15 @@ DEFAULT_SETTINGS: dict = {
     "max_distance_km": 0,
     "centre_lat": None,
     "centre_lng": None,
+    # Home-visit hours, e.g. [{"start": "07:00", "end": "11:00"}]. Empty = the
+    # visits follow the lab's sample collection window (the original behaviour).
+    "windows": [],
 }
 
 SLOT_MINUTES_ALLOWED = (30, 60, 90, 120)
+#: Custom visit windows per centre (morning + afternoon + evening).
+MAX_WINDOWS = 3
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 #: WhatsApp list messages hold at most 10 rows.
 MAX_SLOT_ROWS = 10
 
@@ -102,7 +108,28 @@ def normalize_settings(raw: Optional[dict]) -> dict:
             out[key] = v if lo <= v <= hi else None
         except (TypeError, ValueError):
             out[key] = None
+    out["windows"] = normalize_windows(raw.get("windows"))
     return out
+
+
+def normalize_windows(raw) -> list[dict]:
+    """Valid, sorted, non-overlapping HH:MM ranges; anything else is dropped."""
+    if not isinstance(raw, list):
+        return []
+    ranges = []
+    for w in raw:
+        if not isinstance(w, dict):
+            continue
+        start, end = str(w.get("start") or ""), str(w.get("end") or "")
+        if _HHMM.match(start) and _HHMM.match(end) and start < end:
+            ranges.append({"start": start, "end": end})
+    ranges.sort(key=lambda w: w["start"])
+    out: list[dict] = []
+    for w in ranges:
+        if out and w["start"] < out[-1]["end"]:
+            continue  # overlaps the previous window
+        out.append(w)
+    return out[:MAX_WINDOWS]
 
 
 async def get_settings(clinic: dict, branch_id: Optional[str] = None) -> dict:
@@ -165,27 +192,33 @@ def _window_hours(window: dict, date_str: str) -> tuple[str, str]:
 
 
 def slots_for(window: dict, settings: dict, date_str: str, now: Optional[datetime] = None) -> list[str]:
-    """Visit slots ("07:00-08:00") inside the collection window on that date.
+    """Visit slots ("07:00-08:00") on that date: inside the centre's own
+    home-visit windows when it set any, else inside the collection window.
 
-    The last slot is cut short at closing time rather than dropped. Today's
-    slots that start sooner than lead_minutes from now are not offered.
+    The last slot of a window is cut short at its closing time rather than
+    dropped. Today's slots that start sooner than lead_minutes from now are
+    not offered.
     """
     now = now or datetime.now(IST)
-    start_s, end_s = _window_hours(window, date_str)
+    ranges = settings.get("windows") or [dict(zip(("start", "end"), _window_hours(window, date_str)))]
     try:
         day = datetime.strptime(date_str, "%Y-%m-%d").date()
-        cur = datetime.combine(day, datetime.strptime(start_s, "%H:%M").time(), IST)
-        end = datetime.combine(day, datetime.strptime(end_s, "%H:%M").time(), IST)
     except (TypeError, ValueError):
         return []
     step = timedelta(minutes=int(settings.get("slot_minutes") or 60))
     earliest = now + timedelta(minutes=int(settings.get("lead_minutes") or 0))
     out = []
-    while cur < end:
-        nxt = min(cur + step, end)
-        if cur >= earliest:
-            out.append(f"{cur:%H:%M}-{nxt:%H:%M}")
-        cur = nxt
+    for r in ranges:
+        try:
+            cur = datetime.combine(day, datetime.strptime(r["start"], "%H:%M").time(), IST)
+            end = datetime.combine(day, datetime.strptime(r["end"], "%H:%M").time(), IST)
+        except (TypeError, ValueError, KeyError):
+            continue
+        while cur < end:
+            nxt = min(cur + step, end)
+            if cur >= earliest:
+                out.append(f"{cur:%H:%M}-{nxt:%H:%M}")
+            cur = nxt
     return out
 
 
@@ -218,6 +251,8 @@ async def open_slots(
     is the upgrade if centres report overbooking.
     """
     slots = slots_for(window, settings, date_str, now)
+    if slots and await all_off_on(clinic_id, date_str, branch_id):
+        return []
     capacity = int(settings.get("slot_capacity") or 0)
     if not capacity or not slots:
         return slots
@@ -292,7 +327,7 @@ async def last_home_address(clinic_id: str, phone: str) -> Optional[dict]:
 async def list_phlebotomists(clinic_id: str, active_only: bool = True) -> list[dict]:
     q = (
         supabase.table("clinic_admins")
-        .select("id, username, full_name, phone, branch_id, is_active")
+        .select("id, username, full_name, phone, branch_id, is_active, off_dates")
         .eq("clinic_id", clinic_id)
         .eq("role", "staff")
         .eq("staff_role", PHLEBOTOMIST)
@@ -315,6 +350,42 @@ def eligible_for(phleb: dict, appt: dict) -> bool:
     return not pb or not ab or str(pb) == str(ab)
 
 
+def is_off(phleb: dict, date_str: Optional[str]) -> bool:
+    """Marked on leave for that date (migration 101)."""
+    return bool(date_str) and str(date_str) in {str(d) for d in (phleb.get("off_dates") or [])}
+
+
+async def all_off_on(clinic_id: str, date_str: str, branch_id: Optional[str] = None) -> bool:
+    """True when the centre has phlebotomists for this branch and every one of
+    them is on leave that date, so no home visit can be honoured.
+
+    A centre with no phlebotomist at all keeps offering slots, as before
+    migration 101: those visits wait unassigned and the admins are alerted.
+    Fails open (False) on a read error -- the slot list must not vanish
+    because of a transient database fault.
+    """
+    try:
+        serving = [p for p in await list_phlebotomists(clinic_id) if eligible_for(p, {"branch_id": branch_id})]
+    except Exception as e:
+        logger.warning(f"Could not read phlebotomist leave for clinic {clinic_id}: {e}")
+        return False
+    return bool(serving) and all(is_off(p, date_str) for p in serving)
+
+
+def upcoming_off_dates(dates, today: Optional[str] = None) -> list[str]:
+    """Valid YYYY-MM-DD dates from today on, sorted and de-duplicated."""
+    today = today or datetime.now(IST).strftime("%Y-%m-%d")
+    out = set()
+    for d in dates or []:
+        try:
+            s = datetime.strptime(str(d), "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+        if s >= today:
+            out.add(s)
+    return sorted(out)
+
+
 async def _day_loads(clinic_id: str, date_str: str) -> list[dict]:
     res = await sb(
         supabase.table("appointments")
@@ -333,7 +404,10 @@ def pick_phlebotomist(appt: dict, phlebs: list[dict], loads: list[dict]) -> Opti
     """Least busy in the same slot, then least busy that day; a phlebotomist
     pinned to the booking's branch before a floating one; then by name, so the
     choice is deterministic."""
-    candidates = [p for p in phlebs if p.get("is_active", True) and eligible_for(p, appt)]
+    candidates = [
+        p for p in phlebs
+        if p.get("is_active", True) and eligible_for(p, appt) and not is_off(p, appt.get("appointment_date"))
+    ]
     if not candidates:
         return None
     slot = appt.get("collection_slot")
@@ -471,11 +545,12 @@ async def set_status(clinic_id: str, appt: dict, new_status: str, note: Optional
     return True
 
 
-async def release_visits_of(clinic_id: str, phlebotomist_id: str) -> int:
-    """A phlebotomist was deactivated: hand their unfinished upcoming visits
-    to someone else. Collected samples stay with them (they carry the tubes)."""
+async def release_visits_of(clinic_id: str, phlebotomist_id: str, dates: Optional[list[str]] = None) -> int:
+    """A phlebotomist was deactivated (dates=None: every upcoming day) or put
+    on leave (those dates only): hand their unfinished visits to someone else.
+    Collected samples stay with them (they carry the tubes)."""
     today = datetime.now(IST).strftime("%Y-%m-%d")
-    res = await sb(
+    q = (
         supabase.table("appointments")
         .update({
             "phlebotomist_id": None,
@@ -489,6 +564,11 @@ async def release_visits_of(clinic_id: str, phlebotomist_id: str) -> int:
         .in_("collection_status", ["assigned", "en_route"])
         .gte("appointment_date", today)
     )
+    if dates is not None:
+        if not dates:
+            return 0
+        q = q.in_("appointment_date", list(dates))
+    res = await sb(q)
     released = res.data or []
     for row in released:
         await auto_assign(clinic_id, str(row["id"]), alert_if_none=True)

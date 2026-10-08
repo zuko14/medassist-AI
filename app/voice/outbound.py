@@ -11,6 +11,7 @@ truthfully if asked whether it is automated (responses.ai_disclosure).
 """
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -31,16 +32,33 @@ class OutboundRefused(Exception):
     pass
 
 
-async def _eligible(clinic_id: str, phone: str) -> Optional[str]:
+def _blocked(p: Optional[dict], attested: bool) -> Optional[str]:
+    """The eligibility rule on a patients row (None = no row)."""
+    if not p:
+        # Staff attested this person asked to be contacted (walk-in enquiry,
+        # health camp, referral...): consent is recorded on the job instead.
+        return None if attested else "not_a_contact_of_this_clinic"
+    if p.get("opted_in") is False or p.get("data_consent_declined_at"):
+        return "do_not_contact"  # an opt-out always wins over an attestation
+    return None
+
+
+async def _eligible(clinic_id: str, phone: str, attested: bool = False) -> Optional[str]:
     """None if this person may be called, else the reason."""
     res = await sb(supabase.table("patients").select("id, opted_in, data_consent_declined_at")
                    .eq("clinic_id", clinic_id).eq("phone", phone).limit(1))
-    p = (res.data or [None])[0]
-    if not p:
-        return "not_a_contact_of_this_clinic"
-    if p.get("opted_in") is False or p.get("data_consent_declined_at"):
-        return "do_not_contact"
-    return None
+    return _blocked((res.data or [None])[0], attested)
+
+
+def _after(ts, cutoff: datetime) -> bool:
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")) >= cutoff
+    except ValueError:
+        return True  # unreadable: assume recent, i.e. do not call again
+
+
+def _attested(job: dict) -> bool:
+    return bool((job.get("context") or {}).get("consent"))
 
 
 async def enqueue(clinic: dict, phone: str, purpose: str, context: dict, created_by: str) -> dict:
@@ -49,7 +67,7 @@ async def enqueue(clinic: dict, phone: str, purpose: str, context: dict, created
     e164 = to_e164(phone)
     if not e164:
         raise OutboundRefused("Not a valid phone number.")
-    reason = await _eligible(clinic["id"], e164)
+    reason = await _eligible(clinic["id"], e164, bool((context or {}).get("consent")))
     if reason:
         raise OutboundRefused({"not_a_contact_of_this_clinic": "This number has never contacted the clinic.",
                                "do_not_contact": "This person opted out. Do not call."}[reason])
@@ -63,6 +81,90 @@ async def enqueue(clinic: dict, phone: str, purpose: str, context: dict, created
         if "uq_voice_outbound_active" in str(e) or "23505" in str(e):
             raise OutboundRefused("A call to this person is already queued.")
         raise
+
+
+BULK_MAX = 500
+_SKIP_TEXT = {"invalid_number": "Not a valid phone number",
+              "duplicate": "Listed twice in this import",
+              "do_not_contact": "Opted out — never called",
+              "not_a_contact_of_this_clinic": "Never contacted the clinic",
+              "already_queued": "A call is already queued",
+              "called_recently": "Called in the last 7 days"}
+
+
+async def enqueue_bulk(clinic: dict, contacts: list, consent: Optional[dict], created_by: str) -> dict:
+    """Queue lead follow-up calls for many people at once.
+
+    contacts: [{"phone": ..., "interest": ...}]. consent: {"source": ...} when
+    staff attested these people asked to be contacted, else None (then only
+    existing contacts of the clinic are queued). Same rules as enqueue(): an
+    opt-out is never called; someone with a live job, or called in the last 7
+    days, is skipped. Calls go out one by one inside the outbound window and
+    under the daily cap -- dispatch_due paces them.
+    """
+    if not ai_receptionist_enabled(clinic):
+        raise OutboundRefused("The AI receptionist is not enabled for this clinic.")
+    cid = clinic["id"]
+    skipped, wanted, seen = [], {}, set()
+    for c in contacts[:BULK_MAX]:
+        raw = str((c or {}).get("phone") or "").strip()
+        e164 = to_e164(raw)
+        if not e164:
+            skipped.append({"phone": raw, "reason": _SKIP_TEXT["invalid_number"]})
+        elif e164 in seen:
+            skipped.append({"phone": e164, "reason": _SKIP_TEXT["duplicate"]})
+        else:
+            seen.add(e164)
+            wanted[e164] = ((c or {}).get("interest") or "").strip()[:60] or None
+    phones = list(wanted)
+    patients, recent = {}, set()
+    week = datetime.now(IST) - timedelta(days=7)
+    for i in range(0, len(phones), 200):
+        chunk = phones[i:i + 200]
+        res = await sb(supabase.table("patients").select("phone, opted_in, data_consent_declined_at")
+                       .eq("clinic_id", cid).in_("phone", chunk))
+        patients.update({p["phone"]: p for p in res.data or []})
+        res = await sb(supabase.table("voice_outbound_jobs").select("patient_phone, status, created_at")
+                       .eq("clinic_id", cid).eq("purpose", "lead_followup").in_("patient_phone", chunk)
+                       .order("created_at", desc=True).limit(2000))
+        for j in res.data or []:
+            active = j["status"] in ("queued", "dialing")
+            if active or _after(j.get("created_at"), week):
+                recent.add((j["patient_phone"], active))
+    live = {p for p, active in recent if active}
+    called = {p for p, _ in recent}
+    rows = []
+    for phone in phones:
+        reason = _blocked(patients.get(phone), bool(consent))
+        if not reason and phone in live:
+            reason = "already_queued"
+        elif not reason and phone in called:
+            reason = "called_recently"
+        if reason:
+            skipped.append({"phone": phone, "reason": _SKIP_TEXT[reason]})
+            continue
+        ctx = {"interest": wanted[phone]}
+        if consent:
+            ctx["consent"] = {**consent, "attested_by": created_by, "at": datetime.now(IST).isoformat()}
+        rows.append({"clinic_id": cid, "patient_phone": phone, "purpose": "lead_followup",
+                     "context": ctx, "created_by": created_by})
+    queued = 0
+    if rows:
+        try:
+            # unscoped: insert_scoped_by_payload
+            queued = len((await sb(supabase.table("voice_outbound_jobs").insert(rows))).data or [])
+        except Exception as e:
+            if "uq_voice_outbound_active" not in str(e) and "23505" not in str(e):
+                raise
+            # A concurrent enqueue raced us for one of these people: insert one by one.
+            for row in rows:
+                try:
+                    # unscoped: insert_scoped_by_payload
+                    await sb(supabase.table("voice_outbound_jobs").insert(row))
+                    queued += 1
+                except Exception:
+                    skipped.append({"phone": row["patient_phone"], "reason": _SKIP_TEXT["already_queued"]})
+    return {"queued": queued, "skipped": skipped, "truncated": max(0, len(contacts) - BULK_MAX)}
 
 
 def next_window_start(window: dict, now: Optional[datetime] = None) -> Optional[datetime]:
@@ -98,6 +200,17 @@ async def _today_count(clinic_id: str) -> int:
     return len(res.data or [])
 
 
+async def _in_flight(clinic_id: str) -> int:
+    """Outbound calls of this clinic still ringing or talking. A row stuck in a
+    live status (a lost provider callback) stops counting after 15 minutes,
+    longer than the longest allowed call, so it cannot block the queue."""
+    since = (datetime.now(IST) - timedelta(minutes=15)).isoformat()
+    res = await sb(supabase.table("voice_calls").select("id").eq("clinic_id", clinic_id)
+                   .eq("direction", "outbound").in_("status", ["queued", "ringing", "in_progress"])
+                   .gte("started_at", since).limit(50))
+    return len(res.data or [])
+
+
 async def dispatch_due(limit: int = 20) -> int:
     """Scheduler body (under a distributed lock). Places due calls; returns how many."""
     now = datetime.now(IST)
@@ -106,6 +219,7 @@ async def dispatch_due(limit: int = 20) -> int:
         supabase.table("voice_outbound_jobs").select("*").eq("status", "queued")
         .lte("next_attempt_at", now.isoformat()).order("next_attempt_at").limit(limit))
     placed = 0
+    busy: dict = {}  # clinic -> calls in flight, counted once per sweep
     for job in res.data or []:
         cid = job["clinic_id"]
         try:
@@ -124,7 +238,16 @@ async def dispatch_due(limit: int = 20) -> int:
             await sb(supabase.table("voice_outbound_jobs").update({"next_attempt_at": later.isoformat()})
                      .eq("clinic_id", cid).eq("id", job["id"]))
             continue
-        if await _eligible(cid, job["patient_phone"]):
+        if cid not in busy:
+            busy[cid] = await _in_flight(cid)
+        if busy[cid] >= max(1, int(out_cfg.get("concurrent") or 1)):
+            # One by one: wait for the current call to end. Moving the job back
+            # a little rotates the queue so other clinics' calls are not starved.
+            await sb(supabase.table("voice_outbound_jobs")
+                     .update({"next_attempt_at": (now + timedelta(minutes=3)).isoformat()})
+                     .eq("clinic_id", cid).eq("id", job["id"]))
+            continue
+        if await _eligible(cid, job["patient_phone"], _attested(job)):
             await sb(supabase.table("voice_outbound_jobs").update({"status": "skipped", "last_error": "do_not_contact"})
                      .eq("clinic_id", cid).eq("id", job["id"]))
             continue
@@ -155,10 +278,20 @@ async def dispatch_due(limit: int = 20) -> int:
             await sb(supabase.table("voice_outbound_jobs").update({"call_id": call["id"]})
                      .eq("clinic_id", cid).eq("id", job["id"]))
             placed += 1
+            busy[cid] += 1
         except Exception as e:
-            logger.error(f"VOICE_DIAL_FAILED job={job['id']}: {type(e).__name__}: {str(e)[:200]}")
+            error = type(e).__name__
+            detail = str(e)[:200]
+            if isinstance(e, httpx.HTTPStatusError):
+                # The status says what to fix (401 credentials, 400/403 flow URL,
+                # caller id or account restrictions); the body has Exotel's reason.
+                error = f"exotel_http_{e.response.status_code}"
+                detail = (e.response.text or "")[:300]
+            # Never log a full phone number (Exotel echoes From/CallerId).
+            detail = re.sub(r"\d{6,}(\d{4})", r"XXXXXX\1", detail)
+            logger.error(f"VOICE_DIAL_FAILED job={job['id']}: {error}: {detail}")
             await store.update_call(cid, call["id"], {"status": "failed", "outcome": "dial_failed"})
-            await job_finished({**call, "outbound_job_id": job["id"]}, success=False, error=type(e).__name__)
+            await job_finished({**call, "outbound_job_id": job["id"]}, success=False, error=error)
     return placed
 
 

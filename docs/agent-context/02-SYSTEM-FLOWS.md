@@ -191,7 +191,8 @@ Only when the plan is `diagstream`/`diagbooking`, the centre enabled it in setti
 ```
 date tap → hc_mode [🏡 Home | 🏥 Visit Centre]
    Visit Centre → who → name → booking (unchanged path)
-   Home → hc_slot (open slots in the collection window minus capacity/notice)
+   Home → hc_slot (open slots in the centre's custom home-visit windows, else the collection window,
+          minus capacity/notice; none at all on a date when every phlebotomist serving the branch is on leave)
         → who → name → _finalize_lab_booking intercepts (intercept_finalize)
         → hc_location (Meta location_request_message; inbound `location` messages are routed here
           only in this step — elsewhere they keep the unsupported-media reply; a pasted Maps link works)
@@ -200,7 +201,8 @@ date tap → hc_mode [🏡 Home | 🏥 Visit Centre]
         → booking: paid → create_booking_with_payment(home_collection=…) adds the fee;
                    counter → book_appointment with visit columns
         → confirmation (_notify_payment_confirmed, home copy) → home_collection.auto_assign
-          (least busy in slot, then day; branch-pinned first; CAS write) → patient told who is coming
+          (skips anyone on leave that date; least busy in slot, then day; branch-pinned first; CAS write)
+          → patient told who is coming
 ```
 Phlebotomist status updates (en_route / collected / failed) send best-effort WhatsApp updates (free-form, so only inside Meta's 24h window).
 

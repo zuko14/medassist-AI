@@ -132,14 +132,22 @@ All `/admin` endpoints require authentication via either a session token in head
 
 ### E2. Home Sample Collection (`app/routers/home_collection.py`, migration 097)
 Plan-gated to `diagstream`/`diagbooking` (`tenant.home_collection_available`). Manager = clinic_admin/super_admin or staff with `HOME_COLLECTION_MANAGE`; branch-pinned staff are confined to their branch.
-- `GET|PUT /admin/home-collection/settings?branch_id=`: Manager. `config.home_collection` on the branch (override) or clinic: `enabled`, fee, free-above threshold, slot length (30/60/90/120), slot capacity, same-day notice, service radius + centre lat/lng. Off by default.
+- `GET|PUT /admin/home-collection/settings?branch_id=`: Manager. `config.home_collection` on the branch (override) or clinic: `enabled`, fee, free-above threshold, slot length (30/60/90/120), slot capacity, same-day notice, service radius + centre lat/lng, `windows` (0-3 non-overlapping HH:MM home-visit ranges; empty = follow the lab collection window). Off by default.
 - `GET /admin/home-collection/visits?date=&branch_id=`: Manager. Home bookings for a day with phlebotomist, map link, pay/collect amount, allowed next statuses.
-- `GET /admin/home-collection/phlebotomists?date=`: Manager. Roster with the day's load.
-- `POST /admin/home-collection/visits/{id}/assign`: Manager. (Re)assign; refuses inactive or other-branch phlebotomists; compare-and-set write.
+- `GET /admin/home-collection/phlebotomists?date=`: Manager. Roster with the day's load, upcoming `off_dates` and `off_on_date`.
+- `PUT /admin/home-collection/phlebotomists/{id}/off-dates`: Manager (branch staff: own branch's phlebotomists only; refused to PHLEBOTOMIST logins). Replaces the leave list; visits already assigned on newly added days are released and auto-assigned to a colleague (admins alerted when nobody is free). Audited.
+- `POST /admin/home-collection/visits/{id}/assign`: Manager. (Re)assign; refuses inactive, other-branch or on-leave phlebotomists; compare-and-set write.
 - `POST /admin/home-collection/auto-assign`: Manager. Runs auto-assignment for upcoming unassigned visits.
 - `GET /admin/home-collection/my?date=`: PHLEBOTOMIST only. Own visits; re-reads the account (active + role) every request.
 - `POST /admin/home-collection/visits/{id}/status`: PHLEBOTOMIST (own visits only, others 404) or manager. Moves along `assigned→en_route→collected→delivered`, `→failed` (reason required); patient gets a WhatsApp update.
 - `POST/PUT /admin/staff` accept optional `full_name`, `phone`; both required for `staff_role=PHLEBOTOMIST`, which holds no permissions and cannot change role. Deactivating a phlebotomist releases and re-assigns their upcoming visits. `GET /admin/me` adds `home_collection_available`.
+
+### E3. AI Receptionist lead calls (`app/routers/voice_admin.py`, `app/voice/outbound.py`, migration 098)
+Owner opt-in (`clinics.features.ai_receptionist`); VOICE_MANAGE to queue, VOICE_VIEW to list. Dispatch runs every 2 min only when `VOICE_ENABLED=true` (`voice_outbound_dispatch`).
+- `POST /admin/voice/outbound`: one call. Only a `patients` row of this clinic that has not opted out.
+- `POST /admin/voice/outbound/bulk`: up to 500 `{phone, interest}`. With `consent_attested` + `source`, numbers with no patients row are allowed and the attestation is stored in `voice_outbound_jobs.context.consent`; without it only existing contacts are queued. An opt-out always wins; live jobs and anyone called in the last 7 days are skipped (reasons returned). Audited.
+- `GET /admin/voice/outbound`: last 100 jobs. A `queued` job with a future `next_attempt_at` is waiting for the outbound window, the daily cap, or the clinic's call in flight.
+- Settings `outbound.concurrent` (1-5, default 1 = one by one: a clinic with that many outbound calls ringing/in progress in the last 15 min waits, job pushed +3 min) and `outbound.pitch` `{te,hi,en}` (≤300 chars, spoken verbatim after the greeting in the caller's current language only). A lead who declines hears the clinic's WhatsApp number (`lead_declined`). No LLM writes caller-facing speech.
 
 ### F. Reports & Deliveries
 - `GET /admin/lab-reports`: Lists processed patient diagnostic reports.

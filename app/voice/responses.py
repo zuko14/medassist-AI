@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.10.07"
+TEMPLATES_VERSION = "templates-2026.10.08"
 
 T: dict = {
     "greeting": {
@@ -23,9 +23,20 @@ T: dict = {
         "hi": "नमस्ते, {hospital} में कॉल करने के लिए धन्यवाद। मैं {assistant} बोल रही हूँ। बताइए, मैं आपकी क्या मदद करूँ?",
     },
     "greeting_outbound": {
-        "te": "నమస్కారం{who}, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {interest_sentence}మీకు అపాయింట్మెంట్ బుక్ చేయడంలో సహాయం చేయమంటారా?",
-        "en": "Namaste{who}, this is {assistant} calling from {hospital}. {interest_sentence}Can I help you book an appointment?",
-        "hi": "नमस्ते{who}, मैं {hospital} से {assistant} बोल रही हूँ। {interest_sentence}क्या मैं आपकी अपॉइंटमेंट बुक करने में मदद करूँ?",
+        "te": "నమస్కారం{who}, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {interest_sentence}{pitch_sentence}మీకు అపాయింట్మెంట్ బుక్ చేయడంలో సహాయం చేయమంటారా?",
+        "en": "Namaste{who}, this is {assistant} calling from {hospital}. {interest_sentence}{pitch_sentence}Can I help you book an appointment?",
+        "hi": "नमस्ते{who}, मैं {hospital} से {assistant} बोल रही हूँ। {interest_sentence}{pitch_sentence}क्या मैं आपकी अपॉइंटमेंट बुक करने में मदद करूँ?",
+    },
+    # A lead said no to booking now: leave the door open on WhatsApp.
+    "lead_declined": {
+        "te": "పర్వాలేదండి.{wa_book_sentence}",
+        "en": "No problem.{wa_book_sentence}",
+        "hi": "कोई बात नहीं।{wa_book_sentence}",
+    },
+    "wa_book_sentence": {
+        "te": " మీకు ఎప్పుడు కావాలన్నా మా WhatsApp నంబర్ {wa_number} లో కూడా సులభంగా బుక్ చేసుకోవచ్చు.",
+        "en": " Whenever you need us, you can also book easily on our WhatsApp number, {wa_number}.",
+        "hi": " जब भी ज़रूरत हो, आप हमारे WhatsApp नंबर {wa_number} पर भी आसानी से बुक कर सकते हैं।",
     },
     "who": {"te": "{name} గారు", "en": "{name}", "hi": "{name} जी"},
     "listening": {
@@ -413,6 +424,15 @@ def speak_doctor(name: str) -> str:
     return re.sub(r"^\s*(dr\.?|doctor)\s+", "", name or "", flags=re.IGNORECASE).strip()
 
 
+def speak_phone(phone: str) -> str:
+    """'+919876543210' -> '9 8 7 6 5, 4 3 2 1 0': the 10-digit number in two
+    groups, digit by digit, so TTS never reads it as one large amount."""
+    digits = re.sub(r"\D", "", phone or "")[-10:]
+    if len(digits) < 10:
+        return " ".join(digits)
+    return " ".join(digits[:5]) + ", " + " ".join(digits[5:])
+
+
 def speak_ref(ref: str) -> str:
     """Booking refs are read character by character: 'KR-7Q2X' -> 'K R 7 Q 2 X'."""
     return " ".join(ch for ch in (ref or "") if ch.isalnum())
@@ -463,6 +483,14 @@ def realize(key: str, lang: str, today: date, specialty_labels: Optional[dict] =
     q["emergency_sentence"] = " " + render("emergency_sentence", lang, emergency=p["emergency"]) if p.get("emergency") else ""
     q["who"] = " " + render("who", lang, name=p["name"]) if p.get("name") else ""
     q["interest_sentence"] = render("interest_sentence", lang, interest=p["interest"]) + " " if p.get("interest") else ""
+    # The clinic's own words, verbatim, in the caller's current language only
+    # (an English pitch is never read out mid-Telugu).
+    pitch = (p.get("pitch") or {}).get(short(lang)) if isinstance(p.get("pitch"), dict) else None
+    q["pitch_sentence"] = " ".join(str(pitch).split()) + " " if pitch and str(pitch).strip() else ""
+    q["wa_book_sentence"] = (render("wa_book_sentence", lang, wa_number=speak_phone(p["wa_number"]))
+                             if p.get("wa_number") and len(re.sub(r"\D", "", p["wa_number"])) >= 10 else "")
+    if q["wa_book_sentence"]:
+        q["wa_book_sentence"] = " " + q["wa_book_sentence"]
     if q.get("specialty") and specialty_labels and q["specialty"] in specialty_labels:
         q["specialty"] = specialty_labels[q["specialty"]].get(short(lang)) or specialty_labels[q["specialty"]]["en"]
     appt = p.get("appt")

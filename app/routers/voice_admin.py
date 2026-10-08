@@ -212,12 +212,22 @@ class Hours(BaseModel):
     days: str = Field(max_length=40)
 
 
+class Pitch(BaseModel):
+    """What the clinic wants said about its services on a lead call, in its own
+    words, per language. Spoken verbatim (no LLM rewrites it)."""
+    te: str = Field("", max_length=300)
+    hi: str = Field("", max_length=300)
+    en: str = Field("", max_length=300)
+
+
 class Outbound(BaseModel):
     auto_leads: bool = False
     window_start: str = Field("10:00", pattern=r"^\d{2}:\d{2}$")
     window_end: str = Field("19:00", pattern=r"^\d{2}:\d{2}$")
     max_attempts: int = Field(2, ge=1, le=3)
     daily_cap: int = Field(30, ge=0, le=500)
+    concurrent: int = Field(1, ge=1, le=5)
+    pitch: Pitch = Field(default_factory=Pitch)
 
 
 class VoiceSettingsIn(BaseModel):
@@ -372,6 +382,41 @@ async def create_outbound(body: OutboundIn, request: Request, clinic_id: str = "
         raise HTTPException(status_code=409, detail=str(e))
     await log_admin_action(user, "voice_outbound_enqueue", "voice_outbound_job", job["id"], ip_address=_ip(request))
     return {"job": job}
+
+
+class BulkContact(BaseModel):
+    phone: str = Field(min_length=1, max_length=25)
+    interest: Optional[str] = Field(None, max_length=60)
+
+
+class OutboundBulkIn(BaseModel):
+    contacts: list[BulkContact] = Field(min_length=1, max_length=outbound.BULK_MAX)
+    #: Where these people came from. Required with consent_attested.
+    source: Optional[str] = Field(None, max_length=60)
+    #: Staff confirm every person asked the clinic to contact them. Without it,
+    #: only numbers that already contacted the clinic are queued.
+    consent_attested: bool = False
+
+
+@router.post("/outbound/bulk")
+async def create_outbound_bulk(body: OutboundBulkIn, request: Request, clinic_id: str = "default",
+                               user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _scope(user, clinic_id, "VOICE_MANAGE")
+    consent = None
+    if body.consent_attested:
+        source = " ".join((body.source or "").split())
+        if len(source) < 3:
+            raise HTTPException(status_code=422, detail="Say where these contacts came from (e.g. health camp sign-ups).")
+        consent = {"source": source}
+    try:
+        result = await outbound.enqueue_bulk(clinic, [c.model_dump() for c in body.contacts], consent, user.username)
+    except outbound.OutboundRefused as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    await log_admin_action(user, "voice_outbound_bulk_enqueue", "clinic", scope,
+                           details={"submitted": len(body.contacts), "queued": result["queued"],
+                                    "skipped": len(result["skipped"]), "consent": consent},
+                           ip_address=_ip(request))
+    return result
 
 
 @router.get("/outbound")

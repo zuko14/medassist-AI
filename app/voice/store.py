@@ -29,8 +29,11 @@ DEFAULT_CONFIG: dict = {
     "reception_hours": {"start": "09:00", "end": "20:00", "days": "Mon,Tue,Wed,Thu,Fri,Sat"},
     "emergency_number": None,
     "monthly_budget_paise": 0,        # 0 = no cap
+    # concurrent: lead calls this clinic has ringing/in progress at once.
+    # pitch: the clinic's own words about its services, per language
+    # ({"te": ..., "hi": ..., "en": ...}), spoken verbatim after the greeting.
     "outbound": {"auto_leads": False, "window_start": "10:00", "window_end": "19:00",
-                 "max_attempts": 2, "daily_cap": 30},
+                 "max_attempts": 2, "daily_cap": 30, "concurrent": 1, "pitch": {}},
     "transcript_retention_days": None,  # None -> settings.voice_transcript_retention_days
 }
 
