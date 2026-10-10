@@ -369,24 +369,30 @@ async def search_patients(
             pr_res = await sb(pr_query.ilike("phone", f"%{digits_only}%").limit(limit))
         else:
             tokens = cleaned.split()
+            # patient_records names the column full_name (not name): searching
+            # "name" 500'd every OPD name search.
             pr_res = await sb(
-                pr_query.ilike("name", "%" + "%".join(tokens) + "%").limit(limit)
+                pr_query.ilike("full_name", "%" + "%".join(tokens) + "%").limit(limit)
             )
 
+        # An imported record already registered as a patient is that patient, not a second hit.
+        known_phones = {h["phone"] for h in hits if h.get("phone")}
         for pr in pr_res.data or []:
             pr_id = pr.get("id")
             key = (pr_id, None)
-            if key not in seen:
+            if key not in seen and not (pr.get("phone") and pr["phone"] in known_phones):
                 seen.add(key)
                 hits.append(
                     {
+                        # Not a patients.id: the desk prefills registration from it
+                        # (match_reason legacy_record), never issues a token on it.
                         "patient_id": pr_id,
                         "family_member_id": None,
                         "mrn": None,
-                        "name": pr.get("name") or "Unknown",
+                        "name": pr.get("full_name") or "Unknown",
                         "phone": pr.get("phone") or "",
                         "relationship": None,
-                        "age_years": pr.get("age"),
+                        "age_years": _compute_age(pr.get("date_of_birth"), pr.get("age_years"), None),
                         "gender": pr.get("gender"),
                         "last_visit_date": None,
                         "match_reason": "legacy_record",

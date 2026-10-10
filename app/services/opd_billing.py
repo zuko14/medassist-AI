@@ -21,9 +21,24 @@ from app.database import (
     supabase,
 )
 from app.services.tenant import get_clinic_by_id
+from app.utils.helpers import actor_uuid
 from app.utils.helpers import IST, doctor_title, today_ist
 
 logger = logging.getLogger(__name__)
+
+
+_NO_DRAWER = ("Cash needs a staff login: the super-admin account has no cash drawer. "
+              "Sign in as the clinic's cashier or admin to take or refund cash.")
+
+
+def _drawer_admin_id(actor: Any) -> Optional[str]:
+    """The cashier a drawer belongs to: a clinic_admins id (UUID), else None.
+
+    The env / super-admin login carries user_id "super_admin_env". Sent as a
+    cashier_admin_id filter it made every shift lookup a PostgREST 400, so the
+    billing page errored on each 5 s poll for super-admins.
+    """
+    return actor_uuid(actor)
 
 # In-memory TTL cache for receipt idempotency keys (clinic_id:key -> (timestamp, receipt))
 _IDEMPOTENCY_CACHE: Dict[str, Tuple[float, dict]] = {}
@@ -165,7 +180,7 @@ async def get_or_create_appointment_invoice(
         "discount_paise": 0,
         "paid_paise": 0,
         "patient_snapshot": patient_snapshot,
-        "created_by": getattr(actor, "user_id", None),
+        "created_by": actor_uuid(actor),
     }
     # unscoped: insert_scoped_by_payload
     inv_ins = await sb(supabase.table("opd_invoices").insert(invoice_payload))
@@ -257,7 +272,7 @@ async def create_invoice(
         "notes": notes,
         "paid_paise": 0,
         "patient_snapshot": patient_snapshot,
-        "created_by": getattr(actor, "user_id", None),
+        "created_by": actor_uuid(actor),
     }
     # unscoped: insert_scoped_by_payload
     inv_ins = await sb(supabase.table("opd_invoices").insert(inv_payload))
@@ -412,7 +427,7 @@ async def issue_invoice(
     # Mark as issued (trigger opd_guard_invoice assigns year, seq, number, and status 'paid' if total == 0)
     issue_update = {
         "status": "issued",
-        "issued_by": getattr(actor, "user_id", None),
+        "issued_by": actor_uuid(actor),
         "issued_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -518,7 +533,7 @@ async def create_receipt(
         )
 
     # Cashier shift resolution
-    admin_id = getattr(actor, "user_id", None)
+    admin_id = _drawer_admin_id(actor)
     resolved_shift_id = None
     if shift_id:
         shift_res = await sb(
@@ -534,6 +549,10 @@ async def create_receipt(
         if target_shift.get("status") != "open" or target_shift.get("closed_at") is not None:
             raise HTTPException(status_code=409, detail="Target cashier shift is closed.")
         resolved_shift_id = str(target_shift["id"])
+    elif not admin_id:
+        # No staff drawer (super-admin): UPI/card settle outside the drawer; cash cannot.
+        if mode == "cash":
+            raise HTTPException(status_code=403, detail=_NO_DRAWER)
     else:
         shift_res = await sb(
             scoped_query("opd_cashier_shifts", clinic_id)
@@ -668,7 +687,9 @@ async def create_refund(
 
     # Counter refund in cash requires open shift
     shift_id = None
-    admin_id = getattr(actor, "user_id", None)
+    admin_id = _drawer_admin_id(actor)
+    if mode == "cash" and not admin_id:
+        raise HTTPException(status_code=403, detail=_NO_DRAWER)
     if mode == "cash":
         shift_res = await sb(
             scoped_query("opd_cashier_shifts", clinic_id)
@@ -752,7 +773,7 @@ async def void_invoice(
     updates = {
         "status": "void",
         "voided_at": datetime.now(timezone.utc).isoformat(),
-        "voided_by": getattr(actor, "user_id", None),
+        "voided_by": actor_uuid(actor),
         "void_reason": reason.strip(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -773,9 +794,9 @@ async def open_shift(
     actor: Any = None,
 ) -> dict:
     """Open a new cashier drawer shift."""
-    admin_id = getattr(actor, "user_id", None)
+    admin_id = _drawer_admin_id(actor)
     if not admin_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(status_code=403, detail=_NO_DRAWER)
 
     existing = await sb(
         scoped_query("opd_cashier_shifts", clinic_id)
@@ -806,7 +827,7 @@ async def get_current_shift(
     actor: Any,
 ) -> Optional[dict]:
     """Retrieve active open shift with live breakdown by payment mode."""
-    admin_id = getattr(actor, "user_id", None)
+    admin_id = _drawer_admin_id(actor)
     if not admin_id:
         return None
 
@@ -860,9 +881,9 @@ async def close_shift(
     actor: Any = None,
 ) -> dict:
     """Close cashier shift using the atomic RPC opd_close_shift."""
-    admin_id = getattr(actor, "user_id", None)
+    admin_id = _drawer_admin_id(actor)
     if not admin_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(status_code=403, detail=_NO_DRAWER)
 
     # Verify shift exists and belongs to caller
     shift_res = await sb(
@@ -1350,7 +1371,7 @@ async def resolve_payment_exception(
                    "resolution_note": (note or "").strip()[:300] or None}
 
     updates.update({
-        "resolved_by_admin_id": getattr(actor, "user_id", None),
+        "resolved_by_admin_id": actor_uuid(actor),
         "resolved_by_name": getattr(actor, "username", "Admin"),
         "resolved_at": datetime.now(timezone.utc).isoformat(),
     })

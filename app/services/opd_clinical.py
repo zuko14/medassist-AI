@@ -15,7 +15,7 @@ from fastapi import HTTPException, status
 
 from app.database import sb, scoped_query, supabase
 from app.services.tenant import get_clinic_by_id
-from app.utils.helpers import IST, today_ist
+from app.utils.helpers import IST, actor_uuid, as_uuid, today_ist
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ async def get_or_create_draft(
         "doctor_id": apt.get("doctor_id"),
         "version": 1,
         "status": "draft",
-        "created_by": actor_id,
+        "created_by": as_uuid(actor_id),
         "started_at": now_iso,
     }
 
@@ -303,7 +303,7 @@ async def save_vitals(
         "weight_kg": float(wt) if wt is not None else None,
         "height_cm": float(ht) if ht is not None else None,
         "vitals_recorded_at": now_iso,
-        "vitals_recorded_by": actor.get("user_id"),
+        "vitals_recorded_by": actor_uuid(actor),
         "vitals_recorded_by_name": actor.get("name") or actor.get("email"),
         "updated_at": now_iso,
     }
@@ -493,7 +493,7 @@ async def sign_encounter(
                 {
                     "p_clinic_id": clinic_id,
                     "p_encounter_id": encounter_id,
-                    "p_signer_admin_id": user.get("user_id"),
+                    "p_signer_admin_id": actor_uuid(user),
                     "p_signer_doctor_id": signer_doc_id,
                     "p_signer_snapshot": signer_snapshot,
                 },
@@ -604,7 +604,7 @@ async def amend_encounter(
         "diagnoses": encounter.get("diagnoses") or [],
         "advice": encounter.get("advice"),
         "follow_up_date": encounter.get("follow_up_date"),
-        "created_by": user.get("user_id"),
+        "created_by": actor_uuid(user),
         "started_at": now_iso,
     }
 
@@ -765,7 +765,7 @@ async def save_prescription_draft(
             "version": 1,
             "status": "draft",
             "general_instructions": draft.get("general_instructions"),
-            "created_by": actor.get("user_id"),
+            "created_by": actor_uuid(actor),
         }
         # unscoped: insert_scoped_by_payload
         ins_res = await sb(supabase.table("opd_prescriptions").insert(new_rx))
@@ -1021,7 +1021,7 @@ async def sign_prescription(
                 {
                     "p_clinic_id": clinic_id,
                     "p_rx_id": rx_id,
-                    "p_signer_admin_id": user.get("user_id"),
+                    "p_signer_admin_id": actor_uuid(user),
                     "p_signer_doctor_id": signer_doc_id,
                     "p_signer_snapshot": signer_snapshot,
                     "p_letterhead_snapshot": letterhead_snapshot,
@@ -1104,7 +1104,7 @@ async def amend_prescription(
         "supersedes_id": rx_id,
         "status": "draft",
         "general_instructions": rx.get("general_instructions"),
-        "created_by": user.get("user_id"),
+        "created_by": actor_uuid(user),
     }
 
     # unscoped: insert_scoped_by_payload

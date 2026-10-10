@@ -226,3 +226,24 @@ def generate_slots(start: time_type, end: time_type, duration_minutes: int) -> l
 
     return slots
 
+
+
+def as_uuid(value) -> Optional[str]:
+    """`value` as a canonical UUID string, else None.
+
+    Audit columns (created_by, issued_by, cashier_admin_id ...) are uuid-typed and
+    hold a clinic_admins id. The env / super-admin logins carry ids like
+    "super_admin_env" with no row behind them; written or filtered as-is they
+    fail the whole request (PostgREST 400 -> a 500 in the panel).
+    """
+    import uuid
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def actor_uuid(actor) -> Optional[str]:
+    """The acting staff account's id for a uuid audit column (None for env logins)."""
+    raw = actor.get("user_id") if isinstance(actor, dict) else getattr(actor, "user_id", None)
+    return as_uuid(raw)

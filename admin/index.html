@@ -16767,7 +16767,13 @@ async function performOpdPatientSearch() {
 function selectOpdPatientFromSearch(escapedJson) {
     try {
         const p = JSON.parse(escapedJson.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
-        setOpdSelectedPatient(p);
+        if (p.match_reason === 'legacy_record') {
+            // An imported record is not a registered patient yet: a token on its id would
+            // fail. Prefill registration so the desk takes consent and saves them first.
+            prefillOpdRegistration(p);
+        } else {
+            setOpdSelectedPatient(p);
+        }
         const box = document.getElementById('opdSearchResults');
         if (box) box.style.display = 'none';
     } catch (e) {
@@ -16800,6 +16806,21 @@ function clearSelectedOpdPatient() {
 
 function clearOpdPatientSearch() {
     clearSelectedOpdPatient();
+}
+
+function prefillOpdRegistration(p) {
+    clearSelectedOpdPatient();
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; };
+    set('f-opdPatName', p.name && p.name !== 'Unknown' ? p.name : '');
+    set('f-opdPatPhone', p.phone);
+    set('f-opdPatAge', p.age_years);
+    const g = document.getElementById('f-opdPatGender');
+    const gv = String(p.gender || '').toLowerCase();
+    const opt = g && [...g.options].find(o => o.value && (o.value === gv || o.value[0] === gv[0]));
+    if (opt) g.value = opt.value;
+    document.getElementById('f-opdPatName')?.focus();
+    msg('opdDeskMsg', 'Imported record found: details filled in. Take consent and save to register this patient.', false);
+    if (typeof checkOpdDuplicates === 'function') checkOpdDuplicates();
 }
 
 function showNewPatientForm() {
