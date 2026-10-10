@@ -69,6 +69,7 @@ from app.services.opd_billing import (
     get_catalog,
     get_collections_summary,
     get_current_shift,
+    get_doctor_earnings,
     get_invoice,
     get_or_create_appointment_invoice,
     issue_invoice,
@@ -1644,6 +1645,33 @@ async def get_daily_collections_summary(
 # ═══════════════════════════════════════════════════════════════════════════════
 # §3.8 OPERATIONAL ANALYTICS
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/my-earnings")
+async def get_my_earnings(
+    from_date: Optional[date] = Query(None, alias="from"),
+    to_date: Optional[date] = Query(None, alias="to"),
+    doctor_id: Optional[str] = Query(None),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Consultation fees billed and collected for one doctor.
+
+    Billing and OPD admins may name any doctor (a branch-pinned one sees that
+    branch's invoices only). Otherwise a doctor-linked login gets its own
+    figures, whatever doctor_id says. Nobody else may read a doctor's earnings.
+    """
+    scope, clinic = await _opd_scope(user, clinic_id, "OPD_CLINICAL", "OPD_BILLING", "OPD_ADMIN", live=False)
+    if doctor_id and _holds(user, "OPD_BILLING", "OPD_ADMIN"):
+        target, branch = doctor_id, _read_branch(user, None)
+    elif user.doctor_id:
+        target, branch = str(user.doctor_id), None
+    elif _holds(user, "OPD_BILLING", "OPD_ADMIN"):
+        raise HTTPException(status_code=422, detail="Choose a doctor.")
+    else:
+        raise HTTPException(status_code=403, detail="This login is not linked to a doctor.")
+    today = today_ist()
+    return await get_doctor_earnings(scope, target, from_date or today, to_date or today, branch_id=branch)
 
 
 @router.get("/analytics", response_model=OpdAnalyticsOut)

@@ -136,3 +136,87 @@ def test_read_branch_pins_staff():
     assert _doctor_only(_staff("DOCTOR", ["OPD_CLINICAL"], doctor_id="d1"))
     assert not _doctor_only(_staff("DOCTOR", ["OPD_CLINICAL", "OPD_FRONT_DESK"], doctor_id="d1"))
     assert not _doctor_only(_staff("STAFF", ["OPD_CLINICAL"]))
+
+
+# ─── 5. doctor consultation earnings ─────────────────────────────────────────
+
+
+def test_allocate_consultation_rules():
+    from app.services.opd_billing import allocate_consultation as a
+
+    assert a(50000, 50000, 0, 50000) == {"fee_paise": 50000, "collected_paise": 50000, "outstanding_paise": 0}
+    assert a(50000, 50000, 10000, 40000)["collected_paise"] == 40000      # discounted, paid in full
+    assert a(50000, 100000, 10000, 45000)["collected_paise"] == 22500     # shared invoice, half paid
+    assert a(50000, 50000, 0, 0)["outstanding_paise"] == 50000
+    for args in [(333, 1000, 1, 500), (1, 3, 1, 1), (99999, 100000, 7, 12345)]:
+        r = a(*args)
+        assert 0 <= r["collected_paise"] <= r["fee_paise"] <= args[0]
+        assert r["collected_paise"] + r["outstanding_paise"] == r["fee_paise"]
+
+
+def test_get_doctor_earnings_sums_only_this_doctors_consultations():
+    import datetime as dt
+
+    from app.services import opd_billing
+
+    q = MagicMock()
+    for m in ("select", "eq", "in_", "gte", "lte", "order", "range", "limit"):
+        getattr(q, m).return_value = q
+    invoices = [
+        {"id": "i1", "invoice_number": "INV-1", "status": "paid", "issued_at": "2026-10-10T05:00:00+00:00",
+         "subtotal_paise": 50000, "discount_paise": 0, "paid_paise": 50000, "patient_snapshot": {"name": "A"}},
+        {"id": "i2", "invoice_number": "INV-2", "status": "issued", "issued_at": "2026-10-10T06:00:00+00:00",
+         "subtotal_paise": 80000, "discount_paise": 0, "paid_paise": 0, "patient_snapshot": {"name": "B"}},
+        {"id": "i3", "invoice_number": "INV-3", "status": "paid", "issued_at": "2026-10-10T07:00:00+00:00",
+         "subtotal_paise": 30000, "discount_paise": 0, "paid_paise": 30000, "patient_snapshot": {"name": "C"}},
+    ]
+    items = [{"invoice_id": "i1", "line_total_paise": 50000}, {"invoice_id": "i2", "line_total_paise": 50000}]
+    sb = AsyncMock(side_effect=[MagicMock(data=[{"id": "d1", "name": "Dr X", "department": "GM"}]),
+                                MagicMock(data=invoices), MagicMock(data=items)])
+    with patch.object(opd_billing, "sb", sb), patch.object(opd_billing, "scoped_query", return_value=q):
+        out = asyncio.run(opd_billing.get_doctor_earnings("c1", "d1", dt.date(2026, 10, 10), dt.date(2026, 10, 10)))
+    assert out["totals"] == {"visits": 2, "fee_paise": 100000, "collected_paise": 50000, "outstanding_paise": 50000}
+    assert [r["invoice_number"] for r in out["rows"]] == ["INV-1", "INV-2"]   # i3 is another doctor's
+    assert out["rows"][1]["shared_invoice"] is True
+    eqs = [c.args for c in q.eq.call_args_list]
+    assert ("doctor_id", "d1") in eqs and ("item_type", "consultation") in eqs
+    statuses = [c.args for c in q.in_.call_args_list if c.args[0] == "status"]
+    assert statuses == [("status", ["issued", "partially_paid", "paid"])]   # drafts and voids excluded
+
+
+def test_get_doctor_earnings_rejects_bad_ranges():
+    import datetime as dt
+
+    from app.services import opd_billing
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(opd_billing.get_doctor_earnings("c1", "d1", dt.date(2026, 10, 10), dt.date(2026, 10, 9)))
+    assert e.value.status_code == 422
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(opd_billing.get_doctor_earnings("c1", "d1", dt.date(2026, 1, 1), dt.date(2026, 10, 9)))
+    assert e.value.status_code == 422
+
+
+@pytest.mark.parametrize("user,doctor_param,expect", [
+    (dict(staff_role="DOCTOR", perms=["OPD_CLINICAL"], doctor_id="d1"), "d2", ("d1", None)),   # own only
+    (dict(staff_role="CASHIER", perms=["OPD_BILLING"]), "d2", ("d2", None)),
+    (dict(staff_role="CASHIER", perms=["OPD_BILLING"], branch_id="B1"), "d2", ("d2", "B1")),
+    (dict(staff_role="CASHIER", perms=["OPD_BILLING"]), None, 422),
+    (dict(staff_role="STAFF", perms=["OPD_CLINICAL"]), "d2", 403),                            # no doctor link
+])
+def test_my_earnings_route_scoping(user, doctor_param, expect):
+    from app.routers import opd as opd_router
+
+    u = _staff(user["staff_role"], user["perms"], doctor_id=user.get("doctor_id"), branch_id=user.get("branch_id"))
+    earn = AsyncMock(return_value={"ok": True})
+    with patch.object(opd_router, "_opd_scope", AsyncMock(return_value=("c1", {"id": "c1"}))), \
+         patch.object(opd_router, "get_doctor_earnings", earn):
+        call = opd_router.get_my_earnings(from_date=None, to_date=None, doctor_id=doctor_param, clinic_id="c1", user=u)
+        if isinstance(expect, int):
+            with pytest.raises(HTTPException) as e:
+                asyncio.run(call)
+            assert e.value.status_code == expect
+        else:
+            asyncio.run(call)
+            args, kwargs = earn.call_args
+            assert (args[1], kwargs["branch_id"]) == expect

@@ -2012,6 +2012,9 @@
             <div class="nav-link" tabindex="0" data-page="opdworkspace" data-opd="clinical" style="display:none" onclick="go('opdworkspace',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span> Consultation
             </div>
+            <div class="nav-link" tabindex="0" data-page="opdearnings" data-opd="earnings" style="display:none" onclick="go('opdearnings',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2.5"></circle><path d="M6 12h.01M18 12h.01"></path></svg></span> <span id="opdEarningsNavLabel">Doctor Collections</span>
+            </div>
             <div class="nav-link" tabindex="0" data-page="opdbilling" data-opd="billing" style="display:none" onclick="go('opdbilling',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg></span> OPD Billing
             </div>
@@ -4896,6 +4899,52 @@
 </div>
 
         <!-- ═══ OPD OS: OPERATIONAL ANALYTICS & PERFORMANCE ═══ -->
+        <div id="pg-opdearnings" class="sec">
+            <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px;">
+                <div>
+                    <h2 id="opdEarnTitle">Consultation Collections</h2>
+                    <p>Consultation fees on invoices issued in the period, and how much of each has been paid.</p>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:4px;">
+                        <button type="button" class="btn btn-ghost btn-sm on" id="opdEarnPreset-today" onclick="setOpdEarnPreset('today')">Today</button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="opdEarnPreset-7d" onclick="setOpdEarnPreset('7d')">7 Days</button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="opdEarnPreset-month" onclick="setOpdEarnPreset('month')">This Month</button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <input type="date" id="opdEarnFrom" aria-label="From date" style="padding:6px 10px; font-size:0.82rem; height:34px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);" onchange="setOpdEarnPreset(null)">
+                        <span style="color:var(--text3); font-size:0.8rem;">to</span>
+                        <input type="date" id="opdEarnTo" aria-label="To date" style="padding:6px 10px; font-size:0.82rem; height:34px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);" onchange="setOpdEarnPreset(null)">
+                    </div>
+                    <select id="opdEarnDoctor" aria-label="Doctor" style="padding:6px 10px; font-size:0.82rem; height:34px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text); max-width:200px; display:none;" onchange="loadOpdEarningsData()"></select>
+                </div>
+            </div>
+            <div id="opdEarnMsg"></div>
+            <div class="stats" style="grid-template-columns:repeat(auto-fit, minmax(min(180px, 100%), 1fr)); margin-bottom:20px;">
+                <div class="stat"><div class="label">Consultations billed</div><div class="num" id="opdEarnVisits">—</div></div>
+                <div class="stat"><div class="label">Fees billed</div><div class="num" id="opdEarnFees">—</div></div>
+                <div class="stat"><div class="label">Collected</div><div class="num" id="opdEarnCollected" style="color:var(--green);">—</div></div>
+                <div class="stat"><div class="label">Outstanding</div><div class="num" id="opdEarnOutstanding" style="color:var(--amber);">—</div></div>
+            </div>
+            <div class="card">
+                <div class="tbl-wrap">
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead><tr style="text-align:left; border-bottom:1px solid var(--border);">
+                            <th style="padding:10px 12px;">Issued</th>
+                            <th style="padding:10px 12px;">Invoice</th>
+                            <th style="padding:10px 12px;">Patient</th>
+                            <th style="padding:10px 12px;">Status</th>
+                            <th style="padding:10px 12px; text-align:right;">Fee</th>
+                            <th style="padding:10px 12px; text-align:right;">Collected</th>
+                            <th style="padding:10px 12px; text-align:right;">Outstanding</th>
+                        </tr></thead>
+                        <tbody id="opdEarnBody"><tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text3);">Loading…</td></tr></tbody>
+                    </table>
+                </div>
+                <p class="muted" style="font-size:0.78rem; margin:12px 0 0;">Draft and void invoices are not counted. Payments and refunds are recorded per invoice, so on an invoice that also carries tests or other services (marked *), the payment and any invoice discount are shared out in proportion to the fee.</p>
+            </div>
+        </div>
+
         <div id="pg-opdanalytics" class="sec">
             <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px;">
                 <div>
@@ -6292,9 +6341,10 @@ function applyOpdRoleNav() {
     });
 }
 function firstVisibleNavPage() {
-    const el = Array.from(document.querySelectorAll('.nav-links .nav-link[data-page]'))
-        .find(n => n.style.display !== 'none');
-    return el ? el.dataset.page : null;
+    const visible = Array.from(document.querySelectorAll('.nav-links .nav-link[data-page]'))
+        .filter(n => n.style.display !== 'none').map(n => n.dataset.page);
+    // Each role's main screen first: consultation, counter, desk.
+    return ['opdworkspace', 'opdbilling', 'opddesk'].find(p => visible.includes(p)) || visible[0] || null;
 }
 
 // Branch-pinned logins work their own branch: its doctors (plus any doctor
@@ -6332,6 +6382,11 @@ const OPD_CAP = { admin: ['OPD_ADMIN'], front: ['OPD_FRONT_DESK'], clinical: ['O
 function opdCan(cap) {
     if (!myOpd) return false;
     if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
+    if (cap === 'earnings') {
+        const perms = myPermissions || [];
+        return perms.includes('OPD_ADMIN') || perms.includes('OPD_BILLING') ||
+            (!!myDoctorId && perms.includes('OPD_CLINICAL'));
+    }
     return (OPD_CAP[cap] || []).some(p => (myPermissions || []).includes(p));
 }
 
@@ -6361,6 +6416,15 @@ function applyOpdGates() {
         const show = caps.some(opdCan) && (live || el.dataset.page === 'opdsetup');
         el.style.display = show ? '' : 'none';
     });
+    const earnLabel = document.getElementById('opdEarningsNavLabel');
+    if (earnLabel) earnLabel.textContent = opdEarnPicksDoctor() ? 'Doctor Collections' : 'My Collections';
+}
+
+// Billing / OPD admins choose a doctor; a doctor-linked login sees its own.
+function opdEarnPicksDoctor() {
+    if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
+    const perms = myPermissions || [];
+    return perms.includes('OPD_ADMIN') || perms.includes('OPD_BILLING');
 }
 
 async function login() {
@@ -7921,7 +7985,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdanalytics: loadOpdAnalytics };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics };
     if (loaders[page]) loaders[page]();
 }
 
@@ -19025,6 +19089,81 @@ function formatOpdCurrency(paise) {
     if (paise === null || paise === undefined || isNaN(paise)) return '₹0.00';
     const rupees = Number(paise) / 100;
     return '₹' + rupees.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ── Doctor consultation collections ─────────────────────────────────────────
+function opdEarnRupees(paise) {
+    return '₹' + (Number(paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function loadOpdEarnings() {
+    const picks = opdEarnPicksDoctor();
+    const sel = document.getElementById('opdEarnDoctor');
+    document.getElementById('opdEarnTitle').textContent = picks ? 'Doctor Consultation Collections' : 'My Consultation Collections';
+    if (sel) {
+        sel.style.display = picks ? '' : 'none';
+        if (picks && !sel.options.length) {
+            try {
+                if (!doctorCache || doctorCache.length === 0) doctorCache = await api('/admin/doctors') || [];
+            } catch (e) { /* the select stays empty and the message below explains */ }
+            const docs = opdScopedDoctors();
+            sel.innerHTML = docs.map(d => `<option value="${esc(d.id)}">${esc(d.name)}${d.department ? ' (' + esc(d.department) + ')' : ''}</option>`).join('');
+            if (myDoctorId && docs.some(d => String(d.id) === String(myDoctorId))) sel.value = myDoctorId;
+        }
+    }
+    const fromEl = document.getElementById('opdEarnFrom');
+    if (fromEl && !fromEl.value) { setOpdEarnPreset('today'); return; }
+    loadOpdEarningsData();
+}
+
+function setOpdEarnPreset(preset) {
+    ['today', '7d', 'month'].forEach(p => document.getElementById('opdEarnPreset-' + p)?.classList.toggle('on', p === preset));
+    const fromEl = document.getElementById('opdEarnFrom');
+    const toEl = document.getElementById('opdEarnTo');
+    if (preset === 'today') { fromEl.value = _getOpdIstDateStr(0); toEl.value = _getOpdIstDateStr(0); }
+    else if (preset === '7d') { fromEl.value = _getOpdIstDateStr(-6); toEl.value = _getOpdIstDateStr(0); }
+    else if (preset === 'month') { const t = _getOpdIstDateStr(0); fromEl.value = t.slice(0, 8) + '01'; toEl.value = t; }
+    loadOpdEarningsData();
+}
+
+async function loadOpdEarningsData() {
+    const from = document.getElementById('opdEarnFrom').value;
+    const to = document.getElementById('opdEarnTo').value;
+    const body = document.getElementById('opdEarnBody');
+    document.getElementById('opdEarnMsg').innerHTML = '';
+    if (!from || !to) return;
+    if (to < from) { msg('opdEarnMsg', "'To' must be on or after 'From'.", true); return; }
+    let url = `/admin/opd/my-earnings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    if (opdEarnPicksDoctor()) {
+        const doc = document.getElementById('opdEarnDoctor').value;
+        if (!doc) { msg('opdEarnMsg', 'No doctor to show. Add a doctor first.', true); body.innerHTML = ''; return; }
+        url += `&doctor_id=${encodeURIComponent(doc)}`;
+    }
+    body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px;"><div class="spin"></div></td></tr>';
+    try {
+        const d = await api(url);
+        const t = d.totals || {};
+        document.getElementById('opdEarnVisits').textContent = t.visits ?? 0;
+        document.getElementById('opdEarnFees').textContent = opdEarnRupees(t.fee_paise);
+        document.getElementById('opdEarnCollected').textContent = opdEarnRupees(t.collected_paise);
+        document.getElementById('opdEarnOutstanding').textContent = opdEarnRupees(t.outstanding_paise);
+        const rows = d.rows || [];
+        const label = { issued: 'Unpaid', partially_paid: 'Part paid', paid: 'Paid' };
+        const cls = { issued: 'badge-cancelled', partially_paid: 'badge-pending', paid: 'badge-confirmed' };
+        body.innerHTML = rows.length ? rows.map(r => `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:10px 12px; white-space:nowrap;">${esc(r.issued_at ? fmtBookedAt(r.issued_at) : '—')}</td>
+                <td style="padding:10px 12px; font-family:monospace;">${esc(r.invoice_number || '—')}${r.shared_invoice ? ' *' : ''}</td>
+                <td style="padding:10px 12px;">${esc(r.patient_name)}</td>
+                <td style="padding:10px 12px;"><span class="badge ${cls[r.status] || ''}">${esc(label[r.status] || r.status)}</span></td>
+                <td style="padding:10px 12px; text-align:right;">${opdEarnRupees(r.fee_paise)}</td>
+                <td style="padding:10px 12px; text-align:right;">${opdEarnRupees(r.collected_paise)}</td>
+                <td style="padding:10px 12px; text-align:right;">${opdEarnRupees(r.outstanding_paise)}</td>
+            </tr>`).join('')
+            : '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text3);">No consultation invoices in this period.</td></tr>';
+    } catch (e) {
+        body.innerHTML = '';
+        msg('opdEarnMsg', 'Could not load collections: ' + e.message, true);
+    }
 }
 
 function setOpdAnalyticsPreset(preset, btn) {

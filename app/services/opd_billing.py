@@ -1481,3 +1481,145 @@ def _is_opd_admin(actor: Any) -> bool:
         return True
     perms = getattr(actor, "permissions", []) or []
     return "OPD_ADMIN" in perms
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCTOR CONSULTATION EARNINGS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_EARNINGS_STATUSES = ("issued", "partially_paid", "paid")
+_EARNINGS_MAX_DAYS = 92
+_EARNINGS_MAX_INVOICES = 20000
+
+
+def _ratio(amount: int, part: int, whole: int) -> int:
+    """amount * part / whole, rounded half up, in exact integers."""
+    if whole <= 0 or part <= 0 or amount <= 0:
+        return 0
+    return (amount * part * 2 + whole) // (whole * 2)
+
+
+def allocate_consultation(consult_paise: int, subtotal_paise: int, discount_paise: int, paid_paise: int) -> dict:
+    """A doctor's share of one invoice.
+
+    Receipts are recorded per invoice, not per line, so money is allocated to
+    the doctor's consultation lines in proportion to their value: the
+    invoice-level discount the same way, then what was paid (refunds already
+    netted out by the receipt trigger) over what was due. On a fully paid
+    invoice the share collected equals the fee net of its discount share;
+    on a consultation-only invoice every figure is exact.
+    """
+    consult = max(0, int(consult_paise or 0))
+    subtotal = max(0, int(subtotal_paise or 0))
+    discount = max(0, int(discount_paise or 0))
+    total = max(0, subtotal - discount)
+    paid = min(max(0, int(paid_paise or 0)), total)
+    net = consult - _ratio(discount, consult, subtotal)
+    collected = net if paid == total else _ratio(paid, net, total)
+    return {"fee_paise": net, "collected_paise": collected, "outstanding_paise": net - collected}
+
+
+async def get_doctor_earnings(
+    clinic_id: str,
+    doctor_id: str,
+    from_date: date,
+    to_date: date,
+    branch_id: Optional[str] = None,
+) -> dict:
+    """Consultation fees billed to one doctor on invoices issued in [from, to]
+    (IST days), and how much of each has been collected. Drafts are not billed
+    and void invoices are excluded."""
+    if to_date < from_date:
+        raise HTTPException(status_code=422, detail="'to' must be on or after 'from'.")
+    if (to_date - from_date).days + 1 > _EARNINGS_MAX_DAYS:
+        raise HTTPException(status_code=422, detail=f"Choose a range of at most {_EARNINGS_MAX_DAYS} days.")
+
+    doc_res = await sb(
+        scoped_query("doctors", clinic_id).select("id, name, department").eq("id", doctor_id).limit(1)
+    )
+    if not doc_res.data:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    doctor = doc_res.data[0]
+
+    start_dt = f"{from_date.isoformat()}T00:00:00+05:30"
+    end_dt = f"{to_date.isoformat()}T23:59:59.999999+05:30"
+    page = 1000
+    invoices: list[dict] = []
+    offset = 0
+    while True:
+        q = (
+            scoped_query("opd_invoices", clinic_id)
+            .select("id, invoice_number, status, issued_at, subtotal_paise, discount_paise, "
+                    "paid_paise, patient_snapshot, branch_id")
+            .in_("status", list(_EARNINGS_STATUSES))
+            .gte("issued_at", start_dt)
+            .lte("issued_at", end_dt)
+        )
+        if branch_id:
+            q = q.eq("branch_id", branch_id)
+        batch = (await sb(q.order("issued_at", desc=True).order("id").range(offset, offset + page - 1))).data or []
+        invoices.extend(batch)
+        if len(invoices) > _EARNINGS_MAX_INVOICES:
+            raise HTTPException(status_code=422, detail="Too many invoices in this range. Please narrow the dates.")
+        if len(batch) < page:
+            break
+        offset += page
+
+    consult_by_invoice: dict[str, int] = {}
+    ids = [str(i["id"]) for i in invoices]
+    for k in range(0, len(ids), 150):
+        items = (await sb(
+            scoped_query("opd_invoice_items", clinic_id)
+            .select("invoice_id, line_total_paise")
+            .eq("doctor_id", doctor_id)
+            .eq("item_type", "consultation")
+            .in_("invoice_id", ids[k:k + 150])
+        )).data or []
+        for it in items:
+            iid = str(it["invoice_id"])
+            consult_by_invoice[iid] = consult_by_invoice.get(iid, 0) + int(it.get("line_total_paise") or 0)
+
+    rows = []
+    totals = {"visits": 0, "fee_paise": 0, "collected_paise": 0, "outstanding_paise": 0}
+    for inv in invoices:
+        consult = consult_by_invoice.get(str(inv["id"]))
+        if consult is None:
+            continue
+        share = allocate_consultation(consult, inv.get("subtotal_paise"), inv.get("discount_paise"), inv.get("paid_paise"))
+        rows.append({
+            "invoice_id": str(inv["id"]),
+            "invoice_number": inv.get("invoice_number"),
+            "issued_at": inv.get("issued_at"),
+            "status": inv.get("status"),
+            "patient_name": (inv.get("patient_snapshot") or {}).get("name") or "Patient",
+            "shared_invoice": int(inv.get("subtotal_paise") or 0) != consult,
+            **share,
+        })
+        totals["visits"] += 1
+        for key in ("fee_paise", "collected_paise", "outstanding_paise"):
+            totals[key] += share[key]
+
+    return {
+        "doctor": {"id": str(doctor["id"]), "name": doctor.get("name"), "department": doctor.get("department")},
+        "from": from_date.isoformat(),
+        "to": to_date.isoformat(),
+        "totals": totals,
+        "rows": rows,
+    }
+
+
+if __name__ == "__main__":
+    a = allocate_consultation
+    assert a(50000, 50000, 0, 50000) == {"fee_paise": 50000, "collected_paise": 50000, "outstanding_paise": 0}
+    assert a(50000, 50000, 0, 0)["outstanding_paise"] == 50000
+    assert a(50000, 50000, 10000, 40000) == {"fee_paise": 40000, "collected_paise": 40000, "outstanding_paise": 0}
+    assert a(50000, 50000, 0, 20000)["collected_paise"] == 20000
+    # 500 consult + 500 lab, 100 discount, fully paid: 450 to the doctor.
+    assert a(50000, 100000, 10000, 90000) == {"fee_paise": 45000, "collected_paise": 45000, "outstanding_paise": 0}
+    # same, half paid
+    assert a(50000, 100000, 10000, 45000)["collected_paise"] == 22500
+    # odd split: 333 of 1000, 1 paisa discount; shares never exceed the fee
+    s = a(333, 1000, 1, 500)
+    assert 0 <= s["collected_paise"] <= s["fee_paise"] <= 333
+    assert a(0, 0, 0, 0) == {"fee_paise": 0, "collected_paise": 0, "outstanding_paise": 0}
+    print("ok")
