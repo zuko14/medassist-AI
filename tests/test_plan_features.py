@@ -69,3 +69,9 @@ def test_lab_test_booking_always_implies_razorpay_payments():
             assert "payments_razorpay" in features, (
                 f"plan '{plan}' books paid lab tests but lacks payments_razorpay"
             )
+
+
+def test_opd_enabled_in_opt_in_features_not_all_features():
+    from app.services.tenant import OPT_IN_FEATURES
+    assert "opd_enabled" in OPT_IN_FEATURES
+    assert "opd_enabled" not in ALL_FEATURES

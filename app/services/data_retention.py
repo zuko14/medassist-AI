@@ -23,9 +23,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from app.database import supabase
 from app.config import settings
-from app.database import sb  # T5.1: off-loop query execution
+from app.database import sb, scoped_query, supabase
 
 logger = logging.getLogger(__name__)
 
@@ -357,12 +356,11 @@ class DataRetentionService:
             logger.error(f"Prescriptions anonymization error: {e}")
             results["errors"].append(f"prescriptions: {e}")
 
-        # 4. Delete saved family members. They are pure PII (a name list the
-        # patient saved for quick booking), not clinical records, so nothing
-        # has to be retained. This used to update columns that do not exist
-        # ("name", "primary_patient_phone"), failed silently at debug level,
-        # and every family name survived erasure. Redacting instead would hit
-        # UNIQUE (clinic_id, primary_phone, full_name) for 2+ members.
+        # 4. Delete saved family members with no OPD records, redact those with OPD records.
+        # Once a family member has OPD records, NMC requires 7-year retention.
+        # Non-referenced rows are pure PII and deleted. Referenced rows are redacted
+        # in place with full_name = f"[REDACTED:{str(fm['id'])[:8]}]" so UNIQUE
+        # (clinic_id, primary_phone, full_name) is preserved.
         try:
             fam_res = await sb(
                 supabase.table("family_members")
@@ -371,9 +369,61 @@ class DataRetentionService:
                 .eq("primary_phone", phone)
             )
             results["family_members_deleted"] = len(fam_res.data or [])
-        except Exception as e:
-            logger.error(f"Family members erasure error: {e}")
-            results["errors"].append(f"family_members: {e}")
+        except Exception as del_err:
+            try:
+                fam_rows_res = await sb(
+                    supabase.table("family_members")
+                    .select("id")
+                    .eq("clinic_id", clinic_id)
+                    .eq("primary_phone", phone)
+                )
+                fam_rows = fam_rows_res.data or []
+                del_count = 0
+                for fm in fam_rows:
+                    fm_id = fm.get("id")
+                    if not fm_id:
+                        continue
+                    # Check for OPD references
+                    has_opd_ref = False
+                    for tbl in ("appointments", "opd_encounters", "opd_prescriptions", "opd_invoices"):
+                        try:
+                            ref = await sb(
+                                supabase.table(tbl)
+                                .select("id")
+                                .eq("clinic_id", clinic_id)
+                                .eq("family_member_id", fm_id)
+                                .limit(1)
+                            )
+                            if ref.data:
+                                has_opd_ref = True
+                                break
+                        except Exception:
+                            pass
+                    if has_opd_ref:
+                        # Redact in place
+                        redacted_name = f"[REDACTED:{str(fm_id)[:8]}]"
+                        await sb(
+                            supabase.table("family_members")
+                            .update({
+                                "full_name": redacted_name,
+                                "allergies": [],
+                                "allergies_status": "unknown",
+                            })
+                            .eq("clinic_id", clinic_id)
+                            .eq("id", fm_id)
+                        )
+                    else:
+                        await sb(
+                            supabase.table("family_members")
+                            .delete()
+                            .eq("clinic_id", clinic_id)
+                            .eq("id", fm_id)
+                        )
+                        del_count += 1
+                results["family_members_deleted"] = del_count
+            except Exception as e:
+                logger.error(f"Family members erasure error: {e}")
+                results["errors"].append(f"family_members: {e}")
 
         # 4b. Delete imported legacy records for this phone (migration 088).
         # They are a convenience copy of the clinic's OLD software's list — the
@@ -398,6 +448,14 @@ class DataRetentionService:
                     "name": "[REDACTED]",
                     "opted_in": False,
                     "data_consent": False,
+                    "address_line": None,
+                    "city": None,
+                    "pincode": None,
+                    "emergency_contact_name": None,
+                    "emergency_contact_phone": None,
+                    "emergency_contact_relation": None,
+                    "allergies": [],
+                    "allergies_status": "unknown",
                 }
             ).eq("clinic_id", clinic_id).eq("phone", phone))
         except Exception as e:

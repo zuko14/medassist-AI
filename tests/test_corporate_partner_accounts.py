@@ -145,6 +145,13 @@ def test_hosts_flags_partners(owner):
     assert [(h["id"], h["partner"], h["enabled"]) for h in hosts] == [(PARTNER, True, True), (TENANT, False, False)]
 
 
+def test_partner_accounts_cannot_enable_opd(owner):
+    with patch.object(platform, "sb", AsyncMock(return_value=MagicMock(data=[{"account_type": "corporate_partner", "plan": "diagstream"}]))):
+        r = client.patch(f"/platform/clinics/{PARTNER}/features", json={"feature": "opd_enabled", "enabled": True})
+    assert r.status_code == 400
+    assert "OPD module is only available to regular clinic/hospital tenants" in r.json()["detail"]
+
+
 # ═══════ every owner tenant listing skips partners ═══════
 
 # Functions that read ALL clinics to show, bill or message them as hospitals.

@@ -58,6 +58,12 @@ def get_security_sensitive_admin_routes():
 ALL_ADMIN_ROUTES = get_security_sensitive_admin_routes()
 
 
+def test_all_opd_routes_covered_by_adversarial_matrix():
+    """Ensure every /admin/opd route is present in ALL_ADMIN_ROUTES."""
+    opd_routes = [r for r in ALL_ADMIN_ROUTES if r[1].startswith("/admin/opd")]
+    assert len(opd_routes) >= 28, f"Expected all /admin/opd routes in adversarial matrix, found only {len(opd_routes)}"
+
+
 @pytest.mark.parametrize("method,path", ALL_ADMIN_ROUTES)
 def test_adversarial_cross_tenant_rejection_per_route(client, method, path):
     """Assert that a Clinic A user requesting Clinic B data is strictly denied (403/404/422)."""
@@ -101,11 +107,16 @@ def test_adversarial_cross_tenant_rejection_per_route(client, method, path):
             .replace("{failed_report_id}", dummy_uuid)
             .replace("{branch_id}", dummy_uuid)
             .replace("{notification_id}", dummy_uuid)
+            .replace("{patient_id}", dummy_uuid)
+            .replace("{encounter_id}", dummy_uuid)
+            .replace("{rx_id}", dummy_uuid)
+            .replace("{invoice_id}", dummy_uuid)
+            .replace("{shift_id}", dummy_uuid)
             .replace("{clinic_id}", clinic_b_id)
         )
 
         headers = {"Authorization": "Basic YWRtaW5fYTpzZWNyZXQ="}
-        params = {"clinic_id": clinic_b_id}
+        params = {"clinic_id": clinic_b_id, "from": "2026-10-01", "to": "2026-10-09"}
         json_body = {
             "clinic_id": clinic_b_id,
             "name": "Unauthorized Mutation",

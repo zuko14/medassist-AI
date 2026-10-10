@@ -166,8 +166,10 @@ def test_no_new_sync_db_helper_is_introduced():
 def test_all_api_helpers_share_one_error_path():
     html = _html()
     assert "async function apiFail(r)" in html
-    assert html.count("await apiFail(r)") == 5, (
-        "api, apiPost, apiPut, apiDel and apiRaw must all funnel failures through apiFail"
+    # 7 = api, apiPost, apiPut, apiPatch (OPD), apiDel, apiRaw + the OPD queue
+    # board's ETag poll, which needs raw fetch to see 304 but still fails via apiFail.
+    assert html.count("await apiFail(r)") == 7, (
+        "api, apiPost, apiPut, apiPatch, apiDel, apiRaw and the OPD queue poll must all funnel failures through apiFail"
     )
     assert "throw new Error(r.status)" not in html, (
         "A bare status code discards the server's explanation"

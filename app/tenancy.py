@@ -66,6 +66,13 @@ TENANT_OWNED_TABLES = frozenset({
     # Migration 098: AI voice receptionist
     "voice_numbers", "voice_calls", "voice_call_events", "voice_lexicon_entries",
     "voice_outbound_jobs", "voice_knowledge_entries",
+    # Migration 103: OPD OS Core (Phase 1). Every table carries clinic_id NOT NULL and
+    # UNIQUE (clinic_id, id); children reference parents through composite
+    # (clinic_id, x_id) FKs, so a cross-tenant reference fails in Postgres too.
+    "opd_encounters", "opd_prescriptions", "opd_prescription_items",
+    "opd_invoices", "opd_invoice_items", "opd_receipts", "opd_cashier_shifts",
+    # Migration 104: online payments not applied in full to an OPD invoice
+    "opd_payment_exceptions",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

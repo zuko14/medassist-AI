@@ -95,6 +95,14 @@ The Kriya AI persistence layer runs on **Supabase PostgreSQL 15+**. Schema modif
 | `callmedex_whatsapp_settings`| Subsystem | `id` (UUID) | - | CallMedex WABA credentials |
 | `_dup_lab_tests` | Temporary | `id` (UUID) | - | Migration 076 cleanup scratch table (deduplication) |
 | `_verification_results`| Temporary | `id` (UUID) | - | Schema verification run results |
+| `opd_encounters` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `patient_id`, `doctor_id`, `appointment_id` | Outpatient clinical encounter records with status lifecycle and locked signed state |
+| `opd_prescriptions` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `encounter_id`, `doctor_id`, `patient_id` | Digitally signed e-prescriptions with DSC cryptographic hash and amendment chain |
+| `opd_prescription_items` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `prescription_id` | Structured medication dosage line items, locked post-signature |
+| `opd_invoices` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `encounter_id`, `patient_id` | Sequential gapless outpatient bills (`INV-YYYY-XXXXX`), tax/discount, payment link |
+| `opd_invoice_items` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `invoice_id` | Itemized charges for consultations, lab tests, medications, procedures |
+| `opd_receipts` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `invoice_id`, `shift_id` | Append-only payment ledger entries & refunds (`RCT-YYYY-XXXXX`), payment modes |
+| `opd_payment_exceptions` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `invoice_id` | Migration 104. Online payment-link money not applied to an invoice (overpaid / invoice already paid / void). One row per gateway payment; open until refunded via gateway or marked settled; facts immutable, purge-only delete |
+| `opd_cashier_shifts` | Yes (`clinic_id`) | `id` (UUID) | `clinic_id`, `cashier_id` | Counter cashier cash register shifts, opening/closing float, declared cash, variance |
 
 ---
 
@@ -102,6 +110,16 @@ The Kriya AI persistence layer runs on **Supabase PostgreSQL 15+**. Schema modif
 
 ### 3.1 `appointments` (Core Operational Entity)
 - **Columns**: `id` (UUID PK), `clinic_id` (UUID NOT NULL), `patient_id` (UUID), `doctor_id` (UUID NULL for lab tests), `branch_id` (UUID), `lab_test_id` (UUID NULL for OPD), `appointment_date` (DATE NOT NULL), `appointment_time` (TIME NOT NULL), `status` (VARCHAR NOT NULL), `booking_ref` (VARCHAR NOT NULL), `payment_status` (VARCHAR DEFAULT 'pending'), `amount_paise` (INTEGER), `razorpay_payment_link_id` (VARCHAR), `payment_gateway` (TEXT NULL = razorpay, 'phonepe'; migration 100), `gateway_order_id` (TEXT, PhonePe orderId; migration 100), `queue_token` (VARCHAR), `followup_sent` (BOOLEAN DEFAULT FALSE), `created_at`, `updated_at`.
+- **OPD OS Extended Columns (Migrations 102 & 103)**:
+  - `booking_channel`: VARCHAR DEFAULT 'whatsapp' (`'whatsapp'`, `'voice'`, `'front_desk'`, `'web'`). Tracks booking ingress point for analytics.
+  - `is_walk_in`: BOOLEAN DEFAULT FALSE. Walk-in consultations are excluded from doctor schedule slot uniqueness constraints, reminders, and leave cancellation sweeps.
+  - `token_number`: INTEGER. Sequential daily token number assigned upon arrival or walk-in registration.
+  - `queue_status`: VARCHAR (`'waiting'`, `'in_consultation'`, `'billing'`, `'completed'`, `'cancelled'`). Enforced by CHECK constraint `appointments_queue_status_check`.
+  - `arrived_at`: TIMESTAMPTZ. Timestamp when patient arrived at clinic.
+  - `checked_in_at`: TIMESTAMPTZ. Timestamp when token was issued and patient joined live queue.
+  - `triage_level`: VARCHAR (`'standard'`, `'priority'`, `'emergency'`).
+  - `vital_signs`: JSONB. Temperature, pulse, BP, SpO2, weight, height, BMI.
+  - `queue_timeline`: JSONB. Detailed timestamp audit log of queue state transitions (`registered`, `waiting`, `in_consultation`, `billing`, `completed`, `cancelled`).
 - **Status Lifecycle States**:
   - `pending_payment`: Held for 10 minutes awaiting online payment.
   - `pending_review`: Held awaiting staff review.
@@ -111,7 +129,7 @@ The Kriya AI persistence layer runs on **Supabase PostgreSQL 15+**. Schema modif
 - **Constraints**:
   - `chk_appointments_status`: `status IN ('pending_payment', 'pending_review', 'confirmed', 'completed', 'cancelled')`
   - Home sample collection (Migration 097): `collection_mode` (`'centre'` default | `'home'`), `collection_slot` ("07:00-08:00"), `collection_address`, `collection_landmark` (WhatsApp pin label), `collection_lat/lng`, `collection_contact_phone`, `home_collection_fee_paise` (already included in `amount_paise`), `phlebotomist_id` (FK `clinic_admins`, ON DELETE SET NULL), `collection_status` (`unassigned`/`assigned`/`en_route`/`collected`/`delivered`/`failed`), `collection_status_at`, `collection_notes`. CHECK `appointments_home_collection_complete`: a home row must be `booking_type='lab_test'` with slot, status, address, contact and coordinates — except a DPDP-erased row (`collection_address='[REDACTED]'`, coordinates NULL). `clinic_admins` gains `full_name`, `phone` (required for `staff_role='PHLEBOTOMIST'`, enforced in the API). Migration 101 adds `clinic_admins.off_dates DATE[] NOT NULL DEFAULT '{}'`: a phlebotomist's leave days (past dates pruned on every write).
-  - Unique Slot Invariant (Migration 064): `idx_appointments_slot_unique` enforces unique `(clinic_id, doctor_id, appointment_date, appointment_time)` WHERE `status IN ('confirmed', 'pending_payment', 'pending_review')`. This prevents double-booking at the database level!
+  - Unique Slot Invariant (Migration 064 / 103): `idx_appointments_slot_unique` enforces unique `(clinic_id, doctor_id, appointment_date, appointment_time)` WHERE `status IN ('confirmed', 'pending_payment', 'pending_review') AND is_walk_in = false`. Prevents double-booking scheduled slots while allowing walk-ins to run concurrently without slot collisions!
 
 ### 3.2 `lab_reports` (Diagnostic Ingestion Entity)
 - **Columns**: `id` (UUID PK), `clinic_id` (UUID NOT NULL), `patient_id` (UUID), `patient_phone` (VARCHAR NOT NULL), `patient_name` (VARCHAR), `test_name` (VARCHAR), `file_path` (VARCHAR), `report_date` (DATE), `delivery_status` (VARCHAR NOT NULL), `whatsapp_message_id` (VARCHAR), `ai_summary` (TEXT), `match_source` (VARCHAR), `retry_count` (INTEGER DEFAULT 0), `created_at`.

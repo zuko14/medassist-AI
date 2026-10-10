@@ -159,6 +159,16 @@ class PhonePeError(RuntimeError):
 _phonepe_tokens: dict[tuple, tuple[str, float]] = {}
 
 
+def _opd_invoice_id_from_order(merchant_order_id: str) -> Optional[str]:
+    """OPDINV-<32 hex>-<epoch> -> invoice UUID. Older ids (24 hex) return None
+    and settle by payment_link_id instead."""
+    part = merchant_order_id[len("OPDINV-"):].split("-")[0]
+    try:
+        return str(uuid.UUID(hex=part))
+    except ValueError:
+        return None
+
+
 class PaymentService:
     """Razorpay payment integration for appointment booking."""
 
@@ -199,6 +209,7 @@ class PaymentService:
         treatment_id: Optional[str] = None,
         treatment_name: Optional[str] = None,
         home_collection: Optional[dict] = None,
+        booking_channel: Optional[str] = "whatsapp",
     ) -> dict:
         """Create a pending_payment booking and a Razorpay order.
 
@@ -300,6 +311,7 @@ class PaymentService:
             "hold_expires_at": hold_expires_at,
             "booking_ref": booking_ref,
             "booking_type": booking_type,
+            "booking_channel": booking_channel or "whatsapp",
         }
         if doctor_id:
             booking_data["doctor_id"] = doctor_id
@@ -563,6 +575,27 @@ class PaymentService:
         if not payment_id:
             logger.error("Razorpay webhook: missing payment_id")
             return {"status": "error", "code": 400, "reason": "missing_fields"}
+
+        # First-branch OPD settlement (Phase 1.4). create_opd_payment_link stamps every
+        # OPD link with these markers, so booking webhooks pay no extra query here.
+        ref_id = str(payment_link_entity.get("reference_id") or "")
+        opd_invoice_id = notes.get("opd_invoice_id")
+        is_opd = bool(
+            opd_invoice_id
+            or notes.get("type") == "opd_invoice"
+            or ref_id.startswith("OPDINV-")
+        )
+        if is_opd:
+            from app.services.opd_billing import settle_opd_payment_link
+            settle_res = await settle_opd_payment_link(
+                clinic_id=clinic_id,
+                gateway="razorpay",
+                payment_id=payment_id,
+                amount_paid=amount_paid or 0,
+                payment_link_id=payment_link_id,
+                opd_invoice_id=opd_invoice_id,
+            )
+            return {"status": "ok", "code": 200, "opd_settled": True, "detail": settle_res}
 
         booking_ref = (
             notes.get("booking_ref")
@@ -2111,6 +2144,101 @@ class PaymentService:
                 )
                 raise RuntimeError(f"Razorpay error ({e.response.status_code}): {err_text}") from e
 
+    async def create_opd_payment_link(
+        self,
+        clinic: dict,
+        invoice: dict,
+        patient: dict,
+        amount_paise: int,
+    ) -> dict:
+        """Create an online payment link for an OPD invoice (Phase 1.4)."""
+        clinic_id = str(clinic["id"])
+        invoice_id = str(invoice["id"])
+        invoice_num = invoice.get("invoice_number") or f"INV-{invoice_id[:8]}"
+        pat_name = (patient or {}).get("name") or "Patient"
+        pat_phone = (patient or {}).get("phone") or ""
+
+        gw = active_gateway(clinic)
+        if gw == "phonepe":
+            # Unique per link (gateways refuse a reused id) and carries the full
+            # invoice id, so a payment on an older link still settles.
+            merchant_order_id = f"OPDINV-{invoice_id.replace('-', '')}-{int(time.time())}"
+            order = await self._phonepe_call(
+                get_phonepe_creds(clinic),
+                "POST",
+                "/checkout/v2/pay",
+                {
+                    "merchantOrderId": merchant_order_id,
+                    "amount": amount_paise,
+                    "expireAfter": 86400,
+                    "metaInfo": {"udf1": invoice_num},
+                    "paymentFlow": {
+                        "type": "PG_CHECKOUT",
+                        "merchantUrls": {"redirectUrl": self._phonepe_redirect_url(clinic)},
+                    },
+                },
+            )
+            link_url = order.get("redirectUrl")
+            link_id = merchant_order_id
+        else:
+            gw = "razorpay"
+            key_id, key_secret, _ = get_razorpay_creds(clinic)
+            expire_by = int(time.time()) + (24 * 3600)  # 24 hours
+            ref_id = f"OPDINV-{invoice_id[:20]}-{int(time.time())}"  # Razorpay refuses a reused reference_id
+            link_data = {
+                "amount": amount_paise,
+                "currency": "INR",
+                "accept_partial": False,
+                "expire_by": expire_by,
+                "description": f"OPD Invoice {invoice_num}",
+                "customer": {
+                    "name": pat_name,
+                    "contact": pat_phone,
+                },
+                "notify": {"sms": False, "email": False},
+                "reference_id": ref_id,
+                "notes": {
+                    "opd_invoice_id": invoice_id,
+                    "invoice_id": invoice_id,
+                    "clinic_id": clinic_id,
+                    "type": "opd_invoice",
+                },
+            }
+            async with httpx.AsyncClient() as client:
+                res = await client.post(
+                    f"{self._razorpay_base}/payment_links",
+                    json=link_data,
+                    auth=(key_id, key_secret),
+                    timeout=15.0,
+                )
+                res.raise_for_status()
+                data = res.json()
+                link_id = data.get("id")
+                link_url = data.get("short_url") or data.get("url")
+
+        # Persist payment link details on opd_invoices
+        updates = {
+            "payment_link_gateway": gw,
+            "payment_link_id": link_id,
+            "payment_link_url": link_url,
+            "payment_link_amount_paise": amount_paise,
+            "payment_link_created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await sb(
+            supabase.table("opd_invoices")
+            .update(updates)
+            .eq("clinic_id", clinic_id)
+            .eq("id", invoice_id)
+        )
+
+        return {
+            "url": link_url,
+            "gateway": gw,
+            "amount_paise": amount_paise,
+            "payment_link_id": link_id,
+        }
+
     async def _check_razorpay_order_status(
         self,
         order_id: str,
@@ -2529,6 +2657,25 @@ class PaymentService:
             return {"status": "ignored", "code": 200}
 
         merchant_order_id = str(body.get("merchantOrderId") or "")
+        if merchant_order_id.startswith("OPDINV-"):
+            st = await self._check_phonepe_payment(clinic, merchant_order_id)
+            if st.get("status") == "unknown":
+                return {"status": "error", "code": 503, "reason": "status_check_failed"}
+            if st.get("status") != "paid":
+                return {"status": "ignored", "code": 200, "reason": f"order_{st.get('status')}"}
+            payment_id = st.get("transaction_id") or merchant_order_id
+            amount_paid = st.get("amount") or int(body.get("amount", 0))
+            from app.services.opd_billing import settle_opd_payment_link
+            settle_res = await settle_opd_payment_link(
+                clinic_id=clinic_id,
+                gateway="phonepe",
+                payment_id=payment_id,
+                amount_paid=amount_paid,
+                payment_link_id=merchant_order_id,
+                opd_invoice_id=_opd_invoice_id_from_order(merchant_order_id),
+            )
+            return {"status": "ok", "code": 200, "opd_settled": True, "detail": settle_res}
+
         try:
             uuid.UUID(merchant_order_id)
         except ValueError:

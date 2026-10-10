@@ -21,3 +21,5 @@ pdf2image>=1.17.0,<2.0
 psycopg2-binary>=2.9,<3
 pytest-timeout>=2.3.1
 openpyxl>=3.1.0,<4.0
+fpdf2>=2.7.9,<3.0
+uharfbuzz>=0.39.0,<1.0

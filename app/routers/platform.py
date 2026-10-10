@@ -33,7 +33,7 @@ from app.services.subscription import (
 )
 from app.services.tenant import invalidate_branch_cache, invalidate_tenant_cache
 from app.utils.security import login_rate_limiter
-from app.database import sb  # T5.1: off-loop query execution
+from app.database import sb, scoped_query  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -701,7 +701,7 @@ async def get_platform_clinics_leaderboard(
             await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, is_active, created_at, "
                     "daily_report_limit, subscription_start_date, subscription_end_date, "
-                    "grace_period_days, subscription_status, last_renewed_at")
+                    "grace_period_days, subscription_status, last_renewed_at, features, opd_state")
             .eq("account_type", "tenant"))
         )
         clinics = clinics_res.data or []
@@ -790,6 +790,9 @@ async def get_platform_clinics_leaderboard(
                 "patients_count": patients_count,
                 "revenue_inr_30d": confirmed_revenue_inr,
                 "last_activity": last_activity,
+                "opd_enabled": bool((c.get("features") or {}).get("opd_enabled", False)),
+                "opd_state": c.get("opd_state") or ("READY" if (c.get("features") or {}).get("opd_enabled") else "DISABLED"),
+                "features": c.get("features") or {},
             }
 
         # Run clinic metric queries concurrently via asyncio.gather
@@ -829,7 +832,8 @@ async def get_platform_clinic_detail(
             await sb(supabase.table("clinics")
             .select("id, name, whatsapp_number, plan, features, is_active, created_at, "
                     "daily_report_limit, subscription_start_date, subscription_end_date, "
-                    "grace_period_days, subscription_status, last_renewed_at")
+                    "grace_period_days, subscription_status, last_renewed_at, "
+                    "opd_state, opd_settings, account_type")
             .eq("id", clinic_id))
         )
         if not clinic_res.data:
@@ -862,6 +866,7 @@ class ClinicFeatureOverride(BaseModel):
 
     feature: str
     enabled: Optional[bool] = None
+    confirm_disable: bool = False
 
 
 @router.patch("/clinics/{clinic_id}/features")
@@ -917,10 +922,53 @@ async def update_clinic_feature(
     else:
         features[body.feature] = body.enabled
 
+    clinic_update_fields = {"features": features}
+
+    if body.feature == "opd_enabled":
+        from app.services.tenant import opd_eligible
+        if body.enabled:
+            if not opd_eligible(clinic_res.data[0]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="The OPD module is only available to regular clinic/hospital tenants with consultation booking enabled.",
+                )
+            from app.services import opd
+            await opd.provision_defaults(clinic_id)
+            clinic_full = (
+                # unscoped: platform super-admin fetching OPD state for specified clinic_id
+                await sb(
+                    supabase.table("clinics")
+                    .select("opd_settings, opd_state")
+                    .eq("id", clinic_id)
+                    .limit(1)
+                )
+            )
+            full_row = clinic_full.data[0] if clinic_full.data else {}
+            settings_obj = full_row.get("opd_settings") or {}
+            if settings_obj.get("went_live_at"):
+                new_state = "READY"
+            else:
+                new_state = "CONFIGURING"
+            clinic_update_fields["opd_state"] = new_state
+        elif body.enabled is False:
+            from app.services import opd
+            preview = await opd.deactivation_preview(clinic_id)
+            if preview.get("blocking") and not body.confirm_disable:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Cannot disable OPD: active queue or draft records exist. Review preview or confirm disable.",
+                        "preview": preview,
+                    },
+                )
+            clinic_update_fields["opd_state"] = "DISABLED"
+        else:
+            clinic_update_fields["opd_state"] = "NOT_CONFIGURED"
+
     result = (
         # unscoped: platform super-admin updating feature flags for specified clinic_id
         await sb(supabase.table("clinics")
-        .update({"features": features})
+        .update(clinic_update_fields)
         .eq("id", clinic_id))
     )
     invalidate_tenant_cache()
@@ -935,6 +983,24 @@ async def update_clinic_feature(
     )
 
     return {"success": True, "clinic": result.data[0] if result.data else None}
+
+
+@router.get("/clinics/{clinic_id}/opd/deactivation-preview")
+async def get_opd_deactivation_preview(
+    clinic_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Owner inspection of in-flight OPD state before disabling the module."""
+    clinic_res = (
+        # unscoped: platform super-admin verifying clinic exists
+        await sb(
+            supabase.table("clinics").select("id").eq("id", clinic_id).limit(1)
+        )
+    )
+    if not clinic_res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    from app.services import opd
+    return await opd.deactivation_preview(clinic_id)
 
 
 class PlatformAIBudgetRequest(BaseModel):
@@ -2377,6 +2443,49 @@ async def get_clinic_deletion_preview(
     )
     active_admin_count = adm_res.count if adm_res.count is not None else len(adm_res.data or [])
 
+    # Migration 103: OPD counts and purge requirement check
+    opd_enc_res = (
+        # unscoped: platform super-admin previewing clinic deletion OPD count
+        await sb(supabase.table("opd_encounters")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id))
+    )
+    opd_rx_res = (
+        # unscoped: platform super-admin previewing clinic deletion OPD count
+        await sb(supabase.table("opd_prescriptions")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id))
+    )
+    opd_inv_res = (
+        # unscoped: platform super-admin previewing clinic deletion OPD count
+        await sb(supabase.table("opd_invoices")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id))
+    )
+    opd_rcpt_res = (
+        # unscoped: platform super-admin previewing clinic deletion OPD count
+        await sb(supabase.table("opd_receipts")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id))
+    )
+    def _coerce_opd_count(res) -> int:
+        c = getattr(res, "count", None)
+        if isinstance(c, int):
+            return c
+        d = getattr(res, "data", None)
+        if isinstance(d, list):
+            return len(d)
+        return 0
+
+    opd_counts = {
+        "encounters": _coerce_opd_count(opd_enc_res),
+        "prescriptions": _coerce_opd_count(opd_rx_res),
+        "invoices": _coerce_opd_count(opd_inv_res),
+        "receipts": _coerce_opd_count(opd_rcpt_res),
+    }
+    total_opd = sum(opd_counts.values())
+    opd_purge_required = total_opd > 0
+
     return {
         "success": True,
         "clinic": clinic,
@@ -2385,6 +2494,8 @@ async def get_clinic_deletion_preview(
             "appointment_count": appointment_count,
             "patient_count": patient_count,
             "active_admin_count": active_admin_count,
+            "opd_counts": opd_counts,
+            "opd_purge_required": opd_purge_required,
             "note": "Historical appointments and patients will remain immutably preserved for audit compliance.",
         },
     }
@@ -2394,6 +2505,7 @@ async def get_clinic_deletion_preview(
 async def delete_clinic(
     clinic_id: str,
     request: Request,
+    confirm_opd_purge: bool = False,
     owner: AdminUser = Depends(verify_owner_credentials),
 ):
     """Safe non-destructive soft-deletion of a clinic preserving historical compliance records."""
@@ -2412,6 +2524,39 @@ async def delete_clinic(
     clinic = clinic_res.data[0]
     if clinic.get("status") == "DELETED":
         raise HTTPException(status_code=400, detail="Clinic is already deleted")
+
+    # Migration 103: If OPD records exist, require confirm_opd_purge=true and call opd_purge_clinic
+    opd_enc_check = (
+        # unscoped: platform super-admin checking OPD encounters before deletion
+        await sb(supabase.table("opd_encounters")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .limit(1))
+    )
+    opd_inv_check = (
+        # unscoped: platform super-admin checking OPD invoices before deletion
+        await sb(supabase.table("opd_invoices")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .limit(1))
+    )
+    def _coerce_opd_check(res) -> int:
+        c = getattr(res, "count", None)
+        if isinstance(c, int):
+            return c
+        d = getattr(res, "data", None)
+        if isinstance(d, list):
+            return len(d)
+        return 0
+
+    has_opd_rows = bool(_coerce_opd_check(opd_enc_check) > 0 or _coerce_opd_check(opd_inv_check) > 0)
+    if has_opd_rows:
+        if not confirm_opd_purge:
+            raise HTTPException(
+                status_code=409,
+                detail="Clinic has signed OPD clinical or billing records. Confirm purge before deletion.",
+            )
+        await sb(supabase.rpc("opd_purge_clinic", {"p_clinic_id": clinic_id}))
 
     now_iso = datetime.now(timezone.utc).isoformat()
 

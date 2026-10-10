@@ -281,3 +281,75 @@ Provides standard HL7 FHIR R4 JSON payloads (`application/fhir+json`):
    - Meta WhatsApp inbound webhooks write to `processed_messages(message_id, clinic_id)` before queueing.
    - Razorpay webhooks verify signature and idempotently transition booking state from `pending` -> `confirmed`. Repeated webhooks do not generate duplicate appointments.
 4. **CORS Isolation**: In production, `allowed_origins` is empty (same-origin only).
+
+---
+
+## 11. OPD OS OPERATIONAL ENDPOINTS (`/admin/opd/*` and `/public/*`)
+
+Defined across [`app/routers/opd.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/routers/opd.py). Guarded by `_opd_scope(user, clinic_id, ...)` requiring `opd_enabled` and live status `READY` (except setup wizard routes).
+
+### Setup & Go-Live Wizard
+| Method | Path | Auth / Role | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/admin/opd/setup/status` | `OPD_ADMIN` | Returns checklist readiness items (14 operational checks) and effective state (`NOT_CONFIGURED`, `CONFIGURING`, `READY`, `DEGRADED`). |
+| `POST` | `/admin/opd/setup/step` | `OPD_ADMIN` | Updates state of setup steps in `opd_settings`. |
+| `POST` | `/admin/opd/setup/activate` | `OPD_ADMIN` | Transitions clinic OPD state to `READY` once all prerequisites pass. |
+| `POST` | `/admin/opd/setup/deactivate` | `OPD_ADMIN` | Deactivates live OPD workflow for the clinic. |
+| `POST` | `/admin/opd/setup/rotate-display-token`| `OPD_ADMIN`| Rotates public queue board cryptographic bearer token. |
+
+### Reception Desk & Patient Registry
+| Method | Path | Auth / Role | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/admin/opd/patients/search` | `OPD_FRONT_DESK` | Fast-search patients by name, phone, or MRN across primary patients and family members. |
+| `POST` | `/admin/opd/patients/duplicate-check` | `OPD_FRONT_DESK` | Demographics candidate check (name, phone, dob, age) to avoid duplicate registrations. |
+| `POST` | `/admin/opd/patients` | `OPD_FRONT_DESK` | Fast-track patient or family member registration with mandatory DPDP consent. Generates unique MRN. |
+| `GET` | `/admin/opd/patients/{patient_id}` | `OPD_FRONT_DESK` | Comprehensive patient profile, visit history, clinical summaries, and active invoices. |
+| `POST` | `/admin/opd/walk-in` | `OPD_FRONT_DESK` | Issues immediate walk-in token and queues patient without consuming pre-scheduled doctor slots. |
+| `POST` | `/admin/opd/arrive` | `OPD_FRONT_DESK` | Marks pre-booked patient as arrived, assigns token number, and moves to live queue. |
+
+### Live Queue Management
+| Method | Path | Auth / Role | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/admin/opd/queue` | `OPD_FRONT_DESK` / `OPD_CLINICAL` / `OPD_BILLING` | Live queue board with ETag caching, room tokens, and wait time estimates. |
+| `POST` | `/admin/opd/queue/call-next` | `OPD_CLINICAL` / `OPD_FRONT_DESK` | Calls next patient in queue into room; fires WhatsApp `token_called` alert. |
+| `POST` | `/admin/opd/queue/recall` | `OPD_CLINICAL` / `OPD_FRONT_DESK` | Re-announces active token in room. |
+| `POST` | `/admin/opd/queue/cancel` | `OPD_FRONT_DESK` | Cancels waiting queue entry with reason audit. |
+
+### Clinical Consultation Workspace
+| Method | Path | Auth / Role | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/admin/opd/encounters/{encounter_id}` | `OPD_CLINICAL` | Retrieves clinical encounter vitals, chief complaints, notes, and prescriptions. |
+| `POST` | `/admin/opd/encounters/{encounter_id}/vitals` | `OPD_CLINICAL` / `OPD_FRONT_DESK` | Records clinical vitals (BP, pulse, temp, SpO2, weight, height, BMI) with bounds checking. |
+| `POST` | `/admin/opd/encounters/{encounter_id}/notes` | `OPD_CLINICAL` | Autosaves SOAP clinical notes with optimistic concurrency (CAS version lock). |
+| `POST` | `/admin/opd/encounters/{encounter_id}/prescriptions` | `OPD_CLINICAL` | Creates or updates draft e-prescription with allergy class conflict checking. |
+| `POST` | `/admin/opd/prescriptions/{rx_id}/sign` | `OPD_CLINICAL` | Digitally signs e-prescription with SHA-256 DSC hash and physician council registration; permanently locks records. |
+| `POST` | `/admin/opd/prescriptions/{rx_id}/amend` | `OPD_CLINICAL` | Generates clinical amendment (v2) with superseded audit chain. |
+| `POST` | `/admin/opd/prescriptions/{rx_id}/resend` | `OPD_CLINICAL` | Retries WhatsApp PDF delivery for signed prescription. |
+| `GET` | `/admin/opd/prescriptions/{rx_id}/pdf` | `OPD_CLINICAL` | Generates A5 printable/shareable PDF prescription with clinic letterhead. |
+
+### Billing, Cash Register & Invoicing
+| Method | Path | Auth / Role | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/admin/opd/billing/queue` | `OPD_BILLING` | Queue of patients ready for settlement. |
+| `GET` | `/admin/opd/invoices/{invoice_id}` | `OPD_BILLING` | Invoice breakdown with line items and payment receipts. |
+| `POST` | `/admin/opd/invoices` | `OPD_BILLING` | Generates sequential gapless invoice (`INV-YYYY-XXXXX`). |
+| `POST` | `/admin/opd/invoices/{invoice_id}/items` | `OPD_BILLING` | Adds items to draft invoice. |
+| `POST` | `/admin/opd/invoices/{invoice_id}/receipts` | `OPD_BILLING` | Records counter cash/UPI/card payment receipt into active cashier shift. |
+| `POST` | `/admin/opd/invoices/{invoice_id}/payment-link` | `OPD_BILLING` | Dispatches Razorpay/PhonePe payment link to patient WhatsApp. |
+| `GET` | `/admin/opd/payment-exceptions` | `OPD_BILLING` | Online payments not applied in full (`?status=open|refunded|settled_offline|all`). |
+| `POST` | `/admin/opd/payment-exceptions/{id}/resolve` | `OPD_ADMIN` | `refund_gateway` (refunds the excess via the original gateway, idempotency key `opdx-<id>`) or `settled_offline` (note required). |
+| `POST` | `/admin/opd/invoices/{invoice_id}/refund` | `OPD_ADMIN` | Processes refund with reason logging. |
+| `GET` | `/admin/opd/shifts/current` | `OPD_BILLING` | Current cashier shift and expected cash drawer total. |
+| `POST` | `/admin/opd/shifts/open` | `OPD_BILLING` | Opens cashier shift with opening float declaration. |
+| `POST` | `/admin/opd/shifts/close` | `OPD_BILLING` | Closes shift with physical cash count discrepancy calculation. |
+
+### Operational Analytics
+| Method | Path | Auth / Role | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/admin/opd/analytics` | `OPD_ADMIN` | Aggregated footfall by channel and department, p50/p90 wait and consult times, collections reconciliation, peak hours 24-hr histogram (IST), and prescription delivery metrics. |
+
+### Public Display
+| Method | Path | Auth | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/public/queue-display/board` | Bearer Token / Query Param | Zero-PII live token call display for waiting hall TVs. |
+

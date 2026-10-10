@@ -79,15 +79,20 @@ def _test_is_uuid(value) -> bool:
     except (ValueError, TypeError, AttributeError):
         return False
 mock_db_module.is_uuid = _test_is_uuid
-sys.modules["app.database"] = mock_db_module
 
 
-
+# Installed only while this module's tests run. Installing it at import time
+# (collection) leaked the fake into every test that ran before this file in the
+# same session (test_opd_channels / test_opd_walkin_slots failed only in suite runs).
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_mock_db():
+    original = sys.modules.get("app.database")
+    sys.modules["app.database"] = mock_db_module
     yield
-    if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
-        del sys.modules["app.database"]
+    if original is not None:
+        sys.modules["app.database"] = original
+    else:
+        sys.modules.pop("app.database", None)
 
 
 WEBHOOK_SECRET = "test_webhook_secret_789"

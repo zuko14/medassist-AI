@@ -704,6 +704,7 @@ class SchedulerService:
                     # collection day at a centre with no doctor -- so it must
                     # not be swept up here.
                     .eq("booking_type", "consultation")
+                    .eq("is_walk_in", False)
                     .eq("reminder_24h_sent", False))
                 )
 
@@ -773,6 +774,7 @@ class SchedulerService:
                         # See send_24h_reminders: lab-test bookings carry no doctor
                         # and no slot time, so they are not reminder material.
                         .eq("booking_type", "consultation")
+                        .eq("is_walk_in", False)
                         .eq("reminder_2h_sent", False))
                     )
                     due.extend((day, a) for a in (res.data or []))
@@ -1244,7 +1246,8 @@ class SchedulerService:
                         .eq("clinic_id", leave.get("clinic_id", "default"))
                         .eq("doctor_name", leave["doctor_name"])
                         .eq("appointment_date", leave["leave_date"])
-                        .eq("status", "confirmed"))
+                        .eq("status", "confirmed")
+                        .eq("is_walk_in", False))
                     )
                     rows = affected.data or []
 

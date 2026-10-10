@@ -1002,6 +1002,7 @@ async def get_available_slots(
                 # (migration 064). Leaving it out offered a slot that always
                 # failed as slot_taken — and the retry re-offered the same slot.
                 .in_("status", ["confirmed", "pending_payment", "pending_review"])
+                .eq("is_walk_in", False)
                 .execute()
             )
             rows = res.data or []
@@ -1215,6 +1216,7 @@ async def book_appointment(clinic_id: str, data: dict) -> dict:
                 .eq("appointment_date", data["appointment_date"])
                 .eq("appointment_time", data["appointment_time"])
                 .eq("doctor_id", data["doctor_id"])
+                .eq("is_walk_in", False)
             )
 
             conflict = (
@@ -1462,7 +1464,11 @@ _NOT_CHECKABLE_IN = frozenset(
 )
 
 
-async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[dict]:
+async def check_in_appointment(
+    clinic_id: str,
+    appointment_id: str,
+    initial_queue_status: str = "waiting",
+) -> Optional[dict]:
     """Assign the next sequential token number for this appointment's queue.
 
     The queue key is doctor+date for a consultation, and branch+date for a
@@ -1474,7 +1480,7 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     conflict instead of allowing duplicate tokens under concurrent check-ins.
     """
     appt_result = (
-        await sb(scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, branch_id, appointment_date, token_number, queue_status, status")
+        await sb(scoped_query("appointments", clinic_id, "id, clinic_id, doctor_name, branch_id, appointment_date, token_number, queue_status, status, queue_timeline")
         .eq("id", appointment_id))
     )
     if not appt_result.data:
@@ -1500,6 +1506,11 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
     branch_id = appt_result.data[0].get("branch_id")
     appointment_date = appt_result.data[0]["appointment_date"]
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+    raw_timeline = appt_result.data[0].get("queue_timeline")
+    timeline = dict(raw_timeline) if isinstance(raw_timeline, dict) else {}
+    timeline[initial_queue_status] = now_iso
+
     max_retries = 5
     for attempt in range(max_retries):
         max_result = (
@@ -1509,7 +1520,10 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
                 branch_id,
                 appointment_date,
             )
-            .order("token_number", desc=True)
+            # DESC sorts NULLs FIRST in Postgres: without nullslast, any not-yet-
+            # checked-in row (including the one being checked in) read as max=0, so
+            # only tokens 1-5 were reachable and the 6th check-in of the day failed.
+            .order("token_number", desc=True, nullsfirst=False)
             .limit(1))
         )
         current_max = (
@@ -1522,7 +1536,12 @@ async def check_in_appointment(clinic_id: str, appointment_id: str) -> Optional[
         try:
             result = (
                 await sb(supabase.table("appointments")
-                .update({"token_number": next_token, "queue_status": "waiting"})
+                .update({
+                    "token_number": next_token,
+                    "queue_status": initial_queue_status,
+                    "checked_in_at": now_iso,
+                    "queue_timeline": timeline,
+                })
                 .eq("clinic_id", clinic_id)
                 .eq("id", appointment_id))
             )
@@ -1597,6 +1616,17 @@ async def get_patient_queue_status(clinic_id: str, phone: str, date_str: str) ->
             return None
 
         appt = result.data[0]
+        try:
+            from app.services.tenant import get_clinic_by_id, opd_enabled
+            clinic = await get_clinic_by_id(clinic_id)
+            # Lab bookings keep the legacy branch-keyed queue; OPD queues are per doctor.
+            if clinic and opd_enabled(clinic) and appt.get("booking_type") != "lab_test":
+                from app.services.opd import queue_position
+                return await queue_position(clinic_id, appt)
+        except Exception as e:
+            # Fall back to the legacy answer rather than leave the patient unanswered.
+            logger.error(f"OPD queue_position failed, using legacy queue: {type(e).__name__}: {e}")
+
         # A lab booking carries no doctor. Passing its NULL doctor_name
         # straight back rendered "Doctor: *None*" to the patient, so the
         # caller gets the test name and a flag to pick the right wording.

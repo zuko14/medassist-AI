@@ -230,6 +230,7 @@ def test_plan_tiers_expose_bundled_features_and_adoption(mock_supabase, _log):
     assert by_plan["enterprise"]["includes_all_features"] is True
     assert by_plan["enterprise"]["features"] == ALL_FEATURES
     assert "*" not in by_plan["enterprise"]["features"]
+    assert "opd_enabled" not in by_plan["enterprise"]["features"]
 
     # soloclinic has booking but not lab_reports — the pricing distinction.
     assert "booking" in by_plan["soloclinic"]["features"]

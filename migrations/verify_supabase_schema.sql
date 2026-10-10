@@ -458,6 +458,82 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 15. MIGRATION 103 — OPD OS Core checks
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl TEXT;
+    v_opd_tables TEXT[] := ARRAY[
+        'opd_encounters', 'opd_prescriptions', 'opd_prescription_items',
+        'opd_invoices', 'opd_invoice_items', 'opd_receipts', 'opd_cashier_shifts',
+        'opd_payment_exceptions'  -- migration 104
+    ];
+    v_func TEXT;
+    v_opd_funcs TEXT[] := ARRAY[
+        'opd_next_counter', 'opd_format_number', 'opd_assign_mrn',
+        'opd_sign_encounter', 'opd_sign_prescription', 'opd_close_shift',
+        'opd_purge_clinic'
+    ];
+    v_slot_rebuilt_count INT;
+BEGIN
+    -- 15.1 OPD Tables
+    FOREACH v_tbl IN ARRAY v_opd_tables LOOP
+        IF EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = v_tbl
+        ) THEN
+            INSERT INTO _verification_results (category, check_name, status, detail)
+            VALUES ('M103', 'Table: ' || v_tbl, 'PASS', 'Exists');
+        ELSE
+            INSERT INTO _verification_results (category, check_name, status, detail)
+            VALUES ('M103', 'Table: ' || v_tbl, 'FAIL', 'MISSING');
+        END IF;
+    END LOOP;
+
+    -- 15.2 Slot Guards Rebuilt
+    SELECT count(*) INTO v_slot_rebuilt_count
+    FROM pg_indexes
+    WHERE tablename = 'appointments'
+      AND indexname IN ('uq_appointment_active_slot', 'uq_appointment_active_slot_unassigned')
+      AND indexdef ILIKE '%is_walk_in = false%';
+
+    IF v_slot_rebuilt_count = 2 THEN
+        INSERT INTO _verification_results (category, check_name, status, detail)
+        VALUES ('M103', 'Slot uniqueness guards rebuilt with is_walk_in = false', 'PASS', 'Both active slot indexes exclude walk-ins');
+    ELSE
+        INSERT INTO _verification_results (category, check_name, status, detail)
+        VALUES ('M103', 'Slot uniqueness guards rebuilt with is_walk_in = false', 'FAIL',
+                'Only ' || v_slot_rebuilt_count || ' of 2 rebuilt indexes found with is_walk_in = false');
+    END IF;
+
+    -- 15.3 appointments_queue_status_check constraint
+    IF EXISTS (
+        SELECT 1 FROM information_schema.check_constraints
+        WHERE constraint_name = 'appointments_queue_status_check'
+    ) THEN
+        INSERT INTO _verification_results (category, check_name, status, detail)
+        VALUES ('M103', 'appointments_queue_status_check constraint', 'PASS', 'Exists');
+    ELSE
+        INSERT INTO _verification_results (category, check_name, status, detail)
+        VALUES ('M103', 'appointments_queue_status_check constraint', 'FAIL', 'MISSING');
+    END IF;
+
+    -- 15.4 OPD Functions
+    FOREACH v_func IN ARRAY v_opd_funcs LOOP
+        IF EXISTS (
+            SELECT 1 FROM information_schema.routines
+            WHERE routine_schema = 'public' AND routine_name = v_func
+        ) THEN
+            INSERT INTO _verification_results (category, check_name, status, detail)
+            VALUES ('M103', 'Function: ' || v_func, 'PASS', 'Exists');
+        ELSE
+            INSERT INTO _verification_results (category, check_name, status, detail)
+            VALUES ('M103', 'Function: ' || v_func, 'FAIL', 'MISSING');
+        END IF;
+    END LOOP;
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================
