@@ -220,3 +220,35 @@ def test_my_earnings_route_scoping(user, doctor_param, expect):
             asyncio.run(call)
             args, kwargs = earn.call_args
             assert (args[1], kwargs["branch_id"]) == expect
+
+
+# ─── 6. branches checklist item reads the multi_branch plan feature ─────────
+
+
+def _branches_item(plan, features, branch_rows):
+    from app.services import opd
+
+    q = MagicMock()
+    for m in ("table", "select", "eq", "limit", "is_", "in_", "order"):
+        getattr(q, m).return_value = q
+    doc = {"id": "d1", "is_active": True}
+    responses = [MagicMock(data=[doc])]
+    if branch_rows is not None:
+        responses.append(MagicMock(data=branch_rows))
+    responses.append(MagicMock(data=[]))  # clinic_admins
+    clinic = {"id": "c1", "name": "A", "plan": plan, "features": features, "opd_settings": {}}
+    with patch.object(opd, "sb", AsyncMock(side_effect=responses)), patch.object(opd, "supabase", q), \
+         patch.object(opd, "scoped_query", return_value=q):
+        return {i["key"]: i for i in asyncio.run(opd.setup_checklist(clinic))}["branches"]["done"]
+
+
+def test_branches_check_uses_multi_branch_feature():
+    # Feature off: never queried, always done.
+    assert _branches_item("soloclinic", {}, None) is True
+    # Feature on (override or enterprise wildcard), single site with no branch rows: done.
+    assert _branches_item("soloclinic", {"multi_branch": True}, []) is True
+    assert _branches_item("enterprise", {}, []) is True
+    # Branches exist: at least one must be active.
+    assert _branches_item("enterprise", {}, [{"id": "b1", "is_active": False}, {"id": "b2", "is_active": True}]) is True
+    assert _branches_item("enterprise", {}, [{"id": "b1", "is_active": False}]) is False
+    assert _branches_item("soloclinic", {"multi_branch": True}, [{"id": "b1", "is_active": False}]) is False

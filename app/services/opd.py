@@ -24,7 +24,7 @@ from app.database import (
     scoped_query,
     supabase,
 )
-from app.services.tenant import clinic_letterhead, get_clinic_by_id
+from app.services.tenant import clinic_letterhead, get_clinic_by_id, has_feature
 from app.utils.helpers import IST, doctor_title, generate_booking_reference, today_ist
 
 logger = logging.getLogger(__name__)
@@ -1473,10 +1473,19 @@ async def setup_checklist(clinic: dict) -> list[dict]:
         for d in active_docs
     )
 
-    # 3. branches
-    if clinic.get("multi_branch"):
-        branch_res = await sb(scoped_query("branches", clinic_id).eq("is_active", True))
-        branches_done = len(branch_res.data or []) >= 1 or "branches" in confirmed
+    # 3. branches. The setting is the multi_branch plan feature (clinics has no
+    # multi_branch column, so this used to always pass). Entitlement alone is
+    # not "runs branches": enterprise grants every feature, and a single-site
+    # clinic with no branch rows is fine. It fails only when branches exist and
+    # none is active, so there is nowhere to send a patient.
+    if has_feature(clinic, "multi_branch"):
+        branch_res = await sb(scoped_query("branches", clinic_id).select("id, is_active"))
+        branch_rows = branch_res.data or []
+        branches_done = (
+            not branch_rows
+            or any(b.get("is_active") is not False for b in branch_rows)
+            or "branches" in confirmed
+        )
     else:
         branches_done = True
 
