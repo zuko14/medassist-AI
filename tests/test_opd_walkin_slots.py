@@ -240,3 +240,47 @@ async def test_scheduler_check_doctor_leaves_ignores_walk_ins():
     params = vars(appt_query.request)["params"]
     assert "is_walk_in" in params
     assert params["is_walk_in"] == "eq.False"
+
+
+# ─── 5. WALK-IN INSERT MATCHES THE REAL SCHEMA ───────────────────────────────
+
+# public.appointments columns in production (information_schema, 2026-10-10).
+APPOINTMENT_COLUMNS = frozenset(
+    "amount_collected_paise amount_paise appointment_date appointment_time booking_channel booking_ref "
+    "booking_type branch_id branch_name checked_in_at clinic_id collection_address collection_contact_phone "
+    "collection_landmark collection_lat collection_lng collection_mode collection_notes collection_slot "
+    "collection_status collection_status_at completed_at created_at department doctor_id doctor_name "
+    "family_member_id followup_sent gateway_order_id health_checkin_3d_sent health_checkin_7d_sent "
+    "hold_expires_at home_collection_fee_paise id is_walk_in lab_test_id lab_test_name notes patient_id "
+    "patient_name patient_phone payment_gateway payment_id phlebotomist_id queue_status queue_timeline "
+    "razorpay_order_id razorpay_payment_link_id refund_id refund_reason refunded_at reminder_24h_sent "
+    "reminder_2h_sent review_rating review_received_at review_requested_at sitting_notes sitting_number "
+    "status symptoms token_number treatment_id treatment_name treatment_plan_id updated_at visit_type".split()
+)
+
+
+@pytest.mark.asyncio
+async def test_walk_in_insert_uses_only_real_appointment_columns():
+    """Issuing a token 500'd in production: the insert carried payment_status, a column
+    appointments never had, so PostgREST rejected the whole row."""
+    body = {"patient_id": "p1", "doctor_id": DOC_ID, "visit_type": "new", "skip_vitals": True}
+    empty = MagicMock(data=[])
+    responses = [
+        MagicMock(data=[{"id": DOC_ID, "name": "Dr. Sharma", "is_active": True, "department": "Cardiology"}]),
+        empty,                                                     # holidays
+        empty,                                                     # leaves
+        empty,                                                     # doctor_branches
+        MagicMock(data=[{"id": "p1", "name": "Umesh", "mrn": "MRN-1", "phone": "+919000000001"}]),
+        MagicMock(data=[{"id": "a1"}]),                            # the insert
+    ]
+    fake_supabase = MagicMock()
+    checked = {"id": "a1", "doctor_id": DOC_ID, "token_number": 1, "queue_status": "waiting"}
+    with patch("app.services.opd.sb", AsyncMock(side_effect=responses)), \
+         patch("app.services.opd.supabase", fake_supabase), \
+         patch("app.services.opd.check_in_appointment", AsyncMock(return_value=checked)):
+        row = await create_walk_in(MOCK_CLINIC, body, FRONT_DESK_USER)
+
+    inserted = fake_supabase.table.return_value.insert.call_args.args[0]
+    assert set(inserted) <= APPOINTMENT_COLUMNS, set(inserted) - APPOINTMENT_COLUMNS
+    assert inserted["is_walk_in"] is True and inserted["booking_channel"] == "front_desk"
+    assert row["token_number"] == 1

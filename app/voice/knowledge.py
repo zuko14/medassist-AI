@@ -38,7 +38,7 @@ from .dates import norm
 
 logger = logging.getLogger(__name__)
 
-KNOWLEDGE_VERSION = "knowledge-2026.10.08"
+KNOWLEDGE_VERSION = "knowledge-2026.10.10"
 MAX_FACTS_CHARS = 14000
 MAX_ANSWER_CHARS = 450
 _LANG_NAME = {"te": "Telugu", "hi": "Hindi", "en": "English"}
@@ -50,6 +50,7 @@ _DR_TITLE = re.compile(r"(?:\bdr\b\.?|\bdoctor\b|డాక్టర్|डॉक
 _STOP = frozenset({"the", "and", "you", "your", "for", "are", "with", "what", "how", "does", "have", "any",
                    "is", "do", "can", "of", "in", "to", "a", "an", "me", "my", "i", "we", "our", "there",
                    "ఏమి", "ఉందా", "ఉన్నాయా", "మీ", "మీరు", "నాకు", "क्या", "है", "हैं", "आप", "आपके", "में", "के", "की"})
+_DOCTOR_WORDS = ("doctor", "డాక్టర్", "వైద్యు", "डॉक्टर", "डाक्टर")   # not "dr": it is inside "address"
 _SERVICE_WORDS = ("services service treatments treatment facilities procedures departments సర్వీసెస్ సర్వీస్ "
                   "సేవలు ట్రీట్మెంట్స్ ట్రీట్మెంట్ ట్రీట్‌మెంట్స్ చికిత్స విభాగాలు सेवाएं सेवाएँ सेवा इलाज "
                   "ट्रीटमेंट सुविधा सुविधाएं सर्विस")
@@ -102,7 +103,7 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
     async def offered_home():
         return hc.is_offered(clinic, await hc.get_settings(clinic, branch_id))
 
-    (hours, location, contact, doctors, treat_res, link_res, tests, home, qa_res) = await asyncio.gather(
+    (hours, location, contact, doctors, treat_res, link_res, tests, home, qa_res, branch_res) = await asyncio.gather(
         _safe("FAQ", cid, faq_answer(clinic, "hours", "en")),
         _safe("FAQ", cid, faq_answer(clinic, "location", "en")),
         _safe("FAQ", cid, faq_answer(clinic, "contact", "en")),
@@ -119,6 +120,9 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
         _safe("QA", cid, sb(
             supabase.table("voice_knowledge_entries").select("id, question, answer, language")
             .eq("clinic_id", cid).eq("is_active", True).order("created_at").limit(200))),
+        _safe("BRANCHES", cid, sb(
+            supabase.table("branches").select("name, address, landmark, phone")
+            .eq("clinic_id", cid).eq("is_active", True).order("display_order").limit(20))),
     )
 
     def add(kind: str, text: str) -> None:
@@ -195,6 +199,35 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
             + ". For a test's price, ask the test name.")
     if home:
         add("lab", "Home sample collection is available for blood and urine tests.")
+
+    branches = (branch_res.data if branch_res else None) or []
+    if len(branches) > 1:
+        for b in branches:
+            bits = [f"Branch: {b.get('name')}"]
+            if b.get("address"):
+                bits.append(f"address {' '.join(str(b['address']).split())}")
+            if b.get("landmark"):
+                bits.append(f"near {b['landmark']}")
+            if b.get("phone"):
+                bits.append(f"phone {b['phone']}")
+            add("branch", "; ".join(bits) + ".")
+
+    # The OPD front desk, once the hospital has gone live with it (OPD Setup).
+    if clinic.get("opd_state") == "READY":
+        opd = clinic.get("opd_settings") or {}
+        add("opd", "Walk-in consultations are accepted: a patient can come without an appointment during "
+                   "the doctor's timings, gets a token number at the front desk, and is seen in token order. "
+                   "A patient who is waiting can ask for their token status.")
+        modes = [m for m in (opd.get("payment_modes") or []) if isinstance(m, str)]
+        if modes:
+            add("opd", "Payment at the hospital counter: " + ", ".join(m.upper() if m == "upi" else m
+                                                                         for m in modes) + ".")
+        items = [c for c in (opd.get("service_catalog") or []) if isinstance(c, dict) and c.get("active", True)
+                 and c.get("name")]
+        if items:
+            add("opd", "Other services at the hospital: " + "; ".join(
+                f"{c['name']}" + (f" {_rupees(c.get('price_paise'))}" if _rupees(c.get("price_paise")) else "")
+                for c in items[:30]) + ".")
 
     kb["qa"] = (qa_res.data if qa_res else None) or []
     for q in kb["qa"]:
@@ -379,6 +412,14 @@ def template_answer(question: str, kb: dict, lang: str, entities: dict, focus: d
                        f" इलाज: {_list(treatments, lang)}।",
                        f" చేసే ట్రీట్మెంట్స్: {_list(treatments, lang)}.")
         return line
+    # "The doctors in your hospital?": each doctor with their department, from the records.
+    docs = [d for d in kb.get("doctors") or [] if _bare(d.get("name") or "")]
+    if docs and any(w in norm(question) for w in _DOCTOR_WORDS):
+        title = _t(lang, "Dr.", "डॉक्टर", "డాక్టర్")
+        names = [f"{title} {_bare(d['name'])}" + (f" ({d['department']})" if d.get("department") else "")
+                 for d in docs]
+        return _t(lang, f"Our doctors are {_list(names, lang)}.", f"हमारे डॉक्टर हैं: {_list(names, lang)}।",
+                  f"మా దగ్గర ఉన్న డాక్టర్లు: {_list(names, lang)}.")
     services = [t.get("name") for t in kb.get("treatments") or [] if t.get("name")] or kb.get("departments") or []
     if services and _tokens(question) & _tokens(_SERVICE_WORDS):
         return _t(lang, f"We offer {_list(services, lang)}.", f"हमारे यहाँ ये सेवाएँ हैं: {_list(services, lang)}।",

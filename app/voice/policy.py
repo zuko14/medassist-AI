@@ -21,7 +21,8 @@ POLICY_VERSION = "policy-2026.10.07"
 
 # Sounds that carry no request. Telugu "ఆ" and Hindi "हाँ" are NOT here: they mean "yes".
 FILLERS = frozenset({"umm", "um", "hmm", "hm", "uh", "ah", "aaa", "huh", "hello", "halo", "hallo", "helo",
-                     "హలో", "హలో హలో", "హ్మ్", "ఉమ్", "అ", "हेलो", "हैलो", "हम्म", "अ"})
+                     "oh", "ohh", "ooh", "హలో", "హలో హలో", "హ్మ్", "ఉమ్", "అ", "ఓ", "ఓహ్", "हेलो", "हैलो",
+                     "हम्म", "अ", "ओह"})
 
 
 def is_filler(text: str) -> bool:
@@ -29,6 +30,17 @@ def is_filler(text: str) -> bool:
     words = [w.strip(".,!?।") for w in norm(text).split()]
     words = [w for w in words if w]
     return bool(words) and all(w in FILLERS for w in words)
+
+
+def is_noise(text: str) -> bool:
+    """A filler, or a short transcript in a script the call is not in and Kriya does not
+    speak: STT turning line noise into one Bengali word ("দহ।", CALL-20261010-33DEF1).
+    Neither is a misunderstanding of the caller."""
+    from .nlu_rules import SUPPORTED_LANGS, script_language
+    if is_filler(text):
+        return True
+    code = script_language(text or "")
+    return bool(code) and code not in SUPPORTED_LANGS and len(norm(text).split()) <= 2
 
 
 def asr_confidence(text: str) -> float:

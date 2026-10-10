@@ -15,7 +15,7 @@ from typing import Optional
 from .dates import first_index, has_any, norm, parse_clock_time, parse_date, parse_time_period
 from .lexicon import find_specialties, match_doctors, resolve_department, tenant_department_for
 
-NLU_RULES_VERSION = "nlu-rules-2026.10.08"
+NLU_RULES_VERSION = "nlu-rules-2026.10.10"
 
 SUPPORTED_LANGS = ("te-IN", "hi-IN", "en-IN")
 DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE")
@@ -58,7 +58,7 @@ W = {
               "खाली", "स्लॉट"),
     "DOCTOR": ("doctor", "doctors", "dr", "daktar", "డాక్టర్", "డాక్టరు", "వైద్యు", "डॉक्टर", "डाक्टर"),
     "INFO": ("information", "info", "details", "samacharam", "సమాచారం", "వివరాలు", "జానకారీ",
-             "jankari", "jaankari", "जानकारी", "डिटेल"),
+             "jankari", "jaankari", "जानकारी", "डिटेल", "డీటెయిల్", "డిటెయిల్", "డీటైల్", "డిటైల్"),
     "CANCEL": ("cancel", "cancellation", "రద్దు", "క్యాన్సిల్", "radd", "रद्द", "कैंसिल"),
     "RESCHEDULE": ("reschedule", "postpone", "prepone", "marchandi", "మార్చండి", "మార్చాలి",
                    "badal", "badalna", "बदल", "बदलना"),
@@ -343,9 +343,17 @@ def understand(text: str, ctx: NluContext, expect: Optional[str] = None) -> NLUR
 
     # Nothing business-like yet: "are doctor slots free?", "naaku doctor kavali" -> booking;
     # "I need other information" -> hospital information (the dialog asks which).
+    # "The doctors in your hospital", a bare "Doctor", "your services": a question about the
+    # hospital even without a question word (spoken fragments rarely have one). Not while a
+    # specific answer is pending (a name, a date, a yes), unless it is phrased as a question.
+    open_floor = expect in (None, "anything_else", "info_topic", "offer") or asking
     if not pos:
         if has_any(t, W["AVAIL"]) or (has_any(t, W["DOCTOR"]) and has_any(t, W["WANT"])):
             pos["BOOK_APPOINTMENT"] = max(0, first_index(t, W["AVAIL"] + W["DOCTOR"]))
+        elif open_floor and has_any(t, W["DOCTOR"]) and not (specs or docs or dept):
+            pos["DOCTOR_INFORMATION"] = first_index(t, W["DOCTOR"])
+        elif open_floor and (has_any(t, W["SERVICES"]) or treatment_hit):
+            pos["KNOWLEDGE_QUESTION"] = 0
         elif has_any(t, W["INFO"]):
             pos["GENERAL_INFORMATION"] = first_index(t, W["INFO"])
 

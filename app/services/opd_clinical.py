@@ -979,7 +979,7 @@ async def sign_prescription(
     # Fetch patient row
     pat_res = await sb(
         supabase.table("patients")
-        .select("id, name, mrn, age, gender, phone")
+        .select("id, name, mrn, age:age_years, gender, phone")
         .eq("clinic_id", clinic_id)
         .eq("id", rx["patient_id"])
         .single()
@@ -990,7 +990,7 @@ async def sign_prescription(
     if rx.get("family_member_id"):
         fam_res = await sb(
             supabase.table("family_members")
-            .select("id, name, mrn, age, gender")
+            .select("id, name:full_name, mrn, age:age_years, gender")
             .eq("clinic_id", clinic_id)
             .eq("id", rx["family_member_id"])
             .single()

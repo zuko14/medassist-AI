@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.10.08b"
+TEMPLATES_VERSION = "templates-2026.10.10"
 
 T: dict = {
     "greeting": {
@@ -60,10 +60,16 @@ T: dict = {
         "en": "I can book your appointment myself, and help with reports, fees and timings. Tell me what you need, or shall I connect you to reception?",
         "hi": "मैं खुद आपका अपॉइंटमेंट बुक कर सकती हूँ, और रिपोर्ट, फीस, टाइमिंग की जानकारी भी दे सकती हूँ। बताइए क्या चाहिए, या रिसेप्शन से जोड़ दूँ?",
     },
+    # Three misses in a row, once per call: say plainly what Kriya can do before any transfer.
+    "help_menu": {
+        "te": "క్షమించండి, లైన్ సరిగ్గా వినపడటం లేదు. నేను అపాయింట్మెంట్ బుక్ చేయగలను, మా డాక్టర్లు, సేవలు, ఫీజులు, టైమింగ్స్, అడ్రస్ చెప్పగలను, మీ రిపోర్ట్ లేదా టోకెన్ కూడా చూడగలను. ఏం కావాలో ఒక్క మాటలో చెప్పండి.",
+        "en": "Sorry, the line isn't very clear. I can book an appointment, tell you about our doctors, services, fees, timings and address, or check your report or token. Just tell me in a few words what you need.",
+        "hi": "माफ़ कीजिए, आवाज़ साफ़ नहीं आ रही। मैं अपॉइंटमेंट बुक कर सकती हूँ, हमारे डॉक्टर, सेवाएँ, फीस, टाइमिंग और पता बता सकती हूँ, या आपकी रिपोर्ट या टोकन देख सकती हूँ। बस थोड़े शब्दों में बताइए क्या चाहिए।",
+    },
     "ask_info_topic": {
-        "te": "తప్పకుండా. ఏ సమాచారం కావాలి? హాస్పిటల్ టైమింగ్స్, అడ్రస్, లేదా డాక్టర్ ఫీజులా?",
-        "en": "Sure. What would you like to know: our timings, our address, or doctor fees?",
-        "hi": "ज़रूर। क्या जानकारी चाहिए: टाइमिंग, पता, या डॉक्टर की फीस?",
+        "te": "తప్పకుండా. ఏ సమాచారం కావాలి? మా డాక్టర్ల గురించా, సేవల గురించా, టైమింగ్స్, అడ్రస్, లేదా ఫీజులా?",
+        "en": "Sure. What would you like to know: our doctors, our services, timings, address, or fees?",
+        "hi": "ज़रूर। क्या जानकारी चाहिए: हमारे डॉक्टर, सेवाएँ, टाइमिंग, पता, या फीस?",
     },
     "interest_sentence": {
         "te": "మీరు ఇటీవల {interest} గురించి అడిగారు. ",
@@ -71,9 +77,15 @@ T: dict = {
         "hi": "आपने हाल ही में {interest} के बारे में पूछा था। ",
     },
     "ask_specialty": {
-        "te": "తప్పకుండా. మీకు ఏ డాక్టర్ కావాలి? ఉదాహరణకు గుండె డాక్టర్, పిల్లల డాక్టర్.",
-        "en": "Sure. Which doctor or department would you like?",
-        "hi": "ज़रूर। आपको किस डॉक्टर या विभाग में दिखाना है?",
+        "te": "తప్పకుండా. మీకు ఏ డాక్టర్ కావాలి?{depts_sentence}",
+        "en": "Sure. Which doctor or department would you like?{depts_sentence}",
+        "hi": "ज़रूर। आपको किस डॉक्टर या विभाग में दिखाना है?{depts_sentence}",
+    },
+    # The clinic's own departments, so the examples are ones it actually has.
+    "depts_sentence": {
+        "te": " మా దగ్గర {depts} విభాగాలు ఉన్నాయి.",
+        "en": " We have {depts}.",
+        "hi": " हमारे यहाँ {depts} विभाग हैं।",
     },
     "ask_date": {"te": "ఏ రోజు కావాలి?", "en": "Which day would you like?", "hi": "किस दिन चाहिए?"},
     "ask_time_period": {
@@ -493,6 +505,7 @@ def realize(key: str, lang: str, today: date, specialty_labels: Optional[dict] =
     q["wa_sentence"] = " " + render("wa_sentence", lang) if p.get("whatsapp_sent") else ""
     q["emergency_sentence"] = " " + render("emergency_sentence", lang, emergency=p["emergency"]) if p.get("emergency") else ""
     q["who"] = " " + render("who", lang, name=p["name"]) if p.get("name") else ""
+    q["depts_sentence"] = " " + render("depts_sentence", lang, depts=p["depts"]) if p.get("depts") else ""
     q["interest_sentence"] = render("interest_sentence", lang, interest=p["interest"]) + " " if p.get("interest") else ""
     # The clinic's own words, verbatim, in the caller's current language only
     # (an English pitch is never read out mid-Telugu).

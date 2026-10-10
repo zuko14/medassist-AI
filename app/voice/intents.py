@@ -40,6 +40,11 @@ WORKFLOW_OF = {
     "HOSPITAL_INFORMATION": "INFO", "GENERAL_INFORMATION": "INFO", "LOCATION": "INFO",
     "DIRECTIONS": "INFO", "CONTACT_INFORMATION": "INFO",
     "QUEUE_STATUS": "QUEUE", "WAIT_TIME": "QUEUE",
+    # A receptionist serves these directly instead of passing the caller on: a new patient
+    # is registered by booking them; "is Dr. X in tomorrow?" is a slot lookup (leaves and
+    # holidays are applied); payment and sample questions read the caller's own records.
+    "NEW_PATIENT_REGISTRATION": "BOOKING", "DOCTOR_LEAVE": "BOOKING",
+    "PAYMENT_LINK": "STATUS", "PAYMENT_FAILED": "STATUS", "SAMPLE_STATUS": "REPORT",
     "HUMAN_AGENT_REQUEST": "HUMAN", "CALLBACK_REQUEST": "CALLBACK",
     "COMPLAINT": "CALLBACK", "FEEDBACK": "CALLBACK",
 }

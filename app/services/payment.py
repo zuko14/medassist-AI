@@ -1808,10 +1808,10 @@ class PaymentService:
                 }
 
         # ── Step 2: only now cancel ──
-        update_data = {
-            "status": "cancelled",
-            "admin_notes": admin_notes,
-        }
+        # No admin_notes column on appointments: the notes live in the
+        # manual_reject payment event below. Writing it failed this update
+        # after the refund had already gone out.
+        update_data = {"status": "cancelled"}
         if refund_result.get("refund_id"):
             update_data["refund_id"] = refund_result.get("refund_id")
 

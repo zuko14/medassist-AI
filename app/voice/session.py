@@ -23,12 +23,12 @@ from app.config import settings
 from . import responses as R
 from . import store
 from .dates import IST, today_ist
-from .dialog import DIALOG_VERSION, DialogEngine, Say, TurnOutput, new_state
+from .dialog import _KNOWLEDGE_INTENTS, DIALOG_VERSION, DialogEngine, Say, TurnOutput, new_state
 from .intents import TAXONOMY_VERSION
 from .lexicon import (LEXICON_VERSION, SPECIALTIES, apply_pronunciations, find_specialties, resolve_department,
                       tenant_department_for)
 from .nlu_llm import PROMPT_VERSION, understand_llm
-from .nlu_rules import NLU_RULES_VERSION, NluContext, gurmukhi_to_devanagari, is_question, understand
+from .nlu_rules import NLU_RULES_VERSION, NluContext, gurmukhi_to_devanagari, understand
 from .policy import POLICY_VERSION, asr_confidence, gate, needs_llm
 from .safety import SAFETY_VERSION, screen
 from .tools import TOOLS_VERSION, CallContext, KriyaTools
@@ -202,6 +202,7 @@ class CallSession:
 
         switched = None if from_gurmukhi else self.engine.observe_language(self.state, text)
         ctx = await self._context()
+        self.engine.clinic["departments"] = ctx.departments
         nlu = understand(text, ctx, self.state.get("expect"))
         if needs_llm(nlu, text):
             nlu, tokens, cost = await understand_llm(text, ctx, self.ctx.clinic_id, self.state.get("expect"))
@@ -211,8 +212,8 @@ class CallSession:
         await self._event("nlu", "INTENT_DETECTED" if nlu.intents else "NOT_UNDERSTOOD",
                           status="ok" if nlu.confidence else "fail", data=nlu.to_dict(),
                           text=None if nlu.intents else text)  # feeds "top failure phrases"
-        if self.interim and ("KNOWLEDGE_QUESTION" in nlu.intents
-                             or ("DOCTOR_INFORMATION" in nlu.intents and is_question(text))):
+        if self.interim and (set(nlu.intents) & _KNOWLEDGE_INTENTS
+                             or ("GENERAL_INFORMATION" in nlu.intents and self.state.get("kb_last"))):
             try:
                 await self.interim(self._render(TurnOutput([Say("kb_checking")])))
             except Exception as e:

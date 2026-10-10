@@ -566,12 +566,15 @@ async def test_prepaid_online_booking_creates_prepaid_online_receipt_on_issue():
         "items": [],
     }
 
+    # The real appointments columns: there is no payment_status. Gateway capture sets
+    # payment_id; amount_paise is what was charged. (This fake used to carry the phantom
+    # column, so the test passed while production never detected a prepaid booking.)
     mock_appt = {
         "id": APPOINTMENT_ID,
         "clinic_id": CLINIC_ID,
-        "payment_status": "paid",
-        "amount_paid_paise": 50000,
-        "payment_reference": payment_ref,
+        "status": "confirmed",
+        "payment_id": payment_ref,
+        "amount_paise": 50000,
         "payment_gateway": "razorpay",
     }
 

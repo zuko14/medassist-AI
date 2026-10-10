@@ -213,9 +213,16 @@ def test_hidden_permissions_are_unticked_not_just_invisible():
 
 
 def test_role_presets_cannot_retick_a_hidden_permission():
-    assert _html().count("    applyPermissionVisibility();\n}") >= 2, (
-        "Both role-change handlers must re-apply plan gating"
-    )
+    # Each handler ticks its role's presets, then must re-apply plan gating (which unticks
+    # what the plan hides). Checked per handler body, not by the call's position in it.
+    for fn in ("onStaffRoleChange", "onEditStaffRoleChange"):
+        m = re.search(rf"function {fn}\(\) \{{(.*?)\n\}}", _html(), re.S)
+        assert m, f"{fn} not found"
+        body = m.group(1)
+        assert "applyPermissionVisibility();" in body, f"{fn} must re-apply plan gating"
+        assert body.index("cb.checked = defaults.includes") < body.index("applyPermissionVisibility();"), (
+            f"{fn} must gate AFTER ticking the presets"
+        )
 
 
 # ── 5. Cross-tab identity mismatch surfaces instead of 403-looping ───────────

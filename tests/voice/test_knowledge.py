@@ -303,3 +303,11 @@ def test_ask_preview_blocks_medical_questions_before_any_lookup():
         assert r.json() == {"text": "Yes, free parking in the basement.", "source": "qa", "rejected": None}
     finally:
         p.stop()
+
+
+def test_doctors_list_from_records_without_the_llm():
+    """CALL-20261010-33DEF1: "the doctors in your hospital" must be answerable from records."""
+    te = K.template_answer("ఆ మీ హాస్పిటల్లో ఉన్న డాక్టర్స్ లో", KB, "te", {}, {})
+    assert te and "డాక్టర్లు" in te and "Meena Patel" in te
+    assert "Meena Patel" in K.template_answer("who are your doctors", KB, "en", {}, {})
+    assert K.template_answer("what is your address", KB, "en", {}, {}) is None   # "dr" inside "address"

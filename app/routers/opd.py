@@ -934,7 +934,7 @@ async def update_queue_stage(
         action="OPD_STAGE_TRANSITION",
         resource_type="appointment",
         resource_id=appointment_id,
-        details={"from": body.expected_from, "to": body.to_stage},
+        details={"from": body.expected_from, "to": body.to_stage, "reason": body.reason},
     )
     return qrow
 

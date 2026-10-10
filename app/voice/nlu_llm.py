@@ -48,7 +48,9 @@ SYSTEM = (
     "(SELF|MOTHER|FATHER|SPOUSE|CHILD|OTHER|null), info_topic (hours|location|contact|null), "
     "confidence (0..1). EXPECTING says what the receptionist just asked; read short replies in that "
     "light. Yes/okay/fine in any language = AFFIRM, no/not needed = DENY, wanting doctor slots or a "
-    "consultation = BOOK_APPOINTMENT, asking for hospital details = GENERAL_INFORMATION, a question about "
+    "consultation = BOOK_APPOINTMENT, asking about the hospital's doctors or departments in general "
+    "(who the doctors are, which departments) = DOCTOR_INFORMATION, asking for hospital details = "
+    "GENERAL_INFORMATION, a question about "
     "the hospital's services, treatments, procedures, sittings, prices of a treatment, a doctor's "
     "qualifications / experience / what they treat, facilities, insurance, parking or policies = "
     "KNOWLEDGE_QUESTION (a question, not a request to book). "
@@ -58,7 +60,11 @@ SYSTEM = (
 
 def _validate(raw: dict, ctx: NluContext, expect: Optional[str] = None) -> NLUResult:
     today = today_ist(ctx.now)
-    intents = [_REMAP.get(i, i) for i in (raw.get("intents") or []) if isinstance(i, str) and i in _ALLOWED][:3]
+    # "Do you have a skin doctor?" -> the booking flow; "which departments do you have?"
+    # (no specialty named) is a question about the hospital, answered from its records.
+    named = isinstance(raw.get("specialty"), str) and raw.get("specialty") in SPECIALTIES
+    remap = _REMAP if named else dict.fromkeys(_REMAP, "KNOWLEDGE_QUESTION")
+    intents = [remap.get(i, i) for i in (raw.get("intents") or []) if isinstance(i, str) and i in _ALLOWED][:3]
     intents = list(dict.fromkeys(intents))
     if expect == "confirm":
         # A booking/cancel is only ever consented to by a yes the rules heard; the LLM may not say it.

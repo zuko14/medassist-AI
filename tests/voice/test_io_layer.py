@@ -60,8 +60,13 @@ def test_llm_cannot_raise_emergencies_or_turn_greetings_into_transfers():
     for raw in ({"intents": ["GREETING"], "confidence": 0.8}, {"intents": ["EMERGENCY"], "confidence": 0.9},
                 {"intents": ["CLINICAL_QUERY"], "confidence": 0.9}):
         assert nlu_llm._validate(raw, c).intents == []
-    r = nlu_llm._validate({"intents": ["SERVICE_AVAILABILITY", "DEPARTMENT_INFORMATION"], "confidence": 0.8}, c)
+    # "Do you have a skin doctor?" (a specialty named) -> the booking flow says yes or no...
+    r = nlu_llm._validate({"intents": ["SERVICE_AVAILABILITY", "DEPARTMENT_INFORMATION"],
+                           "specialty": next(iter(nlu_llm.SPECIALTIES)), "confidence": 0.8}, c)
     assert r.intents == ["DOCTOR_AVAILABILITY"]
+    # ...while "which departments do you have?" is answered from the records, not "which doctor?".
+    r = nlu_llm._validate({"intents": ["SERVICE_AVAILABILITY", "DEPARTMENT_INFORMATION"], "confidence": 0.8}, c)
+    assert r.intents == ["KNOWLEDGE_QUESTION"]
 
 
 def test_llm_can_never_consent_to_a_transaction():

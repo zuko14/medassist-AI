@@ -15,11 +15,22 @@ from typing import Optional, Protocol
 
 from .intents import WORKFLOW_OF
 from .nlu_rules import SUPPORTED_LANGS, NLUResult, is_question, looks_english, script_language
-from .policy import is_filler
+from .policy import is_noise
 
-DIALOG_VERSION = "dialog-2026.10.08b"
+DIALOG_VERSION = "dialog-2026.10.10"
 MAX_FAILURES = 3
 MAX_IDLE = 2          # "hello?" / "hmm" turns answered patiently before they count as misses
+
+# Questions a receptionist answers from the hospital's own records, mid-call, without
+# opening a workflow or transferring: "the doctors here?", "which departments?",
+# "do you take insurance?". CALL-20261010-33DEF1 was asked "the doctors in your
+# hospital" and replied "which doctor do you want?", then handed off.
+_KNOWLEDGE_INTENTS = frozenset({
+    "KNOWLEDGE_QUESTION", "DOCTOR_INFORMATION", "DEPARTMENT_INFORMATION", "SERVICE_AVAILABILITY",
+    "INSURANCE_INFORMATION", "PHARMACY_INFORMATION", "HEALTH_CAMP", "CORPORATE_SCREENING",
+    "HOME_SAMPLE_COLLECTION",
+})
+_WHEN_KEYS = ("date", "time_period", "clock_time")
 
 
 @dataclass
@@ -165,7 +176,7 @@ class DialogEngine:
         # transferred within seconds because three "hello"s counted as three misses).
         opening_ack = not state.get("task") and not expect and intents and set(intents) <= {"AFFIRM"}
         if (not biz and not (ents.keys() & _ANSWER_KEYS) and not nlu.language_request
-                and (is_filler(text) or opening_ack)):
+                and (is_noise(text) or opening_ack)):
             state["idle"] = state.get("idle", 0) + 1
             if state["idle"] <= MAX_IDLE:
                 if expect:
@@ -195,11 +206,21 @@ class DialogEngine:
         # A question about the hospital ("what services do you have?", "what treatments does she
         # do?"), asked at any point: answer it from the clinic's records, then carry on exactly
         # where the call was. Never a miss, never a handoff on its own.
-        if "KNOWLEDGE_QUESTION" in biz or ("DOCTOR_INFORMATION" in biz and is_question(text)):
-            biz = [b for b in biz if b not in ("KNOWLEDGE_QUESTION", "DOCTOR_INFORMATION")]
+        # "Dr. Rao tomorrow evening" names a doctor to BOOK, not a question about him; so does
+        # "the heart doctor" said in reply to "which doctor?" mid-booking.
+        booking_doctor = ("DOCTOR_INFORMATION" in biz and not is_question(text) and (
+            any(ents.get(k) for k in _WHEN_KEYS)
+            or (state.get("task") and ents.keys() & {"department", "doctor_ids", "specialty"})))
+        # "Tell me the details" right after a question about the hospital continues THAT
+        # question; asking "timings, address or fees?" there is what a menu does, not a person.
+        follow_on = ("GENERAL_INFORMATION" in biz and not ents.get("info_topic")
+                     and state.get("kb_last") and len(biz) == 1)
+        if (biz and not booking_doctor and set(biz) & _KNOWLEDGE_INTENTS) or follow_on:
+            biz = [b for b in biz if b not in _KNOWLEDGE_INTENTS and b != "GENERAL_INFORMATION"]
+            question = f"{state['kb_last']} {text}" if follow_on else text
             # Only question: answer, then resume. Question + request ("...and book me for
             # tomorrow"): answer, then the request is handled below as usual.
-            await self._answer_question(state, out, text, ents, follow_up=not biz)
+            await self._answer_question(state, out, question, ents, follow_up=not biz)
             if not biz:
                 return out
 
@@ -305,6 +326,7 @@ class DialogEngine:
         except Exception:
             res = None
         state["failures"], state["idle"] = 0, 0          # understood: not a miss
+        state["kb_last"] = text[-300:]                   # what "tell me more" refers to
         answered = bool(res and res.get("text"))
         out.says.append(Say("kb_answer", {"text": res["text"]}) if answered else Say("kb_unknown"))
         state["outcomes"].append({"wf": "KNOWLEDGE", "outcome": "answered" if answered else "not_answered"})
@@ -326,9 +348,17 @@ class DialogEngine:
         return out
 
     def _miss(self, state: dict, out: TurnOutput, say: Say) -> TurnOutput:
-        """A turn that did not move the conversation forward. Three in a row => human."""
+        """A turn that did not move the conversation forward. Three in a row => once, say
+        plainly what Kriya can do and carry on; three more => human. A receptionist on a
+        bad line repeats what they can help with before passing the phone."""
         state["failures"] = state.get("failures", 0) + 1
         state["misses_total"] = state.get("misses_total", 0) + 1
+        if state["failures"] >= MAX_FAILURES and not state.get("help_offered"):
+            state["help_offered"], state["failures"] = True, 0
+            out.says.append(Say("help_menu"))
+            if state.get("expect"):
+                out.says.append(say)                     # the question still pending
+            return out
         if state["failures"] >= MAX_FAILURES:
             out.handoff_reason = "repeated_misunderstanding"
             out.control = "handoff_pending"
@@ -465,7 +495,7 @@ class DialogEngine:
                 task["outcome"] = "no_doctor"
                 self._offer(state, out, {"wf": "HUMAN", "reason": "specialty_not_offered"})
                 return True
-            return self._ask(state, out, "specialty", Say("ask_specialty"))
+            return self._ask(state, out, "specialty", self._ask_specialty_say())
 
         if "doctors" not in s:
             docs = await self.tools.find_doctors(s.get("department"), s.get("doctor_ids"))
@@ -727,6 +757,14 @@ class DialogEngine:
         if not topic:
             # "I need some information": ask which, rather than reading every FAQ aloud.
             if state.get("expect") == "info_topic":
+                # Whatever they name ("the doctors", "parking") is a question about us.
+                if text.strip():
+                    state["expect"] = None
+                    await self._answer_question(state, out, text, nlu.entities, follow_up=False)
+                    if (state["outcomes"][-1] or {}).get("outcome") == "answered":
+                        task["outcome"] = "answered"
+                        return True
+                    out.says.pop()                       # kb_unknown: re-ask instead
                 self._miss(state, out, Say("ask_info_topic"))
                 state["expect"] = "info_topic"
                 return False
@@ -752,7 +790,7 @@ class DialogEngine:
                 out.says.append(Say("no_doctor_for_specialty", {"specialty": s["specialty"]}))
                 task["outcome"] = "no_doctor"
                 return True
-            return self._ask(state, out, "specialty", Say("ask_specialty"))
+            return self._ask(state, out, "specialty", self._ask_specialty_say())
         rows = await self.tools.doctor_fees(s.get("department"), s.get("doctor_ids"))
         if rows is None:
             return await self._degraded(state, out, task)
@@ -862,6 +900,11 @@ class DialogEngine:
         return True
 
     # ---- speech helpers ----
+
+    def _ask_specialty_say(self) -> Say:
+        # This hospital's own departments as the examples, never generic ones it may not have.
+        depts = [d for d in (self.clinic.get("departments") or []) if d][:4]
+        return Say("ask_specialty", {"depts": ", ".join(depts)} if depts else {})
 
     @staticmethod
     def _two_doctors(docs: list) -> dict:

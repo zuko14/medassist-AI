@@ -433,13 +433,12 @@ async def issue_invoice(
         )
         if appt_res.data:
             appt = appt_res.data[0]
-            if appt.get("payment_status") == "paid":
-                # Paid via WhatsApp or Voice online booking
-                fee_paise = appt.get("amount_paid_paise") or appt.get("payment_amount_paise")
-                if not fee_paise:
-                    # Fallback to appointment fee if recorded
-                    doc_fee = appt.get("consultation_fee")
-                    fee_paise = int(doc_fee * 100) if doc_fee else invoice.get("subtotal_paise", 0) - invoice.get("discount_paise", 0)
+            # appointments has no payment_status column: payment_id is set only
+            # once the gateway captured an online (WhatsApp/voice) payment.
+            if appt.get("payment_id") and appt.get("status") not in ("refunded", "cancelled"):
+                fee_paise = appt.get("amount_paise") or (
+                    invoice.get("subtotal_paise", 0) - invoice.get("discount_paise", 0)
+                )
 
                 prepaid_gw_id = appt.get("payment_id") or f"prepaid:{appt['id']}"
                 gw = appt.get("payment_gateway") or "razorpay"
@@ -459,7 +458,7 @@ async def issue_invoice(
                         "kind": "payment",
                         "mode": "prepaid_online",
                         "amount_paise": fee_paise,
-                        "reference": appt.get("booking_reference") or str(appt["id"])[:8],
+                        "reference": appt.get("booking_ref") or str(appt["id"])[:8],
                         "gateway": gw,
                         "gateway_payment_id": prepaid_gw_id,
                         "received_by_admin_id": None,

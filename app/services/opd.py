@@ -852,7 +852,6 @@ async def create_walk_in(
         "visit_type": body.get("visit_type", "new"),
         "symptoms": body.get("symptoms"),
         "status": "confirmed",
-        "payment_status": "pending",
         "booking_ref": booking_ref,
     }
     # unscoped: insert_scoped_by_payload
@@ -1201,7 +1200,7 @@ async def transition_stage(
         update_payload["status"] = "completed"
     elif to_stage == "cancelled":
         update_payload["status"] = "cancelled"
-        update_payload["cancellation_reason"] = reason
+        # No cancellation_reason column: the router audit-logs `reason`.
 
     upd_res = await sb(
         supabase.table("appointments")

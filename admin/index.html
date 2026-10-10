@@ -4564,6 +4564,7 @@
                     <div style="display:flex; gap:8px; align-items:center;">
                         <span id="opdWsLiveDot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--green); margin-right:4px;"></span>
                         <span id="opdWsDoctorName" style="font-weight:600; color:var(--text); font-size:0.9rem;">Doctor Station</span>
+                        <select id="opdWsDoctorSel" aria-label="Doctor" style="display:none; min-width:220px;" onchange="fetchOpdWorkspace()"></select>
                         <button class="btn btn-outline btn-sm" onclick="fetchOpdWorkspace()">🔄 Refresh</button>
                     </div>
                 </div>
@@ -17253,13 +17254,46 @@ async function loadOpdWorkspace() {
     }, 5000);
 }
 
+// A login linked to a doctor is pinned to that doctor server-side; anyone else
+// (admin, front desk) picks whose queue to work. Polls reuse the same URL so the
+// 5 s refresh does not snap back to the server's default doctor.
+function opdWsUrl() {
+    const picked = !myDoctorId && document.getElementById('opdWsDoctorSel')?.value;
+    return '/admin/opd/workspace' + (picked ? '?doctor_id=' + encodeURIComponent(picked) : '');
+}
+
+async function populateOpdWsDoctorSel() {
+    const sel = document.getElementById('opdWsDoctorSel');
+    if (!sel || myDoctorId) return;
+    if (!doctorCache || doctorCache.length === 0) doctorCache = await api('/admin/doctors') || [];
+    const cur = sel.value;
+    sel.innerHTML = opdScopedDoctors().map(d =>
+        `<option value="${esc(d.id)}">${esc(opdDrName(d.name))}${d.department ? ' (' + esc(d.department) + ')' : ''}</option>`).join('');
+    if (cur) sel.value = cur;
+    sel.style.display = sel.options.length ? '' : 'none';
+}
+
 async function fetchOpdWorkspace() {
     try {
-        const data = await api('/admin/opd/workspace');
+        await populateOpdWsDoctorSel();
+        const data = await api(opdWsUrl());
+        if (_opdWsCurrentDoctor && data.doctor && _opdWsCurrentDoctor.id !== data.doctor.id) {
+            // Switched doctor: the open chart belonged to the previous doctor's queue.
+            _currentOpdEncounter = null; _currentOpdRx = null;
+            ['opdWsVitals', 'opdWsNotes', 'opdRx', 'opdWsActions'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.style.display = 'none';
+            });
+            const hdr = document.getElementById('opdWsHeader');
+            if (hdr) hdr.innerHTML = '<div style="color:var(--text3); font-size:0.9rem;">Select a patient from the queue to start consultation.</div>';
+        }
         _opdWsCurrentDoctor = data.doctor;
+        const sel = document.getElementById('opdWsDoctorSel');
+        if (sel && data.doctor && !myDoctorId) sel.value = data.doctor.id;
         const docNameEl = document.getElementById('opdWsDoctorName');
         if (docNameEl && data.doctor) {
             docNameEl.textContent = `${opdDrName(data.doctor.name)} (${data.doctor.department || 'General'})`;
+            // The picker already names the doctor; don't print it twice.
+            docNameEl.style.display = (sel && sel.style.display !== 'none') ? 'none' : '';
         }
         renderOpdWsQueue(data.queue || []);
     } catch (e) {
@@ -17269,7 +17303,7 @@ async function fetchOpdWorkspace() {
 
 async function fetchOpdWsQueueQuiet() {
     try {
-        const data = await api('/admin/opd/workspace');
+        const data = await api(opdWsUrl());
         renderOpdWsQueue(data.queue || []);
         const dot = document.getElementById('opdWsLiveDot');
         if (dot) {

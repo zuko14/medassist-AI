@@ -99,6 +99,12 @@ class FakeTools:
         self.calls.append(("handoff", reason))
         return {"mode": self.handoff_mode}
 
+    async def answer_question(self, question, lang, entities, focus):
+        self.calls.append(("answer_question", question))
+        if any(w in question.lower() for w in ("doctor", "డాక్టర్", "डॉक्टर")):
+            return {"text": "Our doctors are Dr. Srinivas Rao (Cardiology), Dr. Lakshmi Prasanna (Gynecology)."}
+        return {"text": None}
+
 
 def slot(doc, d, t, period):
     fee = next(x["fee_paise"] for x in DOCS if x["id"] == doc)
@@ -117,6 +123,7 @@ class Conv:
                                            "emergency": "040-12345678", "hold_minutes": 10})
         self.state = new_state(lang)
         self.ctx = NluContext(doctors=DOCS, departments=["Cardiology", "Gynecology"], now=NOW)
+        self.engine.clinic["departments"] = self.ctx.departments     # as session.handle() does
         self.control = "continue"
 
     def text(self, out):
@@ -311,22 +318,62 @@ def test_opening_date_alone_starts_booking():
     assert "ఏ డాక్టర్" in r and c.state["task"]["slots"].get("date")
 
 
-def test_real_gibberish_still_escalates_after_three_misses():
+def test_real_gibberish_still_escalates_after_help_menu():
     c = Conv(FakeTools())
-    for u in ("ఏం చేస్తున్నావ్?", "ఏం చేస్తున్నావ్?", "ఏం చేస్తున్నావ్?"):
-        c.say(u)
+    for _ in range(3):
+        r = c.say("ఏం చేస్తున్నావ్?")
+    assert c.control == "continue" and "అపాయింట్మెంట్ బుక్ చేయగలను" in r   # help menu, once
+    for _ in range(3):
+        c.say("ఏం చేస్తున్నావ్?")
     assert c.control == "transfer"
 
 
-def test_three_misunderstandings_escalate():
+def test_three_misunderstandings_offer_help_then_escalate():
     t = FakeTools()
     c = Conv(t, lang="en-IN")
     c.say("hmm umm")                  # a filler is answered patiently, not counted
     assert c.control == "continue" and c.state.get("misses_total", 0) == 0
     c.say("blah")
     c.say("zzz")
+    r = c.say("qwerty")
+    assert c.control == "continue" and "I can book an appointment" in r
+    assert not any(x[0] == "handoff" for x in t.calls)
+    c.say("blah")
+    c.say("zzz")
     c.say("qwerty")
     assert c.control == "transfer" and ("handoff", "repeated_misunderstanding") in t.calls
+
+
+def test_production_call_doctors_question_answered_not_handed_off():
+    """CALL-20261010-33DEF1: "the doctors in your hospital" -> "which doctor?", then line
+    noise ("Oh", one Bengali word) and a bare "Doctor" counted as 3 misses -> callback."""
+    t = FakeTools()
+    c = Conv(t)
+    r = c.say("ఆ మీ హాస్పిటల్లో ఉన్న డాక్టర్స్ లో")
+    assert "Srinivas Rao" in r and "ఏ డాక్టర్ కావాలి" not in r
+    c.say("Oh")
+    c.say("দহ।")
+    r = c.say("Doctor")
+    assert "Srinivas Rao" in r
+    assert c.control == "continue" and not any(x[0] == "handoff" for x in t.calls)
+    assert c.state.get("misses_total", 0) == 0
+
+
+def test_details_follow_up_continues_last_question():
+    t = FakeTools()
+    c = Conv(t)
+    c.say("మీ హాస్పిటల్లో డాక్టర్స్ ఎవరు?")
+    r = c.say("డీటెయిల్స్ చెప్తారా?")
+    assert "Srinivas Rao" in r and "టైమింగ్స్" not in r
+
+
+def test_doctor_named_mid_booking_still_fills_the_slot():
+    t = FakeTools(slots=SLOTS)
+    c = Conv(t, lang="en-IN")
+    r = c.say("I need an appointment tomorrow morning")
+    assert "Which doctor" in r and "Cardiology" in r                      # the clinic's own departments
+    r = c.say("heart doctor")
+    assert "two options" in r and not any(x[0] == "answer_question" for x in t.calls)
 
 
 def test_unknown_caller_cannot_get_others_report():
