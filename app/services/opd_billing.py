@@ -1018,9 +1018,12 @@ async def list_invoices(
     status_filter: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 50,
+    branch_id: Optional[str] = None,
 ) -> list[dict]:
     """Search and list invoices with patient context."""
     query = scoped_query("opd_invoices", clinic_id).order("created_at", desc=True)
+    if branch_id:
+        query = query.eq("branch_id", branch_id)
 
     if date_str:
         start_dt = f"{date_str}T00:00:00+05:30"

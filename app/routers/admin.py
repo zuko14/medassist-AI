@@ -506,6 +506,48 @@ def _enforce_corporate_viewer_scope(request: Request, user: AdminUser) -> AdminU
     )
 
 
+#: OPD-only logins (migration 103 roles): a DOCTOR works its consultations, a
+#: CASHIER its counter. Most of /admin admits any staff account, so without
+#: this a doctor login could pull the clinic-wide patient list, bookings and
+#: dashboard the panel never shows it. A deny-list, not an allowlist: every
+#: route a granted permission reaches keeps working, and an entry with grants
+#: re-opens for a holder of any of them (the front desk's appointment search).
+_OPD_ROLES = frozenset({"DOCTOR", "CASHIER"})
+_OPD_ROLE_DENIED_ROUTES = (
+    ("GET", re.compile(r"^/admin/stats$"), ()),
+    ("GET", re.compile(r"^/admin/appointments/(recent|upcoming)$"), ()),
+    ("GET", re.compile(r"^/admin/appointments$"), ("OPD_FRONT_DESK",)),
+    ("DELETE", re.compile(r"^/admin/appointments/[^/]+$"), ()),
+    ("POST", re.compile(r"^/admin/appointments/[^/]+/check-in$"), ()),
+    ("GET", re.compile(r"^/admin/departments/popular$"), ()),
+    ("POST", re.compile(r"^/admin/doctors/[^/]+/queue/call-next$"), ()),
+    ("*", re.compile(r"^/admin/lab-reports(/.*)?$"), ("REPORTS_VIEW", "REPORTS_RESOLVE")),
+    ("GET", re.compile(r"^/admin/patients$"), ()),
+    ("GET", re.compile(r"^/admin/prescriptions$"), ()),
+    ("*", re.compile(r"^/admin/bookings(/.*)?$"), ()),
+    ("*", re.compile(r"^/admin/connectors/failed-reports(/.*)?$"), ("CONNECTOR_MANAGE", "REPORTS_RESOLVE")),
+    ("GET", re.compile(r"^/admin/(messaging-usage|subscription|clinics)$"), ()),
+    ("GET", re.compile(r"^/admin/ai/(usage|budget)$"), ()),
+    ("*", re.compile(r"^/admin/notifications(/.*)?$"), ()),
+    ("*", re.compile(r"^/fhir(/.*)?$"), ()),
+)
+
+
+def _enforce_opd_role_scope(request: Request, user: AdminUser) -> AdminUser:
+    if user.role != "staff" or getattr(user, "staff_role", None) not in _OPD_ROLES:
+        return user
+    path = request.url.path.rstrip("/") or "/"
+    held = set(user.permissions or [])
+    for method, rx, grants in _OPD_ROLE_DENIED_ROUTES:
+        if method in ("*", request.method) and rx.match(path) and not held.intersection(grants):
+            logger.warning(f"OPD_ROLE_DENIED user='{user.username}' {request.method} {path}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This login is limited to its OPD work.",
+            )
+    return user
+
+
 async def verify_credentials(
     request: Request,
     credentials: Optional[HTTPBasicCredentials] = Depends(security),
@@ -517,9 +559,11 @@ async def verify_credentials(
     067 has not been applied still authenticates.
 
     Company-viewer logins are then confined to _CORPORATE_VIEWER_ROUTES, and
-    phlebotomist logins to _PHLEBOTOMIST_ROUTES.
+    phlebotomist logins to _PHLEBOTOMIST_ROUTES, and DOCTOR/CASHIER logins
+    kept off _OPD_ROLE_DENIED_ROUTES.
     """
     user = await _authenticate_request(request, credentials)
+    user = _enforce_opd_role_scope(request, user)
     return _enforce_phlebotomist_scope(request, _enforce_corporate_viewer_scope(request, user))
 
 

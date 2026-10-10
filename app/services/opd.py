@@ -802,7 +802,7 @@ async def create_walk_in(
                 raise HTTPException(status_code=409, detail="doctor_on_leave")
 
     # 4. Doctor branch & availability
-    branch_id = body.get("branch_id") or getattr(actor, "branch_id", None) or doc.get("branch_id")
+    branch_id = await resolve_visit_branch(doc["id"], actor, body.get("branch_id"))
 
     # 5. Patient & family member verification
     patient_id = str(body["patient_id"])
@@ -953,10 +953,20 @@ async def arrive(
             detail=f"This booking is {str(appt.get('status')).replace('_', ' ')} and cannot be marked arrived.",
         )
 
+    from app.services.permissions import enforce_branch_scope
+    enforce_branch_scope(actor, appt.get("branch_id"))
+
+    arrive_update: dict = {}
     if visit_type:
+        arrive_update["visit_type"] = visit_type
+    if not appt.get("branch_id") and appt.get("doctor_id"):
+        branch = await resolve_visit_branch(appt["doctor_id"], actor)
+        if branch:
+            arrive_update["branch_id"] = branch
+    if arrive_update:
         await sb(
             supabase.table("appointments")
-            .update({"visit_type": visit_type})
+            .update(arrive_update)
             .eq("clinic_id", clinic_id)
             .eq("id", appointment_id)
         )
@@ -1010,6 +1020,29 @@ async def arrive(
             logger.warning(f"Failed to queue WhatsApp token notification on arrive: {e}")
 
     return _make_queue_row(checked_in)
+
+
+async def resolve_visit_branch(
+    doctor_id: str, actor: Any, explicit: Optional[str] = None
+) -> Optional[str]:
+    """The branch an OPD visit belongs to.
+
+    Branch-pinned logins filter the queue on appointments.branch_id, so a visit
+    saved with no branch is invisible to every one of them. Order: the branch
+    the desk picked, the desk's own branch, then the doctor's branch when the
+    doctor practises at exactly one (doctor_branches). doctors has no
+    branch_id column; reading one is why walk-ins used to land branchless.
+    """
+    if explicit:
+        return str(explicit)
+    if getattr(actor, "branch_id", None):
+        return str(actor.branch_id)
+    res = await sb(
+        # unscoped: doctor branch association; doctor_id was verified against the clinic by the caller
+        supabase.table("doctor_branches").select("branch_id").eq("doctor_id", str(doctor_id))
+    )
+    ids = {str(r["branch_id"]) for r in (res.data or []) if r.get("branch_id")}
+    return ids.pop() if len(ids) == 1 else None
 
 
 def _make_queue_row(appt: dict) -> dict:
@@ -1471,10 +1504,11 @@ async def setup_checklist(clinic: dict) -> list[dict]:
     # 9. front_desk_permissions
     admins_res = await sb(
         supabase.table("clinic_admins")
-        .select("id, role, permissions")
+        .select("id, role, permissions, doctor_id, is_active")
         .eq("clinic_id", clinic_id)
     )
-    admins = admins_res.data or []
+    # A deactivated account cannot sign in, so it staffs nothing.
+    admins = [a for a in (admins_res.data or []) if a.get("is_active") is not False]
     desk_done = any(
         a.get("role") in ("clinic_admin", "super_admin")
         or "OPD_FRONT_DESK" in (a.get("permissions") or [])

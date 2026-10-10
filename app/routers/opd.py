@@ -18,6 +18,7 @@ from app.database import (
     scoped_query,
     supabase,
 )
+from app.services.permissions import resolve_owned_branch
 from app.routers.admin import (
     AdminUser,
     enforce_branch_scope,
@@ -414,6 +415,28 @@ def _holds(user: AdminUser, *perms: str) -> bool:
     )
 
 
+def _doctor_only(user: AdminUser) -> bool:
+    """A login linked to a doctor with no desk/billing/admin duty: it works its
+    own doctor's queue, wherever that patient was registered."""
+    return bool(user.doctor_id) and not _holds(user, "OPD_FRONT_DESK", "OPD_BILLING", "OPD_ADMIN")
+
+
+def _read_branch(user: AdminUser, requested: Optional[str]) -> Optional[str]:
+    """Branch filter for a read. Branch-pinned staff always read their own
+    branch; asking for another is 403. Unpinned staff may filter or not."""
+    if requested:
+        enforce_branch_scope(user, requested)
+    return str(user.branch_id) if getattr(user, "branch_id", None) else requested
+
+
+async def _write_branch(user: AdminUser, scope: str, requested: Optional[str]) -> Optional[str]:
+    """Verify a branch a write names: it must belong to this clinic (404) and
+    to a pinned caller (403). None leaves the service's own default."""
+    if requested:
+        await resolve_owned_branch(user, requested, scope)
+    return requested
+
+
 async def _opd_scope(
     user: AdminUser,
     clinic_id: str,
@@ -783,8 +806,7 @@ async def create_walk_in_appointment(
     """Issue a walk-in token and assign queue stage."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_FRONT_DESK", live=True)
 
-    if body.branch_id:
-        enforce_branch_scope(user, body.branch_id)
+    await _write_branch(user, scope, body.branch_id)
 
     qrow = await create_walk_in(clinic, body.model_dump(), user)
 
@@ -839,9 +861,11 @@ async def get_live_queue(
         user, clinic_id, "OPD_FRONT_DESK", "OPD_CLINICAL", "OPD_BILLING", live=True
     )
 
-    if branch_id:
-        enforce_branch_scope(user, branch_id)
-    effective_branch = user.branch_id or branch_id
+    if _doctor_only(user):
+        # A doctor sees their own patients only, at whichever branch they arrived.
+        doctor_id, effective_branch = str(user.doctor_id), None
+    else:
+        effective_branch = _read_branch(user, branch_id)
     date_val = date or today_ist().isoformat()
 
     board = await get_queue_board(
@@ -1031,7 +1055,9 @@ async def get_doctor_workspace(
         scope,
         date_str=target_date.isoformat(),
         doctor_id=target_doc_id,
-        branch_id=user.branch_id,
+        # A linked doctor's queue is theirs at every branch; a branch filter
+        # would hide their own patients registered elsewhere or before branches.
+        branch_id=None if user.doctor_id else user.branch_id,
     )
     active_stages = {"registered", "vitals_pending", "waiting", "in_consultation"}
     queue_rows = []
@@ -1321,7 +1347,7 @@ async def create_ad_hoc_invoice(
         discount_paise=body.discount_paise,
         discount_reason=body.discount_reason,
         notes=body.notes,
-        branch_id=body.branch_id,
+        branch_id=await _write_branch(user, scope, body.branch_id),
         actor=user,
     )
 
@@ -1514,7 +1540,10 @@ async def list_opd_invoices(
     """List invoices with date, status, and patient search filters."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
     date_str = date_query.isoformat() if date_query else None
-    return await list_invoices(scope, date_str=date_str, status_filter=status_filter, q=q)
+    return await list_invoices(
+        scope, date_str=date_str, status_filter=status_filter, q=q,
+        branch_id=_read_branch(user, None),
+    )
 
 
 @router.get("/invoices/{invoice_id}")
@@ -1525,7 +1554,9 @@ async def get_opd_invoice(
 ):
     """Retrieve full invoice details, line items, and receipts ledger."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_FRONT_DESK", "OPD_ADMIN")
-    return await get_invoice(scope, invoice_id)
+    inv = await get_invoice(scope, invoice_id)
+    enforce_branch_scope(user, inv.get("branch_id"))
+    return inv
 
 
 @router.get("/invoices/{invoice_id}/pdf")
@@ -1537,6 +1568,7 @@ async def download_invoice_pdf(
     """Download immutable A4 invoice PDF."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_FRONT_DESK", "OPD_ADMIN")
     inv = await get_invoice(scope, invoice_id)
+    enforce_branch_scope(user, inv.get("branch_id"))
     items = inv.get("items") or []
     receipts = inv.get("receipts") or []
     pdf_bytes = render_invoice_pdf(inv, items, receipts, clinic=clinic)
@@ -1556,7 +1588,10 @@ async def open_cashier_shift(
 ):
     """Open a cashier drawer shift."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
-    return await open_shift(scope, opening_float_paise=body.opening_float_paise, branch_id=body.branch_id, actor=user)
+    return await open_shift(
+        scope, opening_float_paise=body.opening_float_paise,
+        branch_id=await _write_branch(user, scope, body.branch_id), actor=user,
+    )
 
 
 @router.get("/shifts/current")
@@ -1603,7 +1638,7 @@ async def get_daily_collections_summary(
     """Compute financial summary for a day across cashiers and payment modes."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
     date_str = date_query.isoformat() if date_query else None
-    return await get_collections_summary(scope, date_str=date_str, branch_id=branch_id)
+    return await get_collections_summary(scope, date_str=date_str, branch_id=_read_branch(user, branch_id))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1625,7 +1660,7 @@ async def get_analytics(
         clinic_id=scope,
         from_date_str=from_date,
         to_date_str=to_date,
-        branch_id=branch_id,
+        branch_id=_read_branch(user, branch_id),
     )
 
 
