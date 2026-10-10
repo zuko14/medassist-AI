@@ -3013,7 +3013,15 @@
                             <select id="exportDataset" onchange="onExportDatasetChange()">
                                 <option value="appointments">Appointments &amp; bookings (by appointment date)</option>
                                 <option value="patients">WhatsApp patients (by first contact date)</option>
-                                <option value="patient_records">Imported patients (all)</option>
+                                <option value="patient_records" data-norange="1">Imported patients (all)</option>
+                                <optgroup label="OPD" data-opd="nav" style="display:none">
+                                    <option value="opd_visits">OPD visits: walk-ins &amp; arrivals (by visit date)</option>
+                                    <option value="opd_patients" data-norange="1">OPD patient registry with MRN (all)</option>
+                                    <option value="opd_invoices">OPD invoices (by issue date)</option>
+                                    <option value="opd_invoice_items">OPD invoice line items (by issue date)</option>
+                                    <option value="opd_receipts">OPD payments &amp; refunds (by date)</option>
+                                    <option value="opd_shifts">OPD cashier shifts (by opening date)</option>
+                                </optgroup>
                             </select>
                         </div>
                         <div class="field export-range"><label for="exportFrom">From</label><input type="date" id="exportFrom"></div>
@@ -6411,6 +6419,16 @@ function applyOpdGates() {
         }
         if (caps.includes('nav')) {
             el.style.display = myOpd ? '' : 'none';
+            if (el.tagName === 'OPTGROUP') {
+                // display:none alone does not hide options in every browser.
+                el.hidden = !myOpd;
+                el.disabled = !myOpd;
+                const sel = el.closest('select');
+                if (!myOpd && sel && sel.selectedOptions[0]?.parentElement === el) {
+                    sel.selectedIndex = 0;
+                    sel.dispatchEvent(new Event('change'));
+                }
+            }
             return;
         }
         const show = caps.some(opdCan) && (live || el.dataset.page === 'opdsetup');
@@ -10117,8 +10135,14 @@ function pageDataRecords(dir) {
     loadDataRecords();
 }
 
+// Datasets without a date range carry data-norange on their <option>.
+function exportNeedsRange() {
+    const sel = document.getElementById('exportDataset');
+    return !sel.options[sel.selectedIndex]?.dataset.norange;
+}
+
 function onExportDatasetChange() {
-    const needsRange = document.getElementById('exportDataset').value !== 'patient_records';
+    const needsRange = exportNeedsRange();
     document.querySelectorAll('#dtab-export .export-range').forEach(el => { el.style.display = needsRange ? '' : 'none'; });
 }
 
@@ -10147,7 +10171,7 @@ async function downloadExport() {
     const btn = document.getElementById('exportBtn');
     const msgEl = document.getElementById('exportMsg');
     let path = '/admin/data/export?dataset=' + encodeURIComponent(dataset);
-    if (dataset !== 'patient_records') {
+    if (exportNeedsRange()) {
         if (!from || !to) { msgEl.innerHTML = '<div class="alert alert-err">Choose a From and To date.</div>'; return; }
         path += '&date_from=' + encodeURIComponent(from) + '&date_to=' + encodeURIComponent(to);
     }

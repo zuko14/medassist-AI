@@ -149,6 +149,9 @@ def test_records_limit_from_config(cfg, expected):
     ("-2+3", "'-2+3"),
     ("  =cmd", "'  =cmd"),
     ("+919876543210", "+919876543210"),  # a phone is a number, not a formula
+    ("-100.00", "-100.00"),  # a refund amount is a number, not a formula
+    ("-1-1", "'-1-1"),
+    ("-1e5", "'-1e5"),
     ("Ravi", "Ravi"),
     (None, ""),
     (True, "Yes"),

@@ -8773,7 +8773,10 @@ async def delete_patient_import(
 @router.get("/data/export")
 async def export_clinic_data(
     request: Request,
-    dataset: Literal["appointments", "patients", "patient_records"],
+    dataset: Literal[
+        "appointments", "patients", "patient_records",
+        "opd_visits", "opd_patients", "opd_invoices", "opd_invoice_items", "opd_receipts", "opd_shifts",
+    ],
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     clinic_id: str = "default",
@@ -8784,14 +8787,28 @@ async def export_clinic_data(
     appointments: by appointment date (WhatsApp bookings, lab tests, treatments).
     patients:     WhatsApp patients by first-contact date (IST).
     patient_records: every imported record (no date range).
+    opd_*:        OPD OS data (app.services.opd_export); OPD clinics only.
     """
+    from app.services import opd_export
+    from app.services.tenant import opd_enabled
+
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    is_opd = dataset in opd_export.OPD_EXPORT_DATASETS
+    if is_opd and not opd_enabled(await get_clinic_by_id(effective_clinic_id)):
+        raise HTTPException(status_code=403, detail="The OPD module is not enabled for this clinic.")
     try:
-        client_data.validate_export_range(dataset, date_from, date_to)
+        if is_opd:
+            if opd_export.OPD_EXPORT_DATASETS[dataset][0]:
+                client_data.check_date_range(date_from, date_to)
+        else:
+            client_data.validate_export_range(dataset, date_from, date_to)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
-        rows = await client_data.fetch_export_rows(effective_clinic_id, dataset, date_from, date_to)
+        if is_opd:
+            rows = await opd_export.fetch_opd_export_rows(effective_clinic_id, dataset, date_from, date_to)
+        else:
+            rows = await client_data.fetch_export_rows(effective_clinic_id, dataset, date_from, date_to)
     except OverflowError:
         raise HTTPException(
             status_code=413,
@@ -8801,7 +8818,11 @@ async def export_clinic_data(
         logger.error(f"Export {dataset} failed for clinic={effective_clinic_id}: {e}")
         raise HTTPException(status_code=500, detail="Export failed. Please retry.")
 
-    body = await asyncio.to_thread(client_data.build_csv, dataset, rows)
+    if is_opd:
+        body = await asyncio.to_thread(
+            client_data.csv_from_columns, opd_export.OPD_EXPORT_DATASETS[dataset][2], rows)
+    else:
+        body = await asyncio.to_thread(client_data.build_csv, dataset, rows)
     await log_admin_action(
         user=user,
         action="CLINIC_DATA_EXPORT",

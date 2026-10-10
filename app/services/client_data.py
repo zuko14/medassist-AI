@@ -361,7 +361,9 @@ IMPORT_TEMPLATE_CSV = (
 # ═══════════════════════════════════════════════════════════════════════════
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-_PLAIN_NUMBER = re.compile(r"\+?\d+(\.\d+)?")
+# A bare signed number cannot carry a formula: refunds and cash variance
+# export as -100.00 and must stay numbers in Excel, not text.
+_PLAIN_NUMBER = re.compile(r"[+-]?\d+(\.\d+)?")
 
 
 def csv_cell(value) -> str:
@@ -440,6 +442,11 @@ EXPORT_DATASETS = {
 
 def build_csv(dataset: str, rows: Iterable[dict]) -> str:
     _, _, _, columns = EXPORT_DATASETS[dataset]
+    return csv_from_columns(columns, rows)
+
+
+def csv_from_columns(columns, rows: Iterable[dict]) -> str:
+    """CSV text for [(header, row -> value)] columns; every cell formula-safe."""
     buf = io.StringIO()
     buf.write("﻿")  # Excel needs the BOM to show Telugu/Hindi names correctly
     w = csv.writer(buf)
@@ -455,6 +462,11 @@ def validate_export_range(dataset: str, date_from: Optional[date], date_to: Opti
         raise ValueError(f"Unknown dataset. Choose one of: {', '.join(EXPORT_DATASETS)}.")
     if EXPORT_DATASETS[dataset][1] is None:
         return
+    check_date_range(date_from, date_to)
+
+
+def check_date_range(date_from: Optional[date], date_to: Optional[date]) -> None:
+    """Raises ValueError with a user-facing message."""
     if not date_from or not date_to:
         raise ValueError("Choose a From and To date.")
     if date_from > date_to:
