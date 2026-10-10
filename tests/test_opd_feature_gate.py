@@ -327,3 +327,28 @@ async def test_doctor_delete_fk_23503_maps_to_409():
             await admin.delete_doctor(doc_id, clinic_id="default", user=admin_user)
     assert exc.value.status_code == 409
     assert "Doctor has OPD clinical or billing records" in exc.value.detail
+
+
+# ─── provision_defaults CAS filter must be valid JSON ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_provision_defaults_cas_filter_is_json_not_python_repr():
+    """Re-enabling OPD (non-empty opd_settings) 500'd: the CAS filter went out as
+    a Python repr ({'k': True}) and Postgres rejected it (22P02)."""
+    import json
+
+    from app.services import opd
+
+    existing = {"rooms": {}, "vitals_required": True, "payment_modes": ["cash"]}
+    q = MagicMock()
+    for m in ("table", "select", "update", "eq", "limit"):
+        getattr(q, m).return_value = q
+    sb_mock = AsyncMock(side_effect=[MagicMock(data=[{"opd_settings": existing}]),
+                                     MagicMock(data=[{"id": "c1"}])])
+    with patch.object(opd, "supabase", q), patch.object(opd, "sb", sb_mock):
+        merged = await opd.provision_defaults("c1")
+
+    cas = [c.args[1] for c in q.eq.call_args_list if c.args[0] == "opd_settings"]
+    assert len(cas) == 1 and json.loads(cas[0]) == existing
+    assert merged["vitals_required"] is True and merged["payment_modes"] == ["cash"]

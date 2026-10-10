@@ -6,6 +6,7 @@ Zero-LLM clinical safety compliant.
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import secrets
@@ -153,7 +154,9 @@ async def provision_defaults(clinic_id: str) -> dict:
             supabase.table("clinics")
             .update({"opd_settings": merged})
             .eq("id", clinic_id)
-            .eq("opd_settings", existing)
+            # postgrest-py str()s filter values; a dict would go out as a
+            # Python repr ({'k': True}) that Postgres rejects as invalid JSON.
+            .eq("opd_settings", json.dumps(existing))
         )
         if update_res.data:
             return merged
