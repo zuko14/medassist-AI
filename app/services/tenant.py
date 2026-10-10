@@ -347,6 +347,20 @@ def get_clinic_contact(clinic: dict, key: str, fallback: str) -> str:
     return (clinic.get("config") or {}).get(key) or fallback
 
 
+def clinic_letterhead(clinic: Optional[dict]) -> dict:
+    """The clinic's own name, address and phone for OPD paperwork and the OPD
+    setup check. clinics has no address/phone columns: they live in config,
+    which is what /admin/profile edits. Never falls back to the platform env
+    defaults; that would print another hospital's address on a bill."""
+    clinic = clinic or {}
+    cfg = clinic.get("config") or {}
+    return {
+        "name": (clinic.get("name") or "").strip(),
+        "address": (cfg.get("address") or "").strip(),
+        "phone": (cfg.get("staff_phone") or cfg.get("phone") or clinic.get("whatsapp_number") or "").strip(),
+    }
+
+
 #: The only cancellation cutoff windows a clinic may pick, in hours before the
 #: slot. 0 means "any time before the appointment starts". Anything outside
 #: this list is a typo or a stale client, and is refused rather than stored:

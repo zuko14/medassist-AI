@@ -252,8 +252,10 @@ def render_invoice_pdf(
 
     # 1. Header & Clinic branding
     clinic_name = (clinic or {}).get("name") or "Medical Center"
-    clinic_phone = (clinic or {}).get("phone") or (clinic or {}).get("whatsapp_number") or ""
-    clinic_address = (clinic or {}).get("address") or ""
+    from app.services.tenant import clinic_letterhead
+    lh = clinic_letterhead(clinic)
+    clinic_phone = lh["phone"]
+    clinic_address = lh["address"]
 
     pdf.set_font("NotoSans", "B", 14)
     pdf.set_text_color(24, 43, 73)  # Navy

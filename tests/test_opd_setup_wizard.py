@@ -34,8 +34,8 @@ DOC_ID = str(uuid.uuid4())
 BASE_CLINIC = {
     "id": CLINIC_ID,
     "name": "Kriya Metro Clinic",
-    "address": "123 Health Ave, Bengaluru",
-    "phone": "+918012345678",
+    # Real shape: clinics has no address/phone columns; /admin/profile writes config.
+    "config": {"address": "123 Health Ave, Bengaluru", "staff_phone": "+918012345678"},
     "features": {"opd_enabled": True},
     "opd_state": "CONFIGURING",
     "opd_settings": {
@@ -322,3 +322,70 @@ def test_rotate_display_token(auth_admin):
         assert res.status_code == 200
         url = res.json()["url"]
         assert url.startswith("/public/queue-display#t=")
+
+
+# ─── Clinic profile reads config; every Configure target exists in the panel ──
+
+
+def test_clinic_letterhead_reads_config_never_env_defaults():
+    from app.services.tenant import clinic_letterhead
+
+    assert clinic_letterhead({"name": "A", "config": {"address": "1 Rd", "staff_phone": "+91900"}}) == {
+        "name": "A", "address": "1 Rd", "phone": "+91900"}
+    # Flat keys (non-existent columns) are ignored; WhatsApp number is the phone fallback.
+    assert clinic_letterhead({"name": "A", "address": "x", "phone": "y", "whatsapp_number": "+91800"}) == {
+        "name": "A", "address": "", "phone": "+91800"}
+    assert clinic_letterhead(None) == {"name": "", "address": "", "phone": ""}
+
+
+def test_checklist_fix_pages_exist_in_admin_panel():
+    """A fix_page pointing at a missing page blanked the whole panel."""
+    import asyncio
+    import re
+    from pathlib import Path
+
+    from app.services import opd
+
+    html = (Path(__file__).resolve().parents[1] / "admin" / "index.html").read_text(encoding="utf-8")
+    ids = set(re.findall(r'id="([^"]+)"', html))
+    q = MagicMock()
+    for m in ("table", "select", "eq", "limit", "is_", "in_", "order"):
+        getattr(q, m).return_value = q
+    clinic = {**BASE_CLINIC, "opd_settings": {}}
+    with patch.object(opd, "sb", AsyncMock(return_value=MagicMock(data=[]))), \
+         patch.object(opd, "supabase", q), patch.object(opd, "scoped_query", return_value=q):
+        items = asyncio.run(opd.setup_checklist(clinic))
+    by_key = {i["key"]: i for i in items}
+    assert by_key["clinic_profile"]["done"] is True
+    for i in items:
+        page, _, anchor = i["fix_page"].partition("#")
+        assert f"pg-{page}" in ids, i
+        assert not anchor or anchor in ids, i
+
+
+def test_put_templates_merges_and_validates(auth_admin):
+    """Template names merge into the stored set (legacy alias keys kept, "" clears);
+    bad names, unknown modes and malformed VPAs are refused."""
+    init_clinic = {**BASE_CLINIC, "opd_settings": {
+        **BASE_CLINIC["opd_settings"],
+        "templates": {"opd_receipt": "legacy_receipt", "token_issued": "old_tok", "receipt": "r1"}}}
+    upd = MagicMock(data=[init_clinic])
+    sb_mock = AsyncMock(return_value=upd)
+    with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=init_clinic)), \
+         patch("app.routers.opd.sb", sb_mock), \
+         patch("app.services.opd.sb", AsyncMock(side_effect=[MagicMock(data=[COMPLETE_DOCTOR]), MagicMock(data=[ADMIN_RECORD])])), \
+         patch("app.routers.opd.supabase") as sup, \
+         patch("app.routers.opd.log_admin_action", AsyncMock()):
+        sup.table.return_value = sup
+        sup.update.return_value = sup
+        sup.eq.return_value = sup
+        res = client.put(f"/admin/opd/setup/settings?clinic_id={CLINIC_ID}",
+                         json={"templates": {"token_issued": "new_tok", "receipt": ""}})
+        assert res.status_code == 200
+        written = sup.update.call_args.args[0]["opd_settings"]["templates"]
+        assert written == {"opd_receipt": "legacy_receipt", "token_issued": "new_tok"}
+
+        for bad in ({"templates": {"receipt": "Bad Name"}}, {"templates": {"nope": "x"}},
+                    {"payment_modes": ["cheque"]}, {"payment_modes": []}, {"upi_vpa": "not a vpa"}):
+            r = client.put(f"/admin/opd/setup/settings?clinic_id={CLINIC_ID}", json=bad)
+            assert r.status_code == 422, bad

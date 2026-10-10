@@ -4112,7 +4112,7 @@
             <div id="opdSetupMsg"></div>
 
             <!-- Wizard Progress Card -->
-            <div class="card" style="margin-bottom:20px;">
+            <div class="card" id="opdDryRunAnchor" style="margin-bottom:20px;">
                 <div class="card-head">
                     <div>
                         <h3 style="margin:0 0 4px 0;">Readiness Checklist</h3>
@@ -4159,7 +4159,7 @@
             </div>
 
             <!-- OPD Configuration Settings Card -->
-            <div class="form-card">
+            <div class="form-card" id="opdPrefsCard">
                 <h3>OPD Queue Preferences</h3>
                 <div class="form-row">
                     <div class="field">
@@ -4195,6 +4195,42 @@
                     </div>
                 </div>
                 <button class="btn btn-accent" onclick="saveOpdSettings()">Save OPD Settings</button>
+            </div>
+
+            <div class="form-card" id="opdBillingCard">
+                <h3>Billing &amp; Payment Methods</h3>
+                <p class="muted" style="margin:-4px 0 14px">Modes the OPD counter can take. UPI needs your clinic's UPI ID: it is the payee on every counter QR code, so check it carefully.</p>
+                <div class="form-row">
+                    <div class="field">
+                        <label>Accepted at the counter</label>
+                        <label class="check"><input type="checkbox" id="f-opdModeCash" value="cash"> Cash</label>
+                        <label class="check"><input type="checkbox" id="f-opdModeUpi" value="upi"> UPI (QR)</label>
+                        <label class="check"><input type="checkbox" id="f-opdModeCard" value="card"> Card</label>
+                    </div>
+                    <div class="field">
+                        <label for="f-opdUpiVpa">Clinic UPI ID (VPA)</label>
+                        <input type="text" id="f-opdUpiVpa" placeholder="e.g. aurahospital@okicici" autocomplete="off" spellcheck="false">
+                        <small style="color:var(--text3)">Required when UPI is ticked.</small>
+                    </div>
+                </div>
+                <button class="btn btn-accent" onclick="saveOpdBillingSettings()">Save Payment Methods</button>
+            </div>
+
+            <div class="form-card" id="opdTemplatesCard">
+                <h3>WhatsApp Templates <span class="muted" style="font-size:0.8rem; font-weight:400;">(optional)</span></h3>
+                <p class="muted" style="margin:-4px 0 14px">Approved Meta template names, used when the patient is outside WhatsApp's 24-hour window. Leave blank to send a plain message inside the window only. Names are lowercase letters, digits and underscores.</p>
+                <div class="form-row">
+                    <div class="field"><label for="f-opdTplTokenIssued">Token issued</label><input type="text" id="f-opdTplTokenIssued" data-tpl="token_issued" placeholder="e.g. opd_token_issued" spellcheck="false"><small style="color:var(--text3)">Body: {{1}} token, {{2}} doctor, {{3}} clinic</small></div>
+                    <div class="field"><label for="f-opdTplTokenCalled">Token called</label><input type="text" id="f-opdTplTokenCalled" data-tpl="token_called" placeholder="e.g. opd_token_called" spellcheck="false"><small style="color:var(--text3)">Body: {{1}} token, {{2}} doctor, {{3}} room</small></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label for="f-opdTplRx">Prescription ready</label><input type="text" id="f-opdTplRx" data-tpl="prescription_ready" placeholder="e.g. opd_prescription_ready" spellcheck="false"><small style="color:var(--text3)">Header: document (the prescription PDF)</small></div>
+                    <div class="field"><label for="f-opdTplReceipt">Payment receipt</label><input type="text" id="f-opdTplReceipt" data-tpl="receipt" placeholder="e.g. opd_receipt" spellcheck="false"><small style="color:var(--text3)">Body: {{1}} invoice no, {{2}} amount, {{3}} mode</small></div>
+                </div>
+                <div class="form-row">
+                    <div class="field"><label for="f-opdTplPayLink">Payment link</label><input type="text" id="f-opdTplPayLink" data-tpl="payment_link" placeholder="e.g. opd_payment_link" spellcheck="false"><small style="color:var(--text3)">Body: {{1}} invoice no, {{2}} amount, {{3}} pay URL</small></div>
+                </div>
+                <button class="btn btn-accent" onclick="saveOpdTemplateSettings()">Save Templates</button>
             </div>
         </div>
 
@@ -7789,8 +7825,11 @@ async function loadMyCollections(silent) {
 
 // ═══════ NAV ═══════
 function go(page, el) {
+    // An unknown page used to hide every section and then throw: a blank screen.
+    const target = document.getElementById('pg-' + page);
+    if (!target) { console.warn('go(): no page', page); return; }
     document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
-    document.getElementById('pg-' + page).classList.add('on');
+    target.classList.add('on');
 
     document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('on'));
     if (el) el.classList.add('on');
@@ -16308,7 +16347,7 @@ function renderOpdSetup(data) {
             const actionBtn = item.done
                 ? '<span style="color:var(--green); font-size:0.85rem;">Ready</span>'
                 : (item.fix_page
-                    ? `<button class="btn btn-outline btn-sm" onclick="go('${esc(item.fix_page)}')">Configure</button>`
+                    ? `<button class="btn btn-outline btn-sm" onclick="openOpdFix('${esc(item.fix_page)}')">Configure</button>`
                     : '<span style="color:var(--text3); font-size:0.85rem;">Pending</span>');
             return `<tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:10px 12px; font-size:1.1rem; text-align:center;">${statusIcon}</td>
@@ -16337,6 +16376,72 @@ function renderOpdSetup(data) {
     if (document.getElementById('f-opdBillingAfterConsult')) {
         document.getElementById('f-opdBillingAfterConsult').value = String(settings.billing_after_consult !== false);
     }
+    const modes = settings.payment_modes || [];
+    [['f-opdModeCash', 'cash'], ['f-opdModeUpi', 'upi'], ['f-opdModeCard', 'card']].forEach(([id, m]) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = modes.includes(m);
+    });
+    const vpaEl = document.getElementById('f-opdUpiVpa');
+    if (vpaEl) vpaEl.value = settings.upi_vpa || '';
+    const tpl = settings.templates || {};
+    document.querySelectorAll('#opdTemplatesCard [data-tpl]').forEach(el => {
+        const k = el.dataset.tpl;
+        el.value = tpl[k] || tpl['opd_' + k] || '';
+    });
+}
+
+// Checklist "Configure": "page" or "page#elementId" (a card on that page).
+function openOpdFix(target) {
+    const [page, anchor] = String(target).split('#');
+    if (!document.getElementById('pg-' + page)) {
+        msg('opdSetupMsg', 'That setting is not available in this panel.', true);
+        return;
+    }
+    if (anchor === 'opdDryRunAnchor') { runOpdDryRun(); return; }
+    if (page !== 'opdsetup' || !document.getElementById('pg-opdsetup').classList.contains('on')) go(page);
+    const el = anchor && document.getElementById(anchor);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.querySelector('input, select, button')?.focus({ preventScroll: true });
+}
+
+async function saveOpdBillingSettings() {
+    const payment_modes = ['f-opdModeCash', 'f-opdModeUpi', 'f-opdModeCard']
+        .map(id => document.getElementById(id))
+        .filter(el => el && el.checked).map(el => el.value);
+    const upi_vpa = (document.getElementById('f-opdUpiVpa').value || '').trim();
+    if (!payment_modes.length) { msg('opdSetupMsg', 'Tick at least one payment mode.', true); return; }
+    if (payment_modes.includes('upi') && !upi_vpa) { msg('opdSetupMsg', 'Enter the clinic UPI ID, or untick UPI.', true); return; }
+    if (upi_vpa && !/^[A-Za-z0-9._-]{2,256}@[A-Za-z][A-Za-z0-9]{1,63}$/.test(upi_vpa)) {
+        msg('opdSetupMsg', 'That UPI ID does not look right. It should look like name@bank.', true); return;
+    }
+    try {
+        const updated = await apiPut('/admin/opd/setup/settings', { payment_modes, upi_vpa });
+        msg('opdSetupMsg', 'Payment methods saved.', false);
+        renderOpdSetup(updated);
+    } catch (e) {
+        msg('opdSetupMsg', 'Failed to save payment methods: ' + e.message, true);
+    }
+}
+
+async function saveOpdTemplateSettings() {
+    const templates = {};
+    for (const el of document.querySelectorAll('#opdTemplatesCard [data-tpl]')) {
+        const v = (el.value || '').trim();
+        if (v && !/^[a-z0-9_]{1,512}$/.test(v)) {
+            msg('opdSetupMsg', `"${v}" is not a valid template name (lowercase letters, digits, underscores).`, true);
+            el.focus();
+            return;
+        }
+        templates[el.dataset.tpl] = v;
+    }
+    try {
+        const updated = await apiPut('/admin/opd/setup/settings', { templates });
+        msg('opdSetupMsg', 'WhatsApp templates saved.', false);
+        renderOpdSetup(updated);
+    } catch (e) {
+        msg('opdSetupMsg', 'Failed to save templates: ' + e.message, true);
+    }
 }
 
 async function runOpdDryRun() {
@@ -16344,6 +16449,7 @@ async function runOpdDryRun() {
     if (resBox) {
         resBox.style.display = 'block';
         resBox.innerHTML = '<div class="loader"><div class="spin"></div> Simulating test patient visit flow...</div>';
+        resBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
     try {
         const res = await apiPost('/admin/opd/setup/dry-run', {});
@@ -16354,6 +16460,7 @@ async function runOpdDryRun() {
                 <ul style="margin:8px 0 0 16px; padding:0; font-size:0.85rem; line-height:1.6;">${checksHtml}</ul>
             </div>`;
         }
+        if (res.ok) loadOpdSetup();
     } catch (e) {
         if (resBox) resBox.innerHTML = `<div class="alert alert-err">Dry Run Error: ${esc(e.message)}</div>`;
     }

@@ -24,7 +24,7 @@ from app.database import (
     scoped_query,
     supabase,
 )
-from app.services.tenant import get_clinic_by_id
+from app.services.tenant import clinic_letterhead, get_clinic_by_id
 from app.utils.helpers import IST, doctor_title, generate_booking_reference, today_ist
 
 logger = logging.getLogger(__name__)
@@ -1424,7 +1424,8 @@ async def setup_checklist(clinic: dict) -> list[dict]:
     confirmed = set(settings.get("confirmed_steps") or [])
 
     # 1. clinic_profile
-    profile_done = bool(clinic.get("name") and clinic.get("address") and clinic.get("phone"))
+    lh = clinic_letterhead(clinic)
+    profile_done = bool(lh["name"] and lh["address"] and lh["phone"])
 
     # Active doctors
     doc_res = await sb(
@@ -1520,7 +1521,7 @@ async def setup_checklist(clinic: dict) -> list[dict]:
             "done": profile_done,
             "blocking": True,
             "detail": None if profile_done else "Clinic name, address, and phone must be set",
-            "fix_page": "settings",
+            "fix_page": "profile",
         },
         {
             "key": "operating_hours",
@@ -1568,7 +1569,7 @@ async def setup_checklist(clinic: dict) -> list[dict]:
             "done": durations_done,
             "blocking": True,
             "detail": None,
-            "fix_page": "settings",
+            "fix_page": "doctors",
         },
         {
             "key": "consult_fees",
@@ -1600,7 +1601,7 @@ async def setup_checklist(clinic: dict) -> list[dict]:
             "done": rules_done,
             "blocking": True,
             "detail": None if rules_done else "Token rule and after-check-in stage must be confirmed",
-            "fix_page": "opdsetup",
+            "fix_page": "opdsetup#opdPrefsCard",
         },
         {
             "key": "billing_setup",
@@ -1608,7 +1609,7 @@ async def setup_checklist(clinic: dict) -> list[dict]:
             "done": billing_done,
             "blocking": True,
             "detail": None if billing_done else "Payment modes and UPI VPA must be configured",
-            "fix_page": "opdsetup",
+            "fix_page": "opdsetup#opdBillingCard",
         },
         {
             "key": "whatsapp_templates",
@@ -1616,7 +1617,7 @@ async def setup_checklist(clinic: dict) -> list[dict]:
             "done": tmpl_done,
             "blocking": False,
             "detail": None if tmpl_done else "Meta template names configured (optional)",
-            "fix_page": "opdsetup",
+            "fix_page": "opdsetup#opdTemplatesCard",
         },
         {
             "key": "test_run_go_live",
@@ -1624,7 +1625,7 @@ async def setup_checklist(clinic: dict) -> list[dict]:
             "done": test_run_done,
             "blocking": True,
             "detail": None if test_run_done else "Test visit dry run must have passed within 24 hours",
-            "fix_page": "opdsetup",
+            "fix_page": "opdsetup#opdDryRunAnchor",
         },
     ]
 

@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Literal, Optional, Sequence
+from typing import Annotated, Any, Literal, Optional, Sequence
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, model_validator
@@ -81,7 +81,7 @@ from app.services.opd_billing import (
 )
 from app.services.opd_pdf import render_invoice_pdf, render_prescription_pdf
 from app.services.payment import payment_service
-from app.services.tenant import get_clinic_by_id, opd_enabled
+from app.services.tenant import clinic_letterhead, get_clinic_by_id, opd_enabled
 from app.utils.helpers import doctor_title, today_ist
 
 logger = logging.getLogger(__name__)
@@ -131,11 +131,19 @@ class OpdSettingsPatch(BaseModel):
     after_checkin_stage: Optional[Literal["registered", "vitals_pending", "waiting"]] = None
     billing_after_consult: Optional[bool] = None
     token_rule: Optional[Literal["per_doctor_daily"]] = None
-    payment_modes: Optional[list[str]] = None
-    upi_vpa: Optional[str] = None
+    # Same modes the counter accepts (ReceiptIn.mode).
+    payment_modes: Optional[list[Literal["cash", "upi", "card"]]] = Field(None, min_length=1)
+    # The payee of every counter UPI QR: a typo sends patients' money elsewhere.
+    # "" clears it.
+    upi_vpa: Optional[str] = Field(None, pattern=r"^$|^[A-Za-z0-9._-]{2,256}@[A-Za-z][A-Za-z0-9]{1,63}$")
     auto_open_shift: Optional[bool] = None
     rooms: Optional[dict[str, str]] = None
-    templates: Optional[dict] = None
+    # Meta template names, keyed by the OPD event that sends them. Merged into
+    # the stored set (legacy opd_* alias keys survive); "" clears one.
+    templates: Optional[dict[
+        Literal["token_issued", "token_called", "prescription_ready", "receipt", "payment_link"],
+        Annotated[str, Field(pattern=r"^[a-z0-9_]{0,512}$")],
+    ]] = None
     service_catalog: Optional[list[CatalogItem]] = None
     confirmed_steps: Optional[list[str]] = None
 
@@ -456,7 +464,7 @@ async def get_setup(
         checklist=checklist,
         settings=clinic.get("opd_settings") or {},
         went_live_at=(clinic.get("opd_settings") or {}).get("went_live_at"),
-        clinic={k: clinic.get(k) or "" for k in ("name", "address", "phone")},
+        clinic=clinic_letterhead(clinic),
     )
 
 
@@ -476,6 +484,9 @@ async def update_setup_settings(
         ]
 
     merged_settings = dict(clinic.get("opd_settings") or {})
+    if "templates" in patch_dict:
+        tmpl = {**(merged_settings.get("templates") or {}), **patch_dict["templates"]}
+        patch_dict["templates"] = {k: v for k, v in tmpl.items() if v}
     merged_settings.update(patch_dict)
 
     current_state = clinic.get("opd_state") or "NOT_CONFIGURED"

@@ -965,10 +965,12 @@ async def sign_prescription(
             branch_name = br_res.data.get("name")
             branch_addr = br_res.data.get("address")
 
+    from app.services.tenant import clinic_letterhead
+    lh = clinic_letterhead(clinic)
     letterhead_snapshot = {
         "clinic_name": clinic.get("name", ""),
-        "address": clinic.get("address", ""),
-        "phone": clinic.get("phone", ""),
+        "address": lh["address"],
+        "phone": lh["phone"],
         "email": clinic.get("email", ""),
         "branch_name": branch_name,
         "branch_address": branch_addr,
