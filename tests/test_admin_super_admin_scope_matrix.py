@@ -79,6 +79,8 @@ def _concrete(path):
         ("{appointment_id}", DUMMY), ("{report_id}", DUMMY), ("{prescription_id}", DUMMY),
         ("{booking_id}", DUMMY), ("{connector_id}", DUMMY), ("{failed_report_id}", DUMMY),
         ("{branch_id}", DUMMY), ("{notification_id}", DUMMY), ("{clinic_id}", CLINIC),
+        ("{patient_id}", DUMMY), ("{encounter_id}", DUMMY), ("{rx_id}", DUMMY),
+        ("{invoice_id}", DUMMY), ("{shift_id}", DUMMY),
     ):
         path = path.replace(token, value)
     return path
@@ -86,12 +88,16 @@ def _concrete(path):
 
 def _call(client, method, path, params):
     body = {"name": "X", "phone": "9876543210", "doctor_name": "Dr. Test"}
+    call_params = dict(params) if params else None
+    if call_params is not None and "from" not in call_params:
+        call_params["from"] = "2026-10-01"
+        call_params["to"] = "2026-10-09"
     fn = {
-        "GET": lambda: client.get(path, params=params),
-        "DELETE": lambda: client.delete(path, params=params),
-        "POST": lambda: client.post(path, params=params, json=body),
-        "PUT": lambda: client.put(path, params=params, json=body),
-        "PATCH": lambda: client.patch(path, params=params, json=body),
+        "GET": lambda: client.get(path, params=call_params),
+        "DELETE": lambda: client.delete(path, params=call_params),
+        "POST": lambda: client.post(path, params=call_params, json=body),
+        "PUT": lambda: client.put(path, params=call_params, json=body),
+        "PATCH": lambda: client.patch(path, params=call_params, json=body),
     }.get(method)
     return fn() if fn else None
 
@@ -108,6 +114,12 @@ def client():
 def test_there_are_admin_routes_to_check():
     """Guard against the matrix silently testing nothing."""
     assert len(ROUTES) > 50, f"only {len(ROUTES)} admin routes discovered"
+
+
+def test_all_opd_routes_covered_by_scope_matrix():
+    """Ensure every /admin/opd route is present in ROUTES."""
+    opd_routes = [r for r in ROUTES if r[1].startswith("/admin/opd")]
+    assert len(opd_routes) >= 28, f"Expected all /admin/opd routes in matrix, found only {len(opd_routes)}"
 
 
 @pytest.mark.parametrize("method,path", ROUTES)

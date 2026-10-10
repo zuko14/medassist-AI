@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Now Serving — OPD Queue Display</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #0b0f19;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: clamp(1rem, 2vw, 2rem) clamp(1.5rem, 3vw, 3rem);
+      background: #111827;
+      border-bottom: 2px solid #1e293b;
+    }
+    h1 {
+      font-size: clamp(1.5rem, 3vw, 2.5rem);
+      font-weight: 700;
+      color: #38bdf8;
+      letter-spacing: -0.025em;
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+    #clock {
+      font-size: clamp(1.25rem, 2.5vw, 2.25rem);
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+    #fs {
+      background: #1e293b;
+      color: #f1f5f9;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 0.5rem 0.8rem;
+      font-size: 1.25rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #fs:hover { background: #334155; }
+    main {
+      flex: 1;
+      padding: clamp(1.5rem, 3vw, 3rem);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+      gap: clamp(1.5rem, 2.5vw, 2.5rem);
+      align-content: start;
+    }
+    .doc-card {
+      background: #131c2e;
+      border: 2px solid #1e293b;
+      border-radius: 16px;
+      padding: clamp(1.5rem, 2vw, 2rem);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .doc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 1px solid #1e293b;
+      padding-bottom: 0.75rem;
+    }
+    .doc-name {
+      font-size: clamp(1.25rem, 2vw, 1.75rem);
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .doc-dept {
+      font-size: clamp(0.85rem, 1.2vw, 1rem);
+      color: #64748b;
+      margin-top: 0.25rem;
+    }
+    .room-badge {
+      background: #0284c7;
+      color: #fff;
+      font-weight: 700;
+      font-size: clamp(0.9rem, 1.3vw, 1.2rem);
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      white-space: nowrap;
+    }
+    .serving-section {
+      background: #0f172a;
+      border: 2px solid #10b981;
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+    }
+    .serving-label {
+      font-size: clamp(0.85rem, 1.2vw, 1.1rem);
+      font-weight: 700;
+      color: #10b981;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.25rem;
+    }
+    .serving-token {
+      font-size: clamp(3.5rem, 7vw, 6rem);
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-weight: 800;
+      color: #f8fafc;
+      line-height: 1;
+      margin: 0.5rem 0;
+    }
+    .serving-none {
+      font-size: clamp(1.2rem, 2vw, 1.8rem);
+      color: #64748b;
+      font-style: italic;
+      padding: 1rem 0;
+    }
+    .next-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .next-label {
+      font-size: clamp(0.75rem, 1vw, 0.95rem);
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .next-tokens {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .token-chip {
+      background: #1e293b;
+      color: #38bdf8;
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-size: clamp(1.1rem, 1.8vw, 1.5rem);
+      font-weight: 700;
+      padding: 0.4rem 0.9rem;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 5rem 1rem;
+      color: #64748b;
+      font-size: clamp(1.2rem, 2vw, 1.8rem);
+    }
+    footer {
+      padding: 0.75rem 2rem;
+      background: #111827;
+      border-top: 1px solid #1e293b;
+      font-size: 0.85rem;
+      color: #64748b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .status-ok { color: #10b981; }
+    .status-err { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="clinic">OPD Live Queue</h1>
+    <div class="header-right">
+      <time id="clock">--:--:--</time>
+      <button id="fs" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">⛶</button>
+    </div>
+  </header>
+  <main id="board">
+    <div class="empty-state">Connecting to queue display...</div>
+  </main>
+  <footer>
+    <span id="status">Connecting...</span>
+    <span>Kriya OPD OS</span>
+  </footer>
+
+  <script>
+    const params = new URLSearchParams(location.hash.slice(1));
+    const token = params.get('t') || '';
+    const branch = params.get('b') || '';
+
+    // Clock
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('clock').textContent = now.toLocaleTimeString('en-IN', { hour12: false });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Fullscreen
+    document.getElementById('fs').addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+
+    // WebAudio Chime (Zero external assets)
+    let audioCtx = null;
+    function playChime() {
+      try {
+        if (!audioCtx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) audioCtx = new AudioContext();
+        }
+        if (audioCtx && audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.setValueAtTime(1760, now + 0.15);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      } catch (e) {
+        console.warn('Audio chime error:', e);
+      }
+    }
+
+    let lastServingMap = {};
+
+    function render(data) {
+      if (data.clinic_name) {
+        document.getElementById('clinic').textContent = data.clinic_name;
+      }
+      const board = document.getElementById('board');
+      board.innerHTML = '';
+
+      const doctors = data.doctors || [];
+      if (doctors.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No active consultations at this time.';
+        board.appendChild(empty);
+        return;
+      }
+
+      doctors.forEach(doc => {
+        const card = document.createElement('article');
+        card.className = 'doc-card';
+
+        const head = document.createElement('div');
+        head.className = 'doc-header';
+        const left = document.createElement('div');
+        const dname = document.createElement('div');
+        dname.className = 'doc-name';
+        dname.textContent = doc.doctor_name || 'Doctor';
+        const ddept = document.createElement('div');
+        ddept.className = 'doc-dept';
+        ddept.textContent = doc.department || 'General';
+        left.appendChild(dname);
+        left.appendChild(ddept);
+        head.appendChild(left);
+
+        if (doc.room) {
+          const rbadge = document.createElement('span');
+          rbadge.className = 'room-badge';
+          rbadge.textContent = doc.room;
+          head.appendChild(rbadge);
+        }
+        card.appendChild(head);
+
+        const serv = document.createElement('div');
+        serv.className = 'serving-section';
+        const slabel = document.createElement('div');
+        slabel.className = 'serving-label';
+        slabel.textContent = 'Now Serving';
+        serv.appendChild(slabel);
+
+        if (doc.now_serving !== null && doc.now_serving !== undefined) {
+          const stok = document.createElement('div');
+          stok.className = 'serving-token';
+          stok.textContent = doc.now_serving;
+          serv.appendChild(stok);
+        } else {
+          const snone = document.createElement('div');
+          snone.className = 'serving-none';
+          snone.textContent = 'Standby';
+          serv.appendChild(snone);
+        }
+        card.appendChild(serv);
+
+        if (doc.next_tokens && doc.next_tokens.length > 0) {
+          const nextSec = document.createElement('div');
+          nextSec.className = 'next-section';
+          const nlabel = document.createElement('div');
+          nlabel.className = 'next-label';
+          nlabel.textContent = 'Next Tokens';
+          nextSec.appendChild(nlabel);
+
+          const chips = document.createElement('div');
+          chips.className = 'next-tokens';
+          doc.next_tokens.forEach(tok => {
+            const chip = document.createElement('span');
+            chip.className = 'token-chip';
+            chip.textContent = tok;
+            chips.appendChild(chip);
+          });
+          nextSec.appendChild(chips);
+          card.appendChild(nextSec);
+        }
+
+        board.appendChild(card);
+      });
+    }
+
+    let primed = false;
+    async function poll() {
+      const statusEl = document.getElementById('status');
+      if (!token) {
+        statusEl.textContent = 'Error: Missing display token.';
+        statusEl.className = 'status-err';
+        return;
+      }
+      try {
+        const url = '/public/queue-display/data' + (branch ? '?branch_id=' + encodeURIComponent(branch) : '');
+        const res = await fetch(url, {
+          headers: { 'X-Display-Token': token },
+          cache: 'no-store'
+        });
+        if (res.status === 401 || res.status === 403 || res.status === 404) {
+          statusEl.textContent = 'This display link is invalid or expired.';
+          statusEl.className = 'status-err';
+          return;
+        }
+        if (!res.ok) {
+          statusEl.textContent = 'Reconnecting...';
+          statusEl.className = 'status-err';
+          return;
+        }
+        const data = await res.json();
+
+        // Check if any now_serving token changed to trigger chime
+        let changed = false;
+        (data.doctors || []).forEach(d => {
+          const key = d.doctor_id || d.doctor_name;
+          if (d.now_serving && lastServingMap[key] !== d.now_serving) {
+            changed = true;
+          }
+          lastServingMap[key] = d.now_serving;
+        });
+
+        if (changed && primed) {
+          playChime();
+        }
+        primed = true;  // first poll only seeds the map; a page load is not a call
+
+        render(data);
+        statusEl.textContent = 'Live Connected';
+        statusEl.className = 'status-ok';
+      } catch (err) {
+        statusEl.textContent = 'Reconnecting...';
+        statusEl.className = 'status-err';
+      }
+    }
+
+    poll();
+    setInterval(poll, 5000);
+  </script>
+</body>
+</html>

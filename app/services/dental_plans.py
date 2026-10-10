@@ -45,6 +45,8 @@ import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+
+from app.utils.helpers import doctor_title
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -153,11 +155,6 @@ def fmt_time(t) -> str:
     return format_slot_time(t)
 
 
-def doctor_title(name: Optional[str]) -> str:
-    n = (name or "").strip()
-    if not n:
-        return "Doctor"
-    return n if n.lower().startswith("dr") else f"Dr. {n}"
 
 
 def first_name(name: Optional[str]) -> str:
@@ -546,6 +543,7 @@ async def schedule_sitting(clinic: dict, plan: dict, doctor: dict, day: str, tim
         "sitting_number": number,
         # The review replaces the generic post-visit follow-up for sittings.
         "followup_sent": True,
+        "booking_channel": "front_desk",
     }
     if plan.get("branch_id"):
         # Keeps the sitting visible to that branch's pinned staff on the

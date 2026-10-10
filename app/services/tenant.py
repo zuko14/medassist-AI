@@ -652,7 +652,33 @@ def dental_plans_enabled(clinic: Optional[dict]) -> bool:
 OPT_IN_FEATURES: dict[str, str] = {
     "corporate_health": "Corporate Employee Health Insights",
     "ai_receptionist": "AI Voice Receptionist",
+    "opd_enabled": "OPD OS (Front Desk, Queue, Consultation, Billing)",
 }
+
+def opd_enabled(clinic: Optional[dict]) -> bool:
+    """True only if the clinic is a regular tenant with an explicit owner opt-in
+    for OPD OS AND their plan includes consultation bookings.
+
+    Never use has_feature(clinic, "opd_enabled") — that would allow the enterprise
+    wildcard to bypass the owner opt-in.
+    """
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return False
+    overrides = clinic.get("features") or {}
+    return (
+        isinstance(overrides, dict)
+        and overrides.get("opd_enabled") is True
+        and has_feature(clinic, "booking")
+    )
+
+
+def opd_eligible(clinic: Optional[dict]) -> bool:
+    """Whether this clinic may enable OPD OS. Partner accounts and plans without
+    consultation booking (e.g. diagstream pure report delivery) are rejected."""
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return False
+    return has_feature(clinic, "booking")
+
 
 def ai_receptionist_enabled(clinic: Optional[dict]) -> bool:
     """AI voice receptionist (migration 098). Any plan, but ONLY with an

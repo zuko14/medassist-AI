@@ -1,7 +1,25 @@
 """Helper utilities."""
 
-from datetime import date, datetime, timedelta, time as time_type
+from datetime import date, datetime, timedelta, timezone, time as time_type
 from typing import Optional
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def today_ist(now: Optional[datetime] = None) -> date:
+    """Return current date in Indian Standard Time (Asia/Kolkata)."""
+    return (now or datetime.now(IST)).astimezone(IST).date()
+
+
+def doctor_title(name: Optional[str]) -> str:
+    """'Dr. Name' exactly once. Names are usually stored with the title; a
+    bare startswith('dr') check would also skip real names like 'Drishti'."""
+    import re
+
+    n = (name or "").strip()
+    if not n:
+        return "Doctor"
+    return n if re.match(r"dr\.?(\s|$)", n, re.I) else f"Dr. {n}"
 
 
 from app.config import settings

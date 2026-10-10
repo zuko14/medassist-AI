@@ -56,6 +56,7 @@ from app.services.tenant import (
     has_feature,
     home_collection_available,
     invalidate_tenant_cache,
+    opd_enabled,
     require_feature,
     specialty_enabled,
 )
@@ -79,7 +80,7 @@ from app.services.permissions import (
 from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
 from app.utils.validators import mask_phone, normalize_phone, validate_phone
-from app.database import sb  # T5.1: off-loop query execution
+from app.database import sb, scoped_query  # T5.1: off-loop query execution
 from app.utils.async_tasks import spawn_background_task
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,8 @@ security = HTTPBasic(auto_error=False)
 
 class AdminUser(str):
     """Authenticated admin user with RBAC role, clinic scope, staff user ID,
-    delegated permissions, optional branch scope, and optional staff role."""
+    delegated permissions, optional branch scope, optional staff role, and
+    optional linked doctor ID (migration 103)."""
 
     username: str
     role: str
@@ -103,6 +105,7 @@ class AdminUser(str):
     permissions: list[str]
     branch_id: Optional[str]
     staff_role: Optional[str]
+    doctor_id: Optional[str]
 
     def __new__(
         cls,
@@ -113,6 +116,7 @@ class AdminUser(str):
         permissions: Optional[list[str]] = None,
         branch_id: Optional[str] = None,
         staff_role: Optional[str] = None,
+        doctor_id: Optional[str] = None,
     ):
         obj = super().__new__(cls, username)
         obj.username = username
@@ -122,6 +126,7 @@ class AdminUser(str):
         obj.permissions = permissions or []
         obj.branch_id = branch_id
         obj.staff_role = staff_role
+        obj.doctor_id = doctor_id
         return obj
 
     def can_access_clinic(self, target_clinic_id: str) -> bool:
@@ -260,6 +265,7 @@ async def _authenticate_password(
                     permissions=user_row.get("permissions") or [],
                     branch_id=user_row.get("branch_id"),
                     staff_role=user_row.get("staff_role"),
+                    doctor_id=user_row.get("doctor_id"),
                 )
     except HTTPException:
         raise
@@ -376,14 +382,39 @@ async def resolve_admin_session(token: str) -> Optional[AdminUser]:
     if expires_at <= datetime.now(timezone.utc):
         return None
 
+    user_id = row.get("user_id")
+    doctor_id = None
+    if user_id and user_id not in ("super_admin_env", "platform_owner_env"):
+        try:
+            if row.get("clinic_id"):
+                ca_res = await sb(
+                    scoped_query("clinic_admins", row["clinic_id"])
+                    .select("doctor_id")
+                    .eq("id", user_id)
+                    .limit(1)
+                )
+            else:
+                # unscoped: global_auth_lookup — super admin has no clinic_id
+                ca_res = await sb(
+                    supabase.table("clinic_admins")
+                    .select("doctor_id")
+                    .eq("id", user_id)
+                    .limit(1)
+                )
+            if ca_res.data:
+                doctor_id = ca_res.data[0].get("doctor_id")
+        except Exception as e:
+            logger.warning(f"Could not load doctor_id for session user {user_id}: {e}")
+
     return AdminUser(
         username=row["username"],
         role=row.get("role", "clinic_admin"),
         clinic_id=row.get("clinic_id"),
-        user_id=row.get("user_id"),
+        user_id=user_id,
         permissions=row.get("permissions") or [],
         branch_id=row.get("branch_id"),
         staff_role=row.get("staff_role"),
+        doctor_id=doctor_id,
     )
 
 
@@ -802,6 +833,9 @@ async def get_current_admin(
             "corporate_health_enabled": False,
             "home_collection_available": False,
             "ai_receptionist_enabled": False,
+            "opd_enabled": False,
+            "opd_state": None,
+            "opd_doctor_id": user.doctor_id,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -827,6 +861,10 @@ async def get_current_admin(
         "home_collection_available": home_collection_available(clinic),
         # Owner opt-in only (migration 098): the AI Receptionist control room.
         "ai_receptionist_enabled": ai_receptionist_enabled(clinic),
+        # OPD OS (migration 103): module enabled flag, state, linked doctor ID
+        "opd_enabled": opd_enabled(clinic),
+        "opd_state": clinic.get("opd_state", "NOT_CONFIGURED"),
+        "opd_doctor_id": user.doctor_id,
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.
@@ -1051,6 +1089,7 @@ class StaffCreate(BaseModel):
     staff_role: str = "STAFF"
     extra_permissions: list[str] = Field(default_factory=list)
     branch_id: Optional[str] = None
+    doctor_id: Optional[str] = None
     # migration 097. Required for a PHLEBOTOMIST: given to the patient.
     full_name: Optional[str] = Field(None, max_length=120)
     phone: Optional[str] = Field(None, max_length=20)
@@ -1060,6 +1099,7 @@ class StaffUpdate(BaseModel):
     staff_role: Optional[str] = None
     extra_permissions: Optional[list[str]] = None
     branch_id: Optional[str] = None
+    doctor_id: Optional[str] = None
     is_active: Optional[bool] = None
     full_name: Optional[str] = Field(None, max_length=120)
     phone: Optional[str] = Field(None, max_length=20)
@@ -1098,7 +1138,7 @@ async def list_staff(
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     # unscoped: tenant-scoped operation with verified clinic authorization
     query = supabase.table("clinic_admins").select(
-        "id, username, role, staff_role, permissions, branch_id, is_active, created_at, full_name, phone"
+        "id, username, role, staff_role, permissions, branch_id, doctor_id, is_active, created_at, full_name, phone"
     ).eq("role", "staff")
     query = query.eq("clinic_id", effective_clinic_id)
     result = await sb(query.order("created_at", desc=True).limit(2000))
@@ -1135,6 +1175,38 @@ async def create_staff(
             status_code=422,
             detail="Company viewer logins are created for a company from the Corporate Health page.",
         )
+
+    # migration 103: DOCTOR requires a doctor profile from the same clinic
+    if body.staff_role == "DOCTOR" and not body.doctor_id:
+        raise HTTPException(
+            status_code=422,
+            detail="A doctor account must be linked to a doctor profile.",
+        )
+    if body.doctor_id:
+        doc_check = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            await sb(supabase.table("doctors")
+            .select("id")
+            .eq("id", body.doctor_id)
+            .eq("clinic_id", effective_clinic_id))
+        )
+        if not doc_check.data:
+            raise HTTPException(
+                status_code=422,
+                detail="Selected doctor does not belong to your clinic.",
+            )
+        existing_doc_link = (
+            # unscoped: tenant-scoped operation with verified clinic authorization
+            await sb(supabase.table("clinic_admins")
+            .select("id")
+            .eq("doctor_id", body.doctor_id)
+            .eq("clinic_id", effective_clinic_id))
+        )
+        if existing_doc_link.data:
+            raise HTTPException(
+                status_code=409,
+                detail="This doctor is already linked to a staff login.",
+            )
 
     is_phleb = body.staff_role == "PHLEBOTOMIST"
     contact = _staff_contact(body.full_name, body.phone, required=is_phleb)
@@ -1197,6 +1269,7 @@ async def create_staff(
                 "staff_role": body.staff_role,
                 "permissions": final_permissions,
                 "branch_id": body.branch_id,
+                "doctor_id": body.doctor_id,
                 "is_active": True,
                 **contact,
             }
@@ -1237,7 +1310,7 @@ async def update_staff(
     res = (
     # unscoped: login authentication by username
         await sb(supabase.table("clinic_admins")
-        .select("id, clinic_id, role, staff_role, permissions, branch_id, is_active, username, full_name, phone")
+        .select("id, clinic_id, role, staff_role, permissions, branch_id, doctor_id, is_active, username, full_name, phone")
         .eq("id", staff_id))
     )
     if not res.data or res.data[0]["role"] != "staff":
@@ -1301,6 +1374,48 @@ async def update_staff(
             requested=resolved,
             granter_permissions=user.permissions,
             granter_role=user.role,
+        )
+
+    if body.doctor_id is not None:
+        if body.doctor_id:
+            doc_check = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
+                await sb(supabase.table("doctors")
+                .select("id")
+                .eq("id", body.doctor_id)
+                .eq("clinic_id", target["clinic_id"]))
+            )
+            if not doc_check.data:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Selected doctor does not belong to your clinic.",
+                )
+            existing_doc_link = (
+                # unscoped: tenant-scoped operation with verified clinic authorization
+                await sb(supabase.table("clinic_admins")
+                .select("id")
+                .eq("doctor_id", body.doctor_id)
+                .eq("clinic_id", target["clinic_id"])
+                .neq("id", staff_id))
+            )
+            if existing_doc_link.data:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This doctor is already linked to a staff login.",
+                )
+            update_data["doctor_id"] = body.doctor_id
+        else:
+            current_or_new_role = body.staff_role if body.staff_role is not None else target.get("staff_role")
+            if current_or_new_role == "DOCTOR":
+                raise HTTPException(
+                    status_code=422,
+                    detail="A doctor account must be linked to a doctor profile.",
+                )
+            update_data["doctor_id"] = None
+    elif body.staff_role == "DOCTOR" and not target.get("doctor_id"):
+        raise HTTPException(
+            status_code=422,
+            detail="A doctor account must be linked to a doctor profile.",
         )
 
     if body.branch_id is not None:
@@ -1527,6 +1642,34 @@ class DoctorCreate(BaseModel):
     branch_session: Literal["morning", "evening", "both"] = "both"
     # Dental clinics (migration 089): where sitting reminders are sent.
     whatsapp_phone: Optional[str] = None
+    # OPD OS (migration 103): NMC registration stamping
+    registration_number: Optional[str] = None
+    registration_council: Optional[str] = None
+
+    @field_validator("registration_number")
+    @classmethod
+    def _v_reg_number(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        import re
+        if not re.match(r"^[A-Za-z0-9/.\- ]{3,40}$", v):
+            raise ValueError("Registration number must be 3-40 alphanumeric characters, slashes, dots, or dashes.")
+        return v
+
+    @field_validator("registration_council")
+    @classmethod
+    def _v_reg_council(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if len(v) < 2 or len(v) > 120:
+            raise ValueError("Registration council must be between 2 and 120 characters.")
+        return v
 
     @field_validator("whatsapp_phone")
     @classmethod
@@ -1552,6 +1695,34 @@ class DoctorUpdate(BaseModel):
     branch_session: Optional[Literal["morning", "evening", "both"]] = None
     # "" clears it; omitted leaves it alone.
     whatsapp_phone: Optional[str] = None
+    # OPD OS (migration 103): NMC registration stamping
+    registration_number: Optional[str] = None
+    registration_council: Optional[str] = None
+
+    @field_validator("registration_number")
+    @classmethod
+    def _v_reg_number(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        import re
+        if not re.match(r"^[A-Za-z0-9/.\- ]{3,40}$", v):
+            raise ValueError("Registration number must be 3-40 alphanumeric characters, slashes, dots, or dashes.")
+        return v
+
+    @field_validator("registration_council")
+    @classmethod
+    def _v_reg_council(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if len(v) < 2 or len(v) > 120:
+            raise ValueError("Registration council must be between 2 and 120 characters.")
+        return v
 
     @field_validator("whatsapp_phone")
     @classmethod
@@ -2661,6 +2832,12 @@ async def delete_doctor(
     except HTTPException:
         raise
     except Exception as e:
+        msg = str(e).lower()
+        if "23503" in msg or "foreign key" in msg:
+            raise HTTPException(
+                status_code=409,
+                detail="Doctor has OPD clinical or billing records — deactivate instead.",
+            )
         logger.error(f"Error deleting doctor: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete doctor")
 
@@ -5208,8 +5385,20 @@ async def check_in_appointment_endpoint(
     """Assign the next OPD token number to an arriving patient."""
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
     await _enforce_booking_branch(user, effective_clinic_id, appointment_id)
+    initial_queue_status = "waiting"
     try:
-        result = await check_in_appointment(effective_clinic_id, appointment_id)
+        clinic = await get_clinic_by_id(effective_clinic_id)
+        from app.services.tenant import opd_enabled
+        if clinic and opd_enabled(clinic) and clinic.get("opd_state") == "READY":
+            opd_settings = clinic.get("opd_settings") or {}
+            initial_queue_status = opd_settings.get("after_checkin_stage", "waiting")
+    except Exception:
+        pass
+
+    try:
+        result = await check_in_appointment(
+            effective_clinic_id, appointment_id, initial_queue_status=initial_queue_status
+        )
     except ValueError as e:
         status_now = str(e).split(":", 1)[-1]
         raise HTTPException(
@@ -5278,6 +5467,24 @@ async def call_next_patient_endpoint(
 ):
     """Mark current in_consultation done, and advance the next waiting patient."""
     effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
+    try:
+        clinic = await get_clinic_by_id(effective_clinic_id)
+        from app.services.tenant import opd_enabled
+        if clinic and opd_enabled(clinic) and clinic.get("opd_state") == "READY":
+            from app.database import get_doctor_by_name
+            doc = await get_doctor_by_name(effective_clinic_id, doctor_name)
+            if not doc or not doc.get("id"):
+                raise HTTPException(status_code=404, detail="Doctor not found")
+            from app.services.opd import opd_call_next
+            call_res = await opd_call_next(clinic, str(doc["id"]), user)
+            if not call_res or not call_res.get("called"):
+                return {"message": "No patients waiting in queue"}
+            return call_res["called"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug(f"OPD call-next fallback to legacy queue: {e}")
+
     today_str = datetime.now().strftime("%Y-%m-%d")
     result = await call_next_patient(effective_clinic_id, doctor_name, today_str)
     if not result:

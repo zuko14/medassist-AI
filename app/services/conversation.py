@@ -3999,6 +3999,7 @@ class ConversationManager:
                     doctor_id=context.get("doctor_id") or context.get("selected_doctor_id"),
                     treatment_id=context.get("treatment_id"),
                     treatment_name=context.get("treatment_name"),
+                    booking_channel="whatsapp",
                 )
 
                 if result["success"]:
@@ -4156,6 +4157,7 @@ class ConversationManager:
                     "appointment_time": context["appointment_time"],
                     "symptoms": context.get("symptoms", ""),
                     "status": "confirmed",
+                    "booking_channel": "whatsapp",
                 }
 
                 doctor_id_val = context.get("doctor_id") or context.get("selected_doctor_id")
@@ -6164,6 +6166,7 @@ class ConversationManager:
             patient_id=(patient or {}).get("id"),
             deposit_percent=deposit_percent,
             home_collection=home,
+            booking_channel="whatsapp",
         )
 
         if not result.get("success"):
@@ -6260,6 +6263,7 @@ class ConversationManager:
             "lab_test_id": context.get("lab_test_id"),
             "lab_test_name": context.get("lab_test_name"),
             "amount_paise": context.get("lab_test_price_paise"),
+            "booking_channel": "whatsapp",
         }
         if home:
             appointment_data.update(home)

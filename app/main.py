@@ -11,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 from app.config import settings
-from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection
+from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd
 from app.routers import voice_admin, voice_platform
 from app.voice import gateway as voice_gateway
 from app.routers.integrations import router as integrations_router
@@ -386,6 +386,9 @@ app.include_router(integrations_router)
 app.include_router(callmedex_router)
 # CallMedex external integration API (POST /api/v1/report-jobs, GET /api/v1/report-jobs/{id}, POST /api/v1/notifications)
 app.include_router(callmedex_v1_router)
+# Kriya OPD OS core & public display (Phase 1.2)
+app.include_router(opd.router)
+app.include_router(opd.public_router)
 
 
 @app.get("/")
@@ -416,6 +419,19 @@ async def admin_panel():
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
             "Expires": "0",
+        },
+    )
+
+
+@app.get("/public/queue-display", include_in_schema=False)
+async def public_queue_display():
+    """Serve standalone hallway TV queue display HTML (Phase 1.2)."""
+    return FileResponse(
+        "admin/queue-display.html",
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Robots-Tag": "noindex",
         },
     )
 
@@ -458,6 +474,12 @@ async def admin_panel_chartjs():
     change can hide behind. Keep the lists minimal; move the asset instead.
     """
     return FileResponse("admin/vendor/chart.umd.min.js", media_type="application/javascript")
+
+
+@app.get("/panel-assets/qrcode.min.js")
+async def admin_panel_qrcodejs():
+    """Serve self-hosted qrcode.min.js for OPD billing dynamic UPI QR display."""
+    return FileResponse("admin/vendor/qrcode.min.js", media_type="application/javascript")
 
 
 # NOTE: /admin-panel/admin.js is gone. admin/admin.js was a second copy of the

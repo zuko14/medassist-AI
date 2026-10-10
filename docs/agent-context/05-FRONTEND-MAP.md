@@ -52,6 +52,17 @@ The sidebar dynamically renders 18 tabs based on user role (`admin`, `staff`, `d
 | `branches` | Locations | `admin` | `multi_branch` | `GET /admin/branches`, `POST /admin/branches`, `PUT /admin/branches/{id}`, `GET /admin/branches/{id}/doctors` | Multi-facility setup: manage clinic branches, addresses, geo-coordinates, and branch-specific doctor assignments. |
 | `staff` | Staff & Roles | `admin` | None | `GET /admin/staff`, `POST /admin/staff`, `PUT /admin/staff/{id}/toggle`, `DELETE /admin/staff/{id}` | Administrative user provisioning, role selection (`admin`, `staff`, `doctor`, `receptionist`), branch scoping. |
 | `connectors` | Integrations | All | `diagnostic_reports` | `GET /admin/connectors`, `PUT /admin/connectors`, `POST /admin/connectors/{id}/test`, `GET /admin/connectors/failed-reports` | Laboratory Information System (LIS) / MocDoc connector setup, sync schedule controls, failure dead-letter monitor. |
+| `opdsetup` | OPD Setup | `OPD_ADMIN` | `opd_enabled` | `GET /admin/opd/setup/status`, `POST /admin/opd/setup/activate` | Readiness checklist (14 criteria), dry-run testing mode, go-live state transition. |
+| `opddesk` | Front Desk | `OPD_FRONT_DESK` | `opd_enabled` (live) | `GET /admin/opd/patients/search`, `POST /admin/opd/walk-in`, `POST /admin/opd/arrive` | Patient search, rapid registration with DPDP consent, walk-in token issuance, booked arrival queue entry. |
+| `opdqueue` | Live Queue | `OPD_FRONT_DESK` / `OPD_CLINICAL` / `OPD_BILLING` | `opd_enabled` (live) | `GET /admin/opd/queue`, `POST /admin/opd/queue/call-next` | Live queue tokens, room assignments, priority triage tags, token re-announcement. |
+| `opdworkspace` | Consultation | `OPD_CLINICAL` | `opd_enabled` (live) | `GET /admin/opd/encounters/{id}`, `POST .../prescriptions/{id}/sign` | Triage vitals entry, SOAP clinical notes autosave with CAS locks, allergy warning banner, digital e-Rx signing. |
+| `opdbilling` | OPD Billing | `OPD_BILLING` | `opd_enabled` (live) | `GET /admin/opd/billing/queue`, `POST .../invoices/{id}/receipts`, `POST .../shifts/close` | Itemized invoice creation, UPI QR generation, cash drawer opening/closing reconciliation, 80mm thermal receipt printing. |
+| `opdanalytics` | OPD Analytics | `OPD_ADMIN` | `opd_enabled` (live) | `GET /admin/opd/analytics` | Period presets, footfall channel distribution, p50/p90 wait and consult times, 24-hr IST arrival histogram, collections reconciliation. |
+
+---
+
+### Public Hallway TV Display (`admin/queue-display.html`)
+Served at route `/public/queue-display`. Requires display bearer token (`?token=...`). Polled every 5 seconds. Displays active called tokens, doctor rooms, and waiting numbers with zero PII (no patient names or phones) and WebAudio chimes.
 
 ---
 

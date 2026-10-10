@@ -52,9 +52,19 @@ async def _mock_sb(builder):
 
 
 mock_db_module.sb = _mock_sb
-sys.modules["app.database"] = mock_db_module
 
-from app.services.conversation import ConversationManager  # noqa: E402
+# The fake is only needed while conversation.py is first imported; restore the
+# real module straight away so it cannot leak into tests that run before this
+# file's module fixture (collection happens before any test runs).
+_original_db = sys.modules.get("app.database")
+sys.modules["app.database"] = mock_db_module
+try:
+    from app.services.conversation import ConversationManager  # noqa: E402
+finally:
+    if _original_db is not None:
+        sys.modules["app.database"] = _original_db
+    else:
+        sys.modules.pop("app.database", None)
 
 
 def _clinic(config: dict) -> dict:
@@ -63,9 +73,13 @@ def _clinic(config: dict) -> dict:
 
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_mock_db():
+    original = sys.modules.get("app.database")
+    sys.modules["app.database"] = mock_db_module
     yield
-    if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "__file__"):
-        del sys.modules["app.database"]
+    if original is not None:
+        sys.modules["app.database"] = original
+    else:
+        sys.modules.pop("app.database", None)
 
 
 def _context() -> dict:

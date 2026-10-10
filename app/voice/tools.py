@@ -21,7 +21,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from app.config import settings
 from app.database import sb, supabase
@@ -73,7 +73,7 @@ class KriyaTools:
         self.ctx = ctx
         self._profile = None
         self._profile_loaded = False
-        self._kb_task = None         # knowledge.load(), once per call, started as the call connects
+        self._kb_task: Optional[asyncio.Future[Any]] = None  # knowledge.load(), once per call, started as the call connects
         self.llm_tokens = 0          # grounded answers; added to the call's usage by the session
         self.llm_cost_paise = 0
 
@@ -245,12 +245,13 @@ class KriyaTools:
         await self._trace("HOSPITAL_INFO", "ok" if text else "skipped", t0, {"topic": topic})
         return _speakable(text) if text else None
 
-    def preload_knowledge(self) -> None:
+    def preload_knowledge(self) -> asyncio.Future[Any]:
         """Start reading this clinic's records in the background (the greeting
         hides the time), so a question later in the call is answered fast."""
         if self._kb_task is None:
             from . import knowledge
             self._kb_task = asyncio.ensure_future(knowledge.load(self.ctx.clinic, self.ctx.branch_id))
+        return self._kb_task
 
     async def answer_question(self, question, lang, entities=None, focus=None):
         """A caller's question about this hospital, answered from its own records
@@ -258,8 +259,8 @@ class KriyaTools:
         from . import knowledge
         t0 = time.monotonic()
         try:
-            self.preload_knowledge()
-            kb = await self._kb_task
+            task = self.preload_knowledge()
+            kb = await task
             res = await knowledge.answer(question, kb, (lang or "en").split("-")[0], self.ctx.clinic_id,
                                          entities or {}, focus or {})
         except Exception as e:
@@ -337,7 +338,7 @@ class KriyaTools:
         t0 = time.monotonic()
         name = "LAB_TEST_CREATE" if kind == "lab_test" else "APPOINTMENT_CREATE"
         bare = re.sub(r"^(dr\.?\s*)", "", doctor_name or "", flags=re.I)
-        what = (lab_test or {}).get("name") if kind == "lab_test" else "Dr. " + bare
+        what = ((lab_test or {}).get("name") or "") if kind == "lab_test" else ("Dr. " + bare)
         profile = await self.caller_profile()
         if self._simulated:
             await self._trace(name, "skipped", t0, {"simulated": True, "date": date, "time": time_})
@@ -356,7 +357,8 @@ class KriyaTools:
                     branch_name=branch_name, deposit_percent=deposit,
                     booking_type="lab_test" if kind == "lab_test" else "consultation",
                     lab_test_id=(lab_test or {}).get("id"), lab_test_name=(lab_test or {}).get("name"),
-                    doctor_id=doctor_id if kind != "lab_test" else None)
+                    doctor_id=doctor_id if kind != "lab_test" else None,
+                    booking_channel="voice")
                 if not res.get("success"):
                     reason = res.get("reason")
                     await self._trace(name, "fail", t0, {"reason": reason})
@@ -368,7 +370,7 @@ class KriyaTools:
                 await self._proof(name.replace("CREATE", "VERIFY"), t0,
                                   {"status": "pending_payment", "appointment_date": date, "doctor_id": doctor_id}, row, ok)
                 link_sent = False
-                if ok:
+                if ok and row:
                     t1 = time.monotonic()
                     link_sent = await self._send_payment_link(row, res["payment_link"], what, date, time_, patient_name)
                     await self._trace("PAYMENT_LINK_SEND", "ok" if link_sent else "fail", t1,
@@ -378,8 +380,11 @@ class KriyaTools:
                         "link_sent": link_sent, "hold_minutes": settings.booking_hold_minutes}
 
             data = {"patient_id": (profile or {}).get("id"), "patient_phone": self.ctx.caller_phone,
-                    "patient_name": patient_name, "appointment_date": date, "status": "confirmed"}
+                    "patient_name": patient_name, "appointment_date": date, "status": "confirmed",
+                    "booking_channel": "voice"}
             if kind == "lab_test":
+                if not lab_test:
+                    raise ValueError("lab_test booking without a test")
                 data.update({"department": "Lab Test", "doctor_name": None, "appointment_time": None,
                              "booking_type": "lab_test", "lab_test_id": lab_test["id"],
                              "lab_test_name": lab_test["name"], "amount_paise": lab_test.get("price_paise")})
@@ -400,7 +405,7 @@ class KriyaTools:
             await self._proof(name.replace("CREATE", "VERIFY"), t0,
                               {"status": "confirmed", "appointment_date": date, "doctor_id": doctor_id}, row, ok)
             wa = False
-            if ok:
+            if ok and row:
                 t1 = time.monotonic()
                 wa = await self._send_confirmation(row, what, department, patient_name)
                 await self._trace("WHATSAPP_CONFIRMATION", "ok" if wa else "fail", t1, {})

@@ -50,6 +50,11 @@ PERMISSIONS = frozenset({
     # calls, test console. In no role preset: granted per account.
     "VOICE_VIEW",
     "VOICE_MANAGE",
+    # OPD OS (migration 103). Routes still require opd_enabled(clinic).
+    "OPD_FRONT_DESK",
+    "OPD_CLINICAL",
+    "OPD_BILLING",
+    "OPD_ADMIN",
 })
 
 #: A login for a lab's CORPORATE client: sees that one company's aggregate
@@ -73,6 +78,8 @@ STAFF_ROLES = frozenset({
     "BRANCH_MANAGER",
     "DIAGNOSTIC_OPERATOR",
     "CUSTOM_ROLE",
+    "DOCTOR",
+    "CASHIER",
     CORPORATE_VIEWER,
     PHLEBOTOMIST,
 })
@@ -95,8 +102,8 @@ _DIAGNOSTIC_OPERATOR_GRANTS = [
 
 ROLE_PRESETS: dict[str, list[str]] = {
     "STAFF": [],
-    "RECEPTIONIST": [],
-    "FRONT_DESK": [],
+    "RECEPTIONIST": ["OPD_FRONT_DESK"],
+    "FRONT_DESK": ["OPD_FRONT_DESK"],
     "APPOINTMENT_MANAGER": [],
     "LAB_OPERATOR": ["REPORTS_VIEW", "REPORTS_RESOLVE", "LAB_TESTS_MANAGE"],
     "PHARMACY_OPERATOR": [],
@@ -104,6 +111,8 @@ ROLE_PRESETS: dict[str, list[str]] = {
     "BRANCH_MANAGER": _DOCTOR_SCHEDULE_GRANTS + ["DOCTORS_CREATE", "DOCTORS_DELETE", "STAFF_VIEW", "REPORTS_VIEW"],
     "DIAGNOSTIC_OPERATOR": list(_DIAGNOSTIC_OPERATOR_GRANTS),
     "CUSTOM_ROLE": [],
+    "DOCTOR": ["OPD_CLINICAL"],
+    "CASHIER": ["OPD_BILLING"],
     CORPORATE_VIEWER: [],
     PHLEBOTOMIST: [],
 }
