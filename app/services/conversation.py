@@ -35,7 +35,7 @@ from app.templates.whatsapp_templates import cancellation_policy_line, get_messa
 from app.utils.validators import mask_phone
 from app.utils.helpers import format_slot_time
 
-from app.services.tenant import cancellation_window_hours
+from app.services.tenant import ai_receptionist_enabled, cancellation_window_hours
 
 # Clinical safety firewall — screens messages before LLM is called
 from app.services.clinical_firewall import screen_message
@@ -1932,11 +1932,23 @@ class ConversationManager:
             await self.update_state(clinic, phone, "main_menu", context)
         else:
             # Unknown intent: Let the LLM generate a conversational response
-            try:
-                from app.services.ai_engine import generate_response
+            # First the hospital's own staff-approved answer, word for word (the same
+            # Q&A the phone receptionist speaks); only then the LLM. A question neither
+            # could place is harvested for staff review (reception_learning).
+            from app.services import reception_learning
 
-                ai_reply = await generate_response(message, clinic, context, lang)
-                await self.whatsapp.send_text(clinic, phone, ai_reply)
+            try:
+                approved = await reception_learning.approved_answer(clinic, message, lang)
+                if approved:
+                    await self.whatsapp.send_text(clinic, phone, approved)
+                else:
+                    if ai_receptionist_enabled(clinic):
+                        reception_learning.record(clinic["id"], "whatsapp", message, "low_confidence",
+                                                  phone=phone, language=lang)
+                    from app.services.ai_engine import generate_response
+
+                    ai_reply = await generate_response(message, clinic, context, lang)
+                    await self.whatsapp.send_text(clinic, phone, ai_reply)
             except Exception:
                 await self.whatsapp.send_text(
                     clinic, phone, get_message("invalid_input", lang)

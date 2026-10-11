@@ -380,6 +380,57 @@ async def ask_knowledge(body: AskIn, clinic_id: str = "default", user: AdminUser
     return {"text": res["text"], "source": res["source"], "rejected": res["reject"]}
 
 
+# ---- learning: what patients said that Kriya did not know (migration 106) ----
+
+class ApproveIn(BaseModel):
+    """Staff may correct the phrase / target before approving. A FAQ needs the answer."""
+    phrase: Optional[str] = Field(None, max_length=200)
+    canonical: Optional[str] = Field(None, max_length=120)
+    answer: Optional[str] = Field(None, max_length=600)
+
+
+@router.get("/learning/suggestions")
+async def list_learning(clinic_id: str = "default", status: str = "pending",
+                        user: AdminUser = Depends(verify_credentials)):
+    from app.services.reception_learning import load_catalogue
+    scope, _ = await _scope(user, clinic_id, "VOICE_VIEW")
+    if status not in ("pending", "approved", "dismissed"):
+        raise HTTPException(status_code=422, detail="Unknown status")
+    res = await sb(supabase.table("ai_learning_suggestions").select("*").eq("clinic_id", scope)
+                   .eq("status", status).order("evidence_count", desc=True).limit(100))
+    # The approve form offers only this hospital's own departments / doctors / tests.
+    return {"suggestions": res.data or [], "catalogue": await load_catalogue(scope)}
+
+
+@router.post("/learning/suggestions/{suggestion_id}/approve")
+async def approve_learning(suggestion_id: str, body: ApproveIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    from app.services import reception_learning as rl
+    scope, _ = await _scope(user, clinic_id, "VOICE_MANAGE")
+    try:
+        out = await rl.approve(scope, suggestion_id, user.username, phrase=body.phrase,
+                               canonical=body.canonical, answer=body.answer)
+    except rl.ReviewError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    await log_admin_action(user, "voice_learning_approve", "ai_learning_suggestion", suggestion_id,
+                           details={"table": out["table"]}, ip_address=_ip(request))
+    return out
+
+
+@router.post("/learning/suggestions/{suggestion_id}/dismiss")
+async def dismiss_learning(suggestion_id: str, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    from app.services import reception_learning as rl
+    scope, _ = await _scope(user, clinic_id, "VOICE_MANAGE")
+    try:
+        await rl.dismiss(scope, suggestion_id, user.username)
+    except rl.ReviewError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    await log_admin_action(user, "voice_learning_dismiss", "ai_learning_suggestion", suggestion_id,
+                           ip_address=_ip(request))
+    return {"success": True}
+
+
 @router.get("/numbers")
 async def list_numbers(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _scope(user, clinic_id, "VOICE_VIEW")

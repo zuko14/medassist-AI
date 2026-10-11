@@ -218,10 +218,27 @@ class CallSession:
                 await self.interim(self._render(TurnOutput([Say("kb_checking")])))
             except Exception as e:
                 logger.warning(f"VOICE_INTERIM_FAILED call={self.ctx.call_ref}: {e}")
+        before = len(self.state.get("outcomes") or [])
         out = await self.engine.turn(self.state, nlu, text)
+        self._harvest(text, nlu, self.state.get("outcomes", [])[before:])
         if switched:
             out.says.insert(0, switched)
         return await self._emit(out)
+
+    def _harvest(self, text: str, nlu, new_outcomes: list) -> None:
+        """What this turn taught us we do not know (app/services/reception_learning.py).
+        Test-console turns are staff probing, not patients: never harvested."""
+        if self.ctx.mode == "test":
+            return
+        if any(o.get("wf") == "KNOWLEDGE" and o.get("outcome") == "not_answered" for o in new_outcomes):
+            reason = "unanswered_question"
+        elif not nlu.intents:
+            reason = "low_confidence"
+        else:
+            return
+        from app.services import reception_learning
+        reception_learning.record(self.ctx.clinic_id, "voice", text, reason, phone=self.ctx.caller_phone,
+                                  call_ref=self.ctx.call_ref, language=self.state.get("lang"))
 
     async def silence(self, count: int) -> Reply:
         return await self._emit(await self.engine.silence(self.state, count))

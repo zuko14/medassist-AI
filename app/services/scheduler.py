@@ -449,6 +449,10 @@ class SchedulerService:
                                    id="voice_lead_autoqueue", replace_existing=True)
             self.scheduler.add_job(self.voice_retention_purge, CronTrigger(hour=3, minute=45),
                                    id="voice_retention_purge", replace_existing=True)
+            # Receptionist learning (migration 106): misses -> staff-reviewed suggestions.
+            self.scheduler.add_job(self.reception_learning_distill, CronTrigger(hour="1,7,13,19", minute=20),
+                                   id="reception_learning_distill", replace_existing=True,
+                                   max_instances=1, coalesce=True)
 
         self.scheduler.start()
         logger.info(
@@ -506,6 +510,19 @@ class SchedulerService:
                              .lt("started_at", cutoff))
                 except Exception as e:
                     logger.error(f"Voice retention purge failed: {e}")
+
+    async def reception_learning_distill(self):
+        from app.services import reception_learning
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("reception_learning_distill", lease_seconds=1800) as acquired:
+            if acquired:
+                try:
+                    n = await reception_learning.distill_all()
+                    if n:
+                        logger.info(f"Reception learning: {n} suggestion(s) created or refreshed")
+                except Exception as e:
+                    logger.error(f"Reception learning distill failed: {e}")
 
     async def assign_home_collections(self):
         from app.services import home_collection

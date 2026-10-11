@@ -2829,6 +2829,7 @@
                 <button type="button" class="btn btn-ghost btn-sm" data-vtab="analytics" aria-pressed="false" onclick="vcTab('analytics')">Analytics</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-vtab="outbound" aria-pressed="false" onclick="vcTab('outbound')">Outbound</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-vtab="knowledge" data-vmanage="1" aria-pressed="false" onclick="vcTab('knowledge')">Knowledge</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-vtab="learning" data-vmanage="1" aria-pressed="false" onclick="vcTab('learning')">Learning</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-vtab="settings" data-vmanage="1" aria-pressed="false" onclick="vcTab('settings')">Settings</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-vtab="test" data-vmanage="1" aria-pressed="false" onclick="vcTab('test')">Test console</button>
             </div>
@@ -11309,7 +11310,7 @@ function vcTab(tab) {
     });
     document.getElementById('vcDetail').hidden = true;
     ({ live: vcLive, calls: vcCalls, analytics: vcAnalytics, outbound: vcOutbound, knowledge: vcKnowledge,
-       settings: vcSettings, test: vcTest })[tab]();
+       learning: vcLearning, settings: vcSettings, test: vcTest })[tab]();
 }
 
 function vcCallRows(calls, emptyText) {
@@ -11588,6 +11589,68 @@ async function vcLexAdd() {
 
 async function vcLexDel(id) {
     try { await apiDel('/admin/voice/lexicon/' + encodeURIComponent(id)); vcKnowledge(); } catch (e) { toast(e.message, true); }
+}
+
+// Learning (migration 106): what patients said that Kriya did not know, grouped. Nothing
+// goes live until someone here approves it; approved items are ordinary Knowledge entries.
+const VC_LEARN_KIND = { specialty_synonym: 'Department word', doctor_alias: 'Doctor nickname', test_alias: 'Lab test word', knowledge_faq: 'Unanswered question' };
+let vcLearnCatalogue = {};
+
+async function vcLearning() {
+    const pane = document.getElementById('vcPane');
+    pane.innerHTML = loading();
+    try {
+        const d = await api('/admin/voice/learning/suggestions');
+        vcLearnCatalogue = d.catalogue || {};
+        const rows = d.suggestions || [];
+        pane.innerHTML = `<div class="vc-section"><h3>What patients said that Kriya didn't know</h3>`
+            + `<p class="lead-note">Every few hours Kriya groups phone and WhatsApp messages it could not understand or answer. When two or more patients said the same thing, it shows up here. Approve to teach Kriya (live from the next call), or dismiss and it is never suggested again. Kriya never learns medicines or diagnoses.</p></div>`
+            + (rows.length ? rows.map(vcLearnCard).join('') : emptyState('info', 'Nothing to review. Kriya is understanding your patients.'));
+    } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
+}
+
+function vcLearnCard(s) {
+    const id = esc(s.id);
+    const samples = (s.sample_utterances || []).slice(0, 3).map(t => `“${esc(t)}”`).join(' · ');
+    const head = `<div class="lead-card-title">${esc(VC_LEARN_KIND[s.category] || s.category)} · heard ${Number(s.evidence_count) || 0} times</div>`
+        + `<div class="lead-sub">${samples}</div>`;
+    const dismiss = `<button type="button" class="btn btn-ghost btn-sm" onclick="vcLearnDismiss('${id}')">Dismiss</button>`;
+    if (!s.safety_screen_passed) {
+        return `<div class="vc-section">${head}<div class="alert" style="margin-top:10px">Blocked: this is a medical question. Kriya offers a doctor's appointment instead and will not learn an answer to it.</div><div style="margin-top:10px">${dismiss}</div></div>`;
+    }
+    let form;
+    if (s.category === 'knowledge_faq') {
+        form = `<div class="field"><label for="vlq-${id}">Patients ask</label><input id="vlq-${id}" maxlength="200" value="${esc(s.patient_phrase)}"></div>`
+            + `<div class="field"><label for="vla-${id}">Kriya answers</label><input id="vla-${id}" maxlength="600" autocomplete="off" placeholder="Write the answer patients should hear"></div>`;
+    } else {
+        const opts = (vcLearnCatalogue[s.category] || []).map(c => `<option${c === s.proposed_canonical ? ' selected' : ''}>${esc(c)}</option>`).join('');
+        form = `<div class="field"><label for="vlq-${id}">When patients say</label><input id="vlq-${id}" maxlength="80" value="${esc(s.patient_phrase)}"></div>`
+            + `<div class="field"><label for="vlc-${id}">It means</label><select id="vlc-${id}">${opts}</select></div>`;
+    }
+    return `<div class="vc-section">${head}<div class="vc-inline" style="grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) auto auto;margin-top:12px">${form}`
+        + `<button type="button" class="btn btn-accent" onclick="vcLearnApprove('${id}','${esc(s.category)}', this)">Approve &amp; activate</button>${dismiss}</div></div>`;
+}
+
+async function vcLearnApprove(id, category, btn) {
+    const val = p => (document.getElementById(p + id) || {}).value;
+    const body = { phrase: (val('vlq-') || '').trim() };
+    if (category === 'knowledge_faq') {
+        body.answer = (val('vla-') || '').trim();
+        if (body.answer.length < 2) { toast('Write the answer first.', true); return; }
+    } else {
+        body.canonical = val('vlc-');
+    }
+    btn.disabled = true;
+    try {
+        await apiPost('/admin/voice/learning/suggestions/' + encodeURIComponent(id) + '/approve', body);
+        toast('Learned. Kriya uses it from the next call.');
+        vcLearning();
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+}
+
+async function vcLearnDismiss(id) {
+    try { await apiPost('/admin/voice/learning/suggestions/' + encodeURIComponent(id) + '/dismiss', {}); vcLearning(); }
+    catch (e) { toast(e.message, true); }
 }
 
 async function vcSettings() {

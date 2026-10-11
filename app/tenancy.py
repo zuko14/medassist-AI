@@ -73,6 +73,8 @@ TENANT_OWNED_TABLES = frozenset({
     "opd_invoices", "opd_invoice_items", "opd_receipts", "opd_cashier_shifts",
     # Migration 104: online payments not applied in full to an OPD invoice
     "opd_payment_exceptions",
+    # Migration 106: receptionist learning loop (harvest -> staff-approved suggestions)
+    "ai_reception_harvest_events", "ai_learning_suggestions",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning
