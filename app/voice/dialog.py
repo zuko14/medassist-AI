@@ -17,7 +17,7 @@ from .intents import WORKFLOW_OF
 from .nlu_rules import SUPPORTED_LANGS, NLUResult, is_question, looks_english, script_language
 from .policy import is_noise
 
-DIALOG_VERSION = "dialog-2026.10.10"
+DIALOG_VERSION = "dialog-2026.10.12"
 MAX_FAILURES = 3
 MAX_IDLE = 2          # "hello?" / "hmm" turns answered patiently before they count as misses
 
@@ -82,6 +82,10 @@ _SLOT_KEYS = ("department", "specialty", "doctor_ids", "date", "time_period", "c
 _REPLAN_KEYS = ("department", "doctor_ids", "date", "time_period", "clock_time")
 _ANSWER_KEYS = frozenset(_SLOT_KEYS) | {"option_index", "booking_ref", "info_topic"}
 _EMPTY = NLUResult([], {}, 1.0)
+
+
+def _minutes(hhmm: str) -> int:
+    return int(str(hhmm)[:2]) * 60 + int(str(hhmm)[3:5])
 
 
 class DialogEngine:
@@ -521,6 +525,17 @@ class DialogEngine:
                 opts = await self.tools.find_slots(s["doctors"], s["date"], s.get("time_period"), s.get("clock_time"))
                 if opts is None:
                     return await self._degraded(state, out, task, "booking_system_down")
+                if not opts and s.get("clock_time"):
+                    # The TIME asked for is taken, not the day: "5 isn't free; 4:30 or 6?" -- never
+                    # "no slots on Monday" while Monday still has free times.
+                    near = await self.tools.find_slots(s["doctors"], s["date"], None, None)
+                    if near is None:
+                        return await self._degraded(state, out, task, "booking_system_down")
+                    if near:
+                        out.says.append(Say("time_not_free", {"time": s["clock_time"]}))
+                        want = _minutes(s["clock_time"])
+                        closest = sorted(near, key=lambda o: abs(_minutes(o["time"]) - want))[:2]
+                        opts = sorted(closest, key=lambda o: o["time"])
                 if not opts:
                     out.says.append(Say("no_slots_on_date", {"date": s["date"]}))
                     alt = await self.tools.next_available(s["doctors"], s["date"], s.get("time_period"))
@@ -915,8 +930,9 @@ class DialogEngine:
         opts = s["options"]
         if len(opts) == 1:
             o = opts[0]
+            # The exact time the caller asked for: answer their "is it free?" with a yes first.
             return Say("present_one", {"date": o["date"], "time": o["time"], "doctor": o["doctor_name"],
-                                       "fee": o.get("fee_paise")})
+                                       "fee": o.get("fee_paise"), "exact": s.get("clock_time") == o["time"]})
         a, b = opts[0], opts[1]
         return Say("present_two", {"date": a["date"], "d1": a["doctor_name"], "t1": a["time"],
                                    "d2": b["doctor_name"], "t2": b["time"]})

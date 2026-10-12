@@ -1,5 +1,5 @@
 # Kriya AI — Client Onboarding Standard Operating Procedure (SOP)
-**Document Version:** 4.0 (All Plans — every Kriya-side step verified against the code on 2026-09-26)  
+**Document Version:** 5.0 (All Plans + OPD OS + Exotel Telephony & AI Voice Receptionist — verified against code 2026-10-11)  
 **Provider:** Zuko Labs (Meta Tech Provider — Business ID: `1602916427428175`)  
 **Platform:** Kriya AI Multi-Tenant WhatsApp Healthcare Automation (App ID: `946290901317238`)  
 **Plans Covered:** soloclinic · diagstream · diagbooking · essential · polyclinic · enterprise · derma · eye · dental · ivf · multispecialty · womenchild
@@ -16,12 +16,15 @@ Do the parts in this order for every new client. Tick each box; do not skip ahea
 | 1 | **Plan Reference Matrix** — pick the plan | You + client | Plan slug |
 | 2 | **Part A** — client's Meta steps 1–6 | Client | WABA shared with Zuko Labs |
 | 3 | **Part B** — steps 7–9 | You | Token, WABA ID, Phone Number ID, display number |
-| 4 | **Part C** — register the plan's templates | You | Templates `APPROVED` |
+| 4 | **Part C** — register the plan's templates (including OPD OS if needed) | You | Templates `APPROVED` |
 | 5 | **Part D** — create the clinic in the Platform Panel, then the post-create settings | You | Clinic UUID, admin username + password |
 | 6 | **Part E** — configure the clinic's admin panel for its plan | You / clinic admin | Doctors, prices, payments live |
-| 7 | **Part F** — live end-to-end verification | You | Go-live sign-off |
+| 7 | **Part F** — live WhatsApp end-to-end verification | You | WhatsApp Go-live sign-off |
+| 8 | **Part H** — Exotel Telephony Linking & AI Voice Receptionist Setup *(if voice enabled)* | You + Owner | Exophone mapped, audio stream live, voice tested |
+| 9 | **Part I** — OPD OS Setup Wizard & Go-Live *(if OPD OS enabled)* | You / clinic admin | 14 checks green, dry-run passed, OPD live |
+| 10 | **Part J** — Troubleshooting & Edge Cases | You | Issue resolution |
 
-Keep a per-client sheet with: plan · WABA ID · Phone Number ID · display number · clinic UUID · admin username (password handed to the client, not stored) · template names used · Razorpay webhook set (yes/no).
+Keep a per-client sheet with: plan · WABA ID · Phone Number ID · display number · clinic UUID · admin username (password handed to the client, not stored) · template names used · Razorpay webhook set (yes/no) · Exophone & reception number (if voice) · OPD OS state (if OPD).
 
 ---
 
@@ -72,8 +75,12 @@ These database migrations must be applied on production before the features belo
 | `098_voice_receptionist.sql` | `voice_numbers`, `voice_calls`, `voice_events`, `voice_lexicon`, `voice_outbound_jobs`: **AI Voice Receptionist** (inbound phone calls via Exotel + Sarvam) | All plans after owner opt-in and Exophone mapping. **Must be applied AND recorded in `schema_migrations` before enabling `VOICE_ENABLED=true`**. |
 | `101_phlebotomist_off_dates.sql` | `clinic_admins.off_dates DATE[] NOT NULL DEFAULT '{}'`: **phlebotomist leave days** for Home Sample Collection | Additive, no behaviour change until a centre marks someone on leave. **Apply AND record before deploying** — the roster query selects this column and the pre-flight refuses to boot at disk 101 / DB 100. |
 | `102_voice_knowledge_entries.sql` | `voice_knowledge_entries`: **clinic-written answers** the AI receptionist speaks (parking, insurance, offers...) | Additive. **Apply AND record before deploying** — the pre-flight refuses to boot at disk 102 / DB 101. Until applied on a DB, calls still answer from the records (the Q&A source is skipped). |
+| `103_opd_os_core.sql` | `opd_encounters`, `opd_prescriptions`, `opd_invoices`, `opd_receipts`, `opd_cashier_shifts`, `opd_payment_exceptions`, plus MRN & queue columns on `patients` and `appointments`: **OPD OS Module** | All clinics running OPD OS. **Must be applied AND recorded in `schema_migrations` before enabling `opd_enabled=true`**. |
+| `104_opd_payment_exceptions.sql` | `opd_payment_exceptions` table with indexes and status tracking | Offline payment mismatch tracking, gateway reconciliation, and cashier exception handling. |
+| `105_opd_function_search_path.sql` | Search path security pinning on `assign_patient_mrn` and `opd_next_token_number` | Security — clears Supabase linter warning 0011; prevents search-path hijacking. |
+| `106_receptionist_continuous_learning.sql` | `ai_reception_harvest_events`, `ai_learning_suggestions`: **AI Receptionist Continuous Self-Improvement** | Additive. **Apply AND record before deploying** — harvests misunderstood caller turns, clusters suggestions, and enables 1-click promotion to `voice_lexicon_entries` or `voice_knowledge_entries`. |
 
-Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' ORDER BY name;`
+Verify on production: `SELECT name FROM schema_migrations WHERE name LIKE '08%' OR name LIKE '09%' OR name LIKE '10%' ORDER BY name;`
 
 If a migration was run by hand in the Supabase SQL editor, record it (the pre-flight reads this table):
 `INSERT INTO schema_migrations (name, checksum) VALUES ('098_voice_receptionist.sql', 'manual') ON CONFLICT DO NOTHING;`
@@ -253,6 +260,11 @@ Templates are required for any proactive outbound message sent outside the 24-ho
 | `dental_doctor_sitting` | UTILITY | **dental only** | 7 | To the dentist when a sitting is assigned (on booking / button) |
 | `dental_doctor_schedule` | UTILITY | **dental only** | 4 | 19:00 IST (retry 20:30) — each dentist's schedule for tomorrow |
 | `dental_sitting_review` | UTILITY + 3 quick replies | **dental only** | 3 | ~1 hour after a sitting is marked done (09:00–21:00 IST) |
+| `opd_token_issued` | UTILITY | Clinics with OPD OS enabled (`token_issued`) | 3 | Walk-in check-in or appointment arrival |
+| `opd_token_called` | UTILITY | Clinics with OPD OS enabled (`token_called`) | 3 | When doctor/staff calls next token to consult room |
+| `opd_receipt` | UTILITY | Clinics with OPD OS enabled (`receipt`) | 3 | When cashier records invoice receipt at billing counter |
+| `opd_payment_link` | UTILITY | Clinics with OPD OS enabled (`payment_link`) | 3 | When cashier dispatches online payment link for bill |
+| `prescription_ready` | UTILITY (DOCUMENT header) | Clinics with OPD OS enabled (`prescription_ready`) | 0 | Prescription PDF delivery when outside 24h window |
 | `opt_out_confirmation` | UTILITY | Optional (all plans) | — | **Not sent by the code today** — STOP/deletion replies go out as normal chat messages inside the 24h window. Register only if the client wants them on file. |
 | `data_deletion_confirmation` | UTILITY | Optional (all plans) | — | Same as above |
 
@@ -513,28 +525,126 @@ Dental care is a course of **sittings** (Admin → Treatment Plans). These five 
 
 ---
 
+### Step 10J: OPD OS WhatsApp Templates (Clinics & Hospitals with OPD OS Module)
+
+The OPD OS module introduces full clinic workflow automation: patient token generation on check-in, real-time consultation room calls, digital billing receipts, counter UPI/card payment links, and DSC-signed prescription PDFs delivered over WhatsApp.
+
+These templates are submitted on the client's WABA and mapped in the clinic's OPD settings under `opd_settings.templates` (either via the **OPD OS Setup Wizard** in the admin panel or via `PUT /admin/opd/setup/settings`).
+
+#### Template 17: OPD Token Issued (`opd_token_issued`)
+* **Template Name:** `opd_token_issued` (or configured alias `token_issued`)
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Hello, your OPD Token number is {{1}} for {{2}} at {{3}}. Please be seated in the waiting area. We will notify you when it is your turn.
+  ```
+* **Variables (3 Variables — exact match):**
+  - `{{1}}` → Token Number (e.g., `14` or `B-08`)
+  - `{{2}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
+  - `{{3}}` → Clinic / Hospital Name (e.g., `Accumax Diagnostics`)
+* **When Sent:** Dispatched automatically upon walk-in creation (`opd.create_walk_in`) or when an existing booking arrives at the front desk (`opd.arrive`), provided the patient opted in.
+
+#### Template 18: OPD Token Called (`opd_token_called`)
+* **Template Name:** `opd_token_called` (or configured alias `token_called`)
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  It is your turn! Token {{1}} has been called by {{2}}. Please proceed to {{3}}.
+  ```
+* **Variables (3 Variables — exact match):**
+  - `{{1}}` → Token Number (e.g., `14`)
+  - `{{2}}` → Doctor Name (e.g., `Dr. Ramesh Sharma`)
+  - `{{3}}` → Consultation Room (e.g., `Room 2` or `Consultation Room`)
+* **When Sent:** Dispatched when the doctor or clinical staff clicks "Call Next" (`opd.opd_call_next`) in the live consultation desk.
+
+#### Template 19: OPD Payment Receipt (`opd_receipt`)
+* **Template Name:** `opd_receipt` (or configured alias `receipt`)
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Thank you for your payment. Receipt for bill {{1}} for the amount of {{2}} has been received via {{3}}. Please keep this for your records.
+  ```
+* **Variables (3 Variables — exact match):**
+  - `{{1}}` → Invoice Number (e.g., `INV-2026-0042`)
+  - `{{2}}` → Formatted Amount in INR (e.g., `₹500.00`)
+  - `{{3}}` → Payment Mode (e.g., `CASH`, `UPI`, or `CARD`)
+* **When Sent:** Dispatched when the cashier enters a payment receipt (`opd_billing.create_receipt`) during an active cashier shift.
+
+#### Template 20: OPD Bill Payment Link (`opd_payment_link`)
+* **Template Name:** `opd_payment_link` (or configured alias `payment_link`)
+* **Category:** `UTILITY`
+* **Language:** `en`
+* **Body Text:**
+  ```text
+  Your OPD consultation bill {{1}} for {{2}} is ready. Please click the link to pay online: {{3}}
+  ```
+* **Variables (3 Variables — exact match):**
+  - `{{1}}` → Invoice Number (e.g., `INV-2026-0042`)
+  - `{{2}}` → Outstanding Amount (e.g., `₹500.00`)
+  - `{{3}}` → Razorpay / UPI Online Payment Link (e.g., `https://rzp.io/i/abcdef123`)
+* **When Sent:** Dispatched when the front desk or billing staff generates an online payment link for an unpaid OPD invoice.
+
+#### Template 21: OPD Prescription Ready (`prescription_ready`)
+* **Template Name:** `prescription_ready`
+* **Category:** `UTILITY`
+* **Language:** `en_US` or `en`
+* **Header Format:** `DOCUMENT` (PDF file sample)
+* **Body Text:**
+  ```text
+  Dear patient, your medical prescription from {{1}} is attached above. Please consult your physician if you have any questions.
+  ```
+* **Variables (1 Variable):**
+  - `{{1}}` → Hospital / Clinic Name (e.g., `Accumax Hospitals`)
+* **When Sent:** Dispatched when the doctor digitally signs an encounter prescription (`opd_clinical.sign_prescription`) and delivers it outside the 24-hour WhatsApp customer service window. Inside the 24-hour window, the system automatically sends the prescription PDF directly as an in-session document message.
+
+> [!TIP]
+> **Mapping OPD Templates in Settings:**
+> After Meta approves these templates, navigate to **Admin Panel → OPD OS → Setup Wizard → WhatsApp Templates**, or update via API `PUT /admin/opd/setup/settings`:
+> ```json
+> {
+>   "templates": {
+>     "token_issued": "opd_token_issued",
+>     "token_called": "opd_token_called",
+>     "receipt": "opd_receipt",
+>     "payment_link": "opd_payment_link",
+>     "prescription_ready": "prescription_ready"
+>   }
+> }
+> ```
+
+---
+
 ### Step 10F: Plan-Specific Template Checklist
 
 Use this checklist to confirm which templates to register per plan:
 
-| # | Template Name | solo | diag-stream | diag-booking | essential | poly | enterprise | derma | eye | dental | ivf | multi-specialty / women-child |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | `lab_report_ready_v1` | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 2 | `lab_report_summary_v1` | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 3 | `appointment_reminder_24h` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 4 | `appointment_reminder_2h` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 5 | `appointment_confirmation` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 5b | `kriya_payment_link` *(if AI Voice Receptionist is on)* | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 6 | `appointment_cancelled_doctor_leave` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 7 | `post_appointment_followup` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 8 | `followup_custom_message_v1` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 8b | `patient_health_checkin` *(if the clinic will switch check-ins on)* | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 9 | `opt_out_confirmation` *(optional)* | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
-| 10 | `data_deletion_confirmation` *(optional)* | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
-| 11 | `admin_alert_v1` *(only with a report connector)* | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 12–16 | `dental_*` (5 templates, owner-panel button) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| # | Template Name | solo | diag-stream | diag-booking | essential | poly | enterprise | derma | eye | dental | ivf | multi-specialty / women-child | OPD OS (Any Plan) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `lab_report_ready_v1` | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | — |
+| 2 | `lab_report_summary_v1` | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | — |
+| 3 | `appointment_reminder_24h` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 4 | `appointment_reminder_2h` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 5 | `appointment_confirmation` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 5b | `kriya_payment_link` *(if AI Voice Receptionist is on)* | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 6 | `appointment_cancelled_doctor_leave` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 7 | `post_appointment_followup` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 8 | `followup_custom_message_v1` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 8b | `patient_health_checkin` *(if the clinic will switch check-ins on)* | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 9 | `opt_out_confirmation` *(optional)* | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| 10 | `data_deletion_confirmation` *(optional)* | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ | ⚪ |
+| 11 | `admin_alert_v1` *(only with a report connector)* | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | — |
+| 12–16 | `dental_*` (5 templates, owner-panel button) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | — |
+| 17 | `opd_token_issued` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
+| 18 | `opd_token_called` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
+| 19 | `opd_receipt` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
+| 20 | `opd_payment_link` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
+| 21 | `prescription_ready` | — | — | — | — | — | — | — | — | — | — | — | ✅ *(if OPD on)* |
 
-⚪ = optional: not sent by the code today.
+⚪ = optional: not sent by the code today.  
+OPD OS templates (17–21) are required for any clinic or hospital where the OPD OS module is enabled (`opd_enabled = true`).
 
 ---
 
@@ -678,6 +788,52 @@ templates = [
         'components': [
             {'type': 'BODY', 'text': f'Your data has been deleted from {clinic_name} systems as requested. Reference: {{{{1}}}}. For records, contact {{{{2}}}}.', 'example': {'body_text': [['DEL-20260916-001', '+919490386668']]}}
         ]
+    },
+    # 10. OPD OS Token Issued (if clinic runs OPD OS)
+    {
+        'name': 'opd_token_issued',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': f'Hello, your OPD Token number is {{{{1}}}} for {{{{2}}}} at {clinic_name}. Please be seated in the waiting area. We will notify you when it is your turn.', 'example': {'body_text': [['14', 'Dr. Ramesh Sharma']]}}
+        ]
+    },
+    # 11. OPD OS Token Called (if clinic runs OPD OS)
+    {
+        'name': 'opd_token_called',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'It is your turn! Token {{1}} has been called by {{2}}. Please proceed to {{3}}.', 'example': {'body_text': [['14', 'Dr. Ramesh Sharma', 'Room 2']]}}
+        ]
+    },
+    # 12. OPD OS Payment Receipt (if clinic runs OPD OS)
+    {
+        'name': 'opd_receipt',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'Thank you for your payment. Receipt for bill {{1}} for the amount of {{2}} has been received via {{3}}. Please keep this for your records.', 'example': {'body_text': [['INV-2026-0042', '₹500.00', 'CASH']]}}
+        ]
+    },
+    # 13. OPD OS Payment Link (if clinic runs OPD OS)
+    {
+        'name': 'opd_payment_link',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'BODY', 'text': 'Your OPD consultation bill {{1}} for {{2}} is ready. Please click the link to pay online: {{3}}', 'example': {'body_text': [['INV-2026-0042', '₹500.00', 'https://rzp.io/i/sample123']]}}
+        ]
+    },
+    # 14. OPD OS Prescription Ready (if clinic runs OPD OS)
+    {
+        'name': 'prescription_ready',
+        'category': 'UTILITY',
+        'language': 'en',
+        'components': [
+            {'type': 'HEADER', 'format': 'DOCUMENT', 'example': {'header_handle': [h]}},
+            {'type': 'BODY', 'text': f'Dear patient, your medical prescription from {clinic_name} is attached above. Please consult your physician if you have any questions.', 'example': {'body_text': []}}
+        ]
     }
 ]
 
@@ -694,6 +850,8 @@ print('\nAll Core Templates Submitted for Meta Review Successfully!')
 > **For diagstream / diagbooking plans:** You may skip templates 3–7 (appointment-related). For diagbooking, also skip templates 1–2 (lab report delivery). The script registers all templates — Meta silently ignores templates the clinic never triggers, so registering extras is safe but unnecessary.
 >
 > **Dental plan:** this script does NOT include the five `dental_*` templates. Submit those from Platform → Dental Messaging → **Submit Templates** (Step 10H) — same token and WABA, one click, and the definitions can never drift from the code.
+>
+> **OPD OS module:** templates 10–14 above cover token issuance, room call, receipt, payment link, and prescription delivery. Once approved, map them in the OPD OS Setup Wizard (**Part I**).
 >
 > **After running:** set `lab_report_template_name` (platform panel) and `admin_alert_template_name` (connector/clinic config) to the names you registered.
 
@@ -1065,6 +1223,309 @@ The job runs 10:30 IST for consultations seen 3 and 7 days earlier. Tap **Still 
 
 ---
 
+## Part H: Exotel Telephony Linking & AI Voice Receptionist End-to-End Setup
+
+Kriya AI includes an enterprise AI Voice Receptionist (`app/voice/`) capable of conversing naturally in **Telugu (`te-IN`), Hindi (`hi-IN`), and Indian English (`en-IN`)**, answering hospital enquiries, providing doctor consultation timings, scheduling appointments, dispatching instant WhatsApp payment links for paid slots outside the 24-hour Meta window, and transferring emergency or complex calls seamlessly to human staff.
+
+Telephony is powered by **Exotel** (telecom carrier interconnect) and conversational speech is powered by **Sarvam AI** (`saarika:v2` STT, `bulbul:v2` TTS) alongside Kriya's deterministic Clinical Firewall and appointment booking engine.
+
+---
+
+### H1: Architectural Model — Central Master Account vs Per-Client Virtual Numbers
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│               ZUKO LABS CENTRAL TELEPHONY (Master Exotel Account)       │
+│  • Single Master Exotel Account (`EXOTEL_ACCOUNT_SID`, `API_KEY`)       │
+│  • High-throughput SIP Trunks & Direct Carrier Interconnect            │
+│  • Central Audio Streaming WSS Endpoint (`/voice/exotel/stream`)        │
+└────────────────────────────────────┬───────────────────────────────────┘
+                                     │
+           Allocates / Maps Virtual Exophones (E.164 DID Numbers)
+                                     │
+         ┌───────────────────────────┴───────────────────────────┐
+         ▼                                                       ▼
+┌───────────────────────────────┐       ┌───────────────────────────────┐
+│     Client A (Care Hospital)  │       │   Client B (Dental Clinic)    │
+│  • Virtual Exophone: 080-4710 │       │  • Virtual Exophone: 040-6819 │
+│  • Tenant ID: `uuid-a`        │       │  • Tenant ID: `uuid-b`        │
+│  • Transfer: +919876543210    │       │  • Transfer: +919123456789    │
+│  • Monthly Voice Budget: ₹3000│       │  • Monthly Voice Budget: ₹1500│
+│  • Own Doctors & Knowledge    │       │  • Own Treatments & Lexicon   │
+└───────────────────────────────┘       └───────────────────────────────┘
+```
+
+#### Why Master Account Architecture?
+1. **Zero Client Telecom Overhead**: Clients do not need to register separate telecom accounts, undergo TRAI/DoT commercial paperwork, or manage SIP billing. Zuko Labs manages the central telecom agreement.
+2. **Deterministic Multi-Tenancy**: When a patient dials an Exophone, Kriya resolves the exact clinic in `app/voice/store.py` (`voice_numbers.exophone -> clinics.id`). Every database query, doctor schedule check, and prompt context is strictly isolated to that clinic.
+3. **Fail-Safe Reception Fallback**: Each mapped number configures a `reception_number` (human front-desk phone). If the caller requests human staff, if an emergency red-flag is triggered, or if the clinic's monthly voice budget is exhausted, the call automatically transfers to the clinic's human front desk. **Callers are never hung up on.**
+4. **Transparent Cost Tracking**: Telephony duration, STT speech seconds, and TTS characters are logged per turn in `voice_calls`. Costs are computed in paise according to configured platform rates:
+   $$\text{Cost} = \left(\frac{\text{STT sec}}{60} \times \text{Rate}_{\text{STT}}\right) + \left(\frac{\text{TTS chars}}{1000} \times \text{Rate}_{\text{TTS}}\right) + \left(\frac{\text{Telephony sec}}{60} \times \text{Rate}_{\text{Telephony}}\right)$$
+
+---
+
+### H2: Step-by-Step Exotel Dashboard Setup (Master Account)
+
+Follow these steps in the Master Exotel Dashboard (`my.exotel.com`):
+
+#### Step 1: Procure / Allocate an Exophone
+1. Sign in to the Master Exotel Dashboard.
+2. Navigate to **Exophones** $\rightarrow$ **Buy / Allocate Number**.
+3. Select the city / region matching the clinic's location (e.g., `080` for Bangalore, `040` for Hyderabad, `022` for Mumbai, or a National DID number).
+4. Note down the allocated phone number in **E.164 format** (e.g., `+918047361234`).
+
+#### Step 2: Create the Voicebot Streaming Applet Flow
+1. Navigate to **App Bazaar** $\rightarrow$ Click **Create Flow** (or edit `Kriya AI Voicebot Flow`).
+2. Add **Applet 1: Voicebot Stream Applet (AgentStream)**:
+   - **Stream Type:** `Bi-directional Audio Stream (WebSocket)`
+   - **WebSocket URL:** `wss://medassist-ai-docker.onrender.com/voice/exotel/stream?k=<VOICE_STREAM_TOKEN>`
+   - **Audio Format:** `PCM 8000Hz, 16-bit, Mono` (standard telephony rate)
+   - **Barge-in:** `Enabled` (allows caller interruption)
+3. Connect the output of the Voicebot Stream Applet to **Applet 2: Passthru Applet**:
+   - When the voicebot finishes or closes the stream, Exotel automatically proceeds to Passthru.
+   - **HTTP Method:** `GET`
+   - **Passthru URL:** `https://medassist-ai-docker.onrender.com/voice/exotel/passthru?k=<VOICE_STREAM_TOKEN>`
+   - **Parameters Passed:** `CallSid`, `From`, `To`, `CallType`
+4. Configure Passthru Routing:
+   - **On HTTP 200 (Transfer to Human Receptionist):** Connect to **Applet 3: Connect Applet** (Dial human front desk `reception_number`).
+     > [!NOTE]
+     > Kriya returns HTTP 200 whenever the AI needs to hand off the call: emergency red flag, caller requested staff, unrecognized intent, budget reached, or network disconnect.
+   - **On HTTP 302 (Clean Call Completion):** Connect to **Applet 4: Hangup Applet**.
+     > [!NOTE]
+     > Kriya returns HTTP 302 only when the call ended cleanly (appointment confirmed, FAQ answered, caller said goodbye).
+5. Save and Publish the Flow as **`Kriya Receptionist Stream Flow`**.
+
+#### Step 3: Link the Applet Flow to the Clinic's Exophone
+1. Go to **Exophones** in the Exotel dashboard.
+2. Locate the allocated number (e.g., `+918047361234`).
+3. Set **Inbound Call Applet** to **`Kriya Receptionist Stream Flow`**.
+
+---
+
+### H3: Platform Panel Mapping & Clinic Voice Enablement
+
+After setting up Exotel, link the number to the client's clinic in Kriya:
+
+1. Open Kriya Platform Panel: `https://medassist-ai-docker.onrender.com/platform-panel` $\rightarrow$ Sign in with Owner credentials.
+2. In the sidebar or top navigation, click **AI Receptionist** (or open `/platform/voice`).
+3. Click **+ Add Voice Number** (or send `POST /platform/voice/numbers`):
+   - **Clinic:** Select the client's clinic (e.g., `Accumax Diagnostics`).
+   - **Branch:** (Optional) Select a specific branch if this number routes to a branch front desk.
+   - **Exophone (E.164):** `+918047361234` (must start with `+` and match Exotel).
+   - **Published Number:** (Optional) Display/marketing number if call-forwarded.
+   - **Reception Fallback Number (E.164):** `+919876543210` (human front-desk phone).
+   - **Label:** E.g., `Main Appointment Line`.
+4. Click **Save Number**.
+5. **Enable the Feature Flag:**
+   - Go to Platform Panel $\rightarrow$ Select the clinic $\rightarrow$ **Features / Feature Overrides** $\rightarrow$ Toggle **AI Receptionist** to `ON` (`clinics.features.ai_receptionist = true`).
+6. **Set Monthly Voice Budget:**
+   - Under AI Receptionist, click **Set Budget** for this clinic.
+   - Enter monthly cap in Rupees (e.g., ₹2,000 = `200000` paise). Setting `0` means no limit.
+   - *Graceful Cap Enforcement:* If the clinic reaches 100% of its budget, incoming calls automatically route to human reception (`reception_number`) instead of failing.
+
+---
+
+### H4: Clinic Admin Voice Configuration (`/admin/voice`)
+
+The clinic admin (or you during onboarding) configures the persona and knowledge:
+
+1. Log into the Clinic Admin Panel (`/admin-panel`, `/hospital-panel`, etc.) $\rightarrow$ Open **AI Receptionist** tab.
+2. **General Voice Settings:**
+   - **Assistant Name:** E.g., `"Kriya"` or clinic-branded `"Dr. Sneha's Assistant"`.
+   - **Primary Language:** Choose `te-IN` (Telugu), `hi-IN` (Hindi), or `en-IN` (Indian English).
+   - **Speech Pace:** `1.0` (natural conversational rhythm).
+   - **Operating Hours for Human Reception:** Set days & hours (e.g. Mon–Sat 09:00–20:00). Calls outside these hours inform the patient and offer morning appointment booking.
+   - **Emergency Number:** Set 24/7 Casualty / Ambulance phone.
+3. **Voice Knowledge Base (`/admin/voice/knowledge`):**
+   - Click **+ Add Answer** to record clinic-specific spoken answers:
+     - *Parking:* "Valet parking is available at the main hospital entrance free of charge."
+     - *Insurance:* "We accept Star Health, Medi Assist, HDFC ERGO, ICICI Lombard, and Ayushman Bharat cash-less."
+     - *Timings:* "OPD consultations run from 9:00 AM to 1:00 PM and 4:00 PM to 8:00 PM."
+     - *Pricing:* "General physician consultation is ₹400, and cardiology specialist is ₹800."
+4. **Phonetic Lexicon (`/admin/voice/lexicon`):**
+   - Click **+ Add Lexicon Entry** to ensure Indian medical names and doctors are transcribed accurately:
+     - `doctor_alias`: `"Srinivas"` $\rightarrow$ `"Dr. Srinivas Rao"`
+     - `specialty_synonym`: `"heart doctor"` $\rightarrow$ `"Cardiology"`
+     - `specialty_synonym`: `"skin doctor"` $\rightarrow$ `"Dermatology"`
+     - `test_alias`: `"sugar test"` $\rightarrow$ `"Fasting Blood Sugar"`
+     - `pronunciation`: Phonetic hints for regional clinic branding.
+
+---
+
+### H5: Continuous Self-Improvement & Learning Loop (Session 34 / Migration 106)
+
+Kriya AI Receptionist automatically learns from real patient interactions without code changes:
+
+1. **Automated Turn Harvesting**: Every 6 hours (`00:00`, `06:00`, `12:00`, `18:00` IST), a background job analyzes all completed calls, identifies unmapped questions, low-confidence turns, and STT discrepancies, masks all patient phone numbers/PII, and clusters the phrases.
+2. **Admin Review Screen**:
+   - Go to Admin Panel $\rightarrow$ **AI Receptionist** $\rightarrow$ **Learning Suggestions** (`/admin/voice/learning/suggestions`).
+   - The screen shows suggested phrases grouped by frequency (e.g., *"Do you do ultrasound scanning on Sundays?"* asked 4 times).
+3. **1-Click Promotion**:
+   - Click **Approve as Lexicon**: Maps the phrase to a known department or doctor.
+   - Click **Approve as Knowledge**: Type the clinic's spoken answer and click Approve. It is instantly written to `voice_knowledge_entries`.
+   - Click **Dismiss**: Ignores background chatter or noise.
+4. **Zero-Downtime Spoken Adaptation**: The very next phone call asking that question is answered immediately by the AI voice receptionist.
+
+---
+
+### H6: Live End-to-End Voice Verification
+
+Before handing the number to patients, perform these two verification checks:
+
+#### Phase 1: Test Turn Console (Zero Cost Simulation)
+1. Open Admin Panel $\rightarrow$ AI Receptionist $\rightarrow$ **Test Turn Console** (or API `POST /admin/voice/test-turn`).
+2. Type: `"I want to book an appointment with Dr. Ramesh tomorrow morning"`
+   - Verify reply: Identifies Dr. Ramesh Sharma, displays available slots.
+3. Type: `"What are your consultation timings and parking fees?"`
+   - Verify reply: Reads verbatim from the configured Knowledge Base entries.
+4. Test Emergency Clinical Firewall: Type `"I am having acute chest pain and shortness of breath"`
+   - Verify reply: Deterministically triggers emergency protocol and offers casualty contact.
+
+#### Phase 2: Live Inbound Telephony Call
+1. From any mobile phone, dial the clinic's Exophone (e.g., `+918047361234`).
+2. Confirm the greeting speaks in the clinic's configured primary language.
+3. Book an appointment over the call.
+4. If the slot is paid, confirm you receive the WhatsApp payment link template (`kriya_payment_link`) within 5 seconds.
+5. Say: *"Can I speak to reception?"*
+   - Verify the stream ends and Exotel bridges the call to the configured `reception_number` within 2 seconds.
+6. Check Admin Panel $\rightarrow$ **Calls**: verify the call is logged with telephony seconds, STT duration, TTS characters, and calculated cost in paise.
+
+---
+
+## Part I: OPD OS Module Onboarding & Setup Wizard
+
+The **OPD OS Module** transforms Kriya from a messaging assistant into a comprehensive **Outpatient Department Operating System** for Indian hospitals, specialty clinics, and diagnostic centres. It manages patient registry (MRN), queue tokens, triage vitals, doctor consultation charting, DSC-signed prescriptions, cashier counter shifts, and counter UPI/cash receipts.
+
+### I1: Enabling OPD OS for a Clinic
+
+1. Open Kriya Platform Panel: `https://medassist-ai-docker.onrender.com/platform-panel` $\rightarrow$ Owner Login.
+2. Navigate to the client's clinic $\rightarrow$ Click **Feature Overrides**.
+3. Check **OPD OS** (`clinics.config.opd_enabled = true`).
+4. Save changes.
+
+---
+
+### I2: The 14-Item Readiness Checklist (`GET /admin/opd/setup`)
+
+When OPD OS is enabled, the clinic starts in `NOT_CONFIGURED` or `CONFIGURING` state. To go live (`READY`), the clinic admin opens **Admin Panel $\rightarrow$ OPD OS $\rightarrow$ Setup Wizard** (`/admin/opd/setup`).
+
+All 14 items are dynamically evaluated from live database records:
+
+| # | Item Key | Label | Blocking | What It Checks | Where to Fix |
+|---|---|---|---|---|---|
+| 1 | `clinic_profile` | Clinic Profile | ✅ Blocking | Legal name, physical address, and phone set on letterhead | Admin $\rightarrow$ Profile |
+| 2 | `operating_hours` | Operating Hours & Sessions | ✅ Blocking | Every active doctor has session timings (morning/evening start & slot counts) | Admin $\rightarrow$ Doctors |
+| 3 | `branches` | Branches | ✅ Blocking | Multi-branch clinics must have at least one active branch | Admin $\rightarrow$ Branches |
+| 4 | `departments` | Departments | ✅ Blocking | At least one clinical department registered | Admin $\rightarrow$ Doctors |
+| 5 | `doctor_roster` | Doctor Roster | ✅ Blocking | At least one doctor marked active (`is_active = true`) | Admin $\rightarrow$ Doctors |
+| 6 | `doctor_registration` | NMC Doctor Registrations | ✅ Blocking | NMC registration number and State Medical Council set on every doctor | Admin $\rightarrow$ Doctors |
+| 7 | `consult_durations` | Consultation Slot Durations | ✅ Blocking | Slot duration in minutes configured (defaults to 30 mins) | Admin $\rightarrow$ Doctors |
+| 8 | `consult_fees` | Doctor Consultation Fees | ✅ Blocking | Consultation fee configured on all active doctors (₹0 allowed for trust clinics) | Admin $\rightarrow$ Doctors |
+| 9 | `front_desk_permissions` | Front Desk Permissions | ✅ Blocking | At least one active staff has `OPD_FRONT_DESK` (or clinic admin) | Admin $\rightarrow$ Staff Accounts |
+| 10 | `doctor_logins` | Doctor Login Accounts | ✅ Blocking | Every active doctor is linked to a staff login account | Admin $\rightarrow$ Staff Accounts |
+| 11 | `token_rules` | Queue & Token Rules | ✅ Blocking | Token rule (`per_doctor_daily`) and after-check-in stage configured | OPD Setup $\rightarrow$ Preferences |
+| 12 | `billing_setup` | Billing & Payment Methods | ✅ Blocking | Payment modes (`cash`, `upi`, `card`) and Counter UPI VPA configured | OPD Setup $\rightarrow$ Billing |
+| 13 | `whatsapp_templates` | WhatsApp Templates | ⚪ Optional | Meta template names configured (`token_issued`, `receipt`, etc.) | OPD Setup $\rightarrow$ Templates |
+| 14 | `test_run_go_live` | Pre-flight Dry Run | ✅ Blocking | Simulation test visit dry run passed within the last 24 hours | OPD Setup $\rightarrow$ Pre-flight |
+
+---
+
+### I3: Configuring OPD Preferences & WhatsApp Templates
+
+In the OPD Setup Wizard (or via `PUT /admin/opd/setup/settings`), configure the operational parameters:
+
+```json
+{
+  "token_rule": "per_doctor_daily",
+  "after_checkin_stage": "vitals_pending",
+  "vitals_required": true,
+  "billing_after_consult": true,
+  "auto_open_shift": true,
+  "payment_modes": ["cash", "upi", "card"],
+  "upi_vpa": "accumaxhospitals@icici",
+  "templates": {
+    "token_issued": "opd_token_issued",
+    "token_called": "opd_token_called",
+    "receipt": "opd_receipt",
+    "payment_link": "opd_payment_link",
+    "prescription_ready": "prescription_ready"
+  }
+}
+```
+
+* **`upi_vpa`:** The hospital's official Merchant UPI ID (e.g., `accumax@icici`). Every dynamic counter UPI QR encodes this VPA.
+* **`after_checkin_stage`:** Set to `"vitals_pending"` if a triage nurse checks vitals before the doctor, or `"waiting"` to send patients directly to the consultation waiting area.
+* **`templates`:** The approved Meta template names from **Step 10J**.
+
+---
+
+### I4: Running the Pre-Flight Dry Run (`POST /admin/opd/setup/dry-run`)
+
+Before activation, Kriya runs a 5-step non-destructive simulation:
+1. Click **Run Pre-flight Dry Run** on the Setup page.
+2. The engine executes:
+   - ✅ Doctor roster & session slot validation
+   - ✅ Daily token generator sequence check
+   - ✅ Registry duplicate detection simulation
+   - ✅ Clinical encounter & prescription draft test
+   - ✅ Cashier billing invoice & receipt calculation
+3. When all checks return `ok: true`, the system stamps `dry_run_passed_at`.
+
+---
+
+### I5: Activating Go-Live State (`POST /admin/opd/setup/go-live`)
+
+1. Once all 13 blocking items are checked and the dry-run is stamped, click the green **Activate OPD OS (Go Live)** button.
+2. The clinic state transitions from `CONFIGURING` to **`READY`**.
+3. The Admin sidebar instantly reveals the full OPD operational suite:
+   - 📋 **Patient Registry**: Search, MRN lookup, family member linking, allergy history.
+   - ⏱️ **Live Queue Board**: Real-time token tracking across all doctors and triage stages.
+   - 🩺 **Doctor Consultation Desk**: One-click token calling, ICD-10 charting, Rx drafting, DSC signing.
+   - 💰 **Billing & Cashier Shifts**: Shift open/close with cash float, invoice generation, counter receipts.
+   - 📊 **OPD Analytics**: Patient footfall, average consultation duration, wait times, cashier collections.
+
+---
+
+### I6: Waiting Lobby TV Queue Display Setup
+
+Every OPD clinic includes a real-time public display for waiting hall TVs:
+
+1. In Admin Panel $\rightarrow$ OPD OS, click **Generate TV Display Token** (`POST /admin/opd/display-token`).
+2. Copy the generated TV display URL:
+   ```
+   https://medassist-ai-docker.onrender.com/public/queue-display#t=<DISPLAY_TOKEN>
+   ```
+3. Open this URL in full-screen on any Smart TV or browser stick in the patient waiting lobby.
+4. The display auto-refreshes via WebSocket/poll:
+   - Displays currently called tokens per doctor/room with visual chime.
+   - Displays waiting token numbers.
+   - Masked patient names (DPDP Act compliant).
+
+---
+
+### I7: Clinical & Operational Flow Verification
+
+Walk the clinic team through their daily workflow:
+
+1. **Front Desk (Receptionist):**
+   - Click **+ New Walk-in** $\rightarrow$ Search or register patient $\rightarrow$ Assign doctor $\rightarrow$ Issue Token.
+   - Patient receives `opd_token_issued` on WhatsApp: *"Hello, your OPD Token number is 14 for Dr. Ramesh Sharma..."*
+2. **Triage Nurse:**
+   - Opens **Live Queue** $\rightarrow$ Clicks patient $\rightarrow$ Records BP, Pulse, SpO2, Temperature, Weight $\rightarrow$ Taps **Move to Waiting**.
+3. **Doctor Consultation Room:**
+   - Doctor opens **Doctor Desk** $\rightarrow$ Clicks **Call Next Token**.
+   - Patient receives `opd_token_called` on WhatsApp: *"It is your turn! Token 14 has been called by Dr. Ramesh Sharma. Please proceed to Room 2."*
+   - TV Display updates to show Token 14 in Room 2.
+   - Doctor records diagnosis, enters medications, clicks **Sign Prescription**.
+   - Patient receives prescription PDF on WhatsApp.
+4. **Billing & Cashier Desk:**
+   - Cashier clicks **Open Shift** with float amount (e.g. ₹1,000).
+   - Generates Invoice $\rightarrow$ Patient pays via Cash, UPI QR, or Card $\rightarrow$ Cashier clicks **Record Receipt**.
+   - Patient receives `opd_receipt` on WhatsApp.
+   - At end of day, Cashier enters declared cash and clicks **Close Shift** for shift-end audit.
+
+---
+
 ## Outbound Message Master Reference (every automated WhatsApp message)
 
 | Message | When (IST) | Template | Plans | Clinic switch / condition |
@@ -1082,12 +1543,17 @@ The job runs 10:30 IST for consultations seen 3 and 7 days earlier. Tap **Still 
 | Dentist sitting notice | on booking / button | `dental_doctor_sitting` | dental | doctor WhatsApp number; monthly doctor limit |
 | Dentist evening schedule | 19:00 (retry 20:30) | `dental_doctor_schedule` | dental | automation setting; monthly doctor limit |
 | Sitting review | ~1 h after Done, 09:00–21:00 | `dental_sitting_review` | dental | automation setting; monthly review limit; STOP respected |
+| OPD token issued | on walk-in or arrival | `opd_token_issued` (via `templates.token_issued`) | OPD OS clinics | patient opted in; queue checked-in |
+| OPD token called | on call next token | `opd_token_called` (via `templates.token_called`) | OPD OS clinics | when doctor calls token to room |
+| OPD payment receipt | on invoice payment | `opd_receipt` (via `templates.receipt`) | OPD OS clinics | when cashier records counter receipt |
+| OPD bill payment link | on cashier link request | `opd_payment_link` (via `templates.payment_link`) | OPD OS clinics | when bill is sent for online pay |
+| OPD prescription PDF | on DSC signing | `prescription_ready` (via `templates.prescription_ready`) | OPD OS clinics | outside 24h window (in-session PDF inside 24h) |
 | Storage / message limit warnings | at 90 % and 100 % | admin panel bell (no WhatsApp) | all / dental | — |
 | Owner reply to a clinic message | on reply | admin panel bell (no WhatsApp) | all | — |
 
 ---
 
-## Part G: Troubleshooting & Edge Cases
+## Part J: Troubleshooting & Edge Cases
 
 | Issue / Error | Root Cause | Exact Fix |
 |---|---|---|
@@ -1114,6 +1580,15 @@ The job runs 10:30 IST for consultations seen 3 and 7 days earlier. Tap **Still 
 | **Health check-ins never sent** | Switched off (default), or template not approved. | Hospital Profile → Health check-ins switch; register `patient_health_checkin`. |
 | **Connector alerts never reach the admin** | `admin_alert_template_name` not set. | Register `admin_alert_v1` and set the name (Step 10E2). |
 | **Treatment booking creates duplicate appointments** | Should not happen — `uq_appointment_active_slot` constraint prevents this. | Verify the unique index exists: `SELECT indexname FROM pg_indexes WHERE indexname = 'uq_appointment_active_slot';` |
+| **Exotel Stream Disconnects / Silence on Call** | WebSocket stream token mismatch or wrong URL protocol. | Verify Exotel applet URL is `wss://.../voice/exotel/stream?k=<VOICE_STREAM_TOKEN>`. Check `VOICE_STREAM_TOKEN` in Render `.env`. |
+| **Caller requests human but call hangs up** | Passthru applet not chained after Voicebot stream, or missing `reception_number`. | Ensure Passthru applet points to `/voice/exotel/passthru?k=<token>` and maps HTTP 200 $\rightarrow$ Connect Applet. Ensure `reception_number` is populated in `voice_numbers`. |
+| **Calls not routing to the correct clinic** | Exophone in `voice_numbers` not in exact E.164 format. | Check `voice_numbers.exophone`: must include country code (e.g., `+918047361234`), matching Exotel exactly. |
+| **Voice budget exhausted / calls bypassing AI** | Clinic monthly voice cost reached `monthly_budget_paise`. | Intentional fail-safe: calls automatically bridge to human front desk so patients are never stranded. Increase budget in Platform Panel if needed. |
+| **Local doctor / medicine names misunderstood by voice** | Phonetic variations in regional dialects. | Go to Admin Panel $\rightarrow$ **AI Receptionist $\rightarrow$ Learning Suggestions** or **Phonetic Lexicon** and add the alias. |
+| **OPD OS state shows `DEGRADED`** | A blocking check (e.g., doctor operating hours or UPI VPA) failed after go-live. | Open `/admin/opd/setup` to view the failing red check and click the fix link. |
+| **Cashier unable to record counter payment** | No cashier shift is currently open. | Front desk must open a shift at start of day with cash float (`POST /admin/opd/shifts/open`). |
+| **Doctor unable to sign prescription** | Doctor login not linked to active doctor or missing NMC registration council. | Ensure doctor has registration council/number and user login has `doctor_id` set (`Admin -> Staff Accounts`). |
+| **UPI QR code fails on patient mobile apps** | `upi_vpa` in OPD settings has invalid syntax or banking handle. | Fix `upi_vpa` in OPD Setup $\rightarrow$ Billing (must be valid syntax like `name@bank`). |
 
 ---
 
@@ -1128,7 +1603,14 @@ Default Activation PIN:        123456
 Doctor Diagnostic CLI:         python -m scripts.whatsapp_doctor --clinic <CLINIC_UUID>
 Razorpay webhook (per clinic): https://medassist-ai-docker.onrender.com/webhooks/razorpay/<CLINIC_UUID>
                                events: payment.captured, payment_link.paid
+PhonePe webhook (per clinic):  https://medassist-ai-docker.onrender.com/webhooks/phonepe/<CLINIC_UUID>
+Exotel Voicebot Stream URL:    wss://medassist-ai-docker.onrender.com/voice/exotel/stream?k=<VOICE_STREAM_TOKEN>
+Exotel Passthru URL:           https://medassist-ai-docker.onrender.com/voice/exotel/passthru?k=<VOICE_STREAM_TOKEN>
+Exotel Status Callback URL:    https://medassist-ai-docker.onrender.com/voice/exotel/status?k=<VOICE_STREAM_TOKEN>
+OPD OS TV Display URL:         https://medassist-ai-docker.onrender.com/public/queue-display#t=<DISPLAY_TOKEN>
 Dental templates:              Platform Panel -> Dental Messaging -> Submit Templates
+Voice Test Console API:        POST /admin/voice/test-turn
+OPD Pre-flight Dry Run API:    POST /admin/opd/setup/dry-run
 ```
 
 ### Admin Panel URLs by Plan:
@@ -1144,3 +1626,4 @@ Women & Child:     https://medassist-ai-docker.onrender.com/women-child-panel
 
 ### Feature Summary by Plan:
 See the verified **Feature matrix** in the Plan Reference Matrix at the top of this document (generated from `PLAN_FEATURES`).
+

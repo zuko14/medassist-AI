@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.10.10"
+TEMPLATES_VERSION = "templates-2026.10.12"
 
 T: dict = {
     "greeting": {
@@ -92,9 +92,17 @@ T: dict = {
         "te": "ఉదయం కావాలా, సాయంత్రం కావాలా?", "en": "Morning or evening?", "hi": "सुबह चाहिए या शाम?",
     },
     "present_one": {
-        "te": "{date} {time}కి డాక్టర్ {doctor} గారు అందుబాటులో ఉన్నారు. {fee_sentence}బుక్ చేయమంటారా?",
-        "en": "Dr. {doctor} is available {date} at {time}. {fee_sentence}Shall I book it?",
-        "hi": "डॉक्टर {doctor} {date} {time} बजे उपलब्ध हैं। {fee_sentence}बुक कर दूँ?",
+        "te": "{yes_sentence}{date} {time}కి డాక్టర్ {doctor} గారు అందుబాటులో ఉన్నారు. {fee_sentence}బుక్ చేయమంటారా?",
+        "en": "{yes_sentence}Dr. {doctor} is available {date} at {time}. {fee_sentence}Shall I book it?",
+        "hi": "{yes_sentence}डॉक्टर {doctor} {date} {time} बजे उपलब्ध हैं। {fee_sentence}बुक कर दूँ?",
+    },
+    # The exact time the caller asked for is free: say so before the details.
+    "yes_sentence": {"te": "అవునండి, ఖాళీ ఉంది.", "en": "Yes, that time is free.", "hi": "जी हाँ, वह समय खाली है।"},
+    # The exact time asked for is taken (the day is not full): the nearest times follow.
+    "time_not_free": {
+        "te": "క్షమించండి, {time}కి ఖాళీ లేదు.",
+        "en": "Sorry, {time} is already booked.",
+        "hi": "माफ़ कीजिए, {time} बजे जगह खाली नहीं है।",
     },
     "present_two": {
         "te": "{date} రెండు సమయాలు ఉన్నాయి: డాక్టర్ {d1} గారితో {t1}, లేదా డాక్టర్ {d2} గారితో {t2}. ఏది కావాలి?",
@@ -503,6 +511,7 @@ def realize(key: str, lang: str, today: date, specialty_labels: Optional[dict] =
     # Fragments are joined with explicit spaces (render() strips its output).
     q["fee_sentence"] = render("fee_sentence", lang, fee=q["fee"]) + " " if q.get("fee") else ""
     q["wa_sentence"] = " " + render("wa_sentence", lang) if p.get("whatsapp_sent") else ""
+    q["yes_sentence"] = render("yes_sentence", lang) + " " if p.get("exact") else ""
     q["emergency_sentence"] = " " + render("emergency_sentence", lang, emergency=p["emergency"]) if p.get("emergency") else ""
     q["who"] = " " + render("who", lang, name=p["name"]) if p.get("name") else ""
     q["depts_sentence"] = " " + render("depts_sentence", lang, depts=p["depts"]) if p.get("depts") else ""

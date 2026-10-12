@@ -28,7 +28,7 @@ from .intents import TAXONOMY_VERSION
 from .lexicon import (LEXICON_VERSION, SPECIALTIES, apply_pronunciations, find_specialties, resolve_department,
                       tenant_department_for)
 from .nlu_llm import PROMPT_VERSION, understand_llm
-from .nlu_rules import NLU_RULES_VERSION, NluContext, gurmukhi_to_devanagari, understand
+from .nlu_rules import NLU_RULES_VERSION, NluContext, gurmukhi_to_devanagari, to_telugu_script, understand
 from .policy import POLICY_VERSION, asr_confidence, gate, needs_llm
 from .safety import SAFETY_VERSION, screen
 from .tools import TOOLS_VERSION, CallContext, KriyaTools
@@ -184,7 +184,8 @@ class CallSession:
         # STT sometimes writes a short Telugu/Hindi reply in Gurmukhi ("ਹਾਂ ਹਾਂ" for "haa haa").
         # Read it as Devanagari (before the safety screen, so nothing is missed there), and never
         # let it vote to switch the call's language.
-        converted = gurmukhi_to_devanagari(text)
+        # Same for a short Telugu reply written in Malayalam / Kannada letters.
+        converted = to_telugu_script(gurmukhi_to_devanagari(text))
         from_gurmukhi = converted != text
         text = converted
 

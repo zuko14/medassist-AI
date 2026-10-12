@@ -90,11 +90,15 @@ _MONTHS = {
     "september": 9, "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 
+# Spoken variants matter: CALL-20261011-3F59FF said "సాయంకాలం 5 గంటలకి" and was asked
+# "morning or evening?" because only the written form సాయంత్రం was listed.
 PERIOD_WORDS = {
-    MORNING: ("morning", "udayam", "ఉదయం", "poddunna", "podduna", "పొద్దున", "subah", "subha", "सुबह"),
-    AFTERNOON: ("afternoon", "madhyahnam", "madhyanam", "మధ్యాహ్నం", "dopahar", "dopehar", "दोपहर"),
-    EVENING: ("evening", "saayantram", "sayantram", "sayankalam", "సాయంత్రం", "shaam", "sham", "शाम",
-              "night", "raatri", "రాత్రి"),
+    MORNING: ("morning", "udayam", "ఉదయం", "ఉదయా", "poddunna", "podduna", "పొద్దున", "పొద్దుట", "subah", "subha",
+              "सुबह"),
+    AFTERNOON: ("afternoon", "madhyahnam", "madhyanam", "మధ్యాహ్నం", "మధ్యాహ్న", "మధ్యాన్నం", "dopahar",
+                "dopehar", "दोपहर"),
+    EVENING: ("evening", "saayantram", "sayantram", "sayankalam", "saayankalam", "సాయంత్రం", "సాయంత్రము",
+              "సాయంకాలం", "సాయంకాల", "సాయంత్ర", "shaam", "sham", "शाम", "night", "raatri", "రాత్రి", "=रात", "रात्रि"),
 }
 
 
@@ -184,16 +188,53 @@ _CLOCK = re.compile(
 )
 
 
+# "5 o'clock" / "5 గంటలకి" / "5 बजे": a number said with one of these IS a time, with or
+# without a period word. Specific suffixes only: "2 గంటలు అయింది" (waited 2 hours) is not.
+_CLOCK_MARKERS = ("o'clock", "o’clock", "o clock", "oclock", "గంటలకి", "గంటలకు", "గంటకి", "గంటకు",
+                  "గంటల సమయ", "gantalaki", "gantalaku", "gantaki", "gantaku", "baje", "बजे", "बजकर",
+                  # English said by a Telugu/Hindi caller, written in their script by STT
+                  "ఓ క్లాక్", "ఓక్లాక్", "ఓ'క్లాక్", "ओ क्लॉक", "ओक्लॉक")
+_MARKER_AFTER = re.compile(r"\s*(?:" + "|".join(map(re.escape, _CLOCK_MARKERS)) + ")")
+# "5 పీఎం" / "5 पीएम" -> "5 pm".
+_INDIC_AMPM = re.compile(r"(\d)\s*(?:(పీ|పి|पी)|(ఏ|ఎ|ए))\.?\s*(?:ఎం|एम)(?!\w)")
+# Hours said as words (Telugu STT often writes "ఐదు గంటలకి", not "5 గంటలకి"), including
+# English numbers in Telugu/Hindi letters ("సిక్స్ ఓ క్లాక్", live call 2026-10).
+_HOUR_WORDS = {
+    1: ("one", "ఒకటి", "ఒంటి", "एक", "వన్"), 2: ("two", "రెండు", "दो", "టూ"), 3: ("three", "మూడు", "तीन", "త్రీ"),
+    4: ("four", "నాలుగు", "चार", "ఫోర్"), 5: ("five", "ఐదు", "అయిదు", "पाँच", "पांच", "ఫైవ్", "फाइव"),
+    6: ("six", "ఆరు", "छह", "छः", "సిక్స్", "सिक्स"), 7: ("seven", "ఏడు", "सात", "సెవెన్", "सेवन"),
+    8: ("eight", "ఎనిమిది", "आठ", "ఎయిట్", "एट"), 9: ("nine", "తొమ్మిది", "नौ", "నైన్", "नाइन"),
+    10: ("ten", "పది", "दस", "టెన్", "टेन"), 11: ("eleven", "పదకొండు", "ग्यारह", "ఎలెవెన్", "इलेवन"),
+    12: ("twelve", "పన్నెండు", "बारह", "ట్వెల్వ్", "ट्वेल्व"),
+}
+_WORD_HOUR = {w: h for h, ws in _HOUR_WORDS.items() for w in ws}
+_WORDS_ALT = "|".join(re.escape(w) for w in sorted(_WORD_HOUR, key=len, reverse=True))
+# "ఐదున్నర గంటలకి" = 5:30, "साढ़े पाँच बजे" = 5:30, "six pm" = 18:00.
+_WORD_CLOCK = re.compile(r"(?:(साढ़े|sadhe|saadhe|saade)\s+)?(?<!\S)(" + _WORDS_ALT + r")(న్నర|nnara)?(?="
+                         + _MARKER_AFTER.pattern + r"|\s*[ap]\.?m\b)")
+# Colloquial Telugu "ఐదింటికి" / "నాలుగింటికి" ("at five"): the word's stem + ింటికి.
+_INTIKI = {ws[:-1] + "ింటికి": h for h, group in _HOUR_WORDS.items() for ws in group
+           if ws[-1:] in ("ు", "ి") and not ws.isascii()}
+_INTIKI_RE = re.compile(r"(?<!\S)(" + "|".join(sorted(_INTIKI, key=len, reverse=True)) + ")")
+
+
+def _spoken_hours_to_digits(t: str) -> str:
+    t = _INDIC_AMPM.sub(lambda m: f"{m.group(1)} {'pm' if m.group(2) else 'am'}", t)
+    t = _INTIKI_RE.sub(lambda m: f"{_INTIKI[m.group(1)]} గంటలకి", t)
+    return _WORD_CLOCK.sub(lambda m: f"{_WORD_HOUR[m.group(2)]}"
+                                     + (":30" if m.group(1) or m.group(3) else ""), t)
+
+
 def parse_clock_time(text: str) -> Optional[str]:
-    """'10:30', '10.30', '4 pm', 'saayantram 5' -> 'HH:MM' (24h), else None.
-    A bare number with no minutes, am/pm or period word is NOT a time
-    (it is usually an option number: "second one", "2")."""
-    t = norm(text)
+    """'10:30', '10.30', '4 pm', 'saayantram 5', "5 o'clock", 'ఐదు గంటలకి' -> 'HH:MM' (24h),
+    else None. A bare number with no minutes, am/pm, period word or o'clock marker is NOT a
+    time (it is usually an option number: "second one", "2")."""
+    t = _spoken_hours_to_digits(norm(text))
     period = parse_time_period(t)
     for m in _CLOCK.finditer(t):
         hour, minute = int(m.group(1)), int(m.group(2) or 0)
         ampm = (m.group(3) or "").replace(".", "")
-        if not (m.group(2) or ampm or period):
+        if not (m.group(2) or ampm or period or _MARKER_AFTER.match(t, m.end())):
             continue
         if hour > 23 or minute > 59:
             continue

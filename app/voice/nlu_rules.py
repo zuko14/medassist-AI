@@ -15,7 +15,7 @@ from typing import Optional
 from .dates import first_index, has_any, norm, parse_clock_time, parse_date, parse_time_period
 from .lexicon import find_specialties, match_doctors, resolve_department, tenant_department_for
 
-NLU_RULES_VERSION = "nlu-rules-2026.10.10"
+NLU_RULES_VERSION = "nlu-rules-2026.10.12"
 
 SUPPORTED_LANGS = ("te-IN", "hi-IN", "en-IN")
 DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE")
@@ -90,6 +90,7 @@ W = {
                "sare", "=హా", "=हाँ", "=हां", "=जी", "theek hai", "ठीक", "confirm", "cheyyandi", "cheyandi",
                "చేయండి", "kar do", "kardo", "karo", "pakka", "correct", "right",
                "ఓకే", "ఓకై", "అలాగే", "alage", "=ఔను", "కరెక్ట్", "తప్పకుండా", "చెయ్యండి", "బుక్ చేయండి",
+               "చేసేయండి", "చేసెయ్యండి", "కానివ్వండి",
                "ओके", "ज़रूर", "जरूर", "बिल्कुल", "alright", "go ahead", "please do", "of course"),
     "DENY": ("no", "nope", "vaddu", "వద్దు", "kaadu", "కాదు", "ledu", "లేదు", "nahi", "nahin", "नहीं",
              "mat", "don't", "dont", "వద్దండి", "అక్కర్లేదు", "=నో", "=मत", "नको", "not needed"),
@@ -117,7 +118,12 @@ W = {
 SHORT_AFFIRM = frozenset({"ఆ", "ఆఁ", "ఆ ఆ", "హా", "హాఁ", "హాం", "హా అండి", "ఆ అండి", "aa", "haa", "ha",
                           "ఓకే అండి", "ఓకే సార్", "సరే అండి", "సరే సార్", "सही", "हाँ जी", "जी हाँ",
                           "ఆ చెప్పండి", "హా చెప్పండి", "ఆ ఓకే", "హా ఓకే", "ఆ సరే", "హా సరే", "ఆ చేయండి",
-                          "హా చేయండి", "aa cheppandi", "haa cheppandi", "हाँ बताइए", "हाँ बोलिए"})
+                          "హా చేయండి", "aa cheppandi", "haa cheppandi", "हाँ बताइए", "हाँ बोलिए",
+                          # "do it" said alone at a read-back (చేయి alone is also "hand": whole reply only)
+                          "చెయ్యూ", "చెయ్యి", "చెయ్యు", "చేయి", "చేయు", "చెయ్", "చేసేయ్", "చేసెయ్", "చేసెయ్యి",
+                          "బుక్ చెయ్యి", "బుక్ చేయి", "బుక్ చేయు", "బుక్ చెయ్యండి", "హా చెయ్యి", "ఆ చెయ్యి", "ఉం చెయ్యూ", "ఉం చెయ్యి", "ఊ చెయ్యి", "ఊ చెయ్యూ", "హా చెయ్యూ", "ఆ చెయ్యూ",
+                          "chey", "cheyyi", "cheyi", "book cheyyi", "book cheyi", "कर दो", "कर दीजिए", "हाँ कर दो",
+                          "बुक कर दो", "बुक कर दीजिए", "हाँ बुक कर दो"})
 
 FIRST = ("first", "1st", "modati", "modatidi", "మొదటి", "మొదటిది", "pehla", "pehle", "पहला", "पहले")
 SECOND = ("second", "2nd", "rendo", "rendava", "రెండో", "రెండవ", "doosra", "dusra", "दूसरा", "दूसरे")
@@ -175,6 +181,30 @@ def gurmukhi_to_devanagari(text: str) -> str:
             out.append(chr(o - 0x100))
         else:
             out.append(c)
+    return "".join(out)
+
+
+# Malayalam chillus (final consonants) have no Telugu letter: consonant + virama.
+_ML_CHILLU = {0x0D7A: "ణ్", 0x0D7B: "న్", 0x0D7C: "ర్", 0x0D7D: "ల్", 0x0D7E: "ళ్", 0x0D7F: "క్"}
+
+
+def to_telugu_script(text: str) -> str:
+    """A SHORT reply STT wrote in Malayalam or Kannada letters is a Telugu caller:
+    CALL-20261011-3F59FF heard "ചെയ്യൂ" (= చెయ్యూ, "do it") at the booking read-back and
+    answered "which language do you want?". The blocks are parallel to Telugu (Kannada at
+    +0x80, Malayalam at +0x100). Longer sentences are left alone: those are a real
+    Kannada/Malayalam speaker, who should hear that we speak Telugu, Hindi and English."""
+    if len((text or "").split()) > 3 or not any(0x0C80 <= ord(c) <= 0x0D7F for c in text):
+        return text
+    out = []
+    for c in text:
+        o = ord(c)
+        if 0x0C80 <= o <= 0x0CEF:
+            out.append(chr(o - 0x80))
+        elif 0x0D00 <= o <= 0x0D6F:
+            out.append(chr(o - 0x100))
+        else:
+            out.append(_ML_CHILLU.get(o, c))
     return "".join(out)
 
 

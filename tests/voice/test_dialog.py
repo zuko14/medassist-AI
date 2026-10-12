@@ -42,8 +42,10 @@ class FakeTools:
         self.calls.append(("find_slots", date_, period, clock))
         if self.slots is None:
             return None
+        # As KriyaTools.find_slots: a clock time means exactly that time (the period is ignored).
         return [o for o in self.slots if o["date"] == date_
-                and (period is None or o["period"] == period) and o["doctor_id"] in {d["id"] for d in doctors}]
+                and (o["time"] == clock if clock else (period is None or o["period"] == period))
+                and o["doctor_id"] in {d["id"] for d in doctors}]
 
     async def next_available(self, doctors, after, period):
         self.calls.append(("next_available", after, period))
@@ -471,3 +473,56 @@ def test_every_template_renders_in_every_language():
         for lang in ("te-IN", "hi-IN", "en-IN", "ta-IN"):
             out = R.realize(key, lang, TODAY, labels, **sample)
             assert out and "{" not in out, (key, lang, out)
+
+
+# ---- CALL-20261011-3F59FF: the whole request in one sentence must be acted on ----
+
+def test_one_sentence_request_with_oclock_time_is_answered_not_re_asked():
+    c = Conv(FakeTools(slots=SLOTS), lang="en-IN")
+    r = c.say("I want a cardiology appointment tomorrow 5 o'clock, book it for me, is it available?")
+    assert "Morning or evening" not in r
+    assert r.startswith("Yes, that time is free.") and "5 PM" in r and "Srinivas Rao" in r
+    r = c.say("yes")
+    assert "booked" in r and c.tools.calls[-1] == ("book", "d1", "2026-10-07", "17:00", "Ravi Kumar", "SELF")
+
+
+def test_telugu_saayankalam_gantalaki_is_evening_five_pm():
+    c = Conv(FakeTools(slots=SLOTS))
+    r = c.say("బుక్ చేయు కార్డియాలజీ రేపు సాయంకాలం 5 గంటలకి.")
+    assert "ఉదయం కావాలా" not in r
+    assert r.startswith("అవునండి") and "సాయంత్రం 5" in r
+
+
+def test_asked_time_taken_offers_nearest_same_day_not_no_slots():
+    c = Conv(FakeTools(slots=SLOTS), lang="en-IN")
+    r = c.say("cardiology appointment tomorrow at 6 pm")
+    assert "6 PM is already booked" in r and "no slots" not in r.lower()
+    assert "11 AM" in r and "5 PM" in r                      # the two closest free times, in time order
+    assert not any(x[0] == "next_available" for x in c.tools.calls)
+    r = c.say("5 pm one")
+    assert "Shall I book it?" in r and "5 PM" in r
+
+
+def test_malayalam_script_yes_from_stt_books_instead_of_asking_language():
+    from app.voice.nlu_rules import to_telugu_script
+    c = Conv(FakeTools(slots=SLOTS))
+    c.say("కార్డియాలజీ రేపు సాయంత్రం 5కి")
+    assert c.state["expect"] == "confirm"
+    r = c.say(to_telugu_script("ചെയ്യൂ."))
+    assert "బుక్ అయింది" in r and c.tools.calls[-1][0] == "book"
+
+
+def test_malayalam_script_um_do_it_is_also_yes():
+    from app.voice.nlu_rules import to_telugu_script
+    c = Conv(FakeTools(slots=SLOTS))
+    c.say("కార్డియాలజీ రేపు సాయంత్రం 5కి")
+    assert "బుక్ అయింది" in c.say(to_telugu_script("ഉം ചെയ്യൂ."))
+
+
+def test_script_mapping_only_touches_short_misheard_replies():
+    from app.voice.nlu_rules import to_telugu_script
+    assert to_telugu_script("ചെയ്യൂ.") == "చెయ్యూ."
+    assert to_telugu_script("ಹೌದು") == "హౌదు"                  # Kannada letters -> Telugu letters
+    long_kn = "ನನಗೆ ನಾಳೆ ಡಾಕ್ಟರ್ ಅಪಾಯಿಂಟ್ಮೆಂಟ್ ಬೇಕು"
+    assert to_telugu_script(long_kn) == long_kn               # a real Kannada speaker: left alone
+    assert to_telugu_script("నమస్కారం hello") == "నమస్కారం hello"
