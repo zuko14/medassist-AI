@@ -1,0 +1,14 @@
+%% PROPOSED failure and recovery paths
+flowchart TD
+  E["failure"] --> T{"type"}
+  T -- "OpenRouter down, 429 or budget" --> D1["deterministic suggestions;<br/>typed rules keep working"]
+  T -- "Sarvam down" --> D2["mic disabled message;<br/>typing works"]
+  T -- "session expired" --> D3["existing login modal;<br/>runs restored via GET runs?active=1"]
+  T -- "timeout after write" --> D4["UNKNOWN_OUTCOME then re-verify;<br/>never auto-retry"]
+  T -- "worker restart mid-run" --> D5["sweep: EXECUTING over 2 min<br/>to UNKNOWN_OUTCOME then verify"]
+  T -- "playbook step fails" --> D6["PARTIALLY_COMPLETED;<br/>done steps stay done;<br/>reversal is a new confirmed action"]
+  T -- "plan changed before confirm" --> D7["re-preview, nothing executed"]
+  D4 --> H{"decided within 3 tries?"}
+  D5 --> H
+  H -- no --> NH["NEEDS_HUMAN with page links"]
+  H -- yes --> OK["COMPLETED_VERIFIED or FAILED"]

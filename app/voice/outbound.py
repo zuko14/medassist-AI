@@ -339,7 +339,12 @@ async def autoqueue_leads() -> int:
             if e.get("phone") and e["phone"] not in seen:
                 seen[e["phone"]] = e.get("department") or (e.get("intent") or "").replace("_", " ")
         cap = int(store.voice_config(clinic)["outbound"].get("daily_cap") or 0)
-        for phone, interest in list(seen.items())[:cap]:
+        # The cap counts calls actually queued. Slicing the candidate list first
+        # let leads who had booked or were called this week use up the cap.
+        queued_here = 0
+        for phone, interest in seen.items():
+            if queued_here >= cap:
+                break
             booked = await sb(supabase.table("appointments").select("id").eq("clinic_id", cid)
                               .eq("patient_phone", phone).gte("created_at", since).limit(1))
             called = await sb(supabase.table("voice_outbound_jobs").select("id").eq("clinic_id", cid)
@@ -349,6 +354,7 @@ async def autoqueue_leads() -> int:
             try:
                 await enqueue(clinic, phone, "lead_followup", {"interest": interest}, "auto_leads")
                 queued += 1
+                queued_here += 1
             except OutboundRefused:
                 continue
     return queued

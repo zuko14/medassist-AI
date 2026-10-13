@@ -1,0 +1,19 @@
+%% PROPOSED authorization and confirmation
+flowchart TD
+  A["resolved action and params"] --> F{"clinic feature kriya_ketu<br/>and action feature gate"}
+  F -- off --> X1["REJECTED not_available"]
+  F -- on --> P{"permission held?<br/>role allowed? branch ok?"}
+  P -- no --> X2["REJECTED forbidden"]
+  P -- yes --> RK{"risk class"}
+  RK -- R0 --> EXE["execute"]
+  RK -- R1 or R2 --> PV["preview, plan_hash, 5 min expiry"]
+  RK -- R3 --> PV3["preview and typed count<br/>clinic_admin or super_admin only"]
+  PV --> C{"confirm"}
+  PV3 --> C
+  C -- expired --> EXP["EXPIRED"]
+  C -- hash changed --> PV
+  C -- cancel --> CAN["CANCELLED"]
+  C -- ok, CAS on state --> EXE
+  EXE --> AUTH2{"endpoint re-checks auth<br/>with caller's own session"}
+  AUTH2 -- 401 or 403 --> FAIL["FAILED forbidden"]
+  AUTH2 -- ok --> WR["write"]

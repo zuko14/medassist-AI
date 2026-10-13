@@ -28,6 +28,12 @@ _FORCED_TEST_CREDENTIALS = {
     "RAZORPAY_WEBHOOK_SECRET": "",
     "OWNER_USERNAME": "test_owner",
     "OWNER_PASSWORD": "test_owner_password_12345",
+    # Settings.app_env defaults to "production" (the safe default for a server
+    # started without it). The session fixture below set APP_ENV only with
+    # setdefault, after app.config was imported, so the whole suite ran as
+    # production and tests of non-production behaviour (CallMedex signature
+    # checks, WhatsApp simulation) failed. Tests that need production set it.
+    "APP_ENV": "testing",
 }
 if os.environ.get("KRIYA_TEST_LIVE") != "1":
     os.environ.update(_FORCED_TEST_CREDENTIALS)

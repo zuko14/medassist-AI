@@ -1,0 +1,23 @@
+%% PROPOSED PB-03: WhatsApp leads to voice receptionist calls (existing outbound engine does the calling)
+sequenceDiagram
+  autonumber
+  actor F as Front desk
+  participant K as Kriya Ketu
+  participant L as GET /admin/leads
+  participant O as POST /admin/voice/outbound/bulk
+  participant J as voice_outbound_jobs
+  participant D as dispatch_due (existing scheduler)
+  F->>K: call today's hot dermatology leads
+  K->>L: segment=hot, interest=dermatology, days=1
+  L-->>K: 15 contacts (booked and dnc excluded)
+  K->>O: dry_run=true (KK-P4-06a)
+  O-->>K: 12 would queue, 3 skipped with reasons
+  K-->>F: plan card with window, cap and ETA
+  F->>K: type 12 and Confirm
+  K->>O: contacts, consent_attested=false
+  O->>J: insert queued jobs (opt-out, 7-day and unique guards)
+  K->>J: read back via GET /admin/voice/outbound
+  K-->>F: 12 queued and verified, 3 skipped
+  D->>J: paced dialling inside the outbound window
+  F->>K: how did the calls go?
+  K-->>F: funnel queued, dialled, connected, booked

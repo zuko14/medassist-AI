@@ -1,0 +1,22 @@
+%% CURRENT STATE (audited at d002b3b). Nothing here is proposed.
+flowchart LR
+  subgraph Browser
+    AP["admin/index.html<br/>clinic panel"]
+    PP["admin/platform.html<br/>owner console"]
+  end
+  Patient(("Patient WhatsApp")) --> WH["POST /webhook"]
+  Caller(("Patient call")) --> VG["app/voice/gateway.py"]
+  AP -->|session cookie| ADM["/admin/* routers<br/>admin.py, opd.py, voice_admin.py"]
+  PP -->|Basic auth| PLT["/platform/*"]
+  WH --> IQ[("inbound_messages")] --> CONV["conversation.py FSM"]
+  CONV --> AIE["ai_engine / ai_gateway"] --> OR[("OpenRouter")]
+  VG --> VD["voice dialog + nlu_rules"] --> VT["voice tools.py"]
+  VD -. rules miss .-> OR
+  VG --> SAR[("Sarvam streaming STT/TTS")]
+  ADM --> AUTH["verify_credentials<br/>require_permission<br/>enforce_clinic_access"]
+  AUTH --> DOM["domain services<br/>book_appointment, payment, lab_reports, opd"]
+  CONV --> DOM
+  VT --> DOM
+  DOM --> DB[("Supabase via sb()")]
+  SCH["APScheduler<br/>check_doctor_leaves 08:00"] --> DOM
+  ADM --> AUD[("admin_audit_logs")]

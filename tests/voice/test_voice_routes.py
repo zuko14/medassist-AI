@@ -107,3 +107,18 @@ def test_owner_cannot_map_a_number_to_another_clinics_branch():
         assert r.status_code == 422
     finally:
         p.stop()
+
+
+@pytest.mark.parametrize("who", [STAFF, VIEWER])
+def test_settings_permission_is_checked_before_body_validation(who):
+    """Kriya Ketu bug register D-12: an account without VOICE_MANAGE got 422 on an
+    invalid window (validation ran first) instead of 403."""
+    c, p = client(who)
+    body = {"primary_language": "te-IN", "assistant_name": "Kriya", "pace": 1.0,
+            "reception_hours": {"start": "09:00", "end": "20:00", "days": "Mon,Tue"},
+            "outbound": {"auto_leads": True, "window_start": "07:00", "window_end": "19:00", "max_attempts": 2,
+                         "daily_cap": 10}}
+    try:
+        assert c.put(f"/admin/voice/settings?clinic_id={CID}", json=body).status_code == 403
+    finally:
+        p.stop()

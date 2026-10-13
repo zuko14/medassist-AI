@@ -1493,6 +1493,20 @@ async def update_staff(
     # unscoped: update staff member within clinic after clinic verification
     result = await sb(supabase.table("clinic_admins").update(update_data).eq("id", staff_id))
 
+    # Sessions carry a sign-in snapshot of role, permissions, branch and doctor
+    # link (resolve_admin_session), so a change here used to reach the user only
+    # after they signed in again, up to admin_session_hours later. End their
+    # sessions so the new authority applies from their next request.
+    def _norm(key, value):
+        return sorted(value or []) if key == "permissions" else (str(value) if value is not None else None)
+
+    authority_changed = any(
+        key in update_data and _norm(key, update_data[key]) != _norm(key, target.get(key))
+        for key in ("staff_role", "permissions", "branch_id", "doctor_id")
+    ) or update_data.get("is_active") is False
+    if authority_changed and target.get("username"):
+        await revoke_sessions_for_user(target["username"])
+
     client_ip = request.client.host if (request and request.client) else "unknown"
     await log_admin_action(
         user=user,
@@ -1507,6 +1521,7 @@ async def update_staff(
                 "is_active": target.get("is_active"),
             },
             "after": update_data,
+            "sessions_revoked": bool(authority_changed and target.get("username")),
         },
         ip_address=client_ip,
     )
@@ -1629,7 +1644,7 @@ async def delete_staff(
     except Exception as e:
         logger.error(f"Failed to delete staff {staff_id}: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Could not delete staff account: {e}"
+            status_code=500, detail="Could not delete the staff account. Please try again."
         )
 
     if not deleted.data:
@@ -1653,7 +1668,10 @@ async def delete_staff(
 class LeaveCreate(BaseModel):
     doctor_name: str
     leave_date: date
-    leave_type: str  # full, half_morning, half_evening
+    # Only these three are understood by slot blocking (database.get_available_slots)
+    # and by the cancellation sweep; any other value used to be stored and then
+    # silently block nothing and cancel nothing.
+    leave_type: Literal["full", "half_morning", "half_evening"]
     end_date: Optional[date] = None
     reason: Optional[str] = None
 
@@ -4413,7 +4431,7 @@ async def apply_catalogue_import_preview(
         )
         if isinstance(e, HTTPException):
             raise
-        raise HTTPException(status_code=500, detail=f"Apply failed: {e}")
+        raise HTTPException(status_code=500, detail="Applying the import failed. The preview is back to pending, so you can try again.")
 
 
 class LabAutoClassifyRequest(BaseModel):
@@ -5201,8 +5219,62 @@ async def create_leave(
             leaves_to_insert.append(leave_data)
             current_date += timedelta(days=1)
 
-        # unscoped: insert doctor leaves for validated doctor
-        result = await sb(supabase.table("doctor_leaves").insert(leaves_to_insert))
+        # One leave row per doctor per date. The table may still carry the
+        # pre-tenancy UNIQUE(doctor_name, leave_date) from migration 001, and slot
+        # logic reads a day's rows together (database.leave_blocked_sessions).
+        # A date the doctor is already off is skipped; a half day that this leave
+        # extends (the other half, or a full day) is widened to a full day in place.
+        # A double click or an overlapping range used to store duplicates, or fail.
+        from app.database import leave_blocked_sessions
+
+        existing = await sb(
+            # unscoped: tenant-scoped read with verified clinic authorization
+            supabase.table("doctor_leaves")
+            .select("leave_date, leave_type")
+            .eq("clinic_id", effective_clinic_id)
+            .eq("doctor_name", leave.doctor_name)
+            .gte("leave_date", str(start_date))
+            .lte("leave_date", str(end_date))
+        )
+        by_date: dict = {}
+        for row in existing.data or []:
+            by_date.setdefault(str(row.get("leave_date"))[:10], []).append(row)
+        new_sessions = leave_blocked_sessions([{"leave_type": leave.leave_type}])
+        already = [d for d, rows in by_date.items() if new_sessions <= leave_blocked_sessions(rows)]
+        widened = [d for d in by_date if d not in already]
+        leaves_to_insert = [r for r in leaves_to_insert if r["leave_date"] not in by_date]
+
+        for d in widened:
+            # unscoped: tenant-scoped update with verified clinic authorization
+            await sb(
+                supabase.table("doctor_leaves").update({"leave_type": "full"})
+                .eq("clinic_id", effective_clinic_id)
+                .eq("doctor_name", leave.doctor_name)
+                .eq("leave_date", d)
+            )
+        if not leaves_to_insert and not widened:
+            return {"status": "success", "count": 0, "already_on_leave": sorted(already)}
+
+        result = None
+        if leaves_to_insert:
+            try:
+                # unscoped: insert doctor leaves for validated doctor
+                result = await sb(supabase.table("doctor_leaves").insert(leaves_to_insert))
+            except Exception as e:
+                if not _is_duplicate_error(e):
+                    raise
+                # Only the pre-tenancy UNIQUE(doctor_name, leave_date) can clash
+                # here (this clinic's own rows were handled above): another clinic
+                # has a doctor with exactly the same name on leave that day.
+                logger.error(f"LEAVE_NAME_CLASH clinic={effective_clinic_id} doctor={leave.doctor_name!r}: {e}")
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Could not save leave for {leave.doctor_name}: another clinic has a doctor with "
+                        "exactly the same name on leave that day, and the leave table does not yet allow "
+                        "that. Contact support."
+                    ),
+                )
 
         client_ip = request.client.host if (request and request.client) else "unknown"
         await log_admin_action(
@@ -5210,13 +5282,31 @@ async def create_leave(
             action="create_leave",
             resource_type="doctor_leave",
             resource_id=leave.doctor_name,
-            details={"start_date": str(start_date), "end_date": str(end_date), "count": len(leaves_to_insert)},
+            details={"start_date": str(start_date), "end_date": str(end_date),
+                     "count": len(leaves_to_insert), "skipped_existing": sorted(already),
+                     "widened_to_full_day": sorted(widened)},
             ip_address=client_ip,
         )
 
-        if result.data:
+        # The daily 08:00 sweep is too late for a leave starting today, or
+        # tomorrow once 08:00 has passed: cancel and notify those bookings now.
+        from app.utils.helpers import today_ist
+
+        today = today_ist()
+        applied = leaves_to_insert + [
+            {"clinic_id": effective_clinic_id, "doctor_name": leave.doctor_name, "leave_date": d, "leave_type": "full"}
+            for d in widened
+        ]
+        near = [r for r in applied if today <= date.fromisoformat(r["leave_date"]) <= today + timedelta(days=1)]
+        if near:
+            from app.services.scheduler import scheduler_service
+
+            spawn_background_task(scheduler_service.process_new_leaves(near), name="doctor_leave_immediate")
+
+        if result is not None and result.data:
             return result.data[0]
-        return {"status": "success", "count": len(leaves_to_insert)}
+        return {"status": "success", "count": len(leaves_to_insert),
+                "already_on_leave": sorted(already), "widened_to_full_day": sorted(widened)}
     except HTTPException:
         raise
     except Exception as e:
@@ -5392,6 +5482,7 @@ async def cancel_appointment_by_admin(
     appointment_id: str,
     clinic_id: str = "default",
     user: AdminUser = Depends(verify_credentials),
+    request: Request = None,
 ):
     """Cancel a confirmed appointment.
 
@@ -5411,6 +5502,13 @@ async def cancel_appointment_by_admin(
             admin_notes=f"Cancelled by admin: {user}",
         )
         if result["success"]:
+            await log_admin_action(
+                user=user,
+                action="cancel_appointment",
+                resource_type="appointment",
+                resource_id=appointment_id,
+                ip_address=request.client.host if request and request.client else "unknown",
+            )
             return {"success": True}
         return {"success": False, "message": result.get("reason", "Failed")}
     except HTTPException:
@@ -5452,7 +5550,7 @@ async def check_in_appointment_endpoint(
     except Exception as e:
         logger.error(f"Error during check-in for appointment {appointment_id}: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Check-in failed due to server error: {e}"
+            status_code=500, detail="Check-in failed due to a server error. Please try again."
         )
     if not result:
         raise HTTPException(
@@ -5674,11 +5772,19 @@ async def resend_lab_report(
     report_id: str,
     clinic_id: str = "default",
     user: AdminUser = Depends(verify_credentials),
+    request: Request = None,
 ):
     """Resend a lab report to the patient with strict tenant scoping."""
     try:
         effective_clinic_id = enforce_clinic_access(user, clinic_id)
         await LabReportService().resend_report(report_id, clinic_id=effective_clinic_id)
+        await log_admin_action(
+            user=user,
+            action="resend_lab_report",
+            resource_type="lab_report",
+            resource_id=report_id,
+            ip_address=request.client.host if request and request.client else "unknown",
+        )
         return {"success": True, "message": "Report resent successfully"}
     except ValueError as e:
         logger.warning(f"Lab report resend validation: {e}")
@@ -5690,7 +5796,7 @@ async def resend_lab_report(
         raise
     except Exception as e:
         logger.error(f"Lab report resend error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not resend the report. Please try again.")
 
 
 @router.get("/patients")
@@ -5744,7 +5850,7 @@ async def add_prescription(
         return {"success": True, "prescription": result}
     except Exception as e:
         logger.error(f"Prescription add error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not add the prescription. Please try again.")
 
 
 @router.get("/prescriptions")
@@ -5780,7 +5886,7 @@ async def deactivate_prescription(
         return {"success": True}
     except Exception as e:
         logger.error(f"Prescription deactivate error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not deactivate the prescription. Please try again.")
 
 
 # ═══════ PAYMENTS & BOOKINGS ═══════
@@ -6634,9 +6740,10 @@ async def upsert_connector_credentials(
         try:
             cfg["password_encrypted"] = encrypt_password(body.password.strip(), key)
         except Exception as e:
+            logger.error(f"Connector password encryption failed ({type(e).__name__}): {e}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Password encryption failed ({type(e).__name__}): {e}. Check CONNECTOR_ENCRYPTION_KEY.",
+                detail="Could not encrypt the password. Check CONNECTOR_ENCRYPTION_KEY on the server.",
             )
         cfg.pop("password", None)
     if body.base_url is not None and body.base_url.strip():
@@ -6716,7 +6823,7 @@ async def upsert_connector_credentials(
         raise
     except Exception as e:
         logger.error(f"Connector credentials save failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Database error saving connector: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not save the connector. Please try again.")
 
     client_ip = request.client.host if request.client else "unknown"
     try:
@@ -7597,9 +7704,15 @@ async def resend_lab_report_from_queue(
         res = await lab_service.resend_report(
             report_id, new_phone=new_phone, clinic_id=effective_clinic_id
         )
+    except ValueError as e:
+        # resend_report raises ValueError only with messages written for staff
+        # ("re-upload the report", "another delivery in progress"); same mapping
+        # as POST /admin/lab-reports/{id}/resend.
+        logger.warning(f"Resend refused for report {report_id}: {e}")
+        raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
     except Exception as e:
         logger.error(f"Resend failed for report {report_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to resend report: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not resend the report. Please try again.")
 
     client_ip = request.client.host if request and request.client else "unknown"
     await log_admin_action(

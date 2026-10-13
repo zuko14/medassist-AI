@@ -1,0 +1,10 @@
+%% PROPOSED client widget lifecycle (no server authority)
+stateDiagram-v2
+  [*] --> ABSENT: assistant_enabled false
+  [*] --> CLOSED: assistant_enabled true
+  CLOSED --> OPENING: click or Ctrl+K
+  OPENING --> OPEN_IDLE: DOM built, sync
+  OPEN_IDLE --> OPEN_BUSY: send, confirm or transcribe
+  OPEN_BUSY --> OPEN_IDLE: response
+  OPEN_IDLE --> CLOSED: Esc or close
+  OPEN_BUSY --> CLOSED: close; server run continues, launcher shows busy ring

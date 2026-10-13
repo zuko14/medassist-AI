@@ -352,6 +352,9 @@ async def _treatment_doctors(clinic_id: str, treatment_id: str, branch_id: Optio
     """
     doctors = await get_doctors(clinic_id, branch_id=branch_id)
     mapped = await get_treatment_doctor_ids(clinic_id, treatment_id)
+    if mapped is None:
+        # The mapping could not be read: offer no doctor rather than every doctor.
+        return []
     if mapped:
         doctors = [d for d in doctors if str(d.get("id")) in mapped]
     doctors = [d for d in doctors if d.get("id") and d.get("is_active", True)]

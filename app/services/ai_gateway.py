@@ -26,7 +26,8 @@ logger = logging.getLogger("kriya.ai_gateway")
 
 #: Work a patient is waiting on in real time: never blocked by the admin
 #: spend cap. Voice usage (task_type "voice_*") has its own per-clinic budget
-#: (app/voice/usage.py) and is excluded from the admin sum below.
+#: (app/voice/store.budget_exceeded, checked at call start in app/voice/gateway.py)
+#: and is excluded from the admin sum below.
 PATIENT_FACING_TASKS = frozenset({"patient_chat", "voice_nlu"})
 
 

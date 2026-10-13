@@ -1,5 +1,6 @@
 """Scheduler service for reminders and follow-ups."""
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -29,6 +30,10 @@ CLINIC_TZ = ZoneInfo("Asia/Kolkata")
 
 def _today_local() -> date:
     return datetime.now(CLINIC_TZ).date()
+
+
+def _now_local() -> datetime:
+    return datetime.now(CLINIC_TZ)
 
 
 # How many days back the follow-up job re-scans. Without a window a single
@@ -1238,120 +1243,169 @@ class SchedulerService:
         ))
 
     async def check_doctor_leaves(self):
-        """Check for doctor leaves and notify affected patients."""
+        """Daily 08:00 IST sweep: cancel (and refund, and notify) bookings that
+        fall on a doctor's leave from today through the next 7 days.
+
+        The window used to start TOMORROW and was computed on the container's
+        clock (UTC on Render): a leave for today, or one entered after 08:00 for
+        tomorrow, was never processed. Today is included now, on the IST clock;
+        leaves entered for today/tomorrow are also processed immediately by
+        process_new_leaves() (called from create_leave).
+        """
         from app.services.distributed_lock import distributed_job_lock
         async with distributed_job_lock("doctor_leaves", lease_seconds=300) as acquired:
             if not acquired:
                 return
             try:
-                tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-                next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-
+                today = _today_local()
                 leaves = (
                     # unscoped: platform_sweep
                     await sb(supabase.table("doctor_leaves")
                     .select("*")
-                    .gte("leave_date", tomorrow)
-                    .lte("leave_date", next_week)
+                    .gte("leave_date", today.isoformat())
+                    .lte("leave_date", (today + timedelta(days=7)).isoformat())
                     .in_("leave_type", ["full", "half_morning", "half_evening"]))
                 )
-
-                for leave in leaves.data:
-                    affected = (
-                        await sb(supabase.table("appointments")
-                        .select("*")
-                        .eq("clinic_id", leave.get("clinic_id", "default"))
-                        .eq("doctor_name", leave["doctor_name"])
-                        .eq("appointment_date", leave["leave_date"])
-                        .eq("status", "confirmed")
-                        .eq("is_walk_in", False))
-                    )
-                    rows = affected.data or []
-
-                    # A half-day leave blocks one session. New bookings for it
-                    # were already refused by get_available_slots; bookings made
-                    # before the leave was entered used to be left in place and
-                    # the patient arrived to an absent doctor. Cancel exactly the
-                    # slots of the blocked session — using the same slot lists
-                    # the picker uses — and never guess when the doctor is unknown.
-                    leave_type = leave.get("leave_type") or "full"
-                    if leave_type != "full":
-                        from app.database import doctor_session_slots, get_doctor_by_name
-
-                        doc = await get_doctor_by_name(leave.get("clinic_id"), leave["doctor_name"])
-                        if not doc:
-                            logger.warning(
-                                f"Half-day leave for unknown doctor {leave['doctor_name']!r} "
-                                f"on {leave['leave_date']}: bookings left untouched"
-                            )
-                            continue
-                        session = "morning" if leave_type == "half_morning" else "evening"
-                        blocked = set(doctor_session_slots(doc, session))
-                        rows = [
-                            a for a in rows
-                            if str(a.get("appointment_time") or "")[:5] in blocked
-                        ]
-
-                    for appt in rows:
-                        try:
-                            clinic = await get_clinic_by_id(
-                                appt.get("clinic_id", "default")
-                            )
-                            # A paid booking used to be flipped to 'cancelled'
-                            # here with no refund: the clinic cancelled, the
-                            # patient kept nothing. Refund first (the clinic's
-                            # decision, so the patient cutoff does not apply);
-                            # a successful refund already moves the row off
-                            # 'confirmed', which also releases the slot.
-                            from app.services.payment import payment_service
-
-                            refund = None
-                            if appt.get("payment_id"):
-                                refund = await payment_service.initiate_refund(
-                                    appt["id"],
-                                    reason="doctor_leave",
-                                    clinic=clinic,
-                                    enforce_window=False,
-                                )
-                                if not refund.get("success"):
-                                    await payment_service._alert_admin(
-                                        clinic,
-                                        f"Doctor-leave cancellation of {appt.get('booking_ref')} "
-                                        f"could not be refunded automatically "
-                                        f"({refund.get('reason')}). Refund payment "
-                                        f"{appt['payment_id']} manually in the payment gateway dashboard.",
-                                    )
-                            if not (refund and refund.get("success")):
-                                # unscoped: unique_row_key
-                                await sb(supabase.table("appointments").update(
-                                    {"status": "cancelled"}
-                                ).eq("id", appt["id"]).eq("status", "confirmed"))
-
-                            components = TEMPLATES["appointment_cancelled_doctor_leave"][
-                                "components_builder"
-                            ](appt["doctor_name"], appt["appointment_date"])
-
-                            await whatsapp_service.send_template(
-                                clinic,
-                                appt["patient_phone"],
-                                "appointment_cancelled_doctor_leave",
-                                components=components,
-                                _source="scheduler",
-                            )
-                            if refund is not None:
-                                # Receipt, or "our team will refund you" — never silence.
-                                await payment_service.notify_cancellation_outcome(
-                                    appt, refund, clinic=clinic
-                                )
-
-                            logger.info(
-                                f"Cancelled appointment {appt['id']} due to doctor leave"
-                            )
-                        except Exception as e:
-                            logger.error(f"Error handling doctor leave: {e}")
-
+                await self._cancel_bookings_for_leaves(leaves.data or [])
             except Exception as e:
                 logger.error(f"Error in doctor leaves job: {e}")
+
+    async def process_new_leaves(self, leaves: list, attempts: int = 5, wait_seconds: float = 30.0) -> None:
+        """Cancel bookings for leaves just created for today or tomorrow, now,
+        instead of waiting for the next 08:00 sweep (which, for tomorrow after
+        08:00, would come too late).
+
+        Runs under the same lock as the daily sweep so a booking is never
+        cancelled, refunded or messaged twice: if the sweep is running, wait and
+        retry. The sweep's window includes today, so even if every attempt is
+        refused, the next sweep still processes these leaves.
+        """
+        from app.services.distributed_lock import distributed_job_lock
+        for _ in range(max(1, attempts)):
+            async with distributed_job_lock("doctor_leaves", lease_seconds=300) as acquired:
+                if acquired:
+                    try:
+                        await self._cancel_bookings_for_leaves(leaves)
+                    except Exception as e:
+                        logger.error(f"Error processing new doctor leave: {e}")
+                    return
+            await asyncio.sleep(wait_seconds)
+        logger.error(
+            f"DOCTOR_LEAVE_IMMEDIATE_DEFERRED: lock busy for {len(leaves)} leave row(s); "
+            f"the next daily sweep will process them"
+        )
+
+    async def _cancel_bookings_for_leaves(self, leaves: list) -> None:
+        """Cancel, refund and notify the confirmed bookings each leave blocks.
+        Caller holds the "doctor_leaves" lock."""
+        now = _now_local()
+        today_s, now_hm = now.date().isoformat(), now.strftime("%H:%M")
+        for leave in leaves:
+            affected = (
+                await sb(supabase.table("appointments")
+                .select("*")
+                .eq("clinic_id", leave.get("clinic_id", "default"))
+                .eq("doctor_name", leave["doctor_name"])
+                .eq("appointment_date", leave["leave_date"])
+                .eq("status", "confirmed")
+                .eq("is_walk_in", False))
+            )
+            rows = affected.data or []
+
+            # A same-day leave must not cancel visits whose time has already
+            # passed (seen or no-show): tell no one "your doctor is on leave"
+            # about a visit that is over.
+            if str(leave["leave_date"])[:10] == today_s:
+                rows = [
+                    a for a in rows
+                    if not a.get("appointment_time") or str(a["appointment_time"])[:5] > now_hm
+                ]
+
+            # A half-day leave blocks one session. New bookings for it
+            # were already refused by get_available_slots; bookings made
+            # before the leave was entered used to be left in place and
+            # the patient arrived to an absent doctor. Cancel exactly the
+            # slots of the blocked session — using the same slot lists
+            # the picker uses — and never guess when the doctor is unknown.
+            leave_type = leave.get("leave_type") or "full"
+            if leave_type != "full":
+                from app.database import doctor_session_slots, get_doctor_by_name
+
+                doc = await get_doctor_by_name(leave.get("clinic_id"), leave["doctor_name"])
+                if not doc:
+                    logger.warning(
+                        f"Half-day leave for unknown doctor {leave['doctor_name']!r} "
+                        f"on {leave['leave_date']}: bookings left untouched"
+                    )
+                    continue
+                session = "morning" if leave_type == "half_morning" else "evening"
+                blocked = set(doctor_session_slots(doc, session))
+                rows = [
+                    a for a in rows
+                    if str(a.get("appointment_time") or "")[:5] in blocked
+                ]
+
+            for appt in rows:
+                try:
+                    clinic = await get_clinic_by_id(
+                        appt.get("clinic_id", "default")
+                    )
+                    # A paid booking used to be flipped to 'cancelled'
+                    # here with no refund: the clinic cancelled, the
+                    # patient kept nothing. Refund first (the clinic's
+                    # decision, so the patient cutoff does not apply);
+                    # a successful refund already moves the row off
+                    # 'confirmed', which also releases the slot.
+                    from app.services.payment import payment_service
+
+                    refund = None
+                    if appt.get("payment_id"):
+                        refund = await payment_service.initiate_refund(
+                            appt["id"],
+                            reason="doctor_leave",
+                            clinic=clinic,
+                            enforce_window=False,
+                        )
+                        if not refund.get("success"):
+                            await payment_service._alert_admin(
+                                clinic,
+                                f"Doctor-leave cancellation of {appt.get('booking_ref')} "
+                                f"could not be refunded automatically "
+                                f"({refund.get('reason')}). Refund payment "
+                                f"{appt['payment_id']} manually in the payment gateway dashboard.",
+                            )
+                    if not (refund and refund.get("success")):
+                        # unscoped: unique_row_key
+                        res = await sb(supabase.table("appointments").update(
+                            {"status": "cancelled"}
+                        ).eq("id", appt["id"]).eq("status", "confirmed"))
+                        if not (res and res.data) and refund is None:
+                            # Someone else moved it off 'confirmed' first (a
+                            # patient cancel): it is not ours to announce.
+                            continue
+
+                    components = TEMPLATES["appointment_cancelled_doctor_leave"][
+                        "components_builder"
+                    ](appt["doctor_name"], appt["appointment_date"])
+
+                    await whatsapp_service.send_template(
+                        clinic,
+                        appt["patient_phone"],
+                        "appointment_cancelled_doctor_leave",
+                        components=components,
+                        _source="scheduler",
+                    )
+                    if refund is not None:
+                        # Receipt, or "our team will refund you" — never silence.
+                        await payment_service.notify_cancellation_outcome(
+                            appt, refund, clinic=clinic
+                        )
+
+                    logger.info(
+                        f"Cancelled appointment {appt['id']} due to doctor leave"
+                    )
+                except Exception as e:
+                    logger.error(f"Error handling doctor leave: {e}")
 
     async def drain_pending_retry_messages(self):
         """Replay patient messages that were deferred by a phone-lock timeout.

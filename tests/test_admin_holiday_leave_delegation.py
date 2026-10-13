@@ -85,7 +85,7 @@ async def test_create_leave_with_delegated_permission():
         data=[{"doctor_name": "Dr. Smith", "leave_date": "2026-09-15", "clinic_id": "clinic-1"}]
     )
 
-    leave = LeaveCreate(doctor_name="Dr. Smith", leave_date=date(2026, 9, 15), leave_type="full_day")
+    leave = LeaveCreate(doctor_name="Dr. Smith", leave_date=date(2026, 9, 15), leave_type="full")
     with patch("app.routers.admin.supabase", mock_sb), patch("app.routers.admin.log_admin_action"):
         res = await create_leave(
             leave=leave,
@@ -110,7 +110,7 @@ async def test_create_leave_branch_scoped_checks_doctor_branch():
         data=[{"branch_id": "branch-2"}]
     )
 
-    leave = LeaveCreate(doctor_name="Dr. Smith", leave_date=date(2026, 9, 15), leave_type="full_day")
+    leave = LeaveCreate(doctor_name="Dr. Smith", leave_date=date(2026, 9, 15), leave_type="full")
     with patch("app.routers.admin.supabase", mock_sb):
         with pytest.raises(HTTPException) as exc:
             await create_leave(

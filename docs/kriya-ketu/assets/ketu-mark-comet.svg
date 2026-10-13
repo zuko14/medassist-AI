@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Kriya Ketu">
+  <!-- Concept A "Dhumaketu" (recommended): the K's upper arm is a rising comet trail that
+       launches from the stem and ends in a four-point guiding star. Action -> guidance. -->
+  <defs>
+    <linearGradient id="kkStem" x1="20" y1="10" x2="20" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#43E2A6"/><stop offset="1" stop-color="#0C9668"/>
+    </linearGradient>
+    <linearGradient id="kkLeg" x1="25" y1="34" x2="45" y2="53" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2FA8D8"/><stop offset="1" stop-color="#3D8BFD"/>
+    </linearGradient>
+    <linearGradient id="kkTrail" x1="25" y1="31" x2="46" y2="15" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3D8BFD" stop-opacity=".45"/>
+      <stop offset=".55" stop-color="#2FA8D8" stop-opacity=".75"/>
+      <stop offset="1" stop-color="#9FF0D2"/>
+    </linearGradient>
+    <radialGradient id="kkGlow" cx="47" cy="14" r="13" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9FF0D2" stop-opacity=".55"/><stop offset="1" stop-color="#9FF0D2" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="kkStar" cx="47" cy="14" r="9" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset=".6" stop-color="#D9FFF0"/><stop offset="1" stop-color="#9FF0D2"/>
+    </radialGradient>
+  </defs>
+  <path d="M20 13v38" stroke="url(#kkStem)" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M26 34.5 43.5 52" stroke="url(#kkLeg)" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M21.7 29.7 42.05 13.15 A3.6 3.6 0 0 1 46.29 18.97 L24.3 33.3 Z" fill="url(#kkTrail)"/>
+  <circle cx="47" cy="14" r="13" fill="url(#kkGlow)"/>
+  <path d="M47 4.5Q48.7 12.3 56.5 14Q48.7 15.7 47 23.5Q45.3 15.7 37.5 14Q45.3 12.3 47 4.5Z" fill="url(#kkStar)"/>
+</svg>

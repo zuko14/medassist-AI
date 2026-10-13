@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Kriya Ketu">
+  <!-- Concept B "Dhvaja": ketu also means banner. The stem is a flagpole; a swallow-tailed
+       pennant forms the K's two arms; the guiding star is cut out of the pennant. -->
+  <defs>
+    <linearGradient id="kbPole" x1="18" y1="8" x2="18" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#43E2A6"/><stop offset="1" stop-color="#0C9668"/>
+    </linearGradient>
+    <linearGradient id="kbFlag" x1="22" y1="12" x2="52" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#10B981"/><stop offset=".5" stop-color="#2FA8D8"/><stop offset="1" stop-color="#3D8BFD"/>
+    </linearGradient>
+    <mask id="kbCut">
+      <rect width="64" height="64" fill="#fff"/>
+      <path d="M33 16.5Q34 21 38.5 22Q34 23 33 27.5Q32 23 27.5 22Q32 21 33 16.5Z" fill="#000"/>
+    </mask>
+  </defs>
+  <path d="M18 9v46" stroke="url(#kbPole)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M21 12h28.5a1.5 1.5 0 0 1 1.1 2.5L38.5 27.3l12.1 12.8a1.5 1.5 0 0 1-1.1 2.5H21z"
+        fill="url(#kbFlag)" mask="url(#kbCut)"/>
+  <path d="M21 12h28.5" stroke="#9FF0D2" stroke-opacity=".55" stroke-width="1"/>
+</svg>

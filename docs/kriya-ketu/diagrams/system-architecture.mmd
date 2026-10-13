@@ -1,0 +1,24 @@
+%% PROPOSED. Components marked (new) do not exist yet.
+flowchart TB
+  subgraph Panel["admin/index.html"]
+    L["Ketu launcher (new)"] --> W["Ketu panel (new)"]
+    W --> MIC["MediaRecorder (new)"]
+  end
+  W -->|POST /admin/assistant/requests| R["routers/assistant.py (new)"]
+  MIC -->|POST /admin/assistant/transcribe| R
+  R --> ST["store.py (new)<br/>assistant_runs"]
+  R --> RU["rules.py + resolve.py (new)<br/>L1 nav, L2 triggers, L3 forms"]
+  RU -. miss or conflict only .-> LLM["llm.py (new)"]
+  LLM --> GW["ai_gateway.call_ai_gateway (existing)"] --> OR[("OpenRouter")]
+  RU --> PO["policy.py (new)"]
+  PO --> EX["executor.py (new)"]
+  EX -->|"httpx ASGITransport, caller's own cookie"| ADM["existing /admin/* endpoints"]
+  ADM --> AUTH["existing auth + permission + tenant"]
+  AUTH --> DOM["existing domain services"] --> DB[("Supabase")]
+  EX -->|verify read-back| ADM
+  R --> STT["stt.py (new)"] --> SAR[("Sarvam REST STT")]
+  GW --> LED[("ai_usage_ledger")]
+  STT --> LED
+  REG["registry.py (new)"] --- RU
+  REG --- PO
+  REG --- EX

@@ -1,0 +1,16 @@
+%% PROPOSED boundaries: internal assistant vs patient-facing agents
+flowchart LR
+  subgraph Internal["Staff authority: authenticated session"]
+    K["Kriya Ketu<br/>app/assistant (new)"]
+  end
+  subgraph PatientFacing["Patient self-service authority: phone number"]
+    WA["WhatsApp FSM<br/>conversation.py"]
+    VR["Voice receptionist<br/>app/voice"]
+  end
+  K -->|in-process HTTP| ADM["/admin endpoints"]
+  WA --> DOM["domain services"]
+  VR --> DOM
+  ADM --> DOM
+  K -. read-only helper import .-> DT["app/voice/dates.py"]
+  K x--x WA
+  K x--x VR

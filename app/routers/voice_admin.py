@@ -252,10 +252,11 @@ async def put_settings(body: VoiceSettingsIn, request: Request, clinic_id: str =
                        user: AdminUser = Depends(verify_credentials)):
     """Hospital-editable voice settings. The monthly budget is NOT editable here:
     only the platform owner sets it (PUT /platform/voice/clinics/{id}/budget)."""
+    # Authorise first: a caller without VOICE_MANAGE gets 403, not a validation answer.
+    scope, _ = await _scope(user, clinic_id, "VOICE_MANAGE")
     if (body.outbound.window_start < "09:00" or body.outbound.window_end > "21:00"
             or body.outbound.window_start >= body.outbound.window_end):
         raise HTTPException(status_code=422, detail="Outbound calls are allowed only between 09:00 and 21:00.")
-    scope, _ = await _scope(user, clinic_id, "VOICE_MANAGE")
     # unscoped: unique_row_key (clinics.id IS the tenant, resolved by enforce_clinic_access)
     res = await sb(supabase.table("clinics").select("config").eq("id", scope).limit(1))
     config = dict((res.data or [{}])[0].get("config") or {})

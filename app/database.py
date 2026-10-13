@@ -770,8 +770,13 @@ async def get_treatment_by_id(
         return None
 
 
-async def get_treatment_doctor_ids(clinic_id: str, treatment_id) -> set:
-    """Doctor ids mapped to a treatment. Empty set means "any active doctor"."""
+async def get_treatment_doctor_ids(clinic_id: str, treatment_id) -> Optional[set]:
+    """Doctor ids mapped to a treatment. Empty set means "any active doctor".
+
+    None means the read FAILED. It used to return an empty set here too, which
+    callers read as "any doctor" and so offered doctors who don't perform the
+    treatment; callers now treat None as "none available right now".
+    """
     if not is_uuid(treatment_id):
         return set()
     try:
@@ -782,7 +787,7 @@ async def get_treatment_doctor_ids(clinic_id: str, treatment_id) -> set:
         return {str(r["doctor_id"]) for r in (result.data or []) if r.get("doctor_id")}
     except Exception as e:
         logger.error(f"Error getting doctors for treatment {treatment_id}: {e}")
-        return set()
+        return None
 
 
 
@@ -947,6 +952,25 @@ def doctor_session_slots(doc: dict, session: str) -> list:
     return list(_DEFAULT_SESSION_SLOTS[session])
 
 
+_LEAVE_SESSIONS = {"half_morning": {"morning"}, "half_evening": {"evening"}}
+
+
+def leave_blocked_sessions(leave_rows: list) -> set:
+    """Sessions ('morning', 'evening') a doctor is away for, from ALL their
+    doctor_leaves rows on one date.
+
+    Callers used to read only the first row of an unordered query, so a day with
+    a half-day row and a full-day row could come out as a half day. A full day,
+    or both halves, blocks both sessions. A type that is not one of the three
+    known values (stored before LeaveCreate validated it) counts as a full day:
+    showing the doctor as away is the safe reading.
+    """
+    blocked: set = set()
+    for row in leave_rows or []:
+        blocked |= _LEAVE_SESSIONS.get(row.get("leave_type"), {"morning", "evening"})
+    return blocked
+
+
 async def get_available_slots(
     clinic_id: str,
     doctor_name: str,
@@ -1042,15 +1066,10 @@ async def get_available_slots(
         if holiday_data:
             return [], "hospital_closed"
 
-        blocked_sessions = []
-        if leave_data:
-            leave_type = leave_data[0]["leave_type"]
-            if leave_type == "full":
-                return [], "doctor_on_leave"
-            elif leave_type == "half_morning":
-                blocked_sessions = ["morning"]
-            elif leave_type == "half_evening":
-                blocked_sessions = ["evening"]
+        blocked = leave_blocked_sessions(leave_data)
+        if blocked == {"morning", "evening"}:
+            return [], "doctor_on_leave"
+        blocked_sessions = sorted(blocked)
 
         if not doc:
             return [], "doctor_not_found"

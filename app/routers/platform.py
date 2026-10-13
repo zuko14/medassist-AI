@@ -431,7 +431,7 @@ async def get_platform_overview(
 
     except Exception as e:
         logger.error(f"Error fetching platform overview: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch overview. Please try again.")
 
 
 async def _fetch_clinic_roster_counts() -> dict[str, dict]:
@@ -655,7 +655,7 @@ async def get_platform_branch_changes(
         }
     except Exception as e:
         logger.error(f"Error fetching platform branch changes: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch branch changes: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch branch changes. Please try again.")
 
 
 async def _fetch_daily_usage_map(usage_date=None) -> dict:
@@ -806,7 +806,7 @@ async def get_platform_clinics_leaderboard(
 
     except Exception as e:
         logger.error(f"Error fetching platform clinics leaderboard: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch leaderboard: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch leaderboard. Please try again.")
 
 
 @router.get("/clinics/{clinic_id}")
@@ -855,7 +855,7 @@ async def get_platform_clinic_detail(
         raise
     except Exception as e:
         logger.error(f"Error fetching clinic detail for {clinic_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch clinic detail: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch clinic detail. Please try again.")
 
 
 class ClinicFeatureOverride(BaseModel):
@@ -1565,7 +1565,7 @@ async def get_platform_revenue_analytics(
 
     except Exception as e:
         logger.error(f"Error fetching revenue analytics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch revenue analytics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch revenue analytics. Please try again.")
 
 
 @router.get("/activity")
@@ -1645,7 +1645,7 @@ async def get_platform_activity_analytics(
 
     except Exception as e:
         logger.error(f"Error fetching activity analytics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch activity analytics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch activity analytics. Please try again.")
 
 
 @router.get("/departments")
@@ -1739,7 +1739,7 @@ async def get_platform_department_analytics(
 
     except Exception as e:
         logger.error(f"Error fetching department analytics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch department analytics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch department analytics. Please try again.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2037,7 +2037,7 @@ async def get_callmedex_processing_centers(
 
     except Exception as e:
         logger.error(f"Error fetching CallMedex processing centers: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch CallMedex centers: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch CallMedex centers. Please try again.")
 
 
 # ═══════ MESSAGING USAGE & BILLING (OWNER-ONLY, FULL FINANCIAL VISIBILITY) ═══════
@@ -2075,7 +2075,7 @@ async def get_platform_messaging_usage(
 
     except Exception as e:
         logger.error(f"Error fetching platform messaging usage: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch messaging usage: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch messaging usage. Please try again.")
 
 
 @router.get("/pricing")
@@ -2341,7 +2341,7 @@ async def create_broadcast(
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"Error creating broadcast: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create broadcast: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create broadcast. Please try again.")
 
 
 @router.get("/broadcasts")
@@ -2610,7 +2610,7 @@ async def delete_clinic(
 
     except Exception as e:
         logger.error(f"Error during soft-delete of clinic {clinic_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete clinic: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete clinic. Please try again.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,17 @@
+%% PROPOSED frontend hierarchy (inline in admin/index.html; ketu namespace object)
+flowchart TD
+  SH["existing app shell<br/>sidebar, main, toastContainer"] --> LA["#ketuLauncher"]
+  SH --> PN["#ketuPanel role=dialog"]
+  PN --> HD["header: ketu-mark, title, scope pill, language, minimise, close"]
+  PN --> LOG["conversation role=log aria-live"]
+  LOG --> CU["card: user"]
+  LOG --> CT["card: text, table, help"]
+  LOG --> CC["card: clarify form"]
+  LOG --> CP["card: preview, preview-typed"]
+  LOG --> CS["card: steps"]
+  LOG --> CR["card: result ok, unknown, partial, error"]
+  PN --> SG["suggestion chips"]
+  PN --> CM["composer: textarea, mic, send, meta"]
+  CM --> VR["voice recorder UI: timer, level, stop, cancel"]
+  NS["ketu namespace: init, open, send, confirm, cancel, sync, mic"] -.-> PN
+  NS -. uses .-> EX["existing: api*, withScope, esc, go, toast, apiFail"]

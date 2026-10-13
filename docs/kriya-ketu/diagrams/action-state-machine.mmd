@@ -1,0 +1,30 @@
+%% PROPOSED server-enforced run state machine (guards: architecture.md section 5)
+stateDiagram-v2
+  [*] --> RECEIVED
+  RECEIVED --> NEEDS_CLARIFICATION: slot missing or ambiguous
+  NEEDS_CLARIFICATION --> RECEIVED: slot_answers, same user, within 10 min
+  RECEIVED --> REJECTED: unsupported, negated, clinical, forbidden, not_available
+  RECEIVED --> AUTHORIZED: unique action, slots resolved, pre-check ok
+  AUTHORIZED --> EXECUTING: R0
+  AUTHORIZED --> NEEDS_CONFIRMATION: R1 to R3, preview and plan_hash
+  NEEDS_CONFIRMATION --> NEEDS_CONFIRMATION: plan changed
+  NEEDS_CONFIRMATION --> EXECUTING: confirm, hash ok, not expired, CAS
+  NEEDS_CONFIRMATION --> CANCELLED: cancel
+  NEEDS_CONFIRMATION --> EXPIRED: 5 min
+  EXECUTING --> VERIFYING: 2xx
+  EXECUTING --> FAILED: 4xx
+  EXECUTING --> UNKNOWN_OUTCOME: timeout, 5xx or stuck over 2 min
+  EXECUTING --> PARTIALLY_COMPLETED: playbook later step failed
+  EXECUTING --> NEEDS_CONFIRMATION: playbook step input diverged from preview (remaining steps only)
+  VERIFYING --> COMPLETED_VERIFIED: read-back matches
+  VERIFYING --> UNKNOWN_OUTCOME: mismatch or read failed
+  UNKNOWN_OUTCOME --> COMPLETED_VERIFIED: re-verify ok
+  UNKNOWN_OUTCOME --> FAILED: re-verify shows not written
+  UNKNOWN_OUTCOME --> NEEDS_HUMAN: 3 attempts undecided
+  COMPLETED_VERIFIED --> [*]
+  FAILED --> [*]
+  REJECTED --> [*]
+  CANCELLED --> [*]
+  EXPIRED --> [*]
+  PARTIALLY_COMPLETED --> [*]
+  NEEDS_HUMAN --> [*]

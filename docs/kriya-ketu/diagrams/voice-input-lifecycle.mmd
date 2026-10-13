@@ -1,0 +1,27 @@
+%% PROPOSED voice-to-editable-transcript lifecycle. Never auto-submits.
+stateDiagram-v2
+  [*] --> IDLE
+  IDLE --> PERMISSION_REQUEST: mic click
+  PERMISSION_REQUEST --> RECORDING: granted
+  PERMISSION_REQUEST --> PERMISSION_DENIED: NotAllowedError
+  PERMISSION_REQUEST --> NO_DEVICE: NotFoundError
+  RECORDING --> TRANSCRIBING: stop or 30s cap
+  RECORDING --> CANCELLED: cancel, Esc or widget closed
+  RECORDING --> CAPTURE_FAILED: recorder error or too large
+  TRANSCRIBING --> TRANSCRIPT_READY: text returned
+  TRANSCRIBING --> NO_SPEECH: empty text
+  TRANSCRIBING --> STT_FAILED: provider error or timeout
+  TRANSCRIBING --> SESSION_EXPIRED: 401
+  TRANSCRIBING --> CANCELLED: abort
+  TRANSCRIPT_READY --> USER_EDITING: user types
+  TRANSCRIPT_READY --> RECORDING: re-record
+  USER_EDITING --> SUBMITTED: explicit Send
+  TRANSCRIPT_READY --> SUBMITTED: explicit Send
+  SUBMITTED --> [*]: intent resolution (text path)
+  PERMISSION_DENIED --> IDLE
+  NO_DEVICE --> IDLE
+  CAPTURE_FAILED --> IDLE
+  NO_SPEECH --> IDLE
+  STT_FAILED --> IDLE
+  SESSION_EXPIRED --> IDLE
+  CANCELLED --> IDLE

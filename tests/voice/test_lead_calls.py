@@ -223,3 +223,27 @@ async def test_exotel_rejection_records_the_status_and_masks_the_number_in_logs(
         assert await outbound.dispatch_due() == 0
     assert finished.await_args.kwargs["error"] == "exotel_http_403"
     assert "+919000000001" not in caplog.text and "XXXXXX0001" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_autoqueue_cap_counts_queued_calls_not_skipped_leads():
+    """Kriya Ketu bug register D-16: the daily cap was applied to the candidate list
+    BEFORE skipping people who had booked or were called this week, so a cap of 2
+    with one booked lead first queued only one call."""
+    clinic = {"id": "c1", "features": {"ai_receptionist": True}, "config": {}, "account_type": "tenant"}
+    events = [{"phone": p, "intent": "booking", "department": "Derma"}
+              for p in ("+919000000001", "+919000000002", "+919000000003")]
+    sb = AsyncMock(side_effect=[
+        _res([clinic]), _res(events),
+        _res([{"id": "a"}]), _res([]),   # lead 1: booked in the last 24 h -> skipped
+        _res([]), _res([]),              # lead 2
+        _res([]), _res([]),              # lead 3
+    ])
+    enqueue = AsyncMock(return_value={"id": "j"})
+    with patch.object(outbound, "ai_receptionist_enabled", return_value=True), \
+         patch.object(outbound.store, "voice_config", return_value={"outbound": {"auto_leads": True, "daily_cap": 2}}), \
+         patch.object(outbound, "enqueue", new=enqueue), \
+         patch.object(outbound, "sb", new=sb), patch.object(outbound, "supabase", new=MagicMock()):
+        queued = await outbound.autoqueue_leads()
+    assert queued == 2
+    assert [c.args[1] for c in enqueue.await_args_list] == ["+919000000002", "+919000000003"]

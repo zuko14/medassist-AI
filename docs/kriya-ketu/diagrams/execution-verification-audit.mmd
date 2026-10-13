@@ -1,0 +1,27 @@
+%% PROPOSED execution, verification and audit
+sequenceDiagram
+  participant X as executor
+  participant S as assistant_runs
+  participant A as existing endpoint
+  participant AL as admin_audit_logs
+  participant V as verify read (existing GET)
+  X->>S: CAS NEEDS_CONFIRMATION to EXECUTING
+  X->>A: dispatch (cookie, X-Correlation-ID)
+  A->>AL: log_admin_action (unchanged)
+  alt 2xx
+    A-->>X: ok
+    X->>S: VERIFYING
+    X->>V: read back
+    alt matches
+      X->>S: COMPLETED_VERIFIED with evidence
+    else mismatch
+      X->>S: UNKNOWN_OUTCOME
+    end
+  else 4xx
+    A-->>X: refused, nothing written
+    X->>S: FAILED with error_code
+  else timeout or 5xx
+    X->>S: UNKNOWN_OUTCOME, no retry
+    X->>V: re-verify (max 3)
+    X->>S: COMPLETED_VERIFIED, FAILED or NEEDS_HUMAN
+  end

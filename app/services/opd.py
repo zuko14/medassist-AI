@@ -20,6 +20,7 @@ from postgrest.types import CountMethod
 from app.database import (
     check_in_appointment,
     get_doctor_by_name,
+    leave_blocked_sessions,
     sb,
     scoped_query,
     supabase,
@@ -796,16 +797,12 @@ async def create_walk_in(
         .eq("doctor_name", doc["name"])
         .eq("leave_date", today_str)
     )
-    if leaves.data:
-        leave_type = leaves.data[0].get("leave_type") or "full"
-        if leave_type == "full":
-            raise HTTPException(status_code=409, detail="doctor_on_leave")
-        elif leave_type in ("half_morning", "half_evening"):
-            is_morning = datetime.now(IST).hour < 14
-            if (is_morning and leave_type == "half_morning") or (
-                not is_morning and leave_type == "half_evening"
-            ):
-                raise HTTPException(status_code=409, detail="doctor_on_leave")
+    # Every row for the day counts (database.leave_blocked_sessions): reading
+    # only the first one could treat a full day as a half day.
+    blocked = leave_blocked_sessions(leaves.data)
+    current_session = "morning" if datetime.now(IST).hour < 14 else "evening"
+    if current_session in blocked:
+        raise HTTPException(status_code=409, detail="doctor_on_leave")
 
     # 4. Doctor branch & availability
     branch_id = await resolve_visit_branch(doc["id"], actor, body.get("branch_id"))

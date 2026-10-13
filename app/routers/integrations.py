@@ -383,7 +383,7 @@ async def receive_lab_report(
         logger.error(f"LabReportService failed for {external_report_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process report: {type(e).__name__}: {str(e)[:200]}",
+            detail="Failed to process the report. The error has been logged; please retry.",
         )
 
     if saved_record.get("already_processed"):

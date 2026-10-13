@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Kriya Ketu">
+  <!-- Concept C "Node": Ketu is the lunar node where two orbits cross. The K's arms are two
+       orbital arcs leaving the stem; the star sits exactly on the node. -->
+  <defs>
+    <linearGradient id="knStem" x1="18" y1="10" x2="18" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#43E2A6"/><stop offset="1" stop-color="#0C9668"/>
+    </linearGradient>
+    <linearGradient id="knUp" x1="24" y1="32" x2="52" y2="10" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2FA8D8"/><stop offset="1" stop-color="#43E2A6"/>
+    </linearGradient>
+    <linearGradient id="knDown" x1="24" y1="32" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2FA8D8"/><stop offset="1" stop-color="#3D8BFD"/>
+    </linearGradient>
+    <radialGradient id="knGlow" cx="26" cy="32" r="11" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9FF0D2" stop-opacity=".6"/><stop offset="1" stop-color="#9FF0D2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M18 11v42" stroke="url(#knStem)" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M26 32C31 20 40 13 51 11" fill="none" stroke="url(#knUp)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M26 32C31 44 40 51 51 53" fill="none" stroke="url(#knDown)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M26 32C36 30 46 34 56 40" fill="none" stroke="#9FF0D2" stroke-opacity=".3" stroke-width="1.2" stroke-linecap="round"/>
+  <circle cx="26" cy="32" r="11" fill="url(#knGlow)"/>
+  <path d="M26 25Q27.1 30.9 33 32Q27.1 33.1 26 39Q24.9 33.1 19 32Q24.9 30.9 26 25Z" fill="#F4FFFA"/>
+</svg>

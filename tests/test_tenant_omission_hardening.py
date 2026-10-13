@@ -223,20 +223,29 @@ async def test_tenant_count_failure_fails_closed_instead_of_defaulting():
     assert "default" not in str(exc.value)
 
 
+def _is_count_query(builder) -> bool:
+    """The "how many active clinics?" query of resolve_tenant's Strategy 4.
+
+    These tests used to answer by call number ("the 3rd query is the count"),
+    which stopped matching resolve_tenant once Strategy 1 ran only with a
+    phone_number_id and the dev-only sandbox lookup (Strategy 3) was added: the
+    mock then answered the wrong query and the tests failed against correct code.
+    Recognise the query by its filters instead.
+    """
+    return "status=neq.DELETED" in str(builder.request.params)
+
+
 @pytest.mark.asyncio
 async def test_tenant_count_failure_alone_still_fails_closed():
-    """Isolate the branch: strategies 1 and 2 succeed, only the count throws.
+    """Isolate the branch: the phone lookups succeed, only the count throws.
 
     This is the branch that mattered. It fired only when the database was
     already misbehaving, and resolved that ambiguity by picking a tenant.
     """
     from app.services import tenant as tenant_mod
 
-    calls = {"n": 0}
-
-    async def _rows(_builder):
-        calls["n"] += 1
-        if calls["n"] >= 3:  # the active-clinic count query
+    async def _rows(builder):
+        if _is_count_query(builder):
             raise RuntimeError("statement timeout")
         return MagicMock(data=[])
 
@@ -251,13 +260,10 @@ async def test_multi_tenant_unknown_number_still_refused():
     """The pre-existing guard stays put: >1 active clinic and no match = refuse."""
     from app.services import tenant as tenant_mod
 
-    calls = {"n": 0}
-
-    async def _rows(_builder):
-        calls["n"] += 1
-        # Strategies 1-2 find no clinic for this number; the count query then
-        # reports two active tenants, so there is nothing to resolve TO.
-        if calls["n"] >= 3:
+    async def _rows(builder):
+        # No clinic for this number; the count query reports two active tenants,
+        # so there is nothing to resolve TO.
+        if _is_count_query(builder):
             return MagicMock(data=[{"id": CLINIC_A}, {"id": CLINIC_B}])
         return MagicMock(data=[])
 
@@ -272,12 +278,9 @@ async def test_single_tenant_deployment_still_resolves():
     """Zero regression: the one legitimate fallback must keep working."""
     from app.services import tenant as tenant_mod
 
-    calls = {"n": 0}
-
-    async def _rows(_builder):
-        calls["n"] += 1
-        # Strategies 1-2 find nothing; the count query finds exactly one clinic.
-        if calls["n"] >= 3:
+    async def _rows(builder):
+        # No clinic for this number; the count query finds exactly one clinic.
+        if _is_count_query(builder):
             return MagicMock(data=[{"id": CLINIC_A, "is_active": True}])
         return MagicMock(data=[])
 

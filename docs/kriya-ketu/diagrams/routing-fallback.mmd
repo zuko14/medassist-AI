@@ -1,0 +1,18 @@
+%% PROPOSED deterministic-first router; the LLM is the last layer
+flowchart TD
+  IN["submitted text"] --> FW{"clinical firewall<br/>screen_message"}
+  FW -- clinical --> REJ1["REJECTED clinical"]
+  FW -- ok --> L1{"L1 navigation<br/>page table"}
+  L1 -- match --> NAV["navigate, 0 tokens"]
+  L1 -- no --> L2{"L2 triggers<br/>negation, question, what-if"}
+  L2 -- question --> HELP["help card, 0 tokens"]
+  L2 -- negated --> REJ2["REJECTED negated"]
+  L2 -- unique action --> L3{"L3 slots resolved?"}
+  L3 -- missing or ambiguous --> FORM["clarify form, 0 tokens"]
+  FORM -- answers --> L3
+  L3 -- yes --> POL["policy and execution"]
+  L2 -- none or conflict --> GATE{"LLM enabled,<br/>under rate and budget?"}
+  GATE -- no --> SUG["deterministic suggestions, 0 tokens"]
+  GATE -- yes --> L4["L4 one structured call"]
+  L4 -- valid action --> L3
+  L4 -- invalid, null or error --> SUG

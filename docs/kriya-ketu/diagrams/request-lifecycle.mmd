@@ -1,0 +1,34 @@
+%% PROPOSED text request lifecycle
+sequenceDiagram
+  autonumber
+  actor U as Staff
+  participant W as Ketu panel
+  participant R as /admin/assistant
+  participant RT as rules and resolvers
+  participant L as LLM fallback
+  participant P as policy
+  participant X as executor
+  participant A as existing /admin endpoint
+  U->>W: type and Send
+  W->>R: requests {client_request_id, text}
+  R->>R: auth, feature gate, idempotent insert (RECEIVED)
+  R->>RT: firewall screen, L1 nav, L2 rules, L3 slots
+  alt no match or conflict
+    RT->>L: one json_schema call (enum = permitted actions)
+    L-->>RT: action_id and slot strings
+  end
+  RT->>P: action and resolved params
+  P-->>R: AUTHORIZED or REJECTED
+  alt R0
+    R->>X: execute
+  else R1 to R3
+    R->>X: preview (reads only) and plan_hash
+    X-->>W: NEEDS_CONFIRMATION card
+    U->>W: Confirm
+    W->>R: confirm {plan_hash}
+    R->>X: recompute preview, compare hash
+  end
+  X->>A: dispatch with caller credentials
+  A-->>X: 2xx, 4xx or timeout
+  X->>A: verify read-back
+  X-->>W: COMPLETED_VERIFIED, FAILED or UNKNOWN_OUTCOME
