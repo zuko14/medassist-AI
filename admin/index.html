@@ -19985,12 +19985,20 @@ function ketuClock(s) {
     return s > 0 ? 'Expires in ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') : 'Expired — ask again.';
 }
 
+// After a typed reply: runs on screen whose state the server changed (a form the reply continued shows
+// "Answered below."). State changes only, so a half-filled form that is still open is never redrawn.
+function ketuChangedRuns(shown, fresh, exceptId) {
+    return (Array.isArray(fresh) ? fresh : []).filter(r => r && r.run_id && r.run_id !== exceptId &&
+        shown[r.run_id] && shown[r.run_id].state !== r.state);
+}
+
 // One run -> HTML, driven by its state: controls exist only while the run waits for them,
 // and the tick only on COMPLETED_VERIFIED (ux §4.3: never tick an unexecuted plan).
 function ketuRunHtml(run, pageLabel, nowMs) {
     const id = esc(run.run_id), st = run.state;
     const live = st === 'NEEDS_CONFIRMATION' || st === 'NEEDS_CLARIFICATION';
-    const word = { CANCELLED: 'Cancelled.', EXPIRED: 'Expired — ask again.', REJECTED: 'Not done.' }[st] || '';
+    const word = run.error_code === 'continued' ? 'Answered below.'
+        : { CANCELLED: 'Cancelled.', EXPIRED: 'Expired — ask again.', REJECTED: 'Not done.' }[st] || '';
     const left = run.expires_at ? ketuSecondsLeft(run.expires_at, nowMs) : 0;
     const link = p => p ? '<button type="button" class="ketu-link" data-ketu-go="' + esc(p) + '">Open ' + esc(pageLabel(p)) + '</button>' : '';
     const words = { done: 'Done', failed: 'Failed', unknown: "Couldn't confirm", skipped: 'Skipped' };
@@ -20007,7 +20015,7 @@ function ketuRunHtml(run, pageLabel, nowMs) {
                 : x.kind === 'yesno'
                 ? '<fieldset class="ketu-yesno"><legend>' + esc(x.label || x.name) + '</legend>' + ['yes', 'no'].map(v =>
                     '<label class="ketu-opt"><input type="radio" name="' + esc(x.name) + '" value="' + v + '" required> ' + (v === 'yes' ? 'Yes' : 'No') + '</label>').join('') + '</fieldset>'
-                : '<label>' + esc(x.label || x.name.charAt(0).toUpperCase() + x.name.slice(1)) + ' <input type="' + (x.kind === 'date' ? 'date' : 'text') + '" name="' + esc(x.name) + '" required></label>').join('');
+                : '<label>' + esc(x.label || x.name.charAt(0).toUpperCase() + x.name.slice(1)) + ' <input type="' + (x.kind === 'date' ? 'date' : 'text') + '" name="' + esc(x.name) + '"' + (x.optional ? '' : ' required') + '></label>').join('');
             return '<form class="ketu-card" data-ketu-clarify="' + id + '"><p>' + esc(run.message || 'I need a little more detail.') + '</p>' + f +
                 '<div class="ketu-actions"><button type="submit" class="btn btn-accent">Continue</button></div></form>';
         }
@@ -20434,6 +20442,15 @@ const ketu = {
         } catch (e) { /* the panel works without history */ }
     },
 
+    // A typed reply can continue an open form (server _follow_up): re-read the forms still shown as open.
+    async refreshOpenForms(exceptId) {
+        if (!Object.values(this.runs).some(r => r.run_id !== exceptId && r.state === 'NEEDS_CLARIFICATION')) return;
+        try {
+            const fresh = await api('/admin/assistant/runs?limit=10');
+            ketuChangedRuns(this.runs, fresh, exceptId).forEach(r => this.renderRun(r, true));
+        } catch (e) { /* the old form still answers "Answered below." when clicked */ }
+    },
+
     abort() { if (this.controller) this.controller.abort(); },
 
     async send() {
@@ -20468,6 +20485,7 @@ const ketu = {
                 this.voice = null;
                 this.micChip();
                 this.renderRun(body);
+                this.refreshOpenForms(body.run_id);
                 return;
             }
         } catch (e) {

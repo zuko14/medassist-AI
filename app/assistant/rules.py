@@ -203,7 +203,8 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
     if slot.kind == "session_window":   # evening hours without am/pm are afternoon hours
         return resolve.resolve_session_window(text, resolve.resolve_session(text) or "morning"), ()
     if slot.kind in ("morning_window", "evening_window"):
-        return resolve.resolve_window_after(text, slot.kind.split("_")[0]), ()
+        session = slot.kind.split("_")[0]
+        return resolve.resolve_window_after(text, session) or resolve.resolve_bare_windows(text).get(session), ()
     if slot.kind == "days":
         return resolve.resolve_days(text), ()
     if slot.kind == "new_doctor":
@@ -323,9 +324,34 @@ def fill(spec: ActionSpec, text: str, *, doctors=None, now=None, question: bool 
         elif slot.required:
             missing.append(slot.name)
             candidates = candidates or cands
+    if spec.one_of and not any(params.get(n) for n in spec.one_of):
+        missing.extend(spec.one_of)  # e.g. a new doctor's morning or evening hours: the form asks both
     if missing:
         return Route("clarify", action_id=spec.id, params=params, missing=tuple(missing), candidates=candidates)
     return Route("action", action_id=spec.id, params=params)
+
+
+# Slot kinds a typed follow-up ("mornings 9 to 12", "₹600", "Mon-Sat") may answer: each needs concrete
+# evidence in the text. Free-word kinds (a booking, a search term) would read any sentence as an answer.
+FOLLOW_UP_KINDS = frozenset({"date", "amount", "price", "percent", "days", "session", "session_window",
+                             "morning_window", "evening_window", "time_window", "clock", "phone", "sittings",
+                             "new_doctor", "doctor"})
+
+
+def follow_up(spec: ActionSpec, missing, text: str, given: dict, *, doctors=None, now=None) -> dict:
+    """Answers to an open form's `missing` slots read from a typed reply; {} when it answers none."""
+    out = {}
+    for slot in spec.slots:
+        if slot.name not in missing or slot.kind not in FOLLOW_UP_KINDS:
+            continue
+        if slot.kind == "session_window":  # "5 to 8" after "Dr Rao's evening": the session already said
+            session = resolve.resolve_session(text) or given.get("session") or "morning"
+            value = resolve.resolve_session_window(text, session)
+        else:
+            value, _ = _resolve_slot(slot, text, doctors, now or _now())
+        if value is not None:
+            out[slot.name] = value
+    return out
 
 
 def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[str] = None,

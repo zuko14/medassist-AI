@@ -141,7 +141,8 @@ def _fields(r: rules.Route, layer: str) -> dict:
         slots = {s.name: s for s in REGISTRY[r.action_id].slots} if r.action_id in REGISTRY else {}
         card = {"type": "clarify", "missing": list(r.missing), "candidates": list(r.candidates),
                 "fields": [{"name": m, "kind": "action" if m == "action" else slots[m].kind if m in slots else "text",
-                            **({"label": slots[m].label} if m in slots and slots[m].label else {})}
+                            **({"label": slots[m].label} if m in slots and slots[m].label else {}),
+                            **({"optional": True} if m in slots and not slots[m].required else {})}
                            for m in r.missing],
                 "actions": [{"id": a, "summary": REGISTRY[a].summary if a in REGISTRY else a}
                             for a in r.candidate_actions]}
@@ -208,6 +209,10 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
                                     visible=None if visible is None else set(visible)), clinic)
     if not (r.kind == "none" or (r.kind == "clarify" and r.candidate_actions)):
         return _fields(r, "rules")
+    if r.kind == "none" and not rules.asks(body.text):
+        continued = await _follow_up(body, scope, user, clinic, auth, run_id)
+        if continued is not None:
+            return continued
 
     out = await llm.classify(body.text, clinic_id=scope, username=user.username,
                              action_ids=policy.permitted_actions(user, clinic), visible_pages=visible)
@@ -230,6 +235,39 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
     return {**fields, **spent}
 
 
+async def _follow_up(body: RequestIn, scope: str, user: AdminUser, clinic: dict, auth: CallerAuth,
+                     run_id: str) -> Optional[dict]:
+    """A typed reply to the form just above it ("mornings 9 to 12" under "Add a doctor") continues that
+    request instead of starting a new one: its answers carry over to this run and the old form closes.
+    Only the user's latest earlier run, only while its form is open, only slots the reply states with
+    concrete evidence (rules.FOLLOW_UP_KINDS). None = not a reply; the caller routes the text as usual."""
+    prev = next((r for r in await store.list_runs(scope, user.username, False, 2) if r["id"] != run_id), None)
+    if not prev or prev["state"] != "NEEDS_CLARIFICATION":
+        return None
+    spec = REGISTRY.get(prev.get("action_id") or "")
+    card = next((c for c in (prev.get("result") or {}).get("cards") or [] if c.get("type") == "clarify"), {})
+    missing = card.get("missing") or []
+    if spec is None or not missing or "action" in missing:
+        return None
+    given = dict(prev.get("params") or {})
+    asks_doctor = any(s.kind == "doctor" and s.name in missing for s in spec.slots)
+    doctors = await _doctors(auth, scope, run_id) if asks_doctor else None
+    answers = rules.follow_up(spec, missing, body.text, given, doctors=doctors)
+    offered = {c.get("name") for c in card.get("candidates") or []}
+    for s in spec.slots:  # a doctor answer must be one the form offered, as on the form itself
+        if s.kind == "doctor" and s.name in answers and offered and answers[s.name] not in offered:
+            del answers[s.name]
+    if not answers:
+        return None
+    if not await store.transition(scope, user.username, prev["id"], ("NEEDS_CLARIFICATION",), "CANCELLED",
+                                  error_code="continued"):
+        return None  # answered or expired meanwhile: route the text on its own
+    visible = body.ui_context.visible_pages
+    r = rules.fill(spec, prev["input_text"], doctors=doctors, given={**given, **answers},
+                   visible=set(visible) if visible is not None else None)
+    return _fields(_variant(r, clinic), "form")
+
+
 def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
     """Validate clarify-form answers against what the form offered; raise ValueError on anything else.
     A doctor answer must be one of the candidate ids shown; a date must be ISO; nothing is guessed."""
@@ -239,6 +277,8 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
         if slot.name not in answers:
             continue
         value = answers[slot.name]
+        if not slot.required and isinstance(value, str) and not value.strip():
+            continue  # an optional field left blank ("Evening hours" for a mornings-only doctor)
         if slot.kind == "doctor":
             if value not in candidates:
                 raise ValueError("doctor not offered")
@@ -356,6 +396,8 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
             out[slot.name] = text
         else:
             raise ValueError(f"slot {slot.name} cannot be answered on a form")
+    if spec.one_of and not any(out.get(n) for n in spec.one_of):
+        raise ValueError("one of the hours is needed")
     missing = [s.name for s in spec.slots if s.required and s.name not in out]
     if missing and missing == [m for m in card.get("missing") or [] if m != "action"]:
         raise ValueError("nothing new answered")

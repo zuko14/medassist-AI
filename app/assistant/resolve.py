@@ -555,6 +555,14 @@ _DAY_WORD = r"(mon|tue|wed|thu|fri|sat|sun)[a-z]*"
 _DAY_RANGE = re.compile(_DAY_WORD + r"\s*(?:-|–|to|till|se)\s*" + _DAY_WORD, re.I)
 _NEW_DOCTOR = re.compile(r"\b(?:add|new|create)\b(?:\s+(?:a|the))?(?:\s+new)?(?:\s+doctor)?\s+"
                          r"(dr\.?\s+[A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
+# "create the doctor srikanth": no "Dr", so the name is the words after "doctor" up to a non-name word.
+_NEW_DOCTOR_BARE = re.compile(r"\b(?:add|new|create)\b(?:\s+(?:a|the))?(?:\s+new)?\s+doctor\s+"
+                              r"([A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
+_NOT_NAME = re.compile(r"^(?:for|with|in|on|at|of|and|as|from|to|is|fee|fees|rs|inr|department|dept|"
+                       r"specialist|specialization|mornings?|evenings?|weekdays?|daily|leave|"
+                       r"(?:mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?|sun)(?:day)?|"
+                       r"[a-z]+(?:logy|logist|ics|iatry|iatrician|"
+                       r"ist|surgery|surgeon|medicine|physician))$", re.I)
 _BRANCH_NAME = re.compile(r"\b(?:to|at|in|ni|ko|ki)?\s*(?:the\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+branch\b", re.I)
 _BRANCH_NOISE = {"to", "at", "in", "the", "ni", "ko", "ki", "assign", "dr", "doctor", "a", "this", "that", "same"}
 
@@ -577,7 +585,8 @@ def resolve_session_window(text: str, session: str) -> Optional[str]:
 
     def pm(hm: str) -> str:
         return f"{int(hm[:2]) + 12:02d}{hm[2:]}" if hm < "12:00" else hm
-    return f"{pm(start)}-{pm(end)}"
+    start, end = pm(start), pm(end)
+    return f"{start}-{end}" if start < end else None  # "evening 9 to 1" is no evening: ask, never 21:00-13:00
 
 
 def resolve_days(text: str) -> Optional[str]:
@@ -599,9 +608,17 @@ def resolve_days(text: str) -> Optional[str]:
 def resolve_new_doctor(text: str) -> Optional[str]:
     """The new doctor's name as typed, after "add" / "new doctor" ("Dr Kiran Kumar"); 4..60 chars."""
     m = _NEW_DOCTOR.search(text or "")
-    if not m:
+    if m:
+        name = " ".join(m.group(1).split())
+    elif m := _NEW_DOCTOR_BARE.search(text or ""):
+        words = []
+        for w in m.group(1).split():
+            if _NOT_NAME.match(w):
+                break
+            words.append(w.capitalize() if w.islower() else w)
+        name = "Dr " + " ".join(words) if words else ""
+    else:
         return None
-    name = " ".join(m.group(1).split())
     return name if 4 <= len(name) <= 60 else None
 
 
@@ -627,6 +644,37 @@ def resolve_window_after(text: str, session: str) -> Optional[str]:
     seg = text[m.start():]
     o = other.search(seg)
     return resolve_session_window(seg[:o.start()] if o else seg, session)
+
+
+def _bare_window(m: re.Match) -> Optional[str]:
+    """One window said without a session word, read as clinic hours. With am/pm it is taken as said.
+    Without: crossing noon ("9 to 1", "11 to 2") or starting 8-11 is the morning; starting at 12 is
+    afternoon; starting 1-7 is the evening ("6 to 8" = 18:00-20:00) unless it ends at 11 or 12
+    ("7 to 11", "6 to 12" = morning)."""
+    seg = m.group(0)
+    if _MERIDIEM.search(seg):
+        return resolve_time_window(seg)
+    h1, h2 = int(m.group(1)), int(m.group(4))
+    if h2 < h1 or 8 <= h1 <= 12 or h2 >= 11:
+        return resolve_time_window(seg)
+    return resolve_session_window(seg, "evening")
+
+
+def resolve_bare_windows(text: str) -> dict:
+    """{"morning": "HH:MM-HH:MM", "evening": ...} for hours said with no session word ("9 to 1",
+    "9 to 1 and 6 to 8"). {} when a session word is present (resolve_window_after reads those), when a
+    window can't be read, or when two windows land in the same session: then the form keeps asking."""
+    t = text or ""
+    if _MORNING.search(t) or _EVENING.search(t):
+        return {}
+    out: dict = {}
+    for m in _WINDOW.finditer(t):
+        window = _bare_window(m)
+        session = "morning" if window and window < "12:00" else "evening"
+        if window is None or session in out:
+            return {}
+        out[session] = window
+    return out
 
 
 # ── KK-P4-12: staff login hand-off pre-fill ──

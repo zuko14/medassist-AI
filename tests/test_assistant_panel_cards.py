@@ -58,6 +58,44 @@ def test_clarify_form_offers_only_what_the_server_sent():
     assert 'type="date" name="date"' in html and "Continue" in html
 
 
+def test_a_form_continued_by_a_typed_reply_says_answered_below():
+    card = {"type": "clarify", "missing": ["morning"], "fields": [{"name": "morning", "kind": "morning_window"}]}
+    html = _html(_run("CANCELLED", [card], error_code="continued"))
+    assert "<form" not in html and "Answered below." in html and "Cancelled" not in html
+
+
+def test_optional_form_fields_are_not_required():
+    card = {"type": "clarify", "missing": ["fee", "morning"],
+            "fields": [{"name": "fee", "kind": "price"}, {"name": "morning", "kind": "morning_window", "optional": True}]}
+    html = _html(_run("NEEDS_CLARIFICATION", [card]))
+    assert 'name="fee" required' in html and 'name="morning">' in html
+
+
+def _changed(shown, fresh, except_id):
+    src = _fn("ketuChangedRuns") + \
+        f"\nconsole.log(JSON.stringify(ketuChangedRuns({json.dumps(shown)}, {json.dumps(fresh)}, {json.dumps(except_id)}).map(r => r.run_id)));"
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+def test_after_a_reply_only_runs_whose_state_changed_are_redrawn():
+    shown = {"old": {"run_id": "old", "state": "NEEDS_CLARIFICATION"},
+             "open": {"run_id": "open", "state": "NEEDS_CLARIFICATION"},
+             "new": {"run_id": "new", "state": "NEEDS_CLARIFICATION"}}
+    fresh = [{"run_id": "new", "state": "NEEDS_CONFIRMATION"},          # the reply itself: already drawn
+             {"run_id": "old", "state": "CANCELLED", "error_code": "continued"},
+             {"run_id": "open", "state": "NEEDS_CLARIFICATION"},       # unchanged: a half-filled form is kept
+             {"run_id": "gone", "state": "CANCELLED"}]                 # not on screen
+    assert _changed(shown, fresh, "new") == ["old"]
+    assert _changed(shown, None, "new") == []
+
+
+def test_send_refreshes_the_forms_still_shown_open():
+    js = HTML[HTML.index("// ── Kriya Ketu"):HTML.index("// ── end Kriya Ketu")]
+    assert "this.refreshOpenForms(body.run_id)" in js and "ketuChangedRuns(this.runs" in js
+
+
 def test_a_lapsed_form_is_read_only():
     card = {"type": "clarify", "missing": ["date"], "fields": [{"name": "date", "kind": "date"}]}
     html = _html(_run("EXPIRED", [card]))

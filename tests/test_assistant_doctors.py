@@ -47,6 +47,26 @@ def test_resolve_session_and_window(text, session, window):
     assert resolve.resolve_session_window(text, session or "morning") == window
 
 
+@pytest.mark.parametrize("text, windows", [
+    ("9 to 1", {"morning": "09:00-13:00"}), ("6 to 8", {"evening": "18:00-20:00"}),
+    ("5 to 8", {"evening": "17:00-20:00"}), ("7 to 11", {"morning": "07:00-11:00"}),
+    ("11 to 2", {"morning": "11:00-14:00"}), ("12 to 3", {"evening": "12:00-15:00"}),
+    ("8 to 12", {"morning": "08:00-12:00"}), ("14:00 to 17:00", {"evening": "14:00-17:00"}),
+    ("9 to 1 and 6 to 8", {"morning": "09:00-13:00", "evening": "18:00-20:00"}),
+    ("9 am to 1 pm, 5 pm to 8 pm", {"morning": "09:00-13:00", "evening": "17:00-20:00"}),
+    ("9 to 11 and 10 to 12", {}),            # two mornings: keep asking
+    ("mornings 9 to 1", {}),                 # a session word: resolve_window_after reads it
+    ("₹600 Mon-Sat", {}),
+])
+def test_resolve_bare_windows(text, windows):
+    assert resolve.resolve_bare_windows(text) == windows
+
+
+def test_evening_window_never_ends_before_it_starts():
+    assert resolve.resolve_session_window("9 to 1", "evening") is None
+    assert resolve.resolve_session_window("5 to 8", "evening") == "17:00-20:00"
+
+
 @pytest.mark.parametrize("text, days", [
     ("Mon-Sat", "Mon,Tue,Wed,Thu,Fri,Sat"), ("monday to friday", "Mon,Tue,Wed,Thu,Fri"),
     ("weekdays", "Mon,Tue,Wed,Thu,Fri"), ("all days", "Mon,Tue,Wed,Thu,Fri,Sat,Sun"),
@@ -59,6 +79,9 @@ def test_resolve_days(text, days):
 @pytest.mark.parametrize("text, name", [
     ("Add Dr Kiran Kumar, dermatologist, ₹600, Mon-Sat mornings 9 to 1", "Dr Kiran Kumar"),
     ("add a new doctor Dr. Priya, ₹500", "Dr. Priya"), ("add doctor", None),
+    ("create the doctor srikanth cardiology department", "Dr Srikanth"),
+    ("create the doctor Dr srikant", "Dr srikant"), ("add a new doctor Sunil Kumar mornings 9 to 1", "Dr Sunil Kumar"),
+    ("create a doctor Meera for dermatology", "Dr Meera"), ("create doctor leave for Rao", None),
 ])
 def test_resolve_new_doctor(text, name):
     assert resolve.resolve_new_doctor(text) == name
@@ -84,6 +107,8 @@ DOCTORS = [{"id": D1, "name": "Dr. Anitha"}]
     ("Dr Anitha ki evening timing 5 se 8 karo", "doctor.schedule"),
     ("Add Dr Kiran Kumar, dermatologist, ₹600, Mon-Sat mornings 9 to 1", "doctor.create"),
     ("new doctor Dr Kiran ₹600 weekdays evenings 5 to 8", "doctor.create"),
+    ("create the doctor srikanth cardiology department", "doctor.create"),
+    ("create Dr Srikanth, ₹800, Mon-Sat mornings 9 to 12", "doctor.create"),
     ("assign Dr Anitha to Kukatpally branch mornings", "branch.doctor_assign"),
     ("Dr Anitha ni Kukatpally branch ki assign cheyyi", "branch.doctor_assign"),
     ("Dr Anitha ko Kukatpally branch mein assign karo", "branch.doctor_assign"),
@@ -249,9 +274,84 @@ def test_doctor_create_asks_specialization_and_department_then_previews_slots(db
                     "morning_start": "09:00", "morning_end": "13:00", "slot_duration_minutes": 30}
 
 
-def test_doctor_create_without_hours_is_refused(db, docs):  # noqa: F811
-    out = _answer(_ask("Add Dr Kiran Kumar, ₹600, Mon-Sat"), specialization="Dermatology", department="Skin")
-    assert out["error_code"] == "nothing_to_do" and S["writes"] == []
+def test_doctor_create_without_hours_asks_for_them(db, docs):  # noqa: F811
+    asked = _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat")
+    assert asked["state"] == "NEEDS_CLARIFICATION", asked
+    fields = {f["name"]: f for f in asked["cards"][0]["fields"]}
+    assert fields["morning"].get("optional") and fields["evening"].get("optional")
+    assert not fields["specialization"].get("optional")
+    blank = client.post("/admin/assistant/requests", json={
+        "client_request_id": str(uuid.uuid4()), "text": "x", "reply_to_run_id": asked["run_id"],
+        "slot_answers": {"specialization": "Dermatology", "department": "Skin", "morning": "", "evening": ""}})
+    assert blank.status_code == 422 and S["writes"] == []  # at least one session's hours
+    out = _answer(asked, specialization="Dermatology", department="Skin", morning="", evening="5 to 8")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    (_, body), = S["writes"]
+    assert (body["evening_start"], body["evening_end"]) == ("17:00", "20:00") and "morning_start" not in body
+
+
+def test_doctor_create_typed_follow_up_continues_the_form(db, docs):  # noqa: F811
+    """The reported bug: hours typed under the form went to sample-collection hours / "can't do that"."""
+    first = _ask("create the doctor srikanth cardiology department")
+    assert (first["state"], first["action_id"]) == ("NEEDS_CLARIFICATION", "doctor.create"), first
+    assert {"morning", "evening"} <= set(first["cards"][0]["missing"])
+    out = _ask("mornings 9 to 12 and evenings 6 to 8")
+    assert (out["state"], out["action_id"], out["route_layer"]) == ("NEEDS_CLARIFICATION", "doctor.create", "form"), out
+    assert "morning" not in out["cards"][0]["missing"] and "evening" not in out["cards"][0]["missing"]
+    old = _answer(first, specialization="Cardiology")  # the old form is closed, not answered twice
+    assert (old["state"], old["error_code"]) == ("CANCELLED", "continued")
+    out = _answer(out, specialization="Cardiology", department="Cardiology", fee="800", days="Mon-Sat")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    (_, body), = S["writes"]
+    assert body["name"] == "Dr Srikanth"
+    assert (body["morning_start"], body["morning_end"], body["evening_start"], body["evening_end"]) == \
+        ("09:00", "12:00", "18:00", "20:00")
+
+
+@pytest.mark.parametrize("reply, hours", [
+    ("9 to 1", {"morning_start": "09:00", "morning_end": "13:00"}),
+    ("6 to 8", {"evening_start": "18:00", "evening_end": "20:00"}),
+    ("9 to 12 and 6 to 8", {"morning_start": "09:00", "morning_end": "12:00",
+                            "evening_start": "18:00", "evening_end": "20:00"}),
+])
+def test_bare_hours_follow_up_fills_the_right_session(db, docs, reply, hours):  # noqa: F811
+    first = _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat")
+    out = _ask(reply)
+    assert (out["route_layer"], out["action_id"]) == ("form", "doctor.create"), out
+    out = _answer(out, specialization="Dermatology", department="Skin")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    (_, body), = S["writes"]
+    assert {k: v for k, v in body.items() if k.endswith(("_start", "_end"))} == hours
+    assert first["run_id"] != out["run_id"]
+
+
+def test_bare_hours_in_the_first_message(db, docs):  # noqa: F811
+    out = _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat 9 to 1")
+    assert "morning" not in out["cards"][0]["missing"], out
+
+
+def test_ambiguous_bare_hours_keep_asking(db, docs):  # noqa: F811
+    _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat")
+    assert _ask("9 to 11 and 10 to 12")["route_layer"] != "form"
+
+
+def test_follow_up_never_hijacks_a_real_command_or_chatter(db, docs):  # noqa: F811
+    first = _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat")
+    assert _ask("open leads")["action_id"] == "nav.open"  # a command of its own routes as usual
+    second = _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat")
+    assert _ask("thanks, that is all")["route_layer"] != "form"  # nothing in it answers the form
+    assert _ask("what are the morning hours?")["route_layer"] != "form"  # a question is not an answer
+    active = [r["run_id"] for r in client.get("/admin/assistant/runs?active=1").json()]
+    assert second["run_id"] in active and first["run_id"] in active  # neither form was touched
+
+
+def test_follow_up_only_continues_the_latest_run(db, docs):  # noqa: F811
+    _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat")
+    _ask("open leads")
+    assert _ask("mornings 9 to 1")["route_layer"] != "form"  # the form is no longer the last thing said
 
 
 def test_doctor_create_existing_name_is_refused(db, docs):  # noqa: F811

@@ -141,6 +141,7 @@ class ActionSpec:
     max_items: int = 1
     endpoint: Optional[tuple[str, str]] = None        # (METHOD, route path) that `call` dispatches to
     also: tuple[str, ...] = ()                         # handler only: other permissions it accepts instead
+    one_of: tuple[str, ...] = ()                       # optional slots of which at least one is required
 
 
 def prohibited_path(path: str) -> bool:
@@ -191,6 +192,8 @@ def validate(spec: ActionSpec) -> None:
             p.append(f"{spec.risk} action needs verify (read-back)")
     if spec.endpoint is not None and spec.call is None and spec.risk == "R0":
         p.append("R0 action with an endpoint needs a call")
+    optional = {s.name for s in spec.slots if not s.required}
+    p.extend(f"one_of slot {n!r} must be an optional slot" for n in spec.one_of if n not in optional)
     if spec.risk == "R3" and spec.permission is None and not spec.roles <= ADMIN_ROLES:
         p.append("R3 without a stated permission must be admin-only")
     if p:
@@ -764,16 +767,19 @@ DOCTOR_ACTIONS = (
           permission="DOCTORS_UPDATE", perm_source="dependency"),
     # Specialization and department are always asked on the form (never guessed from the sentence).
     _desk("doctor.create", "Add a doctor", "R2", "POST", "/admin/doctors", "doctors",
+          # "create" phrases only as written: "create+doctor" would also catch "create leave for doctor Rao".
           ("new doctor", "add+new doctor", "add+dr+mornings", "add+dr+evenings", "add+dr+weekdays",
-           "add+dr+mon", "doctor+add cheyyi", "doctor+jodo", "డాక్టర్+జోడించు", "डॉक्टर+जोड़ो"),
+           "add+dr+mon", "create a doctor", "create the doctor", "create dr", "create new dr",
+           "doctor+add cheyyi", "doctor+jodo", "డాక్టర్+జోడించు", "डॉक्टर+जोड़ो"),
           playbooks.doctor_create_preview,
           slots=(SlotSpec("name", "new_doctor", label="Doctor's name, e.g. Dr Kiran Kumar"),
                  SlotSpec("specialization", "text_field", label="Specialization, e.g. Dermatology"),
                  SlotSpec("department", "text_field", label="Department"),
                  SlotSpec("fee", "price", label="Consultation fee in rupees"),
                  SlotSpec("days", "days", label="Working days, e.g. Mon-Sat"),
-                 SlotSpec("morning", "morning_window", False), SlotSpec("evening", "evening_window", False)),
-          permission="DOCTORS_CREATE", perm_source="dependency"),
+                 SlotSpec("morning", "morning_window", False, "Morning hours, e.g. 9 to 1 (blank if none)"),
+                 SlotSpec("evening", "evening_window", False, "Evening hours, e.g. 5 to 8 (blank if none)")),
+          permission="DOCTORS_CREATE", perm_source="dependency", one_of=("morning", "evening")),
     _desk("branch.doctor_assign", "Assign a doctor to a branch", "R2", "POST", "/admin/branches/{branch_id}/doctors",
           "branches", ("assign+branch", "బ్రాంచ్+అసైన్", "ब्रांच+असाइन"), playbooks.branch_assign_preview,
           slots=(SlotSpec("doctor", "doctor"), SlotSpec("branch", "branch", label="Branch"),
