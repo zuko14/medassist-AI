@@ -146,9 +146,12 @@ def _fields(r: rules.Route, layer: str) -> dict:
                            for m in r.missing],
                 "actions": [{"id": a, "summary": REGISTRY[a].summary if a in REGISTRY else a}
                             for a in r.candidate_actions]}
+        # Name the form, so staff see at once which task Kriya understood ("Add a doctor", not a patient form).
+        message = (f"{REGISTRY[r.action_id].summary}: I need a little more detail." if r.action_id in REGISTRY
+                   else "Which of these did you mean?" if r.candidate_actions else "I need a little more detail.")
         return {"to": "NEEDS_CLARIFICATION", "action_id": r.action_id, "route_layer": "form" if layer == "rules" else layer,
                 "params": r.params, "expires_at": expires,
-                "result": {"message": "I need a little more detail.", "cards": [card], "navigate": None}}
+                "result": {"message": message, "cards": [card], "navigate": None}}
     if r.kind == "action":
         return {"to": "AUTHORIZED", "action_id": r.action_id, "route_layer": layer, "params": r.params}
     code = r.error_code if r.kind == "rejected" else "unsupported"

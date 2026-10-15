@@ -667,8 +667,33 @@ OPT_IN_FEATURES: dict[str, str] = {
     "corporate_health": "Corporate Employee Health Insights",
     "ai_receptionist": "AI Voice Receptionist",
     "opd_enabled": "OPD OS (Front Desk, Queue, Consultation, Billing)",
+    "ipd_enabled": "IPD OS (Admissions, Beds, Nursing, Discharge)",
     "kriya_ketu": "Kriya Ketu assistant",
 }
+
+
+def ipd_eligible(clinic: Optional[dict]) -> bool:
+    """IPD OS builds on OPD OS (patient registry, doctor registration, billing,
+    receipts, cashier shifts), so only a clinic with OPD enabled may turn it on."""
+    return opd_enabled(clinic)
+
+
+def ipd_access(clinic: Optional[dict]) -> Optional[str]:
+    """'ACTIVE', 'WIND_DOWN' or None (module unavailable).
+
+    ACTIVE needs the owner's explicit opt-in (never the enterprise wildcard)
+    on an OPD-enabled tenant. WIND_DOWN is what an owner disable leaves while
+    patients are still admitted: their stays continue to discharge, nothing new
+    starts (docs/ipd-os/ADR.md ADR-IPD-07).
+    """
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return None
+    overrides = clinic.get("features") or {}
+    if isinstance(overrides, dict) and overrides.get("ipd_enabled") is True and opd_enabled(clinic):
+        return "ACTIVE"
+    if clinic.get("ipd_state") == "WIND_DOWN":
+        return "WIND_DOWN"
+    return None
 
 def opd_enabled(clinic: Optional[dict]) -> bool:
     """True only if the clinic is a regular tenant with an explicit owner opt-in

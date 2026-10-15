@@ -245,6 +245,21 @@ def test_search_patients(auth_front_desk):
     assert res[0]["mrn"] == "BLR-2026-0010"
 
 
+def test_search_patients_open_to_ipd_admission_desk_only():
+    """The IPD admission desk admits registry patients, so it may search; an IPD nurse may not."""
+    empty = MagicMock(data=[])
+    for perms, expected in ((["IPD_ADMISSIONS"], 200), (["IPD_NURSING"], 403)):
+        app.dependency_overrides[admin.verify_credentials] = lambda p=perms: AdminUser(
+            "ipd", role="staff", clinic_id=CLINIC_ID, permissions=p)
+        try:
+            with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)), \
+                 patch("app.services.opd.sb", AsyncMock(side_effect=[empty, empty, empty])):
+                r = client.get(f"/admin/opd/patients/search?q=Kavita&clinic_id={CLINIC_ID}")
+        finally:
+            app.dependency_overrides.pop(admin.verify_credentials, None)
+        assert r.status_code == expected, (perms, r.text)
+
+
 def test_patient_details_front_desk(auth_front_desk):
     """Front-desk receives patient details and visits, but empty clinical history."""
     fake_pat = MagicMock(data=[{

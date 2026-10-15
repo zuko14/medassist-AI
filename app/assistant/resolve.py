@@ -553,10 +553,10 @@ _MERIDIEM = re.compile(r"\d\s*(?:am|pm|a\.m\.|p\.m\.)", re.I)
 _DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _DAY_WORD = r"(mon|tue|wed|thu|fri|sat|sun)[a-z]*"
 _DAY_RANGE = re.compile(_DAY_WORD + r"\s*(?:-|–|to|till|se)\s*" + _DAY_WORD, re.I)
-_NEW_DOCTOR = re.compile(r"\b(?:add|new|create)\b(?:\s+(?:a|the))?(?:\s+new)?(?:\s+doctor)?\s+"
+_NEW_DOCTOR = re.compile(r"\b(?:add|new|create|register|onboard)\b(?:\s+(?:a|the))?(?:\s+new)?(?:\s+doctor)?\s+"
                          r"(dr\.?\s+[A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
 # "create the doctor srikanth": no "Dr", so the name is the words after "doctor" up to a non-name word.
-_NEW_DOCTOR_BARE = re.compile(r"\b(?:add|new|create)\b(?:\s+(?:a|the))?(?:\s+new)?\s+doctor\s+"
+_NEW_DOCTOR_BARE = re.compile(r"\b(?:add|new|create|register|onboard)\b(?:\s+(?:a|the))?(?:\s+new)?\s+doctor\s+"
                               r"([A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
 _NOT_NAME = re.compile(r"^(?:for|with|in|on|at|of|and|as|from|to|is|fee|fees|rs|inr|department|dept|"
                        r"specialist|specialization|mornings?|evenings?|weekdays?|daily|leave|"
@@ -682,7 +682,8 @@ def resolve_bare_windows(text: str) -> dict:
 _STAFF_NAME = re.compile(r"\b(?i:staff|login|account)\s+(?:(?i:for)\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)")
 _STAFF_ROLES = (("front desk", "FRONT_DESK"), ("receptionist", "RECEPTIONIST"), ("appointment manager",
                 "APPOINTMENT_MANAGER"), ("branch manager", "BRANCH_MANAGER"), ("pharmacy", "PHARMACY_OPERATOR"),
-                ("lab", "LAB_OPERATOR"), ("cashier", "CASHIER"), ("phlebotomist", "PHLEBOTOMIST"), ("doctor", "DOCTOR"))
+                ("lab", "LAB_OPERATOR"), ("cashier", "CASHIER"), ("phlebotomist", "PHLEBOTOMIST"), ("doctor", "DOCTOR"),
+                ("nurse", "NURSE"))
 
 
 def resolve_staff_name(text: str) -> Optional[str]:

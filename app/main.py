@@ -11,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 from app.config import settings
-from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd
+from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd, ipd
 from app.routers import voice_admin, voice_platform, assistant
 from app.voice import gateway as voice_gateway
 from app.routers.integrations import router as integrations_router
@@ -390,6 +390,7 @@ app.include_router(callmedex_v1_router)
 # Kriya OPD OS core & public display (Phase 1.2)
 app.include_router(opd.router)
 app.include_router(opd.public_router)
+app.include_router(ipd.router)
 
 
 @app.get("/")

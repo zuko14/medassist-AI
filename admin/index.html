@@ -2002,6 +2002,179 @@
         }
         @keyframes ketuFade { from { opacity: 0; } to { opacity: 1; } }
         /* ── end Kriya Ketu ─────────────────────────────────────────────────────────────────── */
+
+        /* ═══════ IPD OS (migration 111) ═══════
+           Same "Clinical Depth" tokens as the rest of the panel, so the light
+           and dark themes both follow. Status is carried by a coloured rail
+           plus a badge, never by text colour alone. */
+        .ipd-nav-label { padding: 12px 14px 4px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); }
+        .ipd-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; }
+        .ipd-head > div:first-child { min-width: 0; }
+        .card-head.ipd-head { align-items: center; }
+        .ipd-head select { width: auto; min-width: 200px; padding: 9px 14px; border-radius: 10px; border: 1px solid var(--border); background-color: var(--surface2); color: var(--text); font-family: inherit; font-weight: 500; font-size: 0.85rem; }
+        .ipd-head select:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+        .ipd-winddown { display: flex; gap: 10px; align-items: center; margin: 0 0 18px; padding: 12px 16px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); background: var(--amber-bg); color: var(--amber); font-weight: 600; font-size: 0.88rem; }
+        .ipd-winddown[hidden] { display: none; }
+
+        /* KPI strip */
+        /* eight tiles: an even 4 x 2 on desktop, 2-up on phones (below) */
+        .stats.ipd-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+        .ipd-kpis .stat { padding: 16px 18px 16px 20px; }
+        .ipd-kpis .stat::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--kpi, var(--accent)); }
+        .ipd-kpis .stat .label { font-size: 0.68rem; letter-spacing: 0.07em; margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ipd-kpis .stat .num { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+        .ipd-kpis .stat .num small { font-size: 0.95rem; font-weight: 600; color: var(--text2); margin-left: 2px; }
+
+        /* forms */
+        .ipd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 4px 18px; }
+        .ipd-grid .field { margin-bottom: 12px; }
+        .ipd-grid > .check { align-self: center; }
+        .ipd-grid-tight { grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); }
+        .ipd-span2 { grid-column: 1 / -1; }
+        .ipd-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+        .ipd-row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+        /* bed board */
+        .ipd-ward .card-head h3 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+        .ipd-ward-meta { font-size: 0.78rem; font-weight: 500; color: var(--text3); }
+        .ipd-ward-count { font-size: 0.78rem; color: var(--text2); font-variant-numeric: tabular-nums; }
+        .ipd-beds { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 12px; }
+        .ipd-bed { --rail: var(--text3); position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px 14px 14px 17px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface2); min-height: 104px; overflow: hidden; transition: border-color var(--motion-fast) var(--ease-out); }
+        .ipd-bed::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--rail); }
+        .ipd-bed:hover { border-color: var(--border2); }
+        .ipd-bed-occupied { --rail: var(--blue); }
+        .ipd-bed-available { --rail: var(--green); }
+        .ipd-bed-reserved, .ipd-bed-cleaning { --rail: var(--amber); }
+        .ipd-bed-maintenance, .ipd-bed-blocked { --rail: var(--red); }
+        .ipd-bed-maintenance > *, .ipd-bed-blocked > * { opacity: 0.8; }
+        .ipd-bed-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .ipd-bed-code { font-weight: 700; font-size: 0.95rem; line-height: 1.2; color: var(--text-strong); letter-spacing: 0.01em; }
+        .ipd-bed-cat { font-size: 0.76rem; color: var(--text3); }
+        .ipd-bed > .muted { font-size: 0.8rem; }
+        .card-head.ipd-head > .muted { font-size: 0.8rem; }
+        .ipd-bed .badge { padding: 3px 9px; font-size: 0.68rem; text-transform: capitalize; }
+        .ipd-bed .btn { align-self: flex-start; margin-top: auto; }
+        .ipd-occ { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; font-size: 0.82rem; color: var(--text2); border-radius: 8px; margin: 0 -6px; padding: 6px; transition: background var(--motion-fast); }
+        .ipd-occ:hover { background: var(--accent-row); }
+        .ipd-occ strong { color: var(--text-strong); font-size: 0.9rem; font-weight: 600; }
+        .ipd-occ:focus-visible, .ipd-worklist .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+        /* worklist */
+        .ipd-worklist { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 14px; }
+        .ipd-wl-group { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--surface2); }
+        .ipd-wl-group h4 { display: flex; justify-content: space-between; align-items: center; margin: 0 0 8px; font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text2); }
+        .ipd-wl-group h4 span { min-width: 22px; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); text-align: center; font-variant-numeric: tabular-nums; }
+        .ipd-wl-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+        .ipd-wl-group li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 0.84rem; }
+        .ipd-wl-group li:first-child { border-top: 0; }
+        .ipd-wl-group p { margin: 0; font-size: 0.86rem; }
+        .ipd-worklist .link { all: unset; cursor: pointer; color: var(--text-strong); font-weight: 600; border-radius: 4px; }
+        .ipd-worklist .link:hover { color: var(--accent); }
+        .ipd-worklist > .muted { grid-column: 1 / -1; margin: 0; }
+
+        /* registry search on the admit form */
+        .ipd-hits { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+        .ipd-hits:empty { display: none; }
+        .ipd-hit { display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; font: inherit; transition: border-color var(--motion-fast), background var(--motion-fast); }
+        .ipd-hit:hover, .ipd-hit:focus-visible { border-color: var(--accent-border); background: var(--accent-row); outline: none; }
+        .ipd-hit .muted { font-size: 0.8rem; }
+        .ipd-hit-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+        .ipd-picked { margin-top: 8px; font-size: 0.84rem; }
+        .ipd-picked.on { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--green-border); background: var(--green-bg); color: var(--text); }
+
+        /* avatar initials */
+        .ipd-av { flex-shrink: 0; display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--brand-grad); color: #fff; font-weight: 700; font-size: 0.8rem; line-height: 1; letter-spacing: 0.02em; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25); }
+        .ipd-av-lg { width: 56px; height: 56px; font-size: 1.15rem; }
+
+        /* inpatient switcher: replaces the native <select> on the chart page */
+        .ipd-switch { position: relative; width: min(380px, 100%); }
+        .ipd-switch-btn { width: 100%; display: flex; align-items: center; gap: 12px; padding: 8px 14px 8px 8px; border-radius: 14px; border: 1px solid var(--border2); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; box-shadow: inset 0 1px 0 var(--rim); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
+        .ipd-switch-btn:hover { border-color: var(--accent-border); }
+        .ipd-switch-btn:focus-visible, .ipd-switch-btn[aria-expanded="true"] { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+        .ipd-sw-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+        .ipd-sw-kicker { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); }
+        .ipd-sw-main { font-weight: 600; color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ipd-sw-sub { font-size: 0.78rem; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ipd-sw-icon { display: inline-grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+        .ipd-sw-chev { flex-shrink: 0; color: var(--text3); transition: transform var(--motion-fast) var(--ease-out); }
+        .ipd-switch-btn[aria-expanded="true"] .ipd-sw-chev { transform: rotate(180deg); }
+        .ipd-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: min(440px, calc(100vw - 32px)); border-radius: 16px; border: 1px solid var(--border2); background: var(--surface-solid); box-shadow: inset 0 1px 0 var(--rim), var(--shadow-lg); overflow: hidden; animation: ipdPop var(--motion-base) var(--ease-out); }
+        .ipd-pop[hidden] { display: none; }
+        @keyframes ipdPop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+        .ipd-pop-search { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--text3); }
+        .ipd-pop-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 0.92rem; outline: none; }
+        .ipd-pop-search input::placeholder { color: var(--text3); }
+        .ipd-pop-list { list-style: none; margin: 0; padding: 6px; max-height: min(380px, 55vh); overflow-y: auto; overscroll-behavior: contain; }
+        .ipd-pop-group { padding: 10px 10px 4px; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); }
+        .ipd-opt { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px; cursor: pointer; }
+        .ipd-opt[aria-selected="true"] { background: var(--accent-soft); }
+        .ipd-opt.active { background: var(--accent-row); box-shadow: inset 0 0 0 1px var(--accent-border); }
+        .ipd-opt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+        .ipd-opt-name { font-weight: 600; color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ipd-opt-sub { font-size: 0.76rem; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ipd-opt-bed { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+        .ipd-opt-bed .badge { padding: 2px 8px; font-size: 0.64rem; text-transform: capitalize; }
+        .ipd-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface2); font-size: 0.76rem; font-weight: 600; color: var(--text); white-space: nowrap; }
+        .ipd-chip svg { color: var(--text3); flex-shrink: 0; }
+        .ipd-chip span { color: var(--text3); font-weight: 500; }
+        .ipd-pop-empty { padding: 22px 14px; text-align: center; color: var(--text3); font-size: 0.86rem; }
+
+        /* patient banner */
+        .ipd-banner { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; position: relative; overflow: hidden; }
+        .ipd-banner::after { content: ''; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--brand-grad); opacity: 0.85; }
+        .ipd-banner-id { flex: 1; min-width: min(260px, 100%); display: flex; flex-direction: column; gap: 2px; }
+        .ipd-banner-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 0; font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text-strong); }
+        .ipd-banner-name .badge { font-size: 0.7rem; text-transform: capitalize; letter-spacing: 0.02em; }
+        .ipd-banner-sub { font-size: 0.85rem; color: var(--text2); }
+        .ipd-banner-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .ipd-banner-dx { margin: 8px 0 0; font-size: 0.84rem; color: var(--text2); }
+        .ipd-banner-dx b { color: var(--text3); font-weight: 600; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.06em; margin-right: 6px; }
+        .ipd-banner-actions { display: flex; gap: 8px; align-self: flex-start; }
+        .ipd-chart-empty { display: flex; align-items: center; gap: 16px; color: var(--text2); }
+        .ipd-chart-empty p { margin: 0; }
+
+        /* chart tabs: one segmented control that scrolls sideways on phones */
+        .ipd-tabs { display: flex; gap: 4px; margin: 0 0 18px; padding: 4px; width: fit-content; max-width: 100%; overflow-x: auto; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); scrollbar-width: none; }
+        .ipd-tabs::-webkit-scrollbar { display: none; }
+        .ipd-tabs[hidden] { display: none; }
+        .ipd-tabs button { flex-shrink: 0; padding: 8px 16px; border-radius: 10px; border: 0; background: transparent; color: var(--text2); cursor: pointer; font-family: inherit; font-weight: 600; font-size: 0.85rem; line-height: 1.2; white-space: nowrap; transition: background var(--motion-fast), color var(--motion-fast); }
+        .ipd-tabs button:hover { color: var(--text-strong); background: var(--surface2); }
+        .ipd-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+        .ipd-tabs button[aria-selected="true"] { background: var(--accent); color: #fff; box-shadow: 0 4px 14px var(--accent-glow); }
+
+        /* records */
+        .ipd-struck { opacity: 0.55; text-decoration: line-through; }
+        .ipd-note, .ipd-order { padding: 14px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+        .ipd-note:last-child, .ipd-order:last-child { border-bottom: 0; padding-bottom: 0; }
+        .ipd-note-body { white-space: pre-wrap; color: var(--text); font-size: 0.9rem; }
+        .ipd-mar { margin: 0; padding-left: 18px; font-size: 0.82rem; color: var(--text2); }
+        .ipd-timeline { list-style: none; margin: 0; padding: 0 0 0 20px; position: relative; display: flex; flex-direction: column; gap: 12px; }
+        .ipd-timeline::before { content: ''; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--border2); }
+        .ipd-timeline li { position: relative; font-size: 0.86rem; }
+        .ipd-timeline li::before { content: ''; position: absolute; left: -20px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface-solid); border: 2px solid var(--accent); box-sizing: border-box; }
+        .ipd-timeline .ev { text-transform: capitalize; color: var(--text-strong); font-weight: 600; }
+        .ipd-timeline .muted { font-size: 0.78rem; }
+        .ipd-check { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+        .ipd-check li { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+        .ipd-check li::before { content: ''; flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border2); box-sizing: border-box; }
+        .ipd-check .ok { color: var(--text); }
+        .ipd-check .ok::before { border-color: var(--green); background: var(--green) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / 11px no-repeat; }
+        .ipd-check .todo { color: var(--text2); }
+        .ipd-money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+        .ipd-dialog { border: 1px solid var(--border2); border-radius: var(--radius-lg); background: var(--surface-solid); color: var(--text); padding: 24px; width: min(480px, calc(100vw - 32px)); box-shadow: inset 0 1px 0 var(--rim), var(--shadow-lg); }
+        .ipd-dialog::backdrop { background: rgba(2, 6, 12, 0.6); backdrop-filter: blur(4px); }
+        .ipd-dialog h3 { margin: 0 0 16px; font-size: 1.05rem; color: var(--text-strong); }
+        @media (prefers-reduced-motion: reduce) { .ipd-pop { animation: none; } .ipd-sw-chev, .ipd-bed, .ipd-tabs button { transition: none; } }
+        @media (max-width: 1000px) { .stats.ipd-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        /* the panel turns .stats into a flex column on phones; the IPD KPI row stays a 2-up grid */
+        @media (max-width: 640px) {
+            .ipd-beds, .stats.ipd-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+            .ipd-kpis .stat .num { font-size: 1.45rem; }
+            .ipd-switch { width: 100%; }
+            .ipd-pop { left: 0; right: 0; width: auto; }
+            .ipd-head select { width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -2206,6 +2379,20 @@
             </div>
             <div class="nav-link" tabindex="0" data-page="opdanalytics" data-opd="admin" style="display:none" onclick="go('opdanalytics',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg></span> OPD Analytics
+            </div>
+            <!-- Kriya IPD OS (migration 111): owner opt-in on an OPD-enabled clinic -->
+            <div class="nav-section-label ipd-nav-label" data-ipd="nav" style="display:none">IPD OS</div>
+            <div class="nav-link" tabindex="0" data-page="ipdboard" data-ipd="admin admissions nursing clinical billing" style="display:none" onclick="go('ipdboard',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4v16"></path><path d="M2 8h18a2 2 0 0 1 2 2v10"></path><path d="M2 17h20"></path><path d="M6 8v9"></path></svg></span> Bed Board
+            </div>
+            <div class="nav-link" tabindex="0" data-page="ipdadmit" data-ipd="admin admissions" style="display:none" onclick="go('ipdadmit',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg></span> Admissions
+            </div>
+            <div class="nav-link" tabindex="0" data-page="ipdchart" data-ipd="admin admissions nursing clinical billing" style="display:none" onclick="go('ipdchart',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></span> Inpatient Chart
+            </div>
+            <div class="nav-link" tabindex="0" data-page="ipdsetup" data-ipd="admin" style="display:none" onclick="go('ipdsetup',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span> IPD Setup
             </div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -4182,6 +4369,7 @@
                             <option value="CUSTOM_ROLE">Custom Permissions</option>
                             <option value="DOCTOR" data-opd="role" hidden>Doctor (OPD Clinical Workspace)</option>
                             <option value="CASHIER" data-opd="role" hidden>Cashier (OPD Billing &amp; Counter)</option>
+                            <option value="NURSE" data-ipd="role" hidden>Nurse (IPD Nursing Station)</option>
                             <option value="CORPORATE_VIEWER" data-corporate="opt" hidden>Company Viewer (Corporate Health dashboard only)</option>
                             <option value="PHLEBOTOMIST" data-homecollect="opt" hidden>Phlebotomist (home sample collection only)</option>
                         </select>
@@ -4237,6 +4425,11 @@
                         <label class="check" data-opd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="OPD_CLINICAL"> OPD Clinical (Consultation notes &amp; e-prescriptions)</label>
                         <label class="check" data-opd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="OPD_BILLING"> OPD Billing (Counter shifts, invoices &amp; receipts)</label>
                         <label class="check" data-opd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="OPD_ADMIN"> OPD Admin (OPD OS settings &amp; configuration)</label>
+                        <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="IPD_ADMISSIONS"> IPD Admissions (admit, beds, transfers)</label>
+                        <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="IPD_NURSING"> IPD Nursing (vitals, notes, medication)</label>
+                        <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="IPD_CLINICAL"> IPD Clinical (rounds, orders, discharge; needs a doctor link)</label>
+                        <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="IPD_BILLING"> IPD Billing (charges and final bill)</label>
+                        <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="IPD_ADMIN"> IPD Admin (wards, beds, tariffs)</label>
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -5328,6 +5521,130 @@
             </div>
         </div>
 
+        <!-- ═══════ KRIYA IPD OS (migration 111) ═══════ -->
+        <div id="pg-ipdboard" class="sec">
+            <div class="page-head ipd-head">
+                <div><h2>Bed Board</h2><p>Live occupancy across wards. A bed shows as free only after the server confirms it.</p></div>
+                <button type="button" class="btn btn-accent btn-sm" onclick="ipd.loadBoard()">Refresh</button>
+            </div>
+            <div class="ipd-winddown" data-ipd-winddown hidden>IPD is being switched off for this clinic: new admissions are closed. Existing patients continue to discharge.</div>
+            <div class="stats ipd-kpis" id="ipdKpis"></div>
+            <div id="ipdBoardWards"><div class="loader"><div class="spin"></div>Loading...</div></div>
+            <div class="card">
+                <div class="card-head"><h3>Needs attention</h3></div>
+                <div id="ipdWorklist" class="ipd-worklist"></div>
+            </div>
+        </div>
+
+        <div id="pg-ipdadmit" class="sec">
+            <div class="page-head ipd-head">
+                <div><h2>Admissions</h2><p>Admit a registered patient, place them in a bed, and manage the waiting list.</p></div>
+            </div>
+            <div class="ipd-winddown" data-ipd-winddown hidden>IPD is being switched off for this clinic: new admissions are closed.</div>
+            <div class="card" id="ipdAdmitCard">
+                <div class="card-head"><h3>Admit a patient</h3></div>
+                <div class="ipd-grid">
+                    <div class="field ipd-span2">
+                        <label for="ipdPatientQ">Patient (name, phone or MRN from the OPD registry)</label>
+                        <input id="ipdPatientQ" type="search" autocomplete="off" placeholder="Type at least 2 characters" oninput="ipd.searchPatients()">
+                        <div id="ipdPatientHits" class="ipd-hits" role="listbox" aria-label="Matching patients"></div>
+                        <div id="ipdPatientPicked" class="ipd-picked muted">No patient selected. New patients are registered at OPD Front Desk first.</div>
+                    </div>
+                    <div class="field"><label for="ipdAdmDoctor">Admitting doctor</label><select id="ipdAdmDoctor"></select></div>
+                    <div class="field"><label for="ipdAttDoctor">Attending doctor</label><select id="ipdAttDoctor"><option value="">Same as admitting</option></select></div>
+                    <div class="field"><label for="ipdSource">Source</label>
+                        <select id="ipdSource"><option value="opd">From OPD</option><option value="emergency">Emergency</option><option value="direct" selected>Direct</option><option value="referral">Referral</option><option value="transfer_in">Transfer in</option></select></div>
+                    <div class="field"><label for="ipdPriority">Priority</label>
+                        <select id="ipdPriority"><option value="elective">Elective</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></select></div>
+                    <div class="field ipd-span2"><label for="ipdReason">Reason for admission</label><textarea id="ipdReason" rows="2" maxlength="500"></textarea></div>
+                    <div class="field ipd-span2"><label for="ipdProvDx">Provisional diagnosis (optional; shown to clinical staff only)</label><input id="ipdProvDx" maxlength="500"></div>
+                    <div class="field"><label for="ipdBed">Bed</label><select id="ipdBed"></select></div>
+                    <div class="field"><label for="ipdExpected">Expected discharge</label><input id="ipdExpected" type="date"></div>
+                    <div class="field"><label for="ipdPayer">Payer</label>
+                        <select id="ipdPayer"><option value="self">Self pay</option><option value="insurance">Insurance</option><option value="corporate">Corporate</option><option value="government_scheme">Government scheme</option></select></div>
+                    <div class="field"><label for="ipdPayerName">Insurer / scheme</label><input id="ipdPayerName" maxlength="120"></div>
+                    <div class="field"><label for="ipdAttName">Attendant name</label><input id="ipdAttName" maxlength="100"></div>
+                    <div class="field"><label for="ipdAttPhone">Attendant phone</label><input id="ipdAttPhone" inputmode="tel" maxlength="15"></div>
+                    <label class="check ipd-span2"><input type="checkbox" id="ipdConsent"> Admission consent signed and filed</label>
+                </div>
+                <div class="ipd-actions"><button type="button" class="btn btn-accent" id="ipdAdmitBtn" onclick="ipd.admit()">Admit patient</button></div>
+            </div>
+            <div class="card">
+                <div class="card-head ipd-head">
+                    <h3>Admissions</h3>
+                    <select id="ipdAdmFilter" aria-label="Filter admissions" onchange="ipd.loadAdmissions()">
+                        <option value="pending,admitted,discharge_pending">Active</option>
+                        <option value="pending">Waiting for a bed</option>
+                        <option value="discharge_pending">Discharge in progress</option>
+                        <option value="discharged">Discharged</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="tbl-wrap" id="ipdAdmList"></div>
+            </div>
+        </div>
+
+        <div id="pg-ipdchart" class="sec">
+            <div class="page-head ipd-head">
+                <div><h2>Inpatient Chart</h2><p>One record per stay: observations, notes, orders, medication, billing and discharge.</p></div>
+                <div class="ipd-switch" id="ipdSwitch">
+                    <button type="button" class="ipd-switch-btn" id="ipdSwitchBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="ipdPop" onclick="ipd.sw.toggle()" onkeydown="ipd.sw.btnKey(event)">
+                        <span class="ipd-sw-icon" id="ipdSwitchAv" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span>
+                        <span class="ipd-sw-text"><span class="ipd-sw-kicker">Inpatient</span><span class="ipd-sw-main" id="ipdSwitchMain">Choose an inpatient</span><span class="ipd-sw-sub" id="ipdSwitchSub">Search by name, MRN, bed or IPD no.</span></span>
+                        <svg class="ipd-sw-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </button>
+                    <div class="ipd-pop" id="ipdPop" hidden>
+                        <div class="ipd-pop-search">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <input id="ipdSwitchQ" type="text" role="combobox" aria-expanded="true" aria-controls="ipdSwitchList" aria-autocomplete="list" aria-label="Search inpatients" placeholder="Name, MRN, bed or IPD no." autocomplete="off" spellcheck="false" oninput="ipd.sw.render()" onkeydown="ipd.sw.key(event)">
+                        </div>
+                        <ul class="ipd-pop-list" id="ipdSwitchList" role="listbox" aria-label="Inpatients"></ul>
+                    </div>
+                </div>
+            </div>
+            <div id="ipdChartHead" class="card"><div class="ipd-chart-empty"><span class="ipd-sw-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></span><p>Choose an inpatient above, or open one from the Bed Board.</p></div></div>
+            <div class="ipd-tabs" role="tablist" id="ipdTabs" hidden>
+                <button type="button" role="tab" data-tab="overview" onclick="ipd.tab('overview')">Overview</button>
+                <button type="button" role="tab" data-tab="obs" data-ipd="nursing clinical" onclick="ipd.tab('obs')">Vitals &amp; I/O</button>
+                <button type="button" role="tab" data-tab="notes" data-ipd="nursing clinical" onclick="ipd.tab('notes')">Notes</button>
+                <button type="button" role="tab" data-tab="orders" data-ipd="nursing clinical" onclick="ipd.tab('orders')">Orders &amp; MAR</button>
+                <button type="button" role="tab" data-tab="billing" data-ipd="billing admissions admin" onclick="ipd.tab('billing')">Charges &amp; Bill</button>
+                <button type="button" role="tab" data-tab="discharge" onclick="ipd.tab('discharge')">Discharge</button>
+            </div>
+            <div id="ipdTabBody"></div>
+        </div>
+
+        <div id="pg-ipdsetup" class="sec">
+            <div class="page-head ipd-head">
+                <div><h2>IPD Setup</h2><p>Wards, beds and daily bed tariffs (rupees per day, per bed category).</p></div>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Billing settings</h3></div>
+                <div id="ipdTariffs"></div>
+                <div class="ipd-grid">
+                    <div class="field"><label for="ipdCutoff">Discharge cut-off hour (IST, 0-23)</label><input id="ipdCutoff" type="number" min="0" max="23"></div>
+                    <div class="field"><label for="ipdResMin">Bed reservation hold (minutes)</label><input id="ipdResMin" type="number" min="5" max="1440"></div>
+                </div>
+                <p class="muted">Bed-day rule: every IST calendar day in a bed counts; once a discharge is started, the last day is not charged if it ends before the cut-off hour. Confirm this matches your hospital's tariff policy before go-live.</p>
+                <div class="ipd-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="ipd.addTariffRow()">Add category</button>
+                    <button type="button" class="btn btn-accent btn-sm" onclick="ipd.saveSettings()">Save settings</button></div>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Add a ward</h3></div>
+                <div class="ipd-grid">
+                    <div class="field"><label for="ipdWardCode">Code</label><input id="ipdWardCode" maxlength="20" placeholder="GW1"></div>
+                    <div class="field"><label for="ipdWardName">Name</label><input id="ipdWardName" maxlength="80" placeholder="General Ward 1"></div>
+                    <div class="field"><label for="ipdWardType">Type</label><select id="ipdWardType">
+                        <option value="general">General</option><option value="semi_private">Semi-private</option><option value="private">Private</option>
+                        <option value="icu">ICU</option><option value="hdu">HDU</option><option value="nicu">NICU</option><option value="picu">PICU</option>
+                        <option value="maternity">Maternity</option><option value="isolation">Isolation</option><option value="daycare">Day care</option>
+                        <option value="emergency">Emergency</option><option value="other">Other</option></select></div>
+                    <div class="field"><label for="ipdWardGender">Gender restriction</label><select id="ipdWardGender"><option value="any">None</option><option value="male">Male only</option><option value="female">Female only</option></select></div>
+                </div>
+                <div class="ipd-actions"><button type="button" class="btn btn-accent btn-sm" onclick="ipd.createWard()">Create ward</button></div>
+            </div>
+            <div id="ipdSetupWards"></div>
+        </div>
     </main>
 </div>
 
@@ -5736,6 +6053,7 @@
                     <option value="CUSTOM_ROLE">Custom Permissions</option>
                     <option value="DOCTOR" data-opd="role" hidden>Doctor (OPD Clinical Workspace)</option>
                     <option value="CASHIER" data-opd="role" hidden>Cashier (OPD Billing &amp; Counter)</option>
+                    <option value="NURSE" data-ipd="role" hidden>Nurse (IPD Nursing Station)</option>
                     <option value="PHLEBOTOMIST" disabled>Phlebotomist</option>
                 </select>
             </div>
@@ -5797,6 +6115,11 @@
                 <label class="check" data-opd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="OPD_CLINICAL"> OPD Clinical</label>
                 <label class="check" data-opd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="OPD_BILLING"> OPD Billing</label>
                 <label class="check" data-opd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="OPD_ADMIN"> OPD Admin</label>
+                <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="IPD_ADMISSIONS"> IPD Admissions</label>
+                <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="IPD_NURSING"> IPD Nursing</label>
+                <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="IPD_CLINICAL"> IPD Clinical</label>
+                <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="IPD_BILLING"> IPD Billing</label>
+                <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="IPD_ADMIN"> IPD Admin</label>
             </div>
         </div>
         <div class="modal-actions">
@@ -6383,6 +6706,7 @@ let myPlanServiceLines = [];
 // migration 103: OPD OS (front desk, live queue, clinical, billing)
 let myOpd = false;
 let myOpdState = null;
+let myIpd = null;  // /admin/me.ipd_access: 'ACTIVE' | 'WIND_DOWN' | null
 let myDoctorId = null;
 
 function hasPermission(perm) {
@@ -6502,6 +6826,7 @@ function applyFeatureVisibility() {
     if (branchForm) branchForm.style.display = hasPermission('BRANCHES_MANAGE') ? '' : 'none';
 
     applyOpdGates();
+    applyIpdGates();
     applyPermissionVisibility();
     applyOpdRoleNav();
 }
@@ -6510,7 +6835,7 @@ function applyFeatureVisibility() {
 // pages their grants open, plus any page an extra permission was delegated
 // for. The server refuses the rest (admin._OPD_ROLE_DENIED_ROUTES).
 function isOpdRole() {
-    return myRole === 'staff' && (myStaffRole === 'DOCTOR' || myStaffRole === 'CASHIER');
+    return myRole === 'staff' && (myStaffRole === 'DOCTOR' || myStaffRole === 'CASHIER' || myStaffRole === 'NURSE');
 }
 // A doctor-linked login with no desk/billing/admin grant works only its own queue.
 function isOpdDoctorOnly() {
@@ -6534,7 +6859,7 @@ function applyOpdRoleNav() {
     if (!isOpdRole()) return;
     document.querySelectorAll('.nav-links .nav-link[data-page]').forEach(el => {
         const page = el.dataset.page;
-        if (page.startsWith('opd') || OPD_ROLE_SELF_GATED.has(page)) return;
+        if (page.startsWith('opd') || page.startsWith('ipd') || OPD_ROLE_SELF_GATED.has(page)) return;
         const perms = OPD_ROLE_PAGE_PERMS[page];
         if (!perms || !perms.some(p => (myPermissions || []).includes(p))) el.style.display = 'none';
     });
@@ -6543,7 +6868,7 @@ function firstVisibleNavPage() {
     const visible = Array.from(document.querySelectorAll('.nav-links .nav-link[data-page]'))
         .filter(n => n.style.display !== 'none').map(n => n.dataset.page);
     // Each role's main screen first: consultation, counter, desk.
-    return ['opdworkspace', 'opdbilling', 'opddesk'].find(p => visible.includes(p)) || visible[0] || null;
+    return ['opdworkspace', 'opdbilling', 'opddesk', 'ipdboard'].find(p => visible.includes(p)) || visible[0] || null;
 }
 
 // Branch-pinned logins work their own branch: its doctors (plus any doctor
@@ -6636,6 +6961,777 @@ function opdEarnPicksDoctor() {
     return perms.includes('OPD_ADMIN') || perms.includes('OPD_BILLING');
 }
 
+
+// ═══════ KRIYA IPD OS (migration 111) ═══════
+// Module gate: /admin/me.ipd_access ('ACTIVE' | 'WIND_DOWN' | null). The server
+// enforces every permission again; hiding here is convenience, not security.
+const IPD_CAP = { admin: ['IPD_ADMIN'], admissions: ['IPD_ADMISSIONS'], nursing: ['IPD_NURSING'],
+    clinical: ['IPD_CLINICAL'], billing: ['IPD_BILLING'] };
+function ipdCan(cap) {
+    if (!myIpd) return false;
+    if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
+    return (IPD_CAP[cap] || []).some(p => (myPermissions || []).includes(p));
+}
+
+function applyIpdGates() {
+    document.querySelectorAll('[data-ipd]').forEach(el => {
+        const caps = (el.dataset.ipd || '').split(' ');
+        if (el.tagName === 'OPTION') { el.hidden = !myIpd; el.disabled = !myIpd; return; }
+        if (caps.includes('perm') || caps.includes('nav')) {
+            el.style.display = myIpd ? '' : 'none';
+            const cb = el.querySelector && el.querySelector('input[type="checkbox"]');
+            if (!myIpd && cb) cb.checked = false;
+            return;
+        }
+        el.style.display = caps.some(ipdCan) ? '' : 'none';
+    });
+    document.querySelectorAll('[data-ipd-winddown]').forEach(el => { el.hidden = myIpd !== 'WIND_DOWN'; });
+    const admitCard = document.getElementById('ipdAdmitCard');
+    if (admitCard) admitCard.style.display = myIpd === 'ACTIVE' ? '' : 'none';
+}
+
+const ipd = {
+    board: null, doctors: [], picked: null, admitKey: null, chart: null, tabName: 'overview', searchTimer: null,
+
+    rupees(p) { return p == null ? '—' : '₹' + (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+    when(s) { return s ? new Date(s).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'; },
+    label(s) { return String(s || '').replace(/_/g, ' '); },
+    key() { return (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)); },
+    fail(e) { toast(e && e.message ? e.message : 'Something went wrong', true); },
+    initials(n) { const w = String(n || '').trim().split(/\s+/).filter(Boolean); return ((w[0] || '?')[0] + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase(); },
+    cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); },
+    // ward type / bed category for display: unit acronyms stay upper case (ICU, not Icu)
+    kind(s) { const t = ipd.label(s); return /^(icu|hdu|nicu|picu|iccu|sicu|micu)$/i.test(t) ? t.toUpperCase() : ipd.cap(t); },
+    // "Day 1" is the day of admission, as ward staff count it
+    stayDay(days) { return days == null ? null : Number(days) + 1; },
+    who(p) { return [p.mrn, ipd.cap(p.gender), p.age_years != null ? p.age_years + ' y' : ''].filter(Boolean).join(' · '); },
+    icon: {
+        bed: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4v16"></path><path d="M2 8h18a2 2 0 0 1 2 2v10"></path><path d="M2 17h20"></path><path d="M6 8v9"></path></svg>',
+        file: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>',
+        doc: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"></path><path d="M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4"></path><circle cx="20" cy="10" r="2"></circle></svg>',
+        clock: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline></svg>',
+        person: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
+    },
+    chip(icon, label, value) { return `<span class="ipd-chip">${ipd.icon[icon] || ''}${label ? `<span>${esc(label)}</span>` : ''}${esc(value)}</span>`; },
+
+    // Inpatient switcher (chart page): a button that opens a searchable
+    // listbox. ARIA combobox pattern; arrows/Home/End move, Enter opens, Esc closes.
+    sw: {
+        list: [], shown: [], active: -1,
+        el(id) { return document.getElementById(id); },
+        isOpen() { return !ipd.sw.el('ipdPop').hidden; },
+        open() {
+            const s = ipd.sw;
+            s.el('ipdPop').hidden = false;
+            s.el('ipdSwitchBtn').setAttribute('aria-expanded', 'true');
+            s.el('ipdSwitchQ').value = '';
+            s.render();
+            const cur = ipd.chart ? s.shown.findIndex(a => a.id === ipd.chart.admission.id) : -1;
+            s.move(cur >= 0 ? cur : 0);
+            s.el('ipdSwitchQ').focus();
+        },
+        close(refocus) {
+            const s = ipd.sw;
+            if (!s.isOpen()) return;
+            s.el('ipdPop').hidden = true;
+            s.el('ipdSwitchBtn').setAttribute('aria-expanded', 'false');
+            if (refocus) s.el('ipdSwitchBtn').focus();
+        },
+        toggle() { ipd.sw.isOpen() ? ipd.sw.close(true) : ipd.sw.open(); },
+        btnKey(e) { if (['ArrowDown', 'ArrowUp'].includes(e.key) && !ipd.sw.isOpen()) { e.preventDefault(); ipd.sw.open(); } },
+        render() {
+            const s = ipd.sw, q = s.el('ipdSwitchQ').value.trim().toLowerCase();
+            s.shown = s.list.filter(a => !q || [a.patient_name, a.mrn, a.bed, a.admission_number, a.attending_doctor]
+                .some(v => String(v || '').toLowerCase().includes(q)));
+            const cur = ipd.chart ? ipd.chart.admission.id : null;
+            const opt = (a, i) => `<li class="ipd-opt" role="option" id="ipdOpt-${i}" aria-selected="${a.id === cur}" onmousedown="event.preventDefault()" onclick="ipd.sw.choose(${i})" onmousemove="ipd.sw.move(${i}, true)">
+                <span class="ipd-av" aria-hidden="true">${esc(ipd.initials(a.patient_name))}</span>
+                <span class="ipd-opt-text"><span class="ipd-opt-name">${esc(a.patient_name || 'Patient')}</span><span class="ipd-opt-sub">${esc([a.admission_number, ipd.who(a)].filter(Boolean).join(' · '))}</span></span>
+                <span class="ipd-opt-bed">${a.bed ? ipd.chip('bed', '', a.bed) : ''}${a.status === 'discharge_pending' ? ipd.statusBadge(a.status) : ''}</span></li>`;
+            const inBed = [], waiting = [];
+            s.shown.forEach((a, i) => (a.status === 'pending' ? waiting : inBed).push(opt(a, i)));
+            s.el('ipdSwitchList').innerHTML = !s.list.length ? '<li class="ipd-pop-empty" role="presentation">No one is admitted right now.</li>'
+                : !s.shown.length ? '<li class="ipd-pop-empty" role="presentation">No inpatient matches that search.</li>'
+                : (inBed.length ? `<li class="ipd-pop-group" role="presentation">In a bed · ${inBed.length}</li>${inBed.join('')}` : '')
+                + (waiting.length ? `<li class="ipd-pop-group" role="presentation">Waiting for a bed · ${waiting.length}</li>${waiting.join('')}` : '');
+            s.move(s.shown.length ? 0 : -1);
+        },
+        move(i, fromMouse) {
+            const s = ipd.sw;
+            s.active = i;
+            document.querySelectorAll('#ipdSwitchList .ipd-opt').forEach(o => o.classList.toggle('active', o.id === 'ipdOpt-' + i));
+            const q = s.el('ipdSwitchQ');
+            if (i < 0) { q.removeAttribute('aria-activedescendant'); return; }
+            q.setAttribute('aria-activedescendant', 'ipdOpt-' + i);
+            if (!fromMouse) s.el('ipdOpt-' + i)?.scrollIntoView({ block: 'nearest' });
+        },
+        key(e) {
+            const s = ipd.sw, n = s.shown.length;
+            const to = { ArrowDown: s.active + 1, ArrowUp: s.active - 1, Home: 0, End: n - 1 }[e.key];
+            if (to !== undefined) { e.preventDefault(); if (n) s.move((to + n) % n); }
+            else if (e.key === 'Enter') { e.preventDefault(); if (s.active >= 0) s.choose(s.active); }
+            else if (e.key === 'Escape') { e.preventDefault(); s.close(true); }
+            else if (e.key === 'Tab') s.close(false);
+        },
+        choose(i) {
+            const a = ipd.sw.shown[i];
+            ipd.sw.close(true);
+            if (a) ipd.openChart(a.id);
+        },
+        // Button label follows the open chart (which may be a closed stay not in the list).
+        sync() {
+            const s = ipd.sw, c = ipd.chart;
+            const a = c ? { patient_name: c.patient_name, admission_number: c.admission.admission_number, mrn: c.mrn,
+                bed: (s.list.find(x => x.id === c.admission.id) || {}).bed } : null;
+            s.el('ipdSwitchMain').textContent = a ? (a.patient_name || 'Patient') : 'Choose an inpatient';
+            s.el('ipdSwitchSub').textContent = a ? [a.bed, a.admission_number, a.mrn].filter(Boolean).join(' · ')
+                : (s.list.length ? `${s.list.length} active · search by name, MRN, bed or IPD no.` : 'No one is admitted right now');
+            const av = s.el('ipdSwitchAv');
+            av.className = a ? 'ipd-av' : 'ipd-sw-icon';
+            if (a) av.textContent = ipd.initials(a.patient_name);
+            else av.innerHTML = ipd.icon.person;
+        },
+    },
+    statusBadge(s) {
+        const cls = { available: 'confirmed', occupied: 'completed', reserved: 'pending', cleaning: 'no_show',
+            maintenance: 'inactive', blocked: 'cancelled', admitted: 'confirmed', pending: 'pending',
+            discharge_pending: 'no_show', discharged: 'completed', cancelled: 'cancelled' }[s] || 'secondary';
+        return `<span class="badge badge-${cls}">${esc(ipd.label(s))}</span>`;
+    },
+    async busy(btn, fn) {
+        if (btn) btn.disabled = true;
+        try { return await fn(); } catch (e) { ipd.fail(e); } finally { if (btn) btn.disabled = false; }
+    },
+
+    // One small native <dialog> form instead of chained prompts. Resolves to
+    // {name: value} on Save, null on Cancel/Esc.
+    form(title, fieldsHtml, okText = 'Save') {
+        return new Promise(resolve => {
+            const d = document.createElement('dialog');
+            d.className = 'ipd-dialog';
+            d.innerHTML = `<form method="dialog"><h3>${esc(title)}</h3>${fieldsHtml}
+                <div class="ipd-actions"><button type="button" class="btn btn-ghost btn-sm" value="cancel">Cancel</button>
+                <button type="submit" class="btn btn-accent btn-sm" value="ok">${esc(okText)}</button></div></form>`;
+            document.body.appendChild(d);
+            const done = v => { d.close(); d.remove(); resolve(v); };
+            d.querySelector('button[value="cancel"]').onclick = () => done(null);
+            d.addEventListener('cancel', e => { e.preventDefault(); done(null); });
+            d.querySelector('form').onsubmit = e => {
+                e.preventDefault();
+                const missing = [...d.querySelectorAll('[required]')].find(el => !el.value.trim());
+                if (missing) { missing.focus(); return; }
+                const out = {};
+                d.querySelectorAll('[name]').forEach(el => { out[el.name] = el.value.trim(); });
+                done(out);
+            };
+            d.showModal();
+            const first = d.querySelector('[name]');
+            if (first) first.focus();
+        });
+    },
+
+    // ── Bed board + census + worklist ──
+    async loadBoard() {
+        const wrap = document.getElementById('ipdBoardWards');
+        try {
+            const [board, census, work] = await Promise.all([api('/admin/ipd/board'), api('/admin/ipd/census'),
+                api('/admin/ipd/worklist')]);
+            ipd.board = board;
+            ipd.renderKpis(census);
+            ipd.renderBoard(board);
+            ipd.renderWorklist(work);
+        } catch (e) { wrap.innerHTML = `<div class="alert alert-err">${esc(e.message)}</div>`; }
+    },
+    renderKpis(c) {
+        // [label, value, unit, rail colour]
+        const k = [['Occupancy', c.occupancy_pct ?? '—', c.occupancy_pct == null ? '' : '%', 'var(--accent)'], ['In beds', c.inpatients, '', 'var(--blue)'],
+            ['Waiting for a bed', c.awaiting_bed, '', 'var(--amber)'], ['Discharge in progress', c.discharge_pending, '', 'var(--pink)'],
+            ['Free beds', c.beds.available, '', 'var(--green)'], ['Cleaning', c.beds.cleaning, '', 'var(--amber)'],
+            ['Admitted today', c.admitted_today, '', 'var(--cyan)'], ['Discharged today', c.discharged_today, '', 'var(--text3)']];
+        document.getElementById('ipdKpis').innerHTML = k.map(([l, v, unit, rail]) =>
+            `<div class="stat" style="--kpi:${rail}"><div class="label" title="${esc(l)}">${esc(l)}</div><div class="num">${esc(v ?? 0)}${unit ? `<small>${unit}</small>` : ''}</div></div>`).join('');
+    },
+    renderBoard(b) {
+        const wrap = document.getElementById('ipdBoardWards');
+        if (!b.wards.length) {
+            wrap.innerHTML = emptyState('calendar', ipdCan('admin') ? 'No wards yet. Add wards and beds in IPD Setup.' : 'No wards are configured yet.');
+            return;
+        }
+        wrap.innerHTML = b.wards.map(w => {
+            const beds = w.beds.filter(x => x.is_active), occ = beds.filter(x => x.status === 'occupied').length;
+            return `<div class="card ipd-ward"><div class="card-head"><h3>${esc(w.name)} <span class="ipd-ward-meta">${esc(w.code)} · ${esc(ipd.kind(w.ward_type))}${w.gender_restriction !== 'any' ? ' · ' + esc(ipd.cap(w.gender_restriction)) + ' only' : ''}${w.is_active ? '' : ' · inactive'}</span></h3>
+            <span class="ipd-ward-count">${occ} of ${beds.length} occupied</span></div>
+            <div class="ipd-beds">${beds.map(ipd.bedTile).join('') || '<p class="muted">No beds in this ward.</p>'}</div></div>`;
+        }).join('');
+    },
+    bedTile(bed) {
+        const o = bed.occupant;
+        let body = '', act = '';
+        if (o && bed.status === 'occupied') {
+            body = `<button type="button" class="ipd-occ" onclick="ipd.openChart('${esc(o.admission_id)}')">
+                <strong>${esc(o.patient_name || 'Patient')}</strong><span>${esc(o.admission_number || '')} · Day ${esc(ipd.stayDay(o.days) ?? 1)}</span>
+                <span>${esc(o.attending_doctor || '')}</span>${o.provisional_diagnosis ? `<span class="muted">${esc(o.provisional_diagnosis)}</span>` : ''}
+                ${o.status === 'discharge_pending' ? '<span class="badge badge-no_show">discharge in progress</span>' : ''}</button>`;
+        } else if (bed.status === 'reserved') {
+            body = `<span class="muted">Held for ${esc(o ? (o.patient_name || o.admission_number) : 'a patient')}${bed.reservation_expired ? ' (hold expired)' : ' until ' + esc(ipd.when(bed.reserved_until))}</span>`;
+            if (ipdCan('admissions')) act = `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.releaseHold('${esc(bed.id)}')">Release hold</button>`;
+        } else if (bed.status === 'cleaning' && (ipdCan('nursing') || ipdCan('admissions'))) {
+            act = `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.setBedStatus('${esc(bed.id)}','available')">Mark clean</button>`;
+        } else if (bed.status === 'available' && ipdCan('admissions') && myIpd === 'ACTIVE') {
+            act = `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.admitInto('${esc(bed.id)}')">Admit here</button>`;
+        } else if (['maintenance', 'blocked'].includes(bed.status) && bed.status_reason) {
+            body = `<span class="muted">${esc(bed.status_reason)}</span>`;
+        }
+        return `<div class="ipd-bed ipd-bed-${esc(bed.status)}"><div class="ipd-bed-top"><span class="ipd-bed-code">${esc(bed.code)}</span>${ipd.statusBadge(bed.status)}</div>
+            <div class="ipd-bed-cat">${esc(ipd.kind(bed.bed_category))}${bed.room_label ? ' · ' + esc(bed.room_label) : ''}</div>${body}${act}</div>`;
+    },
+    renderWorklist(w) {
+        const row = (x, extra) => `<li><button type="button" class="link" onclick="ipd.openChart('${esc(x.admission_id)}')">${esc(x.patient_name || x.admission_number)}</button> <span class="muted">${esc(x.admission_number || '')}</span> ${extra || ''}</li>`;
+        const group = (title, n, inner) => `<div class="ipd-wl-group"><h4>${esc(title)} <span>${n}</span></h4>${inner}</div>`;
+        const parts = [];
+        if (w.awaiting_bed.length) parts.push(group('Waiting for a bed', w.awaiting_bed.length, `<ul>${w.awaiting_bed.map(x => row(x, ipd.statusBadge(x.priority === 'emergency' ? 'cancelled' : 'pending').replace(/>[^<]*</, '>' + esc(x.priority) + '<'))).join('')}</ul>`));
+        if (w.discharge_pending.length) parts.push(group('Discharge in progress', w.discharge_pending.length, `<ul>${w.discharge_pending.map(x => row(x, '<span class="muted">' + esc(ipd.label(x.discharge_type)) + '</span>')).join('')}</ul>`));
+        if (w.beds_to_clean.length) parts.push(group('Beds to clean', w.beds_to_clean.length, `<p>${w.beds_to_clean.map(b => esc(b.code)).join(', ')}</p>`));
+        if (w.active_orders && w.active_orders.length) parts.push(group('Active orders', w.active_orders.length, `<ul>${w.active_orders.slice(0, 50).map(o => row(o, esc(o.description) + (o.priority !== 'routine' ? ' <span class="badge badge-cancelled">' + esc(o.priority) + '</span>' : ''))).join('')}</ul>`));
+        document.getElementById('ipdWorklist').innerHTML = parts.join('') || '<p class="muted">Nothing waiting. Every patient is placed and every bed is ready.</p>';
+    },
+    async setBedStatus(bedId, status, reason) {
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/beds/${bedId}/status`, { status, reason: reason || null }); toast('Bed updated'); ipd.loadBoard(); });
+    },
+    async releaseHold(bedId) {
+        if (!(await confirmDialog('Release this bed hold? The patient stays on the waiting list.'))) return;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/beds/${bedId}/release-reservation`, {}); toast('Hold released'); ipd.loadBoard(); });
+    },
+    // loadAdmit applies the bed once its free-bed list has loaded (a timer raced the fetch)
+    admitInto(bedId) { ipd.pendingBed = bedId; go('ipdadmit'); },
+
+    // ── Admissions ──
+    async loadAdmit() {
+        ipd.admitKey = ipd.key();
+        try {
+            const [docs, board] = await Promise.all([api('/admin/doctors'), api('/admin/ipd/board')]);
+            ipd.doctors = (docs || []).filter(d => d.is_active !== false);
+            ipd.board = board;
+            const opts = ipd.doctors.map(d => `<option value="${esc(d.id)}">${esc(d.name)}${d.department ? ' · ' + esc(d.department) : ''}</option>`).join('');
+            document.getElementById('ipdAdmDoctor').innerHTML = opts;
+            document.getElementById('ipdAttDoctor').innerHTML = '<option value="">Same as admitting</option>' + opts;
+            const bedSel = document.getElementById('ipdBed');
+            ipd.fillBedSelect(bedSel, true);
+            if (ipd.pendingBed) { bedSel.value = ipd.pendingBed; ipd.pendingBed = null; }
+        } catch (e) { ipd.fail(e); }
+        ipd.loadAdmissions();
+    },
+    fillBedSelect(sel, allowNone) {
+        const free = [];
+        (ipd.board?.wards || []).forEach(w => w.beds.filter(b => b.is_active && (b.status === 'available' || b.reservation_expired))
+            .forEach(b => free.push(`<option value="${esc(b.id)}">${esc(w.name)} · ${esc(b.code)} (${esc(ipd.label(b.bed_category))})</option>`)));
+        sel.innerHTML = (allowNone ? '<option value="">No bed yet (waiting list)</option>' : '') + free.join('');
+    },
+    searchPatients() {
+        clearTimeout(ipd.searchTimer);
+        const q = document.getElementById('ipdPatientQ').value.trim();
+        const hits = document.getElementById('ipdPatientHits');
+        if (q.length < 2) { hits.innerHTML = ''; return; }
+        ipd.searchTimer = setTimeout(async () => {
+            try {
+                const rows = await api('/admin/opd/patients/search?q=' + encodeURIComponent(q));
+                ipd.hits = rows || [];
+                hits.innerHTML = ipd.hits.slice(0, 10).map((p, i) => `<button type="button" class="ipd-hit" onclick="ipd.pickPatient(${i})">
+                    <span class="ipd-av" aria-hidden="true">${esc(ipd.initials(p.name))}</span><span class="ipd-hit-text"><strong>${esc(p.name)}</strong>
+                    <span class="muted">${esc([p.mrn || 'No MRN', p.phone, p.family_member_id ? 'Family member' : ''].filter(Boolean).join(' · '))}</span></span></button>`).join('')
+                    || '<p class="muted">No match. Register the patient at OPD Front Desk.</p>';
+            } catch (e) {
+                hits.innerHTML = `<p class="muted">${esc(e.status === 403 ? 'Searching the registry needs the IPD Admissions or OPD Front Desk permission.' : e.message)}</p>`;
+            }
+        }, 250);
+    },
+    pickPatient(i) {
+        ipd.picked = ipd.hits[i];
+        document.getElementById('ipdPatientHits').innerHTML = '';
+        const el = document.getElementById('ipdPatientPicked');
+        el.classList.add('on');
+        el.innerHTML = `<span class="ipd-av" aria-hidden="true">${esc(ipd.initials(ipd.picked.name))}</span><span class="ipd-hit-text"><strong>${esc(ipd.picked.name)}</strong>
+            <span class="muted">${esc([ipd.picked.mrn, ipd.picked.phone].filter(Boolean).join(' · '))}</span></span>`;
+    },
+    async admit() {
+        const v = id => document.getElementById(id).value.trim();
+        if (!ipd.picked) { toast('Choose a patient first', true); return; }
+        if (v('ipdReason').length < 3) { toast('Enter the reason for admission', true); return; }
+        const body = {
+            patient_id: ipd.picked.patient_id, family_member_id: ipd.picked.family_member_id || null,
+            admitting_doctor_id: v('ipdAdmDoctor'), attending_doctor_id: v('ipdAttDoctor') || null,
+            source: v('ipdSource'), priority: v('ipdPriority'), reason: v('ipdReason'),
+            provisional_diagnosis: v('ipdProvDx') || null, bed_id: v('ipdBed') || null,
+            expected_discharge_on: v('ipdExpected') || null, payer_type: v('ipdPayer'), payer_name: v('ipdPayerName') || null,
+            attendant_name: v('ipdAttName') || null, attendant_phone: v('ipdAttPhone') || null,
+            consent_recorded: document.getElementById('ipdConsent').checked, idempotency_key: ipd.admitKey,
+        };
+        await ipd.busy(document.getElementById('ipdAdmitBtn'), async () => {
+            const a = await apiPost('/admin/ipd/admissions', body);
+            toast(`${a.admission_number} ${a.status === 'admitted' ? 'admitted' : 'added to the waiting list'}`);
+            ipd.admitKey = ipd.key();
+            ipd.picked = null;
+            ['ipdPatientQ', 'ipdReason', 'ipdProvDx', 'ipdPayerName', 'ipdAttName', 'ipdAttPhone', 'ipdExpected'].forEach(id => { document.getElementById(id).value = ''; });
+            document.getElementById('ipdConsent').checked = false;
+            const picked = document.getElementById('ipdPatientPicked');
+            picked.classList.remove('on');
+            picked.textContent = 'No patient selected.';
+            await ipd.loadAdmit();
+        });
+    },
+    async loadAdmissions() {
+        const wrap = document.getElementById('ipdAdmList');
+        try {
+            const st = document.getElementById('ipdAdmFilter').value;
+            const res = await api('/admin/ipd/admissions?status=' + encodeURIComponent(st) + '&limit=100');
+            const rows = res.admissions || [];
+            if (!rows.length) { wrap.innerHTML = emptyState('calendar', 'No admissions here.'); return; }
+            wrap.innerHTML = `<table><thead><tr><th>No.</th><th>Patient</th><th>Bed</th><th>Attending</th><th>Status</th><th>Admitted</th><th></th></tr></thead><tbody>${rows.map(a => `
+                <tr><td>${esc(a.admission_number)}</td><td>${esc(a.patient_name || '')} <span class="muted">${esc(a.mrn || '')}</span></td>
+                <td>${esc(a.bed || '—')}</td><td>${esc(a.attending_doctor || '')}</td><td>${ipd.statusBadge(a.status)}</td><td>${esc(ipd.when(a.admitted_at))}</td>
+                <td class="ipd-row-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="ipd.openChart('${esc(a.id)}')">Open</button>
+                ${a.status === 'pending' && ipdCan('admissions') ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.assignBed('${esc(a.id)}')">Assign bed</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="ipd.cancelAdmission('${esc(a.id)}')">Cancel</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
+        } catch (e) { wrap.innerHTML = `<div class="alert alert-err">${esc(e.message)}</div>`; }
+    },
+    async pickBed(title, withReason = false) {
+        const board = await api('/admin/ipd/board');
+        ipd.board = board;
+        const free = [];
+        board.wards.forEach(w => w.beds.filter(b => b.is_active && (b.status === 'available' || b.reservation_expired)).forEach(b => free.push({ b, w })));
+        if (!free.length) { toast('No free beds right now', true); return null; }
+        const res = await ipd.form(title, `<div class="field"><label for="ipdPickBed">Free bed</label><select id="ipdPickBed" name="bed" required>
+            ${free.map(x => `<option value="${esc(x.b.id)}">${esc(x.w.name)} · ${esc(x.b.code)} (${esc(ipd.label(x.b.bed_category))})</option>`).join('')}</select></div>
+            ${withReason ? '<div class="field"><label for="ipdPickReason">Reason</label><input id="ipdPickReason" name="reason" maxlength="300" required></div>' : ''}`, 'Choose');
+        if (!res) return null;
+        const pick = free.find(x => x.b.id === res.bed);
+        return pick ? { ...pick.b, reason: res.reason } : null;
+    },
+    async assignBed(aid) {
+        const bed = await ipd.pickBed('Assign a bed');
+        if (!bed) return;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/admissions/${aid}/assign-bed`, { bed_id: bed.id }); toast(`Placed in ${bed.code}`); ipd.loadAdmissions(); });
+    },
+    async cancelAdmission(aid) {
+        const reason = await promptDialog('Why is this admission being cancelled?', { placeholder: 'Reason' });
+        if (!reason) return;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/admissions/${aid}/cancel`, { reason }); toast('Admission cancelled'); ipd.loadAdmissions(); });
+    },
+
+    // ── Inpatient chart ──
+    async loadChartPage() {
+        try {
+            const res = await api('/admin/ipd/admissions?status=admitted,discharge_pending,pending&limit=200');
+            // beds first in bed order, then the waiting list
+            ipd.sw.list = (res.admissions || []).slice().sort((x, y) => (x.status === 'pending') - (y.status === 'pending')
+                || String(x.bed || '').localeCompare(String(y.bed || ''), 'en', { numeric: true }));
+            ipd.sw.sync();
+            if (ipd.chart) ipd.renderChart();
+        } catch (e) { ipd.fail(e); }
+    },
+    async openChart(aid) {
+        if (!aid) return;
+        if (!document.getElementById('pg-ipdchart').classList.contains('on')) { ipd.pendingChart = aid; go('ipdchart'); return; }
+        try {
+            ipd.chart = await api('/admin/ipd/admissions/' + encodeURIComponent(aid));
+            ipd.renderChart();
+        } catch (e) { ipd.fail(e); }
+    },
+    async reloadChart() { if (ipd.chart) await ipd.openChart(ipd.chart.admission.id); },
+    renderChart() {
+        const c = ipd.chart, a = c.admission;
+        const cur = (c.bed_history || []).find(h => !h.ended_at);
+        const canMove = (ipdCan('admissions') || ipdCan('nursing')) && ['admitted', 'discharge_pending'].includes(a.status);
+        const day = ipd.stayDay(a.admitted_at && !a.discharged_at ? Math.floor((Date.now() - new Date(a.admitted_at)) / 864e5) : null);
+        const head = document.getElementById('ipdChartHead');
+        head.className = 'card ipd-banner';
+        head.innerHTML = `<span class="ipd-av ipd-av-lg" aria-hidden="true">${esc(ipd.initials(c.patient_name))}</span>
+            <div class="ipd-banner-id">
+                <h3 class="ipd-banner-name">${esc(c.patient_name || 'Patient')} ${ipd.statusBadge(a.status)}</h3>
+                <div class="ipd-banner-sub">${esc(ipd.who(c)) || '&nbsp;'}</div>
+                <div class="ipd-banner-facts">
+                    ${ipd.chip('bed', 'Bed', cur ? `${cur.bed_code} · ${cur.ward_name}` : 'Not placed')}
+                    ${ipd.chip('file', '', a.admission_number)}
+                    ${c.attending_doctor ? ipd.chip('doc', '', c.attending_doctor) : ''}
+                    ${ipd.chip('clock', day ? `Day ${day}` : '', `${day ? ' · ' : ''}since ${ipd.when(a.admitted_at || a.created_at)}`)}
+                </div>
+                ${a.provisional_diagnosis ? `<p class="ipd-banner-dx"><b>Provisional diagnosis</b>${esc(a.provisional_diagnosis)}</p>` : ''}
+            </div>
+            ${canMove ? `<div class="ipd-banner-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="ipd.transfer()">Transfer bed</button></div>` : ''}`;
+        ipd.sw.sync();
+        document.getElementById('ipdTabs').hidden = false;
+        applyIpdGates();
+        ipd.tab(ipd.tabName);
+    },
+    tab(name) {
+        // a tab remembered from a previous chart may be hidden for this role
+        const btn = document.querySelector(`#ipdTabs [data-tab="${name}"]`);
+        if (!btn || btn.style.display === 'none') name = 'overview';
+        ipd.tabName = name;
+        document.querySelectorAll('#ipdTabs [data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+        const body = document.getElementById('ipdTabBody');
+        const fn = { overview: ipd.tabOverview, obs: ipd.tabObs, notes: ipd.tabNotes, orders: ipd.tabOrders, billing: ipd.tabBilling, discharge: ipd.tabDischarge }[name];
+        body.innerHTML = fn ? fn() : '';
+        if (name === 'discharge') ipd.loadChecklist();
+    },
+    active() { return ['admitted', 'discharge_pending'].includes(ipd.chart.admission.status); },
+    tabOverview() {
+        const c = ipd.chart;
+        return `<div class="card"><div class="card-head"><h3>Bed history</h3></div><div class="tbl-wrap"><table><thead><tr><th>Ward · bed</th><th>Category</th><th>From</th><th>To</th><th>Reason</th></tr></thead><tbody>
+            ${(c.bed_history || []).map(h => `<tr><td>${esc(h.ward_name)} · ${esc(h.bed_code)}</td><td>${esc(ipd.label(h.bed_category))}</td><td>${esc(ipd.when(h.started_at))}</td><td>${esc(h.ended_at ? ipd.when(h.ended_at) : 'now')}</td><td>${esc(h.transfer_reason || h.end_reason || '')}</td></tr>`).join('')}</tbody></table></div></div>
+            <div class="card"><div class="card-head"><h3>Timeline</h3></div><ul class="ipd-timeline">${(c.timeline || []).slice().reverse().map(e =>
+                `<li><span class="ev">${esc(ipd.label(e.event_type))}</span> <span class="muted">· ${esc(ipd.when(e.occurred_at))} · by ${esc(e.actor_name || 'system')}</span></li>`).join('') || '<li class="muted">No events yet.</li>'}</ul></div>`;
+    },
+    tabObs() {
+        const c = ipd.chart;
+        const rows = (c.observations || []).map(o => {
+            const vit = o.kind === 'vitals' ? [o.bp_systolic ? `BP ${o.bp_systolic}/${o.bp_diastolic}` : '', o.pulse_bpm ? `HR ${o.pulse_bpm}` : '', o.resp_rate ? `RR ${o.resp_rate}` : '',
+                o.temperature_c ? `T ${o.temperature_c}°C` : '', o.spo2_pct ? `SpO₂ ${o.spo2_pct}%` : '', o.pain_score != null ? `Pain ${o.pain_score}/10` : '',
+                o.blood_glucose_mg_dl ? `GRBS ${o.blood_glucose_mg_dl}` : '', o.consciousness ? ipd.label(o.consciousness) : ''].filter(Boolean).join(' · ')
+                : `${ipd.label(o.kind)} ${o.volume_ml} ml (${ipd.label(o.io_route)})`;
+            const err = o.status === 'entered_in_error';
+            return `<tr class="${err ? 'ipd-struck' : ''}"><td>${esc(ipd.when(o.observed_at))}</td><td>${esc(vit)}${o.note ? ' — ' + esc(o.note) : ''}${err ? ` <span class="muted">(entered in error: ${esc(o.error_reason)})</span>` : ''}${o.corrects_id ? ' <span class="muted">(correction)</span>' : ''}</td>
+                <td>${esc(o.recorded_by_name)}</td><td>${!err && ipd.active() ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.correctObs('${esc(o.id)}')">Correct</button>` : ''}</td></tr>`;
+        }).join('');
+        const form = ipd.active() ? `<div class="card"><div class="card-head"><h3>Record</h3></div><div class="ipd-grid ipd-grid-tight">
+            <div class="field"><label for="ipdObsKind">Type</label><select id="ipdObsKind" onchange="ipd.tab('obs')"><option value="vitals">Vitals</option><option value="intake">Intake</option><option value="output">Output</option></select></div>
+            <div class="field"><label for="ipdObsAt">Observed at</label><input id="ipdObsAt" type="datetime-local"></div>
+            ${['bp_systolic:BP systolic', 'bp_diastolic:BP diastolic', 'pulse_bpm:Pulse', 'resp_rate:Resp. rate', 'temperature_c:Temp °C', 'spo2_pct:SpO₂ %', 'pain_score:Pain 0-10', 'blood_glucose_mg_dl:Glucose mg/dL']
+                .map(x => { const [k, l] = x.split(':'); return `<div class="field ipd-vital"><label for="ipdObs_${k}">${l}</label><input id="ipdObs_${k}" type="number" step="${k === 'temperature_c' ? '0.1' : '1'}" inputmode="decimal"></div>`; }).join('')}
+            <div class="field ipd-vital"><label for="ipdObs_consciousness">Consciousness</label><select id="ipdObs_consciousness"><option value="">—</option><option value="alert">Alert</option><option value="confused">Confused</option><option value="voice">Responds to voice</option><option value="pain">Responds to pain</option><option value="unresponsive">Unresponsive</option></select></div>
+            <div class="field ipd-io"><label for="ipdObs_volume_ml">Volume (ml)</label><input id="ipdObs_volume_ml" type="number" min="1" max="10000"></div>
+            <div class="field ipd-io"><label for="ipdObs_io_route">Route</label><select id="ipdObs_io_route"><option value="oral">Oral</option><option value="iv">IV</option><option value="ng_tube">NG tube</option><option value="urine">Urine</option><option value="drain">Drain</option><option value="vomitus">Vomitus</option><option value="stool">Stool</option><option value="other">Other</option></select></div>
+            <div class="field ipd-span2"><label for="ipdObs_note">Note</label><input id="ipdObs_note" maxlength="500"></div></div>
+            <div class="ipd-actions"><button type="button" class="btn btn-accent btn-sm" onclick="ipd.saveObs(this)">Save</button></div></div>` : '';
+        setTimeout(ipd.syncObsForm, 0);
+        return form + `<div class="card"><div class="card-head"><h3>Observations</h3></div><div class="tbl-wrap"><table><thead><tr><th>Time</th><th>Values</th><th>By</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="muted">Nothing recorded yet.</td></tr>'}</tbody></table></div></div>`;
+    },
+    syncObsForm() {
+        const kind = document.getElementById('ipdObsKind');
+        if (!kind) return;
+        const at = document.getElementById('ipdObsAt');
+        if (!at.value) { const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000); at.value = d.toISOString().slice(0, 16); }
+        const vit = kind.value === 'vitals';
+        document.querySelectorAll('.ipd-vital').forEach(e => { e.style.display = vit ? '' : 'none'; });
+        document.querySelectorAll('.ipd-io').forEach(e => { e.style.display = vit ? 'none' : ''; });
+    },
+    obsValues() {
+        const kind = document.getElementById('ipdObsKind').value, out = {};
+        const num = k => { const v = document.getElementById('ipdObs_' + k).value; return v === '' ? null : Number(v); };
+        if (kind === 'vitals') {
+            ['bp_systolic', 'bp_diastolic', 'pulse_bpm', 'resp_rate', 'temperature_c', 'spo2_pct', 'pain_score', 'blood_glucose_mg_dl'].forEach(k => { const v = num(k); if (v != null) out[k] = v; });
+            const c = document.getElementById('ipdObs_consciousness').value; if (c) out.consciousness = c;
+        } else { out.volume_ml = num('volume_ml'); out.io_route = document.getElementById('ipdObs_io_route').value; }
+        const note = document.getElementById('ipdObs_note').value.trim(); if (note) out.note = note;
+        return { kind, out };
+    },
+    async saveObs(btn) {
+        const { kind, out } = ipd.obsValues();
+        const at = document.getElementById('ipdObsAt').value;
+        await ipd.busy(btn, async () => {
+            await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/observations`, { kind, observed_at: new Date(at).toISOString(), ...out });
+            toast('Saved'); await ipd.reloadChart();
+        });
+    },
+    async correctObs(id) {
+        const reason = await promptDialog('Why is this entry wrong? It stays on the record, marked "entered in error". Enter the correct values in the form afterwards if needed.', { placeholder: 'Reason' });
+        if (!reason) return;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/observations/${id}/correct`, { reason }); toast('Marked as entered in error'); await ipd.reloadChart(); });
+    },
+    tabNotes() {
+        const c = ipd.chart, mine = n => n.author_name === myUsername;
+        const types = [['nursing', 'Nursing'], ['handover', 'Shift handover']].concat(ipdCan('clinical') && myDoctorId ? [['progress', 'Progress (round)'], ['plan', 'Plan'], ['procedure', 'Procedure']] : []);
+        const form = ipd.active() ? `<div class="card"><div class="card-head"><h3>Add a note</h3></div><div class="ipd-grid">
+            <div class="field"><label for="ipdNoteType">Type</label><select id="ipdNoteType">${types.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+            <div class="field ipd-span2"><label for="ipdNoteBody">Note</label><textarea id="ipdNoteBody" rows="4" maxlength="8000"></textarea></div></div>
+            <div class="ipd-actions"><button type="button" class="btn btn-accent btn-sm" onclick="ipd.saveNote(this)">Save note</button></div></div>` : '';
+        return form + `<div class="card"><div class="card-head"><h3>Notes</h3></div>${(c.notes || []).map(n => `<div class="ipd-note ${n.status !== 'final' ? 'ipd-struck' : ''}">
+            <div class="muted">${esc(ipd.when(n.authored_at))} · ${esc(ipd.label(n.note_type))} · ${esc(n.author_name)}${n.amends_id ? ' · amendment: ' + esc(n.amend_reason) : ''}${n.status !== 'final' ? ' · ' + esc(ipd.label(n.status)) : ''}</div>
+            <div class="ipd-note-body">${esc(n.body)}</div>${n.status === 'final' && mine(n) && ipd.active() ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.amendNote('${esc(n.id)}')">Amend</button>` : ''}</div>`).join('') || '<p class="muted">No notes yet.</p>'}</div>`;
+    },
+    async saveNote(btn) {
+        const body = document.getElementById('ipdNoteBody').value.trim();
+        if (!body) { toast('Write the note first', true); return; }
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/notes`, { note_type: document.getElementById('ipdNoteType').value, body }); toast('Note saved'); await ipd.reloadChart(); });
+    },
+    async amendNote(id) {
+        const old = (ipd.chart.notes || []).find(n => n.id === id);
+        const res = await ipd.form('Amend note (the original stays on the record)', `<div class="field"><label for="ipdAmBody">Corrected note</label>
+            <textarea id="ipdAmBody" name="body" rows="5" maxlength="8000" required>${esc(old ? old.body : '')}</textarea></div>
+            <div class="field"><label for="ipdAmReason">Reason</label><input id="ipdAmReason" name="reason" maxlength="300" required></div>`);
+        if (!res) return;
+        const { body, reason } = res;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/notes/${id}/amend`, { body, reason }); toast('Amended'); await ipd.reloadChart(); });
+    },
+    tabOrders() {
+        const c = ipd.chart, doctor = ipdCan('clinical') && !!myDoctorId;
+        const mar = id => (c.administrations || []).filter(m => m.order_id === id);
+        const form = doctor && ipd.active() ? `<div class="card"><div class="card-head"><h3>New order</h3></div><div class="ipd-grid ipd-grid-tight">
+            <div class="field"><label for="ipdOrdType">Type</label><select id="ipdOrdType"><option value="medication">Medication</option><option value="investigation">Investigation</option><option value="procedure">Procedure</option><option value="diet">Diet</option><option value="nursing">Nursing care</option><option value="other">Other</option></select></div>
+            <div class="field ipd-span2"><label for="ipdOrdDesc">Order</label><input id="ipdOrdDesc" maxlength="300" placeholder="e.g. Inj Ceftriaxone 1 g IV BD"></div>
+            <div class="field"><label for="ipdOrdDrug">Drug</label><input id="ipdOrdDrug" maxlength="120"></div>
+            <div class="field"><label for="ipdOrdDose">Dose</label><input id="ipdOrdDose" maxlength="60"></div>
+            <div class="field"><label for="ipdOrdRoute">Route</label><select id="ipdOrdRoute"><option value="">—</option><option value="oral">Oral</option><option value="iv">IV</option><option value="im">IM</option><option value="sc">SC</option><option value="topical">Topical</option><option value="inhalation">Inhalation</option><option value="pr">PR</option><option value="sl">SL</option><option value="other">Other</option></select></div>
+            <div class="field"><label for="ipdOrdFreq">Frequency</label><input id="ipdOrdFreq" maxlength="60" placeholder="OD / BD / TDS / q6h"></div>
+            <div class="field"><label for="ipdOrdPri">Priority</label><select id="ipdOrdPri"><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="stat">STAT</option></select></div>
+            <label class="check"><input type="checkbox" id="ipdOrdPrn"> PRN (as needed)</label></div>
+            <div class="ipd-actions"><button type="button" class="btn btn-accent btn-sm" data-key="${ipd.key()}" onclick="ipd.saveOrder(this)">Sign &amp; place order</button></div></div>` : '';
+        const list = (c.orders || []).map(o => `<div class="ipd-order ${o.status !== 'active' ? 'ipd-struck' : ''}">
+            <div><strong>${esc(o.description)}</strong> ${o.priority !== 'routine' ? '<span class="badge badge-cancelled">' + esc(o.priority) + '</span>' : ''} ${o.is_prn ? '<span class="badge badge-secondary">PRN</span>' : ''}
+            <span class="muted">${esc(ipd.label(o.order_type))} · ${esc(o.ordered_by_name)} · ${esc(ipd.when(o.ordered_at))}${o.status !== 'active' ? ' · ' + esc(o.status) + (o.end_reason ? ': ' + esc(o.end_reason) : '') : ''}</span></div>
+            ${o.order_type === 'medication' ? `<ul class="ipd-mar">${mar(o.id).map(m => `<li class="${m.status !== 'recorded' ? 'ipd-struck' : ''}">${esc(ipd.when(m.administered_at))} · ${esc(m.outcome)}${m.dose_given ? ' ' + esc(m.dose_given) : ''}${m.reason ? ' — ' + esc(m.reason) : ''} · ${esc(m.recorded_by_name)}</li>`).join('')}</ul>` : ''}
+            <div class="ipd-row-actions">${o.status === 'active' && o.order_type === 'medication' && (ipdCan('nursing') || ipdCan('clinical')) && ipd.active() ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.recordDose('${esc(o.id)}','given')">Given</button><button type="button" class="btn btn-ghost btn-sm" onclick="ipd.recordDose('${esc(o.id)}','not_given')">Not given…</button>` : ''}
+            ${o.status === 'active' && doctor ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.endOrder('${esc(o.id)}','discontinued')">Stop</button>` : ''}
+            ${o.status === 'active' && o.order_type !== 'medication' && (ipdCan('nursing') || doctor) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.endOrder('${esc(o.id)}','completed')">Done</button>` : ''}</div></div>`).join('');
+        return form + `<div class="card"><div class="card-head"><h3>Orders</h3></div>${list || '<p class="muted">No orders.</p>'}</div>`;
+    },
+    async saveOrder(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        const body = { order_type: v('ipdOrdType'), description: v('ipdOrdDesc'), drug_name: v('ipdOrdDrug') || null, dose: v('ipdOrdDose') || null,
+            route: v('ipdOrdRoute') || null, frequency: v('ipdOrdFreq') || null, priority: v('ipdOrdPri'), is_prn: document.getElementById('ipdOrdPrn').checked,
+            idempotency_key: btn.dataset.key };
+        if (!body.description) { toast('Describe the order', true); return; }
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/orders`, body); toast('Order placed'); await ipd.reloadChart(); });
+    },
+    async recordDose(orderId, mode) {
+        let outcome = 'given', reason = null;
+        if (mode !== 'given') {
+            const res = await ipd.form('Dose not given', `<div class="field"><label for="ipdDoseOut">Outcome</label><select id="ipdDoseOut" name="outcome">
+                <option value="refused">Refused by patient</option><option value="held">Held (clinical reason)</option><option value="delayed">Delayed</option><option value="omitted">Omitted</option></select></div>
+                <div class="field"><label for="ipdDoseWhy">Reason</label><input id="ipdDoseWhy" name="reason" maxlength="300" required></div>`, 'Record');
+            if (!res) return;
+            ({ outcome, reason } = res);
+        }
+        await ipd.busy(null, async () => {
+            await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/administrations`, { order_id: orderId, outcome, reason,
+                administered_at: new Date().toISOString(), idempotency_key: ipd.key() });
+            toast('Recorded'); await ipd.reloadChart();
+        });
+    },
+    async endOrder(orderId, status) {
+        let reason = null;
+        if (status === 'discontinued') { reason = await promptDialog('Reason for stopping this order:', { placeholder: 'Reason' }); if (!reason) return; }
+        else if (!(await confirmDialog('Mark this order as done?'))) return;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/orders/${orderId}/end`, { status, reason }); toast('Order updated'); await ipd.reloadChart(); });
+    },
+    tabBilling() {
+        const c = ipd.chart, billing = ipdCan('billing');
+        const charges = c.charges || [];
+        const total = s => charges.filter(x => x.status === s).reduce((t, x) => t + x.total_paise, 0);
+        const rows = charges.map(x => `<tr class="${x.status === 'void' ? 'ipd-struck' : ''}"><td>${x.status === 'proposed' && billing ? `<input type="checkbox" class="ipd-chg" value="${esc(x.id)}" checked aria-label="Post this charge">` : ''}</td>
+            <td>${esc(x.service_date)}</td><td>${esc(x.description)}</td><td>${esc(ipd.label(x.category))}</td><td>${esc(x.quantity)} × ${ipd.rupees(x.unit_price_paise)}</td><td>${ipd.rupees(x.total_paise)}</td>
+            <td>${ipd.statusBadge(x.status === 'posted' ? (x.invoice_id ? 'completed' : 'confirmed') : x.status === 'void' ? 'cancelled' : 'pending').replace(/>[^<]*</, '>' + esc(x.invoice_id ? 'billed' : x.status) + '<')}</td>
+            <td>${billing && x.status !== 'void' && !x.invoice_id ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.voidCharge('${esc(x.id)}')">Void</button>` : ''}</td></tr>`).join('');
+        const bills = (c.bills || []).map(b => `<li>${esc(b.invoice_number || 'Draft bill')} · ${esc(b.status)} · ${ipd.rupees(b.total_paise)} (paid ${ipd.rupees(b.paid_paise)})</li>`).join('');
+        return `${billing && ipd.active() ? `<div class="card"><div class="card-head"><h3>Add a charge</h3></div><div class="ipd-grid ipd-grid-tight">
+            <div class="field"><label for="ipdChgCat">Category</label><select id="ipdChgCat"><option value="procedure">Procedure</option><option value="nursing">Nursing</option><option value="doctor_visit">Doctor visit</option><option value="investigation">Investigation</option><option value="pharmacy">Pharmacy</option><option value="consumable">Consumable</option><option value="package">Package</option><option value="other">Other</option></select></div>
+            <div class="field ipd-span2"><label for="ipdChgDesc">Description</label><input id="ipdChgDesc" maxlength="200"></div>
+            <div class="field"><label for="ipdChgDate">Date</label><input id="ipdChgDate" type="date"></div>
+            <div class="field"><label for="ipdChgQty">Qty</label><input id="ipdChgQty" type="number" min="1" max="999" value="1"></div>
+            <div class="field"><label for="ipdChgPrice">Unit price (₹)</label><input id="ipdChgPrice" type="number" min="0" step="0.01"></div></div>
+            <div class="ipd-actions"><button type="button" class="btn btn-ghost btn-sm" data-key="${ipd.key()}" onclick="ipd.addCharge(this)">Add (proposed)</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="ipd.accrue(this)">Calculate bed charges</button></div></div>` : ''}
+            <div class="card"><div class="card-head ipd-head"><h3>Charges</h3><span class="muted">Proposed ${ipd.rupees(total('proposed'))} · Posted ${ipd.rupees(total('posted'))}</span></div>
+            <div class="tbl-wrap"><table><thead><tr><th></th><th>Date</th><th>Item</th><th>Category</th><th>Qty × price</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No charges yet.</td></tr>'}</tbody></table></div>
+            ${billing ? `<div class="ipd-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="ipd.postCharges(this)">Post selected</button>
+            ${ipd.chart.admission.status === 'discharge_pending' ? `<button type="button" class="btn btn-accent btn-sm" onclick="ipd.finalBill(this)">Generate final bill</button>` : '<span class="muted">The final bill is generated after the discharge is started.</span>'}</div>` : ''}
+            ${bills ? `<h4>Bills</h4><ul>${bills}</ul><p class="muted">Issue the bill and take payment in OPD Billing — receipts, shifts and payment links are shared.</p>` : ''}</div>`;
+    },
+    async addCharge(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        const price = Math.round(parseFloat(v('ipdChgPrice')) * 100);
+        if (!v('ipdChgDesc') || !(price >= 0)) { toast('Enter a description and a price', true); return; }
+        await ipd.busy(btn, async () => {
+            await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/charges`, { category: v('ipdChgCat'), description: v('ipdChgDesc'),
+                service_date: v('ipdChgDate') || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), quantity: parseInt(v('ipdChgQty'), 10) || 1,
+                unit_price_paise: price, source_ref: btn.dataset.key });
+            toast('Charge proposed'); await ipd.reloadChart();
+        });
+    },
+    async accrue(btn) {
+        await ipd.busy(btn, async () => {
+            const r = await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/charges/accrue-bed`, {});
+            toast(r.missing_tariffs && r.missing_tariffs.length ? `No tariff for: ${r.missing_tariffs.join(', ')} — set it in IPD Setup` : `${r.added} bed-day charge(s) proposed`, !!(r.missing_tariffs && r.missing_tariffs.length));
+            await ipd.reloadChart();
+        });
+    },
+    async postCharges(btn) {
+        const ids = [...document.querySelectorAll('.ipd-chg:checked')].map(x => x.value);
+        if (!ids.length) { toast('Select proposed charges to post', true); return; }
+        if (!(await confirmDialog(`Post ${ids.length} charge(s)? Posted charges cannot be edited, only voided before billing.`))) return;
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/charges/post`, { charge_ids: ids }); toast('Posted'); await ipd.reloadChart(); });
+    },
+    async voidCharge(id) {
+        const reason = await promptDialog('Reason for voiding this charge:', { placeholder: 'Reason' });
+        if (!reason) return;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/charges/${id}/void`, { reason }); toast('Voided'); await ipd.reloadChart(); });
+    },
+    async finalBill(btn) {
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/final-bill`, {}); toast('Final bill created in OPD Billing (draft)'); await ipd.reloadChart(); });
+    },
+    tabDischarge() {
+        const a = ipd.chart.admission, doctor = ipdCan('clinical') && !!myDoctorId;
+        const drafts = (ipd.chart.discharge_summaries || []);
+        const draft = drafts.find(s => s.status === 'draft'), signed = drafts.find(s => s.status === 'signed');
+        const src = draft || signed || {};
+        const fields = [['final_diagnosis', 'Final diagnosis'], ['presenting_complaints', 'Presenting complaints'], ['course_in_hospital', 'Course in hospital'],
+            ['procedures_performed', 'Procedures'], ['condition_at_discharge', 'Condition at discharge'], ['discharge_medications', 'Discharge medications'],
+            ['follow_up', 'Follow-up'], ['advice', 'Advice']];
+        // the server lets IPD_CLINICAL start any type and IPD_ADMISSIONS the administrative ones (LAMA/DAMA/absconded)
+        const start = a.status === 'admitted' && (ipdCan('clinical') || ipdCan('admissions')) ? `<div class="card"><div class="card-head"><h3>Start discharge</h3></div><div class="ipd-grid">
+            <div class="field"><label for="ipdDischType">Discharge type</label><select id="ipdDischType">${doctor ? '<option value="regular">Regular (doctor decision)</option><option value="death">Death</option><option value="transfer_out">Transfer to another facility</option>' : ''}
+            <option value="lama">Left against medical advice (LAMA)</option><option value="dama">Discharged against medical advice (DAMA)</option><option value="absconded">Absconded</option></select></div></div>
+            <div class="ipd-actions"><button type="button" class="btn btn-accent btn-sm" onclick="ipd.initiate(this)">Start discharge</button></div></div>` : '';
+        const editor = ipdCan('clinical') && ['admitted', 'discharge_pending', 'discharged'].includes(a.status) ? `<div class="card"><div class="card-head ipd-head"><h3>Discharge summary ${signed && !draft ? '(signed v' + esc(signed.version) + ')' : draft ? '(draft v' + esc(draft.version) + ')' : ''}</h3>
+            <span class="muted">Write or review the clinical content; only the attending doctor's signature makes it final.</span></div>
+            <div class="ipd-grid">${fields.map(([k, l]) => `<div class="field ipd-span2"><label for="ipdDs_${k}">${l}</label><textarea id="ipdDs_${k}" rows="${k === 'course_in_hospital' ? 4 : 2}">${esc(src[k] || '')}</textarea></div>`).join('')}
+            ${signed && !draft ? '<div class="field ipd-span2"><label for="ipdDs_amend_reason">Amendment reason (required to change a signed summary)</label><input id="ipdDs_amend_reason" maxlength="300"></div>' : ''}</div>
+            <div class="ipd-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="ipd.saveSummary(this)">Save draft</button>
+            ${doctor && draft ? `<button type="button" class="btn btn-accent btn-sm" onclick="ipd.signSummary('${esc(draft.id)}', this)">Sign as attending doctor</button>` : ''}
+            ${signed ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.printSummary()">Print</button>` : ''}</div></div>` : '';
+        return start + `<div class="card"><div class="card-head"><h3>Discharge checklist</h3></div><div id="ipdChecklist" class="loader"><div class="spin"></div></div></div>` + editor;
+    },
+    async loadChecklist() {
+        const el = document.getElementById('ipdChecklist');
+        if (!el) return;
+        const a = ipd.chart.admission;
+        if (!['discharge_pending', 'discharged'].includes(a.status)) { el.className = ''; el.innerHTML = '<p class="muted">Start the discharge to see what is outstanding.</p>'; return; }
+        try {
+            const c = await api(`/admin/ipd/admissions/${a.id}/discharge/checklist`);
+            const label = { discharge_initiated: 'Discharge started', summary_signed: 'Discharge summary signed', orders_closed: 'All orders stopped or done',
+                charges_reviewed: 'Every proposed charge posted or voided', final_bill_issued: 'Final bill issued', all_charges_billed: 'All posted charges on the bill', bill_settled: 'Bill settled' };
+            el.className = '';
+            el.innerHTML = `<ul class="ipd-check">${c.items.map(i => `<li class="${i.done ? 'ok' : 'todo'}">${esc(label[i.key] || i.key)}${i.count ? ' (' + esc(i.count) + ' left)' : ''}${i.key === 'bill_settled' && !i.done && i.balance_paise != null ? ' — balance ' + ipd.rupees(i.balance_paise) : ''}</li>`).join('')}</ul>
+                ${a.status === 'discharge_pending' && (ipdCan('admissions') || ipdCan('billing')) ? `<div class="ipd-actions">
+                <button type="button" class="btn btn-accent btn-sm" ${c.ready ? '' : 'disabled'} onclick="ipd.complete(this, ${c.needs_waiver ? 'true' : 'false'})">Complete discharge &amp; release bed</button>
+                ${ipdCan('clinical') ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.revert(this)">Undo discharge start</button>` : ''}</div>` : ''}`;
+        } catch (e) { el.className = ''; el.innerHTML = `<div class="alert alert-err">${esc(e.message)}</div>`; }
+    },
+    async initiate(btn) {
+        const type = document.getElementById('ipdDischType').value;
+        if (!(await confirmDialog(`Start a ${ipd.label(type)} discharge? The patient keeps the bed until the discharge is completed.`))) return;
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/discharge/initiate`, { discharge_type: type }); toast('Discharge started'); await ipd.reloadChart(); });
+    },
+    async revert(btn) {
+        const reason = await promptDialog('Why is the discharge being undone?', { placeholder: 'Reason' });
+        if (!reason) return;
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/discharge/revert`, { reason }); toast('Discharge undone'); await ipd.reloadChart(); });
+    },
+    async saveSummary(btn) {
+        const body = {};
+        ['final_diagnosis', 'presenting_complaints', 'course_in_hospital', 'procedures_performed', 'condition_at_discharge', 'discharge_medications', 'follow_up', 'advice', 'amend_reason']
+            .forEach(k => { const el = document.getElementById('ipdDs_' + k); if (el && el.value.trim()) body[k] = el.value.trim(); });
+        const draft = (ipd.chart.discharge_summaries || []).find(s => s.status === 'draft');
+        if (draft) body.expected_updated_at = draft.updated_at;
+        await ipd.busy(btn, async () => { await apiPut(`/admin/ipd/admissions/${ipd.chart.admission.id}/discharge-summary`, body); toast('Draft saved'); await ipd.reloadChart(); });
+    },
+    async signSummary(id, btn) {
+        if (!(await confirmDialog('Sign this discharge summary as the attending doctor? A signed summary can only be changed by an amendment.'))) return;
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/discharge-summaries/${id}/sign`, {}); toast('Signed'); await ipd.reloadChart(); });
+    },
+    async complete(btn, needsWaiver) {
+        let waiver_reason = null;
+        if (needsWaiver) {
+            waiver_reason = await promptDialog('The bill is not fully paid. An IPD administrator may complete the discharge with a reason (e.g. cashless insurance claim):', { placeholder: 'Reason' });
+            if (!waiver_reason) return;
+        } else if (!(await confirmDialog('Complete the discharge? The bed goes to cleaning and the stay is closed.'))) return;
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/admissions/${ipd.chart.admission.id}/discharge/complete`, { waiver_reason }); toast('Discharged'); await ipd.reloadChart(); });
+    },
+    printSummary() {
+        const c = ipd.chart, s = (c.discharge_summaries || []).find(x => x.status === 'signed');
+        if (!s) return;
+        const doc = s.doctor_snapshot || {};
+        const w = window.open('', '_blank');
+        if (!w) { toast('Allow pop-ups to print', true); return; }
+        const sec = (l, v) => v ? `<h3>${esc(l)}</h3><p>${esc(v).replace(/\n/g, '<br>')}</p>` : '';
+        w.document.write(`<!doctype html><title>Discharge summary</title><style>body{font:14px system-ui;margin:32px;max-width:760px}h1{font-size:20px}h3{font-size:14px;margin:16px 0 4px}p{margin:0}</style>
+            <h1>Discharge summary</h1><p><strong>${esc(c.patient_name || '')}</strong> · ${esc(c.mrn || '')} · ${esc(c.admission.admission_number)}</p>
+            <p>Admitted ${esc(ipd.when(c.admission.admitted_at))}${c.admission.discharged_at ? ' · Discharged ' + esc(ipd.when(c.admission.discharged_at)) : ''} · ${esc(ipd.label(c.admission.discharge_type || ''))}</p>
+            ${sec('Final diagnosis', s.final_diagnosis)}${sec('Presenting complaints', s.presenting_complaints)}${sec('Course in hospital', s.course_in_hospital)}${sec('Procedures', s.procedures_performed)}
+            ${sec('Condition at discharge', s.condition_at_discharge)}${sec('Discharge medications', s.discharge_medications)}${sec('Follow-up', s.follow_up)}${sec('Advice', s.advice)}
+            <p style="margin-top:32px">Signed by ${esc(doc.name || '')} · Reg. ${esc(doc.registration_number || '')} (${esc(doc.registration_council || '')}) · ${esc(ipd.when(s.signed_at))} · version ${esc(s.version)}</p>`);
+        w.document.close(); w.focus(); w.print();
+    },
+    async transfer() {
+        const a = ipd.chart.admission;
+        const bed = await ipd.pickBed('Transfer to which bed?', true);
+        if (!bed) return;
+        const reason = bed.reason;
+        await ipd.busy(null, async () => {
+            await apiPost(`/admin/ipd/admissions/${a.id}/transfer`, { to_bed_id: bed.id, expected_bed_id: a.current_bed_id, reason });
+            toast(`Moved to ${bed.code}`); await ipd.reloadChart();
+        });
+    },
+
+    // ── Setup ──
+    async loadSetup() {
+        try {
+            const s = await api('/admin/ipd/setup');
+            const board = await api('/admin/ipd/board');
+            const t = s.settings.bed_tariffs || {};
+            const cats = new Set(Object.keys(t));
+            board.wards.forEach(w => w.beds.forEach(b => cats.add(b.bed_category)));
+            document.getElementById('ipdTariffs').innerHTML = `<div class="tbl-wrap"><table id="ipdTariffTable"><thead><tr><th>Bed category</th><th>₹ per day</th></tr></thead><tbody>${[...cats].sort().map(c => ipd.tariffRow(c, t[c])).join('')}</tbody></table></div>`;
+            document.getElementById('ipdCutoff').value = s.settings.discharge_cutoff_hour;
+            document.getElementById('ipdResMin').value = s.settings.reservation_minutes;
+            document.getElementById('ipdSetupWards').innerHTML = board.wards.map(w => `<div class="card"><div class="card-head ipd-head"><h3>${esc(w.name)} <span class="muted">${esc(w.code)} · ${esc(ipd.label(w.ward_type))}${w.is_active ? '' : ' · inactive'}</span></h3>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="ipd.toggleWard('${esc(w.id)}', ${!w.is_active})">${w.is_active ? 'Deactivate' : 'Activate'}</button></div>
+                <div class="ipd-grid ipd-grid-tight"><div class="field"><label for="ipdBP_${esc(w.id)}">Bed code prefix</label><input id="ipdBP_${esc(w.id)}" maxlength="10" placeholder="${esc(w.code)}-"></div>
+                <div class="field"><label for="ipdBF_${esc(w.id)}">From no.</label><input id="ipdBF_${esc(w.id)}" type="number" min="1" value="1"></div>
+                <div class="field"><label for="ipdBT_${esc(w.id)}">To no.</label><input id="ipdBT_${esc(w.id)}" type="number" min="1" value="10"></div>
+                <div class="field"><label for="ipdBC_${esc(w.id)}">Category</label><input id="ipdBC_${esc(w.id)}" maxlength="30" value="${esc(w.ward_type === 'icu' ? 'icu' : 'general')}"></div></div>
+                <div class="ipd-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="ipd.addBeds('${esc(w.id)}', this)">Add beds</button></div>
+                <div class="ipd-beds">${w.beds.map(b => `<div class="ipd-bed ipd-bed-${esc(b.status)}"><div class="ipd-bed-top"><strong>${esc(b.code)}</strong>${ipd.statusBadge(b.is_active ? b.status : 'inactive')}</div>
+                    <div class="muted">${esc(ipd.label(b.bed_category))}</div>
+                    ${['available', 'maintenance', 'blocked', 'cleaning'].includes(b.status) ? `<div class="ipd-row-actions">${b.status === 'available' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.outOfService('${esc(b.id)}')">Out of service</button>` : `<button type="button" class="btn btn-ghost btn-sm" onclick="ipd.setBedStatus('${esc(b.id)}','available').then(ipd.loadSetup)">Back in service</button>`}
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="ipd.toggleBed('${esc(b.id)}', ${!b.is_active})">${b.is_active ? 'Deactivate' : 'Activate'}</button></div>` : ''}</div>`).join('')}</div></div>`).join('')
+                || emptyState('calendar', 'No wards yet. Add the first one above.');
+        } catch (e) { ipd.fail(e); }
+    },
+    tariffRow(cat, paise) { return `<tr><td><input class="ipd-tcat" value="${esc(cat || '')}" maxlength="30" aria-label="Bed category" placeholder="e.g. general"></td><td><input class="ipd-tprice" type="number" min="0" step="0.01" value="${paise == null ? '' : paise / 100}" aria-label="Rupees per day"></td></tr>`; },
+    addTariffRow() { const tb = document.querySelector('#ipdTariffTable tbody'); if (tb) tb.insertAdjacentHTML('beforeend', ipd.tariffRow('', null)); },
+    async saveSettings() {
+        const tariffs = {};
+        document.querySelectorAll('#ipdTariffTable tbody tr').forEach(tr => {
+            const c = tr.querySelector('.ipd-tcat').value.trim().toLowerCase(), p = tr.querySelector('.ipd-tprice').value;
+            if (c && p !== '') tariffs[c] = Math.round(parseFloat(p) * 100);
+        });
+        await ipd.busy(null, async () => {
+            await apiPut('/admin/ipd/settings', { bed_tariffs: tariffs, discharge_cutoff_hour: parseInt(document.getElementById('ipdCutoff').value, 10),
+                reservation_minutes: parseInt(document.getElementById('ipdResMin').value, 10) });
+            toast('Settings saved'); ipd.loadSetup();
+        });
+    },
+    async createWard() {
+        const v = id => document.getElementById(id).value.trim();
+        await ipd.busy(null, async () => {
+            await apiPost('/admin/ipd/wards', { code: v('ipdWardCode'), name: v('ipdWardName'), ward_type: v('ipdWardType'), gender_restriction: v('ipdWardGender') });
+            toast('Ward created'); document.getElementById('ipdWardCode').value = ''; document.getElementById('ipdWardName').value = ''; ipd.loadSetup();
+        });
+    },
+    async addBeds(wardId, btn) {
+        const v = k => document.getElementById(k + wardId).value.trim();
+        const from = parseInt(v('ipdBF_'), 10), to = parseInt(v('ipdBT_'), 10);
+        if (!(from >= 1 && to >= from && to - from < 200)) { toast('Use a range of up to 200 beds', true); return; }
+        const beds = [];
+        for (let i = from; i <= to; i++) beds.push({ code: (v('ipdBP_') + i).replace(/[^A-Za-z0-9_-]/g, ''), bed_category: v('ipdBC_').toLowerCase() });
+        await ipd.busy(btn, async () => { await apiPost(`/admin/ipd/wards/${wardId}/beds`, { beds }); toast(`${beds.length} bed(s) added`); ipd.loadSetup(); });
+    },
+    async toggleWard(id, active) { await ipd.busy(null, async () => { await apiPatch(`/admin/ipd/wards/${id}`, { is_active: active }); ipd.loadSetup(); }); },
+    async toggleBed(id, active) { await ipd.busy(null, async () => { await apiPatch(`/admin/ipd/beds/${id}`, { is_active: active }); ipd.loadSetup(); }); },
+    async outOfService(id) {
+        const reason = await promptDialog('Why is this bed out of service?', { placeholder: 'e.g. broken rail' });
+        if (!reason) return;
+        await ipd.busy(null, async () => { await apiPost(`/admin/ipd/beds/${id}/status`, { status: 'maintenance', reason }); ipd.loadSetup(); });
+    },
+};
+window.ipd = ipd;
+document.addEventListener('click', e => { if (!e.target.closest('#ipdSwitch')) ipd.sw.close(false); });
+function loadIpdBoard() { ipd.loadBoard(); }
+function loadIpdAdmit() { ipd.loadAdmit(); }
+async function loadIpdChart() { await ipd.loadChartPage(); if (ipd.pendingChart) { const a = ipd.pendingChart; ipd.pendingChart = null; ipd.openChart(a); } }
+function loadIpdSetup() { ipd.loadSetup(); }
+
 async function login() {
     const u = document.getElementById('loginUser').value.trim();
     const p = document.getElementById('loginPass').value;
@@ -6695,6 +7791,7 @@ async function login() {
     myOpd = !!me.opd_enabled;
     myOpdState = me.opd_state || null;
     myDoctorId = me.opd_doctor_id || null;
+    myIpd = me.ipd_access || null;
     myServiceLines = Array.isArray(me.service_lines) ? me.service_lines : [];
     myPlanServiceLines = Array.isArray(me.plan_service_lines) ? me.plan_service_lines : [];
     myUsername = me.username || '';
@@ -6868,6 +7965,7 @@ async function adoptClinicPlan() {
             myOpd = !!scoped.opd_enabled;
             myOpdState = scoped.opd_state || null;
             myDoctorId = scoped.opd_doctor_id || null;
+            myIpd = scoped.ipd_access || null;
             myServiceLines = Array.isArray(scoped.service_lines) ? scoped.service_lines : [];
             myPlanServiceLines = Array.isArray(scoped.plan_service_lines) ? scoped.plan_service_lines : [];
         }
@@ -8205,7 +9303,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup };
     if (loaders[page]) loaders[page]();
 }
 

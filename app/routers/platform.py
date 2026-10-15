@@ -834,7 +834,7 @@ async def get_platform_clinic_detail(
             .select("id, name, whatsapp_number, plan, features, is_active, created_at, "
                     "daily_report_limit, subscription_start_date, subscription_end_date, "
                     "grace_period_days, subscription_status, last_renewed_at, "
-                    "opd_state, opd_settings, account_type")
+                    "opd_state, opd_settings, account_type, ipd_state")
             .eq("id", clinic_id))
         )
         if not clinic_res.data:
@@ -900,10 +900,15 @@ async def update_clinic_feature(
 
     clinic_res = (
         # unscoped: platform super-admin fetching feature flags for specified clinic_id
-        await sb(supabase.table("clinics").select("features, plan, account_type").eq("id", clinic_id))
+        await sb(supabase.table("clinics").select("features, plan, account_type, ipd_state").eq("id", clinic_id))
     )
     if not clinic_res.data:
         raise HTTPException(status_code=404, detail="Clinic not found")
+    # IPD bills, receipts, registry and doctor registration live in OPD OS.
+    if (body.feature == "opd_enabled" and body.enabled is not True
+            and (clinic_res.data[0].get("ipd_state") or "OFF") != "OFF"):
+        raise HTTPException(status_code=409, detail="Switch IPD OS off (and let it finish winding down) before "
+                                                    "disabling OPD OS: inpatient billing runs through OPD.")
     if (body.feature == "ai_receptionist" and body.enabled
             and (clinic_res.data[0].get("account_type") or "tenant") != "tenant"):
         raise HTTPException(
@@ -965,6 +970,26 @@ async def update_clinic_feature(
             clinic_update_fields["opd_state"] = "DISABLED"
         else:
             clinic_update_fields["opd_state"] = "NOT_CONFIGURED"
+
+    if body.feature == "ipd_enabled":
+        # ADR-IPD-07: disabling never deletes, discharges or frees a bed. With
+        # patients still admitted it needs confirmation and enters WIND_DOWN
+        # (no new admissions; existing stays continue to discharge).
+        from app.services import ipd
+        from app.services.tenant import ipd_eligible
+        if body.enabled:
+            if not ipd_eligible(clinic_res.data[0]):
+                raise HTTPException(status_code=400, detail="Enable OPD OS for this clinic before IPD OS.")
+            await ipd.provision_defaults(clinic_id)
+            clinic_update_fields["ipd_state"] = "ACTIVE"
+        else:
+            preview = await ipd.deactivation_preview(clinic_id)
+            if preview["blocking"] and not body.confirm_disable:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Patients are still admitted. Confirm to stop new admissions while existing "
+                               "stays continue to discharge (wind-down). Nothing is deleted.",
+                    "preview": preview})
+            clinic_update_fields["ipd_state"] = "WIND_DOWN" if preview["blocking"] else "OFF"
 
     result = (
         # unscoped: platform super-admin updating feature flags for specified clinic_id
@@ -2546,14 +2571,23 @@ async def delete_clinic(
             return len(d)
         return 0
 
+    ipd_check = (
+        # unscoped: platform super-admin checking IPD admissions before deletion
+        await sb(supabase.table("ipd_admissions")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .limit(1))
+    )
+    has_ipd_rows = _coerce_opd_check(ipd_check) > 0
     has_opd_rows = bool(_coerce_opd_check(opd_enc_check) > 0 or _coerce_opd_check(opd_inv_check) > 0)
-    if has_opd_rows:
+    if has_opd_rows or has_ipd_rows:
         if not confirm_opd_purge:
             raise HTTPException(
                 status_code=409,
-                detail="Clinic has signed OPD clinical or billing records. Confirm purge before deletion.",
+                detail="Clinic has signed OPD/IPD clinical or billing records. Confirm purge before deletion.",
             )
-        await sb(supabase.rpc("opd_purge_clinic", {"p_clinic_id": clinic_id}))
+        # ipd_purge_clinic purges OPD too (IPD charges reference OPD invoices)
+        await sb(supabase.rpc("ipd_purge_clinic" if has_ipd_rows else "opd_purge_clinic", {"p_clinic_id": clinic_id}))
 
     now_iso = datetime.now(timezone.utc).isoformat()
 

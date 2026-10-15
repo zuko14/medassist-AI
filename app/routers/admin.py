@@ -58,6 +58,7 @@ from app.services.tenant import (
     home_collection_available,
     invalidate_tenant_cache,
     kriya_ketu_enabled,
+    ipd_access,
     opd_enabled,
     require_feature,
     specialty_enabled,
@@ -517,7 +518,7 @@ def _enforce_corporate_viewer_scope(request: Request, user: AdminUser) -> AdminU
 #: dashboard the panel never shows it. A deny-list, not an allowlist: every
 #: route a granted permission reaches keeps working, and an entry with grants
 #: re-opens for a holder of any of them (the front desk's appointment search).
-_OPD_ROLES = frozenset({"DOCTOR", "CASHIER"})
+_OPD_ROLES = frozenset({"DOCTOR", "CASHIER", "NURSE"})
 _OPD_ROLE_DENIED_ROUTES = (
     ("GET", re.compile(r"^/admin/stats$"), ()),
     ("GET", re.compile(r"^/admin/appointments/(recent|upcoming)$"), ()),
@@ -887,6 +888,7 @@ async def get_current_admin(
             "opd_enabled": False,
             "opd_state": None,
             "opd_doctor_id": user.doctor_id,
+            "ipd_access": None,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -925,6 +927,8 @@ async def get_current_admin(
         "opd_enabled": opd_enabled(clinic),
         "opd_state": clinic.get("opd_state", "NOT_CONFIGURED"),
         "opd_doctor_id": user.doctor_id,
+        # IPD OS (migration 111): 'ACTIVE', 'WIND_DOWN' (no new admissions) or None
+        "ipd_access": ipd_access(clinic),
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.

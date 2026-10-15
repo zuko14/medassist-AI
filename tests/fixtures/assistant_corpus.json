@@ -4124,6 +4124,189 @@
    "expect": "hypothetical",
    "lang": "en",
    "near": "voice.settings_update"
+  },
+  {
+   "text": "how many beds are free",
+   "expect": "action:ipd.census",
+   "lang": "en"
+  },
+  {
+   "text": "bed occupancy today",
+   "expect": "action:ipd.census",
+   "lang": "en"
+  },
+  {
+   "text": "show free beds",
+   "expect": "action:ipd.census",
+   "lang": "en"
+  },
+  {
+   "text": "enni beds khali unnayi",
+   "expect": "action:ipd.census",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kitne beds khali hain",
+   "expect": "action:ipd.census",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ఖాళీ బెడ్లు ఎన్ని",
+   "expect": "action:ipd.census",
+   "lang": "te"
+  },
+  {
+   "text": "कितने खाली बेड हैं",
+   "expect": "action:ipd.census",
+   "lang": "hi"
+  },
+  {
+   "text": "open bed board",
+   "expect": "nav:ipdboard",
+   "lang": "en",
+   "near": "ipd.census"
+  },
+  {
+   "text": "block bed 12",
+   "expect": "none",
+   "lang": "en",
+   "near": "ipd.census"
+  },
+  {
+   "text": "who is admitted",
+   "expect": "action:ipd.inpatients",
+   "lang": "en"
+  },
+  {
+   "text": "ward patients list",
+   "expect": "action:ipd.inpatients",
+   "lang": "en"
+  },
+  {
+   "text": "list inpatients",
+   "expect": "action:ipd.inpatients",
+   "lang": "en"
+  },
+  {
+   "text": "admit ayina patients evaru",
+   "expect": "action:ipd.inpatients",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "bharti mareez kaun hain",
+   "expect": "action:ipd.inpatients",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "भर्ती मरीज कौन हैं",
+   "expect": "action:ipd.inpatients",
+   "lang": "hi"
+  },
+  {
+   "text": "open inpatient chart",
+   "expect": "nav:ipdchart",
+   "lang": "en",
+   "near": "ipd.inpatients"
+  },
+  {
+   "text": "discharge all admitted patients",
+   "expect": "none",
+   "lang": "en",
+   "near": "ipd.inpatients"
+  },
+  {
+   "text": "patients waiting for bed",
+   "expect": "action:ipd.waiting",
+   "lang": "en"
+  },
+  {
+   "text": "show bed waiting list",
+   "expect": "action:ipd.waiting",
+   "lang": "en"
+  },
+  {
+   "text": "pending admissions today",
+   "expect": "action:ipd.waiting",
+   "lang": "en"
+  },
+  {
+   "text": "bed kosam wait chestunnaru",
+   "expect": "action:ipd.waiting",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kisko bed ka intezaar hai",
+   "expect": "action:ipd.waiting",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "బెడ్ కోసం ఎవరు ఉన్నారు",
+   "expect": "action:ipd.waiting",
+   "lang": "te"
+  },
+  {
+   "text": "किसे बेड का इंतज़ार है",
+   "expect": "action:ipd.waiting",
+   "lang": "hi"
+  },
+  {
+   "text": "open admissions",
+   "expect": "nav:ipdadmit",
+   "lang": "en",
+   "near": "ipd.waiting"
+  },
+  {
+   "text": "cancel pending admissions",
+   "expect": "none",
+   "lang": "en",
+   "near": "ipd.waiting"
+  },
+  {
+   "text": "pending discharges",
+   "expect": "action:ipd.discharges",
+   "lang": "en"
+  },
+  {
+   "text": "show discharge list",
+   "expect": "action:ipd.discharges",
+   "lang": "en"
+  },
+  {
+   "text": "discharges today",
+   "expect": "action:ipd.discharges",
+   "lang": "en"
+  },
+  {
+   "text": "ivala discharge evaru",
+   "expect": "action:ipd.discharges",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj kiska discharge hai",
+   "expect": "action:ipd.discharges",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ఈ రోజు డిశ్చార్జ్ లు",
+   "expect": "action:ipd.discharges",
+   "lang": "te"
+  },
+  {
+   "text": "आज के डिस्चार्ज",
+   "expect": "action:ipd.discharges",
+   "lang": "hi"
+  },
+  {
+   "text": "complete discharge",
+   "expect": "action:ipd.discharge",
+   "lang": "en",
+   "near": "ipd.discharges"
+  },
+  {
+   "text": "what is a discharge summary",
+   "expect": "help:ipdchart",
+   "lang": "en",
+   "near": "ipd.discharges"
   }
  ],
  "doctors": [

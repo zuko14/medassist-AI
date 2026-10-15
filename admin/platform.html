@@ -2002,6 +2002,17 @@
                 </label>
                 <div id="modalOpdState" style="font-size:0.8rem; color:var(--text3); margin-top:10px;"></div>
             </div>
+
+            <!-- Migration 111: IPD OS. Needs OPD OS. Disabling with patients admitted winds down; nothing is deleted. -->
+            <div id="modalIpdCard" style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">IPD OS</h4>
+                <p style="color:var(--text3); font-size:0.78rem; margin-bottom:12px;">Admissions, bed board, nursing station, orders and medication record, discharge and inpatient billing. Requires OPD OS. Turning it off never deletes records, discharges patients or frees beds.</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalIpdToggle" onchange="toggleIpd(this)">
+                    IPD OS enabled
+                </label>
+                <div id="modalIpdState" style="font-size:0.8rem; color:var(--text3); margin-top:10px;"></div>
+            </div>
         </div>
     </div>
 
@@ -3089,6 +3100,17 @@
                         opdStateEl.textContent = `State: ${st}${wentLive}`;
                     }
 
+                    const ipdCard = document.getElementById('modalIpdCard');
+                    if (ipdCard) ipdCard.style.display = (c.account_type || 'tenant') === 'tenant' ? '' : 'none';
+                    const ipdToggle = document.getElementById('modalIpdToggle');
+                    if (ipdToggle) ipdToggle.checked = overrides.ipd_enabled === true;
+                    const ipdStateEl = document.getElementById('modalIpdState');
+                    if (ipdStateEl) {
+                        const st = c.ipd_state || 'OFF';
+                        ipdStateEl.textContent = st === 'WIND_DOWN'
+                            ? 'State: WIND_DOWN (no new admissions; admitted patients continue to discharge)'
+                            : `State: ${st}${overrides.opd_enabled === true ? '' : ' (enable OPD OS first)'}`;
+                    }
                     document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
                     document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
                     document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;
@@ -3144,6 +3166,37 @@
                 alert(`Failed to update feature: ${e.message}`);
                 // Revert the checkbox to reflect the unsaved state
                 openModal(_modalClinicId);
+            }
+        }
+
+        // IPD OS (migration 111). The server decides: with patients still admitted it
+        // answers 409 + preview, and only a confirmed disable enters WIND_DOWN.
+        async function toggleIpd(cb) {
+            const clinicId = _modalClinicId;
+            const send = async (enabled, confirm) => fetch(`/platform/clinics/${clinicId}/features`, {
+                method: 'PATCH',
+                headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ feature: 'ipd_enabled', enabled, confirm_disable: confirm })
+            });
+            try {
+                let res = await send(cb.checked, false);
+                if (res.status === 409 && !cb.checked) {
+                    const p = ((await res.json().catch(() => ({}))).detail || {}).preview || {};
+                    const ok = confirm(`${p.in_bed || 0} patient(s) are in beds and ${p.pending || 0} waiting for a bed.`
+                        + '\n\nTurning IPD OS off now stops NEW admissions only. Staff keep caring for admitted patients until '
+                        + 'each is discharged. No record is deleted and no bed is freed.\n\nWind down IPD OS?');
+                    if (!ok) { cb.checked = true; return; }
+                    res = await send(false, true);
+                }
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error((err.detail && (err.detail.message || err.detail)) || 'Failed to update IPD OS');
+                }
+                openModal(clinicId);
+                fetchPlatformData();
+            } catch (e) {
+                alert(e.message || 'Failed to update IPD OS');
+                openModal(clinicId);
             }
         }
 

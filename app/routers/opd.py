@@ -624,8 +624,9 @@ async def search_registry_patients(
     user: AdminUser = Depends(verify_credentials),
 ):
     """Search patients across account holders, family members, and legacy records."""
+    # IPD_ADMISSIONS: the admission desk admits registry patients (migration 111)
     scope, clinic = await _opd_scope(
-        user, clinic_id, "OPD_FRONT_DESK", "OPD_CLINICAL", "OPD_BILLING", live=True
+        user, clinic_id, "OPD_FRONT_DESK", "OPD_CLINICAL", "OPD_BILLING", "IPD_ADMISSIONS", live=True
     )
     return await search_patients(scope, q=q, limit=limit)
 

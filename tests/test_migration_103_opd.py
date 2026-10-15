@@ -745,6 +745,16 @@ def test_103_down_rollback_and_reapply(real_pg_conn):
     with open(up_path, "r", encoding="utf-8") as f:
         up_sql = f.read()
 
+    # Rollbacks run newest-first: 111 (IPD) depends on 103, so 111_down goes first.
+    # One transaction, rolled back at the end, so the shared test DB keeps its data.
+    ipd_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback", "111_down.sql")
+    cur.execute("BEGIN")
+    cur.execute("SELECT to_regclass('public.ipd_admissions') IS NOT NULL")
+    if cur.fetchone()[0]:
+        cur.execute("SELECT ipd_purge_clinic(clinic_id) FROM (SELECT DISTINCT clinic_id FROM ipd_admissions) x")
+        with open(ipd_down, "r", encoding="utf-8") as f:
+            cur.execute(f.read())
+
     # Apply rollback
     cur.execute(down_sql)
 
@@ -770,3 +780,4 @@ def test_103_down_rollback_and_reapply(real_pg_conn):
         """
     )
     assert cur.fetchone()[0] == 5
+    cur.execute("ROLLBACK")

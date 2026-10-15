@@ -39,6 +39,7 @@ READS = {
     "connectors.failed", "patients.search",  # released 2026-10-14 after D-21 / D-22
     "lab_tests.cleanup",  # KK-P4-09
     "voice.learning_review",  # KK-P4-13
+    "ipd.census", "ipd.inpatients", "ipd.waiting", "ipd.discharges",  # IPD OS (migration 111)
 }
 NOT_YET = {"patient.view", "voice.call_detail", "patient.duplicate_check", "voice.test_turn"}
 CORPUS = json.loads((Path(__file__).parent / "fixtures" / "assistant_corpus.json")
@@ -84,7 +85,7 @@ def test_corpus_has_five_phrases_te_hi_and_two_negatives(aid):
 @pytest.mark.parametrize("text", [
     "cancel today's appointments", "delete the lab test rates", "send new leads a message",
     "mark all my notifications read", "aaj ke appointments cancel karo", "आज के अपॉइंटमेंट रद्द करो",
-    "ee roju appointments raddu cheyyi",
+    "ee roju appointments raddu cheyyi", "discharge all admitted patients", "transfer the ward patients",
 ])
 def test_a_read_never_runs_when_the_text_asks_for_a_change(text):
     r = rules.route(text)  # the matching write (preview + confirm) may answer it; a read never does
@@ -143,6 +144,18 @@ SEEN: list = []
 APPT = {"appointment_time": "10:30", "patient_name": "Ravi Kumar", "department": "ENT", "status": "confirmed",
         "booking_ref": "KR-1001", "appointment_date": TODAY, "patient_phone": PHONE}
 DATA = {
+    "/admin/ipd/census": {"date": TODAY, "occupancy_pct": 62.5, "inpatients": 5, "awaiting_bed": 1, "discharge_pending": 1,
+                          "admitted_today": 2, "discharged_today": 1,
+                          "beds": {"available": 3, "occupied": 5, "cleaning": 1, "reserved": 0, "maintenance": 0,
+                                   "blocked": 0, "total": 9}},
+    "/admin/ipd/admissions": {"admissions": [{"admission_number": "IPD-2026-00001", "patient_name": "Ravi Kumar",
+                                              "mrn": "MRN-000001", "bed": "101", "attending_doctor": "Dr. Rao",
+                                              "status": "admitted"}], "limit": 100, "offset": 0},
+    "/admin/ipd/worklist": {"awaiting_bed": [{"admission_number": "IPD-2026-00002", "patient_name": "Sita",
+                                              "mrn": "MRN-000002", "priority": "urgent"}],
+                            "discharge_pending": [{"admission_number": "IPD-2026-00001", "patient_name": "Ravi Kumar",
+                                                   "mrn": "MRN-000001", "discharge_type": "regular"}],
+                            "beds_to_clean": [], "active_orders": []},
     "/admin/lab-tests/cleanup-suggestions": {"summary": {"total_tests_analyzed": 120, "duplicate_groups_count": 3,
                                                          "suspicious_prices_count": 2, "missing_prep_count": 5,
                                                          "uncategorized_count": 9}, "duplicates": [{"name": "CBC"}]},
@@ -222,6 +235,11 @@ async def _serve(rest: str, request: Request):
 
 # (text, action, path, the page's own query (subset), a string a row must show, total)
 CASES = [
+    ("how many beds are free", "ipd.census", "/admin/ipd/census", {}, "62.5", None),
+    ("who is admitted", "ipd.inpatients", "/admin/ipd/admissions", {"status": "admitted,discharge_pending", "limit": "100"},
+     "Ravi Kumar", 1),
+    ("pending admissions today", "ipd.waiting", "/admin/ipd/worklist", {}, "Sita", 1),
+    ("pending discharges", "ipd.discharges", "/admin/ipd/worklist", {}, "Ravi Kumar", 1),
     ("dashboard stats", "stats.summary", "/admin/stats", {"days": "30"}, "42", None),
     ("booking trends", "insights.view", "/admin/insights", {"days": "30"}, "50", None),
     ("opd footfall", "opd.analytics", "/admin/opd/analytics", {"from": TODAY, "to": TODAY}, "18", None),
@@ -263,7 +281,7 @@ CASES = [
 ]
 EVERYTHING_ON = {"id": CID, "plan": "diagbooking", "account_type": "tenant", "opd_state": "READY",
                  "features": {"kriya_ketu": True, "opd_enabled": True, "ai_receptionist": True, "booking": True,
-                              "specialty_treatments": True}}
+                              "specialty_treatments": True, "ipd_enabled": True}}
 
 client = TestClient(app)
 
@@ -344,7 +362,8 @@ HANDLER_READS = sorted(a for a in READS if a in REGISTRY and REGISTRY[a].perm_so
 def test_handler_reads_are_the_expected_ones():
     assert set(HANDLER_READS) == {"opd.analytics", "opd.queue", "homecollect.visits", "voice.calls", "voice.live",
                                   "voice.analytics", "voice.usage", "voice.outbound_list",
-                                  "voice.learning_review"}
+                                  "voice.learning_review", "ipd.census", "ipd.inpatients", "ipd.waiting",
+                                  "ipd.discharges"}
 
 
 @pytest.mark.parametrize("aid", HANDLER_READS)

@@ -55,6 +55,14 @@ PERMISSIONS = frozenset({
     "OPD_CLINICAL",
     "OPD_BILLING",
     "OPD_ADMIN",
+    # IPD OS (migration 111). Routes still require ipd_access(clinic).
+    # Clinical authoring (progress notes, orders, discharge decision and
+    # summary signing) additionally needs a login linked to a doctor.
+    "IPD_ADMIN",
+    "IPD_ADMISSIONS",
+    "IPD_NURSING",
+    "IPD_CLINICAL",
+    "IPD_BILLING",
 })
 
 #: A login for a lab's CORPORATE client: sees that one company's aggregate
@@ -80,6 +88,7 @@ STAFF_ROLES = frozenset({
     "CUSTOM_ROLE",
     "DOCTOR",
     "CASHIER",
+    "NURSE",
     CORPORATE_VIEWER,
     PHLEBOTOMIST,
 })
@@ -113,6 +122,7 @@ ROLE_PRESETS: dict[str, list[str]] = {
     "CUSTOM_ROLE": [],
     "DOCTOR": ["OPD_CLINICAL"],
     "CASHIER": ["OPD_BILLING"],
+    "NURSE": ["IPD_NURSING"],
     CORPORATE_VIEWER: [],
     PHLEBOTOMIST: [],
 }

@@ -17,6 +17,7 @@ from app.services.tenant import (
     ai_receptionist_enabled,
     dental_plans_enabled,
     home_collection_available,
+    ipd_access,
     opd_enabled,
     specialty_enabled,
 )
@@ -46,6 +47,10 @@ PAGES: dict[str, str] = {
     "opdearnings": "Doctor Collections",
     "opdbilling": "OPD Billing",
     "opdanalytics": "OPD Analytics",
+    "ipdboard": "Bed Board",
+    "ipdadmit": "Admissions",
+    "ipdchart": "Inpatient Chart",
+    "ipdsetup": "IPD Setup",
     "leads": "WhatsApp Leads",
     "diagreports": "Report Automation",
     "labreports": "Lab Reports",
@@ -80,6 +85,10 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "opdworkspace": ("consultation room",),
     "opdearnings": ("collections",),
     "opdbilling": ("billing", "bills", "బిల్లింగ్", "बिलिंग"),
+    "ipdboard": ("bed board", "beds", "wards", "ward board", "bed status", "బెడ్లు", "बेड"),
+    "ipdadmit": ("admit", "admission", "ipd admission", "admit patient", "bharti", "भर्ती"),
+    "ipdchart": ("inpatient chart", "ipd chart", "nursing station", "patient chart"),
+    "ipdsetup": ("ipd setup", "ward setup", "bed setup", "bed tariff"),
     "leads": ("leads", "lead list", "లీడ్స్", "लीड्स"),
     "diagreports": ("report delivery",),
     "labreports": ("ల్యాబ్ రిపోర్ట్స్", "लैब रिपोर्ट"),
@@ -142,6 +151,7 @@ class ActionSpec:
     endpoint: Optional[tuple[str, str]] = None        # (METHOD, route path) that `call` dispatches to
     also: tuple[str, ...] = ()                         # handler only: other permissions it accepts instead
     one_of: tuple[str, ...] = ()                       # optional slots of which at least one is required
+    unless: tuple[str, ...] = ()                       # phrases naming another object: any one drops this action
 
 
 def prohibited_path(path: str) -> bool:
@@ -494,7 +504,7 @@ LEAVES = (
     ActionSpec(id="doctor_leave.create", module="doctor_leave", summary="Add doctor leave", risk="R2",
                permission="DOCTOR_LEAVES_CREATE", perm_source="dependency", page="leaves",
                endpoint=("POST", "/admin/leaves"), slots=_LEAVE_SLOTS, max_items=playbooks.MAX_LEAVE_DAYS,
-               triggers=("on leave", "is on leave", "will be on leave", "add leave", "mark leave", "chutti",
+               triggers=("on leave", "is on leave", "will be on leave", "add leave", "mark leave", "add+leave", "create+leave", "apply+leave", "chutti",
                          "chutti pe", "chutti par", "selavu", "selavulo", "=సెలవు", "సెలవులో", "సెలవు పెట్టారు",
                          "=छुट्टी", "छुट्टी पर"),
                preview=playbooks.leave_create_preview, call=playbooks.leave_create_call,
@@ -627,6 +637,23 @@ LEAD_CALLS = (
 _DESK_OPD = dict(permission=_OPD[0], perm_source=_HANDLER, feature=_opd_live)
 _ROOM_OPD = dict(permission=_OPD[0], also=_OPD[1:2], perm_source=_HANDLER, feature=_opd_live)  # + own-doctor rule
 _TARGET = (SlotSpec("target", "queue_target"), SlotSpec("doctor", "doctor", False))
+# "register" alone means a patient, but "register doctor Srinivas" / "register a nurse" / "doctor ni register"
+# name another object right at the verb: those never open the patient form (consent, phone).
+_NOT_PATIENTS = ("doctor", "dr", "doctors", "staff", "nurse", "receptionist", "cashier", "employee", "user", "login",
+                 "branch", "test", "lab test", "company", "ward", "bed", "phlebotomist", "technician", "pharmacist",
+                 "ambulance", "vehicle", "equipment", "machine", "device", "room", "department", "service", "package",
+                 "scheme", "insurance", "insurer", "tpa", "vendor", "supplier", "medicine", "drug", "product", "item",
+                 "hospital", "clinic", "lab", "pharmacy", "theatre", "ot", "icu", "leave", "holiday", "shift", "slot")
+_REGISTER_OTHER = tuple(f"register {art}{who}" for who in _NOT_PATIENTS
+                        for art in ("", "a ", "an ", "the ", "new ", "a new ")) + tuple(
+    f"{who}{tail}" for who in _NOT_PATIENTS for tail in (" registration", " ni register", " ko register",
+                                                          " nu register", " ki registration")) + (
+    "డాక్టర్ని రిజిస్టర్", "డాక్టర్ ని రిజిస్టర్", "డాక్టర్ను రిజిస్టర్", "डॉक्टर को रजिस्टर", "डॉक्टर का रजिस्ट्रेशन")
+_PERSON = ("patient", "patients", "person", "people", "family", "member", "child", "children", "baby", "kid", "boy",
+           "girl", "man", "woman", "lady", "gentleman", "son", "daughter", "wife", "husband", "mother", "father",
+           "brother", "sister", "walk", "new", "existing", "old", "returning", "senior", "pregnant", "more", "one",
+           "rogi", "mareez", "marij")
+_REGISTER_A_THING = re.compile(r"\bregister (?:(?:a|an|the|another) (?:new )?|new )(?!(?:" + "|".join(_PERSON) + r")\b)[a-z]+")
 OPD_DESK = (
     _desk("patient.register", "Register a new patient", "R2", "POST", "/admin/opd/patients", "opddesk",
           ("register", "registration", "register+patient", "new patient", "register cheyyi", "register karo",
@@ -634,7 +661,7 @@ OPD_DESK = (
           slots=(SlotSpec("name", "person_name"), SlotSpec("phone", "phone"),
                  SlotSpec("data_consent", "yesno", label="Patient agrees to their data being stored"),
                  SlotSpec("whatsapp_opt_in", "yesno", label="Patient agrees to WhatsApp messages"),
-                 SlotSpec("new_person", "new_person", False)), **_DESK_OPD),
+                 SlotSpec("new_person", "new_person", False)), unless=_REGISTER_OTHER + (_REGISTER_A_THING,), **_DESK_OPD),
     _desk("opd.walk_in", "Give a walk-in token", "R2", "POST", "/admin/opd/walk-ins", "opddesk",
           ("token for", "give+token", "walk in", "walkin", "walk-in", "token+ivvandi", "token+ivvu", "token+do",
            "token+dijiye", "టోకెన్+ఇవ్వండి", "टोकन+दो"), playbooks.walk_in_preview,
@@ -673,7 +700,8 @@ CATALOGUE = (
                  SlotSpec("round", "round_to", False)), max_items=playbooks.MAX_LAB_BULK, **_LAB),
     # The name is stored as typed, so it is only taken from quotes; otherwise the form asks.
     _desk("lab_test.create", "Add a lab test", "R2", "POST", "/admin/lab-tests", "labtests",
-          ("add+test", "add+lab test", "new+test", "create+test", "test+add cheyyi", "test+jodo", "టెస్ట్+జోడించు",
+          ("add+test", "add+lab test", "new+test", "create+test", "register test", "register a test", "register lab test",
+           "register a lab test", "test+add cheyyi", "test+jodo", "టెస్ట్+జోడించు",
            "टेस्ट+जोड़ो"), playbooks.lab_create_preview,
           slots=(SlotSpec("name", "test_name", label="Test name, exactly as patients should see it"),
                  SlotSpec("price", "price")), **_LAB),
@@ -770,7 +798,12 @@ DOCTOR_ACTIONS = (
           # "create" phrases only as written: "create+doctor" would also catch "create leave for doctor Rao".
           ("new doctor", "add+new doctor", "add+dr+mornings", "add+dr+evenings", "add+dr+weekdays",
            "add+dr+mon", "create a doctor", "create the doctor", "create dr", "create new dr",
-           "doctor+add cheyyi", "doctor+jodo", "డాక్టర్+జోడించు", "डॉक्टर+जोड़ो"),
+           # contiguous only: "register Ravi for Dr Rao" is a patient, "add leave for doctor Rao" a leave
+           "create doctor", "add doctor", "add a doctor", "add dr", "add a dr", "onboard doctor", "onboard dr",
+           "onboard a doctor", "register doctor", "register a doctor", "register the doctor", "register dr",
+           "register a dr", "doctor ni register", "doctor ko register", "dr ni register", "dr ko register",
+           "doctor+add cheyyi", "doctor+jodo", "డాక్టర్+జోడించు", "डॉक्टर+जोड़ो", "డాక్టర్ని రిజిస్టర్",
+           "డాక్టర్ ని రిజిస్టర్", "డాక్టర్ను రిజిస్టర్", "डॉक्टर को रजिस्टर", "doctor registration", "dr registration"),
           playbooks.doctor_create_preview,
           slots=(SlotSpec("name", "new_doctor", label="Doctor's name, e.g. Dr Kiran Kumar"),
                  SlotSpec("specialization", "text_field", label="Specialization, e.g. Dermatology"),
@@ -779,7 +812,10 @@ DOCTOR_ACTIONS = (
                  SlotSpec("days", "days", label="Working days, e.g. Mon-Sat"),
                  SlotSpec("morning", "morning_window", False, "Morning hours, e.g. 9 to 1 (blank if none)"),
                  SlotSpec("evening", "evening_window", False, "Evening hours, e.g. 5 to 8 (blank if none)")),
-          permission="DOCTORS_CREATE", perm_source="dependency", one_of=("morning", "evening")),
+          permission="DOCTORS_CREATE", perm_source="dependency", one_of=("morning", "evening"),
+          # "add dr Rao leave tomorrow" is a leave; "doctor registration number" an edit of an existing doctor
+          unless=("leave", "leaves", "chutti", "selavu", "సెలవు", "छुट्टी", "holiday", "registration number",
+                  "registration no", "reg number", "reg no")),
     _desk("branch.doctor_assign", "Assign a doctor to a branch", "R2", "POST", "/admin/branches/{branch_id}/doctors",
           "branches", ("assign+branch", "బ్రాంచ్+అసైన్", "ब्रांच+असाइन"), playbooks.branch_assign_preview,
           slots=(SlotSpec("doctor", "doctor"), SlotSpec("branch", "branch", label="Branch"),
@@ -790,15 +826,18 @@ DOCTOR_ACTIONS = (
 # ── KK-P4-12: H tier — a person presses the page's own button (KK-FR-025). Nothing here is executable. ──
 
 def _h(id: str, summary: str, page: str, button: str, triggers: tuple, note: str, *, fields=(), slots=(),
-       feature=None) -> ActionSpec:
+       feature=None, unless=()) -> ActionSpec:
     return ActionSpec(id=id, module=id.split(".")[0], summary=summary, risk="H", page=page, triggers=triggers,
-                      slots=slots, feature=feature, handoff=Handoff(page=page, fields=fields, button=button, note=note))
+                      slots=slots, feature=feature, unless=unless,
+                      handoff=Handoff(page=page, fields=fields, button=button, note=note))
 
 
 _ROW = "Use the buttons on its row in the list."
 HANDOFF_ACTIONS = (
     _h("staff.create", "Create a staff login", "staff", "Create Staff Login",
-       ("add+staff", "new staff", "staff+login", "create+login", "staff account", "naya staff",
+       ("add+staff", "new staff", "staff+login", "create+login", "staff account", "naya staff", "register staff",
+        "register a staff", "register nurse", "register a nurse", "add nurse", "add a nurse", "new nurse",
+        "register receptionist", "add receptionist", "new receptionist", "register cashier", "add cashier",
         "స్టాఫ్+లాగిన్", "स्टाफ+लॉगिन"),
        "Choose the username and password yourself, check the details, then press Create Staff Login.",
        # Role first: choosing it shows or hides other fields (the name is only shown for some roles).
@@ -830,7 +869,7 @@ HANDOFF_ACTIONS = (
     _h("treatment.delete", "Delete a treatment", "treatments", "", ("delete+treatment", "remove+treatment"),
        "Deleting is done by a person (Kriya can hide a treatment instead). " + _ROW),
     _h("branch.manage", "Add or change a branch", "branches", "Save Branch",
-       ("add+branch", "new branch", "create+branch", "delete+branch", "rename+branch", "edit+branch"),
+       ("add+branch", "new branch", "create+branch", "register branch", "register a branch", "delete+branch", "rename+branch", "edit+branch"),
        "Branches are what patients see on WhatsApp, so a person saves them."),
     _h("data.export", "Export data", "data", "Export data",
        ("export+data", "export+patients", "download+data", "export+patient"), "Exports are downloaded by a person."),
@@ -838,7 +877,8 @@ HANDOFF_ACTIONS = (
        ("import+patients", "upload+patients", "patients+excel", "import+excel"),
        "Imports are checked and started by a person."),
     _h("corporate.manage", "Corporate health", "corporate", "New company",
-       ("corporate+company", "add+company", "corporate+client", "corporate health"), "Done by a person on the page."),
+       ("corporate+company", "add+company", "corporate+client", "corporate health", "register company",
+        "register a company"), "Done by a person on the page."),
     _h("voice.takeover", "Take over a live call", "voice", "Live",
        ("take over+call", "takeover+call", "live call+take", "pause+call"),
        "A live patient call is taken over by a person.", feature=ai_receptionist_enabled),
@@ -953,6 +993,70 @@ BILLING = (
           playbooks.homecollect_auto_assign_preview, slots=(), max_items=200, **_HCM),
 )
 
+# ── IPD OS (migration 111): reads + hand-offs only (docs/ipd-os/KRIYA-KETU.md, ADR-IPD-08) ──
+# No IPD write is executable through Ketu in v1: bed allocation, clinical records
+# and billing stay on the page where a person presses its own button.
+
+def _ipd_on(clinic: dict) -> bool:  # _ipd_scope(): module ACTIVE or WIND_DOWN
+    return ipd_access(clinic) is not None
+
+
+_IPD_ANY = dict(permission="IPD_ADMISSIONS", also=("IPD_NURSING", "IPD_CLINICAL", "IPD_BILLING", "IPD_ADMIN"),
+                perm_source=_HANDLER, feature=_ipd_on)
+_IPD_LIST = (("Admission", "admission_number", "text"), ("Patient", "patient_name", "text"),
+             ("MRN", "mrn", "text"))
+IPD_ACTIONS = (
+    _read("ipd.census", "Bed occupancy", "/admin/ipd/census", "ipdboard",
+          ("bed occupancy", "occupancy", "free beds", "beds free", "empty beds", "how many beds", "ipd census",
+           "inpatient count", "khali beds", "beds khali", "enni beds khali", "ఖాళీ బెడ్లు", "खाली बेड"),
+          lambda d, p: present.metrics("Beds right now", "ipdboard", d, (
+              ("Occupancy", "occupancy_pct", "pct"), ("Inpatients", "inpatients", "num"),
+              ("Free beds", "beds.available", "num"), ("Occupied", "beds.occupied", "num"),
+              ("Cleaning", "beds.cleaning", "num"), ("Waiting for a bed", "awaiting_bed", "num"),
+              ("Discharge in progress", "discharge_pending", "num"), ("Admitted today", "admitted_today", "num"),
+              ("Discharged today", "discharged_today", "num"))),
+          **_IPD_ANY),
+    _read("ipd.inpatients", "Inpatients", "/admin/ipd/admissions", "ipdchart",
+          ("inpatient list", "inpatients", "admitted patients", "who is admitted", "list inpatients", "ward patients",
+           "ipd patients", "admit ayina patients", "bharti mareez", "भर्ती मरीज"),
+          lambda d, p: present.table("Inpatients", "ipdchart", (
+              ("Bed", "bed", "text"), *_IPD_LIST, ("Attending", "attending_doctor", "text"),
+              ("Status", "status", "label")), _rows(d, "admissions")),
+          query=lambda p: {"status": "admitted,discharge_pending", "limit": 100}, **_IPD_ANY),
+    _read("ipd.waiting", "Waiting for a bed", "/admin/ipd/worklist", "ipdadmit",
+          ("waiting for a bed", "waiting for bed", "bed waiting list", "pending admissions", "admission queue",
+           "bed kosam wait", "bed ka intezaar", "బెడ్ కోసం", "बेड का इंतज़ार"),
+          lambda d, p: present.table("Waiting for a bed", "ipdadmit", (*_IPD_LIST, ("Priority", "priority", "label")),
+                                     _rows(d, "awaiting_bed")),
+          **_IPD_ANY),
+    _read("ipd.discharges", "Discharges in progress", "/admin/ipd/worklist", "ipdchart",
+          ("pending discharges", "discharges today", "discharge list", "who is being discharged",
+           "discharge pending", "discharge evaru", "kiska discharge", "డిశ్చార్జ్", "डिस्चार्ज"),
+          lambda d, p: present.table("Discharges in progress", "ipdchart", (
+              *_IPD_LIST, ("Type", "discharge_type", "label")), _rows(d, "discharge_pending")),
+          **_IPD_ANY),
+    _h("ipd.admit", "Admit a patient", "ipdadmit", "Admit patient",
+       ("admit+patient", "new admission", "ipd+admit", "admit+bed", "bharti+karo", "admit", "bharti"),
+       "Pick the patient from the registry and a free bed, then press Admit patient. The bed is "
+       "confirmed by the server when you press it.", feature=_ipd_on),
+    _h("ipd.discharge", "Discharge a patient", "ipdchart", "",
+       ("discharge+patient", "complete+discharge", "release+bed", "discharge+summary", "discharge",
+        "discharge karo", "discharge cheyyi"),
+       "Open the patient's chart, Discharge tab: the attending doctor decides and signs; the checklist and "
+       "Complete discharge button are there.",
+       # one patient at a time: a bulk discharge is not offered at all
+       feature=_ipd_on, unless=("discharge all", "discharge everyone", "all patients", "sab ko discharge",
+                                "andarini discharge")),
+    _h("ipd.vitals", "Record vitals or notes", "ipdchart", "",
+       ("record+vitals", "enter+vitals", "nursing+note", "intake+output", "give+medicine", "medication+given"),
+       "Open the patient's chart; clinical entries are made and signed by staff, never by Kriya.",
+       feature=_ipd_on),
+    _h("ipd.transfer", "Move a patient to another bed", "ipdchart", "",
+       ("transfer", "shift+bed", "change+bed", "move+bed", "bed+change", "bed+marchu", "bed+badlo"),
+       "Open the patient's chart and press Transfer bed: the server confirms the new bed is still free.",
+       feature=_ipd_on),
+)
+
 #: action -> the action that does the same job where the first is switched off for the clinic (KK-FR-061).
 VARIANTS: dict[str, str] = {"appointment.check_in": "opd.arrive"}
 
@@ -975,4 +1079,5 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *VOICE_ADMIN,
     *BRIEFINGS,
     *BILLING,
+    *IPD_ACTIONS,
 )

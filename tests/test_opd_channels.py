@@ -14,7 +14,7 @@ Covers:
    - OPD settings templates are wired for token issued, patient called, etc.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -158,7 +158,8 @@ async def test_front_desk_and_admin_booking_channel_stamped():
             clinic=clinic,
             plan=plan,
             doctor=doctor,
-            day="2026-10-15",
+            # relative: schedule_sitting refuses past days, so a fixed date expires
+            day=(today_ist() + timedelta(days=1)).isoformat(),
             time_str="12:00",
             sitting_number=1,
         )

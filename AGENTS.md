@@ -41,6 +41,7 @@ Detailed, implementation-level intelligence documents are maintained in [`docs/a
 | [13-KNOWN-ISSUES-AND-GAPS.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/13-KNOWN-ISSUES-AND-GAPS.md) | Capability status matrix (Implemented vs Stubbed vs Dead), fragile boundaries. |
 | [14-CURRENT-STATE.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/14-CURRENT-STATE.md) | Documentation drift analysis comparing historical specs to current code. |
 | [15-AGENT-HANDOFF.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/15-AGENT-HANDOFF.md) | Direct answers to the 16 architectural handoff questions and debugging entry points. |
+| [docs/ipd-os/status.md](docs/ipd-os/status.md) | **IPD OS (migration 111)**: execution tracker; start here, then ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU in the same folder. |
 
 ---
 

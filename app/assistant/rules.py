@@ -52,6 +52,9 @@ WRITE_VERBS = ("cancel", "delete", "remove", "add", "create", "change", "update"
                "book", "block", "mark", "assign", "confirm", "reject", "refund", "approve", "dismiss", "register",
                "reschedule", "enable", "disable", "turn on", "turn off", "activate", "deactivate", "call next",
                "reset", "clear", "stop", "pause", "resume", "resolve", "check in", "checkin",
+               # IPD: imperative forms only, so "discharge list" / "pending discharges" stay reads
+               "transfer", "admit the", "discharge all", "discharge the", "discharge karo", "discharge cheyyi",
+               "डिस्चार्ज करो",
                "increase", "decrease", "reduce", "raise", "penchu", "tagginchu", "badhao", "ghatao",
                "hatao", "hata do", "badlo", "badal do", "bhejo", "bhej do", "jodo", "jod do", "radd",
                "raddu", "pampu", "pampandi", "marchu", "marchandi", "teeseyi", "teeseyandi",
@@ -263,12 +266,19 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
     raise ValueError(f"unknown slot kind {slot.kind!r}")
 
 
+def _names_other(t: str, spec: ActionSpec) -> bool:
+    """The sentence is about another object ("register doctor Srinivas" is not a patient registration).
+    `unless` holds phrases and compiled patterns (matched on the normalised text)."""
+    phrases = tuple(_norm(u) for u in spec.unless if isinstance(u, str))
+    return (bool(phrases) and has_any(t, phrases)) or any(u.search(t) for u in spec.unless if isinstance(u, re.Pattern))
+
+
 def _match_action(text: str, t: str, actions: dict, ui_page: Optional[str], doctors, now,
                   visible: Optional[set]) -> Route:
     scored = []
     writing = has_any(t, WRITE_VERBS)
     for spec in actions.values():
-        if writing and spec.risk == "R0":
+        if (writing and spec.risk == "R0") or _names_other(t, spec):
             continue
         # Each matched trigger counts its words: "raddu+selavu" (2) outweighs a bare "selavu" (1).
         hits = sum(len(_norm(trig.replace("+", " ")).split()) for trig in spec.triggers if _hits(t, trig))
@@ -307,7 +317,7 @@ def fill(spec: ActionSpec, text: str, *, doctors=None, now=None, question: bool 
     """Resolve one known action's slots from text (rules, the LLM fallback and clarify replies share
     this). `given` holds slots already answered on a clarify form; they are not re-parsed."""
     now = now or _now()
-    if spec.risk == "R0" and has_any(_norm(text), WRITE_VERBS):
+    if (spec.risk == "R0" and has_any(_norm(text), WRITE_VERBS)) or (given is None and _names_other(_norm(text), spec)):
         return Route("none")  # also guards the LLM fallback and clarify replies, which come through here
     if spec.risk == "H" and visible is not None and spec.handoff.page not in visible:
         return Route("rejected", page=spec.handoff.page, action_id=spec.id, error_code="not_available")  # T-29

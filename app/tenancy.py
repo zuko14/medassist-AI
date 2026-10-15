@@ -77,6 +77,10 @@ TENANT_OWNED_TABLES = frozenset({
     "ai_reception_harvest_events", "ai_learning_suggestions",
     # Migration 108: Kriya Ketu staff assistant run log
     "assistant_runs",
+    # Migration 111: IPD OS core. Same composite-FK pattern as 103.
+    "ipd_wards", "ipd_beds", "ipd_admissions", "ipd_bed_assignments", "ipd_events",
+    "ipd_observations", "ipd_notes", "ipd_orders", "ipd_med_administrations",
+    "ipd_charges", "ipd_discharge_summaries",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

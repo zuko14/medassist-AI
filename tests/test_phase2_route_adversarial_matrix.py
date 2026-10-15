@@ -64,6 +64,12 @@ def test_all_opd_routes_covered_by_adversarial_matrix():
     assert len(opd_routes) >= 28, f"Expected all /admin/opd routes in adversarial matrix, found only {len(opd_routes)}"
 
 
+def test_all_ipd_routes_covered_by_adversarial_matrix():
+    """Every /admin/ipd route (migration 111) gets the cross-tenant rejection check below."""
+    ipd_routes = [r for r in ALL_ADMIN_ROUTES if r[1].startswith("/admin/ipd")]
+    assert len(ipd_routes) >= 38, f"Expected all /admin/ipd routes in adversarial matrix, found only {len(ipd_routes)}"
+
+
 @pytest.mark.parametrize("method,path", ALL_ADMIN_ROUTES)
 def test_adversarial_cross_tenant_rejection_per_route(client, method, path):
     """Assert that a Clinic A user requesting Clinic B data is strictly denied (403/404/422)."""
