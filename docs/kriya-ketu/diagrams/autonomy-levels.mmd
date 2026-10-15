@@ -2,5 +2,6 @@
 flowchart LR
   L1["L1 Ask<br/>read, no confirm"] --> L2["L2 Do<br/>one action, risk-scaled confirm"]
   L2 --> L3["L3 Run a job<br/>playbook, one confirm,<br/>every write verified"]
-  L3 --> L4a["L4a Standing (v1)<br/>built-in automations on/off,<br/>scheduled read-only briefings"]
+  L3 --> L4a["L4a Standing (v1)<br/>built-in automations on/off"]
+  L4a -.-> L4ab["L4a scheduled briefings (v2)<br/>needs per-user notifications (DP-17)"]
   L4a -.-> L4b["L4b Standing writes (v2)<br/>needs ADR-006b principal design"]

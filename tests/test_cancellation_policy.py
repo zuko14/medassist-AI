@@ -26,6 +26,7 @@ from app.templates.whatsapp_templates import (
     cancellation_policy_line,
     get_message,
 )
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -468,7 +469,7 @@ def _settings_mocks(existing_cfg, written):
 def test_every_tier_can_be_saved_through_the_settings_api(hours):
     written = {}
     row, table, fake_sb = _settings_mocks({"razorpay_key_id": "rzp_x"}, written)
-    with patch("app.routers.admin.get_clinic_by_id", new=AsyncMock(return_value=row)), \
+    with captured_config_writes() as writes, patch("app.routers.admin.get_clinic_by_id", new=AsyncMock(return_value=row)), \
          patch("app.routers.admin.enforce_clinic_access", return_value=CLINIC_ID), \
          patch("app.routers.admin.supabase") as sb_mod, \
          patch("app.routers.admin.sb", side_effect=fake_sb), \
@@ -478,7 +479,7 @@ def test_every_tier_can_be_saved_through_the_settings_api(hours):
         res = client.put("/admin/settings/payment", headers=admin_auth(),
                          json={"cancellation_window_hours": hours})
     assert res.status_code == 200, res.text
-    assert written["config"]["cancellation_window_hours"] == hours
+    assert writes[-1]["config"]["cancellation_window_hours"] == hours
 
 
 @pytest.mark.parametrize("bad", [1, 3, 5, 8, 48, -4])
@@ -494,7 +495,7 @@ def test_saving_the_window_preserves_the_existing_razorpay_config():
     existing = {"razorpay_key_id": "rzp_live_x", "razorpay_key_secret": "s3cr3t",
                 "payment_mode": "full"}
     row, table, fake_sb = _settings_mocks(existing, written)
-    with patch("app.routers.admin.get_clinic_by_id", new=AsyncMock(return_value=row)), \
+    with captured_config_writes() as writes, patch("app.routers.admin.get_clinic_by_id", new=AsyncMock(return_value=row)), \
          patch("app.routers.admin.enforce_clinic_access", return_value=CLINIC_ID), \
          patch("app.routers.admin.supabase") as sb_mod, \
          patch("app.routers.admin.sb", side_effect=fake_sb), \
@@ -504,7 +505,8 @@ def test_saving_the_window_preserves_the_existing_razorpay_config():
         res = client.put("/admin/settings/payment", headers=admin_auth(),
                          json={"cancellation_window_hours": 12})
     assert res.status_code == 200, res.text
-    cfg = written["config"]
+    cfg = writes[-1]["config"]
+    assert writes[-1]["changed"] == [["cancellation_window_hours"]]  # D-13: nothing else is written
     assert cfg["razorpay_key_id"] == "rzp_live_x"
     assert cfg["razorpay_key_secret"] == "s3cr3t"
     assert cfg["payment_mode"] == "full"

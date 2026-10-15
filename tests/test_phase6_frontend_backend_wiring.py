@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.routers.admin import require_admin, AdminUser
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 
 def test_get_admin_profile_success():
@@ -67,7 +68,8 @@ def test_put_admin_profile_updates_config():
     app.dependency_overrides[require_admin] = lambda: admin_user
 
     try:
-        with patch("app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=mock_clinic), \
+        with captured_config_writes(), \
+             patch("app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=mock_clinic), \
              patch("app.routers.admin.supabase.table") as mock_table, \
              patch("app.routers.admin.invalidate_tenant_cache") as mock_inv, \
              patch("app.routers.admin.log_admin_action", new_callable=AsyncMock):

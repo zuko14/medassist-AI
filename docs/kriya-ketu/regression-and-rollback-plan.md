@@ -70,6 +70,6 @@ is one 19.7k-line inline application, so one script error can break every page.
 | D-14 error text | Messages the panel shows for intended 4xx | Classify before changing; keep intended 4xx text | Revert per site | Route tests grep |
 | Playbooks (bulk writes) | Catalogue, prices, calls | Caps, typed counts, per-step verify, divergence guard, kill switch per action (remove from registry) | Remove the playbook from the registry (config release), reverse data via a reversal plan where possible (prices); calls already placed cannot be undone | Playbook tests |
 | Hand-off pre-fill | Page forms | Fills only, never submits; ids drift-tested | Disable H actions in the registry | UI-19 |
-| L4a scheduled briefing | Scheduler load at 08:30 IST | Distributed lock, read-only | Remove the job registration | BRF-03 |
+| L4a scheduled briefing (**v2, DP-17**; not built in v1) | Scheduler load at 08:30 IST | Distributed lock, read-only | Remove the job registration | BRF-03 |
 
 Irreversible by nature (stated in previews): placed calls, sent WhatsApp messages, refunds issued, cancelled bookings (patients notified).

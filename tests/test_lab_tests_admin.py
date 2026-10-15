@@ -33,6 +33,7 @@ if "app.database" in sys.modules and not hasattr(sys.modules["app.database"], "_
 
 import asyncio
 import app.database as app_db
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 
 class TestLabTestsManagePermission:
@@ -417,7 +418,7 @@ class TestLabCollectionWindowEndpoint:
         from app.routers.admin import verify_credentials
         app.dependency_overrides[verify_credentials] = fake_user
 
-        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+        with captured_config_writes(), patch.object(admin_module, "supabase") as mock_sb, patch.object(
             admin_module, "enforce_clinic_access", return_value="clinic-1"
         ):
             mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
@@ -471,7 +472,7 @@ class TestLabCollectionWindowSundayOverride:
         from app.routers.admin import verify_credentials
         app.dependency_overrides[verify_credentials] = fake_user
 
-        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+        with captured_config_writes(), patch.object(admin_module, "supabase") as mock_sb, patch.object(
             admin_module, "enforce_clinic_access", return_value="clinic-1"
         ):
             mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
@@ -508,7 +509,7 @@ class TestLabCollectionWindowSundayOverride:
         from app.routers.admin import verify_credentials
         app.dependency_overrides[verify_credentials] = fake_user
 
-        with patch.object(admin_module, "supabase") as mock_sb, patch.object(
+        with captured_config_writes(), patch.object(admin_module, "supabase") as mock_sb, patch.object(
             admin_module, "enforce_clinic_access", return_value="clinic-1"
         ):
             mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(

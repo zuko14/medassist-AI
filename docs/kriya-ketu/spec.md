@@ -48,7 +48,7 @@ only when a sentence can't be matched: one structured call that can only *name* 
 | L1 Ask | Asks | "Show hot leads" | ✔ |
 | L2 Do | One instruction → one action → confirm if needed | "Cancel Sita's 4 pm" | ✔ |
 | L3 Run a job | One instruction → a whole playbook → **one** confirmation → every step verified | "Call today's hot leads", "register + token", "bulk price change" | ✔ |
-| L4a Standing (built-in) | Switches existing automations on/off; scheduled read-only briefings | "Call new leads automatically every day" (`auto_leads`), "brief me at 9" | ✔ |
+| L4a Standing (built-in) | Switches existing automations on/off (scheduled briefings deferred to v2, DP-17; briefings are on demand) | "Call new leads automatically every day" (`auto_leads`) | ✔ (automations only) |
 | L4b Standing (custom writes) | Scheduled custom write playbooks | "Every Monday raise…" | v2 (needs ADR-006b) |
 
 ### 1.4 Why it beats what clinics use today
@@ -212,7 +212,7 @@ action, a security matrix, staged rollout, kill switches, and verified results i
 | ID | Area | Requirement | How measured |
 |---|---|---|---|
 | KK-NFR-PERF-01 | Performance | Deterministic routing ≤ 300 ms p95 server-side, excluding the dispatched endpoint | `assistant_runs.route_ms` |
-| KK-NFR-PERF-02 | Performance | Widget adds ≤ 35 KB to `admin/index.html`; DOM built only on first open | Diff size; Lighthouse before/after |
+| KK-NFR-PERF-02 | Performance | Widget adds ≤ 20 KB **gzipped** to `admin/index.html` (its CSS block, script block and mark symbol); DOM built only on first open. *Owner decision 2026-10-14: was "≤ 35 KB raw"; redefined as the bytes users actually download, so the block can stay commented like the rest of the panel.* | `tests/test_assistant_panel_static.py::test_widget_size_budget_gzipped`; Lighthouse before/after |
 | KK-NFR-PERF-03 | Performance | All DB access via `await sb(...)`; no blocking calls on the loop | Tenant lint + grep test |
 | KK-NFR-SCALE-01 | Throughput | Bulk playbooks write sequentially, ≤ 5 writes/s; a 200-row price change in ≤ 2 min with live progress | Playbook timing test |
 | KK-NFR-REL-01 | Reliability | Patient WhatsApp and voice latency unchanged (no shared locks or queues) | `/webhook` p95 before/after pilot |

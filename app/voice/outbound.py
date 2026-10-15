@@ -92,7 +92,8 @@ _SKIP_TEXT = {"invalid_number": "Not a valid phone number",
               "called_recently": "Called in the last 7 days"}
 
 
-async def enqueue_bulk(clinic: dict, contacts: list, consent: Optional[dict], created_by: str) -> dict:
+async def enqueue_bulk(clinic: dict, contacts: list, consent: Optional[dict], created_by: str,
+                       dry_run: bool = False) -> dict:
     """Queue lead follow-up calls for many people at once.
 
     contacts: [{"phone": ..., "interest": ...}]. consent: {"source": ...} when
@@ -148,6 +149,9 @@ async def enqueue_bulk(clinic: dict, contacts: list, consent: Optional[dict], cr
             ctx["consent"] = {**consent, "attested_by": created_by, "at": datetime.now(IST).isoformat()}
         rows.append({"clinic_id": cid, "patient_phone": phone, "purpose": "lead_followup",
                      "context": ctx, "created_by": created_by})
+    if dry_run:  # KK-P4-06a (DP-14): the same rules and reasons, nothing inserted
+        return {"queued": 0, "would_queue": [r["patient_phone"] for r in rows], "skipped": skipped,
+                "truncated": max(0, len(contacts) - BULK_MAX), "dry_run": True}
     queued = 0
     if rows:
         try:

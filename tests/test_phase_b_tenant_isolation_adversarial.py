@@ -66,6 +66,8 @@ def test_adversarial_refund_cross_tenant_rejected(client):
 
     mock_db = MagicMock()
     mock_db.select.return_value.eq.return_value.execute.return_value.data = [fake_booking_b]
+    # D-37 (b): the lookup is scoped to the caller's clinic, where tenant B's booking does not exist.
+    mock_db.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
 
     try:
         with patch("app.routers.admin.supabase.table", return_value=mock_db):
@@ -74,7 +76,7 @@ def test_adversarial_refund_cross_tenant_rejected(client):
                 headers={"Authorization": "Basic YWRtaW5fYTpwYXNzd29yZDEyMw=="},
                 json={"reason": "Customer cancellation"},
             )
-            assert response.status_code == 403
+            assert response.status_code == 404  # D-37 (b): not found in your clinic (was 403)
     finally:
         app.dependency_overrides.clear()
 

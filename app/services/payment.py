@@ -51,7 +51,7 @@ import httpx
 
 from app.config import settings
 from app.database import supabase, is_valid_clinic_scope
-from app.utils.helpers import format_slot_time
+from app.utils.helpers import format_slot_time, today_ist
 from app.database import sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
@@ -1947,7 +1947,7 @@ class PaymentService:
         When clinic_id is provided, scopes the reconciliation summary strictly to that clinic.
         """
         if not date_str:
-            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date_str = today_ist().isoformat()  # D-25: appointment_date is an IST calendar date
 
         # Get confirmed bookings for the date
         query = (

@@ -20,6 +20,7 @@ import sys
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 os.environ.setdefault("WHATSAPP_TOKEN", "test_token")
 os.environ.setdefault("WHATSAPP_PHONE_NUMBER_ID", "000000000000")
@@ -459,7 +460,7 @@ class TestCollectionWindowWrite:
         from app.routers import admin as admin_module
 
         app = _admin_app(_admin_user())
-        with patch.object(admin_module, "supabase") as sb, patch.object(
+        with captured_config_writes() as writes, patch.object(admin_module, "supabase") as sb, patch.object(
             admin_module, "enforce_clinic_access", return_value="clinic-1"
         ):
             sb.table.return_value.select.return_value = _clinic_config_query(
@@ -474,7 +475,9 @@ class TestCollectionWindowWrite:
             )
 
         assert resp.status_code == 200
-        written = sb.table.return_value.update.call_args[0][0]["config"]
+        assert writes[-1]["table"] == "branches" and writes[-1]["id"] == KUKATPALLY
+        assert writes[-1]["changed"] == [["lab_collection"]]  # D-13: only the hours are written
+        written = writes[-1]["config"]
         assert written["lab_collection"] == {
             "start": "08:00",
             "end": "14:00",
@@ -482,7 +485,8 @@ class TestCollectionWindowWrite:
         }
         # Unrelated branch settings must survive an hours-only save.
         assert written["other"] == "kept"
-        assert sb.table.call_args_list[-1][0][0] == "branches"
+        # The branch config goes through config_store, then its audit row (D-31).
+        assert [c[0][0] for c in sb.table.call_args_list][-1] == "admin_audit_logs"
 
 
 class TestCollectionWindowResolution:
@@ -542,7 +546,7 @@ class TestCollectionWindowClear:
         from app.routers import admin as admin_module
 
         app = _admin_app(_admin_user())
-        with patch.object(admin_module, "supabase") as sb, patch.object(
+        with captured_config_writes() as writes, patch.object(admin_module, "supabase") as sb, patch.object(
             admin_module, "enforce_clinic_access", return_value="clinic-1"
         ), patch.object(
             admin_module,
@@ -565,7 +569,8 @@ class TestCollectionWindowClear:
 
         assert resp.status_code == 200
         assert resp.json() == {"success": True, "cleared": True}
-        written = sb.table.return_value.update.call_args[0][0]["config"]
+        assert writes[-1]["changed"] == [["lab_collection"]]  # D-13: only the removal is written
+        written = writes[-1]["config"]
         assert "lab_collection" not in written
         # Unrelated branch settings must survive.
         assert written["other"] == "kept"

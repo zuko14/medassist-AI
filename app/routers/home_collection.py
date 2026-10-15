@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.database import is_uuid, restrict_to_branch, sb, supabase
+from app.services import config_store  # D-13: config saves write only the changed keys, atomically
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
 from app.services import home_collection as hc
 from app.services.permissions import PHLEBOTOMIST, enforce_branch_scope, resolve_owned_branch
@@ -186,19 +187,17 @@ async def put_settings(
     })
     if branch_id:
         branch = await resolve_owned_branch(user, branch_id, scope)
-        config = branch.get("config") or {}
-        config["home_collection"] = settings
-        await sb(supabase.table("branches").update({"config": config}).eq("clinic_id", scope).eq("id", branch["id"]))
+        before = branch.get("config") or {}
+        await config_store.save_config("branches", branch["id"], scope, before, {**before, "home_collection": settings})
     else:
         if user.role == "staff" and getattr(user, "branch_id", None):
             raise HTTPException(status_code=403, detail="Branch staff can only change their own branch's settings.")
+        # unscoped: unique_row_key (clinics.id IS the tenant, resolved by _manager_scope)
         res = await sb(supabase.table("clinics").select("config, whatsapp_number, phone_number_id").eq("id", scope))
         if not res.data:
             raise HTTPException(status_code=404, detail="Clinic not found")
-        config = res.data[0].get("config") or {}
-        config["home_collection"] = settings
-        # unscoped: unique_row_key
-        await sb(supabase.table("clinics").update({"config": config}).eq("id", scope))
+        before = res.data[0].get("config") or {}
+        await config_store.save_config("clinics", scope, scope, before, {**before, "home_collection": settings})
         invalidate_tenant_cache(res.data[0].get("whatsapp_number"), res.data[0].get("phone_number_id"))
     await log_admin_action(user, "update_home_collection_settings", "clinic", scope,
                            {"branch_id": branch_id, **settings}, _ip(request))

@@ -1,0 +1,4143 @@
+{
+ "version": 1,
+ "note": "expect: nav:<page> | help:<page> | action:<id> | not_available | negated | hypothetical | clinical | clarify | none. KK-P4-01 read phrases carry lang (en / te-Latin / hi-Latin / te / hi); their negatives carry near=<action id>.",
+ "phrases": [
+  {
+   "text": "open leads",
+   "expect": "nav:leads",
+   "near": "leads.list"
+  },
+  {
+   "text": "Open WhatsApp Leads",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "go to leads",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "leads",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "show me the leads page",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "leads open cheyyi",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "leads kholo",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "लीड्स खोलो",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "లీడ్స్ ఓపెన్ చేయండి",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "whatsapp leads page please",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "take me to leads",
+   "expect": "nav:leads"
+  },
+  {
+   "text": "open leaves",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "go to doctor leaves",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "chutti page kholo",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "selavu page open cheyyi",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "సెలవులు తెరవండి",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "छुट्टी पेज खोलो",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "leaves page",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "show leaves",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "leave tab open karo",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "navigate to leaves",
+   "expect": "nav:leaves"
+  },
+  {
+   "text": "open appointments",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "appointments",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "go to the appointments page",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "appointments kholo",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "అపాయింట్మెంట్స్ ఓపెన్ చేయండి",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "अपॉइंटमेंट्स खोलो",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "appointments chupinchu",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "show appointments tab",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "appointment list open cheyandi",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "take me to appointments",
+   "expect": "nav:appointments"
+  },
+  {
+   "text": "open doctors",
+   "expect": "nav:doctors",
+   "near": "doctors.list"
+  },
+  {
+   "text": "doctors page",
+   "expect": "nav:doctors"
+  },
+  {
+   "text": "go to doctors",
+   "expect": "nav:doctors"
+  },
+  {
+   "text": "doctors kholo",
+   "expect": "nav:doctors"
+  },
+  {
+   "text": "డాక్టర్లు చూపించండి",
+   "expect": "nav:doctors"
+  },
+  {
+   "text": "डॉक्टर्स दिखाओ",
+   "expect": "nav:doctors"
+  },
+  {
+   "text": "doctor list",
+   "expect": "nav:doctors"
+  },
+  {
+   "text": "show doctors",
+   "expect": "nav:doctors"
+  },
+  {
+   "text": "open holidays",
+   "expect": "nav:holidays"
+  },
+  {
+   "text": "hospital holidays page",
+   "expect": "nav:holidays"
+  },
+  {
+   "text": "go to holidays",
+   "expect": "nav:holidays"
+  },
+  {
+   "text": "holidays kholo",
+   "expect": "nav:holidays"
+  },
+  {
+   "text": "holidays open cheyyi",
+   "expect": "nav:holidays"
+  },
+  {
+   "text": "open patients",
+   "expect": "nav:patients",
+   "near": "patients.search"
+  },
+  {
+   "text": "patients",
+   "expect": "nav:patients"
+  },
+  {
+   "text": "patient list kholo",
+   "expect": "nav:patients"
+  },
+  {
+   "text": "पेशेंट्स खोलो",
+   "expect": "nav:patients"
+  },
+  {
+   "text": "పేషెంట్లు చూపించండి",
+   "expect": "nav:patients"
+  },
+  {
+   "text": "मरीज पेज खोलो",
+   "expect": "nav:patients"
+  },
+  {
+   "text": "go to patients",
+   "expect": "nav:patients"
+  },
+  {
+   "text": "open dashboard",
+   "expect": "nav:dashboard",
+   "near": "stats.summary"
+  },
+  {
+   "text": "go home",
+   "expect": "nav:dashboard"
+  },
+  {
+   "text": "dashboard",
+   "expect": "nav:dashboard"
+  },
+  {
+   "text": "home page",
+   "expect": "nav:dashboard"
+  },
+  {
+   "text": "डैशबोर्ड खोलो",
+   "expect": "nav:dashboard"
+  },
+  {
+   "text": "dashboard kholo",
+   "expect": "nav:dashboard"
+  },
+  {
+   "text": "main page open cheyyi",
+   "expect": "nav:dashboard"
+  },
+  {
+   "text": "open lab reports",
+   "expect": "nav:labreports",
+   "near": "reports.queue"
+  },
+  {
+   "text": "go to lab reports",
+   "expect": "nav:labreports"
+  },
+  {
+   "text": "lab reports kholo",
+   "expect": "nav:labreports"
+  },
+  {
+   "text": "लैब रिपोर्ट खोलो",
+   "expect": "nav:labreports"
+  },
+  {
+   "text": "ల్యాబ్ రిపోర్ట్స్ ఓపెన్ చేయండి",
+   "expect": "nav:labreports"
+  },
+  {
+   "text": "lab reports page",
+   "expect": "nav:labreports"
+  },
+  {
+   "text": "open lab tests",
+   "expect": "nav:labtests",
+   "near": "lab_tests.list"
+  },
+  {
+   "text": "test catalogue",
+   "expect": "nav:labtests"
+  },
+  {
+   "text": "lab tests kholo",
+   "expect": "nav:labtests"
+  },
+  {
+   "text": "go to the test catalogue",
+   "expect": "nav:labtests"
+  },
+  {
+   "text": "lab tests page please",
+   "expect": "nav:labtests"
+  },
+  {
+   "text": "open report automation",
+   "expect": "nav:diagreports"
+  },
+  {
+   "text": "report automation page",
+   "expect": "nav:diagreports"
+  },
+  {
+   "text": "go to report automation",
+   "expect": "nav:diagreports"
+  },
+  {
+   "text": "open the live queue",
+   "expect": "nav:opdqueue"
+  },
+  {
+   "text": "live queue",
+   "expect": "nav:opdqueue"
+  },
+  {
+   "text": "queue kholo",
+   "expect": "nav:opdqueue"
+  },
+  {
+   "text": "show the live queue page",
+   "expect": "nav:opdqueue"
+  },
+  {
+   "text": "क्यू खोलो",
+   "expect": "nav:opdqueue"
+  },
+  {
+   "text": "queue open cheyyi",
+   "expect": "nav:opdqueue"
+  },
+  {
+   "text": "open front desk",
+   "expect": "nav:opddesk"
+  },
+  {
+   "text": "front desk",
+   "expect": "nav:opddesk"
+  },
+  {
+   "text": "go to front desk",
+   "expect": "nav:opddesk"
+  },
+  {
+   "text": "front desk kholo",
+   "expect": "nav:opddesk"
+  },
+  {
+   "text": "reception desk open cheyyi",
+   "expect": "nav:opddesk"
+  },
+  {
+   "text": "open opd billing",
+   "expect": "nav:opdbilling"
+  },
+  {
+   "text": "billing page",
+   "expect": "nav:opdbilling"
+  },
+  {
+   "text": "go to billing",
+   "expect": "nav:opdbilling"
+  },
+  {
+   "text": "billing kholo",
+   "expect": "nav:opdbilling"
+  },
+  {
+   "text": "బిల్లింగ్ ఓపెన్ చేయండి",
+   "expect": "nav:opdbilling"
+  },
+  {
+   "text": "open consultation",
+   "expect": "nav:opdworkspace"
+  },
+  {
+   "text": "consultation room",
+   "expect": "nav:opdworkspace"
+  },
+  {
+   "text": "go to consultation",
+   "expect": "nav:opdworkspace"
+  },
+  {
+   "text": "open doctor collections",
+   "expect": "nav:opdearnings"
+  },
+  {
+   "text": "doctor collections page",
+   "expect": "nav:opdearnings"
+  },
+  {
+   "text": "open opd analytics",
+   "expect": "nav:opdanalytics",
+   "near": "opd.analytics"
+  },
+  {
+   "text": "opd analytics page",
+   "expect": "nav:opdanalytics"
+  },
+  {
+   "text": "open opd setup",
+   "expect": "nav:opdsetup"
+  },
+  {
+   "text": "opd setup page",
+   "expect": "nav:opdsetup"
+  },
+  {
+   "text": "open ai receptionist",
+   "expect": "nav:voice",
+   "near": "voice.analytics"
+  },
+  {
+   "text": "receptionist page",
+   "expect": "nav:voice"
+  },
+  {
+   "text": "go to the voice receptionist",
+   "expect": "nav:voice"
+  },
+  {
+   "text": "receptionist kholo",
+   "expect": "nav:voice"
+  },
+  {
+   "text": "రిసెప్షనిస్ట్ ఓపెన్ చేయండి",
+   "expect": "nav:voice"
+  },
+  {
+   "text": "open payments",
+   "expect": "nav:payments",
+   "near": "bookings.pending_review"
+  },
+  {
+   "text": "payments page",
+   "expect": "nav:payments"
+  },
+  {
+   "text": "go to payments",
+   "expect": "nav:payments",
+   "near": "payments.reconciliation"
+  },
+  {
+   "text": "पेमेंट्स खोलो",
+   "expect": "nav:payments"
+  },
+  {
+   "text": "payments kholo",
+   "expect": "nav:payments"
+  },
+  {
+   "text": "open payment settings",
+   "expect": "nav:paysettings"
+  },
+  {
+   "text": "take me to payment settings",
+   "expect": "nav:paysettings"
+  },
+  {
+   "text": "payment settings page",
+   "expect": "nav:paysettings"
+  },
+  {
+   "text": "upi settings",
+   "expect": "nav:paysettings"
+  },
+  {
+   "text": "open hospital profile",
+   "expect": "nav:profile"
+  },
+  {
+   "text": "clinic profile",
+   "expect": "nav:profile"
+  },
+  {
+   "text": "go to profile",
+   "expect": "nav:profile"
+  },
+  {
+   "text": "profile kholo",
+   "expect": "nav:profile"
+  },
+  {
+   "text": "ప్రొఫైల్ ఓపెన్ చేయండి",
+   "expect": "nav:profile"
+  },
+  {
+   "text": "open branches",
+   "expect": "nav:branches"
+  },
+  {
+   "text": "go to branches",
+   "expect": "nav:branches"
+  },
+  {
+   "text": "locations page",
+   "expect": "nav:branches"
+  },
+  {
+   "text": "branches kholo",
+   "expect": "nav:branches"
+  },
+  {
+   "text": "open staff accounts",
+   "expect": "nav:staff"
+  },
+  {
+   "text": "staff page",
+   "expect": "nav:staff"
+  },
+  {
+   "text": "go to staff",
+   "expect": "nav:staff"
+  },
+  {
+   "text": "staff kholo",
+   "expect": "nav:staff"
+  },
+  {
+   "text": "स्टाफ खोलो",
+   "expect": "nav:staff"
+  },
+  {
+   "text": "open report connector",
+   "expect": "nav:connectors"
+  },
+  {
+   "text": "connectors page",
+   "expect": "nav:connectors"
+  },
+  {
+   "text": "go to the connector",
+   "expect": "nav:connectors"
+  },
+  {
+   "text": "open treatments",
+   "expect": "nav:treatments",
+   "near": "treatments.list"
+  },
+  {
+   "text": "treatments page",
+   "expect": "nav:treatments"
+  },
+  {
+   "text": "procedures",
+   "expect": "nav:treatments"
+  },
+  {
+   "text": "treatments kholo",
+   "expect": "nav:treatments"
+  },
+  {
+   "text": "open treatment plans",
+   "expect": "nav:dentalplans"
+  },
+  {
+   "text": "dental plans page",
+   "expect": "nav:dentalplans"
+  },
+  {
+   "text": "open prescriptions",
+   "expect": "nav:prescriptions"
+  },
+  {
+   "text": "go to prescriptions page",
+   "expect": "nav:prescriptions"
+  },
+  {
+   "text": "prescriptions kholo",
+   "expect": "nav:prescriptions"
+  },
+  {
+   "text": "open home collections",
+   "expect": "nav:homecollect"
+  },
+  {
+   "text": "home collection page",
+   "expect": "nav:homecollect"
+  },
+  {
+   "text": "home visits",
+   "expect": "nav:homecollect"
+  },
+  {
+   "text": "open corporate health",
+   "expect": "nav:corporate"
+  },
+  {
+   "text": "corporate health page",
+   "expect": "nav:corporate"
+  },
+  {
+   "text": "open insights",
+   "expect": "nav:insights"
+  },
+  {
+   "text": "insights page",
+   "expect": "nav:insights"
+  },
+  {
+   "text": "go to insights",
+   "expect": "nav:insights"
+  },
+  {
+   "text": "open data & support",
+   "expect": "nav:data"
+  },
+  {
+   "text": "support page",
+   "expect": "nav:data"
+  },
+  {
+   "text": "open staff accounts",
+   "expect": "not_available",
+   "visible": [
+    "dashboard",
+    "appointments",
+    "patients",
+    "opddesk"
+   ]
+  },
+  {
+   "text": "go to payment settings",
+   "expect": "not_available",
+   "visible": [
+    "dashboard",
+    "appointments",
+    "patients",
+    "opddesk"
+   ]
+  },
+  {
+   "text": "open insights",
+   "expect": "not_available",
+   "visible": [
+    "dashboard",
+    "appointments",
+    "patients",
+    "opddesk"
+   ],
+   "near": "insights.view"
+  },
+  {
+   "text": "staff kholo",
+   "expect": "not_available",
+   "visible": [
+    "dashboard",
+    "appointments",
+    "patients",
+    "opddesk"
+   ]
+  },
+  {
+   "text": "open opd billing",
+   "expect": "not_available",
+   "visible": [
+    "dashboard",
+    "appointments",
+    "patients",
+    "opddesk"
+   ]
+  },
+  {
+   "text": "how do I add a leave",
+   "expect": "help:leaves"
+  },
+  {
+   "text": "how to add doctor leave",
+   "expect": "help:leaves"
+  },
+  {
+   "text": "leave ela add cheyyali",
+   "expect": "help:leaves"
+  },
+  {
+   "text": "chutti kaise add karein",
+   "expect": "help:leaves"
+  },
+  {
+   "text": "how can I mark a doctor on leave?",
+   "expect": "help:leaves"
+  },
+  {
+   "text": "छुट्टी कैसे जोड़ें",
+   "expect": "help:leaves"
+  },
+  {
+   "text": "selavu ela petali",
+   "expect": "help:leaves"
+  },
+  {
+   "text": "how do I add a doctor",
+   "expect": "help:doctors"
+  },
+  {
+   "text": "how to add a new doctor?",
+   "expect": "help:doctors"
+  },
+  {
+   "text": "doctor kaise add karein",
+   "expect": "help:doctors"
+  },
+  {
+   "text": "doctor ni ela add cheyyali",
+   "expect": "help:doctors"
+  },
+  {
+   "text": "how do I add a holiday",
+   "expect": "help:holidays"
+  },
+  {
+   "text": "how to add a hospital holiday?",
+   "expect": "help:holidays"
+  },
+  {
+   "text": "holiday kaise add karein",
+   "expect": "help:holidays"
+  },
+  {
+   "text": "how do I add a treatment",
+   "expect": "help:treatments"
+  },
+  {
+   "text": "how to add a procedure?",
+   "expect": "help:treatments"
+  },
+  {
+   "text": "how do I register a new patient",
+   "expect": "help:opddesk"
+  },
+  {
+   "text": "how to register a patient?",
+   "expect": "help:opddesk"
+  },
+  {
+   "text": "patient ko register kaise karein",
+   "expect": "help:opddesk"
+  },
+  {
+   "text": "how do I sync reports",
+   "expect": "help:connectors"
+  },
+  {
+   "text": "how to run the connector?",
+   "expect": "help:connectors"
+  },
+  {
+   "text": "don't open leads",
+   "expect": "negated"
+  },
+  {
+   "text": "dont open the leads page",
+   "expect": "negated"
+  },
+  {
+   "text": "do not go to appointments",
+   "expect": "negated"
+  },
+  {
+   "text": "leads vaddu",
+   "expect": "negated"
+  },
+  {
+   "text": "appointments page vaddu",
+   "expect": "negated"
+  },
+  {
+   "text": "leads mat kholo",
+   "expect": "negated"
+  },
+  {
+   "text": "लीड्स मत खोलो",
+   "expect": "negated"
+  },
+  {
+   "text": "అపాయింట్మెంట్స్ వద్దు",
+   "expect": "negated"
+  },
+  {
+   "text": "leads nahi kholna",
+   "expect": "negated"
+  },
+  {
+   "text": "don't cancel Sita's appointment",
+   "expect": "negated"
+  },
+  {
+   "text": "do not send the report",
+   "expect": "negated"
+  },
+  {
+   "text": "Dr Rao leave vaddu",
+   "expect": "negated"
+  },
+  {
+   "text": "price mat badhao",
+   "expect": "negated"
+  },
+  {
+   "text": "don’t call the leads",
+   "expect": "negated"
+  },
+  {
+   "text": "what if Dr Rao is on leave tomorrow",
+   "expect": "hypothetical",
+   "near": "doctor_leave.create"
+  },
+  {
+   "text": "suppose Dr Anitha takes leave on Friday",
+   "expect": "hypothetical"
+  },
+  {
+   "text": "agar Dr Srinivas chutti le to kya hoga",
+   "expect": "hypothetical"
+  },
+  {
+   "text": "ఒకవేళ డాక్టర్ రావు రేపు సెలవు అయితే",
+   "expect": "hypothetical"
+  },
+  {
+   "text": "what happens if we raise prices 10%",
+   "expect": "hypothetical"
+  },
+  {
+   "text": "अगर कल छुट्टी हो तो",
+   "expect": "hypothetical"
+  },
+  {
+   "text": "okavela repu holiday aithe",
+   "expect": "hypothetical"
+  },
+  {
+   "text": "what would happen if I cancel all appointments",
+   "expect": "hypothetical"
+  },
+  {
+   "text": "prescribe paracetamol for Sita",
+   "expect": "clinical"
+  },
+  {
+   "text": "what medicine for BP",
+   "expect": "clinical"
+  },
+  {
+   "text": "dosage of amoxicillin for a child",
+   "expect": "clinical"
+  },
+  {
+   "text": "which tablet should I give for fever",
+   "expect": "clinical"
+  },
+  {
+   "text": "diagnose this patient",
+   "expect": "clinical"
+  },
+  {
+   "text": "is it a boy or girl",
+   "expect": "clinical"
+  },
+  {
+   "text": "what is the diagnosis for Ravi",
+   "expect": "clinical"
+  },
+  {
+   "text": "write a prescription for cough",
+   "expect": "clinical"
+  },
+  {
+   "text": "ladka hai ya ladki batao",
+   "expect": "clinical"
+  },
+  {
+   "text": "dose of metformin",
+   "expect": "clinical"
+  },
+  {
+   "text": "cancel all appointments",
+   "expect": "none"
+  },
+  {
+   "text": "open the pod bay doors",
+   "expect": "none"
+  },
+  {
+   "text": "call today's hot leads",
+   "expect": "action:leads.call"
+  },
+  {
+   "text": "raise biochemistry prices 10%",
+   "expect": "none"
+  },
+  {
+   "text": "Dr Rao is on leave tomorrow",
+   "expect": "action:doctor_leave.create"
+  },
+  {
+   "text": "register Lakshmi for Dr Anitha",
+   "expect": "clarify"
+  },
+  {
+   "text": "send the report to Ravi",
+   "expect": "none"
+  },
+  {
+   "text": "open leads and call them",
+   "expect": "action:leads.call"
+  },
+  {
+   "text": "x",
+   "expect": "none"
+  },
+  {
+   "text": "hello",
+   "expect": "none"
+  },
+  {
+   "text": "good morning",
+   "expect": "none"
+  },
+  {
+   "text": "thank you",
+   "expect": "none"
+  },
+  {
+   "text": "open",
+   "expect": "none"
+  },
+  {
+   "text": "open the page",
+   "expect": "none"
+  },
+  {
+   "text": "doctor leave tomorrow",
+   "expect": "none"
+  },
+  {
+   "text": "show the leads of last week",
+   "expect": "none"
+  },
+  {
+   "text": "resend failed reports",
+   "expect": "action:report.resend_failed"
+  },
+  {
+   "text": "book a slot",
+   "expect": "none"
+  },
+  {
+   "text": "what's the weather",
+   "expect": "none"
+  },
+  {
+   "text": "open appointments",
+   "expect": "nav:appointments",
+   "visible": [
+    "dashboard",
+    "appointments"
+   ],
+   "near": "appointments.search"
+  },
+  {
+   "text": "dashboard stats",
+   "expect": "action:stats.summary",
+   "lang": "en"
+  },
+  {
+   "text": "show clinic stats",
+   "expect": "action:stats.summary",
+   "lang": "en"
+  },
+  {
+   "text": "monthly stats please",
+   "expect": "action:stats.summary",
+   "lang": "en"
+  },
+  {
+   "text": "nela stats chupinchu",
+   "expect": "action:stats.summary",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "is mahine ke stats dikhao",
+   "expect": "action:stats.summary",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "క్లినిక్ గణాంకాలు",
+   "expect": "action:stats.summary",
+   "lang": "te"
+  },
+  {
+   "text": "आंकड़े दिखाओ",
+   "expect": "action:stats.summary",
+   "lang": "hi"
+  },
+  {
+   "text": "reset dashboard stats",
+   "expect": "none",
+   "near": "stats.summary"
+  },
+  {
+   "text": "booking trends",
+   "expect": "action:insights.view",
+   "lang": "en"
+  },
+  {
+   "text": "revenue trend this month",
+   "expect": "action:insights.view",
+   "lang": "en"
+  },
+  {
+   "text": "show business trends",
+   "expect": "action:insights.view",
+   "lang": "en"
+  },
+  {
+   "text": "trends enti",
+   "expect": "action:insights.view",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "trends batao",
+   "expect": "action:insights.view",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "delete booking trends",
+   "expect": "none",
+   "near": "insights.view"
+  },
+  {
+   "text": "opd footfall",
+   "expect": "action:opd.analytics",
+   "lang": "en"
+  },
+  {
+   "text": "opd numbers today",
+   "expect": "action:opd.analytics",
+   "lang": "en"
+  },
+  {
+   "text": "opd summary for yesterday",
+   "expect": "action:opd.analytics",
+   "lang": "en"
+  },
+  {
+   "text": "opd lekkalu",
+   "expect": "action:opd.analytics",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj ka opd ka hisaab",
+   "expect": "action:opd.analytics",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ओपीडी फुटफॉल",
+   "expect": "action:opd.analytics",
+   "lang": "hi"
+  },
+  {
+   "text": "update opd numbers",
+   "expect": "none",
+   "near": "opd.analytics"
+  },
+  {
+   "text": "today's appointments",
+   "expect": "action:appointments.search",
+   "lang": "en"
+  },
+  {
+   "text": "how many appointments tomorrow",
+   "expect": "action:appointments.search",
+   "lang": "en"
+  },
+  {
+   "text": "appointments on 20 october",
+   "expect": "action:appointments.search",
+   "lang": "en"
+  },
+  {
+   "text": "list appointments",
+   "expect": "action:appointments.search",
+   "lang": "en"
+  },
+  {
+   "text": "ee roju appointments",
+   "expect": "action:appointments.search",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "repu appointments chupinchu",
+   "expect": "action:appointments.search",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj ke appointments",
+   "expect": "action:appointments.search",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "आज के अपॉइंटमेंट",
+   "expect": "action:appointments.search",
+   "lang": "hi"
+  },
+  {
+   "text": "ఈ రోజు అపాయింట్మెంట్స్",
+   "expect": "action:appointments.search",
+   "lang": "te"
+  },
+  {
+   "text": "cancel today's appointments",
+   "expect": "none",
+   "near": "appointments.search"
+  },
+  {
+   "text": "aaj ke appointments cancel karo",
+   "expect": "none",
+   "near": "appointments.search"
+  },
+  {
+   "text": "ee roju appointments raddu cheyyi",
+   "expect": "none",
+   "near": "appointments.search"
+  },
+  {
+   "text": "bookings pending review",
+   "expect": "action:bookings.pending_review",
+   "lang": "en"
+  },
+  {
+   "text": "which bookings to review",
+   "expect": "action:bookings.pending_review",
+   "lang": "en"
+  },
+  {
+   "text": "pending bookings",
+   "expect": "action:bookings.pending_review",
+   "lang": "en"
+  },
+  {
+   "text": "review lo unna bookings",
+   "expect": "action:bookings.pending_review",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "review wale bookings dikhao",
+   "expect": "action:bookings.pending_review",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "confirm pending bookings",
+   "expect": "none",
+   "near": "bookings.pending_review"
+  },
+  {
+   "text": "payment reconciliation",
+   "expect": "action:payments.reconciliation",
+   "lang": "en"
+  },
+  {
+   "text": "reconciliation for yesterday",
+   "expect": "action:payments.reconciliation",
+   "lang": "en"
+  },
+  {
+   "text": "settlement check",
+   "expect": "action:payments.reconciliation",
+   "lang": "en"
+  },
+  {
+   "text": "dabbu lekka",
+   "expect": "action:payments.reconciliation",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj ka hisaab",
+   "expect": "action:payments.reconciliation",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "refund the reconciliation difference",
+   "expect": "none",
+   "near": "payments.reconciliation"
+  },
+  {
+   "text": "payment stats",
+   "expect": "action:payments.stats",
+   "lang": "en"
+  },
+  {
+   "text": "payment summary",
+   "expect": "action:payments.stats",
+   "lang": "en"
+  },
+  {
+   "text": "how much collected",
+   "expect": "action:payments.stats",
+   "lang": "en"
+  },
+  {
+   "text": "payments lekkalu",
+   "expect": "action:payments.stats",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "payment ka summary",
+   "expect": "action:payments.stats",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "पेमेंट का हिसाब",
+   "expect": "action:payments.stats",
+   "lang": "hi"
+  },
+  {
+   "text": "send payment summary to patients",
+   "expect": "none",
+   "near": "payments.stats"
+  },
+  {
+   "text": "open payments page",
+   "expect": "nav:payments",
+   "near": "payments.stats"
+  },
+  {
+   "text": "who is waiting",
+   "expect": "action:opd.queue",
+   "lang": "en"
+  },
+  {
+   "text": "waiting patients",
+   "expect": "action:opd.queue",
+   "lang": "en"
+  },
+  {
+   "text": "current token",
+   "expect": "action:opd.queue",
+   "lang": "en"
+  },
+  {
+   "text": "evaru wait chestunnaru",
+   "expect": "action:opd.queue",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kaun wait kar raha hai",
+   "expect": "action:opd.queue",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "कौन इंतज़ार कर रहा है",
+   "expect": "action:opd.queue",
+   "lang": "hi"
+  },
+  {
+   "text": "open queue",
+   "expect": "nav:opdqueue",
+   "near": "opd.queue"
+  },
+  {
+   "text": "call next token",
+   "expect": "clarify",
+   "near": "opd.queue"
+  },
+  {
+   "text": "list doctors",
+   "expect": "action:doctors.list",
+   "lang": "en"
+  },
+  {
+   "text": "which doctors are available",
+   "expect": "action:doctors.list",
+   "lang": "en"
+  },
+  {
+   "text": "how many doctors",
+   "expect": "action:doctors.list",
+   "lang": "en"
+  },
+  {
+   "text": "doctors evaru",
+   "expect": "action:doctors.list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kaun se doctor hain",
+   "expect": "action:doctors.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "कौन से डॉक्टर",
+   "expect": "action:doctors.list",
+   "lang": "hi"
+  },
+  {
+   "text": "add doctor names",
+   "expect": "none",
+   "near": "doctors.list"
+  },
+  {
+   "text": "lab test rates",
+   "expect": "action:lab_tests.list",
+   "lang": "en"
+  },
+  {
+   "text": "list tests",
+   "expect": "action:lab_tests.list",
+   "lang": "en"
+  },
+  {
+   "text": "how many tests do we have",
+   "expect": "action:lab_tests.list",
+   "lang": "en"
+  },
+  {
+   "text": "test dharalu",
+   "expect": "action:lab_tests.list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "test ke rate batao",
+   "expect": "action:lab_tests.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "टेस्ट के रेट",
+   "expect": "action:lab_tests.list",
+   "lang": "hi"
+  },
+  {
+   "text": "delete the lab test rates",
+   "expect": "action:lab_test.delete",
+   "near": "lab_tests.list",
+   "note": "KK-P4-12: a hand-off card (nothing is written; deletion is done by a person on the page)"
+  },
+  {
+   "text": "change test rates",
+   "expect": "none",
+   "near": "lab_tests.list"
+  },
+  {
+   "text": "list treatments",
+   "expect": "action:treatments.list",
+   "lang": "en"
+  },
+  {
+   "text": "treatment prices",
+   "expect": "action:treatments.list",
+   "lang": "en"
+  },
+  {
+   "text": "which treatments do we offer",
+   "expect": "action:treatments.list",
+   "lang": "en"
+  },
+  {
+   "text": "treatment dharalu",
+   "expect": "action:treatments.list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "treatment ke rate",
+   "expect": "action:treatments.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "update treatment prices",
+   "expect": "none",
+   "near": "treatments.list"
+  },
+  {
+   "text": "report delivery status",
+   "expect": "action:reports.deliveries",
+   "lang": "en"
+  },
+  {
+   "text": "reports delivered",
+   "expect": "action:reports.deliveries",
+   "lang": "en"
+  },
+  {
+   "text": "delivery log",
+   "expect": "action:reports.deliveries",
+   "lang": "en"
+  },
+  {
+   "text": "reports pampinchara",
+   "expect": "action:reports.deliveries",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "report bheje gaye kya",
+   "expect": "action:reports.deliveries",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "resend report deliveries",
+   "expect": "clarify",
+   "near": "reports.deliveries"
+  },
+  {
+   "text": "open report delivery",
+   "expect": "nav:diagreports",
+   "near": "reports.deliveries"
+  },
+  {
+   "text": "failed reports",
+   "expect": "action:reports.queue",
+   "lang": "en"
+  },
+  {
+   "text": "report queue",
+   "expect": "action:reports.queue",
+   "lang": "en"
+  },
+  {
+   "text": "unmatched reports",
+   "expect": "action:reports.queue",
+   "lang": "en"
+  },
+  {
+   "text": "fail aina reports",
+   "expect": "action:reports.queue",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "atki reports dikhao",
+   "expect": "action:reports.queue",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "अटकी रिपोर्ट",
+   "expect": "action:reports.queue",
+   "lang": "hi"
+  },
+  {
+   "text": "dismiss failed reports",
+   "expect": "none",
+   "near": "reports.queue"
+  },
+  {
+   "text": "home visits today",
+   "expect": "action:homecollect.visits",
+   "lang": "en"
+  },
+  {
+   "text": "today's home visits",
+   "expect": "action:homecollect.visits",
+   "lang": "en"
+  },
+  {
+   "text": "sample pickups",
+   "expect": "action:homecollect.visits",
+   "lang": "en"
+  },
+  {
+   "text": "ee roju home visits",
+   "expect": "action:homecollect.visits",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj ke home visit",
+   "expect": "action:homecollect.visits",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "assign home visits today",
+   "expect": "none",
+   "near": "homecollect.visits"
+  },
+  {
+   "text": "open home collection",
+   "expect": "nav:homecollect",
+   "near": "homecollect.visits"
+  },
+  {
+   "text": "new leads",
+   "expect": "action:leads.list",
+   "lang": "en"
+  },
+  {
+   "text": "how many leads",
+   "expect": "action:leads.list",
+   "lang": "en"
+  },
+  {
+   "text": "recent leads",
+   "expect": "action:leads.list",
+   "lang": "en"
+  },
+  {
+   "text": "kotha leads",
+   "expect": "action:leads.list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "naye leads dikhao",
+   "expect": "action:leads.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "नए लीड्स",
+   "expect": "action:leads.list",
+   "lang": "hi"
+  },
+  {
+   "text": "కొత్త లీడ్స్",
+   "expect": "action:leads.list",
+   "lang": "te"
+  },
+  {
+   "text": "send new leads a message",
+   "expect": "clarify",
+   "near": "leads.list"
+  },
+  {
+   "text": "whatsapp usage",
+   "expect": "action:messaging.usage",
+   "lang": "en"
+  },
+  {
+   "text": "messages remaining",
+   "expect": "action:messaging.usage",
+   "lang": "en"
+  },
+  {
+   "text": "message quota",
+   "expect": "action:messaging.usage",
+   "lang": "en"
+  },
+  {
+   "text": "messages enni",
+   "expect": "action:messaging.usage",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kitne message bache",
+   "expect": "action:messaging.usage",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "send messages remaining",
+   "expect": "none",
+   "near": "messaging.usage"
+  },
+  {
+   "text": "open dashboard page",
+   "expect": "nav:dashboard",
+   "near": "messaging.usage"
+  },
+  {
+   "text": "call log",
+   "expect": "action:voice.calls",
+   "lang": "en"
+  },
+  {
+   "text": "recent calls",
+   "expect": "action:voice.calls",
+   "lang": "en"
+  },
+  {
+   "text": "call history",
+   "expect": "action:voice.calls",
+   "lang": "en"
+  },
+  {
+   "text": "calls chudali",
+   "expect": "action:voice.calls",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "calls dikhao",
+   "expect": "action:voice.calls",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "कॉल लॉग",
+   "expect": "action:voice.calls",
+   "lang": "hi"
+  },
+  {
+   "text": "delete call log",
+   "expect": "none",
+   "near": "voice.calls"
+  },
+  {
+   "text": "open voice calls",
+   "expect": "nav:voice",
+   "near": "voice.calls"
+  },
+  {
+   "text": "live calls",
+   "expect": "action:voice.live",
+   "lang": "en"
+  },
+  {
+   "text": "ongoing calls",
+   "expect": "action:voice.live",
+   "lang": "en"
+  },
+  {
+   "text": "active calls",
+   "expect": "action:voice.live",
+   "lang": "en"
+  },
+  {
+   "text": "ippudu jarugutunna calls",
+   "expect": "action:voice.live",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "abhi chal rahi calls",
+   "expect": "action:voice.live",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "disable live calls",
+   "expect": "none",
+   "near": "voice.live"
+  },
+  {
+   "text": "open receptionist",
+   "expect": "nav:voice",
+   "near": "voice.live"
+  },
+  {
+   "text": "call analytics",
+   "expect": "action:voice.analytics",
+   "lang": "en"
+  },
+  {
+   "text": "call success rate",
+   "expect": "action:voice.analytics",
+   "lang": "en"
+  },
+  {
+   "text": "receptionist performance",
+   "expect": "action:voice.analytics",
+   "lang": "en"
+  },
+  {
+   "text": "calls lekkalu",
+   "expect": "action:voice.analytics",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "calls ka analysis",
+   "expect": "action:voice.analytics",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "reset call analytics",
+   "expect": "none",
+   "near": "voice.analytics"
+  },
+  {
+   "text": "call minutes",
+   "expect": "action:voice.usage",
+   "lang": "en"
+  },
+  {
+   "text": "voice usage",
+   "expect": "action:voice.usage",
+   "lang": "en"
+  },
+  {
+   "text": "voice bill this month",
+   "expect": "action:voice.usage",
+   "lang": "en"
+  },
+  {
+   "text": "call nimishalu",
+   "expect": "action:voice.usage",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kitne minute hue",
+   "expect": "action:voice.usage",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "set voice usage limit",
+   "expect": "none",
+   "near": "voice.usage"
+  },
+  {
+   "text": "go to receptionist",
+   "expect": "nav:voice",
+   "near": "voice.usage"
+  },
+  {
+   "text": "outbound calls",
+   "expect": "action:voice.outbound_list",
+   "lang": "en"
+  },
+  {
+   "text": "follow up calls",
+   "expect": "action:voice.outbound_list",
+   "lang": "en"
+  },
+  {
+   "text": "callback queue",
+   "expect": "action:voice.outbound_list",
+   "lang": "en"
+  },
+  {
+   "text": "follow up calls enni",
+   "expect": "action:voice.outbound_list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "follow up calls kitne",
+   "expect": "action:voice.outbound_list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "cancel outbound calls",
+   "expect": "none",
+   "near": "voice.outbound_list"
+  },
+  {
+   "text": "open voice receptionist",
+   "expect": "nav:voice",
+   "near": "voice.outbound_list"
+  },
+  {
+   "text": "my notifications",
+   "expect": "action:notifications.list",
+   "lang": "en"
+  },
+  {
+   "text": "unread notifications",
+   "expect": "action:notifications.list",
+   "lang": "en"
+  },
+  {
+   "text": "any alerts",
+   "expect": "action:notifications.list",
+   "lang": "en"
+  },
+  {
+   "text": "notifications enti",
+   "expect": "action:notifications.list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "notifications dikhao",
+   "expect": "action:notifications.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "mark all my notifications read",
+   "expect": "action:notifications.mark_all_read",
+   "near": "notifications.list"
+  },
+  {
+   "text": "delete notifications",
+   "expect": "none",
+   "near": "notifications.list"
+  },
+  {
+   "text": "audit log",
+   "expect": "action:audit.recent",
+   "lang": "en"
+  },
+  {
+   "text": "recent changes",
+   "expect": "action:audit.recent",
+   "lang": "en"
+  },
+  {
+   "text": "who changed the prices",
+   "expect": "action:audit.recent",
+   "lang": "en"
+  },
+  {
+   "text": "evaru marcharu",
+   "expect": "action:audit.recent",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kisne badla",
+   "expect": "action:audit.recent",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "delete audit log",
+   "expect": "none",
+   "near": "audit.recent"
+  },
+  {
+   "text": "edit recent changes",
+   "expect": "none",
+   "near": "audit.recent"
+  },
+  {
+   "text": "ai usage",
+   "expect": "action:ai.usage",
+   "lang": "en"
+  },
+  {
+   "text": "ai spend this month",
+   "expect": "action:ai.usage",
+   "lang": "en"
+  },
+  {
+   "text": "ai cost",
+   "expect": "action:ai.usage",
+   "lang": "en"
+  },
+  {
+   "text": "ai kharchu",
+   "expect": "action:ai.usage",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "ai kharcha",
+   "expect": "action:ai.usage",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "एआई खर्च",
+   "expect": "action:ai.usage",
+   "lang": "hi"
+  },
+  {
+   "text": "disable ai usage",
+   "expect": "none",
+   "near": "ai.usage"
+  },
+  {
+   "text": "open profile",
+   "expect": "nav:profile",
+   "near": "ai.usage"
+  },
+  {
+   "text": "ai budget",
+   "expect": "action:ai.budget",
+   "lang": "en"
+  },
+  {
+   "text": "monthly ai budget",
+   "expect": "action:ai.budget",
+   "lang": "en"
+  },
+  {
+   "text": "ai limit",
+   "expect": "action:ai.budget",
+   "lang": "en"
+  },
+  {
+   "text": "ai budget enta",
+   "expect": "action:ai.budget",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "ai budget kitna hai",
+   "expect": "action:ai.budget",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "change ai budget",
+   "expect": "none",
+   "near": "ai.budget"
+  },
+  {
+   "text": "set ai limit",
+   "expect": "none",
+   "near": "ai.budget"
+  },
+  {
+   "text": "subscription status",
+   "expect": "action:subscription.view",
+   "lang": "en"
+  },
+  {
+   "text": "my plan",
+   "expect": "action:subscription.view",
+   "lang": "en"
+  },
+  {
+   "text": "plan validity",
+   "expect": "action:subscription.view",
+   "lang": "en"
+  },
+  {
+   "text": "plan eppudu aipotundi",
+   "expect": "action:subscription.view",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "plan kab khatam hoga",
+   "expect": "action:subscription.view",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "cancel subscription",
+   "expect": "none",
+   "near": "subscription.view"
+  },
+  {
+   "text": "change my plan",
+   "expect": "none",
+   "near": "subscription.view"
+  },
+  {
+   "text": "data storage",
+   "expect": "action:data.storage",
+   "lang": "en"
+  },
+  {
+   "text": "storage used",
+   "expect": "action:data.storage",
+   "lang": "en"
+  },
+  {
+   "text": "record limit",
+   "expect": "action:data.storage",
+   "lang": "en"
+  },
+  {
+   "text": "storage enta",
+   "expect": "action:data.storage",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "storage kitna bacha",
+   "expect": "action:data.storage",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "delete data storage",
+   "expect": "none",
+   "near": "data.storage"
+  },
+  {
+   "text": "open data",
+   "expect": "nav:data",
+   "near": "data.storage"
+  },
+  {
+   "text": "connector failed reports",
+   "expect": "action:connectors.failed",
+   "lang": "en"
+  },
+  {
+   "text": "connector failures",
+   "expect": "action:connectors.failed",
+   "lang": "en"
+  },
+  {
+   "text": "documents not sent",
+   "expect": "action:connectors.failed",
+   "lang": "en"
+  },
+  {
+   "text": "connector errors today",
+   "expect": "action:connectors.failed",
+   "lang": "en"
+  },
+  {
+   "text": "connector fail ayinavi",
+   "expect": "action:connectors.failed",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "connector fail hue",
+   "expect": "action:connectors.failed",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "कनेक्टर फेल",
+   "expect": "action:connectors.failed",
+   "lang": "hi"
+  },
+  {
+   "text": "resolve connector failures",
+   "expect": "none",
+   "near": "connectors.failed"
+  },
+  {
+   "text": "open connectors",
+   "expect": "nav:connectors",
+   "near": "connectors.failed"
+  },
+  {
+   "text": "find patient ravi",
+   "expect": "action:patients.search",
+   "lang": "en"
+  },
+  {
+   "text": "search patient 98765",
+   "expect": "action:patients.search",
+   "lang": "en"
+  },
+  {
+   "text": "look up patient sita",
+   "expect": "action:patients.search",
+   "lang": "en"
+  },
+  {
+   "text": "patient vetuku ravi",
+   "expect": "action:patients.search",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "patient dhundo sita",
+   "expect": "action:patients.search",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "मरीज ढूंढो रवि",
+   "expect": "action:patients.search",
+   "lang": "hi"
+  },
+  {
+   "text": "register patient ravi",
+   "expect": "clarify",
+   "near": "patients.search"
+  },
+  {
+   "text": "Dr Rao on leave tomorrow",
+   "expect": "action:doctor_leave.create",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Anitha is on leave on 20 october",
+   "expect": "action:doctor_leave.create",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Anitha on leave 20 to 22 oct morning only",
+   "expect": "action:doctor_leave.create",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Rao repu selavu",
+   "expect": "action:doctor_leave.create",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Dr Rao kal chutti pe hain",
+   "expect": "action:doctor_leave.create",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "డాక్టర్ అనిత రేపు సెలవు",
+   "expect": "action:doctor_leave.create",
+   "lang": "te"
+  },
+  {
+   "text": "डॉक्टर अनिता कल छुट्टी पर",
+   "expect": "action:doctor_leave.create",
+   "lang": "hi"
+  },
+  {
+   "text": "Dr Rao is not on leave tomorrow",
+   "expect": "negated",
+   "near": "doctor_leave.create"
+  },
+  {
+   "text": "Dr Rao kal chutti nahi",
+   "expect": "negated",
+   "near": "doctor_leave.create"
+  },
+  {
+   "text": "cancel Dr Rao's leave on 20 oct",
+   "expect": "action:doctor_leave.delete",
+   "lang": "en"
+  },
+  {
+   "text": "remove the leave for Dr Anitha tomorrow",
+   "expect": "action:doctor_leave.delete",
+   "lang": "en"
+  },
+  {
+   "text": "delete Dr Rao leave tomorrow",
+   "expect": "action:doctor_leave.delete",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Rao selavu raddu cheyyi repu",
+   "expect": "action:doctor_leave.delete",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Dr Rao ki kal ki chutti cancel karo",
+   "expect": "action:doctor_leave.delete",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "cancel Dr Rao's appointments tomorrow",
+   "expect": "none",
+   "near": "doctor_leave.delete"
+  },
+  {
+   "text": "how to cancel a leave",
+   "expect": "help:leaves",
+   "near": "doctor_leave.delete"
+  },
+  {
+   "text": "bookings affected by Dr Rao leave tomorrow",
+   "expect": "action:doctor_leave.impact",
+   "lang": "en"
+  },
+  {
+   "text": "affected appointments for Dr Anitha leave on 20 october",
+   "expect": "action:doctor_leave.impact",
+   "lang": "en"
+  },
+  {
+   "text": "leave impact for Dr Rao tomorrow",
+   "expect": "action:doctor_leave.impact",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Rao repu leave ki affect ayye bookings",
+   "expect": "action:doctor_leave.impact",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Dr Rao ki kal leave se kitni booking affect hogi",
+   "expect": "action:doctor_leave.impact",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "delete affected bookings",
+   "expect": "none",
+   "near": "doctor_leave.impact"
+  },
+  {
+   "text": "what if Dr Rao takes leave tomorrow",
+   "expect": "hypothetical",
+   "near": "doctor_leave.impact"
+  },
+  {
+   "text": "check in MC-2026-ABCD2345",
+   "expect": "action:appointment.check_in",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi Kumar has arrived, check in",
+   "expect": "action:appointment.check_in",
+   "lang": "en"
+  },
+  {
+   "text": "check in patient Sita Devi",
+   "expect": "action:appointment.check_in",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi vachharu check in cheyyi",
+   "expect": "action:appointment.check_in",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Sita gari check in cheyandi",
+   "expect": "action:appointment.check_in",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi aa gaye check in karo",
+   "expect": "action:appointment.check_in",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita ka check in kar do",
+   "expect": "action:appointment.check_in",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "cancel Ravi's appointment",
+   "expect": "action:appointment.cancel",
+   "lang": "en"
+  },
+  {
+   "text": "cancel booking MC-2026-WXYZ6789",
+   "expect": "action:appointment.cancel",
+   "lang": "en"
+  },
+  {
+   "text": "please cancel the appointment for Sita Devi",
+   "expect": "action:appointment.cancel",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi appointment raddu cheyyi",
+   "expect": "action:appointment.cancel",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "booking MC-2026-ABCD2345 raddu cheyandi",
+   "expect": "action:appointment.cancel",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ki booking radd karo",
+   "expect": "action:appointment.cancel",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita ka appointment cancel kar do",
+   "expect": "action:appointment.cancel",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "confirm booking MC-2026-ABCD2345",
+   "expect": "action:booking.confirm",
+   "lang": "en"
+  },
+  {
+   "text": "approve the booking for Ravi",
+   "expect": "action:booking.confirm",
+   "lang": "en"
+  },
+  {
+   "text": "confirm the payment booking of Sita",
+   "expect": "action:booking.confirm",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi booking confirm cheyyi",
+   "expect": "action:booking.confirm",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Sita gari booking confirm cheyandi",
+   "expect": "action:booking.confirm",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ki booking confirm karo",
+   "expect": "action:booking.confirm",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita ka booking confirm kar do",
+   "expect": "action:booking.confirm",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "reject booking MC-2026-WXYZ6789",
+   "expect": "action:booking.reject",
+   "lang": "en"
+  },
+  {
+   "text": "decline the booking for Ravi",
+   "expect": "action:booking.reject",
+   "lang": "en"
+  },
+  {
+   "text": "reject Sita's booking",
+   "expect": "action:booking.reject",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi booking reject cheyyi",
+   "expect": "action:booking.reject",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Sita gari booking reject cheyandi",
+   "expect": "action:booking.reject",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ki booking reject karo",
+   "expect": "action:booking.reject",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita ka booking reject kar do",
+   "expect": "action:booking.reject",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "call next patient for Dr Anitha",
+   "expect": "action:opd.call_next",
+   "lang": "en"
+  },
+  {
+   "text": "call next for Dr Rao",
+   "expect": "action:opd.call_next",
+   "lang": "en"
+  },
+  {
+   "text": "next patient please, Dr Anitha",
+   "expect": "action:opd.call_next",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Anitha ki next patient ni pilavandi",
+   "expect": "action:opd.call_next",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Rao gariki next patient pilu",
+   "expect": "action:opd.call_next",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Dr Anitha ke liye agla patient bulao",
+   "expect": "action:opd.call_next",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Rao ka agla patient bulao",
+   "expect": "action:opd.call_next",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "mark all notifications as read",
+   "expect": "action:notifications.mark_all_read",
+   "lang": "en"
+  },
+  {
+   "text": "mark all read",
+   "expect": "action:notifications.mark_all_read",
+   "lang": "en"
+  },
+  {
+   "text": "clear my notifications",
+   "expect": "action:notifications.mark_all_read",
+   "lang": "en"
+  },
+  {
+   "text": "notifications anni read cheyyi",
+   "expect": "action:notifications.mark_all_read",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "notifications read cheyandi",
+   "expect": "action:notifications.mark_all_read",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "sab notifications read karo",
+   "expect": "action:notifications.mark_all_read",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "notifications read karo",
+   "expect": "action:notifications.mark_all_read",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't check in Ravi",
+   "expect": "negated",
+   "near": "appointment.check_in"
+  },
+  {
+   "text": "what if Ravi has arrived",
+   "expect": "hypothetical",
+   "near": "appointment.check_in"
+  },
+  {
+   "text": "don't cancel Ravi's appointment",
+   "expect": "negated",
+   "near": "appointment.cancel"
+  },
+  {
+   "text": "what if we cancel Sita's booking",
+   "expect": "hypothetical",
+   "near": "appointment.cancel"
+  },
+  {
+   "text": "don't confirm Ravi's booking",
+   "expect": "negated",
+   "near": "booking.confirm"
+  },
+  {
+   "text": "what if we confirm the booking for Ravi",
+   "expect": "hypothetical",
+   "near": "booking.confirm"
+  },
+  {
+   "text": "don't reject Ravi's booking",
+   "expect": "negated",
+   "near": "booking.reject"
+  },
+  {
+   "text": "what if we reject the booking for Sita",
+   "expect": "hypothetical",
+   "near": "booking.reject"
+  },
+  {
+   "text": "don't call the next patient for Dr Anitha",
+   "expect": "negated",
+   "near": "opd.call_next"
+  },
+  {
+   "text": "what if we call next for Dr Rao",
+   "expect": "hypothetical",
+   "near": "opd.call_next"
+  },
+  {
+   "text": "don't mark notifications as read",
+   "expect": "negated",
+   "near": "notifications.mark_all_read"
+  },
+  {
+   "text": "what if I mark all notifications as read",
+   "expect": "hypothetical",
+   "near": "notifications.mark_all_read"
+  },
+  {
+   "text": "resend Ravi's report",
+   "expect": "action:report.resend",
+   "lang": "en"
+  },
+  {
+   "text": "resend the CBC report for Sita",
+   "expect": "action:report.resend",
+   "lang": "en"
+  },
+  {
+   "text": "send Ravi's report again",
+   "expect": "action:report.resend",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi report malli pampu",
+   "expect": "action:report.resend",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Sita gari report malli pampandi",
+   "expect": "action:report.resend",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ki report dobara bhejo",
+   "expect": "action:report.resend",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita ka report phir se bhejo",
+   "expect": "action:report.resend",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "resend all the failed reports",
+   "expect": "action:report.resend_failed",
+   "lang": "en"
+  },
+  {
+   "text": "send the failed reports again",
+   "expect": "action:report.resend_failed",
+   "lang": "en"
+  },
+  {
+   "text": "fail aina reports malli pampu",
+   "expect": "action:report.resend_failed",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "failed reports malli pampandi",
+   "expect": "action:report.resend_failed",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "failed reports dobara bhejo",
+   "expect": "action:report.resend_failed",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "fail hue reports dobara bhejo",
+   "expect": "action:report.resend_failed",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "message Ravi: Doctor is available till 1 pm",
+   "expect": "action:lead.message",
+   "lang": "en"
+  },
+  {
+   "text": "send a message to Sita \"Your report is ready\"",
+   "expect": "action:lead.message",
+   "lang": "en"
+  },
+  {
+   "text": "msg Ravi Kumar: please come by 11",
+   "expect": "action:lead.message",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi ki message pampu: doctor 12 ki vastaru",
+   "expect": "action:lead.message",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Sita ki message pampandi: report ready",
+   "expect": "action:lead.message",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ko message bhejo: kal 10 baje aaiye",
+   "expect": "action:lead.message",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita ko message bhejo: report taiyar hai",
+   "expect": "action:lead.message",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "run the connector now",
+   "expect": "action:connector.run_now",
+   "lang": "en"
+  },
+  {
+   "text": "run the mocdoc connector",
+   "expect": "action:connector.run_now",
+   "lang": "en"
+  },
+  {
+   "text": "sync mocdoc now",
+   "expect": "action:connector.run_now",
+   "lang": "en"
+  },
+  {
+   "text": "connector run cheyyi",
+   "expect": "action:connector.run_now",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "connector ippude run cheyandi",
+   "expect": "action:connector.run_now",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "connector chalao",
+   "expect": "action:connector.run_now",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "abhi connector run karo",
+   "expect": "action:connector.run_now",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't resend Ravi's report",
+   "expect": "negated",
+   "near": "report.resend"
+  },
+  {
+   "text": "what if we resend Ravi's report",
+   "expect": "hypothetical",
+   "near": "report.resend"
+  },
+  {
+   "text": "don't resend the failed reports",
+   "expect": "negated",
+   "near": "report.resend_failed"
+  },
+  {
+   "text": "what if we resend failed reports",
+   "expect": "hypothetical",
+   "near": "report.resend_failed"
+  },
+  {
+   "text": "don't message Ravi",
+   "expect": "negated",
+   "near": "lead.message"
+  },
+  {
+   "text": "what if I message Ravi: hello",
+   "expect": "hypothetical",
+   "near": "lead.message"
+  },
+  {
+   "text": "don't run the connector",
+   "expect": "negated",
+   "near": "connector.run_now"
+  },
+  {
+   "text": "what if we run the connector now",
+   "expect": "hypothetical",
+   "near": "connector.run_now"
+  },
+  {
+   "text": "close the clinic on 2 Nov for Diwali",
+   "expect": "action:holiday.create",
+   "lang": "en"
+  },
+  {
+   "text": "add a holiday on 25 December",
+   "expect": "action:holiday.create",
+   "lang": "en"
+  },
+  {
+   "text": "mark 15 Jan as a holiday for Sankranti",
+   "expect": "action:holiday.create",
+   "lang": "en"
+  },
+  {
+   "text": "2 nov clinic close cheyyi",
+   "expect": "action:holiday.create",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "25 dec holiday pettandi",
+   "expect": "action:holiday.create",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "2 nov ko clinic band rahega",
+   "expect": "action:holiday.create",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "25 december ko hospital band",
+   "expect": "action:holiday.create",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't close the clinic on 2 Nov",
+   "expect": "negated",
+   "near": "holiday.create"
+  },
+  {
+   "text": "what if we close the clinic on 2 Nov",
+   "expect": "hypothetical",
+   "near": "holiday.create"
+  },
+  {
+   "text": "call the hot leads from this week",
+   "expect": "action:leads.call",
+   "lang": "en"
+  },
+  {
+   "text": "call all dermatology leads from this week",
+   "expect": "action:leads.call",
+   "lang": "en"
+  },
+  {
+   "text": "call new leads",
+   "expect": "action:leads.call",
+   "lang": "en"
+  },
+  {
+   "text": "leads ki call cheyyi",
+   "expect": "action:leads.call",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "hot leads ki call cheyandi",
+   "expect": "action:leads.call",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "leads ko call karo",
+   "expect": "action:leads.call",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "hot leads ko call karo",
+   "expect": "action:leads.call",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "how did the lead calls go",
+   "expect": "action:leads.funnel",
+   "lang": "en"
+  },
+  {
+   "text": "lead conversion report",
+   "expect": "action:leads.funnel",
+   "lang": "en"
+  },
+  {
+   "text": "lead call results",
+   "expect": "action:leads.funnel",
+   "lang": "en"
+  },
+  {
+   "text": "lead calls result enti",
+   "expect": "action:leads.funnel",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "lead calls lekkalu cheppu",
+   "expect": "action:leads.funnel",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "lead calls ka result batao",
+   "expect": "action:leads.funnel",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "lead calls ka hisaab",
+   "expect": "action:leads.funnel",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "turn on automatic lead calls",
+   "expect": "action:voice.auto_leads",
+   "lang": "en"
+  },
+  {
+   "text": "stop auto lead calls",
+   "expect": "action:voice.auto_leads",
+   "lang": "en"
+  },
+  {
+   "text": "call leads automatically",
+   "expect": "action:voice.auto_leads",
+   "lang": "en"
+  },
+  {
+   "text": "auto lead calls on cheyyi",
+   "expect": "action:voice.auto_leads",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "auto lead calls aapandi",
+   "expect": "action:voice.auto_leads",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "auto lead calls chalu karo",
+   "expect": "action:voice.auto_leads",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "auto lead calls band karo",
+   "expect": "action:voice.auto_leads",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't call the leads",
+   "expect": "negated",
+   "near": "leads.call"
+  },
+  {
+   "text": "what if we call the hot leads",
+   "expect": "hypothetical",
+   "near": "leads.call"
+  },
+  {
+   "text": "don't show the lead conversion report",
+   "expect": "negated",
+   "near": "leads.funnel"
+  },
+  {
+   "text": "what if the lead calls go badly",
+   "expect": "hypothetical",
+   "near": "leads.funnel"
+  },
+  {
+   "text": "don't turn on automatic lead calls",
+   "expect": "negated",
+   "near": "voice.auto_leads"
+  },
+  {
+   "text": "what if we turn on automatic lead calls",
+   "expect": "hypothetical",
+   "near": "voice.auto_leads"
+  },
+  {
+   "text": "register Ravi Teja 9876543210",
+   "expect": "clarify",
+   "action": "patient.register",
+   "lang": "en"
+  },
+  {
+   "text": "register new patient Sita Devi 9123456780",
+   "expect": "clarify",
+   "action": "patient.register",
+   "lang": "en"
+  },
+  {
+   "text": "add a new patient Lakshmi 9988776655",
+   "expect": "clarify",
+   "action": "patient.register",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi Teja 9876543210 ni register cheyyi",
+   "expect": "clarify",
+   "action": "patient.register",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kotha patient Sita 9123456780 register cheyandi",
+   "expect": "clarify",
+   "action": "patient.register",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "naya patient Ravi 9876543210 register karo",
+   "expect": "clarify",
+   "action": "patient.register",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita 9123456780 ka registration karo",
+   "expect": "clarify",
+   "action": "patient.register",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "give Sita Devi a token for Dr Rao",
+   "expect": "action:opd.walk_in",
+   "lang": "en"
+  },
+  {
+   "text": "walk in token for Lakshmi with Dr Anitha",
+   "expect": "action:opd.walk_in",
+   "lang": "en"
+  },
+  {
+   "text": "token for Ravi Teja with Dr Rao",
+   "expect": "action:opd.walk_in",
+   "lang": "en"
+  },
+  {
+   "text": "Sita ki Dr Rao token ivvu",
+   "expect": "action:opd.walk_in",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Lakshmi ki Dr Anitha token ivvandi",
+   "expect": "action:opd.walk_in",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ko Dr Anitha ka token do",
+   "expect": "action:opd.walk_in",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "Sita ke liye Dr Rao ka token dijiye",
+   "expect": "action:opd.walk_in",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "recall token 5",
+   "expect": "action:opd.recall",
+   "lang": "en"
+  },
+  {
+   "text": "call token 7 again",
+   "expect": "action:opd.recall",
+   "lang": "en"
+  },
+  {
+   "text": "announce token 3 again",
+   "expect": "action:opd.recall",
+   "lang": "en"
+  },
+  {
+   "text": "token 5 malli pilavandi",
+   "expect": "action:opd.recall",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "token 8 ni malli pilu",
+   "expect": "action:opd.recall",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "token 5 ko dobara bulao",
+   "expect": "action:opd.recall",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "token 9 dobara bulao",
+   "expect": "action:opd.recall",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "send token 5 to billing",
+   "expect": "action:opd.stage",
+   "lang": "en"
+  },
+  {
+   "text": "mark token 4 done",
+   "expect": "action:opd.stage",
+   "lang": "en"
+  },
+  {
+   "text": "move token 6 to vitals",
+   "expect": "action:opd.stage",
+   "lang": "en"
+  },
+  {
+   "text": "token 5 billing ki pampandi",
+   "expect": "action:opd.stage",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "token 7 billing ki pampu",
+   "expect": "action:opd.stage",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "token 5 billing ko bhejo",
+   "expect": "action:opd.stage",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "token 3 ko billing ko bhejo",
+   "expect": "action:opd.stage",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't register Ravi",
+   "expect": "negated",
+   "near": "patient.register"
+  },
+  {
+   "text": "what if we register Ravi 9876543210",
+   "expect": "hypothetical",
+   "near": "patient.register"
+  },
+  {
+   "text": "don't give Ravi a token",
+   "expect": "negated",
+   "near": "opd.walk_in"
+  },
+  {
+   "text": "what if we give Ravi a token for Dr Rao",
+   "expect": "hypothetical",
+   "near": "opd.walk_in"
+  },
+  {
+   "text": "don't recall token 5",
+   "expect": "negated",
+   "near": "opd.recall"
+  },
+  {
+   "text": "what if we recall token 5",
+   "expect": "hypothetical",
+   "near": "opd.recall"
+  },
+  {
+   "text": "don't send token 5 to billing",
+   "expect": "negated",
+   "near": "opd.stage"
+  },
+  {
+   "text": "what if we send token 5 to billing",
+   "expect": "hypothetical",
+   "near": "opd.stage"
+  },
+  {
+   "text": "change CBC price to ₹350",
+   "expect": "clarify",
+   "lang": "en",
+   "note": "lab or treatment price: the page or the clinic's features decide (router)"
+  },
+  {
+   "text": "set lipid profile rate to 900 rupees",
+   "expect": "clarify",
+   "lang": "en",
+   "note": "lab or treatment price: the page or the clinic's features decide (router)"
+  },
+  {
+   "text": "increase thyroid profile price by 10%",
+   "expect": "clarify",
+   "lang": "en",
+   "note": "lab or treatment price: the page or the clinic's features decide (router)"
+  },
+  {
+   "text": "CBC rate 400 rupees ki marchu",
+   "expect": "clarify",
+   "lang": "te-Latin",
+   "note": "lab or treatment price: the page or the clinic's features decide (router)"
+  },
+  {
+   "text": "CBC price 350 rupees ki marchandi",
+   "expect": "clarify",
+   "lang": "te-Latin",
+   "note": "lab or treatment price: the page or the clinic's features decide (router)"
+  },
+  {
+   "text": "CBC ka rate 400 rupees badlo",
+   "expect": "clarify",
+   "lang": "hi-Latin",
+   "note": "lab or treatment price: the page or the clinic's features decide (router)"
+  },
+  {
+   "text": "increase all prices by 10%",
+   "expect": "action:lab_test.price_bulk",
+   "lang": "en"
+  },
+  {
+   "text": "reduce all lab test prices by 5% round to 10",
+   "expect": "action:lab_test.price_bulk",
+   "lang": "en"
+  },
+  {
+   "text": "increase all imaging prices by 8 percent",
+   "expect": "action:lab_test.price_bulk",
+   "lang": "en"
+  },
+  {
+   "text": "anni tests prices 10% penchu",
+   "expect": "action:lab_test.price_bulk",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "anni rates 5% tagginchu",
+   "expect": "action:lab_test.price_bulk",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "sab tests ke daam 10% badhao",
+   "expect": "action:lab_test.price_bulk",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "add lab test \"Vitamin D3\" at ₹1200",
+   "expect": "action:lab_test.create",
+   "lang": "en"
+  },
+  {
+   "text": "new test \"HbA1c\" 450 rupees",
+   "expect": "action:lab_test.create",
+   "lang": "en"
+  },
+  {
+   "text": "create test \"Ferritin\" for ₹700",
+   "expect": "action:lab_test.create",
+   "lang": "en"
+  },
+  {
+   "text": "\"Ferritin\" test add cheyyi 700 rupees",
+   "expect": "action:lab_test.create",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "\"Ferritin\" test jodo 700 rupees",
+   "expect": "action:lab_test.create",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "deactivate the lipid profile test",
+   "expect": "action:lab_test.deactivate",
+   "lang": "en"
+  },
+  {
+   "text": "stop offering lipid profile test",
+   "expect": "action:lab_test.deactivate",
+   "lang": "en"
+  },
+  {
+   "text": "hide the ferritin test",
+   "expect": "action:lab_test.deactivate",
+   "lang": "en"
+  },
+  {
+   "text": "lipid profile test aapandi",
+   "expect": "action:lab_test.deactivate",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "lipid profile test band karo",
+   "expect": "action:lab_test.deactivate",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "set collection hours 7 to 11",
+   "expect": "action:lab_collection_window.update",
+   "lang": "en"
+  },
+  {
+   "text": "change sample collection time to 6:30 am to 10:30 am",
+   "expect": "action:lab_collection_window.update",
+   "lang": "en"
+  },
+  {
+   "text": "collection window 9 am to 1 pm",
+   "expect": "action:lab_collection_window.update",
+   "lang": "en"
+  },
+  {
+   "text": "collection timings 7 to 11 ki marchu",
+   "expect": "action:lab_collection_window.update",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "collection samay 7 se 11 karo",
+   "expect": "action:lab_collection_window.update",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't change the CBC price",
+   "expect": "negated",
+   "lang": "en"
+  },
+  {
+   "text": "what if we increase all prices by 10%",
+   "expect": "hypothetical",
+   "lang": "en"
+  },
+  {
+   "text": "lab test prices",
+   "expect": "action:lab_tests.list",
+   "lang": "en"
+  },
+  {
+   "text": "open lab tests",
+   "expect": "nav:labtests",
+   "lang": "en"
+  },
+  {
+   "text": "show catalogue clean up suggestions",
+   "expect": "action:lab_tests.cleanup",
+   "lang": "en"
+  },
+  {
+   "text": "any duplicate tests in the catalogue",
+   "expect": "action:lab_tests.cleanup",
+   "lang": "en"
+  },
+  {
+   "text": "check the catalogue quality",
+   "expect": "action:lab_tests.cleanup",
+   "lang": "en"
+  },
+  {
+   "text": "catalogue lo problems chupinchu",
+   "expect": "action:lab_tests.cleanup",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "catalogue ki problems dikhao",
+   "expect": "action:lab_tests.cleanup",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "delete the duplicate tests",
+   "expect": "help:labtests",
+   "lang": "en",
+   "near": "lab_tests.cleanup"
+  },
+  {
+   "text": "what if we clean up the catalogue suggestions",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "lab_tests.cleanup"
+  },
+  {
+   "text": "fix the fasting instructions",
+   "expect": "action:lab_tests.fix_prep",
+   "lang": "en"
+  },
+  {
+   "text": "add missing fasting instructions",
+   "expect": "action:lab_tests.fix_prep",
+   "lang": "en"
+  },
+  {
+   "text": "fasting instructions add cheyyi",
+   "expect": "action:lab_tests.fix_prep",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "fasting instructions jodo",
+   "expect": "action:lab_tests.fix_prep",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't fix the fasting instructions",
+   "expect": "negated",
+   "lang": "en",
+   "near": "lab_tests.fix_prep"
+  },
+  {
+   "text": "auto classify the lab tests",
+   "expect": "action:lab_tests.auto_classify",
+   "lang": "en"
+  },
+  {
+   "text": "file the unfiled tests",
+   "expect": "action:lab_tests.auto_classify",
+   "lang": "en"
+  },
+  {
+   "text": "tests ki category pettu",
+   "expect": "action:lab_tests.auto_classify",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "tests ko category mein daalo",
+   "expect": "action:lab_tests.auto_classify",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "import this price list",
+   "expect": "help:labtests",
+   "lang": "en"
+  },
+  {
+   "text": "update prices from the new price list",
+   "expect": "help:labtests",
+   "lang": "en"
+  },
+  {
+   "text": "price list import cheyyi",
+   "expect": "help:labtests",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "write a description for the CBC test",
+   "expect": "help:labtests",
+   "lang": "en"
+  },
+  {
+   "text": "change HydraFacial treatment price to ₹2500",
+   "expect": "action:treatment.price",
+   "lang": "en"
+  },
+  {
+   "text": "increase PRP treatment price by 10%",
+   "expect": "action:treatment.price",
+   "lang": "en"
+  },
+  {
+   "text": "PRP treatment rate 5000 rupees ki marchu",
+   "expect": "action:treatment.price",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "PRP treatment ka rate 5000 rupees badlo",
+   "expect": "action:treatment.price",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "raise all laser treatments by 5%",
+   "expect": "action:treatment.price_bulk",
+   "lang": "en"
+  },
+  {
+   "text": "increase all treatments by 10% round to 10",
+   "expect": "action:treatment.price_bulk",
+   "lang": "en"
+  },
+  {
+   "text": "anni treatments 5% penchu",
+   "expect": "action:treatment.price_bulk",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "sab treatments ke daam 5% badhao",
+   "expect": "action:treatment.price_bulk",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "hide LASIK",
+   "expect": "action:treatments.status",
+   "lang": "en"
+  },
+  {
+   "text": "publish chemical peel",
+   "expect": "action:treatments.status",
+   "lang": "en"
+  },
+  {
+   "text": "LASIK treatment dachu",
+   "expect": "action:treatments.status",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "LASIK treatment chupao",
+   "expect": "action:treatments.status",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "only Dr Anitha does PRP",
+   "expect": "action:treatment.doctors",
+   "lang": "en"
+  },
+  {
+   "text": "PRP only Dr Anitha chestaru",
+   "expect": "action:treatment.doctors",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "PRP sirf Dr Anitha karti hain",
+   "expect": "action:treatment.doctors",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't hide LASIK",
+   "expect": "negated",
+   "lang": "en",
+   "near": "treatments.status"
+  },
+  {
+   "text": "Root canal plan for Suresh 9876543210, 3 sittings, ₹9000, first sitting Monday at 10:30 with Dr Anitha",
+   "expect": "clarify",
+   "lang": "en"
+  },
+  {
+   "text": "braces plan for Kiran 9876543210 12 sittings",
+   "expect": "clarify",
+   "lang": "en"
+  },
+  {
+   "text": "Suresh ki next sitting Monday 11 am Dr Anitha tho book cheyyi",
+   "expect": "action:dental.sitting_book",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Suresh ki agli sitting Monday 11 am Dr Anitha ke saath book karo",
+   "expect": "action:dental.sitting_book",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "book Suresh's next sitting on Monday at 11 am with Dr Anitha",
+   "expect": "action:dental.sitting_book",
+   "lang": "en"
+  },
+  {
+   "text": "what if we book Suresh's next sitting on Monday",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "dental.sitting_book"
+  },
+  {
+   "text": "write a treatment description for microneedling",
+   "expect": "help:treatments",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Anitha's evening is now 5 to 8",
+   "expect": "action:doctor.schedule",
+   "lang": "en"
+  },
+  {
+   "text": "change Dr Anitha's morning hours to 9 to 1",
+   "expect": "action:doctor.schedule",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Anitha evening timings 5 to 8 ki marchu",
+   "expect": "action:doctor.schedule",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Dr Anitha ki evening timing 5 se 8 karo",
+   "expect": "action:doctor.schedule",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't change Dr Anitha's evening hours",
+   "expect": "negated",
+   "lang": "en",
+   "near": "doctor.schedule"
+  },
+  {
+   "text": "Add Dr Kiran Kumar, dermatologist, ₹600, Mon-Sat mornings 9 to 1",
+   "expect": "clarify",
+   "lang": "en"
+  },
+  {
+   "text": "new doctor Dr Kiran ₹600 weekdays evenings 5 to 8",
+   "expect": "clarify",
+   "lang": "en"
+  },
+  {
+   "text": "assign Dr Anitha to Kukatpally branch mornings",
+   "expect": "action:branch.doctor_assign",
+   "lang": "en"
+  },
+  {
+   "text": "Dr Anitha ni Kukatpally branch ki assign cheyyi",
+   "expect": "action:branch.doctor_assign",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Dr Anitha ko Kukatpally branch mein assign karo",
+   "expect": "action:branch.doctor_assign",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "what if we assign Dr Anitha to Kukatpally branch",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "branch.doctor_assign"
+  },
+  {
+   "text": "add staff Ramesh as receptionist",
+   "expect": "action:staff.create",
+   "lang": "en"
+  },
+  {
+   "text": "create a login for Priya as front desk",
+   "expect": "action:staff.create",
+   "lang": "en"
+  },
+  {
+   "text": "staff login create cheyyi",
+   "expect": "action:staff.create",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "naya staff login banao",
+   "expect": "action:staff.create",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "reset Ramesh's password",
+   "expect": "action:staff.manage",
+   "lang": "en"
+  },
+  {
+   "text": "change the razorpay key",
+   "expect": "action:payment.settings",
+   "lang": "en"
+  },
+  {
+   "text": "record cash payment for token 5",
+   "expect": "action:opd.record_payment",
+   "lang": "en"
+  },
+  {
+   "text": "refund the invoice for Ravi",
+   "expect": "action:opd.refund",
+   "lang": "en"
+  },
+  {
+   "text": "void the invoice for Ravi",
+   "expect": "action:opd.void",
+   "lang": "en"
+  },
+  {
+   "text": "sign the visit",
+   "expect": "action:visit.sign",
+   "lang": "en"
+  },
+  {
+   "text": "sign the prescription",
+   "expect": "clinical",
+   "lang": "en",
+   "near": "visit.sign"
+  },
+  {
+   "text": "delete doctor Rao",
+   "expect": "action:doctor.delete",
+   "lang": "en"
+  },
+  {
+   "text": "delete the CBC test",
+   "expect": "action:lab_test.delete",
+   "lang": "en"
+  },
+  {
+   "text": "delete the PRP treatment",
+   "expect": "action:treatment.delete",
+   "lang": "en"
+  },
+  {
+   "text": "add a new branch",
+   "expect": "action:branch.manage",
+   "lang": "en"
+  },
+  {
+   "text": "export patient data",
+   "expect": "action:data.export",
+   "lang": "en"
+  },
+  {
+   "text": "import patients from excel",
+   "expect": "action:data.import",
+   "lang": "en"
+  },
+  {
+   "text": "add a corporate company",
+   "expect": "action:corporate.manage",
+   "lang": "en"
+  },
+  {
+   "text": "take over the live call",
+   "expect": "action:voice.takeover",
+   "lang": "en"
+  },
+  {
+   "text": "don't delete doctor Rao",
+   "expect": "negated",
+   "lang": "en",
+   "near": "doctor.delete"
+  },
+  {
+   "text": "teach the receptionist an answer",
+   "expect": "clarify",
+   "action": "voice.knowledge_add",
+   "lang": "en"
+  },
+  {
+   "text": "teach the receptionist about parking",
+   "expect": "clarify",
+   "action": "voice.knowledge_add",
+   "lang": "en"
+  },
+  {
+   "text": "the receptionist should say we have free parking",
+   "expect": "clarify",
+   "action": "voice.knowledge_add",
+   "lang": "en"
+  },
+  {
+   "text": "receptionist ki nerpu parking gurinchi",
+   "expect": "clarify",
+   "action": "voice.knowledge_add",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "receptionist ko sikhao parking ke baare mein",
+   "expect": "clarify",
+   "action": "voice.knowledge_add",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "రిసెప్షనిస్ట్ కి నేర్పు",
+   "expect": "clarify",
+   "action": "voice.knowledge_add",
+   "lang": "te"
+  },
+  {
+   "text": "don't teach the receptionist that",
+   "expect": "negated",
+   "lang": "en",
+   "near": "voice.knowledge_add"
+  },
+  {
+   "text": "what if we teach the receptionist about parking",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "voice.knowledge_add"
+  },
+  {
+   "text": "remove the receptionist answer about parking",
+   "expect": "action:voice.knowledge_delete",
+   "lang": "en"
+  },
+  {
+   "text": "delete the answer about pharmacy",
+   "expect": "action:voice.knowledge_delete",
+   "lang": "en"
+  },
+  {
+   "text": "remove the saved answer about visiting hours",
+   "expect": "action:voice.knowledge_delete",
+   "lang": "en"
+  },
+  {
+   "text": "parking gurinchi answer teeseyi",
+   "expect": "clarify",
+   "action": "voice.knowledge_delete",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "answer teeseyi about parking",
+   "expect": "action:voice.knowledge_delete",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "answer hatao about parking",
+   "expect": "action:voice.knowledge_delete",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't remove the answer about parking",
+   "expect": "negated",
+   "lang": "en",
+   "near": "voice.knowledge_delete"
+  },
+  {
+   "text": "what if we delete the answer about parking",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "voice.knowledge_delete"
+  },
+  {
+   "text": "callers say \"anitha madam\" for Dr Anitha",
+   "expect": "action:voice.lexicon_add",
+   "lang": "en"
+  },
+  {
+   "text": "patients say \"skin doctor\" for dermatology",
+   "expect": "action:voice.lexicon_add",
+   "lang": "en"
+  },
+  {
+   "text": "people say \"sugar test\" for thyroid profile",
+   "expect": "action:voice.lexicon_add",
+   "lang": "en"
+  },
+  {
+   "text": "callers \"anitha amma\" antaru for Dr Anitha",
+   "expect": "action:voice.lexicon_add",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "patients \"skin wale doctor\" kehte for dermatology",
+   "expect": "action:voice.lexicon_add",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't add what callers say",
+   "expect": "negated",
+   "lang": "en",
+   "near": "voice.lexicon_add"
+  },
+  {
+   "text": "what if patients say \"skin doctor\" for dermatology",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "voice.lexicon_add"
+  },
+  {
+   "text": "remove the alias \"anitha madam\"",
+   "expect": "action:voice.lexicon_delete",
+   "lang": "en"
+  },
+  {
+   "text": "delete the phrase \"skin doctor\"",
+   "expect": "action:voice.lexicon_delete",
+   "lang": "en"
+  },
+  {
+   "text": "remove the nickname \"anitha amma\"",
+   "expect": "action:voice.lexicon_delete",
+   "lang": "en"
+  },
+  {
+   "text": "alias teeseyi \"anitha amma\"",
+   "expect": "action:voice.lexicon_delete",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "alias hatao \"skin wale doctor\"",
+   "expect": "action:voice.lexicon_delete",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't remove the alias \"anitha madam\"",
+   "expect": "negated",
+   "lang": "en",
+   "near": "voice.lexicon_delete"
+  },
+  {
+   "text": "what if we delete the phrase \"skin doctor\"",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "voice.lexicon_delete"
+  },
+  {
+   "text": "what did the receptionist learn",
+   "expect": "action:voice.learning_review",
+   "lang": "en"
+  },
+  {
+   "text": "show learning suggestions",
+   "expect": "action:voice.learning_review",
+   "lang": "en"
+  },
+  {
+   "text": "receptionist suggestions to review",
+   "expect": "action:voice.learning_review",
+   "lang": "en"
+  },
+  {
+   "text": "receptionist emi nerchukundi",
+   "expect": "action:voice.learning_review",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "receptionist ne kya seekha",
+   "expect": "action:voice.learning_review",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "రిసెప్షనిస్ట్ ఏమి నేర్చుకుంది",
+   "expect": "action:voice.learning_review",
+   "lang": "te"
+  },
+  {
+   "text": "approve all receptionist suggestions",
+   "expect": "none",
+   "lang": "en",
+   "near": "voice.learning_review"
+  },
+  {
+   "text": "dismiss the receptionist suggestions",
+   "expect": "none",
+   "lang": "en",
+   "near": "voice.learning_review"
+  },
+  {
+   "text": "approve the suggestion \"skin doctor\"",
+   "expect": "action:voice.learning_approve",
+   "lang": "en"
+  },
+  {
+   "text": "approve the learning \"anitha madam\"",
+   "expect": "action:voice.learning_approve",
+   "lang": "en"
+  },
+  {
+   "text": "approve the phrase \"sugar test\"",
+   "expect": "action:voice.learning_approve",
+   "lang": "en"
+  },
+  {
+   "text": "suggestion ok cheyyi \"skin doctor\"",
+   "expect": "action:voice.learning_approve",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "suggestion approve karo \"anitha madam\"",
+   "expect": "action:voice.learning_approve",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't approve the suggestion \"skin doctor\"",
+   "expect": "negated",
+   "lang": "en",
+   "near": "voice.learning_approve"
+  },
+  {
+   "text": "what if we approve the suggestion \"skin doctor\"",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "voice.learning_approve"
+  },
+  {
+   "text": "dismiss the suggestion \"sugar tablet\"",
+   "expect": "action:voice.learning_dismiss",
+   "lang": "en"
+  },
+  {
+   "text": "reject the suggestion \"skin doctor\"",
+   "expect": "action:voice.learning_dismiss",
+   "lang": "en"
+  },
+  {
+   "text": "ignore the suggestion \"anitha madam\"",
+   "expect": "action:voice.learning_dismiss",
+   "lang": "en"
+  },
+  {
+   "text": "suggestion teeseyi \"sugar tablet\"",
+   "expect": "action:voice.learning_dismiss",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "suggestion hatao \"sugar tablet\"",
+   "expect": "action:voice.learning_dismiss",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't dismiss the suggestion \"skin doctor\"",
+   "expect": "negated",
+   "lang": "en",
+   "near": "voice.learning_dismiss"
+  },
+  {
+   "text": "what if we dismiss the suggestion \"skin doctor\"",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "voice.learning_dismiss"
+  },
+  {
+   "text": "good morning",
+   "expect": "action:briefing.morning",
+   "lang": "en"
+  },
+  {
+   "text": "morning briefing please",
+   "expect": "action:briefing.morning",
+   "lang": "en"
+  },
+  {
+   "text": "brief me",
+   "expect": "action:briefing.morning",
+   "lang": "en"
+  },
+  {
+   "text": "ee roju emundi",
+   "expect": "action:briefing.morning",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj kya hai",
+   "expect": "action:briefing.morning",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ఈరోజు ఏముంది",
+   "expect": "action:briefing.morning",
+   "lang": "te"
+  },
+  {
+   "text": "आज क्या है",
+   "expect": "action:briefing.morning",
+   "lang": "hi"
+  },
+  {
+   "text": "don't brief me",
+   "expect": "negated",
+   "lang": "en",
+   "near": "briefing.morning"
+  },
+  {
+   "text": "what if you brief me",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "briefing.morning"
+  },
+  {
+   "text": "wrap up the day",
+   "expect": "action:briefing.eod",
+   "lang": "en"
+  },
+  {
+   "text": "end of day summary",
+   "expect": "action:briefing.eod",
+   "lang": "en"
+  },
+  {
+   "text": "close the day",
+   "expect": "action:briefing.eod",
+   "lang": "en"
+  },
+  {
+   "text": "ee roju summary",
+   "expect": "action:briefing.eod",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "din khatam summary",
+   "expect": "action:briefing.eod",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "రోజు ముగింపు",
+   "expect": "action:briefing.eod",
+   "lang": "te"
+  },
+  {
+   "text": "दिन का सारांश",
+   "expect": "action:briefing.eod",
+   "lang": "hi"
+  },
+  {
+   "text": "don't wrap up the day",
+   "expect": "negated",
+   "lang": "en",
+   "near": "briefing.eod"
+  },
+  {
+   "text": "what if we close the day",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "briefing.eod"
+  },
+  {
+   "text": "make the bill for Ravi Kumar",
+   "expect": "action:opd.invoice_create",
+   "lang": "en"
+  },
+  {
+   "text": "create invoice for token 4",
+   "expect": "action:opd.invoice_create",
+   "lang": "en"
+  },
+  {
+   "text": "generate the bill for Sita",
+   "expect": "action:opd.invoice_create",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi ki bill cheyyi",
+   "expect": "action:opd.invoice_create",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ka bill banao",
+   "expect": "action:opd.invoice_create",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't make the bill for Ravi",
+   "expect": "negated",
+   "lang": "en",
+   "near": "opd.invoice_create"
+  },
+  {
+   "text": "what if we make the bill for Ravi",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "opd.invoice_create"
+  },
+  {
+   "text": "issue Ravi's invoice",
+   "expect": "action:opd.invoice_issue",
+   "lang": "en"
+  },
+  {
+   "text": "finalise the bill for Sita",
+   "expect": "action:opd.invoice_issue",
+   "lang": "en"
+  },
+  {
+   "text": "issue the bill for Ravi Kumar",
+   "expect": "action:opd.invoice_issue",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi invoice issue cheyyi",
+   "expect": "action:opd.invoice_issue",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ka bill issue karo",
+   "expect": "action:opd.invoice_issue",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't issue Ravi's invoice",
+   "expect": "negated",
+   "lang": "en",
+   "near": "opd.invoice_issue"
+  },
+  {
+   "text": "what if we issue Ravi's invoice",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "opd.invoice_issue"
+  },
+  {
+   "text": "send payment link to Ravi",
+   "expect": "action:opd.payment_link",
+   "lang": "en"
+  },
+  {
+   "text": "payment link for Sita",
+   "expect": "action:opd.payment_link",
+   "lang": "en"
+  },
+  {
+   "text": "send Ravi a link to pay",
+   "expect": "action:opd.payment_link",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi ki payment link pampu",
+   "expect": "action:opd.payment_link",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ko payment link bhejo",
+   "expect": "action:opd.payment_link",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't send the payment link to Ravi",
+   "expect": "negated",
+   "lang": "en",
+   "near": "opd.payment_link"
+  },
+  {
+   "text": "what if we send Ravi a payment link",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "opd.payment_link"
+  },
+  {
+   "text": "refund Ravi's booking",
+   "expect": "action:booking.refund",
+   "lang": "en"
+  },
+  {
+   "text": "refund booking MC-2026-ABCD2345",
+   "expect": "action:booking.refund",
+   "lang": "en"
+  },
+  {
+   "text": "refund Sita's appointment",
+   "expect": "action:booking.refund",
+   "lang": "en"
+  },
+  {
+   "text": "Ravi booking refund cheyyi",
+   "expect": "action:booking.refund",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Ravi ki booking refund karo",
+   "expect": "action:booking.refund",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't refund Ravi's booking",
+   "expect": "negated",
+   "lang": "en",
+   "near": "booking.refund"
+  },
+  {
+   "text": "what if we refund Ravi's booking",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "booking.refund"
+  },
+  {
+   "text": "assign Lakshmi's home visit to Kiran",
+   "expect": "action:homecollect.assign",
+   "lang": "en"
+  },
+  {
+   "text": "assign Ravi's sample pickup to Suma",
+   "expect": "action:homecollect.assign",
+   "lang": "en"
+  },
+  {
+   "text": "assign the visit for Sita to Kiran",
+   "expect": "action:homecollect.assign",
+   "lang": "en"
+  },
+  {
+   "text": "Lakshmi visit Kiran ki assign cheyyi",
+   "expect": "clarify",
+   "action": "homecollect.assign",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "Lakshmi ki visit Kiran ko assign karo",
+   "expect": "clarify",
+   "action": "homecollect.assign",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't assign Lakshmi's visit to Kiran",
+   "expect": "negated",
+   "lang": "en",
+   "near": "homecollect.assign"
+  },
+  {
+   "text": "what if we assign Lakshmi's visit to Kiran",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "homecollect.assign"
+  },
+  {
+   "text": "auto assign home visits",
+   "expect": "action:homecollect.auto_assign",
+   "lang": "en"
+  },
+  {
+   "text": "assign all unassigned visits",
+   "expect": "action:homecollect.auto_assign",
+   "lang": "en"
+  },
+  {
+   "text": "auto assign the pickups",
+   "expect": "action:homecollect.auto_assign",
+   "lang": "en"
+  },
+  {
+   "text": "visits auto assign cheyyi",
+   "expect": "action:homecollect.auto_assign",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "visits auto assign karo",
+   "expect": "action:homecollect.auto_assign",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "don't auto assign the visits",
+   "expect": "negated",
+   "lang": "en",
+   "near": "homecollect.auto_assign"
+  },
+  {
+   "text": "what if we auto assign home visits",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "homecollect.auto_assign"
+  },
+  {
+   "text": "receptionist hours 9 to 6",
+   "expect": "action:voice.settings_update",
+   "lang": "en"
+  },
+  {
+   "text": "lead call limit 50",
+   "expect": "action:voice.settings_update",
+   "lang": "en"
+  },
+  {
+   "text": "rename the receptionist to \"Asha\"",
+   "expect": "action:voice.settings_update",
+   "lang": "en"
+  },
+  {
+   "text": "lead calls between 10 and 7",
+   "expect": "action:voice.settings_update",
+   "lang": "en"
+  },
+  {
+   "text": "receptionist ka naam Asha rakho",
+   "expect": "action:voice.settings_update",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "receptionist peru Asha pettu",
+   "expect": "action:voice.settings_update",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "change the receptionist settings",
+   "expect": "clarify",
+   "action": "voice.settings_update",
+   "lang": "en"
+  },
+  {
+   "text": "don't change the receptionist hours",
+   "expect": "negated",
+   "lang": "en",
+   "near": "voice.settings_update"
+  },
+  {
+   "text": "what if the lead call limit is 50",
+   "expect": "hypothetical",
+   "lang": "en",
+   "near": "voice.settings_update"
+  }
+ ],
+ "doctors": [
+  {
+   "id": "d1",
+   "name": "Dr. Srinivas Rao"
+  },
+  {
+   "id": "d2",
+   "name": "Dr. Srinivas Reddy"
+  },
+  {
+   "id": "d3",
+   "name": "Dr. Anitha"
+  }
+ ]
+}

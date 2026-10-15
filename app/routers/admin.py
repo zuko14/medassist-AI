@@ -1,6 +1,7 @@
 """Admin router for analytics and management — Security Hardened."""
 
 import asyncio
+import copy
 import csv
 import hashlib
 import io
@@ -8,7 +9,7 @@ import logging
 import re
 import secrets
 from datetime import date, datetime, time as time_type, timedelta, timezone
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -56,6 +57,7 @@ from app.services.tenant import (
     has_feature,
     home_collection_available,
     invalidate_tenant_cache,
+    kriya_ketu_enabled,
     opd_enabled,
     require_feature,
     specialty_enabled,
@@ -73,6 +75,8 @@ from app.services.broadcast import broadcast_service
 from app.services import client_data
 from app.services.lab_reports import LabReportService
 from app.services.permissions import (
+    CORPORATE_VIEWER,
+    PHLEBOTOMIST,
     enforce_branch_scope,
     require_permission,
     resolve_owned_branch,
@@ -81,6 +85,7 @@ from app.services.prescriptions import PrescriptionService
 from app.utils.security import login_rate_limiter
 from app.utils.validators import mask_phone, normalize_phone, validate_phone
 from app.database import sb, scoped_query  # T5.1: off-loop query execution
+from app.services import config_store  # D-13: config saves write only the changed keys, atomically
 from app.utils.async_tasks import spawn_background_task
 
 logger = logging.getLogger(__name__)
@@ -877,6 +882,8 @@ async def get_current_admin(
             "corporate_health_enabled": False,
             "home_collection_available": False,
             "ai_receptionist_enabled": False,
+            "assistant_enabled": False,
+            "assistant_stt_enabled": False,
             "opd_enabled": False,
             "opd_state": None,
             "opd_doctor_id": user.doctor_id,
@@ -884,6 +891,12 @@ async def get_current_admin(
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
     plan = clinic.get("plan", "soloclinic")
+    # Kriya Ketu (KK-FR-001): global switch + owner opt-in; no launcher for read-only partner/phleb logins.
+    assistant_on = (
+        settings.assistant_enabled
+        and kriya_ketu_enabled(clinic)
+        and user.staff_role not in (CORPORATE_VIEWER, PHLEBOTOMIST)
+    )
     features = (
         list(ALL_FEATURES)
         if plan == "enterprise"
@@ -905,6 +918,9 @@ async def get_current_admin(
         "home_collection_available": home_collection_available(clinic),
         # Owner opt-in only (migration 098): the AI Receptionist control room.
         "ai_receptionist_enabled": ai_receptionist_enabled(clinic),
+        # Owner opt-in + ASSISTANT_ENABLED (migration 108): the Kriya Ketu launcher and its mic.
+        "assistant_enabled": assistant_on,
+        "assistant_stt_enabled": assistant_on and settings.assistant_stt_enabled,
         # OPD OS (migration 103): module enabled flag, state, linked doctor ID
         "opd_enabled": opd_enabled(clinic),
         "opd_state": clinic.get("opd_state", "NOT_CONFIGURED"),
@@ -1665,6 +1681,10 @@ async def delete_staff(
     return {"success": True, "deleted": True, "username": target.get("username")}
 
 
+# One leave row is inserted per day; a far end_date would insert thousands (D-26).
+MAX_LEAVE_RANGE_DAYS = 92
+
+
 class LeaveCreate(BaseModel):
     doctor_name: str
     leave_date: date
@@ -1686,15 +1706,19 @@ def _clean_doctor_whatsapp(v: Optional[str]) -> Optional[str]:
     return p
 
 
+#: D-34: the fee reaches the payment flow, so it is bounded like the other money fields.
+MAX_CONSULTATION_FEE = 100_000
+
+
 class DoctorCreate(BaseModel):
-    name: str
-    specialization: str
-    department: str
+    name: str = Field(..., max_length=120)
+    specialization: str = Field(..., max_length=120)
+    department: str = Field(..., max_length=120)
     available_days: str = "Mon,Tue,Wed,Thu,Fri"
     morning_slots: Optional[list[str]] = None
     evening_slots: Optional[list[str]] = None
     is_active: bool = True
-    consultation_fee: int = 500
+    consultation_fee: int = Field(500, ge=0, le=MAX_CONSULTATION_FEE)
     morning_start: Optional[time_type] = None
     morning_end: Optional[time_type] = None
     evening_start: Optional[time_type] = None
@@ -1740,14 +1764,14 @@ class DoctorCreate(BaseModel):
 
 
 class DoctorUpdate(BaseModel):
-    name: Optional[str] = None
-    specialization: Optional[str] = None
-    department: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=120)
+    specialization: Optional[str] = Field(None, max_length=120)
+    department: Optional[str] = Field(None, max_length=120)
     available_days: Optional[str] = None
     morning_slots: Optional[list[str]] = None
     evening_slots: Optional[list[str]] = None
     is_active: Optional[bool] = None
-    consultation_fee: Optional[int] = None
+    consultation_fee: Optional[int] = Field(None, ge=0, le=MAX_CONSULTATION_FEE)
     morning_start: Optional[time_type] = None
     morning_end: Optional[time_type] = None
     evening_start: Optional[time_type] = None
@@ -1831,6 +1855,10 @@ def _clean_lab_description(v: Optional[str]) -> Optional[str]:
     return v
 
 
+#: lab_tests.price_paise is INTEGER (038): a higher price overflowed in the DB as a 500 (D-31).
+MAX_LAB_PRICE_RUPEES = (2**31 - 1) // 100
+
+
 class LabTestCreate(BaseModel):
     name: str
 
@@ -1879,6 +1907,8 @@ class LabTestCreate(BaseModel):
     def validate_price(cls, v: int) -> int:
         if v <= 0:
             raise ValueError("price_rupees must be greater than 0")
+        if v > MAX_LAB_PRICE_RUPEES:
+            raise ValueError(f"price_rupees must be at most {MAX_LAB_PRICE_RUPEES}")
         return v
 
 
@@ -1933,6 +1963,8 @@ class LabTestUpdate(BaseModel):
         """
         if v is not None and v <= 0:
             raise ValueError("price_rupees must be greater than 0")
+        if v is not None and v > MAX_LAB_PRICE_RUPEES:
+            raise ValueError(f"price_rupees must be at most {MAX_LAB_PRICE_RUPEES}")
         return v
 
 
@@ -2062,6 +2094,12 @@ class DoctorBranchAssign(BaseModel):
     doctor_id: str
     session: Literal["morning", "evening", "both"] = "both"
 
+    @field_validator("doctor_id")
+    @classmethod
+    def _v_doctor_id(cls, v: str) -> str:
+        # D-34: a malformed id reached the uuid column as a generic 500.
+        return str(UUID(str(v).strip()))
+
 
 class ConnectorCredentialsUpdate(BaseModel):
     """Self-service MocDoc/HMIS connector credentials a clinic_admin can set
@@ -2120,7 +2158,8 @@ class PrescriptionCreate(BaseModel):
 
 @router.get("/stats")
 async def get_stats(
-    clinic_id: str = "default", days: int = 30, user: AdminUser = Depends(verify_credentials)
+    clinic_id: str = "default", days: Annotated[int, Query(ge=1, le=365)] = 30,  # D-23
+    user: AdminUser = Depends(verify_credentials)
 ):
     """Get dashboard statistics."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
@@ -2462,6 +2501,9 @@ def _reject_empty_branch_session(doc: dict, session: Optional[str]) -> None:
         )
 
 
+_SHIFT_FIELDS = ("morning_start", "morning_end", "evening_start", "evening_end", "morning_slots", "evening_slots")
+
+
 def _apply_slot_config(data: dict) -> dict:
     """Regenerate morning_slots/evening_slots from start/end/duration if provided.
 
@@ -2719,6 +2761,18 @@ async def update_doctor(
             update_data.pop("branch_id", None)
             update_data.pop("branch_session", None)
 
+        # D-34: _apply_slot_config regenerates BOTH shifts from what it is given, so a shift (and the
+        # slot length) this request does not mention keeps its stored values instead of being blanked
+        # or regenerated at the 30-minute default. A shift the request clears explicitly stays cleared.
+        if any(k in update_data for k in _SHIFT_FIELDS):
+            for shift in ("morning", "evening"):
+                keys = (f"{shift}_start", f"{shift}_end", f"{shift}_slots")
+                if not any(k in update_data for k in keys):
+                    update_data.update({k: existing_doctor[k] for k in keys
+                                        if isinstance(existing_doctor.get(k), (str, list))})
+            stored_minutes = existing_doctor.get("slot_duration_minutes")
+            if "slot_duration_minutes" not in update_data and isinstance(stored_minutes, int):
+                update_data["slot_duration_minutes"] = existing_doctor["slot_duration_minutes"]
         update_data = _apply_slot_config(update_data)
         if requested_branch_id is not None:
             # This form holds ONE branch, and writing it deletes every
@@ -3086,6 +3140,7 @@ async def update_lab_test(
         # unscoped: updating lab test catalog item by test_id within verified clinic
         query = supabase.table("lab_tests").update(update_data)
         query = query.eq("clinic_id", effective_clinic_id)
+        query = restrict_to_branch(query, _staff_branch(user))  # D-31: another branch's row -> 404
         result = await sb(query.eq("id", test_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Lab test not found")
@@ -3123,6 +3178,7 @@ async def delete_lab_test(
         # unscoped: soft-deleting lab test catalog item by test_id within verified clinic
         query = supabase.table("lab_tests").delete()
         query = query.eq("clinic_id", effective_clinic_id)
+        query = restrict_to_branch(query, _staff_branch(user))  # D-31: another branch's row -> 404
         result = await sb(query.eq("id", test_id))
         if not result.data:
             raise HTTPException(status_code=404, detail="Lab test not found")
@@ -4133,6 +4189,9 @@ async def import_lab_tests_csv(
 
 _import_semaphore = asyncio.Semaphore(1)
 
+#: D-32: shown on the page when a price list fails for a reason the parser did not word itself.
+IMPORT_FAILED_TEXT = "Could not read this price list. Please check the file and upload it again."
+
 
 async def _process_catalogue_import_job(
     preview_id: str,
@@ -4165,7 +4224,9 @@ async def _process_catalogue_import_job(
             logger.info(f"Import preview {preview_id} processed: {len(staged_rows)} rows staged.")
         except Exception as e:
             logger.error(f"Import preview {preview_id} failed: {e}", exc_info=True)
-            err_msg = str(getattr(e, "detail", e))
+            # D-32: the parser's own HTTPException texts are written for staff; anything else
+            # (DB, OCR, provider errors) stays in the log only.
+            err_msg = e.detail if isinstance(e, HTTPException) and isinstance(e.detail, str) else IMPORT_FAILED_TEXT
             await sb(
                 supabase.table("catalogue_import_previews")
                 .update({
@@ -4701,6 +4762,19 @@ async def apply_lab_tests_cleanup(
         audit_updated_items = []
         audit_deleted_items = []
 
+        # D-33: every listed row's branch is checked before the first write (as bulk-delete
+        # does), so a refusal never leaves earlier rows changed without an audit row.
+        listed = list({fix.test_id for fix in [*body.prep_fixes, *body.price_fixes]})
+        for start in range(0, len(listed), _AUTO_CLASSIFY_CHUNK):
+            scope_rows = await sb(
+                # unscoped: reading this clinic's own rows (clinic_id filter)
+                supabase.table("lab_tests").select("id, branch_id")
+                .eq("clinic_id", effective_clinic_id)
+                .in_("id", listed[start:start + _AUTO_CLASSIFY_CHUNK])
+            )
+            for row in scope_rows.data or []:
+                enforce_branch_scope(user, row.get("branch_id"))
+
         # ── RUN UPDATES BEFORE DELETES ──────────────────────────────────────
         # If any update fails, an exception is raised and deletes will NOT run.
 
@@ -5065,7 +5139,7 @@ async def clear_lab_collection_window(
         )
     try:
         branch = await resolve_owned_branch(user, branch_id, effective_clinic_id)
-        config = branch.get("config") or {}
+        config = dict(branch.get("config") or {})
         if "lab_collection" not in config:
             # Already inheriting. Idempotent rather than a 404, so a double
             # click or a stale panel cannot turn into an error the admin has
@@ -5073,10 +5147,7 @@ async def clear_lab_collection_window(
             return {"success": True, "cleared": False}
 
         config.pop("lab_collection", None)
-        # unscoped: unique_row_key
-        await sb(
-            supabase.table("branches").update({"config": config}).eq("id", branch["id"])
-        )
+        await config_store.save_config("branches", branch["id"], effective_clinic_id, branch.get("config") or {}, config)
         return {"success": True, "cleared": True}
     except HTTPException:
         raise
@@ -5115,20 +5186,24 @@ async def update_lab_collection_window(
             )
             if not branch_result.data:
                 raise HTTPException(status_code=404, detail="Branch not found")
-            config = branch_result.data[0].get("config") or {}
-            config["lab_collection"] = window
-            # unscoped: updating branch configuration by branch_id within verified clinic
-            await sb(supabase.table("branches").update({"config": config}).eq("id", branch_id))
+            before = branch_result.data[0].get("config") or {}
+            await config_store.save_config("branches", branch_id, effective_clinic_id, before, {**before, "lab_collection": window})
         else:
             # unscoped: updating clinic configuration by clinic_id within verified clinic
             clinic_result = await sb(supabase.table("clinics").select("config").eq("id", effective_clinic_id))
             if not clinic_result.data:
                 raise HTTPException(status_code=404, detail="Clinic not found")
-            config = clinic_result.data[0].get("config") or {}
-            config["lab_collection"] = window
-            # unscoped: updating clinic configuration by clinic_id within verified clinic
-            await sb(supabase.table("clinics").update({"config": config}).eq("id", effective_clinic_id))
+            before = clinic_result.data[0].get("config") or {}
+            await config_store.save_config("clinics", effective_clinic_id, effective_clinic_id, before,
+                              {**before, "lab_collection": window})
 
+        await log_admin_action(
+            user=user,
+            action="update_lab_collection_window",
+            resource_type="lab_collection_window",
+            resource_id=branch_id or effective_clinic_id,
+            details={"branch_id": branch_id or None, "lab_collection": window},
+        )
         return {"success": True, "lab_collection": window}
     except HTTPException:
         raise
@@ -5204,6 +5279,11 @@ async def create_leave(
         if end_date < start_date:
             raise HTTPException(
                 status_code=400, detail="End date cannot be before start date"
+            )
+        if (end_date - start_date).days >= MAX_LEAVE_RANGE_DAYS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A leave can cover at most {MAX_LEAVE_RANGE_DAYS} days. Add longer leave in parts.",
             )
 
         leaves_to_insert = []
@@ -5398,12 +5478,15 @@ async def get_holidays(
 @router.post("/holidays")
 async def create_holiday(
     holiday_date: date,
-    name: str,
+    name: Annotated[str, Query(min_length=1, max_length=100)],  # column is VARCHAR(100) (D-27)
     request: Request = None,
     clinic_id: str = "default",
     user: AdminUser = Depends(require_permission("HOLIDAYS_CREATE")),
 ):
     """Create a hospital holiday."""
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Enter a holiday name")
     try:
         effective_clinic_id = await resolve_clinic_id_for_write(user, clinic_id)
         result = (
@@ -5813,7 +5896,7 @@ async def get_patients(
     """
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     try:
-        patients = await get_genuine_patients(effective_clinic_id)
+        patients = await get_genuine_patients(effective_clinic_id, branch_id=_staff_branch(user))  # D-22
         return {"patients": patients}
     except Exception as e:
         logger.error(f"Error loading genuine patients: {e}")
@@ -6117,6 +6200,7 @@ async def admin_reject_booking(
 async def admin_refund_booking(
     booking_id: str,
     body: dict = None,
+    clinic_id: str = "default",
     user: AdminUser = Depends(require_admin),
 ):
     """Initiate a refund for a confirmed booking with strict tenant scoping."""
@@ -6124,22 +6208,22 @@ async def admin_refund_booking(
         from app.services.payment import payment_service
         from app.services.tenant import get_clinic_by_id
 
-        # 1. Fetch booking to verify existence and tenant ownership
-        # scoped: fetch booking by id and enforce clinic access below
+        # 1-2. D-37 (b): the booking must belong to the clinic this session works on (the panel and
+        # Kriya Ketu always send ?clinic_id). It used to be loaded by id alone and then checked against
+        # its own clinic, so a super_admin could refund any tenant's booking from any clinic's panel.
+        effective_clinic_id = enforce_clinic_access(user, clinic_id)
         booking_result = (
             # unscoped: tenant-scoped operation with verified clinic authorization
             await sb(supabase.table("appointments")
             .select("*")
-            .eq("id", booking_id))
+            .eq("id", booking_id)
+            .eq("clinic_id", effective_clinic_id))
         )
         if not booking_result.data:
             raise HTTPException(status_code=404, detail="Booking not found")
 
         booking = booking_result.data[0]
-        booking_clinic_id = booking.get("clinic_id") or "default"
-
-        # 2. Enforce clinic access (raises 403 if user lacks access to this clinic)
-        enforce_clinic_access(user, booking_clinic_id)
+        booking_clinic_id = booking.get("clinic_id") or effective_clinic_id
 
         # 3. Resolve the booking's clinic for per-clinic Razorpay credentials
         clinic = None
@@ -6158,9 +6242,11 @@ async def admin_refund_booking(
             enforce_window=False,
         )
         if not result["success"]:
-            raise HTTPException(
-                status_code=400, detail=result.get("reason", "Refund failed")
-            )
+            reason = result.get("reason") or "Refund failed"
+            if "_error:" in reason:  # D-37: "<gateway>_error: <exception text>" stays in the server log only
+                logger.warning(f"Admin refund gateway failure booking={booking_id}: {reason[:300]}")
+                reason = "The payment gateway did not accept the refund. Please try again or check the gateway dashboard."
+            raise HTTPException(status_code=400, detail=reason)
         return result
     except HTTPException:
         raise
@@ -6209,7 +6295,7 @@ async def get_payment_events(
 
 @router.get("/payments/reconciliation")
 async def get_payment_reconciliation(
-    date_str: Optional[str] = None,
+    date_str: Optional[date] = None,  # D-25: validated (422), not passed through as raw text
     clinic_id: Optional[str] = None,
     user: AdminUser = Depends(require_admin),
 ):
@@ -6218,7 +6304,9 @@ async def get_payment_reconciliation(
     try:
         from app.services.payment import payment_service
 
-        summary = await payment_service.get_daily_reconciliation(date_str, clinic_id=effective_clinic_id)
+        summary = await payment_service.get_daily_reconciliation(
+            date_str.isoformat() if date_str else None, clinic_id=effective_clinic_id
+        )
         return summary
     except HTTPException:
         raise
@@ -6230,7 +6318,7 @@ async def get_payment_reconciliation(
 @router.get("/payments/stats")
 async def get_payment_stats(
     clinic_id: str = "default",
-    days: int = 30,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,  # D-23
     user: AdminUser = Depends(require_admin),
 ):
     """Get payment statistics for the dashboard."""
@@ -6362,6 +6450,7 @@ async def update_clinic_profile(
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
     clinic = await get_clinic_by_id(effective_clinic_id)
 
+    before_cfg = copy.deepcopy(clinic.get("config") or {})  # D-13: only what this save changes is written
     cfg = dict(clinic.get("config") or {})
     updates = (
         body.model_dump(exclude_unset=True)
@@ -6403,7 +6492,6 @@ async def update_clinic_profile(
         cfg["followup_message_template_name"] = updates[
             "followup_message_template_name"
         ].strip()
-    row_updates["config"] = cfg
     # Top-level columns for tenant routing (migration 043)
     if "phone_number_id" in updates and updates["phone_number_id"] is not None:
         row_updates["phone_number_id"] = updates["phone_number_id"].strip()
@@ -6411,15 +6499,19 @@ async def update_clinic_profile(
         row_updates["is_sandbox"] = updates["is_sandbox"]
 
     target_clinic_id = clinic["id"]
-    result = (
-        # unscoped: updating clinic configuration filtered by target_clinic_id
-        await sb(supabase.table("clinics")
-        .update(row_updates)
-        .eq("id", target_clinic_id))
-    )
-    if not result.data:
+    if await config_store.save_config("clinics", target_clinic_id, target_clinic_id, before_cfg, cfg) is None:
         raise HTTPException(status_code=404, detail="Clinic not found")
-    updated_clinic = result.data[0]
+    updated_clinic = {**clinic, **row_updates}
+    if row_updates:  # name / routing columns, not config
+        result = (
+            # unscoped: updating clinic columns filtered by target_clinic_id
+            await sb(supabase.table("clinics")
+            .update(row_updates)
+            .eq("id", target_clinic_id))
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Clinic not found")
+        updated_clinic = result.data[0]
 
     invalidate_tenant_cache(updated_clinic.get("whatsapp_number"))
 
@@ -6509,6 +6601,7 @@ async def update_payment_settings(
     clinic = await get_clinic_by_id(effective_clinic_id)
     require_feature(clinic, "payments_razorpay")
 
+    before_cfg = copy.deepcopy(clinic.get("config") or {})  # D-13: only what this save changes is written
     cfg = dict(clinic.get("config") or {})
     updates = (
         body.model_dump(exclude_unset=True)
@@ -6574,15 +6667,9 @@ async def update_payment_settings(
         )
 
     target_clinic_id = clinic["id"]
-    result = (
-        # unscoped: updating clinic configuration filtered by target_clinic_id
-        await sb(supabase.table("clinics")
-        .update({"config": cfg})
-        .eq("id", target_clinic_id))
-    )
-    if not result.data:
+    if await config_store.save_config("clinics", target_clinic_id, target_clinic_id, before_cfg, cfg) is None:
         raise HTTPException(status_code=404, detail="Clinic not found")
-    updated_clinic = result.data[0]
+    updated_clinic = clinic
 
     invalidate_tenant_cache(updated_clinic.get("whatsapp_number"))
 
@@ -7188,33 +7275,35 @@ async def run_connector_now(
 @router.get("/connectors/{connector_id}/audit-log")
 async def get_connector_audit_log(
     connector_id: str,
-    limit: int = 20,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,  # D-28: was unbounded
     user: AdminUser = Depends(require_permission("CONNECTOR_MANAGE")),
 ):
     """Get recent audit log entries (run history — found/uploaded/failed
     counts per poll) for a connector."""
     try:
-        # First get the connector to find its clinic_id, type and branch
-        connector = (
+        # First get the connector to find its clinic_id, type and branch.
+        # limit(1), not single(): single() raised on a missing id, which surfaced as a 500 (D-28).
+        rows = (
             # unscoped: tenant-scoped operation with verified clinic authorization
             await sb(supabase.table("integration_connectors")
             .select("clinic_id, connector_type, branch_id")
             .eq("id", connector_id)
-            .single())
+            .limit(1))
         )
-
-        if not connector.data:
+        if not rows.data:
             raise HTTPException(status_code=404, detail="Connector not found")
-        enforce_clinic_access(user, connector.data["clinic_id"])
+        connector = rows.data[0]
+        enforce_clinic_access(user, connector["clinic_id"])
+        enforce_branch_scope(user, connector.get("branch_id"))  # D-28: as _load_connector_for_action does
 
         query = (
             # unscoped: tenant-scoped operation with verified clinic authorization
             supabase.table("connector_audit_log")
             .select("*")
-            .eq("clinic_id", connector.data["clinic_id"])
-            .eq("connector_type", connector.data["connector_type"])
+            .eq("clinic_id", connector["clinic_id"])
+            .eq("connector_type", connector["connector_type"])
         )
-        branch_id = connector.data.get("branch_id")
+        branch_id = connector.get("branch_id")
         query = query.eq("branch_id", branch_id) if branch_id else query.is_("branch_id", "null")
         logs = await sb(query.order("created_at", desc=True).limit(limit))
 
@@ -7236,12 +7325,15 @@ async def get_connector_failed_reports(
     """Get per-report failure tracking records for staff visibility — this
     is the "which patient documents failed to send" history."""
     effective_clinic_id = enforce_clinic_access(user, clinic_id)
+    if branch_id:
+        enforce_branch_scope(user, branch_id)  # D-21: a pinned staff member can't ask for another branch
     try:
         # unscoped: tenant-scoped operation with verified clinic authorization
         query = supabase.table("connector_failed_reports").select("*")
         query = query.eq("clinic_id", effective_clinic_id)
         if branch_id:
             query = query.eq("branch_id", branch_id)
+        query = restrict_to_branch(query, _staff_branch(user))  # D-21: own branch + branch-less rows
         if unresolved_only:
             query = query.is_("resolved_at", "null")
         result = await sb(query.order("last_attempt_at", desc=True).limit(2000))
@@ -7266,6 +7358,7 @@ async def resolve_connector_failed_report(
             {"resolved_at": datetime.now().isoformat()}
         ).eq("id", failed_report_id)
         query = query.eq("clinic_id", effective_clinic_id)
+        query = restrict_to_branch(query, _staff_branch(user))  # D-21: another branch's row -> 404
         result = await sb(query)
         if not result.data:
             raise HTTPException(status_code=404, detail="Failed report not found")
@@ -7732,7 +7825,7 @@ async def resend_lab_report_from_queue(
 async def get_lab_report_deliveries(
     clinic_id: str = "default",
     branch_id: Optional[str] = None,
-    days: int = 7,
+    days: Annotated[int, Query(ge=1, le=365)] = 7,  # D-23: an unbounded value overflowed timedelta (500)
     state: str = "all",
     user: AdminUser = Depends(require_permission("REPORTS_VIEW")),
 ):
@@ -8059,7 +8152,7 @@ async def get_diagnostic_stats(
 @router.get("/audit-logs")
 async def get_admin_audit_logs(
     clinic_id: str = "default",
-    limit: int = 50,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,  # D-23
     user: AdminUser = Depends(require_admin),
 ):
     """Get administrative staff action audit logs for compliance auditing (NABH / DPDP)."""
@@ -8543,8 +8636,8 @@ async def get_messaging_usage(
 async def get_admin_notifications(
     clinic_id: Optional[str] = None,
     unread_only: bool = False,
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,  # D-23
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
     user: AdminUser = Depends(verify_credentials),
 ):
     """Retrieve in-app broadcast alerts for the authenticated clinic admin."""
@@ -9660,10 +9753,9 @@ async def update_dental_settings(
     if not changes:
         return {"success": True, "settings": dental_plans.dental_settings(clinic.get("config"))}
     fresh = await sb(supabase.table("clinics").select("config").eq("id", clinic["id"]).limit(1))
-    cfg = dict(((fresh.data or [{}])[0].get("config")) or {})
-    cfg.update(changes)
-    # unscoped: unique_row_key
-    await sb(supabase.table("clinics").update({"config": cfg}).eq("id", clinic["id"]))
+    before = ((fresh.data or [{}])[0].get("config")) or {}
+    cfg = {**before, **changes}
+    await config_store.save_config("clinics", clinic["id"], clinic["id"], before, cfg)
     invalidate_tenant_cache(clinic.get("whatsapp_number"))
     await log_admin_action(
         user=user, action="DENTAL_SETTINGS_UPDATE", resource_type="clinic_config", resource_id=clinic["id"],

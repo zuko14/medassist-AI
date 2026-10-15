@@ -265,8 +265,8 @@ async def test_audit_log_cross_tenant_forbidden():
     mock_sb = MagicMock()
     mock_table = MagicMock()
     mock_sb.table.return_value = mock_table
-    mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-        data={"clinic_id": "clinic-OTHER", "connector_type": "mocdoc", "branch_id": None}
+    mock_table.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[{"clinic_id": "clinic-OTHER", "connector_type": "mocdoc", "branch_id": None}]
     )
 
     with patch("app.routers.admin.supabase", mock_sb):
@@ -515,8 +515,8 @@ async def test_audit_log_allows_diagnostic_operator_staff():
     mock_sb = MagicMock()
     mock_table = MagicMock()
     mock_sb.table.return_value = mock_table
-    mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-        data={"clinic_id": "clinic-3", "connector_type": "mocdoc", "branch_id": None}
+    mock_table.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[{"clinic_id": "clinic-3", "connector_type": "mocdoc", "branch_id": None}]
     )
     mock_table.select.return_value.eq.return_value.eq.return_value.is_.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
         data=[{"id": "log-1", "run_status": "success", "reports_found": 2}]
@@ -588,3 +588,90 @@ async def test_upsert_connector_audits_the_enabled_flag():
     details = log.call_args.kwargs["details"]
     assert details["is_enabled"] is False
     assert details["enabled_changed"] is True
+
+
+# ── D-21: branch-pinned staff see and resolve only their own branch's failures ──
+
+_B1, _B2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+
+
+def _recording_query(rows):
+    q = MagicMock()
+    q.calls = []
+    for name in ("select", "update", "eq", "is_", "order", "limit", "or_"):
+        def _rec(*a, _n=name, **k):
+            q.calls.append((_n, a))
+            return q
+        setattr(q, name, MagicMock(side_effect=_rec))
+    q.execute.return_value = MagicMock(data=rows)
+    sb_mock = MagicMock()
+    sb_mock.table.return_value = q
+    return sb_mock, q
+
+
+def _pinned():
+    return AdminUser("desk-b1", role="staff", clinic_id="clinic-2", user_id="u-9", branch_id=_B1)
+
+
+@pytest.mark.asyncio
+async def test_failed_reports_pinned_staff_see_only_their_branch():
+    sb_mock, q = _recording_query([])
+    with patch("app.routers.admin.supabase", sb_mock):
+        await get_connector_failed_reports(clinic_id="clinic-2", branch_id=None, unresolved_only=True, user=_pinned())
+    assert ("or_", (f"branch_id.eq.{_B1},branch_id.is.null",)) in q.calls
+
+
+@pytest.mark.asyncio
+async def test_failed_reports_pinned_staff_cannot_ask_for_another_branch():
+    sb_mock, q = _recording_query([])
+    with patch("app.routers.admin.supabase", sb_mock), pytest.raises(HTTPException) as exc:
+        await get_connector_failed_reports(clinic_id="clinic-2", branch_id=_B2, unresolved_only=True, user=_pinned())
+    assert exc.value.status_code == 403 and q.calls == []
+
+
+@pytest.mark.asyncio
+async def test_failed_reports_clinic_admin_unchanged():
+    admin = AdminUser("boss", role="clinic_admin", clinic_id="clinic-2", user_id="u-1")
+    sb_mock, q = _recording_query([])
+    with patch("app.routers.admin.supabase", sb_mock):
+        await get_connector_failed_reports(clinic_id="clinic-2", branch_id=None, unresolved_only=True, user=admin)
+    assert not [c for c in q.calls if c[0] == "or_"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_failed_report_pinned_staff_limited_to_their_branch():
+    sb_mock, q = _recording_query([])  # another branch's row matches nothing -> 404
+    with patch("app.routers.admin.supabase", sb_mock), pytest.raises(HTTPException) as exc:
+        await resolve_connector_failed_report("fail-9", clinic_id="clinic-2", user=_pinned())
+    assert exc.value.status_code == 404
+    assert ("or_", (f"branch_id.eq.{_B1},branch_id.is.null",)) in q.calls
+
+
+# ── D-28: connector run history — branch check, missing id, bounded limit ──
+
+def _audit_sb(connector_rows):
+    mock_sb = MagicMock()
+    table = MagicMock()
+    mock_sb.table.return_value = table
+    table.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=connector_rows)
+    return mock_sb
+
+
+@pytest.mark.asyncio
+async def test_audit_log_pinned_staff_cannot_read_another_branch():
+    staff = AdminUser("desk-b1", role="staff", clinic_id="clinic-2", user_id="u-9", branch_id=_B1,
+                      permissions=["CONNECTOR_MANAGE"])
+    sb_mock = _audit_sb([{"clinic_id": "clinic-2", "connector_type": "mocdoc", "branch_id": _B2}])
+    with patch("app.routers.admin.supabase", sb_mock):
+        with pytest.raises(HTTPException) as exc:
+            await get_connector_audit_log(connector_id="conn-1", limit=20, user=staff)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_audit_log_missing_connector_is_404_not_500():
+    admin = AdminUser("labtech", role="clinic_admin", clinic_id="clinic-2", user_id="user-2")
+    with patch("app.routers.admin.supabase", _audit_sb([])):
+        with pytest.raises(HTTPException) as exc:
+            await get_connector_audit_log(connector_id="nope", limit=20, user=admin)
+    assert exc.value.status_code == 404

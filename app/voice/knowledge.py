@@ -88,6 +88,19 @@ async def _safe(label: str, cid: str, coro, default=None):
         return default
 
 
+def speakable_qa(rows: list) -> list:
+    """D-36: a clinic Q&A whose question or answer trips the clinical firewall is never spoken (an entry
+    saved before POST /admin/voice/knowledge screened it). Zero-LLM, the same screen the save applies."""
+    from app.services.clinical_firewall import screen_message
+    keep = []
+    for q in rows:
+        if screen_message(str(q.get("question") or ""))[0] or screen_message(str(q.get("answer") or ""))[0]:
+            logger.warning(f"VOICE_QA_SKIPPED_CLINICAL entry={q.get('id')}")
+            continue
+        keep.append(q)
+    return keep
+
+
 async def load(clinic: dict, branch_id: Optional[str]) -> dict:
     """Everything a caller may ask about, as numbered facts. Never raises;
     a source that fails is left out (and the answer falls back). The sources
@@ -229,7 +242,7 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
                 f"{c['name']}" + (f" {_rupees(c.get('price_paise'))}" if _rupees(c.get("price_paise")) else "")
                 for c in items[:30]) + ".")
 
-    kb["qa"] = (qa_res.data if qa_res else None) or []
+    kb["qa"] = speakable_qa((qa_res.data if qa_res else None) or [])
     for q in kb["qa"]:
         add("qa", f"Q: {q.get('question')} A: {q.get('answer')}")
     return kb

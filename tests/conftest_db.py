@@ -73,6 +73,7 @@ def clean_db(real_pg_conn):
             inbound_messages,
             scheduler_locks,
             admin_audit_logs,
+            assistant_runs,
             rate_limits
         CASCADE;
         """)

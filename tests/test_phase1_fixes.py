@@ -29,6 +29,7 @@ from app.routers.admin import (
     LabPriceFixItem,
     apply_lab_tests_cleanup,
 )
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 
 class StrictLabTestsTable:
@@ -272,7 +273,8 @@ async def test_platform_owner_can_set_clinic_ai_budget():
             updates.append(payload)
             return self
 
-    with patch("app.routers.platform.supabase.table", side_effect=lambda name: FakeTable()), \
+    with captured_config_writes() as writes, \
+         patch("app.routers.platform.supabase.table", side_effect=lambda name: FakeTable()), \
          patch("app.database.supabase.table", side_effect=lambda name: FakeTable()), \
          patch("app.routers.platform.sb", new_callable=AsyncMock) as mock_sb, \
          patch("app.routers.platform.log_admin_action", new_callable=AsyncMock):
@@ -289,5 +291,5 @@ async def test_platform_owner_can_set_clinic_ai_budget():
         assert res["success"] is True
         assert res["budget_paise"] == 120000
         assert res["budget_rupees"] == 1200.0
-        assert len(updates) == 1
-        assert updates[0]["config"]["ai_budget_paise"] == 120000
+        assert len(writes) == 1 and updates == []  # D-13: the config goes through config_store
+        assert writes[0]["config"]["ai_budget_paise"] == 120000

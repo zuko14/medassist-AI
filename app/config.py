@@ -260,6 +260,20 @@ class Settings(BaseSettings):
     voice_tts_paise_per_1k_chars: int = 0
     voice_telephony_paise_per_minute: int = 0
 
+    # -- Kriya Ketu staff assistant (docs/kriya-ketu/, migration 108) ------------
+    # Dormant unless ASSISTANT_ENABLED=true AND the platform owner switches
+    # clinics.features.kriya_ketu on for a clinic. Reuses OPENROUTER_API_KEY / SARVAM_API_KEY.
+    assistant_enabled: bool = False
+    assistant_llm_enabled: bool = True          # fallback only; rules and playbooks never need it
+    assistant_llm_model: str = "google/gemini-3.1-flash-lite"   # must support strict JSON schema (G-KK-LLM)
+    assistant_llm_fallback_model: str = "openai/gpt-4.1-mini"
+    assistant_llm_timeout_seconds: float = 5.0  # one attempt
+    assistant_llm_max_tokens: int = 200
+    assistant_llm_rate_per_hour: int = 20       # per user
+    assistant_stt_enabled: bool = False         # mic; keep off until DPDP notice (DP-07) and G-KK-ASR
+    assistant_stt_model: str = "saaras:v3"
+    assistant_stt_timeout_seconds: float = 10.0
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

@@ -75,6 +75,8 @@ TENANT_OWNED_TABLES = frozenset({
     "opd_payment_exceptions",
     # Migration 106: receptionist learning loop (harvest -> staff-approved suggestions)
     "ai_reception_harvest_events", "ai_learning_suggestions",
+    # Migration 108: Kriya Ketu staff assistant run log
+    "assistant_runs",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

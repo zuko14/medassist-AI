@@ -15,6 +15,7 @@ from app.routers.admin import (
     update_clinic_profile,
     ClinicProfileUpdate,
 )
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 
 def _mock_request() -> Request:
@@ -128,13 +129,13 @@ async def test_update_payment_settings_clinic_admin_updates_own_clinic():
         "app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=fake_clinic
     ), patch("app.routers.admin.supabase", mock_sb), patch(
         "app.routers.admin.invalidate_tenant_cache"
-    ):
+    ), captured_config_writes() as writes:
         result = await update_payment_settings(
             body=body, request=_mock_request(), clinic_id="default", user=admin
         )
 
     assert result["success"] is True
-    sent_config = mock_table.update.call_args[0][0]["config"]
+    sent_config = writes[-1]["config"]
     assert sent_config["payment_mode"] == "partial"
     assert sent_config["payment_deposit_percent"] == 25
 
@@ -215,12 +216,12 @@ async def test_update_payment_settings_empty_secret_does_not_clobber_stored():
         "app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=fake_clinic
     ), patch("app.routers.admin.supabase", mock_sb), patch(
         "app.routers.admin.invalidate_tenant_cache"
-    ):
+    ), captured_config_writes() as writes:
         await update_payment_settings(
             body=body, request=_mock_request(), clinic_id="default", user=admin
         )
 
-    sent_config = mock_table.update.call_args[0][0]["config"]
+    sent_config = writes[-1]["config"]
     assert sent_config["razorpay_key_secret"] == "existingsecret"
 
 
@@ -277,17 +278,17 @@ async def test_update_clinic_profile_sets_name_address_maps_link_and_emergency_n
         "app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=fake_clinic
     ), patch("app.routers.admin.supabase", mock_sb), patch(
         "app.routers.admin.invalidate_tenant_cache"
-    ):
+    ), captured_config_writes() as writes:
         result = await update_clinic_profile(
             body=body, request=_mock_request(), clinic_id="default", user=admin
         )
 
     assert result["success"] is True
     sent_updates = mock_table.update.call_args[0][0]
-    assert sent_updates["name"] == "City Care Hospital"
-    assert sent_updates["config"]["address"] == "123 Main St"
-    assert sent_updates["config"]["maps_link"] == "https://maps.google.com/xyz"
-    assert sent_updates["config"]["emergency_number"] == "+919999999999"
+    assert sent_updates == {"name": "City Care Hospital"}  # columns; config goes through config_store (D-13)
+    assert writes[-1]["config"]["address"] == "123 Main St"
+    assert writes[-1]["config"]["maps_link"] == "https://maps.google.com/xyz"
+    assert writes[-1]["config"]["emergency_number"] == "+919999999999"
 
 
 @pytest.mark.asyncio

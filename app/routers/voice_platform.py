@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.database import is_uuid, sb, supabase
+from app.services import config_store  # D-13: config saves write only the changed keys, atomically
 from app.routers.admin import AdminUser, log_admin_action
 from app.routers.platform import verify_owner_credentials
 from app.services.tenant import ai_receptionist_enabled, invalidate_tenant_cache
@@ -133,12 +134,9 @@ async def set_budget(clinic_id: str, body: BudgetIn, request: Request,
     res = await sb(supabase.table("clinics").select("config").eq("id", clinic_id).limit(1))
     if not res.data:
         raise HTTPException(status_code=404, detail="Clinic not found")
-    config = dict(res.data[0].get("config") or {})
-    voice = dict(config.get("voice") or {})
-    voice["monthly_budget_paise"] = body.monthly_budget_paise
-    config["voice"] = voice
-    # unscoped: platform_admin
-    await sb(supabase.table("clinics").update({"config": config}).eq("id", clinic_id))
+    before = res.data[0].get("config") or {}
+    voice = {**(before.get("voice") or {}), "monthly_budget_paise": body.monthly_budget_paise}
+    await config_store.save_config("clinics", clinic_id, clinic_id, before, {**before, "voice": voice})
     invalidate_tenant_cache()
     await log_admin_action(owner, "voice_budget_set", "clinic", clinic_id, details=body.model_dump(),
                            ip_address=_ip(request))

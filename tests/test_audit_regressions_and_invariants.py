@@ -147,7 +147,8 @@ def test_assign_doctor_to_branch_cross_tenant_rejected():
             )
 
             payload = {
-                "doctor_id": "doc_cross_tenant_999",
+                # D-34: a well-formed id (a malformed one is now 422 before any query)
+                "doctor_id": "99999999-9999-9999-9999-999999999999",
                 "session": "morning",
             }
 

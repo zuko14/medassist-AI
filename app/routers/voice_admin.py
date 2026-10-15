@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.database import sb, supabase
+from app.services import config_store  # D-13: config saves write only the changed keys, atomically
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
 from app.services.tenant import ai_receptionist_enabled, get_clinic_by_id, invalidate_tenant_cache
 from app.voice import outbound, store
@@ -259,12 +260,10 @@ async def put_settings(body: VoiceSettingsIn, request: Request, clinic_id: str =
         raise HTTPException(status_code=422, detail="Outbound calls are allowed only between 09:00 and 21:00.")
     # unscoped: unique_row_key (clinics.id IS the tenant, resolved by enforce_clinic_access)
     res = await sb(supabase.table("clinics").select("config").eq("id", scope).limit(1))
-    config = dict((res.data or [{}])[0].get("config") or {})
-    voice = dict(config.get("voice") or {})
-    voice.update(body.model_dump())
-    config["voice"] = voice
-    # unscoped: unique_row_key (clinics.id IS the tenant, resolved by enforce_clinic_access)
-    await sb(supabase.table("clinics").update({"config": config}).eq("id", scope))
+    before = (res.data or [{}])[0].get("config") or {}
+    voice = {**(before.get("voice") or {}), **body.model_dump()}
+    # D-13: only the changed voice keys are written, so the platform's budget and other settings survive.
+    await config_store.save_config("clinics", scope, scope, before, {**before, "voice": voice})
     invalidate_tenant_cache()
     await log_admin_action(user, "voice_settings_update", "clinic", scope, details=body.model_dump(),
                            ip_address=_ip(request))
@@ -344,9 +343,13 @@ async def list_knowledge(clinic_id: str = "default", user: AdminUser = Depends(v
 @router.post("/knowledge")
 async def add_knowledge(body: KnowledgeIn, request: Request, clinic_id: str = "default",
                         user: AdminUser = Depends(verify_credentials)):
+    from app.services.clinical_firewall import screen_message
     scope, _ = await _scope(user, clinic_id, "VOICE_MANAGE")
     row = {"question": " ".join(body.question.split()), "answer": " ".join(body.answer.split()),
            "language": body.language, "clinic_id": scope, "created_by": user.username}
+    # D-36: the same zero-LLM firewall the Learning approve form applies (NMC: no medicine or diagnosis advice).
+    if screen_message(row["question"])[0] or screen_message(row["answer"])[0]:
+        raise HTTPException(status_code=422, detail="The answer mentions medicines or diagnosis; Kriya cannot say that.")
     try:
         # unscoped: insert_scoped_by_payload
         res = await sb(supabase.table("voice_knowledge_entries").insert(row))
@@ -516,6 +519,8 @@ class OutboundBulkIn(BaseModel):
     #: Staff confirm every person asked the clinic to contact them. Without it,
     #: only numbers that already contacted the clinic are queued.
     consent_attested: bool = False
+    #: KK-P4-06a (DP-14): report who would be queued and who skipped, without queueing anyone.
+    dry_run: bool = False
 
 
 @router.post("/outbound/bulk")
@@ -529,9 +534,12 @@ async def create_outbound_bulk(body: OutboundBulkIn, request: Request, clinic_id
             raise HTTPException(status_code=422, detail="Say where these contacts came from (e.g. health camp sign-ups).")
         consent = {"source": source}
     try:
-        result = await outbound.enqueue_bulk(clinic, [c.model_dump() for c in body.contacts], consent, user.username)
+        result = await outbound.enqueue_bulk(clinic, [c.model_dump() for c in body.contacts], consent, user.username,
+                                             **({"dry_run": True} if body.dry_run else {}))
     except outbound.OutboundRefused as e:
         raise HTTPException(status_code=409, detail=str(e))
+    if body.dry_run:  # nothing was written, so nothing to audit
+        return result
     await log_admin_action(user, "voice_outbound_bulk_enqueue", "clinic", scope,
                            details={"submitted": len(body.contacts), "queued": result["queued"],
                                     "skipped": len(result["skipped"]), "consent": consent},

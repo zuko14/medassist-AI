@@ -186,3 +186,29 @@ def test_leave_type_outside_the_three_known_values_is_rejected(bad):
 
     with pytest.raises(ValidationError):
         LeaveCreate(doctor_name="Dr. A", leave_date=TODAY, leave_type=bad)
+
+
+# D-26: one request must not insert an unbounded number of rows.
+@pytest.mark.asyncio
+async def test_leave_range_longer_than_the_cap_is_rejected_before_any_write():
+    from datetime import timedelta
+
+    from fastapi import HTTPException
+
+    from app.routers.admin import MAX_LEAVE_RANGE_DAYS
+
+    start = date(2035, 6, 1)
+    with pytest.raises(HTTPException) as exc:
+        await _create(start, start + timedelta(days=MAX_LEAVE_RANGE_DAYS))
+    assert exc.value.status_code == 422
+    assert str(MAX_LEAVE_RANGE_DAYS) in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_leave_range_at_the_cap_is_accepted():
+    from datetime import timedelta
+
+    from app.routers.admin import MAX_LEAVE_RANGE_DAYS
+
+    start = date(2035, 6, 1)
+    await _create(start, start + timedelta(days=MAX_LEAVE_RANGE_DAYS - 1))

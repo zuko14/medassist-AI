@@ -12,7 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd
-from app.routers import voice_admin, voice_platform
+from app.routers import voice_admin, voice_platform, assistant
 from app.voice import gateway as voice_gateway
 from app.routers.integrations import router as integrations_router
 from app.integrations.callmedex.api.router import (
@@ -371,6 +371,7 @@ app.include_router(home_collection.router)
 # refuse clinics the owner has not enabled.
 app.include_router(voice_gateway.router)
 app.include_router(voice_admin.router)
+app.include_router(assistant.router)
 app.include_router(voice_platform.router)
 app.include_router(clinics.router)
 app.include_router(platform.router)

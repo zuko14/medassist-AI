@@ -208,6 +208,32 @@ class DataRetentionService:
             logger.error(f"Failed messages DLQ purge error: {e}")
             return 0
 
+    async def purge_assistant_runs(self, days: int = 90) -> int:
+        """Purge Kriya Ketu assistant_runs older than `days` (KK-NFR-RET-01).
+
+        Rows hold staff instructions that may name patients. The endpoints the
+        assistant called keep their own admin_audit_logs rows, which are untouched.
+
+        Returns:
+            Number of assistant runs purged.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        try:
+            result = await sb(
+                # unscoped: platform_sweep
+                supabase.table("assistant_runs")
+                .delete()
+                .lt("created_at", cutoff)
+            )
+            count = len(result.data) if result.data else 0
+            if count > 0:
+                logger.info(f"Data retention: purged {count} assistant runs (older than {days} days)")
+            return count
+        except Exception as e:
+            logger.error(f"Assistant runs purge error: {e}")
+            return 0
+
     # ── Tier 1: Clinical Record Anonymization ─────────────────────────────────
 
     async def anonymize_clinical_records(self, clinic_id: str, phone: str) -> dict:

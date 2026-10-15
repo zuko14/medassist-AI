@@ -385,11 +385,15 @@ async def update_patient(clinic_id: str, phone: str, updates: dict) -> bool:
         return False
 
 
-async def get_genuine_patients(clinic_id: str) -> list[dict]:
+async def get_genuine_patients(clinic_id: str, branch_id: Optional[str] = None) -> list[dict]:
     """Get list of genuine patients with clinical engagement.
-    
+
     Excludes transient, unengaged WhatsApp contacts (visit_count == 0, name is null/placeholder,
     and no appointments, lab reports, or prescriptions).
+
+    branch_id (a branch-pinned staff member, D-22): patients carry no branch, so the list
+    is narrowed to patients with an appointment at that branch or a branch-less one, and
+    a DB error returns [] instead of the clinic-wide fallback.
     """
     if not is_valid_clinic_scope(clinic_id):
         raise TenantIsolationError(f"Refusing get_genuine_patients on invalid clinic_id: {clinic_id!r}")
@@ -404,10 +408,9 @@ async def get_genuine_patients(clinic_id: str) -> list[dict]:
             .limit(2000)
         )
         a_task = sb(
-            supabase.table("appointments")
-            .select("patient_phone")
-            .eq("clinic_id", clinic_id)
-            .limit(2000)
+            restrict_to_branch(
+                supabase.table("appointments").select("patient_phone").eq("clinic_id", clinic_id), branch_id
+            ).limit(2000)
         )
         r_task = sb(
             supabase.table("lab_reports")
@@ -430,6 +433,9 @@ async def get_genuine_patients(clinic_id: str) -> list[dict]:
         lab_phones = {x["patient_phone"] for x in (r_res.data or []) if x.get("patient_phone")}
         presc_phones = {x["patient_phone"] for x in (pr_res.data or []) if x.get("patient_phone")}
         clinical_phones = appt_phones | lab_phones | presc_phones
+        if branch_id:
+            # Lab reports and prescriptions have no branch: only a visit here puts a patient on this list.
+            raw_patients = [p for p in raw_patients if p.get("phone") in appt_phones]
 
         disallowed_names = {
             "our services", "services", "book appointment", "cancel appointment",
@@ -449,6 +455,8 @@ async def get_genuine_patients(clinic_id: str) -> list[dict]:
         return [p for p in raw_patients if is_genuine(p)]
     except Exception as e:
         logger.error(f"Error getting genuine patients for clinic {clinic_id}: {e}")
+        if branch_id:
+            return []  # the fallback below is clinic-wide: fail closed for a pinned branch
         # Fallback to basic query if any subquery fails
         try:
             res = await sb(supabase.table("patients").select("*").eq("clinic_id", clinic_id).limit(2000))
@@ -950,6 +958,36 @@ def doctor_session_slots(doc: dict, session: str) -> list:
     ):
         return []
     return list(_DEFAULT_SESSION_SLOTS[session])
+
+
+def leave_query_match(appt: dict, leave: dict) -> bool:
+    """The sweep's SQL filter (scheduler._cancel_bookings_for_leaves) as a predicate,
+    for callers whose read is broader (Kriya Ketu's leave preview): confirmed,
+    is_walk_in exactly False (eq False excludes NULL), that doctor, that date."""
+    return (appt.get("status") == "confirmed" and appt.get("is_walk_in") is False
+            and appt.get("doctor_name") == leave["doctor_name"]
+            and str(appt.get("appointment_date"))[:10] == str(leave["leave_date"])[:10])
+
+
+def leave_affected(rows: list, leave: dict, doctor: Optional[dict], now: datetime) -> list:
+    """Of the rows the sweep's query selected for one doctor_leaves row, the ones it
+    cancels: the ONE selection shared by the leave sweep and Kriya Ketu's leave
+    preview, so the preview's count is what the sweep will cancel.
+
+    Today: only visits still ahead. A half day: only the blocked session's slots, and
+    nothing at all when the doctor row is unknown (never guess). `now` is IST.
+    """
+    # A same-day leave must not cancel visits whose time has already passed (seen or no-show).
+    if str(leave["leave_date"])[:10] == now.date().isoformat():
+        now_hm = now.strftime("%H:%M")
+        rows = [a for a in rows if not a.get("appointment_time") or str(a["appointment_time"])[:5] > now_hm]
+    leave_type = leave.get("leave_type") or "full"
+    if leave_type != "full":
+        if not doctor:
+            return []
+        blocked = set(doctor_session_slots(doctor, "morning" if leave_type == "half_morning" else "evening"))
+        rows = [a for a in rows if str(a.get("appointment_time") or "")[:5] in blocked]
+    return list(rows)
 
 
 _LEAVE_SESSIONS = {"half_morning": {"morning"}, "half_evening": {"evening"}}

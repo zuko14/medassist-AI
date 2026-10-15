@@ -34,6 +34,7 @@ from app.services.subscription import (
 from app.services.tenant import invalidate_branch_cache, invalidate_tenant_cache
 from app.utils.security import login_rate_limiter
 from app.database import sb, scoped_query  # T5.1: off-loop query execution
+from app.services import config_store  # D-13: config saves write only the changed keys, atomically
 
 logger = logging.getLogger(__name__)
 
@@ -1034,9 +1035,7 @@ async def platform_update_clinic_ai_budget(
     old_budget = cfg.get("ai_budget_paise", 50000)
     cfg["ai_budget_paise"] = new_budget_paise
 
-    await sb(
-        supabase.table("clinics").update({"config": cfg}).eq("id", clinic_id)
-    )
+    await config_store.save_config("clinics", clinic_id, clinic_id, clinic_row.get("config") or {}, cfg)
 
     client_ip = request.client.host if (request and getattr(request, "client", None)) else "unknown"
     await log_admin_action(
@@ -1154,8 +1153,7 @@ async def update_clinic_data_storage(
     if body.addon_rupees is not None:
         cfg["data_storage_addon_paise"] = int(round(body.addon_rupees * 100))
 
-    # unscoped: platform_admin
-    await sb(supabase.table("clinics").update({"config": cfg}).eq("id", clinic_id))
+    await config_store.save_config("clinics", clinic_id, clinic_id, clinic_row.get("config") or {}, cfg)
     invalidate_tenant_cache()
 
     after = {"records_limit": client_data.records_limit(cfg),
@@ -1427,8 +1425,7 @@ async def update_dental_messaging(
     cfg["dental_message_limits"] = limits
     if fields.get("addon_rupees") is not None:
         cfg["dental_messaging_addon_paise"] = int(round(fields["addon_rupees"] * 100))
-    # unscoped: platform_admin
-    await sb(supabase.table("clinics").update({"config": cfg}).eq("id", clinic_id))
+    await config_store.save_config("clinics", clinic_id, clinic_id, clinic.get("config") or {}, cfg)
     invalidate_tenant_cache()
     after = {"limits": dental_plans.message_limits(cfg), "addon_paise": dental_plans.messaging_addon_paise(cfg)}
     await log_admin_action(
@@ -3766,11 +3763,12 @@ async def rename_corporate_partner(partner_id: str, body: CorporatePartnerIn, re
         raise HTTPException(status_code=404, detail="Partner lab not found")
     if any(p["id"] != partner_id and _same_name(p.get("name"), body.name) for p in partners):
         raise HTTPException(status_code=409, detail="A partner lab with this name already exists.")
-    config = {**(partner.get("config") or {}), "clinic_name": body.name}
     await sb(
         # unscoped: owner renaming a dashboard-only partner row by id
-        supabase.table("clinics").update({"name": body.name, "config": config})
+        supabase.table("clinics").update({"name": body.name})
         .eq("id", partner_id).eq("account_type", "corporate_partner"))
+    before = partner.get("config") or {}
+    await config_store.save_config("clinics", partner_id, partner_id, before, {**before, "clinic_name": body.name})
     invalidate_tenant_cache()
     await log_admin_action(user=owner, action="corporate_partner_rename", resource_type="clinic",
                            resource_id=partner_id, details={"from": partner.get("name"), "to": body.name},

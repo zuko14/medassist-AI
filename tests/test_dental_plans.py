@@ -13,6 +13,7 @@ from app.main import app
 from app.routers.admin import AdminUser, verify_credentials
 from app.services import dental_plans as dp
 from app.services.tenant import dental_plans_enabled
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 CLINIC = "11111111-1111-1111-1111-111111111111"
 APPT = "22222222-2222-2222-2222-222222222222"
@@ -460,15 +461,15 @@ def test_owner_sets_limits_and_addon_preserving_config():
     written = {}
     table, fake_sb = _owner_clinic_patch(
         {"id": CLINIC, "name": "Smile", "plan": "dental", "config": {"meta_waba_id": "w"}}, written)
-    with patch("app.routers.platform.supabase") as sup, patch("app.routers.platform.sb", side_effect=fake_sb), \
+    with captured_config_writes() as writes, patch("app.routers.platform.supabase") as sup, patch("app.routers.platform.sb", side_effect=fake_sb), \
          patch("app.routers.platform.log_admin_action", new_callable=AsyncMock):
         sup.table.side_effect = table
         res = client.patch(f"/platform/clinics/{CLINIC}/dental-messaging", headers=owner_auth(),
                            json={"doctor_limit": 50, "review_limit": 0, "addon_rupees": 299})
     assert res.status_code == 200, res.text
-    assert written["config"]["meta_waba_id"] == "w"
-    assert written["config"]["dental_message_limits"] == {"patient": 1000, "doctor": 50, "review": 0}
-    assert written["config"]["dental_messaging_addon_paise"] == 29900
+    assert writes[-1]["config"]["meta_waba_id"] == "w"
+    assert writes[-1]["config"]["dental_message_limits"] == {"patient": 1000, "doctor": 50, "review": 0}
+    assert writes[-1]["config"]["dental_messaging_addon_paise"] == 29900
 
 
 @patch("app.routers.platform.log_admin_action", new_callable=AsyncMock)

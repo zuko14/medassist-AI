@@ -199,7 +199,7 @@ Fields in the same order: **Status · Current · Change · Reason · Deps · API
 
 **`app/assistant/handoff.py`** + `ketu.prefill()` in `admin/index.html` · Proposed new · — · H-tier page + field maps; client fills existing inputs by id, never submits · Sensitive forms · `go()`, page DOM ids · None · None · Never passwords; only visible pages · Element-id drift → test parses ids from HTML · `tests/test_assistant_handoff.py` · KK-P4-12
 
-**`app/services/scheduler.py`** (v2) · Register the L4a morning-briefing job (read-only, writes `admin_notifications` via `broadcast_service` helpers — **verify per-admin targeting**) · ADR-006 L4a · `distributed_job_lock` · — · `admin_notifications` rows · Per-clinic scoping · Extra load at 08:30 IST · Job test · KK-P4-14
+**`app/services/scheduler.py`** (v2) · **Deferred to v2 (DP-17); not changed in v1.** Register the L4a morning-briefing job (read-only, writes `admin_notifications` via `broadcast_service` helpers — **verify per-admin targeting**) · ADR-006 L4a · `distributed_job_lock` · — · `admin_notifications` rows · Per-clinic scoping · Extra load at 08:30 IST · Job test · KK-P4-14
 
 **`docs/kriya-ketu/assets/ketu-mark-*.svg`** · New (design source, not served) · Three concepts · DP-08 · — · KK-P2-01
 

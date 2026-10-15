@@ -667,6 +667,7 @@ OPT_IN_FEATURES: dict[str, str] = {
     "corporate_health": "Corporate Employee Health Insights",
     "ai_receptionist": "AI Voice Receptionist",
     "opd_enabled": "OPD OS (Front Desk, Queue, Consultation, Billing)",
+    "kriya_ketu": "Kriya Ketu assistant",
 }
 
 def opd_enabled(clinic: Optional[dict]) -> bool:
@@ -703,6 +704,17 @@ def ai_receptionist_enabled(clinic: Optional[dict]) -> bool:
         return False
     overrides = clinic.get("features") or {}
     return isinstance(overrides, dict) and overrides.get("ai_receptionist") is True
+
+
+def kriya_ketu_enabled(clinic: Optional[dict]) -> bool:
+    """Kriya Ketu staff assistant (migration 108). Any plan, but ONLY with an
+    explicit owner opt-in (clinics.features.kriya_ketu is True) - never
+    has_feature()'s enterprise wildcard - and never for a partner account.
+    The global ASSISTANT_ENABLED switch and the user's role are checked by callers."""
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return False
+    overrides = clinic.get("features") or {}
+    return isinstance(overrides, dict) and overrides.get("kriya_ketu") is True
 
 
 #: Plans that may use corporate_health: the two diagnostic-centre plans.

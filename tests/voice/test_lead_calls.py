@@ -12,6 +12,7 @@ from app.voice import responses as R
 from app.voice.dates import IST
 
 from .test_dialog import TODAY, Conv, FakeTools
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 PITCH = {"te": "మా దగ్గర 24 గంటల ఫార్మసీ ఉంది.", "en": "We have a 24-hour pharmacy and free home sample collection."}
 
@@ -191,12 +192,14 @@ def test_settings_accept_pitch_and_concurrency_and_bound_them():
         bad = c.put(f"/admin/voice/settings?clinic_id={CID}", json={**base, "outbound": {"concurrent": 9}})
         long = c.put(f"/admin/voice/settings?clinic_id={CID}", json={**base, "outbound": {"pitch": {"en": "x" * 301}}})
         assert bad.status_code == 422 and long.status_code == 422
-        with patch("app.routers.voice_admin.sb", new=AsyncMock(return_value=MagicMock(data=[{"config": {}}]))) as sb, \
+        with captured_config_writes() as writes, \
+             patch("app.routers.voice_admin.sb", new=AsyncMock(return_value=MagicMock(data=[{"config": {}}]))) as sb, \
              patch("app.routers.voice_admin.invalidate_tenant_cache"), \
              patch("app.routers.voice_admin.log_admin_action", new=AsyncMock()):
             ok = c.put(f"/admin/voice/settings?clinic_id={CID}",
                        json={**base, "outbound": {"concurrent": 2, "pitch": {"te": "మా దగ్గర ఫార్మసీ ఉంది."}}})
         assert ok.status_code == 200
+        assert writes[-1]["config"]["voice"]["outbound"]["concurrent"] == 2
     finally:
         p.stop()
 
@@ -247,3 +250,46 @@ async def test_autoqueue_cap_counts_queued_calls_not_skipped_leads():
         queued = await outbound.autoqueue_leads()
     assert queued == 2
     assert [c.args[1] for c in enqueue.await_args_list] == ["+919000000002", "+919000000003"]
+
+
+# ---- KK-P4-06a (DP-14): dry_run — same rules, nothing inserted (WA-10) ----
+
+def _bulk_reads():
+    week_old = (datetime.now(IST) - timedelta(days=3)).isoformat()
+    return [_res([{"phone": "+919000000001", "opted_in": True}, {"phone": "+919000000002", "opted_in": False}]),
+            _res([{"patient_phone": "+919000000003", "status": "queued", "created_at": week_old},
+                  {"patient_phone": "+919000000004", "status": "completed", "created_at": week_old}])]
+
+
+@pytest.mark.asyncio
+async def test_dry_run_inserts_nothing_and_gives_the_same_skip_reasons_as_a_real_call():
+    contacts = [{"phone": "9000000001", "interest": "knee pain"}, {"phone": "+91 90000 00001"},
+                {"phone": "9000000002"}, {"phone": "9000000003"}, {"phone": "9000000004"}, {"phone": "12"}]
+    out = {}
+    for dry in (True, False):
+        reads = _bulk_reads() + ([] if dry else [_res([{"id": "j1"}])])
+        with patch.object(outbound, "ai_receptionist_enabled", return_value=True), \
+             patch.object(outbound, "sb", new=AsyncMock(side_effect=reads)), \
+             patch.object(outbound, "supabase", new=MagicMock()) as fake:
+            out[dry] = await outbound.enqueue_bulk(CLINIC, contacts, None, "admin1", dry_run=dry)
+        assert fake.table.return_value.insert.called is (not dry)
+    assert out[True]["queued"] == 0 and out[True]["dry_run"] is True
+    assert out[True]["would_queue"] == ["+919000000001"]
+    assert out[True]["skipped"] == out[False]["skipped"]
+    assert "dry_run" not in out[False] and "would_queue" not in out[False]   # default path unchanged
+
+
+def test_bulk_route_passes_dry_run_and_does_not_audit_it():
+    c, p = client(ADMIN)
+    try:
+        with patch("app.routers.voice_admin.outbound.enqueue_bulk",
+                   new=AsyncMock(return_value={"queued": 0, "would_queue": ["+919000000001"], "skipped": [],
+                                               "truncated": 0, "dry_run": True})) as eb, \
+             patch("app.routers.voice_admin.log_admin_action", new=AsyncMock()) as audit:
+            r = c.post(f"/admin/voice/outbound/bulk?clinic_id={CID}",
+                       json={"contacts": [{"phone": "9000000001"}], "dry_run": True})
+        assert r.status_code == 200 and r.json()["would_queue"] == ["+919000000001"]
+        assert eb.await_args.kwargs == {"dry_run": True}
+        audit.assert_not_awaited()                     # nothing was written
+    finally:
+        p.stop()

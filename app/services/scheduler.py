@@ -353,6 +353,14 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        # ── DPDP: Purge Kriya Ketu assistant runs older than 90 days (daily 4:30 AM) ──
+        self.scheduler.add_job(
+            self.purge_assistant_runs,
+            CronTrigger(hour=4, minute=30),
+            id="assistant_runs_purge",
+            replace_existing=True,
+        )
+
         # ── Payment: Expire stale pending_payment bookings (every minute) ──
         # Also recovers bookings where Razorpay shows paid but webhook was missed
         self.scheduler.add_job(
@@ -1298,8 +1306,9 @@ class SchedulerService:
     async def _cancel_bookings_for_leaves(self, leaves: list) -> None:
         """Cancel, refund and notify the confirmed bookings each leave blocks.
         Caller holds the "doctor_leaves" lock."""
+        from app.database import get_doctor_by_name, leave_affected
+
         now = _now_local()
-        today_s, now_hm = now.date().isoformat(), now.strftime("%H:%M")
         for leave in leaves:
             affected = (
                 await sb(supabase.table("appointments")
@@ -1310,27 +1319,11 @@ class SchedulerService:
                 .eq("status", "confirmed")
                 .eq("is_walk_in", False))
             )
-            rows = affected.data or []
-
-            # A same-day leave must not cancel visits whose time has already
-            # passed (seen or no-show): tell no one "your doctor is on leave"
-            # about a visit that is over.
-            if str(leave["leave_date"])[:10] == today_s:
-                rows = [
-                    a for a in rows
-                    if not a.get("appointment_time") or str(a["appointment_time"])[:5] > now_hm
-                ]
-
-            # A half-day leave blocks one session. New bookings for it
-            # were already refused by get_available_slots; bookings made
-            # before the leave was entered used to be left in place and
-            # the patient arrived to an absent doctor. Cancel exactly the
-            # slots of the blocked session — using the same slot lists
-            # the picker uses — and never guess when the doctor is unknown.
-            leave_type = leave.get("leave_type") or "full"
-            if leave_type != "full":
-                from app.database import doctor_session_slots, get_doctor_by_name
-
+            # A half-day leave blocks one session, a same-day leave only visits still
+            # ahead: database.leave_affected() is the one selection, shared with
+            # Kriya Ketu's leave preview so the two can never disagree.
+            doc = None
+            if (leave.get("leave_type") or "full") != "full":
                 doc = await get_doctor_by_name(leave.get("clinic_id"), leave["doctor_name"])
                 if not doc:
                     logger.warning(
@@ -1338,12 +1331,7 @@ class SchedulerService:
                         f"on {leave['leave_date']}: bookings left untouched"
                     )
                     continue
-                session = "morning" if leave_type == "half_morning" else "evening"
-                blocked = set(doctor_session_slots(doc, session))
-                rows = [
-                    a for a in rows
-                    if str(a.get("appointment_time") or "")[:5] in blocked
-                ]
+            rows = leave_affected(affected.data or [], leave, doc, now)
 
             for appt in rows:
                 try:
@@ -1826,6 +1814,21 @@ class SchedulerService:
                     logger.info(f"Scheduler: purged {count} expired catalogue import previews")
             except Exception as e:
                 logger.error(f"Catalogue import previews purge job failed: {e}")
+
+    async def purge_assistant_runs(self):
+        """Purge Kriya Ketu assistant_runs older than 90 days (KK-NFR-RET-01)."""
+        from app.services.distributed_lock import distributed_job_lock
+        async with distributed_job_lock("purge_assistant_runs", lease_seconds=300) as acquired:
+            if not acquired:
+                return
+            try:
+                from app.services.data_retention import data_retention_service
+
+                count = await data_retention_service.purge_assistant_runs()
+                if count > 0:
+                    logger.info(f"Scheduler: purged {count} assistant runs")
+            except Exception as e:
+                logger.error(f"Assistant runs purge job failed: {e}")
 
 
 # Global instance

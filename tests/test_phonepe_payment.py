@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 CLINIC_ID = "22222222-2222-2222-2222-222222222222"
 RZP_SECRET = "whsec_rzp"
@@ -495,10 +496,11 @@ async def test_switching_to_phonepe_saves_credentials_and_get_masks_secrets():
               "config": {"razorpay_key_id": "k", "razorpay_key_secret": "s", "payment_mode": "full"}}
     body = {"payment_gateway": "phonepe", **{k: v for k, v in PP.items()}}
     sb, coro, admin = _settings_call(clinic, body)
-    with patch("app.routers.admin.get_clinic_by_id", new=AsyncMock(return_value=clinic)), \
+    with captured_config_writes() as writes, \
+         patch("app.routers.admin.get_clinic_by_id", new=AsyncMock(return_value=clinic)), \
          patch("app.routers.admin.supabase", sb), patch("app.routers.admin.invalidate_tenant_cache"):
         assert (await coro)["success"] is True
-    saved = sb.table.return_value.update.call_args[0][0]["config"]
+    saved = writes[-1]["config"]
     assert saved["payment_gateway"] == "phonepe"
     assert saved["phonepe_client_secret"] == "pp-secret" and saved["razorpay_key_secret"] == "s"
 

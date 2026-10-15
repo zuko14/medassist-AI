@@ -180,7 +180,7 @@ Locations: voice outbound tests extend `tests/voice/test_lead_calls.py` and `tes
 | VOICE-12..14 | PY | Knowledge add/delete, lexicon add, learning approve/dismiss via the real routes with VOICE_MANAGE; 403 without it | Codes |
 | BRF-01 | PY | Briefing sections filtered by role (front desk without LEADS_MANAGE sees no leads section) | Sections |
 | BRF-02 | PY | Briefing makes zero LLM calls | Count 0 |
-| BRF-03 | PY | L4a scheduled briefing writes one notification per admin per clinic, scoped | Rows |
+| BRF-03 | PY | **v2 (DP-17)** — L4a scheduled briefing writes one notification per admin per clinic, scoped; needs per-user notification visibility first | Rows |
 | PAY-01..04 | PY | Invoice create/issue, payment link, refund (typed amount, admin only), booking confirm/reject CAS | Codes + read-back |
 | HC-01..02 | PY | Auto-assign respects off-dates; assignment read-back | Rows |
 | COST-04 | PY | LLM-backed admin actions show the credit note; bulk generation capped at 10 | Card + cap |

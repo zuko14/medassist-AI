@@ -534,6 +534,55 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 16. MIGRATION 108 — Kriya Ketu assistant_runs
+-- ============================================================================
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class
+        WHERE relname = 'assistant_runs' AND relkind = 'r' AND relrowsecurity
+    ) THEN
+        INSERT INTO _verification_results (category, check_name, status, detail)
+        VALUES ('M108', 'Table: assistant_runs', 'PASS', 'Exists, RLS enabled');
+    ELSE
+        INSERT INTO _verification_results (category, check_name, status, detail)
+        VALUES ('M108', 'Table: assistant_runs', 'FAIL', 'MISSING or RLS off');
+    END IF;
+END $$;
+
+-- ============================================================================
+-- 17. MIGRATION 109 — hospital_holidays keyed per clinic (D-27)
+-- ============================================================================
+DO $$
+DECLARE
+    v_cols text[];
+BEGIN
+    SELECT array_agg(a.attname::text ORDER BY k.ord) INTO v_cols
+      FROM pg_constraint c
+      CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+     WHERE c.conrelid = 'hospital_holidays'::regclass AND c.contype = 'p';
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M109', 'PK: hospital_holidays (clinic_id, holiday_date)',
+            CASE WHEN v_cols IS NOT DISTINCT FROM ARRAY['clinic_id', 'holiday_date'] THEN 'PASS' ELSE 'FAIL' END,
+            'Primary key is ' || coalesce(array_to_string(v_cols, ', '), 'missing'));
+END $$;
+
+-- ============================================================================
+-- 18. MIGRATION 110 — atomic partial config writes (D-13)
+-- ============================================================================
+DO $$
+BEGIN
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M110', 'Function: kriya_config_apply(text,uuid,uuid,jsonb,jsonb)',
+            CASE WHEN to_regprocedure('kriya_config_apply(text,uuid,uuid,jsonb,jsonb)') IS NOT NULL
+                 THEN 'PASS' ELSE 'FAIL' END,
+            CASE WHEN to_regprocedure('kriya_config_apply(text,uuid,uuid,jsonb,jsonb)') IS NOT NULL
+                 THEN 'Exists (settings saves write only changed keys)'
+                 ELSE 'MISSING: settings saves fall back to whole-object writes (D-13 lost update)' END);
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

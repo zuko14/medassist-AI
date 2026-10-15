@@ -610,7 +610,7 @@ class AnalyticsService:
                 "new_patients": 0,
                 "total_patients": 0,
                 "by_department": [],
-                "error": str(e),
+                "error": "stats_unavailable",  # D-24: fixed flag; the exception is logged above, never returned
             }
 
     async def get_recent_appointments(

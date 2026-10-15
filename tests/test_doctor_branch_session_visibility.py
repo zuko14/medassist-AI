@@ -99,8 +99,10 @@ async def test_update_refuses_empty_session_before_writing_anything():
     sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
         MagicMock(data=[{**PRIYA, "clinic_id": "clinic-1"}])
     )
+    # The evening is switched off the way the Doctors page does it: explicit nulls (D-34: a shift the
+    # request does not mention now keeps its stored hours).
     body = DoctorUpdate(
-        morning_start="09:00", morning_end="12:00",
+        morning_start="09:00", morning_end="12:00", evening_start=None, evening_end=None,
         branch_id="11111111-1111-1111-1111-111111111111", branch_session="evening",
     )
     user = AdminUser("admin", role="clinic_admin", clinic_id="clinic-1", user_id="u1")

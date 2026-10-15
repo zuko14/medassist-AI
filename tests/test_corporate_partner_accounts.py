@@ -17,6 +17,7 @@ from app.main import app
 from app.routers import platform
 from app.routers.admin import AdminUser
 from app.services.tenant import corporate_health_enabled
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 PARTNER = "66666666-6666-6666-6666-666666666666"
@@ -124,15 +125,17 @@ def test_partner_name_is_validated(owner, name):
 
 def test_rename_touches_only_partner_rows(owner):
     partners = MagicMock(data=[{"id": PARTNER, "name": "Taiyo", "config": {"clinic_name": "Taiyo", "k": 1}}])
-    with patch.object(platform, "sb", AsyncMock(return_value=partners)), patch.object(platform, "supabase") as fake:
+    with captured_config_writes() as refused, patch.object(platform, "sb", AsyncMock(return_value=partners)), patch.object(platform, "supabase") as fake:
         assert client.patch(f"/platform/corporate-health/partners/{TENANT}", json={"name": "Hijack"}).status_code == 404
         fake.table.return_value.update.assert_not_called()
-    with patch.object(platform, "sb", AsyncMock(return_value=partners)), \
+    assert refused == []
+    with captured_config_writes() as writes, patch.object(platform, "sb", AsyncMock(return_value=partners)), \
             patch.object(platform, "supabase") as fake, patch.object(platform, "log_admin_action", AsyncMock()):
         r = client.patch(f"/platform/corporate-health/partners/{PARTNER}", json={"name": "Taiyo Labs"})
     assert r.status_code == 200
     upd = fake.table.return_value.update
-    assert upd.call_args.args[0] == {"name": "Taiyo Labs", "config": {"clinic_name": "Taiyo Labs", "k": 1}}
+    assert upd.call_args.args[0] == {"name": "Taiyo Labs"}
+    assert writes[-1]["id"] == PARTNER and writes[-1]["config"] == {"clinic_name": "Taiyo Labs", "k": 1}
     assert upd.return_value.eq.return_value.eq.call_args.args == ("account_type", "corporate_partner")
 
 

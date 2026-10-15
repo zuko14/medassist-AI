@@ -221,6 +221,7 @@ async def call_ai_gateway(
     temperature: float = 0.2,
     response_format: Optional[Dict[str, str]] = None,
     max_attempts: int = 2,
+    provider_prefs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Execute completion via OpenRouter with native multi-model fallback and spend tracking.
 
@@ -254,6 +255,8 @@ async def call_ai_gateway(
     }
     if response_format:
         payload["response_format"] = response_format
+    if provider_prefs:  # OpenRouter provider routing, e.g. {"require_parameters": True} (Kriya Ketu)
+        payload["provider"] = provider_prefs
 
     headers = {
         "Authorization": f"Bearer {active_key}",

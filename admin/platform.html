@@ -1958,6 +1958,15 @@
                 </div>
                 <div id="modalAiBudgetStatus" style="font-size:0.8rem; margin-top:6px; color:var(--text3);"></div>
             </div>
+            <!-- Kriya Ketu staff assistant (migration 108). Owner opt-in per clinic: clinics.features.kriya_ketu. -->
+            <div style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">Kriya Ketu Assistant</h4>
+                <p style="color:var(--text3); font-size:0.78rem; margin-bottom:12px;">Staff assistant in this clinic's panel. Takes effect only while ASSISTANT_ENABLED is on for the server; voice input also needs ASSISTANT_STT_ENABLED.</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalKetuToggle" onchange="toggleClinicFeature('kriya_ketu', this.checked)">
+                    Kriya Ketu Assistant enabled
+                </label>
+            </div>
             <!-- Migration 098: AI voice receptionist. Off until the owner enables it here. -->
             <div style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
                 <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">AI Voice Receptionist</h4>
@@ -3066,6 +3075,7 @@
                     document.getElementById('modalCorporateHealthRow').style.display = isDiag ? 'flex' : 'none';
                     document.getElementById('modalCorporateHealthToggle').checked = overrides.corporate_health === true;
                     document.getElementById('modalVoiceToggle').checked = overrides.ai_receptionist === true;
+                    document.getElementById('modalKetuToggle').checked = overrides.kriya_ketu === true;
                     loadVoiceForModal(clinicId);
 
                     const opdCard = document.getElementById('modalOpdCard');

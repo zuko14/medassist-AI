@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services import home_collection as hc
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 NOW = datetime(2026, 10, 8, 6, 0, tzinfo=hc.IST)   # before any slot, so none are dropped for lead time
 LAB_WINDOW = {"start": "07:00", "end": "11:00"}
@@ -196,7 +197,8 @@ def test_settings_refuse_bad_or_overlapping_windows(as_user, windows):
 def test_settings_save_custom_windows(as_user):
     as_user(ADMIN)
     sb = AsyncMock(return_value=MagicMock(data=[{"config": {}, "whatsapp_number": None, "phone_number_id": None}]))
-    with patch.object(router_mod, "_scope", AsyncMock(return_value=(CLINIC, CLINIC_ROW))), \
+    with captured_config_writes() as writes, \
+         patch.object(router_mod, "_scope", AsyncMock(return_value=(CLINIC, CLINIC_ROW))), \
          patch.object(router_mod, "sb", sb), patch.object(router_mod, "log_admin_action", AsyncMock()), \
          patch.object(router_mod, "invalidate_tenant_cache"):
         r = client.put("/admin/home-collection/settings",
@@ -204,6 +206,7 @@ def test_settings_save_custom_windows(as_user):
                        params={"clinic_id": CLINIC})
     assert r.status_code == 200, r.text
     assert r.json()["settings"]["windows"] == [{"start": "07:00", "end": "10:00"}, {"start": "16:00", "end": "19:00"}]
+    assert writes[-1]["table"] == "clinics" and writes[-1]["changed"] == [["home_collection"]]
 
 
 # ═══════ schema (migration 101) ═══════

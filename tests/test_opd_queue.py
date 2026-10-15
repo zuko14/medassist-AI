@@ -237,3 +237,79 @@ def test_recall_patient_whatsapp(auth_front_desk):
 
     assert r.status_code == 200
     assert r.json()["notified"] is True
+
+
+# ─── 7. D-30: RECALL GUARDS + DUPLICATE-CHECK BOUNDS ────────────────────────
+
+
+def _recall(appt, user):
+    app.dependency_overrides[admin.verify_credentials] = lambda: user
+    send = AsyncMock(return_value=True)
+    audit = AsyncMock()
+    try:
+        with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)), \
+             patch("app.routers.opd.sb", AsyncMock(return_value=MagicMock(data=[appt]))), \
+             patch("app.services.whatsapp.whatsapp_service.send_text", send), \
+             patch("app.routers.opd.log_admin_action", audit):
+            r = client.post(f"/admin/opd/queue/a1/recall?clinic_id={CLINIC_ID}")
+    finally:
+        app.dependency_overrides.pop(admin.verify_credentials, None)
+    return r, send, audit
+
+
+_APPT = {"id": "a1", "clinic_id": CLINIC_ID, "patient_phone": "+919876543210",
+         "token_number": 5, "doctor_name": "Dr. Rao", "doctor_id": DOC_ID, "branch_id": "b1"}
+
+
+def test_recall_writes_an_audit_row():
+    r, _, audit = _recall(_APPT, FRONT_DESK_USER)
+    assert r.status_code == 200
+    kw = audit.await_args.kwargs
+    assert kw["action"] == "OPD_QUEUE_RECALL" and kw["resource_id"] == "a1"
+    assert kw["details"] == {"token": 5, "notified": True}
+
+
+def test_doctor_cannot_recall_another_doctors_patient():
+    r, send, audit = _recall({**_APPT, "doctor_id": OTHER_DOC_ID}, DOCTOR_USER)
+    assert r.status_code == 403 and "own" in r.text
+    send.assert_not_awaited(); audit.assert_not_awaited()
+
+
+def test_doctor_can_recall_own_patient_at_any_branch():
+    r, send, _ = _recall(_APPT, DOCTOR_USER)
+    assert r.status_code == 200 and send.await_count == 1
+
+
+def test_branch_pinned_desk_cannot_recall_another_branch():
+    pinned = AdminUser("desk_b2", role="staff", clinic_id=CLINIC_ID, permissions=["OPD_FRONT_DESK"], branch_id="b2")
+    r, send, _ = _recall(_APPT, pinned)
+    assert r.status_code == 403
+    send.assert_not_awaited()
+
+
+def test_branch_pinned_desk_can_recall_own_branch():
+    pinned = AdminUser("desk_b1", role="staff", clinic_id=CLINIC_ID, permissions=["OPD_FRONT_DESK"], branch_id="b1")
+    r, _, _ = _recall(_APPT, pinned)
+    assert r.status_code == 200
+
+
+@pytest.mark.parametrize("body", [
+    {"name": "x" * 101, "phone": "9876543210"},
+    {"name": "Ravi", "phone": "9" * 21},
+])
+def test_duplicate_check_bounds(auth_front_desk, body):
+    dup = AsyncMock(return_value=[])
+    with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)), \
+         patch("app.routers.opd.duplicate_candidates", dup):
+        r = client.post(f"/admin/opd/patients/duplicate-check?clinic_id={CLINIC_ID}", json=body)
+    assert r.status_code == 422
+    dup.assert_not_awaited()
+
+
+def test_duplicate_check_at_the_limits_is_accepted(auth_front_desk):
+    dup = AsyncMock(return_value=[])
+    with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)), \
+         patch("app.routers.opd.duplicate_candidates", dup):
+        r = client.post(f"/admin/opd/patients/duplicate-check?clinic_id={CLINIC_ID}",
+                        json={"name": "x" * 100, "phone": "9" * 20})
+    assert r.status_code == 200 and dup.await_count == 1

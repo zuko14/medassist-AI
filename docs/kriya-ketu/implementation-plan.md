@@ -191,7 +191,7 @@ script in the existing `<script>`). One agent at a time.
 | KK-P4-01 | All R0 reads in registry §4 | P1-* | Results match the corresponding page for the same filters (fixtures) |
 | KK-P4-02 | PB-01 leave playbook: `doctor_leave.impact/create/delete`, `appointment.cancel_bulk` | P4-01, **KK-P0-01 decided** | KK-FR-040..043; impact count equals the `check_doctor_leaves` selection |
 | KK-P4-03 | `report.resend`, `lead.message`, `connector.run_now` | P4-01 | KK-FR-050..053 |
-| KK-P4-04 | **PLANNED**: new read endpoint over `failed_messages` / `outbound_message_ledger` + `whatsapp.failed_messages` | separate approval | New endpoint needs its own spec + tenancy review |
+| KK-P4-04 | **DEFERRED to v2 (owner, 2026-10-15)**: new read endpoint over `failed_messages` / `outbound_message_ledger` + `whatsapp.failed_messages`. Not needed for launch: `report.resend_failed`, `connectors.failed` and `lead.message` cover the jobs | v2, separate approval | New endpoint needs its own spec + tenancy review |
 | KK-P4-05 | `appointment.check_in`, `appointment.cancel`, `booking.confirm/reject`, `opd.call_next`, `holiday.create`, `notifications.mark_all_read` | P4-01 | Verify statuses checked against the real service (to-verify items in the registry) |
 
 ## P5 — Platform-owner console (deferred; needs its own Phase 0 addendum)
@@ -200,10 +200,16 @@ script in the existing `<script>`). One agent at a time.
 
 | ID | Step | Evidence |
 |---|---|---|
-| KK-P6-01 | Staging tenant with `features.kriya_ketu=true`; full test plan | Test report |
-| KK-P6-02 | Internal pilot on one live clinic (owner choice), env flags on, LLM on, STT off | 1 week of `assistant_runs` metrics |
-| KK-P6-03 | STT on for the pilot clinic after G-KK-ASR | Eval report |
-| KK-P6-04 | Metrics review against spec §1.7; GA decision | Signed-off metrics |
+**Revised 2026-10-15 (owner, DP-11):** no formal pilot. The owner self-tests on their own test clinic, switching
+Kriya Ketu on/off per clinic with one click in the Platform Owner dashboard (clinic modal → "Kriya Ketu Assistant",
+`PATCH /platform/clinics/{id}/features`, `kriya_ketu`).
+
+| ID | Step | Evidence |
+|---|---|---|
+| KK-P6-01 | Owner self-test on the test clinic: toggle on in the Platform Owner dashboard, server `ASSISTANT_ENABLED=true`, run the test plan journeys | Owner's test notes |
+| ~~KK-P6-02~~ | ~~Internal pilot on one live clinic, 1 week of metrics~~ — **dropped by the owner** (replaced by KK-P6-01 self-test) | — |
+| KK-P6-03 | STT on for the test clinic after G-KK-ASR passes and DP-07 is done (`ASSISTANT_STT_ENABLED=true`) | Eval report |
+| KK-P6-04 | Owner go/no-go for other clinics (each switched on individually with the same toggle) | Owner decision |
 
 ## Completion evidence (every task)
 A PR link or commit hash, test output, the updated status.md row with evidence, and screenshots for
@@ -238,7 +244,7 @@ P2/P3 tasks.
 | KK-P4-11 | PB-11 doctor schedule change, doctor create, branch doctor assign | P4-01 | SCH-01..03 |
 | KK-P4-12 | H-tier hand-off framework + mappings (staff, payment settings, billing cash, workspace, deletions, imports/exports) | P2-03 | UI-19, SEC-18 |
 | KK-P4-13 | Voice admin actions: knowledge, lexicon, learning review, settings | P4-01, KK-P0-07/08 | VOICE-12..14 |
-| KK-P4-14 | PB-12 / PB-13 briefings (on demand) + L4a scheduled morning briefing to notifications | P4-01 | BRF-01..03 |
+| KK-P4-14 | PB-12 / PB-13 briefings (on demand); L4a scheduled briefing **deferred to v2** (DP-17) | P4-01 | BRF-01..02 (BRF-03 moves to v2) |
 | KK-P4-15 | OPD billing R2 (invoice create/issue, payment link), refund R3, booking confirm/reject, home collection assign | P4-01 | PAY-01..04, HC-01..02 |
 | KK-P7 | L4b standing write automations | ADR-006b approval | Out of v1 |
 

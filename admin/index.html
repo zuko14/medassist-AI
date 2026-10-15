@@ -1843,6 +1843,165 @@
             .glass-body { margin: 0 8px 10px; }
             .glass-foot { padding: 0 16px 14px; }
         }
+        /* ── Kriya Ketu assistant (KK-P2-01; docs/kriya-ketu/ux-design-spec.md §2-4) ──────────
+           Tokens are scoped to the widget and alias the existing system; nothing global changes. */
+        #ketuPanel, #ketuLauncher {
+            --ketu-surface: linear-gradient(160deg, rgba(36,58,82,.82) 0%, rgba(14,25,38,.90) 60%, rgba(10,19,30,.94) 100%);
+            --ketu-surface-solid: var(--surface-solid, #0E1926);
+            --ketu-blur: blur(24px) saturate(160%);
+            --ketu-border: var(--border2);
+            --ketu-rim: inset 0 1px 0 var(--rim);
+            --ketu-shadow: 0 24px 64px rgba(0,0,0,.55), 0 0 40px rgba(61,139,253,.10);
+            --ketu-radius: var(--radius-xl);
+        }
+        :root[data-theme="light"] #ketuPanel, :root[data-theme="light"] #ketuLauncher {
+            --ketu-surface: linear-gradient(160deg, rgba(255,255,255,.90), rgba(236,244,245,.94));
+            --ketu-surface-solid: #FFFFFF;
+            --ketu-shadow: 0 18px 48px rgba(7,24,32,.18);
+        }
+        #ketuLauncher {
+            position: fixed; right: 20px; bottom: 20px; z-index: 540;
+            width: 52px; height: 52px; border-radius: 50%; padding: 0; cursor: pointer;
+            display: grid; place-items: center;
+            background: var(--ketu-surface); border: 1px solid var(--ketu-border);
+            box-shadow: var(--ketu-rim), var(--ketu-shadow);
+            -webkit-backdrop-filter: var(--ketu-blur); backdrop-filter: var(--ketu-blur);
+            transition: transform var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+        }
+        #ketuLauncher:hover { transform: translateY(-1px); border-color: var(--accent-border); }
+        #ketuLauncher.is-open { background: var(--accent-soft2); border-color: var(--accent-border); }
+        #ketuLauncher .ketu-mark { width: 26px; height: 26px; transition: transform 200ms var(--ease-out); }
+        #ketuLauncher.is-open .ketu-mark { transform: rotate(45deg); }
+        #ketuPanel {
+            position: fixed; right: 20px; bottom: 84px; z-index: 560;
+            width: 420px; height: min(640px, calc(100vh - 120px));
+            display: flex; flex-direction: column; overflow: hidden;
+            background: var(--ketu-surface); color: var(--text);
+            border: 1px solid var(--ketu-border); border-radius: var(--ketu-radius);
+            box-shadow: var(--ketu-rim), var(--ketu-shadow);
+            -webkit-backdrop-filter: var(--ketu-blur); backdrop-filter: var(--ketu-blur);
+            font-size: .88rem; line-height: 1.5;
+            animation: ketuIn var(--motion-base) var(--ease-out);
+        }
+        #ketuPanel[hidden] { display: none; }
+        @keyframes ketuIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+        .ketu-head { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 16px; min-height: 52px;
+                     border-bottom: 1px solid var(--ketu-border); }
+        .ketu-head .ketu-mark { width: 22px; height: 22px; flex: 0 0 auto; }
+        .ketu-head h2 { font-size: .95rem; font-weight: 600; margin: 0; }
+        .ketu-scope { margin-left: auto; font-size: .76rem; color: var(--text2); white-space: nowrap;
+                      overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+        .ketu-icon-btn { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 auto;
+                         background: transparent; border: 0; border-radius: 10px; color: var(--text2); cursor: pointer; }
+        .ketu-icon-btn:hover { background: var(--surface2); color: var(--text); }
+        .ketu-log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+        .ketu-empty { margin: auto; text-align: center; color: var(--text2); max-width: 280px; }
+        .ketu-empty .ketu-mark { width: 44px; height: 44px; margin-bottom: 10px; }
+        .ketu-empty p:first-of-type { color: var(--text); font-size: .95rem; font-weight: 600; }
+        .ketu-meta { font-size: .76rem; color: var(--text2); }
+        .ketu-composer { border-top: 1px solid var(--ketu-border); padding: 10px 12px 8px; }
+        .ketu-compose-row { display: flex; align-items: flex-end; gap: 8px; }
+        #ketuInput { flex: 1; resize: none; min-height: 40px; max-height: 142px; padding: 9px 12px;
+                     border-radius: 12px; border: 1px solid var(--border2); background: var(--surface2);
+                     color: var(--text); font: inherit; line-height: 1.45; }
+        .ketu-send { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; border: 0;
+                     border-radius: 12px; background: var(--accent); color: #fff; cursor: pointer; }
+        .ketu-send:disabled { opacity: .45; cursor: not-allowed; }
+        .ketu-compose-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px;
+                             font-size: .72rem; color: var(--text2); }
+        .ketu-user { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: 14px 14px 4px 14px;
+                     background: var(--accent-soft2); border: 1px solid var(--accent-border);
+                     white-space: pre-wrap; overflow-wrap: anywhere; }
+        .ketu-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+        .ketu-card { background: var(--surface2); border: 1px solid var(--ketu-border); border-radius: var(--radius);
+                     padding: 12px 14px; overflow-wrap: anywhere; }
+        .ketu-card-title { font-weight: 600; font-size: .92rem; margin-bottom: 8px; }
+        .ketu-card-error { border-left: 3px solid var(--red); }
+        .ketu-table-wrap { overflow-x: auto; }
+        .ketu-table { width: 100%; border-collapse: collapse; font-size: .82rem; font-variant-numeric: tabular-nums; }
+        .ketu-table th, .ketu-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+        .ketu-table th { font-weight: 600; color: var(--text2); }
+        .ketu-link { display: inline-block; margin-top: 8px; background: none; border: 0; padding: 0; color: var(--accent2);
+                     font: inherit; font-weight: 600; cursor: pointer; }
+        .ketu-link:hover { text-decoration: underline; }
+        .ketu-run { display: flex; flex-direction: column; gap: 12px; }
+        .ketu-card label { display: block; margin-top: 8px; }
+        .ketu-card input:not([type=radio]):not([type=checkbox]), .ketu-card select { display: block; width: 100%;
+            margin-top: 4px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border2);
+            background: var(--surface); color: var(--text); font: inherit; }
+        .ketu-card label.ketu-opt { display: flex; gap: 8px; align-items: center; }
+        .ketu-card .ketu-yesno { border: 0; margin: 8px 0 0; padding: 0; min-width: 0; }
+        .ketu-card .ketu-yesno legend { padding: 0; margin-bottom: 2px; font-weight: 600; }
+        [data-ketu-clarify], .ketu-card-warn { border-left: 3px solid var(--amber); }
+        .ketu-card-preview { border-left: 3px solid var(--accent); }
+        .ketu-card-ok { border-left: 3px solid var(--green); }
+        /* Amber/green text failed 4.5:1 on the glass: the colour moves to the tint and rule, text stays --text. */
+        .ketu-warn { color: var(--text); background: var(--amber-bg); border-left: 3px solid var(--amber);
+                     padding: 6px 10px; border-radius: 8px; margin-top: 6px; }
+        .ketu-chip { font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: var(--green-bg);
+                     color: var(--text); border: 1px solid var(--green-border); margin-left: 6px; }
+        :root[data-theme="light"] #ketuStar stop { stop-color: #0C9668; }
+        :root[data-theme="light"] #ketuGlow stop:first-child { stop-color: #2FA8D8; }
+        #ketuPanel[inert] { opacity: .5; }
+        #ketuNewPill { position: absolute; left: 50%; bottom: 104px; transform: translateX(-50%); z-index: 1;
+                       padding: 6px 14px; border-radius: 999px; border: 1px solid var(--accent-border);
+                       background: var(--ketu-surface-solid); color: var(--text); font: inherit; font-size: .78rem;
+                       cursor: pointer; box-shadow: var(--ketu-shadow); }
+        #ketuNewPill[hidden] { display: none; }
+        .ketu-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .ketu-steps { margin: 8px 0 0 18px; }
+        /* Voice input (KK-P3-03; ux W4-W6, W15): state is always a word plus an icon, never colour alone. */
+        .ketu-compose-row [hidden], .ketu-compose-meta [hidden], .ketu-vchip [hidden] { display: none; }
+        .ketu-mic { width: 40px; height: 40px; }
+        .ketu-rec { flex: 1; min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 2px 0 12px;
+                    border-radius: 12px; border: 1px solid var(--border2); background: var(--surface2); }
+        .ketu-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text2); flex: 0 0 auto; }
+        .ketu-rec.is-live .ketu-rec-dot { background: var(--red); animation: ketuPulse 1.2s ease-in-out infinite; }
+        @keyframes ketuPulse { 50% { opacity: .35; } }
+        .ketu-rec-clock { color: var(--text2); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .ketu-rec-clock.ketu-rec-warn { color: var(--text); font-weight: 600; }
+        .ketu-meter { display: flex; align-items: center; gap: 2px; height: 18px; margin-left: auto; }
+        .ketu-meter i { width: 3px; height: 100%; border-radius: 2px; background: var(--accent2); transform: scaleY(.12); }
+        .ketu-stop-sq { width: 12px; height: 12px; border-radius: 2px; background: var(--red); }
+        .ketu-vchip { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: .76rem; color: var(--text2); }
+        .ketu-vchip[hidden] { display: none; }
+        .ketu-vchip.is-warn { color: var(--text); background: var(--amber-bg); border-left: 3px solid var(--amber);
+                              padding: 2px 2px 2px 8px; border-radius: 8px; }
+        .ketu-vchip span { flex: 1; }
+        .ketu-vchip .ketu-icon-btn { width: 32px; height: 32px; }
+        .ketu-meta-r { display: flex; align-items: center; gap: 8px; }
+        #ketuLang { font: inherit; font-size: .72rem; color: var(--text2); background: var(--surface2);
+                    border: 1px solid var(--border2); border-radius: 6px; padding: 1px 4px; }
+        .ketu-user .ketu-chip { background: var(--surface2); border-color: var(--ketu-border); }
+        /* Phones: the super-admin scope banner (z 900) sits over the sheet's bottom edge. */
+        #ketuPanel.ketu-has-banner .ketu-composer { padding-bottom: var(--ketu-banner, 8px); }
+        @media (min-width: 641px) and (max-width: 1023px) { #ketuPanel { width: min(420px, calc(100vw - 32px)); } }
+        @media (max-width: 640px) {
+            #ketuLauncher { width: 48px; height: 48px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); }
+            #ketuPanel { inset: 0; width: auto; height: 100dvh; border-radius: 0; }
+            .ketu-icon-btn { width: 44px; height: 44px; }
+            .ketu-send { width: 44px; height: 44px; }
+            .ketu-mic, .ketu-vchip .ketu-icon-btn { width: 44px; height: 44px; }
+            #ketuLang { min-height: 44px; }
+            .ketu-actions .btn { min-height: 44px; }
+            .ketu-link { min-height: 44px; display: inline-flex; align-items: center; }
+            .ketu-card label.ketu-opt { min-height: 44px; }
+        }
+        @supports not ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))) {
+            #ketuPanel, #ketuLauncher { --ketu-surface: var(--ketu-surface-solid); }
+        }
+        @media (prefers-reduced-transparency: reduce) {
+            #ketuPanel, #ketuLauncher { --ketu-surface: var(--ketu-surface-solid); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #ketuPanel { animation: ketuFade var(--motion-base) linear; }
+            #ketuLauncher, #ketuLauncher .ketu-mark { transition: none; }
+            #ketuLauncher:hover, #ketuLauncher.is-open .ketu-mark { transform: none; }
+            .ketu-meter { display: none; }
+            .ketu-rec.is-live .ketu-rec-dot { animation: none; }
+        }
+        @keyframes ketuFade { from { opacity: 0; } to { opacity: 1; } }
+        /* ── end Kriya Ketu ─────────────────────────────────────────────────────────────────── */
     </style>
 </head>
 <body>
@@ -1866,6 +2025,32 @@
     <path d="M22.9 7.6 14.2 16l8.7 8.4" fill="none" stroke="url(#kriyaArm)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M14.2 13.3 16.9 16l-2.7 2.7L11.5 16z" fill="#9FF0D2"/>
   </symbol>
+  <!-- Kriya Ketu (assistant) mark, concept A "Dhumaketu" (DP-08): the K's arm is a comet trail ending
+       in a guiding star. Source: docs/kriya-ketu/assets/ketu-mark-comet.svg; ids prefixed ketu*. -->
+  <symbol id="ketu-mark" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="ketuStem" x1="20" y1="10" x2="20" y2="54" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#43E2A6"/><stop offset="1" stop-color="#0C9668"/>
+      </linearGradient>
+      <linearGradient id="ketuLeg" x1="25" y1="34" x2="45" y2="53" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#2FA8D8"/><stop offset="1" stop-color="#3D8BFD"/>
+      </linearGradient>
+      <linearGradient id="ketuTrail" x1="25" y1="31" x2="46" y2="15" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#3D8BFD" stop-opacity=".45"/><stop offset=".55" stop-color="#2FA8D8" stop-opacity=".75"/><stop offset="1" stop-color="#9FF0D2"/>
+      </linearGradient>
+      <radialGradient id="ketuGlow" cx="47" cy="14" r="13" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#9FF0D2" stop-opacity=".55"/><stop offset="1" stop-color="#9FF0D2" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="ketuStar" cx="47" cy="14" r="9" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#FFFFFF"/><stop offset=".6" stop-color="#D9FFF0"/><stop offset="1" stop-color="#9FF0D2"/>
+      </radialGradient>
+    </defs>
+    <path d="M20 13v38" stroke="url(#ketuStem)" stroke-width="7" stroke-linecap="round" fill="none"/>
+    <path d="M26 34.5 43.5 52" stroke="url(#ketuLeg)" stroke-width="7" stroke-linecap="round" fill="none"/>
+    <path d="M21.7 29.7 42.05 13.15 A3.6 3.6 0 0 1 46.29 18.97 L24.3 33.3 Z" fill="url(#ketuTrail)"/>
+    <circle cx="47" cy="14" r="13" fill="url(#ketuGlow)"/>
+    <path d="M47 4.5Q48.7 12.3 56.5 14Q48.7 15.7 47 23.5Q45.3 15.7 37.5 14Q45.3 12.3 47 4.5Z" fill="url(#ketuStar)"/>
+  </symbol>
 </svg>
 
 <!-- Icon set. One stroke weight, one grid. Replaces emoji, which render
@@ -1887,6 +2072,7 @@
   <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.7" y2="16.7"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></symbol>
   <symbol id="i-shuffle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></symbol>
@@ -6188,6 +6374,9 @@ let myCorporateHealth = false;
 // migration 097: diagnostic plans only, from /admin/me
 let myHomeCollection = false;
 let myVoice = false;
+// Kriya Ketu staff assistant (migration 108): global switch + owner opt-in, from /admin/me
+let myKetu = false;
+let myKetuStt = false;  // mic: ASSISTANT_STT_ENABLED via /admin/me (KK-FR-009)
 // migration 082: treatment sections (Child Care / Women Care / ...) from /admin/me
 let myServiceLines = [];
 let myPlanServiceLines = [];
@@ -6501,6 +6690,8 @@ async function login() {
     myCorporateHealth = !!me.corporate_health_enabled;
     myHomeCollection = !!me.home_collection_available;
     myVoice = !!me.ai_receptionist_enabled;
+    myKetu = !!me.assistant_enabled;
+    myKetuStt = !!me.assistant_stt_enabled;
     myOpd = !!me.opd_enabled;
     myOpdState = me.opd_state || null;
     myDoctorId = me.opd_doctor_id || null;
@@ -6525,6 +6716,7 @@ async function login() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').classList.add('open');
     applyFeatureVisibility();
+    ketuSafe('init');
 
     // A company-viewer login (migration 095) has one page. Every other /admin
     // route answers it 403, so none of the dashboard loaders below may run.
@@ -6635,6 +6827,7 @@ function renderClinicScopeBanner() {
         '<button onclick="switchClinic()" style="background:rgba(255,255,255,.25);' +
         'border:0; color:#fff; padding:.2rem .55rem; border-radius:999px;' +
         'cursor:pointer; font:inherit; flex:0 0 auto;">Switch</button>';
+    ketuSafe('place');
 }
 
 // Switching tenants can move BETWEEN a diagnostics plan and a clinic plan, so
@@ -6670,6 +6863,8 @@ async function adoptClinicPlan() {
             myCorporateHealth = !!scoped.corporate_health_enabled;
             myHomeCollection = !!scoped.home_collection_available;
             myVoice = !!scoped.ai_receptionist_enabled;
+            myKetu = !!scoped.assistant_enabled;
+            myKetuStt = !!scoped.assistant_stt_enabled;
             myOpd = !!scoped.opd_enabled;
             myOpdState = scoped.opd_state || null;
             myDoctorId = scoped.opd_doctor_id || null;
@@ -6680,6 +6875,7 @@ async function adoptClinicPlan() {
         console.warn('Could not resolve plan for clinic', CLINIC_SCOPE, e);
     }
     applyFeatureVisibility();
+    ketuSafe('init');
 }
 
 async function switchClinic() {
@@ -6732,6 +6928,9 @@ function logout() {
     myCorporateHealth = false;
     myHomeCollection = false;
     myVoice = false;
+    myKetu = false;
+    myKetuStt = false;
+    ketuSafe('teardown');
     corpResetState();
     hcResetState();
     document.body.classList.remove('corp-viewer');
@@ -6821,6 +7020,7 @@ function detailText(data) {
     if (!d) return '';
     if (typeof d === 'string') return d;
     if (Array.isArray(d)) return d.map(e => (e && e.msg) || '').filter(Boolean).join(' ');
+    if (typeof d === 'object' && typeof d.message === 'string') return d.message;
     return '';
 }
 
@@ -19671,7 +19871,896 @@ async function loadOpdAnalytics() {
         if (refreshBtn) refreshBtn.disabled = false;
     }
 }
+// ── Kriya Ketu assistant: widget shell (KK-P2-01; docs/kriya-ketu/ux-design-spec.md §3-4, ADR-005) ──
+// One namespace. The launcher exists only when /admin/me says assistant_enabled; the panel DOM is
+// built on first open. Every entry point goes through ketuSafe() so a widget error never blocks
+// the panel.
+function ketuAllowed(enabled, staffRole) {
+    return enabled === true && staffRole !== 'CORPORATE_VIEWER' && staffRole !== 'PHLEBOTOMIST';
+}
 
+// Ctrl/Cmd+K toggles the panel, except while typing in another field (unless the panel is open).
+function ketuShortcut(e, panelOpen) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.isComposing) return false;
+    if (String(e.key).toLowerCase() !== 'k') return false;
+    const t = e.target || {};
+    const typing = !!t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
+    return !typing || !!panelOpen;
+}
+
+// The super-admin scope banner sits fixed at bottom 12px; the launcher clears it by 8px.
+function ketuLauncherBottom(bannerHeight, mobile) {
+    if (bannerHeight > 0) return 12 + bannerHeight + 8;
+    return mobile ? 16 : 20;
+}
+
+// Composer keys: Enter sends, Shift+Enter is a newline, IME composition is never interrupted,
+// and nothing is sent twice while a request is in flight (KK-FR-004).
+function ketuKeyAction(e, inFlight) {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return null;
+    return inFlight ? 'block' : 'send';
+}
+
+function ketuCanSend(text, inFlight) {
+    return !inFlight && String(text || '').trim().length > 0 && String(text).length <= 1000;
+}
+
+// The draft carries its client_request_id: a retry after a failure reuses it (the server returns
+// the same run), an edit starts a new request (KK-FR-003/005).
+function ketuDraftOnInput(text) { return { text: text, crid: null }; }
+function ketuDraftOnSend(draft, newId) { return { text: draft.text, crid: draft.crid || newId }; }
+
+// Only the assistant's own fixed messages are shown; anything else gets fixed text (KK-FR-034).
+function ketuErrorText(status, body) {
+    const d = body && body.detail;
+    if (d && typeof d === 'object' && !Array.isArray(d) && typeof d.message === 'string') return d.message;
+    if (status === 422) return "Kriya couldn't send that. Please shorten or rephrase it.";
+    if (status === 0) return "Couldn't reach Kriya. Your message is kept; press Send to try again.";
+    return 'Kriya had a problem. Your message is kept; press Send to try again.';
+}
+
+// One card -> HTML. Every server string goes through esc().
+function ketuCardHtml(card, pageLabel) {
+    const c = card || {};
+    const open = (page, label) => page
+        ? '<button type="button" class="ketu-link" data-ketu-go="' + esc(page) + '">' + esc(label) + '</button>' : '';
+    if (c.type === 'user') return '<div class="ketu-user">' + esc(c.text) +
+        (c.edited ? '<span class="ketu-chip">🎙 edited</span>' : '') + '</div>';
+    if (c.type === 'error') return '<div class="ketu-card ketu-card-error" role="alert"><p>' + esc(c.text) + '</p></div>';
+    if (c.type === 'help') {
+        return '<div class="ketu-card ketu-card-help"><p>' + esc(c.text) + '</p>' +
+            (c.page ? open(c.page, 'Open ' + pageLabel(c.page)) : '') + '</div>';
+    }
+    if (c.type === 'handoff') {  // H tier (KK-FR-025): the person presses the page's own button
+        const fields = (Array.isArray(c.fields) ? c.fields : []).filter(f => f && f.id);
+        const list = fields.length ? '<ul class="ketu-fill-list">' + fields.map(f =>
+            '<li>' + esc(f.label) + ': ' + esc(f.value) + '</li>').join('') + '</ul>' : '';
+        const btn = !c.page ? '' : '<button type="button" class="ketu-link" data-ketu-fill="' + esc(c.page) +
+            '" data-ketu-fields="' + esc(JSON.stringify(fields)) + '">' +
+            (fields.length ? 'Open &amp; fill' : esc('Open ' + pageLabel(c.page))) + '</button>';
+        return '<div class="ketu-card ketu-card-help"><p>' + esc(c.text) + '</p>' + list + btn + '</div>';
+    }
+    if (c.type === 'table') {
+        const cols = Array.isArray(c.columns) ? c.columns : [];
+        const rows = Array.isArray(c.rows) ? c.rows : [];
+        const total = typeof c.total === 'number' ? c.total : rows.length;
+        const head = '<tr>' + cols.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr>';
+        const body = rows.slice(0, 8).map(r =>
+            '<tr>' + (Array.isArray(r) ? r : []).map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('');
+        const link = !c.page ? '' : total > 8
+            ? open(c.page, 'Show all ' + total + ' in ' + pageLabel(c.page))
+            : open(c.page, 'Open ' + pageLabel(c.page));
+        return '<div class="ketu-card">' + (c.title ? '<div class="ketu-card-title">' + esc(c.title) + '</div>' : '') +
+            '<div class="ketu-table-wrap"><table class="ketu-table">' + head + body + '</table></div>' + link + '</div>';
+    }
+    return c.text ? '<div class="ketu-text">' + esc(c.text) + '</div>' : '';
+}
+
+// UI-19: fill only the listed fields; never a password or secret-like field, never a hidden option,
+// never submit or click. Returns the ids it filled.
+function ketuFillFields(doc, fields) {
+    const filled = [];
+    (Array.isArray(fields) ? fields : []).forEach(f => {
+        const id = String((f && f.id) || '');
+        if (!id || /pass|secret|key|token|pin|otp|cvv/i.test(id)) return;
+        const el = doc.getElementById(id);
+        if (!el || el.disabled || el.type === 'password') return;
+        // A field the page hides (e.g. contact details for some roles) is never filled unseen.
+        if (typeof el.getClientRects === 'function' && el.getClientRects().length === 0) return;
+        const v = String(f.value == null ? '' : f.value);
+        if (el.tagName === 'SELECT' && !Array.from(el.options || []).some(o => o.value === v && !o.hidden)) return;
+        el.value = v;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        filled.push(id);
+    });
+    return filled;
+}
+
+function ketuSecondsLeft(expiresAt, nowMs) {
+    return Math.max(0, Math.ceil((Date.parse(expiresAt) - nowMs) / 1000));
+}
+
+function ketuClock(s) {
+    return s > 0 ? 'Expires in ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') : 'Expired — ask again.';
+}
+
+// One run -> HTML, driven by its state: controls exist only while the run waits for them,
+// and the tick only on COMPLETED_VERIFIED (ux §4.3: never tick an unexecuted plan).
+function ketuRunHtml(run, pageLabel, nowMs) {
+    const id = esc(run.run_id), st = run.state;
+    const live = st === 'NEEDS_CONFIRMATION' || st === 'NEEDS_CLARIFICATION';
+    const word = { CANCELLED: 'Cancelled.', EXPIRED: 'Expired — ask again.', REJECTED: 'Not done.' }[st] || '';
+    const left = run.expires_at ? ketuSecondsLeft(run.expires_at, nowMs) : 0;
+    const link = p => p ? '<button type="button" class="ketu-link" data-ketu-go="' + esc(p) + '">Open ' + esc(pageLabel(p)) + '</button>' : '';
+    const words = { done: 'Done', failed: 'Failed', unknown: "Couldn't confirm", skipped: 'Skipped' };
+    const steps = (run.steps || []).map(x => '<li>' + esc(x.label) + ' — ' + (words[x.status] || 'Waiting') + '</li>').join('');
+    const cards = (run.cards && run.cards.length) ? run.cards : (run.message ? [{ type: 'text', text: run.message }] : []);
+    return cards.map(c => {
+        if (c.type === 'clarify') {
+            if (!live) return '<p class="ketu-meta">' + (word || 'Answered.') + '</p>';
+            const f = (c.fields || []).map(x => x.kind === 'action'
+                ? (c.actions || []).map(a => '<label class="ketu-opt"><input type="radio" name="action" value="' + esc(a.id) + '" required> ' + esc(a.summary) + '</label>').join('')
+                : x.kind === 'doctor'
+                ? '<label>Doctor <select name="doctor" required>' + (c.candidates || []).map(d => '<option value="' + esc(d.id) + '">' + esc(d.name) + '</option>').join('') + '</select></label>'
+                // Consent questions: no default, both answers required, asked to the patient by staff (REG-03).
+                : x.kind === 'yesno'
+                ? '<fieldset class="ketu-yesno"><legend>' + esc(x.label || x.name) + '</legend>' + ['yes', 'no'].map(v =>
+                    '<label class="ketu-opt"><input type="radio" name="' + esc(x.name) + '" value="' + v + '" required> ' + (v === 'yes' ? 'Yes' : 'No') + '</label>').join('') + '</fieldset>'
+                : '<label>' + esc(x.label || x.name.charAt(0).toUpperCase() + x.name.slice(1)) + ' <input type="' + (x.kind === 'date' ? 'date' : 'text') + '" name="' + esc(x.name) + '" required></label>').join('');
+            return '<form class="ketu-card" data-ketu-clarify="' + id + '"><p>' + esc(run.message || 'I need a little more detail.') + '</p>' + f +
+                '<div class="ketu-actions"><button type="submit" class="btn btn-accent">Continue</button></div></form>';
+        }
+        if (c.type === 'preview' || c.type === 'preview-typed') {
+            const body = '<div class="ketu-card-title">' + esc(c.title) + '</div>' +
+                (c.bullets || []).map(b => '<p>' + esc(b) + '</p>').join('') +
+                ((c.rows || []).length ? ketuCardHtml({ type: 'table', columns: [], rows: c.rows }, pageLabel) : '') +
+                (c.warnings || []).map(w => '<p class="ketu-warn">' + esc(w) + '</p>').join('') +
+                (run.error_code === 'plan_changed' ? '<p class="ketu-warn">The details changed since you looked. Please review again.</p>' : '');
+            if (!live) return '<div class="ketu-card">' + body + '<p class="ketu-meta">' + word + '</p></div>';
+            const typed = c.type !== 'preview-typed' ? '' : '<label><span id="ketuTypedHint-' + id + '">Type <strong>' + esc(c.typed_count) +
+                '</strong> to confirm</span><input id="ketuTyped-' + id + '" inputmode="numeric" autocomplete="off" aria-describedby="ketuTypedHint-' + id + '"></label>';
+            const ack = c.requires_ack ? '<label class="ketu-opt"><input type="checkbox" id="ketuAck-' + id + '"> ' + esc(c.ack_text || 'I understand this may be sent twice') + '</label>' : '';
+            return '<div class="ketu-card ketu-card-preview">' + body + typed + ack +
+                '<p class="ketu-meta" data-ketu-exp="' + esc(run.expires_at) + '">' + ketuClock(left) + '</p>' +
+                '<div class="ketu-actions"><button type="button" class="btn btn-accent" data-ketu-confirm="' + id + '"' + (left ? '' : ' disabled') +
+                '>Confirm</button><button type="button" class="btn" data-ketu-cancel="' + id + '">Cancel</button></div></div>';
+        }
+        if (c.type === 'result-ok') {
+            const ok = st === 'COMPLETED_VERIFIED';
+            return '<div class="ketu-card ketu-card-ok"><div class="ketu-card-title" tabindex="-1">' + (ok ? '✓ ' : '') + esc(c.title) +
+                (ok ? ' <span class="ketu-chip">Verified</span>' : '') + '</div>' +
+                (c.evidence || []).map(e => '<p class="ketu-meta">' + esc(e) + '</p>').join('') + link(c.page) + '</div>';
+        }
+        if (c.type === 'result-unknown' || c.type === 'result-partial') {
+            return '<div class="ketu-card ketu-card-warn" role="status"><div class="ketu-card-title" tabindex="-1">' + esc(c.text) + '</div>' +
+                (c.type === 'result-partial' ? '<ul class="ketu-steps">' + steps + '</ul>' : '') + link(c.page) + '</div>';
+        }
+        return ketuCardHtml(c, pageLabel);
+    }).join('');
+}
+
+// Phones: the sheet follows the visual viewport so the composer stays above the on-screen keyboard.
+function ketuSheetBox(vv, mobile) {
+    if (!mobile || !vv) return null;
+    return { height: Math.round(vv.height), top: Math.round(vv.offsetTop) };
+}
+
+// "New result" pill only when the user has scrolled 80 px or more up the log (ux §6).
+function ketuNeedsPill(scrollHeight, scrollTop, clientHeight) {
+    return scrollHeight - scrollTop - clientHeight >= 80;
+}
+
+function ketuPageLabel(page) {
+    const el = document.querySelector('.nav-links .nav-link[data-page="' + page + '"]');
+    return el ? el.textContent.trim() : page;
+}
+
+// The sidebar pages this user can actually see (the server answers "not available" for the rest).
+function ketuVisiblePages() {
+    return Array.from(document.querySelectorAll('.nav-links .nav-link[data-page]'))
+        .filter(el => el.getClientRects().length > 0).map(el => el.dataset.page).slice(0, 64);
+}
+
+function ketuCurrentPage() {
+    const sec = document.querySelector('.sec.on');
+    return sec ? sec.id.replace(/^pg-/, '').slice(0, 40) : '';
+}
+
+// ── Voice input (KK-P3-03; speech spec B.2-B.5, ux W4-W6, W15). Recording -> server transcription ->
+// text in the composer. Nothing here sends: the person edits and presses Send (KK-FR-006, VOICE-04).
+function ketuMicAllowed(sttEnabled, nav, MR) {
+    return sttEnabled === true && typeof MR === 'function' &&
+        !!(nav && nav.mediaDevices && typeof nav.mediaDevices.getUserMedia === 'function');
+}
+
+// The first format the server accepts: WebM/Opus (Chrome, Edge, Firefox) or MP4 (Safari).
+function ketuPickMime(isSupported) {
+    for (const t of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']) {
+        try { if (isSupported(t)) return t; } catch (e) { return null; }
+    }
+    return null;
+}
+
+function ketuMicCopy(kind) {
+    return {
+        PERMISSION_DENIED: "Microphone blocked. Allow it in the browser's site settings, or type instead.",
+        NO_DEVICE: 'No microphone found.',
+        CAPTURE_FAILED: 'Recording failed. Try again.',
+        NO_SPEECH: "Didn't catch anything. Try again closer to the mic.",
+        UNSUPPORTED: "Voice isn't supported in this browser. Type your request.",
+    }[kind] || 'Voice service unavailable. Type your request.';
+}
+
+function ketuMicErrorKind(e) {
+    const n = e && e.name;
+    if (n === 'NotAllowedError' || n === 'SecurityError') return 'PERMISSION_DENIED';
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return 'NO_DEVICE';
+    return 'CAPTURE_FAILED';
+}
+
+// The server's own fixed message when it sent one (it carries the B.3 copy), else fixed text.
+function ketuSttErrorText(status, body) {
+    const d = body && body.detail;
+    if (d && typeof d === 'object' && !Array.isArray(d) && typeof d.message === 'string') return d.message;
+    return ketuMicCopy(status === 413 ? 'CAPTURE_FAILED' : status === 415 ? 'UNSUPPORTED' : 'STT_FAILED');
+}
+
+// The clinic languages are te/hi/en-IN; anything else is inserted anyway with a "please check" warning.
+function ketuVoiceChip(lang, edited) {
+    if (edited) return { text: 'From voice · edited', warn: false };
+    const name = { 'te-IN': 'Telugu', 'hi-IN': 'Hindi', 'en-IN': 'English' }[lang];
+    if (lang && !name) return { text: 'Detected ' + lang + ' — please check', warn: true };
+    return { text: 'From voice · ' + (name ? name + ' · ' : '') + 'check before sending', warn: false };
+}
+
+function ketuNoSpeech(text) { return String(text || '').trim().length < 2; }
+
+// What Send adds for a voice request: the original transcript is kept even after edits (KK-FR-007).
+function ketuVoiceFields(voice) {
+    if (!voice) return { input_mode: 'text' };
+    const f = { input_mode: 'voice', transcript_original: voice.original };
+    if (voice.lang) f.language = voice.lang;
+    return f;
+}
+
+function ketuRecState(ms) {
+    const s = Math.min(30, Math.floor(Math.max(0, ms) / 1000));
+    return { clock: '0:' + String(s).padStart(2, '0') + ' / 0:30', warn: ms >= 25000, done: ms >= 30000 };
+}
+
+// The transcript goes into the composer with the cursor at the end. It is never sent from here.
+function ketuApplyTranscript(input, out) {
+    input.value = out.text;
+    input.focus();
+    input.setSelectionRange(out.text.length, out.text.length);
+    return { original: out.text, lang: out.language || null };
+}
+
+// Stopping every track turns off the browser's recording indicator (B.3: on every exit path).
+function ketuStopTracks(stream) {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+}
+
+function ketuSafe(method) {
+    try { ketu[method](); } catch (e) { console.warn('Kriya Ketu: ' + method + ' failed', e); }
+}
+
+const ketu = {
+    launcher: null,
+    panel: null,
+    isOpen: false,
+    inFlight: false,
+    controller: null,
+    draft: { text: '', crid: null },
+    runs: {},
+    synced: false,
+    saveTimer: null,
+    timer: null,
+    voice: null,   // {original, lang} while a transcript is in the composer (KK-FR-007)
+    mic: null,     // the live recording or upload, else null
+
+    init() {
+        if (!ketuAllowed(myKetu, myStaffRole)) { this.teardown(); return; }
+        if (!this.launcher) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.id = 'ketuLauncher';
+            b.title = 'Kriya Ketu · Ctrl K';
+            b.setAttribute('aria-label', 'Open Kriya Ketu assistant');
+            b.setAttribute('aria-expanded', 'false');
+            b.setAttribute('aria-controls', 'ketuPanel');
+            b.innerHTML = '<svg class="ketu-mark" aria-hidden="true" focusable="false"><use href="#ketu-mark"/></svg>';
+            b.addEventListener('click', () => this.toggle());
+            document.body.appendChild(b);
+            this.launcher = b;
+        }
+        this.place();
+    },
+
+    build() {
+        const wrap = document.createElement('div');
+        wrap.innerHTML =
+            '<section id="ketuPanel" role="dialog" aria-modal="false" aria-labelledby="ketuTitle" hidden>' +
+            '<header class="ketu-head">' +
+            '<svg class="ketu-mark" aria-hidden="true" focusable="false"><use href="#ketu-mark"/></svg>' +
+            '<h2 id="ketuTitle">Kriya Ketu</h2>' +
+            '<span class="ketu-scope" id="ketuScope"></span>' +
+            '<button type="button" class="ketu-icon-btn" id="ketuClose" aria-label="Close Kriya Ketu">' +
+            '<svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>' +
+            '</header>' +
+            '<div class="ketu-log" id="ketuLog" role="log" aria-live="polite" aria-relevant="additions" tabindex="0">' +
+            '<div class="ketu-empty">' +
+            '<svg class="ketu-mark" aria-hidden="true" focusable="false"><use href="#ketu-mark"/></svg>' +
+            '<p>How can I help?</p>' +
+            '<p class="ketu-meta">Try “open appointments” or “how do I add a leave”.</p>' +
+            '</div></div>' +
+            '<button type="button" id="ketuNewPill" hidden>New result ↓</button>' +
+            '<form class="ketu-composer" id="ketuComposer" novalidate>' +
+            '<div class="ketu-vchip" id="ketuVoiceChip" hidden><span></span>' +
+            '<button type="button" class="ketu-icon-btn" id="ketuReRecord" aria-label="Record again" title="Record again">' +
+            '<svg class="i" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg></button></div>' +
+            '<div class="ketu-compose-row">' +
+            '<textarea id="ketuInput" rows="1" maxlength="1000" aria-label="Message Kriya Ketu" ' +
+            'aria-describedby="ketuHint" placeholder="Ask or tell Kriya Ketu…"></textarea>' +
+            '<div class="ketu-rec" id="ketuRec" hidden><span class="ketu-rec-dot" aria-hidden="true"></span>' +
+            '<span id="ketuRecLabel">Recording…</span><span class="ketu-rec-clock" id="ketuRecClock"></span>' +
+            '<span class="ketu-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>' +
+            '<button type="button" class="ketu-icon-btn" id="ketuRecStop" aria-label="Stop recording" title="Stop">' +
+            '<span class="ketu-stop-sq" aria-hidden="true"></span></button>' +
+            '<button type="button" class="ketu-icon-btn" id="ketuRecCancel" aria-label="Cancel recording" title="Cancel">' +
+            '<svg class="i" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button></div>' +
+            '<button type="button" class="ketu-icon-btn ketu-mic" id="ketuMic" aria-label="Record voice" title="Record voice" hidden>' +
+            '<svg class="i" aria-hidden="true" focusable="false"><use href="#i-mic"/></svg></button>' +
+            '<button type="submit" class="ketu-send" id="ketuSend" aria-label="Send" disabled>' +
+            '<svg class="i" aria-hidden="true" focusable="false"><use href="#i-send"/></svg></button>' +
+            '</div>' +
+            '<div class="ketu-compose-meta"><span id="ketuHint">Enter to send · Shift+Enter new line</span>' +
+            '<span class="ketu-meta-r"><select id="ketuLang" aria-label="Voice language" hidden>' +
+            '<option value="auto">Auto</option><option value="te">Telugu</option><option value="hi">Hindi</option>' +
+            '<option value="en">English</option><option value="mixed">Mixed</option></select>' +
+            '<span id="ketuCount" aria-hidden="true">0/1000</span></span></div>' +
+            '<span class="sr-only" id="ketuLive" role="status" aria-live="polite"></span>' +
+            '</form>' +
+            '</section>';
+        const p = wrap.firstElementChild;
+        p.querySelector('#ketuClose').addEventListener('click', () => this.close());
+        p.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            e.stopPropagation();
+            if (this.mic) this.micCancel(); else if (this.inFlight) this.abort(); else this.close();
+        });
+        p.querySelector('#ketuMic').addEventListener('click', () => this.micStart());
+        p.querySelector('#ketuReRecord').addEventListener('click', () => this.micStart());
+        p.querySelector('#ketuRecStop').addEventListener('click', () => this.micStop());
+        p.querySelector('#ketuRecCancel').addEventListener('click', () => this.micCancel());
+        const lang = p.querySelector('#ketuLang');
+        try { lang.value = localStorage.getItem('ketu_lang') || 'auto'; } catch (e) { /* default Auto */ }
+        if (!lang.value) lang.value = 'auto';
+        lang.addEventListener('change', () => { try { localStorage.setItem('ketu_lang', lang.value); } catch (e) { /* not kept */ } });
+        const input = p.querySelector('#ketuInput');
+        input.addEventListener('input', () => this.onInput());
+        input.addEventListener('keydown', (e) => {
+            const act = ketuKeyAction(e, this.inFlight);
+            if (!act) return;
+            e.preventDefault();
+            if (act === 'send') this.send();
+        });
+        p.querySelector('#ketuComposer').addEventListener('submit', (e) => { e.preventDefault(); this.send(); });
+        const log = p.querySelector('#ketuLog');
+        log.addEventListener('click', (e) => {
+            const go = e.target.closest('[data-ketu-go]');
+            if (go) this.goTo(go.getAttribute('data-ketu-go'));
+            const fill = e.target.closest('[data-ketu-fill]');
+            if (fill) this.fill(fill.getAttribute('data-ketu-fill'), fill.getAttribute('data-ketu-fields'));
+            const ok = e.target.closest('[data-ketu-confirm]');
+            if (ok) this.confirm(ok.getAttribute('data-ketu-confirm'), ok);
+            const no = e.target.closest('[data-ketu-cancel]');
+            if (no) this.decide(no.getAttribute('data-ketu-cancel'), 'cancel', {}, no);
+        });
+        log.addEventListener('submit', (e) => {
+            const f = e.target.closest('[data-ketu-clarify]');
+            if (f) { e.preventDefault(); this.answer(f.getAttribute('data-ketu-clarify'), f); }
+        });
+        this.timer = setInterval(() => this.tick(), 1000);
+        const pill = p.querySelector('#ketuNewPill');
+        pill.addEventListener('click', () => { log.scrollTop = log.scrollHeight; pill.hidden = true; });
+        log.addEventListener('scroll', () => {
+            if (!ketuNeedsPill(log.scrollHeight, log.scrollTop, log.clientHeight)) pill.hidden = true;
+        });
+        // The page's own confirm dialog (z 600) is modal: the panel steps back while it is open (ux §4.1).
+        const overlay = document.getElementById('confirmOverlay');
+        if (overlay) {
+            this.observer = new MutationObserver(() => { p.inert = overlay.classList.contains('open'); });
+            this.observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+        }
+        if (window.visualViewport) {
+            this.fit = () => this.fitSheet();
+            window.visualViewport.addEventListener('resize', this.fit);
+            window.visualViewport.addEventListener('scroll', this.fit);
+        }
+        document.body.appendChild(p);
+        this.panel = p;
+        this.loadDraft();
+    },
+
+    onInput() {
+        const value = this.panel.querySelector('#ketuInput').value;
+        if (!value) this.voice = null;  // cleared: whatever is typed next is a text request
+        this.micChip();
+        this.draft = ketuDraftOnInput(value);
+        clearTimeout(this.saveTimer);
+        this.saveTimer = setTimeout(() => this.saveDraft(), 300);
+        this.refreshComposer();
+    },
+
+    refreshComposer() {
+        const input = this.panel.querySelector('#ketuInput');
+        this.panel.querySelector('#ketuCount').textContent = input.value.length + '/1000';
+        const send = this.panel.querySelector('#ketuSend');
+        send.disabled = !ketuCanSend(input.value, this.inFlight);
+        send.setAttribute('aria-busy', this.inFlight ? 'true' : 'false');
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight + 2, 142) + 'px';
+    },
+
+    saveDraft() {
+        try { sessionStorage.setItem('ketu_draft', JSON.stringify(this.draft)); } catch (e) { /* private mode */ }
+    },
+
+    loadDraft() {
+        try {
+            const d = JSON.parse(sessionStorage.getItem('ketu_draft') || 'null');
+            if (d && typeof d.text === 'string') {
+                this.draft = { text: d.text.slice(0, 1000), crid: d.crid || null };
+                this.panel.querySelector('#ketuInput').value = this.draft.text;
+            }
+        } catch (e) { /* unreadable draft: start empty */ }
+        this.refreshComposer();
+    },
+
+    append(html) {
+        if (!html) return;
+        const log = this.panel.querySelector('#ketuLog');
+        const empty = log.querySelector('.ketu-empty');
+        if (empty) empty.remove();
+        const scrolledUp = ketuNeedsPill(log.scrollHeight, log.scrollTop, log.clientHeight);
+        log.insertAdjacentHTML('beforeend', html);
+        if (scrolledUp) this.panel.querySelector('#ketuNewPill').hidden = false;
+        else log.scrollTop = log.scrollHeight;
+    },
+
+    renderRun(run, fromSync) {
+        if (!run || !run.run_id) return;
+        this.runs[run.run_id] = run;
+        let box = this.panel.querySelector('[data-run="' + CSS.escape(run.run_id) + '"]');
+        const fresh = !box;
+        if (fresh) {
+            this.append('<div class="ketu-run" data-run="' + esc(run.run_id) + '"></div>');
+            box = this.panel.querySelector('#ketuLog').lastElementChild;
+        }
+        box.innerHTML = ketuRunHtml(run, ketuPageLabel, Date.now());
+        if (run.navigate && fresh && !fromSync) this.goTo(run.navigate);
+    },
+
+    fitSheet() {
+        if (!this.panel) return;
+        const box = this.isOpen && ketuSheetBox(window.visualViewport, window.matchMedia('(max-width: 640px)').matches);
+        this.panel.style.height = box ? box.height + 'px' : '';
+        this.panel.style.top = box ? box.top + 'px' : '';
+    },
+
+    tick() {
+        if (!this.panel || this.panel.hidden) return;
+        this.panel.querySelectorAll('[data-ketu-exp]').forEach(el => {
+            const left = ketuSecondsLeft(el.getAttribute('data-ketu-exp'), Date.now());
+            el.textContent = ketuClock(left);
+            if (!left) el.parentElement.querySelectorAll('[data-ketu-confirm]').forEach(b => { b.disabled = true; });
+        });
+    },
+
+    async post(path, payload) {
+        let status = 0, body = null;
+        try {
+            const r = await apiRaw(path, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(payload) }, () => true);
+            status = r.status;
+            body = await r.json().catch(() => null);
+            if (r.ok) return body;
+        } catch (e) {
+            if (e && e.status === 401) return null;
+            if (e && e.status === 403) { this.append(ketuCardHtml({ type: 'error', text: e.message }, ketuPageLabel)); return null; }
+        }
+        this.append(ketuCardHtml({ type: 'error', text: ketuErrorText(status, body) }, ketuPageLabel));
+        return null;
+    },
+
+    confirm(id, btn) {
+        const run = this.runs[id];
+        if (!run) return;
+        const typed = this.panel.querySelector('#ketuTyped-' + CSS.escape(id));
+        const ack = this.panel.querySelector('#ketuAck-' + CSS.escape(id));
+        const payload = { plan_hash: run.plan_hash, ack_duplicate: !!(ack && ack.checked) };
+        if (typed) payload.typed_count = parseInt(typed.value, 10);
+        return this.decide(id, 'confirm', payload, btn);
+    },
+
+    async decide(id, verb, payload, btn) {
+        if (btn) btn.disabled = true;  // a second click is ignored; the server's CAS is the real guard
+        const out = await this.post('/admin/assistant/runs/' + encodeURIComponent(id) + (verb === 'confirm' ? '/confirm' : '/cancel'), payload);
+        if (btn && btn.isConnected) btn.disabled = false;
+        if (!out) return;
+        this.renderRun(out);
+        const head = this.panel.querySelector('[data-run="' + CSS.escape(id) + '"] [tabindex="-1"]');
+        if (head) head.focus();
+    },
+
+    async answer(id, form) {
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        const out = await this.post('/admin/assistant/requests', {
+            client_request_id: crypto.randomUUID(), text: 'continue', input_mode: 'text',
+            reply_to_run_id: id, slot_answers: Object.fromEntries(new FormData(form).entries()),
+            ui_context: { page: ketuCurrentPage(), visible_pages: ketuVisiblePages() },
+        });
+        if (btn.isConnected) btn.disabled = false;
+        if (out) this.renderRun(out);
+    },
+
+    goTo(page) {
+        if (typeof go !== 'function' || !document.getElementById('pg-' + page)) return;
+        go(page);
+        if (window.matchMedia('(max-width: 640px)').matches) this.close();  // the page needs the screen
+    },
+
+    fill(page, json) {  // H tier: open the page, pre-fill, focus the first field; the person saves
+        if (typeof go !== 'function' || !document.getElementById('pg-' + page)) return;
+        let fields = [];
+        try { fields = JSON.parse(json || '[]'); } catch (e) { fields = []; }
+        this.goTo(page);
+        const done = ketuFillFields(document, fields);
+        const first = done.length ? document.getElementById(done[0]) : null;
+        if (first) { first.scrollIntoView({ block: 'center' }); first.focus(); }
+        const names = fields.filter(f => done.includes(f.id)).map(f => f.label).join(', ');
+        this.append('<div class="ketu-text">' + esc(done.length
+            ? 'Filled ' + names + '. Check them and press the page\u2019s button yourself.'
+            : 'The page is open. Nothing on it needed filling.') + '</div>');
+    },
+
+    async sync() {
+        try {
+            const runs = await api('/admin/assistant/runs?active=1&limit=30');
+            (Array.isArray(runs) ? runs : []).slice().reverse().forEach(r => this.renderRun(r, true));
+        } catch (e) { /* the panel works without history */ }
+    },
+
+    abort() { if (this.controller) this.controller.abort(); },
+
+    async send() {
+        const input = this.panel.querySelector('#ketuInput');
+        const text = input.value;
+        if (!ketuCanSend(text, this.inFlight)) return;
+        const draft = this.draft.text === text ? this.draft : ketuDraftOnInput(text);
+        this.draft = ketuDraftOnSend(draft, crypto.randomUUID());
+        this.saveDraft();
+        const voiceFields = ketuVoiceFields(this.voice);
+        this.append(ketuCardHtml({ type: 'user', text: text, edited: !!this.voice && text !== this.voice.original }, ketuPageLabel));
+        this.inFlight = true;
+        this.controller = new AbortController();
+        this.refreshComposer();
+        let status = 0, body = null;
+        try {
+            const r = await apiRaw('/admin/assistant/requests', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                signal: this.controller.signal,
+                body: JSON.stringify(Object.assign({
+                    client_request_id: this.draft.crid, text: text,
+                    ui_context: { page: ketuCurrentPage(), visible_pages: ketuVisiblePages() },
+                }, voiceFields)),
+            }, () => true);
+            status = r.status;
+            body = await r.json().catch(() => null);
+            if (r.ok && body && body.run_id) {
+                this.draft = ketuDraftOnInput('');
+                this.saveDraft();
+                input.value = '';
+                this.voice = null;
+                this.micChip();
+                this.renderRun(body);
+                return;
+            }
+        } catch (e) {
+            if (e && e.name === 'AbortError') {
+                this.append(ketuCardHtml({ type: 'text', text: 'Stopped. If Kriya already received it, the result will appear here.' }, ketuPageLabel));
+                this.sync();
+                return;
+            }
+            if (e && e.status === 401) return;          // apiFail already sent the user to sign in
+            if (e && e.status === 403) { this.append(ketuCardHtml({ type: 'error', text: e.message }, ketuPageLabel)); return; }
+        } finally {
+            this.inFlight = false;
+            this.controller = null;
+            if (this.panel) this.refreshComposer();
+        }
+        this.append(ketuCardHtml({ type: 'error', text: ketuErrorText(status, body) }, ketuPageLabel));
+    },
+
+    // ── mic (ADR-003): record <= 30 s -> /admin/assistant/transcribe -> text in the composer, never sent ──
+    micAllowed() { return ketuMicAllowed(myKetuStt, window.navigator, window.MediaRecorder); },
+
+    say(text) { const live = this.panel && this.panel.querySelector('#ketuLive'); if (live) live.textContent = text; },
+
+    micNotice() {  // B.5: one-time disclosure per browser
+        try {
+            if (localStorage.getItem('ketu_voice_notice')) return;
+            localStorage.setItem('ketu_voice_notice', '1');
+        } catch (e) { /* storage blocked: shown each time */ }
+        this.append('<div class="ketu-text ketu-meta">' +
+            esc("Voice is sent to our speech provider to turn it into text. Audio isn't stored.") + '</div>');
+    },
+
+    async micStart() {
+        if (this.mic || this.inFlight || !this.micAllowed()) return;
+        const mime = ketuPickMime(t => MediaRecorder.isTypeSupported(t));
+        if (!mime) { this.micFail('UNSUPPORTED'); return; }
+        this.micNotice();
+        const m = this.mic = { chunks: [], mime: mime };
+        this.micChip();
+        this.micView('starting');
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+            if (this.mic === m) this.micFail(ketuMicErrorKind(e));
+            return;
+        }
+        if (this.mic !== m) { ketuStopTracks(stream); return; }  // cancelled or closed during the prompt
+        m.stream = stream;
+        try {
+            // 64 kbps is ample for speech and keeps 30 s far under the server's 1 MiB cap on every browser.
+            m.rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 64000 });
+            m.rec.ondataavailable = (e) => { if (e.data && e.data.size) m.chunks.push(e.data); };
+            m.rec.onerror = () => { if (this.mic === m) this.micFail('CAPTURE_FAILED'); };
+            m.rec.onstop = () => this.micStopped(m);
+            m.rec.start();
+        } catch (e) {
+            this.micFail('CAPTURE_FAILED');
+            return;
+        }
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            try {  // level meter only; recording works without it
+                m.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                m.analyser = m.ctx.createAnalyser();
+                m.analyser.fftSize = 256;
+                m.ctx.createMediaStreamSource(stream).connect(m.analyser);
+            } catch (e) { m.analyser = null; }
+        }
+        m.started = Date.now();
+        m.timer = setInterval(() => this.micTick(), 100);
+        this.micView('recording');
+        this.say('Recording started');
+    },
+
+    micTick() {
+        const m = this.mic;
+        if (!m || !m.started || !this.panel) return;
+        const st = ketuRecState(Date.now() - m.started);
+        const clock = this.panel.querySelector('#ketuRecClock');
+        clock.textContent = st.clock + (st.warn ? ' · ending soon' : '');
+        clock.classList.toggle('ketu-rec-warn', st.warn);
+        if (m.analyser) {
+            const buf = new Uint8Array(m.analyser.fftSize);
+            m.analyser.getByteTimeDomainData(buf);
+            let sum = 0;
+            for (const v of buf) sum += (v - 128) * (v - 128);
+            m.levels = (m.levels || []).concat(Math.sqrt(sum / buf.length) / 128).slice(-7);
+            this.panel.querySelectorAll('.ketu-meter i').forEach((b, i) => {
+                b.style.transform = 'scaleY(' + Math.max(0.12, Math.min(1, (m.levels[i] || 0) * 4)) + ')';
+            });
+        }
+        if (st.done) this.micStop();  // hard stop at 30 s
+    },
+
+    micStop() {
+        const m = this.mic;
+        if (m && m.rec && m.rec.state === 'recording') { clearInterval(m.timer); m.rec.stop(); }
+    },
+
+    micStopped(m) {
+        if (this.mic !== m) return;  // cancelled: the audio is dropped
+        const ms = Math.min(30000, Date.now() - m.started);
+        const blob = new Blob(m.chunks, { type: (m.rec && m.rec.mimeType) || m.mime });
+        m.chunks = [];
+        this.micRelease();
+        if (!blob.size || blob.size > 1048576) { this.micFail('CAPTURE_FAILED'); return; }
+        this.micUpload(m, blob, ms);
+    },
+
+    async micUpload(m, blob, ms) {
+        this.micView('transcribing');
+        this.say('Recording stopped, transcribing');
+        m.ctrl = new AbortController();
+        const lang = this.panel.querySelector('#ketuLang').value || 'auto';
+        let status = 0, body = null;
+        try {
+            const r = await apiRaw('/admin/assistant/transcribe?language=' + encodeURIComponent(lang) + '&duration_ms=' + ms, {
+                method: 'POST', headers: authHeaders({ 'Content-Type': blob.type }), body: blob, signal: m.ctrl.signal,
+            }, () => true);
+            status = r.status;
+            body = await r.json().catch(() => null);
+        } catch (e) {
+            if (this.mic !== m) return;               // CANCELLED / WIDGET_CLOSED: back to idle silently
+            if (e && e.status === 401) { this.micCancel(); return; }  // SESSION_EXPIRED: login modal is up
+            this.micFail('STT_FAILED', e && e.status === 403 ? e.message : null);
+            return;
+        }
+        if (this.mic !== m) return;
+        if (status < 200 || status >= 300 || !body || typeof body.text !== 'string') {
+            this.micFail(status >= 500 || status === 0 ? 'STT_FAILED' : 'OTHER', ketuSttErrorText(status, body));
+            return;
+        }
+        this.mic = null;
+        this.micView('idle');
+        if (ketuNoSpeech(body.text)) { this.micFail('NO_SPEECH'); return; }
+        this.voice = ketuApplyTranscript(this.panel.querySelector('#ketuInput'), body);
+        this.onInput();
+        this.say('Transcript ready, edit and press Send');
+    },
+
+    micCancel() {
+        const m = this.mic;
+        if (!m) return;
+        this.micRelease();
+        this.mic = null;
+        if (m.ctrl) m.ctrl.abort();
+        if (m.rec && m.rec.state !== 'inactive') { try { m.rec.stop(); } catch (e) { /* already stopped */ } }
+        m.chunks = [];
+        this.micView('idle');
+    },
+
+    micRelease() {
+        const m = this.mic;
+        if (!m) return;
+        clearInterval(m.timer);
+        ketuStopTracks(m.stream);
+        if (m.ctx) m.ctx.close().catch(() => {});
+        m.stream = m.ctx = m.analyser = null;
+    },
+
+    micFail(kind, text) {
+        this.micRelease();
+        this.mic = null;
+        this.micView('idle');
+        const copy = text || ketuMicCopy(kind);
+        this.micChip(copy);
+        this.say(copy);
+        const btn = this.panel && this.panel.querySelector('#ketuMic');
+        if (kind === 'STT_FAILED' && btn) {  // W15: the mic rests briefly; typing always works
+            btn.disabled = true;
+            btn.title = copy;
+            setTimeout(() => { if (btn.isConnected) { btn.disabled = false; btn.title = 'Record voice'; } }, 30000);
+        }
+    },
+
+    micView(state) {  // idle | starting | recording | transcribing
+        if (!this.panel) return;
+        const q = (s) => this.panel.querySelector(s);
+        const busy = state !== 'idle';
+        const allowed = this.micAllowed();
+        q('#ketuInput').hidden = busy;
+        q('#ketuSend').hidden = busy;
+        q('#ketuRec').hidden = !busy;
+        q('#ketuMic').hidden = busy || !allowed;
+        q('#ketuLang').hidden = !allowed;
+        q('#ketuRecStop').hidden = state !== 'recording';
+        q('#ketuRec').classList.toggle('is-live', state === 'recording');
+        q('#ketuRecLabel').textContent = state === 'transcribing' ? 'Turning speech into text…'
+            : state === 'starting' ? 'Starting the microphone…' : 'Recording…';
+        q('#ketuRecClock').textContent = state === 'recording' ? ketuRecState(0).clock : '';
+        q('#ketuRecClock').classList.remove('ketu-rec-warn');
+        this.panel.querySelectorAll('.ketu-meter i').forEach(b => { b.style.transform = ''; });
+        q('#ketuHint').textContent = state === 'transcribing' ? 'Esc to cancel'
+            : busy ? "Speak your request. It won't be sent until you press Send." : 'Enter to send · Shift+Enter new line';
+        if (busy) (state === 'recording' ? q('#ketuRecStop') : q('#ketuRecCancel')).focus();
+        else if (this.isOpen && !this.panel.contains(document.activeElement)) q('#ketuInput').focus();
+    },
+
+    micChip(errorText) {  // transcript chip (W5/W6) or a voice failure line (B.3)
+        if (!this.panel) return;
+        const chip = this.panel.querySelector('#ketuVoiceChip');
+        const input = this.panel.querySelector('#ketuInput');
+        const c = errorText ? { text: errorText, warn: true }
+            : this.voice ? ketuVoiceChip(this.voice.lang, input.value !== this.voice.original) : null;
+        chip.hidden = !c;
+        if (!c) return;
+        chip.classList.toggle('is-warn', c.warn);
+        chip.querySelector('span').textContent = (errorText ? '' : '\u{1F399} ') + c.text;
+        chip.querySelector('#ketuReRecord').hidden = !!errorText || !this.micAllowed();
+    },
+
+    toggle() { this.isOpen ? this.close() : this.show(); },
+
+    show() {
+        if (!this.launcher) return;
+        if (!this.panel) this.build();
+        const scope = this.panel.querySelector('#ketuScope');
+        scope.textContent = myRole === 'super_admin' ? (clinicScopeNames[CLINIC_SCOPE] || '') : '';
+        this.panel.hidden = false;
+        this.isOpen = true;
+        this.launcher.setAttribute('aria-expanded', 'true');
+        this.launcher.setAttribute('aria-label', 'Close Kriya Ketu assistant');
+        this.launcher.classList.add('is-open');
+        this.place();
+        this.fitSheet();
+        if (!this.mic) this.micView('idle');  // the mic follows the current clinic's flag
+        this.panel.querySelector('#ketuInput').focus();
+        if (!this.synced) { this.synced = true; this.sync(); }
+    },
+
+    close() {
+        if (!this.panel || !this.isOpen) return;
+        this.micCancel();  // WIDGET_CLOSED: tracks stopped, audio discarded
+        this.panel.hidden = true;
+        this.isOpen = false;
+        this.launcher.setAttribute('aria-expanded', 'false');
+        this.launcher.setAttribute('aria-label', 'Open Kriya Ketu assistant');
+        this.launcher.classList.remove('is-open');
+        this.launcher.focus();
+    },
+
+    place() {
+        if (!this.launcher) return;
+        const banner = document.getElementById('clinicScopeBanner');
+        const h = banner ? banner.getBoundingClientRect().height : 0;
+        const mobile = window.matchMedia('(max-width: 640px)').matches;
+        if (this.panel) {
+            this.panel.classList.toggle('ketu-has-banner', h > 0 && mobile);
+            this.panel.style.setProperty('--ketu-banner', (h + 20) + 'px');
+        }
+        if (h > 0) {
+            const bottom = ketuLauncherBottom(h, mobile);
+            this.launcher.style.bottom = bottom + 'px';
+            if (this.panel) this.panel.style.bottom = mobile ? '' : (bottom + this.launcher.offsetHeight + 12) + 'px';
+        } else {
+            this.launcher.style.bottom = '';
+            if (this.panel) this.panel.style.bottom = '';
+        }
+    },
+
+    teardown() {
+        this.micCancel();
+        this.voice = null;
+        this.abort();
+        if (this.panel) this.panel.remove();
+        if (this.launcher) this.launcher.remove();
+        this.panel = null;
+        this.launcher = null;
+        this.isOpen = false;
+        this.inFlight = false;
+        this.draft = { text: '', crid: null };
+        this.runs = {};
+        this.synced = false;
+        clearInterval(this.timer);
+        if (this.observer) this.observer.disconnect();
+        if (this.fit && window.visualViewport) {
+            window.visualViewport.removeEventListener('resize', this.fit);
+            window.visualViewport.removeEventListener('scroll', this.fit);
+        }
+        this.observer = null;
+        this.fit = null;
+        try { sessionStorage.removeItem('ketu_draft'); } catch (e) { /* nothing stored */ }
+    },
+};
+
+document.addEventListener('keydown', (e) => {
+    if (ketu.launcher && ketuShortcut(e, ketu.isOpen)) {
+        e.preventDefault();
+        ketuSafe('toggle');
+    }
+});
+window.addEventListener('resize', () => ketuSafe('place'));
+// ── end Kriya Ketu ──────────────────────────────────────────────────────────────────────
 
 </script>
 </body>

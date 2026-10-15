@@ -23,12 +23,16 @@ correctness (Session 20 incidents).
      Staged:
      - **L4a (v1)**: (i) switch the **built-in automations** that already exist on or off (`outbound.auto_leads`
        hourly job, its cap and window); (ii) scheduled **read-only** briefings delivered to the existing
-       admin notifications.
+       admin notifications — **(ii) deferred to v2 (owner, 2026-10-15, DP-17)**: notifications are read
+       clinic-wide (`broadcast.get_admin_notifications` ignores `admin_id`) and a job has no user session,
+       so a per-user, permission-filtered briefing cannot be delivered safely. Briefings stay on demand
+       (PB-12/PB-13).
      - **L4b (v2)**: scheduled **write** playbooks. Needs a non-interactive principal, because a 12 h
        session cannot back a recurring job.
 
 ## Decision
-Option 3. Ship L1–L3 and L4a in v1. L4b needs this ADR's follow-up (ADR-006b) and owner approval.
+Option 3. Ship L1–L3 and L4a (i) in v1. L4a (ii) scheduled briefings and L4b need this ADR's follow-up
+(ADR-006b: a non-interactive principal and per-user notification visibility) and owner approval.
 
 ## Reasons
 - L3 gives the one-instruction experience: "call today's hot dermatology leads" is one sentence, one

@@ -131,6 +131,18 @@ def test_csp_has_no_unsafe_inline_for_scripts():
     assert "default-src 'self'" in csp
 
 
+def test_permissions_policy_allows_same_origin_microphone_only():
+    """VOICE-11 / KK-P3-01 (D-05): Ketu voice input needs the mic on our own
+    origin; camera and geolocation stay off, and no third-party origin gets the mic."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.utils.security import SECURITY_HEADERS
+
+    expected = "camera=(), microphone=(self), geolocation=()"
+    assert SECURITY_HEADERS["Permissions-Policy"] == expected
+    resp = TestClient(app).get("/admin-panel")
+    assert resp.headers["Permissions-Policy"] == expected
+
 
 def test_stale_duplicate_admin_bundle_is_not_served():
     """T3.3 (revised): there is exactly ONE admin frontend.

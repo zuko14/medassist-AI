@@ -151,8 +151,8 @@ class OpdSettingsPatch(BaseModel):
 
 
 class DuplicateCheckIn(BaseModel):
-    name: str
-    phone: str
+    name: str = Field(..., max_length=100)
+    phone: str = Field(..., max_length=20)
     date_of_birth: Optional[date] = None
     age_years: Optional[int] = None
 
@@ -990,6 +990,12 @@ async def recall_queue_patient(
     if not appt_res.data:
         raise HTTPException(status_code=404, detail="Appointment not found")
     appt = appt_res.data[0]
+    # Same rule as /stage: the desk recalls within its branch; a clinical-only user
+    # recalls their own doctor's patients only (at any branch, like their queue board).
+    if _holds(user, "OPD_FRONT_DESK"):
+        enforce_branch_scope(user, appt.get("branch_id"))
+    elif not user.doctor_id or str(user.doctor_id) != str(appt.get("doctor_id") or ""):
+        raise HTTPException(status_code=403, detail="Doctors can only recall their own patients")
 
     notified = False
     if appt.get("patient_phone"):
@@ -1005,6 +1011,13 @@ async def recall_queue_patient(
         except Exception as e:
             logger.warning(f"Recall notification failed: {e}")
 
+    await log_admin_action(
+        user=user,
+        action="OPD_QUEUE_RECALL",
+        resource_type="appointment",
+        resource_id=appointment_id,
+        details={"token": appt.get("token_number"), "notified": notified},
+    )
     return {"notified": notified}
 
 
@@ -1328,7 +1341,14 @@ async def create_appointment_invoice(
 ):
     """Create or retrieve the single live draft invoice for an appointment visit."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_FRONT_DESK", "OPD_ADMIN")
-    return await get_or_create_appointment_invoice(scope, appointment_id, user)
+    # D-38: a branch-pinned user bills only their branch's visits (checked before the draft is written).
+    appt = await sb(scoped_query("appointments", scope, "id, branch_id").eq("id", appointment_id).limit(1))
+    if appt.data:
+        enforce_branch_scope(user, appt.data[0].get("branch_id"))
+    inv = await get_or_create_appointment_invoice(scope, appointment_id, user)
+    await log_admin_action(user=user, action="OPD_INVOICE_CREATE", resource_type="opd_invoice",
+                           resource_id=str(inv.get("id")), details={"appointment_id": appointment_id})
+    return inv
 
 
 @router.post("/invoices")
@@ -1382,7 +1402,11 @@ async def issue_opd_invoice(
 ):
     """Issue a draft invoice, assigning sequential invoice number."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
-    return await issue_invoice(scope, invoice_id, user)
+    enforce_branch_scope(user, (await get_invoice(scope, invoice_id)).get("branch_id"))  # D-38
+    inv = await issue_invoice(scope, invoice_id, user)
+    await log_admin_action(user=user, action="OPD_INVOICE_ISSUE", resource_type="opd_invoice", resource_id=invoice_id,
+                           details={"invoice_number": inv.get("invoice_number")})
+    return inv
 
 
 @router.post("/invoices/{invoice_id}/receipts", status_code=status.HTTP_201_CREATED)
@@ -1415,6 +1439,7 @@ async def generate_payment_link(
     """Generate an online payment link (Razorpay/PhonePe) for outstanding balance."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
     inv = await get_invoice(scope, invoice_id)
+    enforce_branch_scope(user, inv.get("branch_id"))  # D-38
     if inv.get("status") not in ("issued", "partially_paid"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1470,6 +1495,8 @@ async def generate_payment_link(
                 )
         except Exception as e:
             logger.debug(f"Failed to dispatch WhatsApp payment link: {e}")
+    await log_admin_action(user=user, action="OPD_PAYMENT_LINK", resource_type="opd_invoice", resource_id=invoice_id,
+                           details={"balance_paise": balance, "whatsapp": bool(patient.get("phone"))})
     return link_res
 
 

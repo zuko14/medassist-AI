@@ -1,0 +1,25 @@
+# KK-P0-15 hardening checklist — report resend, lead message, connector run-now (KK-P4-03)
+
+Audited 2026-10-14 by reading the routes in `app/routers/admin.py` and `LabReportService.resend_report`
+(`app/services/lab_reports.py`), `leads.send_lead_message` (`app/services/leads.py`) and
+`_dispatch_connector_run`. Same columns as [leaves.md](leaves.md).
+
+| Endpoint | Action | Perm | Tenant | Branch | Bounds | Idempotent / CAS | Audit row | 5xx | Off-loop | Result |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `POST /admin/reports/{id}/resend` | `report.resend` (R2), `report.resend_failed` (R3, ≤ 20, typed count) | REPORTS_RESOLVE (dependency) | ✔ read + `resend_report` both filter `clinic_id` | `lab_reports` has no branch by design (see r0-reads) | ✔ one id; optional `new_phone` validated (Kriya never sends it) | ✘ **not idempotent**: each call sends WhatsApp again. Kriya: duplicate-risk tick when delivered < 24 h ago (PB-02); never retries; per-phone lock in the service | ✔ `resend_lab_report` | ✔ fixed text (a 400 carries staff-written `ValueError` text; the executor never forwards `detail`) | ✔ (storage download via `to_thread`) | Registered. Read-back: delivery-log row `sent` with a newer `sent_at` |
+| `POST /admin/leads/message` | `lead.message` (R2) | LEADS_MANAGE (dependency `_LEADS`) | ✔ `get_patient_by_phone(clinic_id, …)`: only a number that messaged THIS clinic | — | ✔ `LeadMessage` phone ≤ 20, message 1..1000 | ✘ not idempotent (a send). Kriya: one recipient per run (T-19), never retries | ✔ `LEAD_MESSAGE_SENT` (no body: personal data) | ✔ fixed text | ✔ | Registered. Opt-out / declined consent → 409, outside 24 h → 409, Meta refusal → 502: all enforced here; Kriya also checks first for a clear answer. **Evidence = the 200** (returned only after Meta accepted; ADR-004 "response reveals the outcome"); there is no read endpoint for sent messages (KK-P4-04 PLANNED) |
+| `POST /admin/connectors/{id}/run-now` | `connector.run_now` (R1) | CONNECTOR_MANAGE (dependency) | ✔ `_load_connector_for_action` filters `clinic_id` | ✔ `enforce_branch_scope(connector.branch_id)` | ✔ one id | dispatch only: web mode spawns a background run, worker mode stamps `run_requested_at` (a repeat re-stamps) | — (none for run-now) | ✔ | ✔ (the browser automation runs in the worker / background, not the request) | Registered. **Evidence = `running`/`queued`** (the dispatch is the write; the run's results appear on the page 2-5 min later) |
+| `GET /admin/reports/deliveries`, `GET /admin/leads`, `GET /admin/connectors`, `GET /admin/me` | previews + read-back | as their pages | ✔ | as in r0-reads; `GET /admin/connectors` is not branch-filtered for pinned staff, so Ketu filters to the user's branch itself (run-now enforces it anyway) | ✔ | — | — | ✔ | ✔ | Used |
+| `GET /admin/connectors/{id}/audit-log` | — | CONNECTOR_MANAGE | ✔ (`enforce_clinic_access` on the row's clinic) | ✔ D-28 fixed: `enforce_branch_scope` | ✔ D-28 fixed: `limit` 1..100, missing id → 404 | — | — | ✔ | ✔ | **Not used** by Kriya Ketu |
+
+Observations (not defects): the leads RPC masks a do-not-contact patient's number (`•`), and Kriya
+refuses such a contact before any write. The message text is the staff member's own (quotes or after a
+colon); Kriya never writes patient-facing text, and no phone number is stored in `assistant_runs`.
+
+## KK-P4-06 additions (PB-03 / PB-04 / PB-05), audited 2026-10-14
+
+| Endpoint | Action | Perm | Tenant | Branch | Bounds | Idempotent / CAS | Audit row | 5xx | Off-loop | Result |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `POST /admin/voice/outbound/bulk` | `leads.call` (R3, typed count, ≤ 100) | handler `_scope(VOICE_MANAGE)` + `ai_receptionist_enabled` | ✔ `enqueue_bulk` filters `clinic_id` | — (clinic-wide queue, as on the Voice page) | ✔ ≤ 500 contacts (Kriya sends ≤ 100) | ✔ partial unique index `uq_voice_outbound_active` (one live job per person); opt-out never called; 7-day repeat guard; never retried by Kriya | ✔ `voice_outbound_bulk_enqueue` (none for a dry run: nothing written) | ✔ | ✔ | Registered. Preview = `dry_run=true` (KK-P4-06a, the only POST a preview may send: `registry.read_only_post`); write = exactly the dry run's `would_queue`, `consent_attested` always false (WA-09). Read-back: live jobs in `GET /admin/voice/outbound` |
+| `GET /admin/voice/outbound` | `leads.funnel` (R0) + read-back | handler `VOICE_VIEW` | ✔ | — | ✔ latest 100 | — | — | ✔ | ✔ | Used. The funnel counts job statuses + booked leads (30 d); per-call outcomes and appointment attribution wait for KK-P4-06b |
+| `GET` / `PUT /admin/voice/settings` | `voice.auto_leads` (R2) | handler `VOICE_VIEW` / `VOICE_MANAGE` (D-12 fixed: permission before validation) | ✔ the clinic's own config row | — | ✔ window 09:00–21:00, cap 0..500 enforced by the model/route | ✘ whole-object replace: Kriya sends back exactly what it read with one field changed and hashes the full object, so an edit between preview and confirm means a new preview; **D-13** (config read-modify-write) can still lose an edit in the instant between confirm and the PUT | ✔ `voice_settings_update` | ✔ | ✔ | Registered |

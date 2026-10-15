@@ -311,3 +311,39 @@ def test_doctors_list_from_records_without_the_llm():
     assert te and "డాక్టర్లు" in te and "Meena Patel" in te
     assert "Meena Patel" in K.template_answer("who are your doctors", KB, "en", {}, {})
     assert K.template_answer("what is your address", KB, "en", {}, {}) is None   # "dr" inside "address"
+
+
+# ── D-36: a clinical answer is never taught, and one saved before the fix is never spoken ──
+
+def _post_knowledge(question, answer):
+    c, p = client(ADMIN)
+    sb = AsyncMock(return_value=type("R", (), {"data": [{"id": "e1"}]})())
+    try:
+        with patch("app.routers.voice_admin.sb", new=sb), patch("app.routers.voice_admin.supabase") as fake, \
+             patch("app.routers.voice_admin.log_admin_action", new=AsyncMock()):
+            r = c.post(f"/admin/voice/knowledge?clinic_id={CID}", json={"question": question, "answer": answer})
+        return r, fake.table.return_value.insert.call_count
+    finally:
+        p.stop()
+
+
+@pytest.mark.parametrize("question, answer", [
+    ("What for fever?", "Take paracetamol 500 mg twice a day."),
+    ("Which tablet for headache?", "Please ask the doctor at the clinic."),
+])
+def test_a_clinical_question_or_answer_is_refused(question, answer):
+    r, inserts = _post_knowledge(question, answer)
+    assert r.status_code == 422 and "medicine" in r.json()["detail"] and inserts == 0
+
+
+@pytest.mark.parametrize("answer", ["Yes, free parking in the basement.", "We have a 24 hour pharmacy on the ground floor.",
+                                    "Blood tests need 10 hours fasting."])
+def test_ordinary_answers_are_still_saved(answer):
+    r, inserts = _post_knowledge("Is there parking?", answer)
+    assert r.status_code == 200 and inserts == 1
+
+
+def test_a_clinical_answer_saved_before_the_fix_is_never_spoken():
+    rows = [{"id": "q1", "question": "Is there parking?", "answer": "Yes, free parking in the basement."},
+            {"id": "q2", "question": "What for fever?", "answer": "Take paracetamol 500 mg twice a day."}]
+    assert [q["id"] for q in K.speakable_qa(rows)] == ["q1"]

@@ -14,6 +14,7 @@ from app.config import settings
 from app.main import app
 from app.routers.admin import AdminUser, verify_credentials
 from app.services import client_data as cd
+from tests.config_writes import captured_config_writes  # D-13: saves go through config_store
 
 CLINIC = "11111111-1111-1111-1111-111111111111"
 OTHER = "22222222-2222-2222-2222-222222222222"
@@ -367,7 +368,7 @@ def test_owner_sets_limit_and_addon_in_clinic_config():
     async def fake_sb(builder):
         return MagicMock(data=getattr(builder, "_rows", []))
 
-    with patch("app.routers.platform.supabase") as sb_mod, \
+    with captured_config_writes() as writes, patch("app.routers.platform.supabase") as sb_mod, \
          patch("app.routers.platform.sb", side_effect=fake_sb), \
          patch("app.routers.platform.log_admin_action", new_callable=AsyncMock), \
          patch.object(cd, "clinic_quota", AsyncMock(return_value=cd.quota_state(0, 20000))):
@@ -375,7 +376,7 @@ def test_owner_sets_limit_and_addon_in_clinic_config():
         res = client.patch(f"/platform/clinics/{CLINIC}/data-storage", headers=owner_auth(),
                            json={"records_limit": 20000, "addon_rupees": 499})
     assert res.status_code == 200, res.text
-    assert written["config"] == {"ai_budget_paise": 1, "patient_records_limit": 20000,
+    assert writes[-1]["config"] == {"ai_budget_paise": 1, "patient_records_limit": 20000,
                                  "data_storage_addon_paise": 49900}  # other keys preserved
 
 
@@ -630,7 +631,7 @@ def test_followup_switch_saves_only_the_flag(as_user):
         chain.execute.return_value = MagicMock(data=[{"name": "Smile", "whatsapp_number": "+91"}])
         return chain
 
-    with patch("app.routers.admin.get_clinic_by_id", new_callable=AsyncMock,
+    with captured_config_writes() as writes, patch("app.routers.admin.get_clinic_by_id", new_callable=AsyncMock,
                return_value={"id": CLINIC, "config": dict(cfg)}), \
          patch("app.routers.admin.supabase") as sup, \
          patch("app.routers.admin.invalidate_tenant_cache"), \
@@ -638,7 +639,8 @@ def test_followup_switch_saves_only_the_flag(as_user):
         sup.table.return_value.update.side_effect = _update
         res = client.put("/admin/profile", json={"followup_enabled": False})
     assert res.status_code == 200, res.text
-    assert written["config"] == {**cfg, "followup_enabled": False}
+    assert writes[-1]["config"] == {**cfg, "followup_enabled": False}
+    assert writes[-1]["changed"] == [["followup_enabled"]]  # D-13: only the flag is written
     assert "name" not in written  # the hospital name is untouched
     assert audit.await_args.kwargs["details"]["followup_enabled"] is False
 

@@ -157,7 +157,8 @@ async def test_assign_doctor_to_branch_success():
         data=[{"doctor_id": "doc-1", "branch_id": "branch-1", "session": "morning"}]
     )
 
-    body = DoctorBranchAssign(doctor_id="doc-1", session="morning")
+    # D-34: the body takes a real UUID (a malformed id is now 422); the mocked insert row is unchanged.
+    body = DoctorBranchAssign(doctor_id="33333333-3333-3333-3333-333333333333", session="morning")
     with patch("app.routers.admin.supabase", mock_sb), patch(
         "app.database.supabase", mock_sb
     ), patch("app.routers.admin.log_admin_action"):
