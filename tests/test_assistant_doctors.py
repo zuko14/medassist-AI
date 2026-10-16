@@ -31,6 +31,7 @@ from tests.test_assistant_runs import CID, as_user, db  # noqa: F401  (fixtures)
 NOW = datetime(2026, 10, 15, 10, 0, tzinfo=IST)
 D1 = str(uuid.UUID(int=701))
 B1 = str(uuid.UUID(int=801))
+B2 = str(uuid.UUID(int=802))
 
 
 # ── resolvers ────────────────────────────────────────────────────────────────
@@ -174,7 +175,7 @@ async def _appts(request: Request):
 
 @fake.get("/admin/branches")
 async def _branches():
-    return S["branches"]
+    return {"branches": S["branches"]}  # the real endpoint's shape
 
 
 @fake.get("/admin/branches/{bid}/doctors")
@@ -362,6 +363,50 @@ def test_doctor_create_existing_name_is_refused(db, docs):  # noqa: F811
 def test_doctor_create_fee_bounds(db, docs):  # noqa: F811
     out = _answer(_ask("Add Dr Kiran, ₹2,00,000, Mon-Sat mornings 9 to 1"), specialization="Derm", department="Skin")
     assert out["error_code"] == "nothing_to_do" and S["writes"] == []
+
+
+TWO = [{"id": B1, "name": "Kukatpally", "is_active": True}, {"id": B2, "name": "Madhapur", "is_active": True}]
+
+
+def test_doctor_create_offers_the_branches_at_a_multi_branch_clinic(db, docs):  # noqa: F811
+    _reset(branches=TWO + [{"id": "b-off", "name": "Closed", "is_active": False}])
+    asked = _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat mornings 9 to 1")
+    field = next(f for f in asked["cards"][0]["fields"] if f["name"] == "branch")
+    assert field["options"] == ["Kukatpally", "Madhapur"] and field.get("optional")  # inactive ones are not offered
+    out = _answer(asked, specialization="Dermatology", department="Skin", branch="Madhapur")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert "Madhapur" in str(out["cards"])
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    (_, body), = S["writes"]
+    assert body["branch_id"] == B2
+
+
+def test_doctor_create_branch_left_blank_is_assigned_later(db, docs):  # noqa: F811
+    _reset(branches=TWO)
+    out = _answer(_ask("Add Dr Kiran Kumar, ₹600, Mon-Sat mornings 9 to 1"),
+                  specialization="Dermatology", department="Skin", branch="")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert "several branches" in str(out["cards"])
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    (_, body), = S["writes"]
+    assert "branch_id" not in body
+
+
+def test_doctor_create_single_branch_or_pinned_staff_get_no_branch_pick(db, docs):  # noqa: F811
+    asked = _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat mornings 9 to 1")  # one branch: the server assigns it
+    assert "branch" not in asked["cards"][0]["missing"]
+    _reset(branches=TWO)
+    docs["user"] = AdminUser(username="desk1", role="staff", clinic_id=CID, user_id=str(uuid.uuid4()),
+                             staff_role="FRONT_DESK", permissions=["DOCTORS_CREATE"], branch_id=B1)
+    assert "branch" not in _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat mornings 9 to 1")["cards"][0]["missing"]
+
+
+def test_branch_assign_exact_name_beats_a_longer_one(db, docs):  # noqa: F811
+    _reset(branches=[{"id": B1, "name": "Main"}, {"id": B2, "name": "Main Road"}])
+    out = _ask("assign Dr Anitha to Main branch", page="branches")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    assert S["writes"][0][1] == B1
 
 
 def test_branch_assign(db, docs):  # noqa: F811

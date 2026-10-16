@@ -628,7 +628,7 @@
             justify-content: flex-end;
             opacity: 0;
             visibility: hidden;
-            transition: all 0.3s ease;
+            transition: opacity 0.25s ease, visibility 0.25s;
         }
 
         .modal-overlay.active {
@@ -646,7 +646,8 @@
             padding: 32px;
             box-shadow: -10px 0 40px rgba(0,0,0,0.5);
             transform: translateX(100%);
-            transition: transform 0.3s ease;
+            /* Fast start, soft landing: the same curve as the clinic panel. */
+            transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .modal-overlay.active .modal-panel {
@@ -721,16 +722,23 @@
            Presentation only. Adds blur, rim light and the brand gradient on
            top of existing rules; changes no layout flow or hit target.
            ================================================================== */
-        body {
+        /* The auras on a fixed layer behind the page (body keeps --bg). As a
+           fixed body background they repainted the whole page every scroll frame. */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
             background:
                 radial-gradient(ellipse 55% 40% at 88% -5%, var(--bg-aura-2) 0%, transparent 58%),
-                radial-gradient(ellipse 50% 38% at 6% 6%, var(--bg-aura-1) 0%, transparent 55%),
-                var(--bg);
-            background-attachment: fixed;
+                radial-gradient(ellipse 50% 38% at 6% 6%, var(--bg-aura-1) 0%, transparent 55%);
         }
 
-        .login-card, .stat-card, .section-card, .chart-card,
-        .modal-panel, .mini-stat, .search-box, .filter-select, .form-control {
+        /* Only what floats over moving content is blurred. Cards and inputs sit
+           on the smooth aura layer, where a blur looks the same but was redone
+           for each one on every scroll frame. */
+        .login-card {
             backdrop-filter: blur(var(--blur)) saturate(155%);
             -webkit-backdrop-filter: blur(var(--blur)) saturate(155%);
         }

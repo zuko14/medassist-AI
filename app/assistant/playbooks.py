@@ -1627,6 +1627,19 @@ def _plain_name(name) -> str:
     return re.sub(r"^dr\.?\s+", "", str(name or "").strip().lower())
 
 
+def branch_rows(data, active_only: bool = False) -> list:
+    """GET /admin/branches answers {"branches": [...]}; reading it as a bare list found no branches at all."""
+    rows = data.get("branches") if isinstance(data, dict) else data
+    rows = [b for b in rows if isinstance(b, dict)] if isinstance(rows, list) else []
+    return [b for b in rows if b.get("is_active", True)] if active_only else rows
+
+
+def _match_branch(branches: list, term: str) -> list:
+    """An exact name wins, so "Main" is not ambiguous beside "Main Road"; else every name containing it."""
+    exact = [b for b in branches if " ".join(str(b.get("name") or "").lower().split()) == term]
+    return exact or [b for b in branches if term in str(b.get("name") or "").lower()]
+
+
 async def doctor_create_preview(read, params: dict) -> dict:
     name, fee = params["name"], params["fee"]
     if fee[0] != "amount":
@@ -1651,11 +1664,19 @@ async def doctor_create_preview(read, params: dict) -> dict:
                        f"{len(_slots(body[f'{s}_start'], body[f'{s}_end'], 30))} slots of 30 min.")
     body["slot_duration_minutes"] = 30
     me = await _get(read, "/admin/me")
-    branches = await _get(read, "/admin/branches")
+    branches = branch_rows(await _get(read, "/admin/branches"), active_only=True)
     warnings = ["Patients can book this doctor on WhatsApp straight away."]
     if isinstance(me, dict) and me.get("branch_id"):
-        warnings.append("The doctor is assigned to your branch.")
-    elif isinstance(branches, list) and len(branches) > 1:
+        warnings.append("The doctor is assigned to your branch.")  # the server pins it; a picked branch is ignored
+    elif params.get("branch"):
+        found = _match_branch(branches, params["branch"])
+        names = ", ".join(str(b.get("name")) for b in branches[:12]) or "none"
+        if len(found) != 1:
+            raise EmptyPlan(f'{"No branch" if not found else f"{len(found)} branches"} match "{params["branch"]}". '
+                            f"Branches: {names}.")
+        body["branch_id"] = str(found[0]["id"])
+        bullets.append(f"Branch: {found[0].get('name')} (morning and evening).")
+    elif len(branches) > 1:
         warnings.append("Your clinic has several branches: assign the doctor to one next (\"assign Dr … to … branch\").")
     before = sorted(str(d.get("id")) for d in doctors)
 
@@ -1672,10 +1693,9 @@ async def doctor_create_preview(read, params: dict) -> dict:
 
 async def branch_assign_preview(read, params: dict) -> dict:
     doc = await _doctor(read, params["doctor"])
-    branches = await _get(read, "/admin/branches")
-    branches = [b for b in branches if isinstance(b, dict)] if isinstance(branches, list) else []
+    branches = branch_rows(await _get(read, "/admin/branches"))
     term = params["branch"]
-    found = [b for b in branches if term in str(b.get("name") or "").lower()]
+    found = _match_branch(branches, term)
     names = ", ".join(str(b.get("name")) for b in branches[:12]) or "none"
     if len(found) != 1:
         raise EmptyPlan(f'{"No branch" if not found else f"{len(found)} branches"} match "{term}". Branches: {names}.')

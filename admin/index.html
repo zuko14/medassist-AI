@@ -663,7 +663,7 @@
             display: flex;
             flex-direction: column;
             z-index: 100;
-            transition: transform 0.25s ease;
+            transition: transform 0.3s var(--ease-out);
         }
 
         .sidebar-head {
@@ -734,13 +734,23 @@
             width: calc(100% - 260px);
             box-sizing: border-box;
             padding: 32px 36px;
-            background:
-                radial-gradient(ellipse 60% 45% at 88% -5%, var(--bg-aura-2) 0%, transparent 58%),
-                radial-gradient(ellipse 55% 40% at 5% 8%, var(--bg-aura-1) 0%, transparent 55%),
-                var(--bg);
-            background-attachment: fixed;
             min-height: 100vh;
             overflow-x: hidden;
+        }
+        /* The page auras, painted once on a fixed layer behind the content
+           (body supplies --bg). As `background-attachment: fixed` on .main
+           they forced a full repaint of the page on every scroll frame. The
+           clip keeps them to .main's box, exactly where they were drawn. */
+        .main::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            background:
+                radial-gradient(ellipse 60% 45% at 88% -5%, var(--bg-aura-2) 0%, transparent 58%),
+                radial-gradient(ellipse 55% 40% at 5% 8%, var(--bg-aura-1) 0%, transparent 55%);
+            clip-path: inset(0 0 0 260px);
         }
 
         .page-head { margin-bottom: 28px; }
@@ -748,7 +758,7 @@
         .page-head p { color: var(--text3); font-size: 0.85rem; }
 
         /* ─── Sections ─── */
-        .sec { display: none; animation: fadeIn 0.3s ease; }
+        .sec { display: none; animation: fadeIn 180ms var(--ease-out); }
         .sec.on { display: block; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
@@ -916,7 +926,7 @@
             max-height: 90vh;
             overflow-y: auto;
             box-shadow: 0 20px 80px rgba(0,0,0,0.5);
-            animation: fadeUp 0.3s ease;
+            animation: fadeUp 0.28s var(--ease-out);
         }
         .modal h3 {
             font-size: 1.1rem;
@@ -1059,6 +1069,11 @@
 
         /* ═══════ LOADING ═══════ */
         .loader { text-align: center; padding: 40px; color: var(--text3); font-size: 0.85rem; }
+        /* Most loads finish in a few hundred ms: the spinner fades in only if
+           one doesn't, so switching pages doesn't flash a spinner each time. */
+        @media (prefers-reduced-motion: no-preference) {
+            .loader { animation: fadeIn 200ms var(--ease-out) 250ms both; }
+        }
 
         .spin {
             width: 30px; height: 30px;
@@ -1176,6 +1191,7 @@
             .sidebar.mobile-open { transform: translateX(0); }
             .overlay.show { display: block; }
             .main { margin-left: 0; padding: 68px 16px 24px; }
+            .main::before { clip-path: none; }
             .stats { grid-template-columns: repeat(2, 1fr); }
             .form-row { grid-template-columns: 1fr; }
         }
@@ -1186,6 +1202,7 @@
 
         @media (min-width: 1441px) {
             .main { max-width: 1400px; }
+            .main::before { clip-path: inset(0 max(0px, calc(100% - 1660px)) 0 260px); }
         }
 
         /* ═══════ MESSAGING USAGE CARD ═══════ */
@@ -1217,8 +1234,12 @@
            Surfaces are translucent tokens, so the page auras diffuse through
            the blur. The mint inset rim is the top highlight that reads as a
            real glass edge rather than a tinted rectangle. */
-        .login-card, .sidebar, .stat, .card, .form-card,
-        .modal, .toast, .hamburger, .toggle-group {
+        /* Only surfaces that float over moving content are blurred. Cards,
+           stats and form cards sit on the smooth aura layer, where a blur
+           looks the same but was recomputed for every card on every scroll
+           frame — the main cause of the panel's lag on clinic PCs. */
+        .login-card, .sidebar,
+        .modal, .toast, .hamburger {
             backdrop-filter: blur(var(--blur)) saturate(155%);
             -webkit-backdrop-filter: blur(var(--blur)) saturate(155%);
         }
@@ -1332,7 +1353,6 @@
         .field input:not([type="checkbox"]):not([type="radio"]):hover,
         .field select:hover, .search-bar:hover { border-color: var(--border2); }
 
-        .btn-ghost { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
         .btn-ghost:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-glow); }
 
         .toggle-btn.on { background: var(--accent-soft2); color: var(--text-strong); }
@@ -9279,8 +9299,11 @@ function go(page, el) {
     // An unknown page used to hide every section and then throw: a blank screen.
     const target = document.getElementById('pg-' + page);
     if (!target) { console.warn('go(): no page', page); return; }
+    const switched = !target.classList.contains('on');
     document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
     target.classList.add('on');
+    // A new page opens at its top, not at the previous page's scroll depth. A re-entry keeps its place.
+    if (switched) window.scrollTo(0, 0);
 
     document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('on'));
     if (el) el.classList.add('on');
@@ -12213,10 +12236,14 @@ async function populateDocBranchDropdown() {
         }
         // Multi-branch: show dropdown
         row.style.display = '';
+        // Rebuilding the list mid-edit used to blank the pick, and Save then unassigned the doctor.
+        const keep = sel.value;
         sel.innerHTML = '<option value="">— Select Branch —</option>';
         branches.forEach(b => {
             sel.innerHTML += `<option value="${b.id}">${esc(b.name)}</option>`;
         });
+        if (_docBranchLocked) setDocBranchLocked(true);
+        else if (branches.some(b => String(b.id) === keep)) sel.value = keep;
     } catch (e) {
         // Non-fatal: branches feature may not be enabled
         row.style.display = 'none';
@@ -21113,6 +21140,11 @@ function ketuRunHtml(run, pageLabel, nowMs) {
                 : x.kind === 'yesno'
                 ? '<fieldset class="ketu-yesno"><legend>' + esc(x.label || x.name) + '</legend>' + ['yes', 'no'].map(v =>
                     '<label class="ketu-opt"><input type="radio" name="' + esc(x.name) + '" value="' + v + '" required> ' + (v === 'yes' ? 'Yes' : 'No') + '</label>').join('') + '</fieldset>'
+                // A new doctor's branch at a multi-branch clinic: a pick of the clinic's own branches.
+                : (x.kind === 'branch' && Array.isArray(x.options) && x.options.length)
+                ? '<label>' + esc(x.label || 'Branch') + ' <select name="' + esc(x.name) + '"' + (x.optional ? '' : ' required') + '>' +
+                    (x.optional ? '<option value="">— Assign later —</option>' : '') +
+                    x.options.map(o => '<option value="' + esc(o) + '">' + esc(o) + '</option>').join('') + '</select></label>'
                 : '<label>' + esc(x.label || x.name.charAt(0).toUpperCase() + x.name.slice(1)) + ' <input type="' + (x.kind === 'date' ? 'date' : 'text') + '" name="' + esc(x.name) + '"' + (x.optional ? '' : ' required') + '></label>').join('');
             return '<form class="ketu-card" data-ketu-clarify="' + id + '"><p>' + esc(run.message || 'I need a little more detail.') + '</p>' + f +
                 '<div class="ketu-actions"><button type="submit" class="btn btn-accent">Continue</button></div></form>';

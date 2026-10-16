@@ -25,7 +25,7 @@ from typing import Annotated, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.assistant import executor, llm, policy, resolve, rules, store, stt
+from app.assistant import executor, llm, playbooks, policy, resolve, rules, store, stt
 from app.assistant.executor import Call, CallerAuth
 from app.assistant.registry import PAGES, REGISTRY, VARIANTS, read_only_post
 from app.config import settings
@@ -166,6 +166,26 @@ async def _doctors(auth: CallerAuth, scope: str, run_id: str) -> Optional[list]:
         return None
     return [{"id": str(d["id"]), "name": d["name"], **{k: d.get(k) for k in ("morning_slots", "evening_slots")}}
             for d in out.data if isinstance(d, dict) and d.get("id") and d.get("name")]
+
+
+async def _offer_branch(fields: dict, user: AdminUser, auth: CallerAuth, scope: str, run_id: str) -> None:
+    """A new doctor's form at a clinic with several active branches offers them as a pick, like the Doctors
+    page form. A branch-pinned staff member's doctor always goes to their own branch (POST /admin/doctors)."""
+    params = fields.get("params") or {}
+    if (fields.get("to") != "NEEDS_CLARIFICATION" or fields.get("action_id") != "doctor.create"
+            or params.get("branch") or (user.role == "staff" and user.branch_id)):
+        return
+    card = next((c for c in (fields.get("result") or {}).get("cards") or [] if c.get("type") == "clarify"), None)
+    if card is None or "branch" in (card.get("missing") or []):
+        return
+    out = await executor.dispatch(Call("GET", "/admin/branches"), auth, scope, run_id, app=DISPATCH_APP)
+    names = [str(b["name"]) for b in playbooks.branch_rows(out.data if out.status == "ok" else None, True)
+             if b.get("name")]
+    if len(names) < 2:
+        return  # one branch: the server assigns it; none: nothing to pick
+    card["missing"] = [*(card.get("missing") or []), "branch"]
+    card["fields"] = [*(card.get("fields") or []),
+                      {"name": "branch", "kind": "branch", "label": "Branch", "optional": True, "options": names}]
 
 
 def _from_llm(intent: llm.Intent, body: RequestIn, visible, doctors=None) -> rules.Route:
@@ -402,7 +422,8 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
     if spec.one_of and not any(out.get(n) for n in spec.one_of):
         raise ValueError("one of the hours is needed")
     missing = [s.name for s in spec.slots if s.required and s.name not in out]
-    if missing and missing == [m for m in card.get("missing") or [] if m != "action"]:
+    offered = {"action"} | ({"branch"} - {s.name for s in spec.slots if s.required})  # _offer_branch's extra pick
+    if missing and missing == [m for m in card.get("missing") or [] if m not in offered]:
         raise ValueError("nothing new answered")
     return out
 
@@ -438,6 +459,7 @@ async def _reply(body: RequestIn, request: Request, scope: str, user: AdminUser,
     visible = body.ui_context.visible_pages
     fields = _fields(rules.fill(spec, row["input_text"], given=given,
                                 visible=set(visible) if visible is not None else None), "form")
+    await _offer_branch(fields, user, CallerAuth.from_request(request), scope, rid)
     to_state = fields.pop("to")
     final = await store.transition(scope, user.username, rid, ("RECEIVED",), to_state, **fields) or claimed
     if final["state"] == "AUTHORIZED":
@@ -565,6 +587,7 @@ async def create_request(body: RequestIn, request: Request, clinic_id: str = "de
         if not decision.allowed:
             routed.update(to="REJECTED", error_code=decision.reason, expires_at=None,
                           result=_text(decision.message, "error"))
+    await _offer_branch(routed, user, CallerAuth.from_request(request), scope, row["id"])
     to_state = routed.pop("to")
     routed["route_ms"] = int((time.monotonic() - started) * 1000)
     final = await store.transition(scope, user.username, row["id"], ("RECEIVED",), to_state, **routed)

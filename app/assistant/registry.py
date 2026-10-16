@@ -811,7 +811,9 @@ DOCTOR_ACTIONS = (
                  SlotSpec("fee", "price", label="Consultation fee in rupees"),
                  SlotSpec("days", "days", label="Working days, e.g. Mon-Sat"),
                  SlotSpec("morning", "morning_window", False, "Morning hours, e.g. 9 to 1 (blank if none)"),
-                 SlotSpec("evening", "evening_window", False, "Evening hours, e.g. 5 to 8 (blank if none)")),
+                 SlotSpec("evening", "evening_window", False, "Evening hours, e.g. 5 to 8 (blank if none)"),
+                 # Offered as a pick on the form only at a clinic with several branches (assistant._offer_branch).
+                 SlotSpec("branch", "branch", False, "Branch")),
           permission="DOCTORS_CREATE", perm_source="dependency", one_of=("morning", "evening"),
           # "add dr Rao leave tomorrow" is a leave; "doctor registration number" an edit of an existing doctor
           unless=("leave", "leaves", "chutti", "selavu", "సెలవు", "छुट्टी", "holiday", "registration number",
