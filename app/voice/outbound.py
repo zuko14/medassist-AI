@@ -58,7 +58,9 @@ def _after(ts, cutoff: datetime) -> bool:
 
 
 def _attested(job: dict) -> bool:
-    return bool((job.get("context") or {}).get("consent"))
+    # A reminder is about the patient's own booking with this clinic: that booking is the
+    # relationship. An opt-out still wins (_blocked).
+    return job.get("purpose") == REMINDER or bool((job.get("context") or {}).get("consent"))
 
 
 async def enqueue(clinic: dict, phone: str, purpose: str, context: dict, created_by: str) -> dict:
@@ -235,9 +237,19 @@ async def dispatch_due(limit: int = 20) -> int:
                      .eq("clinic_id", cid).eq("id", job["id"]))
             continue
         out_cfg = store.voice_config(clinic)["outbound"]
-        later = next_window_start(out_cfg, now)
-        if later is None and await _today_count(cid) >= int(out_cfg.get("daily_cap") or 0):
-            later = next_window_start(out_cfg, now.replace(hour=23, minute=59))
+        reminder = job.get("purpose") == REMINDER
+        if reminder:
+            # Never deferred past the visit: a reminder that cannot ring before call_by is dropped.
+            call_by = _ts((job.get("context") or {}).get("call_by"))
+            later = next_window_start(REMINDER_WINDOW, now)
+            if not call_by or now >= call_by or (later is not None and later >= call_by):
+                await sb(supabase.table("voice_outbound_jobs").update({"status": "skipped", "last_error": "too_late"})
+                         .eq("clinic_id", cid).eq("id", job["id"]))
+                continue
+        else:
+            later = next_window_start(out_cfg, now)
+            if later is None and await _today_count(cid) >= int(out_cfg.get("daily_cap") or 0):
+                later = next_window_start(out_cfg, now.replace(hour=23, minute=59))
         if later is not None:
             await sb(supabase.table("voice_outbound_jobs").update({"next_attempt_at": later.isoformat()})
                      .eq("clinic_id", cid).eq("id", job["id"]))
@@ -255,6 +267,18 @@ async def dispatch_due(limit: int = 20) -> int:
             await sb(supabase.table("voice_outbound_jobs").update({"status": "skipped", "last_error": "do_not_contact"})
                      .eq("clinic_id", cid).eq("id", job["id"]))
             continue
+        if reminder:
+            valid = await _reminder_still_valid(cid, job)
+            if valid is None:  # could not read the appointment: try again next sweep, never guess
+                await sb(supabase.table("voice_outbound_jobs")
+                         .update({"next_attempt_at": (now + timedelta(minutes=1)).isoformat()})
+                         .eq("clinic_id", cid).eq("id", job["id"]))
+                continue
+            if not valid:
+                await sb(supabase.table("voice_outbound_jobs")
+                         .update({"status": "skipped", "last_error": "appointment_changed"})
+                         .eq("clinic_id", cid).eq("id", job["id"]))
+                continue
         nums = await sb(supabase.table("voice_numbers").select("exophone").eq("clinic_id", cid)
                         .eq("is_active", True).order("created_at").limit(1))
         if not nums.data:
@@ -270,7 +294,9 @@ async def dispatch_due(limit: int = 20) -> int:
         call = await store.create_call(cid, {"direction": "outbound", "status": "queued",
                                              "caller_phone": job["patient_phone"], "exophone": nums.data[0]["exophone"],
                                              "outbound_job_id": job["id"],
-                                             "handoff_packet": {"interest": (job.get("context") or {}).get("interest")},
+                                             "handoff_packet": ({"reminder": (job.get("context") or {}).get("appointment")}
+                                                                if reminder else
+                                                                {"interest": (job.get("context") or {}).get("interest")}),
                                              "language": store.voice_config(clinic)["primary_language"]})
         if not call:
             await sb(supabase.table("voice_outbound_jobs").update({"status": "queued", "last_error": "db_write"})
@@ -303,18 +329,26 @@ async def job_finished(call: dict, success: bool, error: Optional[str] = None) -
     job_id, cid = call.get("outbound_job_id"), call.get("clinic_id")
     if not job_id or not cid:
         return
-    res = await sb(supabase.table("voice_outbound_jobs").select("attempts").eq("clinic_id", cid).eq("id", job_id))
-    attempts = int(((res.data or [{}])[0]).get("attempts") or 0)
+    res = await sb(supabase.table("voice_outbound_jobs").select("attempts, purpose, context")
+                   .eq("clinic_id", cid).eq("id", job_id))
+    job = (res.data or [{}])[0]
+    attempts = int(job.get("attempts") or 0)
     try:
         clinic = await get_clinic_by_id(cid)
         max_attempts = int(store.voice_config(clinic)["outbound"].get("max_attempts") or 1)
     except Exception:
         max_attempts = 1
+    retry_at = datetime.now(IST) + timedelta(hours=2)
+    in_time = True
+    if job.get("purpose") == REMINDER:
+        # A reminder retries soon, and only while it can still ring before the visit.
+        retry_at = datetime.now(IST) + timedelta(minutes=REMINDER_RETRY_MIN)
+        call_by = _ts((job.get("context") or {}).get("call_by"))
+        in_time = bool(call_by and retry_at < call_by)
     if success:
         fields = {"status": "completed"}
-    elif attempts < max_attempts:
-        fields = {"status": "queued", "next_attempt_at": (datetime.now(IST) + timedelta(hours=2)).isoformat(),
-                  "last_error": error}
+    elif attempts < max_attempts and in_time:
+        fields = {"status": "queued", "next_attempt_at": retry_at.isoformat(), "last_error": error}
     else:
         fields = {"status": "failed", "last_error": error}
     fields["updated_at"] = datetime.now(IST).isoformat()
@@ -361,4 +395,170 @@ async def autoqueue_leads() -> int:
                 queued_here += 1
             except OutboundRefused:
                 continue
+    return queued
+
+
+# ---- appointment reminder calls (migration 112) ----
+
+REMINDER = "appointment_reminder"
+# A reminder is a call the patient expects about their own visit: it uses the platform's
+# calling bounds (the 09:00-21:00 the settings page allows), not the lead-call hours, and
+# the lead daily cap does not hold it back. The monthly voice budget still applies.
+REMINDER_WINDOW = {"window_start": "09:00", "window_end": "21:00"}
+REMINDER_CALL_BY_MIN = 10   # never ring later than this before the visit
+REMINDER_RETRY_MIN = 10     # unanswered: try again this soon, while still before call_by
+
+
+def _ts(value) -> Optional[datetime]:
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=IST)
+
+
+def reminder_offsets(cfg: dict) -> list:
+    """The clinic's valid minutes-before values, largest first."""
+    vals = (cfg.get("reminders") or {}).get("minutes_before") or []
+    return sorted({m for m in vals if type(m) is int and 15 <= m <= 1440}, reverse=True)
+
+
+def appointment_at(appt: dict) -> Optional[datetime]:
+    """The visit as an IST datetime; None when its date or time is missing or unreadable."""
+    try:
+        d = datetime.strptime(str(appt.get("appointment_date") or "")[:10], "%Y-%m-%d")
+        t = datetime.strptime(str(appt.get("appointment_time") or "")[:5], "%H:%M")
+    except ValueError:
+        return None
+    return d.replace(hour=t.hour, minute=t.minute, tzinfo=IST)
+
+
+def reminder_due(appt: dict, offsets: list, now: datetime) -> Optional[tuple]:
+    """(minutes_before, call_by) of the reminder to queue now, or None.
+
+    The latest offset whose moment has come wins, so after downtime, or when the feature
+    is switched on, a patient gets one call, never a burst of overdue ones. An offset
+    whose moment came before the booking was made is skipped: they have just booked."""
+    at = appointment_at(appt)
+    if not at:
+        return None
+    call_by = at - timedelta(minutes=REMINDER_CALL_BY_MIN)
+    if now >= call_by:
+        return None
+    booked = _ts(appt.get("created_at")) if appt.get("created_at") else None
+    due = [m for m in offsets if at - timedelta(minutes=m) <= now
+           and (booked is None or booked <= at - timedelta(minutes=m))]
+    return (min(due), call_by) if due else None
+
+
+def reminder_key(appt: dict, minutes: int) -> str:
+    return f"{appt['id']}|{str(appt['appointment_date'])[:10]}T{str(appt['appointment_time'])[:5]}|{minutes}"
+
+
+async def _reminder_still_valid(cid: str, job: dict) -> Optional[bool]:
+    """At dial time: is the appointment still confirmed at the time we will speak?
+    None when the read failed."""
+    appt = (job.get("context") or {}).get("appointment") or {}
+    if not appt.get("id"):
+        return False
+    try:
+        res = await sb(supabase.table("appointments").select("status, appointment_date, appointment_time")
+                       .eq("clinic_id", cid).eq("id", appt["id"]).limit(1))
+    except Exception as e:
+        logger.warning(f"VOICE_REMINDER_RECHECK_FAILED job={job.get('id')}: {type(e).__name__}")
+        return None
+    row = (res.data or [None])[0]
+    return bool(row and row.get("status") == "confirmed"
+                and str(row.get("appointment_date") or "")[:10] == appt.get("date")
+                and str(row.get("appointment_time") or "")[:5] == appt.get("time"))
+
+
+async def _queue_clinic_reminders(cid: str, offsets: list, now: datetime) -> int:
+    from app.services.subscription import automated_outbound_allowed
+    clinic = await get_clinic_by_id(cid)
+    if not automated_outbound_allowed(clinic):
+        return 0
+    days = [now.date().isoformat(), (now + timedelta(days=1)).date().isoformat()]
+    # Same appointments the WhatsApp reminders cover: confirmed doctor visits with a slot time.
+    res = await sb(supabase.table("appointments")
+                   .select("id, patient_phone, patient_name, doctor_id, doctor_name, booking_type, lab_test_name, "
+                           "booking_ref, payment_id, status, appointment_date, appointment_time, created_at")
+                   .eq("clinic_id", cid).in_("appointment_date", days).eq("status", "confirmed")
+                   .eq("booking_type", "consultation").eq("is_walk_in", False).limit(2000))
+    todo = []
+    for a in res.data or []:
+        hit = reminder_due(a, offsets, now)
+        phone = to_e164(a.get("patient_phone") or "")
+        if hit and phone and a.get("doctor_name"):  # the call says "with Dr. X": never a blank name
+            todo.append((a, phone, *hit))
+    if not todo:
+        return 0
+    keys, waiting = set(), {}
+    ids = sorted({a["id"] for a, *_ in todo})
+    for i in range(0, len(ids), 100):
+        jobs = await sb(supabase.table("voice_outbound_jobs").select("id, status, context")
+                        .eq("clinic_id", cid).eq("purpose", REMINDER)
+                        .in_("context->>appointment_id", ids[i:i + 100]).limit(1000))
+        for j in jobs.data or []:
+            ctx = j.get("context") or {}
+            keys.add(ctx.get("reminder_key"))
+            if j.get("status") == "queued":
+                waiting.setdefault(ctx.get("appointment_id"), []).append((j["id"], ctx.get("reminder_key")))
+    todo = [t for t in todo if reminder_key(t[0], t[2]) not in keys]
+    if not todo or await store.budget_exceeded(clinic):
+        return 0
+    queued = 0
+    for a, phone, minutes, call_by in todo:
+        key = reminder_key(a, minutes)
+        # An earlier reminder for this visit that has not rung yet is replaced by this one.
+        for old_id, old_key in waiting.get(a["id"], []):
+            if old_key != key:
+                await sb(supabase.table("voice_outbound_jobs")
+                         .update({"status": "cancelled", "last_error": "superseded", "updated_at": now.isoformat()})
+                         .eq("clinic_id", cid).eq("id", old_id).eq("status", "queued"))
+        appt = {"id": a["id"], "booking_ref": a.get("booking_ref"), "status": a["status"],
+                "paid": bool(a.get("payment_id")), "doctor_id": a.get("doctor_id"),
+                "doctor_name": a.get("doctor_name"), "booking_type": a.get("booking_type"),
+                "lab_test_name": a.get("lab_test_name"), "date": str(a["appointment_date"])[:10],
+                "time": str(a["appointment_time"])[:5], "patient_name": a.get("patient_name")}
+        row = {"clinic_id": cid, "patient_phone": phone, "purpose": REMINDER, "created_by": "auto_reminders",
+               "context": {"appointment_id": a["id"], "reminder_key": key, "minutes_before": minutes,
+                           "call_by": call_by.isoformat(), "appointment": appt}}
+        blocked = await _eligible(cid, phone, attested=True)
+        if blocked:  # recorded once (the key is taken), so an opt-out is not re-checked every sweep
+            row.update({"status": "skipped", "last_error": blocked})
+        try:
+            # unscoped: insert_scoped_by_payload
+            await sb(supabase.table("voice_outbound_jobs").insert(row))
+            queued += 0 if blocked else 1
+        except Exception as e:
+            # uq_voice_reminder_once: already queued by another sweep. uq_voice_outbound_active:
+            # this number has a reminder call live right now; the next sweep queues this one.
+            if "23505" not in str(e) and "uq_voice_" not in str(e):
+                raise
+    return queued
+
+
+async def autoqueue_reminders(now: Optional[datetime] = None) -> int:
+    """Every 2 minutes: queue the reminder call due now for each confirmed appointment of
+    clinics that switched voice.reminders on. At most once per appointment slot and offset
+    (uq_voice_reminder_once); dispatch_due re-checks the appointment before dialling."""
+    now = (now or datetime.now(IST)).astimezone(IST)
+    res = await sb(
+        # unscoped: platform_sweep
+        supabase.table("clinics").select("id, features, config, account_type, is_active")
+        .eq("account_type", "tenant").eq("is_active", True))
+    queued = 0
+    for row in res.data or []:
+        if not ai_receptionist_enabled(row):
+            continue
+        cfg = store.voice_config(row)
+        offsets = reminder_offsets(cfg)
+        # Shadow mode never speaks to a patient (the gateway would drop the answered call).
+        if not cfg["reminders"].get("enabled") or not offsets or cfg.get("mode") == "shadow":
+            continue
+        try:
+            queued += await _queue_clinic_reminders(row["id"], offsets, now)
+        except Exception as e:  # one clinic's failure never stops the others' reminders
+            logger.error(f"VOICE_REMINDER_SWEEP_FAILED clinic={row['id']}: {type(e).__name__}: {e}")
     return queued

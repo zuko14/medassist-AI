@@ -41,7 +41,16 @@ VERSIONS = {"taxonomy": TAXONOMY_VERSION, "nlu_rules": NLU_RULES_VERSION, "llm_p
 QUALITY_VERSION = "quality-v1"
 _LABELS = {k: v["label"] for k, v in SPECIALTIES.items()}
 _SUCCESS = {"booked", "payment_link_sent", "answered", "report_sent", "cancelled", "refunded", "cancelled_late",
-            "rescheduled", "callback_requested", "status_told", "none", "not_ready", "nothing_to_change"}
+            "rescheduled", "callback_requested", "status_told", "none", "not_ready", "nothing_to_change",
+            "reminder_confirmed", "reminder_cant_come"}
+
+
+def _plain_name(raw) -> Optional[str]:
+    """WhatsApp display names can be emoji or nicknames: speak only a plain 1-3 word name."""
+    raw = " ".join(str(raw or "").split())
+    if raw and len(raw) <= 30 and len(raw.split()) <= 3 and all(c.isalpha() or c in " .'" for c in raw):
+        return raw
+    return None
 
 
 @dataclass
@@ -144,12 +153,17 @@ class CallSession:
 
     # ---- API ----
 
-    async def start(self, outbound: bool = False, interest: Optional[str] = None) -> Reply:
+    async def start(self, outbound: bool = False, interest: Optional[str] = None,
+                    reminder: Optional[dict] = None) -> Reply:
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {"versions": VERSIONS})
         await self._event("system", "CALL_STARTED", status="ok", data={"mode": self.ctx.mode})
         preload = getattr(self.tools, "preload_knowledge", None)
         if preload:
             preload()
+        if outbound and reminder:
+            # The appointment's own patient name (a family member's booking is named right).
+            appt = {**reminder, "patient_name": _plain_name(reminder.get("patient_name"))}
+            return await self._emit(self.engine.greeting(self.state, reminder=appt))
         name, slots = None, {}
         if outbound:
             name, slots = await self._lead_context(interest)
@@ -162,10 +176,7 @@ class CallSession:
         name, slots = None, {}
         try:
             prof = await self.tools.caller_profile()
-            raw = " ".join(((prof or {}).get("name") or "").split())
-            # WhatsApp display names can be emoji or nicknames: speak only a plain 1-3 word name.
-            if raw and len(raw) <= 30 and len(raw.split()) <= 3 and all(c.isalpha() or c in " .'" for c in raw):
-                name = raw
+            name = _plain_name((prof or {}).get("name"))
         except Exception:
             pass
         if interest:

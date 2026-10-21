@@ -34,6 +34,9 @@ DEFAULT_CONFIG: dict = {
     # ({"te": ..., "hi": ..., "en": ...}), spoken verbatim after the greeting.
     "outbound": {"auto_leads": False, "window_start": "10:00", "window_end": "19:00",
                  "max_attempts": 2, "daily_cap": 30, "concurrent": 1, "pitch": {}},
+    # Appointment reminder calls (migration 112): Kriya calls each patient with a confirmed
+    # appointment this many minutes before it (one call per value). Off until the hospital opts in.
+    "reminders": {"enabled": False, "minutes_before": [60]},
     "transcript_retention_days": None,  # None -> settings.voice_transcript_retention_days
 }
 

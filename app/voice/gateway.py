@@ -325,8 +325,9 @@ async def exotel_stream(ws: WebSocket, k: str = ""):
         runner = CallRunner(ws, ev.stream_sid, session, stt_stream, tts, ev.sample_rate)
         _ACTIVE[call["id"]] = runner
         outbound = call.get("direction") == "outbound"
-        interest = ((call.get("handoff_packet") or {}).get("interest") if outbound else None)
-        status = await runner.run(await session.start(outbound=outbound, interest=interest))
+        packet = (call.get("handoff_packet") or {}) if outbound else {}
+        status = await runner.run(await session.start(outbound=outbound, interest=packet.get("interest"),
+                                                      reminder=packet.get("reminder")))
     except Exception as e:
         logger.error(f"VOICE_CALL_CRASHED call={call['call_ref']}: {type(e).__name__}: {e}")
         await store.add_event(ctx.clinic_id, ctx.call_id, "error", "CALL_CRASHED", status="fail",

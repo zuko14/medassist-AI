@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.10.12"
+TEMPLATES_VERSION = "templates-2026.10.21"
 
 T: dict = {
     "greeting": {
@@ -26,6 +26,31 @@ T: dict = {
         "te": "నమస్కారం{who}, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {interest_sentence}{pitch_sentence}మీకు అపాయింట్మెంట్ బుక్ చేయడంలో సహాయం చేయమంటారా?",
         "en": "Namaste{who}, this is {assistant} calling from {hospital}. {interest_sentence}{pitch_sentence}Can I help you book an appointment?",
         "hi": "नमस्ते{who}, मैं {hospital} से {assistant} बोल रही हूँ। {interest_sentence}{pitch_sentence}क्या मैं आपकी अपॉइंटमेंट बुक करने में मदद करूँ?",
+    },
+    # Appointment reminder call (app/voice/outbound.py autoqueue_reminders). {whose}: the
+    # appointment's patient by name ("Lakshmi garu has"), or "you have" when no plain name.
+    "greeting_reminder": {
+        "te": "నమస్కారం, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {whose}{date} {time}కి {what} అపాయింట్మెంట్ ఉంది. అది గుర్తు చేయడానికే ఫోన్ చేశాను. దయచేసి సమయానికి, వీలైతే పది నిమిషాలు ముందుగానే రండి. మీరు వస్తున్నారా అండి?",
+        "en": "Namaste, this is {assistant} calling from {hospital}. This is a reminder that {whose}an appointment {what} {date} at {time}. Please be on time, and if you can, come ten minutes early. Will you be able to come?",
+        "hi": "नमस्ते, मैं {hospital} से {assistant} बोल रही हूँ। {whose}{date} {time} बजे {what} अपॉइंटमेंट है। यही याद दिलाने के लिए फ़ोन किया है। कृपया समय पर, हो सके तो दस मिनट पहले आइए। क्या आप आ पाएँगे?",
+    },
+    "reminder_whose_named": {"te": "{patient} గారికి", "en": "{patient} has", "hi": "{patient} जी का"},
+    "reminder_whose_you": {"te": "మీకు", "en": "you have", "hi": "आपका"},
+    "reminder_ask_coming": {
+        "te": "మీరు అపాయింట్మెంట్‌కి వస్తున్నారా అండి?",
+        "en": "Will you be able to come for the appointment?",
+        "hi": "क्या आप अपॉइंटमेंट के लिए आ पाएँगे?",
+    },
+    "reminder_confirmed": {
+        "te": "చాలా సంతోషం అండి. మీ కోసం ఎదురుచూస్తుంటాం. ధన్యవాదాలు.",
+        "en": "Great, thank you. We look forward to seeing you.",
+        "hi": "बहुत अच्छा, धन्यवाद। हम आपका इंतज़ार करेंगे।",
+    },
+    "no_problem": {"te": "పర్వాలేదండి.", "en": "No problem.", "hi": "कोई बात नहीं।"},
+    "offer_reschedule": {
+        "te": "అపాయింట్మెంట్‌ని వేరే రోజుకి లేదా వేరే సమయానికి మార్చమంటారా?",
+        "en": "Shall I move your appointment to another day or time?",
+        "hi": "क्या मैं आपका अपॉइंटमेंट किसी और दिन या समय पर कर दूँ?",
     },
     # An answer about the hospital from its own records (app/voice/knowledge.py: clinic Q&A,
     # a verified grounded sentence, or a fixed sentence built from the records).
@@ -514,6 +539,8 @@ def realize(key: str, lang: str, today: date, specialty_labels: Optional[dict] =
     q["yes_sentence"] = render("yes_sentence", lang) + " " if p.get("exact") else ""
     q["emergency_sentence"] = " " + render("emergency_sentence", lang, emergency=p["emergency"]) if p.get("emergency") else ""
     q["who"] = " " + render("who", lang, name=p["name"]) if p.get("name") else ""
+    q["whose"] = (render("reminder_whose_named", lang, patient=p["patient"]) if p.get("patient")
+                  else render("reminder_whose_you", lang)) + " "
     q["depts_sentence"] = " " + render("depts_sentence", lang, depts=p["depts"]) if p.get("depts") else ""
     q["interest_sentence"] = render("interest_sentence", lang, interest=p["interest"]) + " " if p.get("interest") else ""
     # The clinic's own words, verbatim, in the caller's current language only

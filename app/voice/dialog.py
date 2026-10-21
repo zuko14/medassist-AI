@@ -17,7 +17,7 @@ from .intents import WORKFLOW_OF
 from .nlu_rules import SUPPORTED_LANGS, NLUResult, is_question, looks_english, script_language
 from .policy import is_noise
 
-DIALOG_VERSION = "dialog-2026.10.12"
+DIALOG_VERSION = "dialog-2026.10.21"
 MAX_FAILURES = 3
 MAX_IDLE = 2          # "hello?" / "hmm" turns answered patiently before they count as misses
 
@@ -97,7 +97,16 @@ class DialogEngine:
     # ---- entry points ----
 
     def greeting(self, state: dict, outbound: bool = False, interest: Optional[str] = None,
-                 name: Optional[str] = None, slots: Optional[dict] = None) -> TurnOutput:
+                 name: Optional[str] = None, slots: Optional[dict] = None,
+                 reminder: Optional[dict] = None) -> TurnOutput:
+        if reminder:
+            # Appointment reminder call: say who is calling, the visit, "please be on time",
+            # then ask if they are coming. A reprompt repeats only that short question.
+            state["reminder"] = reminder
+            state["expect"] = "reminder"
+            state["last_question"] = asdict(Say("reminder_ask_coming"))
+            return self._finish(state, TurnOutput([Say("greeting_reminder", {
+                **self._c(), "appt": reminder, "patient": reminder.get("patient_name")})]))
         if outbound:
             # A "yes" goes straight to the department the lead asked about (no re-asking).
             state["offer"] = {"wf": "BOOKING", "slots": dict(slots or {})}
@@ -202,6 +211,23 @@ class DialogEngine:
                 return out
             await self._handoff(state, out, "caller_requested_human")
             return out
+        if expect == "reminder" and not biz:
+            # DENY first: "yes... but I can't come" must be offered a new time, not hung up on.
+            if "DENY" in intents:
+                # Cannot come: offer to move this very appointment (no "which one?" question).
+                appt = state.get("reminder") or {}
+                state["outcomes"].append({"wf": "REMINDER", "outcome": "reminder_cant_come"})
+                out.says.append(Say("no_problem"))
+                self._offer(state, out, {"wf": "RESCHEDULE", "slots": {"appts": [appt], "selected": appt}})
+                return out
+            if "AFFIRM" in intents:
+                state["expect"] = None
+                state["outcomes"].append({"wf": "REMINDER", "outcome": "reminder_confirmed"})
+                out.says.append(Say("reminder_confirmed"))
+                out.control = "end"
+                return out
+            if "GOODBYE" not in intents:
+                return self._miss(state, out, Say("reminder_ask_coming"))
         if "GOODBYE" in intents and not biz and expect not in ("confirm", "option", "patient_name"):
             out.says.append(Say("farewell"))
             out.control = "end"
@@ -391,8 +417,8 @@ class DialogEngine:
 
     @staticmethod
     def _offer_say(offer: dict) -> Say:
-        return Say({"BOOKING": "offer_booking", "LAB_BOOKING": "offer_lab_booking",
-                    "HUMAN": "offer_human", "CALLBACK": "offer_callback"}.get(offer.get("wf"), "offer_booking"))
+        return Say({"BOOKING": "offer_booking", "LAB_BOOKING": "offer_lab_booking", "HUMAN": "offer_human",
+                    "CALLBACK": "offer_callback", "RESCHEDULE": "offer_reschedule"}.get(offer.get("wf"), "offer_booking"))
 
     async def _handoff(self, state: dict, out: TurnOutput, reason: str, announce: bool = True) -> TurnOutput:
         res = await self.tools.handoff(reason) or {}

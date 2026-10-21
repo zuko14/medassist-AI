@@ -11,10 +11,10 @@ import logging
 import re
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.database import sb, supabase
 from app.services import config_store  # D-13: config saves write only the changed keys, atomically
@@ -231,6 +231,24 @@ class Outbound(BaseModel):
     pitch: Pitch = Field(default_factory=Pitch)
 
 
+class Reminders(BaseModel):
+    """Appointment reminder calls: Kriya calls each patient this many minutes before a
+    confirmed appointment, once per value (15 minutes to 24 hours, at most 3 values)."""
+    enabled: bool = False
+    minutes_before: list[Annotated[int, Field(ge=15, le=1440)]] = Field(default_factory=lambda: [60], max_length=3)
+
+    @field_validator("minutes_before")
+    @classmethod
+    def _distinct(cls, v: list) -> list:
+        return sorted(set(v), reverse=True)
+
+    @model_validator(mode="after")
+    def _need_a_time(self):
+        if self.enabled and not self.minutes_before:
+            raise ValueError("Pick at least one time before the appointment for reminder calls.")
+        return self
+
+
 class VoiceSettingsIn(BaseModel):
     primary_language: str = Field(pattern=r"^(te|hi|en)-IN$")
     assistant_name: str = Field(min_length=2, max_length=30)
@@ -239,6 +257,8 @@ class VoiceSettingsIn(BaseModel):
     reception_hours: Hours
     emergency_number: Optional[str] = Field(None, max_length=20)
     outbound: Outbound
+    #: None (an older client) keeps the stored reminder settings unchanged.
+    reminders: Optional[Reminders] = None
 
 
 @router.get("/settings")
@@ -261,7 +281,10 @@ async def put_settings(body: VoiceSettingsIn, request: Request, clinic_id: str =
     # unscoped: unique_row_key (clinics.id IS the tenant, resolved by enforce_clinic_access)
     res = await sb(supabase.table("clinics").select("config").eq("id", scope).limit(1))
     before = (res.data or [{}])[0].get("config") or {}
-    voice = {**(before.get("voice") or {}), **body.model_dump()}
+    changes = body.model_dump()
+    if body.reminders is None:
+        changes.pop("reminders")
+    voice = {**(before.get("voice") or {}), **changes}
     # D-13: only the changed voice keys are written, so the platform's budget and other settings survive.
     await config_store.save_config("clinics", scope, scope, before, {**before, "voice": voice})
     invalidate_tenant_cache()

@@ -12732,8 +12732,10 @@ async function vcOutbound() {
             + `<div class="table-wrap"><table><thead><tr><th>Phone</th><th>Asked about</th><th>Status</th><th>Attempts</th><th>Next try</th><th>Note</th></tr></thead><tbody>`
             + ((d.jobs || []).map(j => {
                 const ctx = j.context || {};
-                const src = ctx.consent ? `<div class="lead-sub">Imported · ${esc(ctx.consent.source || '')}</div>` : (j.created_by === 'auto_leads' ? '<div class="lead-sub">WhatsApp lead</div>' : '');
-                return `<tr><td>${esc(j.patient_phone)}${src}</td><td>${esc(ctx.interest || '—')}</td><td>${badge(j.status)}</td><td>${esc(j.attempts)}</td>`
+                const ap = j.purpose === 'appointment_reminder' ? (ctx.appointment || {}) : null;
+                const src = ap ? '<div class="lead-sub">Appointment reminder</div>' : ctx.consent ? `<div class="lead-sub">Imported · ${esc(ctx.consent.source || '')}</div>` : (j.created_by === 'auto_leads' ? '<div class="lead-sub">WhatsApp lead</div>' : '');
+                const about = ap ? `Dr. ${String(ap.doctor_name || '').replace(/^dr\.?\s*/i, '')} · ${ap.date || ''} ${ap.time || ''}` : (ctx.interest || '—');
+                return `<tr><td>${esc(j.patient_phone)}${src}</td><td>${esc(about)}</td><td>${badge(j.status)}</td><td>${esc(j.attempts)}</td>`
                     + `<td>${esc(VC_TIME(j.next_attempt_at))}</td><td>${esc(vcJobNote(j))}</td></tr>`;
             }).join('') || '<tr><td colspan="6">No outbound calls yet.</td></tr>')
             + '</tbody></table></div>';
@@ -12744,6 +12746,10 @@ const VC_JOB_ERR = {
     disabled: 'AI receptionist was switched off', do_not_contact: 'Opted out — not called',
     no_number: 'No Exotel number is set up for outbound calls', dial_failed: 'Could not place the call',
     db_write: 'Will retry shortly',
+    too_late: 'Not called — too close to the appointment (or outside 9 AM–9 PM)',
+    appointment_changed: 'Not called — the appointment was cancelled or moved',
+    superseded: 'Replaced by a later reminder for the same visit',
+    not_a_contact_of_this_clinic: 'Never contacted the clinic',
     HTTPStatusError: 'Exotel refused the call (older attempt) — contact Kriya support',
     exotel_http_401: 'Exotel rejected the API key — contact Kriya support',
     exotel_http_403: 'Exotel does not allow this call (account or number restriction) — contact Kriya support',
@@ -13006,6 +13012,7 @@ async function vcSettings() {
             + `<div class="vc-form">`
             + ['te', 'hi', 'en'].map(l => `<div class="field"><label for="vcPitch-${l}">${{ te: 'Telugu', hi: 'Hindi', en: 'English' }[l]}</label><textarea id="vcPitch-${l}" rows="3" maxlength="300">${esc(((s.outbound.pitch || {})[l]) || '')}</textarea></div>`).join('')
             + `</div></div>`
+            + vcReminderSection(s.reminders || {})
             + `<div class="vc-actions"><button type="button" class="btn btn-accent" onclick="vcSaveSettings()">Save settings</button><span class="lead-note">Monthly budget: ${s.monthly_budget_paise ? VC_MONEY(s.monthly_budget_paise) : 'no cap'} (set by Kriya). When it is used up, calls go straight to your reception.</span></div>`;
         document.getElementById('vcSetLang').value = s.primary_language;
         document.getElementById('vcSetConc').value = String(Math.min(5, Math.max(1, Number(s.outbound.concurrent) || 1)));
@@ -13017,11 +13024,40 @@ async function vcSettings() {
     } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
 }
 
+const VC_REMIND_PRESETS = [[15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [180, '3 hours'], [1440, '1 day']];
+
+function vcReminderSection(r) {
+    const mins = (r.minutes_before || []).map(Number);
+    const other = mins.find(m => !VC_REMIND_PRESETS.some(([p]) => p === m));
+    return `<div class="vc-section"><h3>Appointment reminder calls</h3><p class="lead-note">Kriya calls each patient with a confirmed doctor appointment before their visit, in your main language: says it is calling from your hospital, tells them the doctor, day and time, and asks them to come on time. If they cannot come, Kriya offers to move the appointment on the same call. WhatsApp reminders still go out as before.</p>`
+        + `<div class="field"><label class="check"><input type="checkbox" id="vcRemOn" ${r.enabled ? 'checked' : ''}> Call patients before their appointment</label></div>`
+        + `<div class="field"><label>Call this long before the appointment (up to 3)</label><div class="day-picker" id="vcRemTimes">${VC_REMIND_PRESETS.map(([m, l]) => `<label><input type="checkbox" value="${m}" ${mins.includes(m) ? 'checked' : ''}>${l}</label>`).join('')}</div></div>`
+        + `<div class="vc-form"><div class="field"><label for="vcRemOther">Other time (minutes before)</label><input id="vcRemOther" type="number" min="15" max="1440" step="5" value="${other ?? ''}" placeholder="e.g. 45"><div class="lead-sub">15 minutes to 1 day (1440).</div></div></div>`
+        + `<p class="lead-note">Reminder calls ring only between 9 AM and 9 PM and never later than 10 minutes before the visit. An unanswered call is tried again 10 minutes later while there is still time. Patients who opted out are never called. Each call uses your voice minutes.</p></div>`;
+}
+
+// null = invalid (a toast says why).
+function vcReminderBody() {
+    const mins = [...document.querySelectorAll('#vcRemTimes input:checked')].map(i => Number(i.value));
+    const raw = document.getElementById('vcRemOther').value.trim();
+    if (raw) {
+        const m = Number(raw);
+        if (!Number.isInteger(m) || m < 15 || m > 1440) { toast('Other reminder time must be 15 to 1440 minutes.', true); return null; }
+        if (!mins.includes(m)) mins.push(m);
+    }
+    const enabled = document.getElementById('vcRemOn').checked;
+    if (mins.length > 3) { toast('Pick at most 3 reminder times.', true); return null; }
+    if (enabled && !mins.length) { toast('Pick when Kriya should call before the appointment.', true); return null; }
+    return { enabled, minutes_before: mins };
+}
+
 async function vcSaveSettings() {
     const v = id => document.getElementById(id).value.trim();
     const s = vcState.settings || {};
     const days = [...document.querySelectorAll('#vcSetDays input:checked')].map(i => i.value);
     if (!days.length) { toast('Pick at least one day reception is open.', true); return; }
+    const reminders = vcReminderBody();
+    if (!reminders) return;
     const body = {
         primary_language: v('vcSetLang'), assistant_name: v('vcSetName'), speaker: v('vcSetSpeaker') || null,
         pace: Number(v('vcSetPace')) || 1.0, emergency_number: v('vcSetEmerg') || null,
@@ -13030,6 +13066,7 @@ async function vcSaveSettings() {
                     window_end: v('vcSetOe'), max_attempts: (s.outbound || {}).max_attempts || 2, daily_cap: Number(v('vcSetCap')) || 0,
                     concurrent: Number(v('vcSetConc')) || 1,
                     pitch: { te: v('vcPitch-te'), hi: v('vcPitch-hi'), en: v('vcPitch-en') } },
+        reminders,
     };
     try { await apiPut('/admin/voice/settings', body); toast('Saved'); } catch (e) { toast(e.message, true); }
 }

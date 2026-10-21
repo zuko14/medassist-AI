@@ -460,6 +460,10 @@ class SchedulerService:
                                    max_instances=1, coalesce=True)
             self.scheduler.add_job(self.voice_lead_autoqueue, CronTrigger(minute=15),
                                    id="voice_lead_autoqueue", replace_existing=True)
+            # Appointment reminder calls (migration 112): queued at the minute they fall due.
+            self.scheduler.add_job(self.voice_reminder_autoqueue, "interval", minutes=2,
+                                   id="voice_reminder_autoqueue", replace_existing=True,
+                                   max_instances=1, coalesce=True)
             self.scheduler.add_job(self.voice_retention_purge, CronTrigger(hour=3, minute=45),
                                    id="voice_retention_purge", replace_existing=True)
             # Receptionist learning (migration 106): misses -> staff-reviewed suggestions.
@@ -503,6 +507,19 @@ class SchedulerService:
                         logger.info(f"Voice outbound: queued {n} lead follow-up(s)")
                 except Exception as e:
                     logger.error(f"Voice lead auto-queue failed: {e}")
+
+    async def voice_reminder_autoqueue(self):
+        from app.services.distributed_lock import distributed_job_lock
+        from app.voice import outbound
+
+        async with distributed_job_lock("voice_reminder_autoqueue", lease_seconds=110) as acquired:
+            if acquired:
+                try:
+                    n = await outbound.autoqueue_reminders()
+                    if n:
+                        logger.info(f"Voice outbound: queued {n} appointment reminder call(s)")
+                except Exception as e:
+                    logger.error(f"Voice reminder auto-queue failed: {e}")
 
     async def voice_retention_purge(self):
         """DPDP minimisation: drop call timelines (transcripts) after the retention
