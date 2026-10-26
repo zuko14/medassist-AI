@@ -401,3 +401,17 @@ def test_branch_pinned_staff_cannot_touch_another_branchs_beds(api):
     assert api.call("PATCH", f"/admin/ipd/wards/{ward_b['id']}", clinic, {"name": "x"}).status_code == 403
     assert api.call("POST", f"/admin/ipd/wards/{ward_b['id']}/beds", clinic,
                     {"beds": [{"code": "S2", "bed_category": "general"}]}).status_code == 403
+
+
+def test_observation_correction_with_invalid_replacement_is_422_and_changes_nothing(api):
+    clinic = _clinic(api.conn)
+    doctor, u, beds = _setup_hospital(api, clinic)
+    aid = _admit(api, clinic, u, doctor, beds["101"]).json()["id"]
+    api.as_(u["nurse"])
+    obs = api.call("POST", f"/admin/ipd/admissions/{aid}/observations", clinic, {
+        "kind": "vitals", "observed_at": datetime.now(timezone.utc).isoformat(), "pulse_bpm": 104}).json()
+    for bad in ({"pulse_bpm": 900}, {"kind": "intake"}, {"bogus": 1}):
+        r = api.call("POST", f"/admin/ipd/observations/{obs['id']}/correct", clinic,
+                     {"reason": "Wrong value", "replacement": bad})
+        assert r.status_code == 422, (bad, r.status_code, r.text)
+    assert _q(api.conn, "SELECT status FROM ipd_observations WHERE id = %s", obs["id"]) == "recorded"

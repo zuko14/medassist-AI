@@ -5660,6 +5660,7 @@
                         <option value="maternity">Maternity</option><option value="isolation">Isolation</option><option value="daycare">Day care</option>
                         <option value="emergency">Emergency</option><option value="other">Other</option></select></div>
                     <div class="field"><label for="ipdWardGender">Gender restriction</label><select id="ipdWardGender"><option value="any">None</option><option value="male">Male only</option><option value="female">Female only</option></select></div>
+                    <div class="field" id="ipdWardBranchWrap" hidden><label for="ipdWardBranch">Branch</label><select id="ipdWardBranch"></select></div>
                 </div>
                 <div class="ipd-actions"><button type="button" class="btn btn-accent btn-sm" onclick="ipd.createWard()">Create ward</button></div>
             </div>
@@ -7684,8 +7685,42 @@ const ipd = {
     },
 
     // ── Setup ──
+    async loadBranches() {
+        // Multi-branch hospitals pick each ward's branch; a branch-pinned admin's wards are their own branch's.
+        // Not cached: a different login can follow in the same page (sign out / sign in).
+        let list = [];
+        if (planAllowsFeature('multi_branch')) {
+            try { list = ((await api('/admin/branches')).branches || []).filter(b => b.is_active !== false); } catch (e) { list = []; }
+        }
+        const pinned = myRole === 'staff' && myBranchId;
+        const visible = pinned ? list.filter(b => b.id === myBranchId) : list;
+        ipd.branchChoices = (pinned ? [] : [['', 'Shared (all branches)']]).concat(visible.map(b => [b.id, b.name]));
+        document.getElementById('ipdWardBranch').innerHTML = ipd.branchChoices
+            .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join('');
+        document.getElementById('ipdWardBranchWrap').hidden = !visible.length;
+        ipd.branches = Object.fromEntries(list.map(b => [b.id, b.name]));
+        return ipd.branches;
+    },
+    branchOptions(current) {
+        // A ward of another branch shows its own name too, so the select never misstates where it is.
+        const choices = ipd.branchChoices.slice();
+        if (current && !choices.some(c => c[0] === current)) choices.unshift([current, (ipd.branches || {})[current] || 'Branch']);
+        if (!current && !choices.some(c => c[0] === '')) choices.unshift(['', 'Shared (all branches)']);
+        return choices.map(([id, name]) => `<option value="${esc(id)}"${(id || null) === (current || null) ? ' selected' : ''}>${esc(name)}</option>`).join('');
+    },
+    async moveWard(id) {
+        const to = document.getElementById('ipdWB_' + id).value || null;
+        if (!await confirmDialog('Move this ward to ' + (to ? (ipd.branches[to] || 'that branch') : 'shared (all branches)')
+            + '? Its beds then appear on that branch\'s bed board. Not possible while a bed is occupied or reserved.',
+            { title: 'Change ward branch', okText: 'Move ward' })) { ipd.loadSetup(); return; }
+        await ipd.busy(null, async () => {
+            await apiPatch('/admin/ipd/wards/' + id, { branch_id: to });
+            toast('Ward moved'); ipd.loadSetup();
+        });
+    },
     async loadSetup() {
         try {
+            const branchNames = await ipd.loadBranches();
             const s = await api('/admin/ipd/setup');
             const board = await api('/admin/ipd/board');
             const t = s.settings.bed_tariffs || {};
@@ -7694,8 +7729,10 @@ const ipd = {
             document.getElementById('ipdTariffs').innerHTML = `<div class="tbl-wrap"><table id="ipdTariffTable"><thead><tr><th>Bed category</th><th>₹ per day</th></tr></thead><tbody>${[...cats].sort().map(c => ipd.tariffRow(c, t[c])).join('')}</tbody></table></div>`;
             document.getElementById('ipdCutoff').value = s.settings.discharge_cutoff_hour;
             document.getElementById('ipdResMin').value = s.settings.reservation_minutes;
-            document.getElementById('ipdSetupWards').innerHTML = board.wards.map(w => `<div class="card"><div class="card-head ipd-head"><h3>${esc(w.name)} <span class="muted">${esc(w.code)} · ${esc(ipd.label(w.ward_type))}${w.is_active ? '' : ' · inactive'}</span></h3>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="ipd.toggleWard('${esc(w.id)}', ${!w.is_active})">${w.is_active ? 'Deactivate' : 'Activate'}</button></div>
+            document.getElementById('ipdSetupWards').innerHTML = board.wards.map(w => `<div class="card"><div class="card-head ipd-head"><h3>${esc(w.name)} <span class="muted">${esc(w.code)} · ${esc(ipd.label(w.ward_type))}${Object.keys(branchNames).length ? ' · ' + esc(w.branch_id ? (branchNames[w.branch_id] || 'Branch') : 'Shared') : ''}${w.is_active ? '' : ' · inactive'}</span></h3>
+                <div class="ipd-row-actions">${Object.keys(branchNames).length ? `<label class="sr-only" for="ipdWB_${esc(w.id)}">Branch for ${esc(w.name)}</label><select id="ipdWB_${esc(w.id)}">${ipd.branchOptions(w.branch_id)}</select>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="ipd.moveWard('${esc(w.id)}')">Move</button>` : ''}
+                <button type="button" class="btn btn-ghost btn-sm" onclick="ipd.toggleWard('${esc(w.id)}', ${!w.is_active})">${w.is_active ? 'Deactivate' : 'Activate'}</button></div></div>
                 <div class="ipd-grid ipd-grid-tight"><div class="field"><label for="ipdBP_${esc(w.id)}">Bed code prefix</label><input id="ipdBP_${esc(w.id)}" maxlength="10" placeholder="${esc(w.code)}-"></div>
                 <div class="field"><label for="ipdBF_${esc(w.id)}">From no.</label><input id="ipdBF_${esc(w.id)}" type="number" min="1" value="1"></div>
                 <div class="field"><label for="ipdBT_${esc(w.id)}">To no.</label><input id="ipdBT_${esc(w.id)}" type="number" min="1" value="10"></div>
@@ -7725,7 +7762,8 @@ const ipd = {
     async createWard() {
         const v = id => document.getElementById(id).value.trim();
         await ipd.busy(null, async () => {
-            await apiPost('/admin/ipd/wards', { code: v('ipdWardCode'), name: v('ipdWardName'), ward_type: v('ipdWardType'), gender_restriction: v('ipdWardGender') });
+            await apiPost('/admin/ipd/wards', { code: v('ipdWardCode'), name: v('ipdWardName'), ward_type: v('ipdWardType'), gender_restriction: v('ipdWardGender'),
+                branch_id: v('ipdWardBranch') || null });
             toast('Ward created'); document.getElementById('ipdWardCode').value = ''; document.getElementById('ipdWardName').value = ''; ipd.loadSetup();
         });
     },
@@ -20272,7 +20310,16 @@ async function recordOpdPayment() {
         return;
     }
 
-    const idempotencyKey = crypto.randomUUID();
+    // One key per payment attempt: a retry after a timeout replays the first receipt
+    // (server + DB idempotency) instead of taking the money twice. Cleared on success.
+    const billing = window.opd.billing;
+    if (!billing.payAttempt || billing.payAttempt.invoiceId !== inv.id) {
+        billing.payAttempt = { invoiceId: inv.id, key: crypto.randomUUID() };
+    }
+    const idempotencyKey = billing.payAttempt.key;
+    const payBtn = document.getElementById('opdPayBtn');
+    if (payBtn && payBtn.disabled) return;           // a click while the first is in flight
+    if (payBtn) payBtn.disabled = true;
     const msgEl = document.getElementById('opdPayMsg');
     if (msgEl) {
         msgEl.textContent = 'Processing payment...';
@@ -20286,19 +20333,23 @@ async function recordOpdPayment() {
                 reference: refVal || null,
                 idempotency_key: idempotencyKey
             });
+        billing.payAttempt = null;
+        if (payBtn) payBtn.disabled = false;
 
         if (msgEl) msgEl.textContent = '';
-        toast(`Receipt ${rcpt.receipt_number} issued for ₹${(amtPaise/100).toFixed(2)}`);
+        const paidPaise = rcpt.amount_paise || amtPaise;   // a replay returns the first receipt's amount
+        toast(`Receipt ${rcpt.receipt_number} issued for ₹${(paidPaise/100).toFixed(2)}`);
 
         // Refresh invoice & drawer totals
         await openOpdInvoiceById(inv.id);
         await fetchOpdShiftStatus();
 
         // Prompt thermal print
-        if (await confirmDialog(`Payment of ₹${(amtPaise/100).toFixed(2)} recorded. Print the 80 mm receipt now?`, { title: 'Payment recorded', okText: 'Print receipt', cancelText: 'Not now' })) {
+        if (await confirmDialog(`Payment of ₹${(paidPaise/100).toFixed(2)} recorded. Print the 80 mm receipt now?`, { title: 'Payment recorded', okText: 'Print receipt', cancelText: 'Not now' })) {
             printOpdThermalReceipt(rcpt.id);
         }
     } catch (e) {
+        if (payBtn) payBtn.disabled = false;
         if (msgEl) {
             msgEl.textContent = 'Payment failed: ' + (e.message || e);
             msgEl.style.color = 'var(--opd-cancel)';

@@ -69,6 +69,8 @@ _ERRORS: dict[str, tuple[int, str]] = {
     "ipd_reservation_minutes": (422, "Reservation must be between 5 and 1440 minutes."),
     "ipd_bad_bed_status": (422, "Unknown bed status."),
     "ipd_bed_ineligible": (422, "This bed is not eligible for this patient."),
+    "ipd_ward_in_use": (409, "A bed in this ward is occupied or reserved. Discharge, transfer or release it before "
+                             "changing the ward's branch."),
 }
 _INELIGIBLE = {"gender": "This ward is restricted to the other gender.",
                "gender_unknown": "Record the patient's gender before using a gender-restricted ward.",
@@ -152,7 +154,10 @@ async def create_ward(clinic_id: str, body: dict) -> dict:
 
 
 async def update_ward(clinic_id: str, ward_id: str, patch: dict) -> dict:
-    res = await sb(supabase.table("ipd_wards").update(patch).eq("clinic_id", clinic_id).eq("id", ward_id))
+    try:
+        res = await sb(supabase.table("ipd_wards").update(patch).eq("clinic_id", clinic_id).eq("id", ward_id))
+    except Exception as e:
+        raise_for(e)
     if not res.data:
         raise HTTPException(status_code=404, detail="Ward not found.")
     return res.data[0]
@@ -221,16 +226,23 @@ def _days(admitted_at: Any) -> Optional[int]:
     return max(0, (datetime.now(timezone.utc) - start).days) if start else None
 
 
+async def _branch_wards(clinic_id: str, branch_id: Optional[str], cols: str = "*") -> list[dict]:
+    """Wards one branch works with: its own plus shared (branch-less) wards, which every
+    branch may already act on (enforce_branch_scope passes a NULL branch). None = all."""
+    if not branch_id:
+        return await _rows(scoped_query("ipd_wards", clinic_id, cols).order("code"))
+    own = await _rows(scoped_query("ipd_wards", clinic_id, cols).eq("branch_id", branch_id))
+    shared = await _rows(scoped_query("ipd_wards", clinic_id, cols).is_("branch_id", "null"))
+    return sorted(own + shared, key=lambda w: w.get("code") or "")
+
+
 async def bed_board(clinic_id: str, branch_id: Optional[str] = None, clinical: bool = False) -> dict:
     """Wards -> beds with occupant summary. Diagnosis only for clinical roles.
 
     shortcut: whole-clinic read (wards x beds), fine to a few hundred beds; add
     paging per ward when a tenant passes ~1,000 beds.
     """
-    wq = scoped_query("ipd_wards", clinic_id).order("code")
-    if branch_id:
-        wq = wq.eq("branch_id", branch_id)
-    wards = await _rows(wq)
+    wards = await _branch_wards(clinic_id, branch_id)
     ward_ids = [w["id"] for w in wards]
     beds = await _rows(scoped_query("ipd_beds", clinic_id).in_("ward_id", ward_ids).order("code")) if ward_ids else []
     adm_ids = sorted({b[k] for b in beds for k in ("current_admission_id", "reserved_admission_id") if b.get(k)})
@@ -624,8 +636,8 @@ async def worklist(clinic_id: str, branch_id: Optional[str] = None) -> dict:
                                       "priority, is_prn, ordered_at").in_("admission_id", in_bed)
                          .eq("status", "active")) if in_bed else []
     cq = scoped_query("ipd_beds", clinic_id, "id, code, ward_id, status_reason, updated_at").eq("status", "cleaning")
-    if branch_id:   # a branch-pinned user sees only their branch's beds
-        wards = [w["id"] for w in await _rows(scoped_query("ipd_wards", clinic_id, "id").eq("branch_id", branch_id))]
+    if branch_id:   # a branch-pinned user sees only their branch's (and shared) beds
+        wards = [w["id"] for w in await _branch_wards(clinic_id, branch_id, "id, code")]
         cq = cq.in_("ward_id", wards) if wards else None
     cleaning = await _rows(cq) if cq is not None else []
 

@@ -271,6 +271,33 @@ def _patients_matching(data, params: dict) -> list:
     return [p for p in rows if not q or q in (p.get("name") or "").lower() or q in (p.get("phone") or "")]
 
 
+def _tests_matching(data, params: dict) -> list:
+    """A price question names a test ("price of cbc test"): rows whose name has every word of it."""
+    words = (params.get("q") or "").lower().split()
+    rows = [t for t in _rows(data, "") or [] if isinstance(t, dict)]
+    return [t for t in rows if all(w in (t.get("name") or "").lower() for w in words)]
+
+
+def _with_no_show_rate(data):
+    """The dashboard's own counts plus no-shows as a share of appointments (none when there are none)."""
+    if not isinstance(data, dict):
+        return data
+    total, missed = data.get("total_appointments"), data.get("no_show")
+    if isinstance(total, int) and total > 0 and isinstance(missed, int):
+        return {**data, "no_show_rate": round(100 * missed / total, 1)}
+    return data
+
+
+def _unpaid_rows(data) -> list:
+    return [{**r, "balance_paise": (r.get("total_paise") or 0) - (r.get("paid_paise") or 0)}
+            for r in _rows(data, "") or [] if isinstance(r, dict)]
+
+
+def _upcoming(data) -> list:
+    today = today_ist().isoformat()
+    return [h for h in _rows(data, "") or [] if isinstance(h, dict) and str(h.get("holiday_date") or "")[:10] >= today]
+
+
 _APPT = (("Time", "appointment_time", "text"), ("Patient", "patient_name", "text"),
          ("Department", "department", "text"), ("Status", "status", "label"), ("Ref", "booking_ref", "text"))
 _OPD, _VOICE, _HANDLER = ("OPD_FRONT_DESK", "OPD_CLINICAL", "OPD_BILLING"), "VOICE_VIEW", "handler"
@@ -283,10 +310,13 @@ def _opd_live(clinic: dict) -> bool:  # _opd_scope(..., live=True): OPD on and i
 READS = (
     _read("stats.summary", "Dashboard figures", "/admin/stats", "dashboard",
           ("dashboard stats", "clinic stats", "monthly stats", "dashboard numbers", "stats summary", "nela stats",
-           "mahine ke stats", "గణాంకాలు", "आंकड़े"),
-          lambda d, p: present.metrics("Last 30 days", "dashboard", d, (
+           "mahine ke stats", "గణాంకాలు", "आंकड़े",
+           # no-shows (2026-10-26 probe): the same figures, with the rate
+           "no show", "no shows", "noshow", "no show rate", "missed appointments", "రాని పేషెంట్లు", "नहीं आए मरीज"),
+          lambda d, p: present.metrics("Last 30 days", "dashboard", _with_no_show_rate(d), (
               ("Appointments", "total_appointments", "num"), ("Confirmed", "confirmed", "num"),
               ("Completed", "completed", "num"), ("Cancelled", "cancelled", "num"), ("No-shows", "no_show", "num"),
+              ("No-show rate", "no_show_rate", "pct"),
               ("New patients", "new_patients", "num"), ("All patients", "total_patients", "num"))),
           query=lambda p: {"days": 30}),
     _read("insights.view", "Insights", "/admin/insights", "insights",
@@ -351,16 +381,23 @@ READS = (
           permission=_OPD[0], also=_OPD[1:], perm_source=_HANDLER, feature=_opd_live),
     _read("doctors.list", "Doctors", "/admin/doctors", "doctors",
           ("list doctors", "which doctors", "doctors available", "doctor names", "how many doctors", "doctors evaru",
-           "kaun se doctor", "ఏ డాక్టర్లు", "कौन से डॉक्टर"),
+           "kaun se doctor", "ఏ డాక్టర్లు", "कौन से डॉक्टर",
+           # a question about fees reads them; changing one is the doctor.fee hand-off
+           "what is+fee", "how much+fee", "fee+kitna", "fee+kitni", "fee+entha", "fees+list", "show+fees"),
           lambda d, p: present.table("Doctors", "doctors", (
               ("Name", "name", "text"), ("Specialisation", "specialization", "text"),
-              ("Department", "department", "text"), ("Active", "is_active", "yesno")), _rows(d, ""))),
+              ("Department", "department", "text"), ("Fee", "consultation_fee", "rupees"),
+              ("Active", "is_active", "yesno")), _rows(d, ""))),
     _read("lab_tests.list", "Lab tests", "/admin/lab-tests", "labtests",
           ("lab test rates", "test rates", "lab test prices", "list tests", "how many tests", "test dharalu",
-           "test ke rate", "టెస్ట్ ధరలు", "टेस्ट के रेट"),
-          lambda d, p: present.table("Lab tests", "labtests", (
+           "test ke rate", "టెస్ట్ ధరలు", "टेस्ट के रेट",
+           # one test's price (2026-10-26 probe): "price of cbc test", "cbc test entha"
+           "price+test", "rate+test", "cost+test", "test+entha", "test+ka rate", "test+ki price", "टेस्ट+कीमत",
+           "టెస్ట్+ధర"),
+          lambda d, p: present.table(f'Lab tests matching "{p["q"]}"' if p.get("q") else "Lab tests", "labtests", (
               ("Test", "name", "text"), ("Price", "price_paise", "paise"), ("Sample", "sample_type", "label"),
-              ("Active", "is_active", "yesno")), _rows(d, ""))),
+              ("Active", "is_active", "yesno")), _tests_matching(d, p)),
+          slots=(SlotSpec("q", "price_term", required=False),)),
     _read("treatments.list", "Treatments", "/admin/treatments", "treatments",
           ("list treatments", "treatment prices", "treatment rates", "which treatments", "treatment list",
            "treatment dharalu", "treatment ke rate", "ట్రీట్మెంట్ ధరలు", "ट्रीटमेंट के रेट"),
@@ -377,7 +414,10 @@ READS = (
           query=lambda p: {"days": 7, "state": "all"}, permission="REPORTS_VIEW", perm_source="dependency"),
     _read("reports.queue", "Reports needing attention", "/admin/reports/queue", "diagreports",
           ("failed reports", "report queue", "unmatched reports", "reports needing review", "stuck reports",
-           "fail aina reports", "atki reports", "ఫెయిల్ అయిన రిపోర్ట్స్", "अटकी रिपोर्ट"),
+           "fail aina reports", "atki reports", "ఫెయిల్ అయిన రిపోర్ట్స్", "अटकी रिपोर्ट",
+           # "pending" = not yet with the patient (2026-10-26 probe); results stay in the lab system
+           "pending lab reports", "pending reports", "reports pending", "pending report", "report pending",
+           "పెండింగ్ రిపోర్ట్స్", "पेंडिंग रिपोर्ट"),
           lambda d, p: present.table("Reports needing attention", "diagreports", (
               ("Patient", "patient_name", "text"), ("Report", "report_name", "text"), ("Issue", "issue", "text")),
               _report_queue_rows(d)),
@@ -495,6 +535,34 @@ READS = (
               ("Name", "name", "text"), ("Phone", "phone", "phone"), ("Visits", "visit_count", "num")),
               _patients_matching(d, p)),
           slots=(SlotSpec("q", "term", required=False),)),
+    # 2026-10-26: everyday questions from the probe. Same endpoints and filters as the OPD Billing page.
+    _read("opd.collections", "Today's collection", "/admin/opd/collections/summary", "opdbilling",
+          ("today's collection", "todays collection", "collection today", "today collection", "total collection",
+           "collection summary", "daily collection", "cash collected", "ee roju collection", "collection entha",
+           "aaj ka collection", "aaj ki collection", "collection kitna", "ఈ రోజు కలెక్షన్", "కలెక్షన్ ఎంత",
+           "आज का कलेक्शन", "कलेक्शन कितना"),
+          lambda d, p: present.metrics(f"Collection on {_on(p)}", "opdbilling", d, (
+              ("Net collected", "net_paise", "paise"), ("Gross", "gross_paise", "paise"),
+              ("Refunds", "refunds_paise", "paise"), ("Cash", "modes.cash", "paise"), ("UPI", "modes.upi", "paise"),
+              ("Card", "modes.card", "paise"), ("Online", "online_paise", "paise"),
+              ("Outstanding dues", "outstanding_dues_paise", "paise"), ("Bills raised", "invoices_count", "num"))),
+          query=lambda p: {"date": _day(p)}, slots=_DATE,
+          permission="OPD_BILLING", also=("OPD_ADMIN",), perm_source=_HANDLER, feature=_opd_live),
+    _read("opd.unpaid", "Unpaid bills", "/admin/opd/invoices", "opdbilling",
+          ("pending payments", "pending payment", "unpaid bills", "unpaid bill", "unpaid invoices", "outstanding bills",
+           "outstanding dues", "pending dues", "dues pending", "balance due", "pending bills", "bills pending",
+           "baki bills", "bakaya bills", "baaki payment", "బకాయి బిల్లులు", "बकाया बिल"),
+          lambda d, p: present.table("Unpaid bills (latest 50)", "opdbilling", (
+              ("Bill", "invoice_number", "text"), ("Patient", "patient_snapshot.name", "text"),
+              ("Balance", "balance_paise", "paise"), ("Issued", "issued_at", "time")), _unpaid_rows(d)),
+          query=lambda p: {"status": "issued,partially_paid"},
+          permission="OPD_BILLING", also=("OPD_ADMIN",), perm_source=_HANDLER, feature=_opd_live),
+    _read("holidays.list", "Hospital holidays", "/admin/holidays", "holidays",
+          ("list holidays", "holiday list", "holidays list", "upcoming holidays", "next holiday", "holidays this year",
+           "which holidays", "holiday calendar", "holidays enti", "selavu dinalu enti", "holidays kab", "chuttiyon ki list",
+           "సెలవు దినాల జాబితా", "छुट्टियों की सूची"),
+          lambda d, p: present.table("Upcoming holidays", "holidays", (
+              ("Date", "holiday_date", "date"), ("Holiday", "name", "text")), _upcoming(d))),
 )
 
 # ── PB-01 doctor leave (KK-P4-02; app/assistant/playbooks.py) ──
@@ -866,6 +934,13 @@ HANDOFF_ACTIONS = (
        "Only the doctor signs; Kriya never writes clinical content.", feature=_opd_live),
     _h("doctor.delete", "Remove a doctor", "doctors", "", ("delete+doctor", "remove+doctor"),
        "Removing a doctor is done by a person. " + _ROW),
+    # A fee is what patients are charged and quoted on WhatsApp, so a person changes it on the page.
+    _h("doctor.fee", "Change a doctor's fee", "doctors", "",
+       ("consultation fee", "doctor fee", "doctor's fee", "doctors fee", "dr fee", "fee+doctor", "fee+dr",
+        "fees+doctor", "fees+dr", "doctor ki fees", "doctor ki fee", "doctor fee marchu", "డాక్టర్ ఫీజు", "डॉक्टर की फीस"),
+       "A doctor's consultation fee is changed on the Doctors page: edit the doctor and change Consultation fee. "
+       + _ROW, unless=("add", "new doctor", "create", "register", "onboard",
+                       "what is", "how much", "kitna", "kitni", "entha", "list", "show")),
     _h("lab_test.delete", "Delete a lab test", "labtests", "", ("delete+test", "remove+test", "delete+lab test"),
        "Deleting is done by a person (Kriya can deactivate a test instead). " + _ROW),
     _h("treatment.delete", "Delete a treatment", "treatments", "", ("delete+treatment", "remove+treatment"),
@@ -1060,7 +1135,9 @@ IPD_ACTIONS = (
 )
 
 #: action -> the action that does the same job where the first is switched off for the clinic (KK-FR-061).
-VARIANTS: dict[str, str] = {"appointment.check_in": "opd.arrive"}
+VARIANTS: dict[str, str] = {"appointment.check_in": "opd.arrive",
+                             # no live OPD (e.g. a diagnostic centre): the money is online bookings
+                             "opd.collections": "payments.reconciliation", "opd.unpaid": "bookings.pending_review"}
 
 REGISTRY: dict[str, ActionSpec] = _build(
     ActionSpec(id="nav.open", module="nav", summary="Open a page", risk="R0"),       # client go(page)

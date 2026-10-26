@@ -4307,6 +4307,236 @@
    "expect": "help:ipdchart",
    "lang": "en",
    "near": "ipd.discharges"
+  },
+  {
+   "text": "today's collection",
+   "expect": "action:opd.collections",
+   "lang": "en"
+  },
+  {
+   "text": "show today's collection",
+   "expect": "action:opd.collections",
+   "lang": "en"
+  },
+  {
+   "text": "total collection today",
+   "expect": "action:opd.collections",
+   "lang": "en"
+  },
+  {
+   "text": "collection summary for today",
+   "expect": "action:opd.collections",
+   "lang": "en"
+  },
+  {
+   "text": "ee roju collection entha",
+   "expect": "action:opd.collections",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj ka collection kitna hua",
+   "expect": "action:opd.collections",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ఈ రోజు కలెక్షన్ ఎంత",
+   "expect": "action:opd.collections",
+   "lang": "te"
+  },
+  {
+   "text": "आज का कलेक्शन",
+   "expect": "action:opd.collections",
+   "lang": "hi"
+  },
+  {
+   "text": "show collections",
+   "expect": "nav:opdearnings",
+   "near": "opd.collections"
+  },
+  {
+   "text": "reset today's collection",
+   "expect": "none",
+   "near": "opd.collections"
+  },
+  {
+   "text": "pending payments",
+   "expect": "action:opd.unpaid",
+   "lang": "en"
+  },
+  {
+   "text": "unpaid bills",
+   "expect": "action:opd.unpaid",
+   "lang": "en"
+  },
+  {
+   "text": "show outstanding dues",
+   "expect": "action:opd.unpaid",
+   "lang": "en"
+  },
+  {
+   "text": "pending bills today",
+   "expect": "action:opd.unpaid",
+   "lang": "en"
+  },
+  {
+   "text": "baki bills chupinchu",
+   "expect": "action:opd.unpaid",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "bakaya bills dikhao",
+   "expect": "action:opd.unpaid",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "బకాయి బిల్లులు",
+   "expect": "action:opd.unpaid",
+   "lang": "te"
+  },
+  {
+   "text": "बकाया बिल",
+   "expect": "action:opd.unpaid",
+   "lang": "hi"
+  },
+  {
+   "text": "open the billing page please",
+   "expect": "nav:opdbilling",
+   "near": "opd.unpaid"
+  },
+  {
+   "text": "clear pending payments",
+   "expect": "none",
+   "near": "opd.unpaid"
+  },
+  {
+   "text": "list holidays",
+   "expect": "action:holidays.list",
+   "lang": "en"
+  },
+  {
+   "text": "upcoming holidays",
+   "expect": "action:holidays.list",
+   "lang": "en"
+  },
+  {
+   "text": "when is the next holiday",
+   "expect": "action:holidays.list",
+   "lang": "en"
+  },
+  {
+   "text": "holiday list for this year",
+   "expect": "action:holidays.list",
+   "lang": "en"
+  },
+  {
+   "text": "holidays enti",
+   "expect": "action:holidays.list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "holidays kab hai",
+   "expect": "action:holidays.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "छुट्टियों की सूची",
+   "expect": "action:holidays.list",
+   "lang": "hi"
+  },
+  {
+   "text": "take me to the holidays page",
+   "expect": "nav:holidays",
+   "near": "holidays.list"
+  },
+  {
+   "text": "add holiday on 1 november",
+   "expect": "action:holiday.create",
+   "near": "holidays.list"
+  },
+  {
+   "text": "pending lab reports",
+   "expect": "action:reports.queue",
+   "lang": "en"
+  },
+  {
+   "text": "reports pending",
+   "expect": "action:reports.queue",
+   "lang": "en"
+  },
+  {
+   "text": "reports enni pending unnayi",
+   "expect": "action:reports.queue",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kitni reports pending hai",
+   "expect": "action:reports.queue",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "price of cbc test",
+   "expect": "action:lab_tests.list",
+   "lang": "en"
+  },
+  {
+   "text": "what is the rate of thyroid profile test",
+   "expect": "action:lab_tests.list",
+   "lang": "en"
+  },
+  {
+   "text": "cbc test entha",
+   "expect": "action:lab_tests.list",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "cbc test ka rate",
+   "expect": "action:lab_tests.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "no-show rate this month",
+   "expect": "action:stats.summary",
+   "lang": "en"
+  },
+  {
+   "text": "how many no shows",
+   "expect": "action:stats.summary",
+   "lang": "en"
+  },
+  {
+   "text": "missed appointments count",
+   "expect": "action:stats.summary",
+   "lang": "en"
+  },
+  {
+   "text": "no show enni",
+   "expect": "action:stats.summary",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kitne no show hue",
+   "expect": "action:stats.summary",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "what is dr meena's consultation fee",
+   "expect": "action:doctors.list",
+   "lang": "en"
+  },
+  {
+   "text": "how much is the doctor fee",
+   "expect": "action:doctors.list",
+   "lang": "en"
+  },
+  {
+   "text": "doctor fee kitna hai",
+   "expect": "action:doctors.list",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "doctor fee entha",
+   "expect": "action:doctors.list",
+   "lang": "te-Latin"
   }
  ],
  "doctors": [

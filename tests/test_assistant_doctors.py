@@ -349,6 +349,20 @@ def test_follow_up_never_hijacks_a_real_command_or_chatter(db, docs):  # noqa: F
     assert second["run_id"] in active and first["run_id"] in active  # neither form was touched
 
 
+def test_a_new_instruction_is_never_absorbed_by_an_open_form(db, docs):  # noqa: F811
+    """Found in a probe: with "Add Dr Kiran" open, "change dr anitha consultation fee to 600" (no rule
+    matches it) was read as the new doctor's fee. A sentence with its own command verb is a new request."""
+    first = _ask("Add Dr Kiran Kumar, Mon-Sat")
+    assert "fee" in first["cards"][0]["missing"], first
+    for text in ("change dr anitha consultation fee to 600", "update the lab test price to 450",
+                 "set the evening timings to 5 to 8 for dr anitha"):
+        assert _ask(text)["action_id"] != "doctor.create", text
+    active = [r["run_id"] for r in client.get("/admin/assistant/runs?active=1").json()]
+    assert first["run_id"] in active                       # the open form was not touched
+    _ask("Add Dr Kiran Kumar, Mon-Sat")
+    assert _ask("₹600")["route_layer"] == "form"          # a bare answer still continues the latest form
+
+
 def test_follow_up_only_continues_the_latest_run(db, docs):  # noqa: F811
     _ask("Add Dr Kiran Kumar, ₹600, Mon-Sat")
     _ask("open leads")

@@ -40,7 +40,7 @@ def test_kriya_ketu_enabled(clinic, expected):
 def test_settings_defaults_are_off_and_match_the_spec():
     s = Settings()
     assert s.assistant_enabled is False
-    assert s.assistant_stt_enabled is False
+    assert s.assistant_stt_enabled is True       # owner, 2026-10-26: mic on wherever Kriya Ketu is on
     assert s.assistant_llm_enabled is True
     assert s.assistant_llm_model == "google/gemini-3.1-flash-lite"
     assert s.assistant_llm_fallback_model == "openai/gpt-4.1-mini"
@@ -56,10 +56,11 @@ def _user(staff_role=None, clinic_id=CID, role="staff"):
                      staff_role=staff_role, permissions=[])
 
 
-async def _me(user, features, *, on=True, stt=True, clinic_id=None):
+async def _me(user, features, *, on=True, stt=True, clinic_id=None, key="sarvam-key"):
     clinic = {"id": CID, "plan": "polyclinic", "features": features}
     with patch.object(settings, "assistant_enabled", on), \
          patch.object(settings, "assistant_stt_enabled", stt), \
+         patch.object(settings, "sarvam_api_key", key), \
          patch("app.routers.admin.get_clinic_by_id", new_callable=AsyncMock, return_value=clinic):
         return await admin.get_current_admin(clinic_id=clinic_id, user=user)
 
@@ -83,6 +84,13 @@ async def test_me_hides_the_assistant(staff_role, features, on, stt, exp_assista
     res = await _me(_user(staff_role), features, on=on, stt=stt)
     assert res["assistant_enabled"] is exp_assistant
     assert res["assistant_stt_enabled"] is exp_stt
+
+
+@pytest.mark.asyncio
+async def test_no_mic_without_a_speech_key():
+    """A mic the server cannot serve (no SARVAM_API_KEY) would fail on every press: it is hidden."""
+    res = await _me(_user("FRONT_DESK"), {"kriya_ketu": True}, key="")
+    assert res["assistant_enabled"] is True and res["assistant_stt_enabled"] is False
 
 
 @pytest.mark.asyncio

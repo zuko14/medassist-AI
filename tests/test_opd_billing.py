@@ -100,6 +100,10 @@ def _q_path(query) -> str:
     return str(getattr(getattr(query, "request", None), "path", ""))
 
 
+def _is_lookup(query) -> bool:
+    return getattr(getattr(query, "request", None), "http_method", "") == "GET"
+
+
 # ─── 1. PRICING & CATALOG ───────────────────────────────────────────────────
 
 
@@ -217,7 +221,14 @@ async def test_draft_edit_cas_stale_conflict_409():
         "items": [],
     }
 
-    with patch("app.services.opd_billing.sb", AsyncMock(return_value=MagicMock(data=[mock_inv]))):
+    async def db(query):
+        if "rpc/opd_save_invoice_draft" in _q_path(query):
+            # the version check runs under the row lock in SQL (migration 114)
+            raise Exception("{'message': 'opd_stale_draft', 'code': 'P0001'}")
+        return MagicMock(data=[mock_inv])
+
+    with patch("app.services.opd_billing.sb", side_effect=db), \
+         patch("app.services.opd_billing.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)):
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as exc_info:
             await save_invoice_draft(
@@ -322,6 +333,8 @@ async def test_split_payment_cash_and_upi_settles_invoice():
 
     async def mock_sb_split_1(query):
         p = _q_path(query)
+        if "opd_receipts" in p and _is_lookup(query):
+            return MagicMock(data=[])
         if "opd_cashier_shifts" in p:
             return MagicMock(data=[mock_shift])
         if "opd_invoices" in p:
@@ -352,6 +365,8 @@ async def test_split_payment_cash_and_upi_settles_invoice():
 
     async def mock_sb_split_2(query):
         p = _q_path(query)
+        if "opd_receipts" in p and _is_lookup(query):
+            return MagicMock(data=[])
         if "opd_cashier_shifts" in p:
             return MagicMock(data=[mock_shift])
         if "opd_invoices" in p:
@@ -417,6 +432,8 @@ async def test_receipt_idempotency_key_replay_returns_same_receipt():
         "amount_paise": 50000,
     }
 
+    stored = []   # the database: the lookup finds a receipt only after one was inserted
+
     async def mock_sb_idemp(query):
         p = _q_path(query)
         if "opd_invoices" in p:
@@ -424,6 +441,9 @@ async def test_receipt_idempotency_key_replay_returns_same_receipt():
         if "opd_cashier_shifts" in p:
             return MagicMock(data=[mock_shift])
         if "opd_receipts" in p:
+            if _is_lookup(query):
+                return MagicMock(data=list(stored))
+            stored.append(mock_rcpt)
             return MagicMock(data=[mock_rcpt])
         return MagicMock(data=[])
 
@@ -449,6 +469,7 @@ async def test_receipt_idempotency_key_replay_returns_same_receipt():
 
         assert first_res["id"] == second_res["id"]
         assert second_res["receipt_number"] == "RCT-2026-00099"
+        assert len(stored) == 1          # one insert: the replay came from the database
 
 
 # ─── 4. REFUNDS & VOIDS ─────────────────────────────────────────────────────
@@ -591,9 +612,11 @@ async def test_prepaid_online_booking_creates_prepaid_online_receipt_on_issue():
         if "opd_receipts" in p and m == "POST":
             receipt_inserted = True
             return MagicMock(data=[{"id": str(uuid.uuid4()), "mode": "prepaid_online", "shift_id": None}])
-        if "opd_receipts" in p:
-            # Check for existing receipt returns empty
+        if "opd_receipts" in p or "opd_payment_exceptions" in p:
+            # Check for existing receipt / parked excess returns empty
             return MagicMock(data=[])
+        if "opd_invoices" in p and m == "PATCH":
+            mock_inv["status"] = "issued"
         return MagicMock(data=[mock_inv])
 
     with patch("app.services.opd_billing.get_invoice", AsyncMock(return_value={**mock_inv, "status": "paid", "paid_paise": 50000})), \

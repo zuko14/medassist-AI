@@ -119,6 +119,37 @@ _REJECTED = {
     "unavailable": "Kriya couldn't prepare that right now. Please try again.",
 }
 _ACK_DEFAULT = "I understand this may be sent twice"
+#: What a greeting, "help" or a request Kriya can't do is answered with: real requests, in this order,
+#: filtered to the actions THIS user may run here (policy.permitted_actions).
+EXAMPLES = (
+    ("appointments.search", "show today's appointments"), ("opd.queue", "who is waiting for Dr Rao"),
+    ("opd.call_next", "call the next patient for Dr Rao"), ("briefing.morning", "give me today's briefing"),
+    ("opd.collections", "today's collection"), ("opd.unpaid", "pending payments"),
+    ("ipd.census", "how many beds are free"), ("doctor_leave.create", "mark Dr Rao on leave tomorrow"),
+    ("leads.list", "show new leads"), ("report.resend", "resend the report to 98480 12345"),
+    ("holiday.create", "hospital holiday on 1 November"), ("patient.register", "register a new patient"),
+    ("doctor.create", "add a new doctor"), ("lab_test.create", "add a lab test"),
+)
+
+
+def _with_chat(fields: dict, user: AdminUser, clinic: dict) -> dict:
+    """Small talk and "can't do that" answered with what this user can do here."""
+    chat = (fields.get("params") or {}).get("chat") if fields.get("action_id") == "help.howto" else None
+    if chat or fields.get("error_code") == "unsupported":
+        fields["result"] = _text(_chat_reply(chat, user, clinic), "help")
+    return fields
+
+
+def _chat_reply(kind: Optional[str], user: AdminUser, clinic: dict) -> str:
+    """kind: greeting | capabilities | thanks (rules.small_talk), or None = a request Kriya can't do."""
+    if kind == "thanks":
+        return "You're welcome."
+    allowed = set(policy.permitted_actions(user, clinic))
+    said = ", ".join([f'"{text}"' for action, text in EXAMPLES if action in allowed][:5])
+    lead = {"greeting": "Hi, I'm Kriya Ketu.", "capabilities": "I'm Kriya Ketu."}.get(kind, "I can't do that yet.")
+    asks = f" You can ask me, for example: {said}." if said else ""
+    return (f"{lead}{asks} I can also open a page (\"open appointments\") or tell you how to do something "
+            f"(\"how do I add a leave\").")
 
 
 def _text(message: str, card: str = "text", **extra) -> dict:
@@ -132,6 +163,9 @@ def _fields(r: rules.Route, layer: str) -> dict:
         result["navigate"] = r.page
         return {"to": "COMPLETED_VERIFIED", "action_id": "nav.open", "route_layer": "nav" if layer == "rules" else layer,
                 "params": {"page": r.page}, "result": result}
+    if r.kind == "help" and r.error_code in rules.SMALL_TALK:  # the text is set by the caller (_chat_reply)
+        return {"to": "COMPLETED_VERIFIED", "action_id": "help.howto", "route_layer": layer,
+                "params": {"chat": r.error_code}, "result": _text("", "help")}
     if r.kind == "help":
         answer = r.help.answer if r.help else f"You can do this on the {PAGES.get(r.page, 'right')} page."
         return {"to": "COMPLETED_VERIFIED", "action_id": "help.howto", "route_layer": layer,
@@ -231,7 +265,7 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
             r = _variant(rules.fill(REGISTRY[live[0]], body.text, doctors=doctors, question=rules.asks(body.text),
                                     visible=None if visible is None else set(visible)), clinic)
     if not (r.kind == "none" or (r.kind == "clarify" and r.candidate_actions)):
-        return _fields(r, "rules")
+        return _with_chat(_fields(r, "rules"), user, clinic)
     if r.kind == "none" and not rules.asks(body.text):
         continued = await _follow_up(body, scope, user, clinic, auth, run_id)
         if continued is not None:
@@ -241,7 +275,8 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
                              action_ids=policy.permitted_actions(user, clinic), visible_pages=visible)
     spent = {"llm_tokens": out.tokens, "llm_cost_paise": out.cost_paise}
     if out.status != "ok":
-        fields = _fields(r, "rules") if r.kind == "clarify" else _fields(rules.Route("none"), "none")
+        fields = _fields(r, "rules") if r.kind == "clarify" else _with_chat(_fields(rules.Route("none"), "none"),
+                                                                             user, clinic)
         if out.status == "invalid":
             fields["route_layer"] = "llm"
         if out.status == "budget" and user.role in ("clinic_admin", "super_admin"):
@@ -251,8 +286,8 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
     spec = REGISTRY.get(out.intent.action_id or "")
     if doctors is None and spec is not None and any(sl.kind == "doctor" for sl in spec.slots):
         doctors = await _doctors(auth, scope, run_id)
-    fields = _fields(_variant(_from_llm(out.intent, body, set(visible) if visible is not None else None, doctors),
-                              clinic), "llm")
+    fields = _with_chat(_fields(_variant(_from_llm(out.intent, body, set(visible) if visible is not None else None,
+                                                   doctors), clinic), "llm"), user, clinic)
     if fields["to"] == "NEEDS_CLARIFICATION" and out.intent.question_for_user:
         fields["result"]["message"] = out.intent.question_for_user  # plain text; the widget escapes it
     return {**fields, **spent}
@@ -264,6 +299,8 @@ async def _follow_up(body: RequestIn, scope: str, user: AdminUser, clinic: dict,
     request instead of starting a new one: its answers carry over to this run and the old form closes.
     Only the user's latest earlier run, only while its form is open, only slots the reply states with
     concrete evidence (rules.FOLLOW_UP_KINDS). None = not a reply; the caller routes the text as usual."""
+    if rules.starts_new_request(body.text):
+        return None
     prev = next((r for r in await store.list_runs(scope, user.username, False, 2) if r["id"] != run_id), None)
     if not prev or prev["state"] != "NEEDS_CLARIFICATION":
         return None

@@ -8,10 +8,9 @@ Zero-LLM clinical safety compliant.
 import asyncio
 import logging
 import secrets
-import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from fastapi import HTTPException
 
@@ -39,18 +38,6 @@ def _drawer_admin_id(actor: Any) -> Optional[str]:
     billing page errored on each 5 s poll for super-admins.
     """
     return actor_uuid(actor)
-
-# In-memory TTL cache for receipt idempotency keys (clinic_id:key -> (timestamp, receipt))
-_IDEMPOTENCY_CACHE: Dict[str, Tuple[float, dict]] = {}
-_IDEMPOTENCY_TTL_SECONDS = 600.0  # 10 minutes
-
-
-def _clean_idempotency_cache() -> None:
-    """Evict expired idempotency keys."""
-    now = time.time()
-    expired = [k for k, (ts, _) in _IDEMPOTENCY_CACHE.items() if now - ts > _IDEMPOTENCY_TTL_SECONDS]
-    for k in expired:
-        _IDEMPOTENCY_CACHE.pop(k, None)
 
 
 def _format_money_inr(paise: int) -> str:
@@ -311,7 +298,11 @@ async def save_invoice_draft(
     notes: Optional[str] = None,
     actor: Any = None,
 ) -> dict:
-    """Update draft invoice items and discounts with CAS optimistic locking."""
+    """Replace a draft's lines, discount and notes in ONE transaction (migration 114).
+
+    The version check is exact and happens under the invoice row lock, so of two
+    cashiers saving the same draft the second gets 409 instead of overwriting the
+    first; a failing line changes nothing."""
     inv_res = await sb(
         scoped_query("opd_invoices", clinic_id)
         .eq("id", invoice_id)
@@ -327,19 +318,6 @@ async def save_invoice_draft(
             detail=f"Cannot edit invoice in '{invoice.get('status')}' status. Only draft invoices can be edited.",
         )
 
-    # CAS check
-    actual_updated_str = invoice.get("updated_at")
-    if actual_updated_str:
-        actual_updated = datetime.fromisoformat(actual_updated_str.replace("Z", "+00:00"))
-        expected_norm = expected_updated_at.astimezone(timezone.utc)
-        actual_norm = actual_updated.astimezone(timezone.utc)
-        # Compare seconds with 0.1s margin
-        if abs((actual_norm - expected_norm).total_seconds()) > 0.5:
-            raise HTTPException(
-                status_code=409,
-                detail="Invoice was modified concurrently. Please reload to review the latest changes.",
-            )
-
     if discount_paise > 0 and not discount_reason:
         raise HTTPException(status_code=422, detail="Discount reason is required when discount is applied.")
 
@@ -350,46 +328,31 @@ async def save_invoice_draft(
     if discount_paise > subtotal_paise:
         raise HTTPException(status_code=422, detail="Discount cannot exceed invoice subtotal.")
 
-    # Delete existing items
-    await sb(
-        supabase.table("opd_invoice_items")
-        .delete()
-        .eq("clinic_id", clinic_id)
-        .eq("invoice_id", invoice_id)
-    )
-
-    # Insert updated items
-    for line_idx, item in enumerate(validated_items, start=1):
-        item_row = {
-            "clinic_id": clinic_id,
-            "invoice_id": invoice_id,
-            "line_no": line_idx,
-            "item_type": item["item_type"],
-            "catalog_code": item.get("catalog_code"),
-            "doctor_id": item.get("doctor_id"),
-            "lab_test_id": item.get("lab_test_id"),
-            "description": item["description"],
-            "quantity": item["quantity"],
-            "unit_price_paise": item["unit_price_paise"],
-            "discount_paise": item.get("discount_paise", 0),
-        }
-        # unscoped: insert_scoped_by_payload
-        await sb(supabase.table("opd_invoice_items").insert(item_row))
-
-    # Update invoice fields
-    updates = {
-        "subtotal_paise": subtotal_paise,
-        "discount_paise": discount_paise,
-        "discount_reason": discount_reason if discount_paise > 0 else None,
-        "notes": notes,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await sb(
-        supabase.table("opd_invoices")
-        .update(updates)
-        .eq("clinic_id", clinic_id)
-        .eq("id", invoice_id)
-    )
+    try:
+        await sb(supabase.rpc("opd_save_invoice_draft", {
+            "p_clinic_id": clinic_id,
+            "p_invoice_id": invoice_id,
+            "p_expected_updated_at": expected_updated_at.isoformat(),
+            "p_items": [{k: it.get(k) for k in ("item_type", "catalog_code", "doctor_id", "lab_test_id", "description",
+                                                 "quantity", "unit_price_paise", "discount_paise")}
+                        for it in validated_items],
+            "p_discount_paise": discount_paise,
+            "p_discount_reason": discount_reason if discount_paise > 0 else None,
+            "p_notes": notes,
+        }))
+    except Exception as e:
+        msg = str(getattr(e, "message", None) or e)
+        if "opd_stale_draft" in msg:
+            raise HTTPException(status_code=409,
+                                detail="Invoice was modified concurrently. Please reload to review the latest changes.")
+        if "opd_not_draft" in msg:
+            raise HTTPException(status_code=409, detail="This invoice is no longer a draft. Reload it.")
+        if "opd_not_found" in msg:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        if "ipd_bill_lines_locked" in msg:
+            raise HTTPException(status_code=409,
+                                detail="Inpatient bill lines come from posted charges and cannot be edited here.")
+        raise
 
     return await get_invoice(clinic_id, invoice_id)
 
@@ -409,80 +372,88 @@ async def issue_invoice(
         raise HTTPException(status_code=404, detail="Invoice not found")
     invoice = inv_res.data[0]
 
-    # Already issued? Idempotent return
-    if invoice.get("status") in ("issued", "partially_paid", "paid"):
-        return await get_invoice(clinic_id, invoice_id)
-
     if invoice.get("status") == "void":
         raise HTTPException(status_code=409, detail="Cannot issue a void invoice.")
 
-    # Check that invoice has items
-    items_res = await sb(
-        scoped_query("opd_invoice_items", clinic_id)
-        .eq("invoice_id", invoice_id)
-    )
-    if not items_res.data:
-        raise HTTPException(status_code=422, detail="Cannot issue an invoice without line items.")
-
-    # Mark as issued (trigger opd_guard_invoice assigns year, seq, number, and status 'paid' if total == 0)
-    issue_update = {
-        "status": "issued",
-        "issued_by": actor_uuid(actor),
-        "issued_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await sb(
-        supabase.table("opd_invoices")
-        .update(issue_update)
-        .eq("clinic_id", clinic_id)
-        .eq("id", invoice_id)
-    )
-
-    # Prepaid online booking detection
-    appt_id = invoice.get("appointment_id")
-    if appt_id:
-        appt_res = await sb(
-            scoped_query("appointments", clinic_id)
-            .eq("id", appt_id)
-            .limit(1)
+    if invoice.get("status") == "draft":
+        # Check that invoice has items
+        items_res = await sb(
+            scoped_query("opd_invoice_items", clinic_id)
+            .eq("invoice_id", invoice_id)
         )
-        if appt_res.data:
-            appt = appt_res.data[0]
-            # appointments has no payment_status column: payment_id is set only
-            # once the gateway captured an online (WhatsApp/voice) payment.
-            if appt.get("payment_id") and appt.get("status") not in ("refunded", "cancelled"):
-                fee_paise = appt.get("amount_paise") or (
-                    invoice.get("subtotal_paise", 0) - invoice.get("discount_paise", 0)
-                )
+        if not items_res.data:
+            raise HTTPException(status_code=422, detail="Cannot issue an invoice without line items.")
 
-                prepaid_gw_id = appt.get("payment_id") or f"prepaid:{appt['id']}"
-                gw = appt.get("payment_gateway") or "razorpay"
+        # Mark as issued (trigger opd_guard_invoice assigns year, seq, number, and status 'paid' if total == 0)
+        issue_update = {
+            "status": "issued",
+            "issued_by": actor_uuid(actor),
+            "issued_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await sb(
+            supabase.table("opd_invoices")
+            .update(issue_update)
+            .eq("clinic_id", clinic_id)
+            .eq("id", invoice_id)
+        )
 
-                # Check if receipt already created for this gateway payment
-                existing_rct = await sb(
-                    scoped_query("opd_receipts", clinic_id)
-                    .eq("gateway", gw)
-                    .eq("gateway_payment_id", prepaid_gw_id)
-                    .limit(1)
-                )
-                if not existing_rct.data:
-                    receipt_data = {
-                        "clinic_id": clinic_id,
-                        "invoice_id": invoice_id,
-                        "shift_id": None,
-                        "kind": "payment",
-                        "mode": "prepaid_online",
-                        "amount_paise": fee_paise,
-                        "reference": appt.get("booking_ref") or str(appt["id"])[:8],
-                        "gateway": gw,
-                        "gateway_payment_id": prepaid_gw_id,
-                        "received_by_admin_id": None,
-                        "received_by_name": "online",
-                    }
-                    # unscoped: insert_scoped_by_payload
-                    await sb(supabase.table("opd_receipts").insert(receipt_data))
-
+    # Also on an already-issued invoice: a retry finishes a prepayment an earlier attempt missed.
+    await _apply_prepaid(clinic_id, invoice_id, invoice.get("appointment_id"))
     return await get_invoice(clinic_id, invoice_id)
+
+
+async def _apply_prepaid(clinic_id: str, invoice_id: str, appt_id: Optional[str]) -> None:
+    """Apply a visit's online prepayment (WhatsApp / voice booking) to its invoice, once.
+
+    Only what the bill can take is applied; any excess (a discount, or a fee lowered after
+    booking) is parked as a payment exception for refund, like an over-paid payment link.
+    Idempotent on the gateway payment id (receipt or exception already there = done)."""
+    if not appt_id:
+        return
+    appt_res = await sb(scoped_query("appointments", clinic_id).eq("id", appt_id).limit(1))
+    appt = appt_res.data[0] if appt_res.data else {}
+    # appointments has no payment_status column: payment_id is set only
+    # once the gateway captured an online (WhatsApp/voice) payment.
+    if not appt.get("payment_id") or appt.get("status") in ("refunded", "cancelled"):
+        return
+    gw, gw_id = appt.get("payment_gateway") or "razorpay", appt["payment_id"]
+    for table in ("opd_receipts", "opd_payment_exceptions"):
+        done = await sb(scoped_query(table, clinic_id).eq("gateway", gw).eq("gateway_payment_id", gw_id).limit(1))
+        if done.data:
+            return
+    inv_res = await sb(scoped_query("opd_invoices", clinic_id).eq("id", invoice_id).limit(1))
+    invoice = inv_res.data[0]
+    total = invoice.get("total_paise")
+    if total is None:
+        total = invoice.get("subtotal_paise", 0) - invoice.get("discount_paise", 0)
+    prepaid = appt.get("amount_paise") or total
+    applied = 0
+    if invoice.get("status") in ("issued", "partially_paid"):
+        applied = max(0, min(prepaid, total - (invoice.get("paid_paise") or 0)))
+    if applied:
+        try:
+            # unscoped: insert_scoped_by_payload
+            await sb(supabase.table("opd_receipts").insert({
+                "clinic_id": clinic_id,
+                "invoice_id": invoice_id,
+                "shift_id": None,
+                "kind": "payment",
+                "mode": "prepaid_online",
+                "amount_paise": applied,
+                "reference": appt.get("booking_ref") or str(appt["id"])[:8],
+                "gateway": gw,
+                "gateway_payment_id": gw_id,
+                "received_by_admin_id": None,
+                "received_by_name": "online",
+            }))
+        except Exception as err:
+            if _is_unique_violation(err):   # a concurrent issue already applied it
+                return
+            raise
+    if prepaid > applied:
+        await _record_payment_exception(invoice, gw, gw_id, None, prepaid, applied,
+                                        "overpaid" if applied else "invoice_settled")
 
 
 async def create_receipt(
@@ -495,17 +466,25 @@ async def create_receipt(
     actor: Any = None,
     shift_id: Optional[str] = None,
 ) -> dict:
-    """Record an in-person counter receipt (cash, upi, card) against an issued invoice."""
-    _clean_idempotency_cache()
-    cache_key = f"{clinic_id}:{idempotency_key}"
-    if cache_key in _IDEMPOTENCY_CACHE:
-        return _IDEMPOTENCY_CACHE[cache_key][1]
+    """Record an in-person counter receipt (cash, upi, card) against an issued invoice.
+
+    Idempotent in the database (migration 113): a retry with the same key, on any
+    worker, returns the first receipt instead of taking the money twice."""
+    async def _existing() -> Optional[dict]:
+        res = await sb(scoped_query("opd_receipts", clinic_id).eq("idempotency_key", idempotency_key).limit(1))
+        return res.data[0] if res.data else None
 
     if mode not in ("cash", "upi", "card"):
         raise HTTPException(status_code=422, detail="Counter receipts accept only 'cash', 'upi', or 'card'.")
 
     if mode in ("upi", "card") and not reference:
         raise HTTPException(status_code=422, detail=f"Transaction reference (UTR/RRN) is required for {mode.upper()} payments.")
+
+    replay = await _existing()
+    if replay:
+        if str(replay.get("invoice_id")) != str(invoice_id):
+            raise HTTPException(status_code=409, detail="This payment key was already used for another invoice.")
+        return replay
 
     inv_res = await sb(
         scoped_query("opd_invoices", clinic_id)
@@ -598,15 +577,20 @@ async def create_receipt(
         "received_by_admin_id": admin_id,
         "received_by_name": getattr(actor, "username", "Cashier"),
         "reason": None,
+        "idempotency_key": idempotency_key,
     }
-    # unscoped: insert_scoped_by_payload
-    rct_ins = await sb(supabase.table("opd_receipts").insert(receipt_payload))
+    try:
+        # unscoped: insert_scoped_by_payload
+        rct_ins = await sb(supabase.table("opd_receipts").insert(receipt_payload))
+    except Exception as e:
+        if "uq_opd_receipts_idempotency" in str(e):   # a concurrent click won the race: return its receipt
+            replay = await _existing()
+            if replay:
+                return replay
+        raise
     if not rct_ins.data:
         raise HTTPException(status_code=500, detail="Failed to persist receipt.")
     receipt = rct_ins.data[0]
-
-    # Cache for idempotency
-    _IDEMPOTENCY_CACHE[cache_key] = (time.time(), receipt)
 
     # Dispatch receipt WhatsApp notification
     try:
@@ -923,12 +907,15 @@ async def list_shifts(
     clinic_id: str,
     date_str: Optional[str] = None,
     actor: Any = None,
+    branch_id: Optional[str] = None,
 ) -> list[dict]:
     """List drawer shifts for admin reconciliation (§3.7)."""
     if not _is_opd_admin(actor):
         raise HTTPException(status_code=403, detail="Admin access required to view drawer shifts.")
 
     query = scoped_query("opd_cashier_shifts", clinic_id).order("opened_at", desc=True)
+    if branch_id:
+        query = query.eq("branch_id", branch_id)
     if date_str:
         start_dt = f"{date_str}T00:00:00+05:30"
         end_dt = f"{date_str}T23:59:59+05:30"
@@ -956,6 +943,15 @@ async def get_collections_summary(
     )
     rcts_res = await sb(rct_query.limit(1000))
     receipts = rcts_res.data or []
+    if branch_id and receipts:
+        # A receipt has no branch of its own: it counts for the branch of the bill it pays.
+        inv_ids = sorted({str(r["invoice_id"]) for r in receipts})
+        own: set[str] = set()
+        for i in range(0, len(inv_ids), 100):   # batches keep the request URL short on a busy day
+            res = await sb(scoped_query("opd_invoices", clinic_id, "id").eq("branch_id", branch_id)
+                           .in_("id", inv_ids[i:i + 100]))
+            own |= {str(row["id"]) for row in (res.data or [])}
+        receipts = [r for r in receipts if str(r["invoice_id"]) in own]
 
     gross_by_mode = {
         "cash": 0,
@@ -1050,8 +1046,12 @@ async def list_invoices(
         end_dt = f"{date_str}T23:59:59+05:30"
         query = query.gte("created_at", start_dt).lte("created_at", end_dt)
 
-    if status_filter:
-        query = query.eq("status", status_filter)
+    if status_filter:   # one status, or several comma-separated ("issued,partially_paid" = unpaid)
+        statuses = [st.strip() for st in status_filter.split(",") if st.strip()]
+        if len(statuses) == 1:
+            query = query.eq("status", statuses[0])
+        elif statuses:
+            query = query.in_("status", statuses)
 
     res = await sb(query.limit(limit))
     rows = res.data or []
@@ -1290,8 +1290,10 @@ async def _record_payment_exception(
         logger.error(f"Failed to alert on OPD payment exception: {alert_err}")
 
 
-async def list_payment_exceptions(clinic_id: str, status: str = "open", limit: int = 50) -> list[dict]:
-    """Online payments not applied in full, newest first, with invoice + patient labels."""
+async def list_payment_exceptions(clinic_id: str, status: str = "open", limit: int = 50,
+                                  branch_id: Optional[str] = None) -> list[dict]:
+    """Online payments not applied in full, newest first, with invoice + patient labels.
+    branch_id keeps only exceptions on that branch's invoices (a branch-pinned reader)."""
     q = scoped_query("opd_payment_exceptions", clinic_id).order("created_at", desc=True).limit(limit)
     if status != "all":
         q = q.eq("status", status)
@@ -1300,9 +1302,13 @@ async def list_payment_exceptions(clinic_id: str, status: str = "open", limit: i
     invoices: dict = {}
     if inv_ids:
         inv_res = await sb(
-            scoped_query("opd_invoices", clinic_id, "id,invoice_number,patient_snapshot,status").in_("id", inv_ids)
+            scoped_query("opd_invoices", clinic_id, "id,invoice_number,patient_snapshot,status,branch_id").in_("id", inv_ids)
         )
         invoices = {str(i["id"]): i for i in (inv_res.data or [])}
+    if branch_id:
+        # shortcut: filtered after the limit, so a pinned reader may see fewer than `limit`;
+        # open exceptions are a handful per clinic. Filter in SQL if that stops being true.
+        rows = [r for r in rows if str((invoices.get(str(r["invoice_id"])) or {}).get("branch_id")) == str(branch_id)]
     for r in rows:
         inv = invoices.get(str(r["invoice_id"])) or {}
         r["invoice_number"] = inv.get("invoice_number")
@@ -1388,6 +1394,9 @@ async def resolve_payment_exception(
     return upd.data[0]
 
 
+_PG_INT_MAX = 2_147_483_647   # opd_invoice_items / opd_invoices money columns are INTEGER paise
+
+
 async def _validate_and_price_items(
     clinic_id: str,
     items: list[dict],
@@ -1471,6 +1480,8 @@ async def _validate_and_price_items(
             raise HTTPException(status_code=422, detail=f"Line {idx}: Unit price exceeds permitted bounds.")
 
         line_gross = qty * unit_price
+        if line_gross > _PG_INT_MAX:
+            raise HTTPException(status_code=422, detail=f"Line {idx}: Line total is too large.")
         if item_discount > line_gross:
             raise HTTPException(status_code=422, detail=f"Line {idx}: Line discount cannot exceed line total.")
 
@@ -1489,6 +1500,8 @@ async def _validate_and_price_items(
             "line_total_paise": line_total,
         })
 
+    if subtotal > _PG_INT_MAX:
+        raise HTTPException(status_code=422, detail="Bill total is too large. Split it into separate bills.")
     return validated, subtotal
 
 

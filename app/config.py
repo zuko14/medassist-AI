@@ -270,7 +270,8 @@ class Settings(BaseSettings):
     assistant_llm_timeout_seconds: float = 5.0  # one attempt
     assistant_llm_max_tokens: int = 200
     assistant_llm_rate_per_hour: int = 20       # per user
-    assistant_stt_enabled: bool = False         # mic; keep off until DPDP notice (DP-07) and G-KK-ASR
+    assistant_stt_enabled: bool = True          # mic (owner, 2026-10-26); shown only with SARVAM_API_KEY set.
+                                                # ASSISTANT_STT_ENABLED=false hides it everywhere at once
     assistant_stt_model: str = "saaras:v3"
     assistant_stt_timeout_seconds: float = 10.0
 

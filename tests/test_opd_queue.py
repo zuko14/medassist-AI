@@ -70,7 +70,8 @@ def test_forbidden_transition_raises_422(auth_front_desk):
     }
 
     with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)), \
-         patch("app.services.opd.sb", AsyncMock(return_value=MagicMock(data=[fake_appt]))):
+         patch("app.services.opd.sb", AsyncMock(return_value=MagicMock(data=[fake_appt]))), \
+         patch("app.routers.opd.sb", AsyncMock(return_value=MagicMock(data=[fake_appt]))):
         r = client.post(
             f"/admin/opd/queue/{appt_id}/stage?clinic_id={CLINIC_ID}",
             json={"expected_from": "completed", "to_stage": "waiting"},
@@ -93,7 +94,8 @@ def test_stage_change_cas_conflict_raises_409(auth_front_desk):
     }
 
     with patch("app.routers.opd.get_clinic_by_id", AsyncMock(return_value=MOCK_CLINIC)), \
-         patch("app.services.opd.sb", AsyncMock(return_value=MagicMock(data=[fake_appt]))):
+         patch("app.services.opd.sb", AsyncMock(return_value=MagicMock(data=[fake_appt]))), \
+         patch("app.routers.opd.sb", AsyncMock(return_value=MagicMock(data=[fake_appt]))):
         r = client.post(
             f"/admin/opd/queue/{appt_id}/stage?clinic_id={CLINIC_ID}",
             json={"expected_from": "waiting", "to_stage": "in_consultation"},

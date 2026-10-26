@@ -47,6 +47,7 @@ _REAL_LOCK_MODULES = {
     "test_phase_f_real_load_and_failure_injection",
     "test_phase3_multi_instance_concurrency",
     "test_phone_lease_heartbeat",
+    "test_opd_billing_real_pg",
 }
 
 

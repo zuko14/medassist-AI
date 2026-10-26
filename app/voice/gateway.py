@@ -87,18 +87,28 @@ class CallRunner:
 
     async def _speak(self, texts: list, heard_at: Optional[float]) -> None:
         first = True
-        for text in texts:
-            self.tts_chars += len(text)
-            chunker = PcmChunker()
-            async for pcm in self.tts.synthesize(text, self.session.state["lang"], self.cfg.get("speaker"),
-                                                 self.cfg.get("pace") or 1.0, self.rate):
-                for c in chunker.feed(pcm):
-                    if first and heard_at is not None:
-                        self.turn_ms.append(int((time.monotonic() - heard_at) * 1000))
-                        first = False
+        try:
+            for text in texts:
+                self.tts_chars += len(text)
+                chunker = PcmChunker()
+                async for pcm in self.tts.synthesize(text, self.session.state["lang"], self.cfg.get("speaker"),
+                                                     self.cfg.get("pace") or 1.0, self.rate):
+                    for c in chunker.feed(pcm):
+                        if first and heard_at is not None:
+                            self.turn_ms.append(int((time.monotonic() - heard_at) * 1000))
+                            first = False
+                        await self._send(X.media(self.sid, c))
+                for c in chunker.flush():
                     await self._send(X.media(self.sid, c))
-            for c in chunker.flush():
-                await self._send(X.media(self.sid, c))
+        except Exception as e:
+            # No voice = dead air for the caller. End the stream as a transfer: passthru then
+            # connects reception (it hangs up only on a cleanly completed call).
+            logger.error(f"VOICE_TTS_FAILED call={self.session.ctx.call_ref}: {type(e).__name__}")
+            await store.add_event(self.session.ctx.clinic_id, self.session.ctx.call_id, "error",
+                                  "TTS_FAILED", status="fail", data={"error": type(e).__name__})
+            self.control = "transfer"
+            self.finished.set()
+            return
         self.marks += 1
         self.pending_mark = f"u{self.marks}"
         self.mark_done.clear()
@@ -148,6 +158,24 @@ class CallRunner:
             self.finished.set()
 
     async def pump_stt(self) -> None:
+        try:
+            await self._pump_stt()
+        except Exception as e:
+            logger.error(f"VOICE_STT_FAILED call={self.session.ctx.call_ref}: {type(e).__name__}")
+        if not self.finished.is_set() and self.control == "continue":
+            # Recognition ended under a live call: we can no longer hear the caller. Hand them to
+            # reception now, instead of "are you there?" reprompts and a clean-looking hang-up.
+            await store.add_event(self.session.ctx.clinic_id, self.session.ctx.call_id, "error",
+                                  "STT_LOST", status="fail")
+            try:
+                out = await self.session.engine._handoff(self.session.state, self.session.engine_out(), "stt_lost")
+                await self.respond(await self.session._emit(out))
+                self.control = "transfer"
+            except Exception:
+                self.control = "transfer"     # announce failed too: close now, passthru connects reception
+                self.finished.set()
+
+    async def _pump_stt(self) -> None:
         async for kind, payload in self.stt.events():
             if self.finished.is_set():
                 return

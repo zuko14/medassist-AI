@@ -41,7 +41,7 @@ def _section(page: str) -> str:
 def test_the_hand_offs_of_the_plan_are_registered():
     assert {"staff.create", "staff.manage", "payment.settings", "opd.record_payment", "opd.refund", "opd.void",
             "visit.sign", "doctor.delete", "lab_test.delete", "treatment.delete", "branch.manage", "data.export",
-            "data.import", "corporate.manage", "voice.takeover"} <= set(H_ACTIONS)
+            "data.import", "corporate.manage", "voice.takeover", "doctor.fee"} <= set(H_ACTIONS)
 
 
 @pytest.mark.parametrize("aid", H_ACTIONS)
@@ -103,6 +103,9 @@ def test_sec18_policy_never_builds_a_plan_for_h():
     ("import patients from excel", "data.import"),
     ("add a corporate company", "corporate.manage"),
     ("take over the live call", "voice.takeover"),
+    ("change dr meena consultation fee to 600", "doctor.fee"),   # 2026-10-26 probe
+    ("update Dr Rao's fee", "doctor.fee"),
+    ("doctor fee marchu", "doctor.fee"),
 ])
 def test_routes(text, action):
     r = rules.route(text)
@@ -264,3 +267,8 @@ const filled = ketuFillFields(doc, {json.dumps(fields)}.concat([{{id: 'f-secretK
 console.log(JSON.stringify({{filled, role: els['f-role'].value, key: els['f-secretKey'].value}}));"""
     out = _node(src)
     assert out["filled"] == ["f-name"] and out["role"] == "" and out["key"] == ""
+
+
+def test_a_new_doctors_fee_stays_part_of_adding_the_doctor():
+    r = rules.route("Add Dr Kiran Kumar, consultation fee 600, Mon-Sat")
+    assert r.action_id == "doctor.create", r

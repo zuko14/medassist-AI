@@ -62,6 +62,23 @@ WRITE_VERBS = ("cancel", "delete", "remove", "add", "create", "change", "update"
                "रद्द", "भेजो", "भेजें", "बदलो", "बदलें", "हटाओ", "हटाएं", "जोड़ो", "जोड़ें")
 CLARIFY_MINUTES = 10
 MAX_DOCTOR_CHOICES = 30
+# Small talk: a message made ONLY of these (plus filler) is answered, never routed. "good morning" is not
+# here: it is the morning-briefing trigger.
+SMALL_TALK = {
+    "greeting": ("hi", "hii", "hello", "helo", "hey", "hai", "namaste", "namaskar", "namaskaram", "namasthe",
+                 "నమస్తే", "నమస్కారం", "హలో", "नमस्ते", "नमस्कार", "हैलो"),
+    "thanks": ("thanks", "thank you", "thank u", "thanku", "thx", "dhanyavad", "dhanyavaad", "dhanyavadalu",
+               "shukriya", "ధన్యవాదాలు", "धन्यवाद", "शुक्रिया"),
+    "capabilities": ("help", "what can you do", "what can u do", "what do you do", "who are you", "what are you",
+                     "how can you help", "menu"),
+}
+_CHAT_FILLER = ("kriya ketu", "kriya", "ketu", "ok", "okay", "please", "pls", "sir", "madam", "ji", "garu",
+                "me", "so", "and", "very much", "a lot")
+# "Hi, open leads" / "hello kriya, show today's appointments": the greeting is dropped and the rest routed.
+_GREETING_PREFIX = re.compile(r"^\s*(?:hi+|hello|helo|hey|hai|namaste|namaskar(?:am)?)\b[\s,.!:-]*"
+                              r"(?:(?:kriya\s*)?ketu|kriya)?\b[\s,.!:-]*", re.I)
+_CHAT_FINDERS = sorted(((kind, w) for kind, words in SMALL_TALK.items() for w in words),
+                       key=lambda x: -len(x[1]))
 
 
 def _now() -> datetime:
@@ -105,6 +122,29 @@ _PAGE_NAMES = sorted({(_norm(n), page) for page, label in PAGES.items()
                       for n in (page, label, *PAGE_SYNONYMS.get(page, ()))}, key=lambda x: -len(x[0]))
 _PAGE_FINDERS = [(_finder(n), page) for n, page in _PAGE_NAMES if n]
 _NAV_FINDERS = [_finder(w if w.startswith("=") else _norm(w)) for w in sorted(NAV_WORDS, key=len, reverse=True)]
+
+
+def small_talk(text: str) -> Optional[str]:
+    """"greeting" | "thanks" | "capabilities" when the message is only that (and filler), else None.
+    Greeting + help ("hi, what can you do") is "capabilities"; anything else in it means a real request."""
+    t = _norm(text)
+    found = set()
+    for kind, word in _CHAT_FINDERS:
+        rx = _finder(word)
+        if rx.search(t):
+            found.add(kind)
+            t = rx.sub(" ", t)
+    for word in sorted(_CHAT_FILLER, key=len, reverse=True):
+        t = _finder(word).sub(" ", t)
+    if not found or t.strip():
+        return None
+    return "capabilities" if "capabilities" in found else "thanks" if "thanks" in found else "greeting"
+
+
+def starts_new_request(text: str) -> bool:
+    """A sentence with a command verb of its own ("change Dr Anitha's fee to 600") is a new request,
+    never a typed answer to the form above it, even when it contains a value the form is missing."""
+    return has_any(_norm(text), WRITE_VERBS)
 
 
 def _page_spans(t: str) -> list[tuple[int, int, str]]:
@@ -195,6 +235,8 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
         return resolve.resolve_stage(text), ()
     if slot.kind == "lab_test":
         return resolve.resolve_lab_test(text), ()
+    if slot.kind == "price_term":
+        return resolve.resolve_price_term(text), ()
     if slot.kind == "treatment":
         return resolve.resolve_treatment(text), ()
     if slot.kind == "staff_name":
@@ -381,6 +423,12 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
         return Route("rejected", error_code="negated")
     if has_any(t, HYPOTHETICAL):
         return Route("rejected", error_code="hypothetical")
+    chat = small_talk(text)
+    if chat:  # the router answers it (what this user can do); nothing is routed or executed
+        return Route("help", error_code=chat)
+    rest = _GREETING_PREFIX.sub("", text, count=1)
+    if rest.strip() and rest != text:
+        return route(rest, visible_pages=visible_pages, ui_page=ui_page, actions=actions, doctors=doctors, now=now)
     if has_any(t, HOW_TO):
         entry = _help(t, visible)
         return Route("help", page=entry.page, help=entry) if entry else Route("rejected", error_code="unsupported")

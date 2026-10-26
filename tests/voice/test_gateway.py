@@ -252,3 +252,46 @@ async def test_real_speech_over_kriya_still_interrupts_and_is_answered():
 
     await _run_until_stopped(ws, stt, ps, script)
     assert "clear" in ws.kinds() and seen == ["Naaku repu heart doctor appointment kavali"]
+
+
+@pytest.mark.asyncio
+async def test_stt_stream_lost_mid_call_hands_the_caller_to_reception():
+    """Speech recognition dropping mid-call must not leave the caller talking to a bot that
+    cannot hear them (which then says goodbye and hangs up): it goes to reception."""
+    finish = AsyncMock()
+    stt, ps = _patches(FakeTools(slots=SLOTS), finish)
+    ws = FakeWS()
+    for p in ps:
+        p.start()
+    try:
+        ws.inbox.put_nowait(json.dumps(START))
+        task = asyncio.create_task(gateway.exotel_stream(ws, k="tok"))
+        await _until(lambda: stt.streams and "mark" in ws.kinds())
+        stt.streams[0].queue.put_nowait(None)          # the STT websocket closed under a live call
+        await asyncio.wait_for(task, 5)
+    finally:
+        for p in ps:
+            p.stop()
+    assert finish.await_args.args[0] == "handed_off"
+
+
+@pytest.mark.asyncio
+async def test_tts_failure_hands_the_caller_to_reception_instead_of_dead_air():
+    finish = AsyncMock()
+    stt, ps = _patches(FakeTools(slots=SLOTS), finish)
+
+    async def broken(*a, **k):
+        raise RuntimeError("Sarvam TTS error 503")
+        yield b""                                       # pragma: no cover (makes this a generator)
+    ps.append(patch.object(FakeTTS, "synthesize", new=lambda self, *a, **k: broken()))
+    ws = FakeWS()
+    for p in ps:
+        p.start()
+    try:
+        ws.inbox.put_nowait(json.dumps(START))
+        await asyncio.wait_for(gateway.exotel_stream(ws, k="tok"), 5)
+    finally:
+        for p in ps:
+            p.stop()
+    assert finish.await_args.args[0] == "handed_off"
+    assert ws.closed

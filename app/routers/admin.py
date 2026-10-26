@@ -922,7 +922,8 @@ async def get_current_admin(
         "ai_receptionist_enabled": ai_receptionist_enabled(clinic),
         # Owner opt-in + ASSISTANT_ENABLED (migration 108): the Kriya Ketu launcher and its mic.
         "assistant_enabled": assistant_on,
-        "assistant_stt_enabled": assistant_on and settings.assistant_stt_enabled,
+        # ...and only with a speech key: a mic the server can't serve would fail on every press
+        "assistant_stt_enabled": assistant_on and settings.assistant_stt_enabled and bool(settings.sarvam_api_key),
         # OPD OS (migration 103): module enabled flag, state, linked doctor ID
         "opd_enabled": opd_enabled(clinic),
         "opd_state": clinic.get("opd_state", "NOT_CONFIGURED"),

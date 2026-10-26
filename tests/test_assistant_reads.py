@@ -40,6 +40,7 @@ READS = {
     "lab_tests.cleanup",  # KK-P4-09
     "voice.learning_review",  # KK-P4-13
     "ipd.census", "ipd.inpatients", "ipd.waiting", "ipd.discharges",  # IPD OS (migration 111)
+    "opd.collections", "opd.unpaid", "holidays.list",  # 2026-10-26: everyday questions from the probe
 }
 NOT_YET = {"patient.view", "voice.call_detail", "patient.duplicate_check", "voice.test_turn"}
 CORPUS = json.loads((Path(__file__).parent / "fixtures" / "assistant_corpus.json")
@@ -176,7 +177,19 @@ DATA = {
     "/admin/opd/queue": {"doctors": [{"doctor_name": "Dr. Rao", "rows": [
         {"token_number": 4, "patient_name": "Sita", "stage": "waiting", "doctor_name": "Dr. Rao"},
         {"token_number": 5, "patient_name": "Gita", "stage": "in_consultation", "doctor_name": "Dr. Rao"}]}]},
-    "/admin/doctors": [{"name": "Dr. Rao", "specialization": "ENT", "department": "ENT", "is_active": True}],
+    "/admin/doctors": [{"name": "Dr. Rao", "specialization": "ENT", "department": "ENT", "is_active": True,
+                        "consultation_fee": 500}],
+    "/admin/opd/collections/summary": {"date": TODAY, "gross_paise": 950000, "refunds_paise": 50000,
+                                       "net_paise": 900000, "counter_paise": 800000, "online_paise": 150000,
+                                       "modes": {"cash": 500000, "upi": 250000, "card": 50000, "payment_link": 100000,
+                                                 "prepaid_online": 50000},
+                                       "outstanding_dues_paise": 30000, "invoices_count": 12,
+                                       "cashiers": {"Asha": {"collections_paise": 800000}}},
+    "/admin/opd/invoices": [{"invoice_number": "INV-2026-00007", "status": "partially_paid", "total_paise": 50000,
+                             "paid_paise": 20000, "issued_at": "2026-10-14T04:30:00+00:00",
+                             "patient_snapshot": {"name": "Ravi Kumar", "phone": PHONE}}],
+    "/admin/holidays": [{"holiday_date": "2020-01-26", "name": "Republic Day 2020"},
+                        {"holiday_date": "2099-11-01", "name": "Diwali"}],
     "/admin/lab-tests": [{"name": "CBC", "price_paise": 35000, "sample_type": "blood", "is_active": True}],
     "/admin/treatments": [{"name": "Root canal", "category": "Dental", "price_from_paise": 450000, "is_active": True}],
     "/admin/reports/deliveries": {"deliveries": [{"sent_at": "2026-10-14T04:30:00+00:00", "patient_name": "Ravi",
@@ -278,6 +291,9 @@ CASES = [
      None),
     ("what did the receptionist learn", "voice.learning_review", "/admin/voice/learning/suggestions", {},
      "skin doctor", 1),
+    ("today's collection", "opd.collections", "/admin/opd/collections/summary", {"date": TODAY}, "₹9,000", None),
+    ("pending payments", "opd.unpaid", "/admin/opd/invoices", {"status": "issued,partially_paid"}, "₹300", 1),
+    ("list holidays", "holidays.list", "/admin/holidays", {}, "Diwali", 1),   # past holidays are not listed
 ]
 EVERYTHING_ON = {"id": CID, "plan": "diagbooking", "account_type": "tenant", "opd_state": "READY",
                  "features": {"kriya_ketu": True, "opd_enabled": True, "ai_receptionist": True, "booking": True,
@@ -360,7 +376,8 @@ HANDLER_READS = sorted(a for a in READS if a in REGISTRY and REGISTRY[a].perm_so
 
 
 def test_handler_reads_are_the_expected_ones():
-    assert set(HANDLER_READS) == {"opd.analytics", "opd.queue", "homecollect.visits", "voice.calls", "voice.live",
+    assert set(HANDLER_READS) == {"opd.analytics", "opd.queue", "opd.collections", "opd.unpaid",
+                                  "homecollect.visits", "voice.calls", "voice.live",
                                   "voice.analytics", "voice.usage", "voice.outbound_list",
                                   "voice.learning_review", "ipd.census", "ipd.inpatients", "ipd.waiting",
                                   "ipd.discharges"}
@@ -400,3 +417,68 @@ def test_patient_search_filters_like_the_page(q, names):
     shown = [row[0] for row in card.get("rows", [])]
     assert shown == names
     assert PHONE not in json.dumps(out)
+
+
+# ── 2026-10-26: wording staff actually use (probe of unseen requests) ───────
+
+@pytest.mark.parametrize("text, aid", [
+    ("pending lab reports", "reports.queue"), ("price of cbc test", "lab_tests.list"),
+    ("no-show rate this month", "stats.summary"), ("aaj ka collection kitna hua", "opd.collections"),
+    ("unpaid bills", "opd.unpaid"), ("when is the next holiday", "holidays.list"),
+])
+def test_everyday_wording_reaches_its_read(db, reads, text, aid):  # noqa: F811
+    out = _ask(text)
+    assert (out["state"], out["action_id"]) == ("COMPLETED_VERIFIED", aid), out
+
+
+@pytest.mark.parametrize("text, aid", [("today's collection", "payments.reconciliation"),
+                                       ("pending payments", "bookings.pending_review")])
+def test_without_opd_the_same_question_reads_online_payments(db, reads, text, aid):  # noqa: F811
+    no_opd = {**EVERYTHING_ON, "features": {**EVERYTHING_ON["features"], "opd_enabled": False}}
+    with patch.object(assistant_router, "get_clinic_by_id", AsyncMock(return_value=no_opd)):
+        out = _ask(text)
+    assert (out["state"], out["action_id"]) == ("COMPLETED_VERIFIED", aid), out
+
+
+@pytest.mark.parametrize("text, term", [
+    ("price of cbc test", "cbc"), ("what is the rate of thyroid profile test", "thyroid profile"),
+    ("how much does the lipid profile test cost", "lipid profile"), ("cbc test ka rate", "cbc"),
+    ("lab test rates", None), ("how many tests do we have", None), ("test dharalu", None),
+])
+def test_test_price_term(text, term):
+    r = rules.route(text)
+    assert (r.kind, r.action_id) == ("action", "lab_tests.list"), r
+    assert r.params.get("q") == term
+
+
+def test_test_price_shows_only_matching_tests():
+    rows = [{"name": "CBC", "price_paise": 35000}, {"name": "Thyroid Profile (T3, T4, TSH)", "price_paise": 60000},
+            {"name": "Lipid Profile", "price_paise": 50000}]
+    view = REGISTRY["lab_tests.list"].present
+    shown = lambda q: [r[0] for r in view([Outcome("ok", 200, None, "", rows)], {"q": q})["cards"][0].get("rows", [])]
+    assert shown("thyroid profile") == ["Thyroid Profile (T3, T4, TSH)"] and shown("cbc") == ["CBC"]
+    assert shown(None) == ["CBC", "Thyroid Profile (T3, T4, TSH)", "Lipid Profile"]
+    assert "nothing to show" in view([Outcome("ok", 200, None, "", rows)], {"q": "vitamin d"})["message"]
+
+
+def test_no_show_rate_is_computed_from_the_same_figures():
+    out = REGISTRY["stats.summary"].present([Outcome("ok", 200, None, "", {"total_appointments": 40, "no_show": 3})], {})
+    assert ["No-show rate", "7.5%"] in out["cards"][0]["rows"]
+    out = REGISTRY["stats.summary"].present([Outcome("ok", 200, None, "", {"total_appointments": 0, "no_show": 0})], {})
+    assert not any(r[0] == "No-show rate" for r in out["cards"][0]["rows"])   # no division by zero
+
+
+@pytest.mark.parametrize("text, aid", [
+    ("what is dr meena's consultation fee", "doctors.list"), ("how much is the doctor fee", "doctors.list"),
+    ("doctor fee kitna hai", "doctors.list"), ("show doctor fees", "doctors.list"),
+    ("change dr meena consultation fee to 600", "doctor.fee"), ("update Dr Rao's fee", "doctor.fee"),
+])
+def test_a_fee_question_reads_the_fees_and_a_fee_change_is_handed_to_the_page(text, aid):
+    r = rules.route(text)
+    assert r.action_id == aid, r
+
+
+def test_doctor_list_shows_the_fee():
+    out = REGISTRY["doctors.list"].present([Outcome("ok", 200, None, "", DATA["/admin/doctors"])], {})
+    card = out["cards"][0]
+    assert "Fee" in card["columns"] and "₹500" in card["rows"][0]

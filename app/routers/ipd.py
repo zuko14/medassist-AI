@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.database import sb, scoped_query, supabase
 from app.routers.admin import (
@@ -66,6 +66,7 @@ class WardPatch(_In):
     name: Optional[str] = Field(None, min_length=1, max_length=80)
     gender_restriction: Optional[Literal["any", "male", "female"]] = None
     is_active: Optional[bool] = None
+    branch_id: Optional[str] = None     # sent as null = make the ward shared by all branches
 
 
 class BedIn(_In):
@@ -311,7 +312,8 @@ async def _admission(user: AdminUser, scope: str, admission_id: str) -> dict:
 
 async def _ward_in_branch(user: AdminUser, scope: str, ward_id: Optional[str] = None,
                           bed_id: Optional[str] = None) -> None:
-    """Branch-pinned staff may change only their own branch's wards and beds (404 if absent)."""
+    """Branch-pinned staff may change only their own branch's wards and beds, and place
+    patients only in their own branch's beds (404 if absent)."""
     if bed_id:
         bed = await sb(scoped_query("ipd_beds", scope, "id, ward_id").eq("id", bed_id).limit(1))
         if not bed.data:
@@ -364,6 +366,8 @@ async def create_ward(body: WardIn, request: Request, clinic_id: str = "default"
     scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN", new_work=True)
     if body.branch_id:
         await resolve_owned_branch(user, body.branch_id, scope)
+    elif getattr(user, "branch_id", None):
+        body.branch_id = str(user.branch_id)   # a branch-pinned admin's ward is their branch's (like admissions)
     ward = await ipd.create_ward(scope, body.model_dump(exclude_none=True))
     await _audit(user, request, "ipd_ward_create", "ipd_ward", ward["id"], {"code": body.code})
     return ward
@@ -374,8 +378,17 @@ async def patch_ward(ward_id: str, body: WardPatch, request: Request, clinic_id:
                      user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN")
     await _ward_in_branch(user, scope, ward_id=ward_id)
-    ward = await ipd.update_ward(scope, ward_id, body.model_dump(exclude_none=True))
-    await _audit(user, request, "ipd_ward_update", "ipd_ward", ward_id, body.model_dump(exclude_none=True))
+    patch = body.model_dump(exclude_none=True)
+    if "branch_id" in body.model_fields_set:      # a move; the DB refuses it while a bed is occupied/reserved
+        if body.branch_id:
+            await resolve_owned_branch(user, body.branch_id, scope)
+        elif getattr(user, "branch_id", None):
+            raise HTTPException(status_code=403, detail="Only a hospital-wide administrator can make a ward shared.")
+        patch["branch_id"] = body.branch_id
+    if not patch:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    ward = await ipd.update_ward(scope, ward_id, patch)
+    await _audit(user, request, "ipd_ward_update", "ipd_ward", ward_id, patch)
     return ward
 
 
@@ -507,6 +520,7 @@ async def assign_bed(admission_id: str, body: BedChoiceIn, request: Request, cli
                      user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMISSIONS")
     await _admission(user, scope, admission_id)
+    await _ward_in_branch(user, scope, bed_id=body.bed_id)
     adm = await ipd.assign_bed(scope, admission_id, body.bed_id, user)
     await _audit(user, request, "ipd_assign_bed", "ipd_admission", admission_id, {"bed_id": body.bed_id})
     return adm
@@ -517,6 +531,7 @@ async def reserve_bed(admission_id: str, body: ReserveIn, request: Request, clin
                       user: AdminUser = Depends(verify_credentials)):
     scope, clinic = await _ipd_scope(user, clinic_id, "IPD_ADMISSIONS")
     await _admission(user, scope, admission_id)
+    await _ward_in_branch(user, scope, bed_id=body.bed_id)
     minutes = body.minutes or int((clinic.get("ipd_settings") or {}).get("reservation_minutes")
                                   or ipd.DEFAULT_SETTINGS["reservation_minutes"])
     bed = await ipd.reserve_bed(scope, admission_id, body.bed_id, minutes, user)
@@ -529,6 +544,7 @@ async def transfer(admission_id: str, body: TransferIn, request: Request, clinic
                    user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMISSIONS", "IPD_NURSING")
     await _admission(user, scope, admission_id)
+    await _ward_in_branch(user, scope, bed_id=body.to_bed_id)
     adm = await ipd.transfer(scope, admission_id, body.to_bed_id, body.expected_bed_id, body.reason, user)
     await _audit(user, request, "ipd_transfer", "ipd_admission", admission_id, {"to_bed_id": body.to_bed_id})
     return adm
@@ -612,9 +628,13 @@ async def correct_observation(observation_id: str, body: CorrectionIn, request: 
     scope, _ = await _ipd_scope(user, clinic_id, "IPD_NURSING", "IPD_CLINICAL")
     row = await _child(user, scope, "ipd_observations", observation_id, "Observation")
     replacement = None
-    if body.replacement is not None:   # same validation as a new entry
-        replacement = ObservationIn(**{"kind": row["kind"], "observed_at": row["observed_at"], **body.replacement}
-                                    ).model_dump(exclude_none=True, mode="json")
+    if body.replacement is not None:   # same validation as a new entry; the kind never changes
+        try:
+            replacement = ObservationIn(**{"observed_at": row["observed_at"], **body.replacement,
+                                           "kind": row["kind"]}).model_dump(exclude_none=True, mode="json")
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=[
+                {"loc": err["loc"], "msg": err["msg"]} for err in e.errors()])
     out = await ipd.correct_observation(scope, observation_id, body.reason, replacement, user)
     await _audit(user, request, "ipd_observation_correct", "ipd_admission", row["admission_id"])
     return out

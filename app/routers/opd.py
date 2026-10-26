@@ -430,6 +430,24 @@ def _read_branch(user: AdminUser, requested: Optional[str]) -> Optional[str]:
     return str(user.branch_id) if getattr(user, "branch_id", None) else requested
 
 
+async def _visit_in_branch(user: AdminUser, scope: str, *, appointment_id: Optional[str] = None,
+                           encounter_id: Optional[str] = None, rx_id: Optional[str] = None) -> None:
+    """Branch-pinned desk / billing staff act on their own branch's visits only (404 if
+    absent). A doctor login works its own patients wherever they were registered."""
+    if _doctor_only(user) or not getattr(user, "branch_id", None):
+        return
+    if rx_id:
+        res = await sb(scoped_query("opd_prescriptions", scope, "encounter_id").eq("id", rx_id).limit(1))
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Prescription not found")
+        encounter_id = res.data[0]["encounter_id"]
+    table, row_id = ("opd_encounters", encounter_id) if encounter_id else ("appointments", appointment_id)
+    res = await sb(scoped_query(table, scope, "branch_id").eq("id", row_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Encounter not found" if encounter_id else "Appointment not found")
+    enforce_branch_scope(user, res.data[0].get("branch_id"))
+
+
 async def _write_branch(user: AdminUser, scope: str, requested: Optional[str]) -> Optional[str]:
     """Verify a branch a write names: it must belong to this clinic (404) and
     to a pinned caller (403). None leaves the service's own default."""
@@ -900,9 +918,14 @@ async def update_queue_stage(
     scope, clinic = await _opd_scope(user, clinic_id, live=True)
 
     # Permission validation
-    # Deny by default: only the desk (or an admin) moves any queue; anyone else needs
-    # OPD_CLINICAL and may act on their own doctor queue only.
-    if not _holds(user, "OPD_FRONT_DESK"):
+    # Deny by default: only the desk (or an admin) moves any queue -- within its branch;
+    # anyone else needs OPD_CLINICAL and may act on their own doctor queue only.
+    if _holds(user, "OPD_FRONT_DESK"):
+        appt_res = await sb(scoped_query("appointments", scope).eq("id", appointment_id).limit(1))
+        if not appt_res.data:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        enforce_branch_scope(user, appt_res.data[0].get("branch_id"))
+    else:
         if "OPD_CLINICAL" in (user.permissions or []):
             appt_res = await sb(
                 scoped_query("appointments", scope).eq("id", appointment_id).limit(1)
@@ -960,7 +983,9 @@ async def call_next_queue_patient(
         else:
             raise HTTPException(status_code=403, detail="OPD_FRONT_DESK permission required")
 
-    res = await opd_call_next(clinic, doctor_id=body.doctor_id, actor=user)
+    # The desk acts on the queue it sees: its own branch's patients of this doctor.
+    branch = None if _doctor_only(user) else _read_branch(user, None)
+    res = await opd_call_next(clinic, doctor_id=body.doctor_id, actor=user, branch_id=branch)
 
     await log_admin_action(
         user=user,
@@ -1099,6 +1124,7 @@ async def get_encounter_by_appointment(
 ):
     """Encounter details by appointment (§3.5). FRONT_DESK receives vitals only."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_CLINICAL", "OPD_FRONT_DESK")
+    await _visit_in_branch(user, scope, appointment_id=appointment_id)
     encounter = await get_or_create_draft(scope, appointment_id, user.user_id)
 
     # Whose chart this is: vitals and notes must never be entered against an
@@ -1155,6 +1181,7 @@ async def update_encounter_vitals(
 ):
     """Save vitals and advance vitals_pending -> waiting (§3.5)."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_FRONT_DESK", "OPD_CLINICAL")
+    await _visit_in_branch(user, scope, appointment_id=appointment_id)
     actor = {"user_id": user.user_id, "name": user.username, "email": user.username}
     enc = await save_vitals(clinic, appointment_id, body.model_dump(), actor)
     return enc
@@ -1214,6 +1241,7 @@ async def get_prescription_route(
 ):
     """Get prescription and items for encounter (§3.6). FRONT_DESK can only view signed."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_CLINICAL", "OPD_FRONT_DESK")
+    await _visit_in_branch(user, scope, encounter_id=encounter_id)
     rx = await get_encounter_prescription(scope, encounter_id)
     if not rx:
         return None
@@ -1278,6 +1306,7 @@ async def get_prescription_pdf_route(
 ):
     """Render prescription as A5 PDF (§3.6). Refuses drafts with 409."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_CLINICAL", "OPD_FRONT_DESK")
+    await _visit_in_branch(user, scope, rx_id=rx_id)
     rx_res = await sb(
         supabase.table("opd_prescriptions")
         .select("*")
@@ -1314,6 +1343,7 @@ async def send_prescription_whatsapp_route(
 ):
     """Dispatch signed prescription on WhatsApp (§3.6)."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_CLINICAL", "OPD_FRONT_DESK")
+    await _visit_in_branch(user, scope, rx_id=rx_id)
     actor = {"user_id": user.user_id, "name": user.username}
     res = await send_prescription(clinic, rx_id, actor)
     return res
@@ -1360,6 +1390,8 @@ async def create_ad_hoc_invoice(
 ):
     """Create an ad-hoc invoice for a patient."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
+    if body.appointment_id:
+        await _visit_in_branch(user, scope, appointment_id=body.appointment_id)
     return await create_invoice(
         clinic_id=scope,
         patient_id=body.patient_id,
@@ -1383,6 +1415,7 @@ async def update_invoice_draft(
 ):
     """Update draft invoice items and discounts with CAS optimistic locking."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
+    enforce_branch_scope(user, (await get_invoice(scope, invoice_id)).get("branch_id"))
     return await save_invoice_draft(
         clinic_id=scope,
         invoice_id=invoice_id,
@@ -1419,7 +1452,8 @@ async def record_invoice_receipt(
 ):
     """Record an in-person payment receipt (cash, upi, card)."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
-    return await create_receipt(
+    enforce_branch_scope(user, (await get_invoice(scope, invoice_id)).get("branch_id"))
+    rct = await create_receipt(
         clinic_id=scope,
         invoice_id=invoice_id,
         mode=body.mode,
@@ -1429,6 +1463,9 @@ async def record_invoice_receipt(
         actor=user,
         shift_id=body.shift_id,
     )
+    await log_admin_action(user=user, action="OPD_RECEIPT_CREATE", resource_type="opd_invoice", resource_id=invoice_id,
+                           details={"receipt_id": rct.get("id"), "mode": body.mode, "amount_paise": body.amount_paise})
+    return rct
 
 
 @router.post("/invoices/{invoice_id}/payment-link")
@@ -1510,7 +1547,8 @@ async def record_invoice_refund(
 ):
     """Record a refund against an invoice (OPD_ADMIN only)."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_ADMIN")
-    return await create_refund(
+    enforce_branch_scope(user, (await get_invoice(scope, invoice_id)).get("branch_id"))
+    refund = await create_refund(
         clinic_id=scope,
         invoice_id=invoice_id,
         mode=body.mode,
@@ -1519,6 +1557,10 @@ async def record_invoice_refund(
         reference=body.reference,
         actor=user,
     )
+    await log_admin_action(user=user, action="OPD_REFUND_CREATE", resource_type="opd_invoice", resource_id=invoice_id,
+                           details={"receipt_id": refund.get("id"), "mode": body.mode,
+                                    "amount_paise": body.amount_paise, "reason": body.reason})
+    return refund
 
 
 @router.post("/invoices/{invoice_id}/void")
@@ -1530,7 +1572,11 @@ async def void_opd_invoice(
 ):
     """Void an invoice with reason (OPD_ADMIN only). Fails if paid > 0."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_ADMIN")
-    return await void_invoice(scope, invoice_id, reason=body.reason, actor=user)
+    enforce_branch_scope(user, (await get_invoice(scope, invoice_id)).get("branch_id"))
+    inv = await void_invoice(scope, invoice_id, reason=body.reason, actor=user)
+    await log_admin_action(user=user, action="OPD_INVOICE_VOID", resource_type="opd_invoice", resource_id=invoice_id,
+                           details={"invoice_number": inv.get("invoice_number"), "reason": body.reason})
+    return inv
 
 
 @router.get("/payment-exceptions")
@@ -1541,7 +1587,7 @@ async def list_opd_payment_exceptions(
 ):
     """Online payments that could not be applied in full to their invoice (migration 104)."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_ADMIN")
-    return {"items": await list_payment_exceptions(scope, status_filter)}
+    return {"items": await list_payment_exceptions(scope, status_filter, branch_id=_read_branch(user, None))}
 
 
 @router.post("/payment-exceptions/{exception_id}/resolve")
@@ -1553,6 +1599,9 @@ async def resolve_opd_payment_exception(
 ):
     """Refund the excess through the gateway, or record an offline settlement (OPD_ADMIN only)."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_ADMIN")
+    exc = await sb(scoped_query("opd_payment_exceptions", scope, "invoice_id").eq("id", exception_id).limit(1))
+    if exc.data:   # absent: the service answers 404
+        enforce_branch_scope(user, (await get_invoice(scope, str(exc.data[0]["invoice_id"]))).get("branch_id"))
     return await resolve_payment_exception(
         scope, exception_id, body.action, note=body.note, reference=body.reference, actor=user,
     )
@@ -1654,7 +1703,7 @@ async def list_all_shifts(
     """List cashier drawer shifts with expected, declared, and variance (OPD_ADMIN)."""
     scope, clinic = await _opd_scope(user, clinic_id, "OPD_ADMIN")
     date_str = date_query.isoformat() if date_query else None
-    return await list_shifts(scope, date_str=date_str, actor=user)
+    return await list_shifts(scope, date_str=date_str, actor=user, branch_id=_read_branch(user, None))
 
 
 @router.get("/collections/summary")

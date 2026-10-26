@@ -1251,8 +1251,23 @@ async def opd_call_next(
     clinic: dict,
     doctor_id: str,
     actor: Any,
+    branch_id: Optional[str] = None,
 ) -> dict:
-    """Advance current in_consultation patient and claim next waiting patient."""
+    """Advance current in_consultation patient and claim next waiting patient.
+
+    One at a time per doctor, across processes: a second concurrent call (double click,
+    two desks) used to finish the patient the first had just called -- sending them to
+    billing unseen -- and call a third. branch_id limits it to one branch's patients (the
+    queue a branch-pinned desk sees); None = every branch, as before."""
+    from app.services.distributed_lock import distributed_job_lock
+    async with distributed_job_lock(f"opd_call_next:{clinic['id']}:{doctor_id}", lease_seconds=30) as acquired:
+        if not acquired:
+            raise HTTPException(status_code=409,
+                                detail="Another 'call next' for this doctor is in progress. Refresh the queue.")
+        return await _call_next(clinic, doctor_id, actor, branch_id)
+
+
+async def _call_next(clinic: dict, doctor_id: str, actor: Any, branch_id: Optional[str]) -> dict:
     clinic_id = str(clinic["id"])
     today_str = today_ist().isoformat()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -1261,13 +1276,13 @@ async def opd_call_next(
     called_row = None
 
     # Step 1: Finish current in_consultation patient if any
-    current_res = await sb(
+    current_q = (
         scoped_query("appointments", clinic_id)
         .eq("doctor_id", doctor_id)
         .eq("appointment_date", today_str)
         .eq("queue_status", "in_consultation")
-        .limit(1)
     )
+    current_res = await sb((current_q.eq("branch_id", branch_id) if branch_id else current_q).limit(1))
     if current_res.data:
         curr = current_res.data[0]
         opd_settings = clinic.get("opd_settings") or {}
@@ -1292,14 +1307,15 @@ async def opd_call_next(
 
     # Step 2: Claim next waiting patient
     for _ in range(5):
-        next_cand = await sb(
+        cand_q = (
             scoped_query("appointments", clinic_id)
             .eq("doctor_id", doctor_id)
             .eq("appointment_date", today_str)
             .eq("queue_status", "waiting")
-            .order("token_number", desc=False)
-            .limit(1)
         )
+        if branch_id:
+            cand_q = cand_q.eq("branch_id", branch_id)
+        next_cand = await sb(cand_q.order("token_number", desc=False).limit(1))
         if not next_cand.data:
             break
 

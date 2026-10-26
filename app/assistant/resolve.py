@@ -408,6 +408,23 @@ def resolve_lab_test(text: str) -> Optional[str]:
     return term if 2 <= len(term) <= 60 else None
 
 
+_PRICE_WORD = re.compile(r"\b(?:price|prices|rate|rates|cost|costs|charge|charges|fee|fees|entha|enta|kitna|"
+                         r"kitne|dhara|dharalu|keemat|kimat)\b", re.I)
+_QUESTION_WORDS = {"what", "whats", "how", "much", "does", "do", "is", "are", "much", "tell", "me", "cost", "costs",
+                   "charge", "charges", "entha", "enta", "kitna", "kitne", "hai", "ka", "ki", "ke", "dhara", "keemat"}
+
+
+def resolve_price_term(text: str) -> Optional[str]:
+    """The test a price question names ("price of cbc test" -> "cbc"), else None. Only when the text asks a
+    price, so "how many tests do we have" keeps listing every test."""
+    if not _PRICE_WORD.search(text or ""):
+        return None
+    term = resolve_lab_test(text)
+    words = [w for w in (term or "").split() if w not in _QUESTION_WORDS]
+    term = " ".join(words)
+    return term if 2 <= len(term) <= 60 else None
+
+
 def resolve_lab_scope(text: str) -> str:
     """"all", or the category words of a bulk instruction ("all imaging prices" -> "imaging")."""
     return " ".join(_lab_words(text))[:60] or "all"
