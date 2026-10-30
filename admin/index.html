@@ -1712,6 +1712,9 @@
             background: linear-gradient(135deg, #ef4444, #f97316); box-shadow: 0 10px 30px rgba(239,68,68,0.45); }
         .emg-fab:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
         .emg-fab[hidden], #emgRapidBtn[hidden] { display: none; }
+        /* The Kriya Ketu launcher owns the bottom-right corner; sit just left of it. */
+        body:has(#ketuLauncher) .emg-fab { right: 84px; }
+        @media (max-width: 640px) { body:has(#ketuLauncher) .emg-fab { right: 76px; } }
         .emg-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
         .emg-seg.two { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .emg-seg button { height: 48px; border-radius: 12px; font: inherit; font-weight: 800; font-size: 0.85rem; cursor: pointer;
@@ -1934,6 +1937,57 @@
         .corp-warn { color: var(--amber); }
         .chart-grid.corp-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         @media (max-width: 1100px) { .chart-grid.corp-three { grid-template-columns: minmax(0, 1fr); } }
+        /* People grid: every figure is an employee (or 1% of them), highlighted when any result is out of range. */
+        /* Workforce at a glance: a ring for the share with any out-of-range result, findings as meters beside it. */
+        .corp-people { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 20px 36px; align-items: center; margin-bottom: 18px; padding: 24px 28px; }
+        .corp-people:empty { display: none; }
+        .corp-ring { position: relative; width: 168px; height: 168px; margin: 0; }
+        .corp-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+        .corp-ring circle { fill: none; stroke-width: 9; }
+        .corp-ring-track { stroke: color-mix(in srgb, var(--text3) 18%, transparent); }
+        .corp-ring-arc { stroke: var(--red); stroke-linecap: round; stroke-dasharray: var(--p) 100; animation: corpRing .9s cubic-bezier(.3,.7,.2,1) both; }
+        @keyframes corpRing { from { stroke-dasharray: 0 100; } }
+        .corp-ring figcaption { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        .corp-ring figcaption b { font-size: 2.1rem; font-weight: 700; letter-spacing: -.03em; color: var(--text-strong); font-variant-numeric: tabular-nums; line-height: 1; }
+        .corp-ring figcaption span { margin-top: 6px; font-size: .74rem; color: var(--text3); }
+        .corp-people h3 { margin: 0; font-size: 1.05rem; font-weight: 500; line-height: 1.45; color: var(--text2); max-width: 46ch; }
+        .corp-people h3 b { color: var(--text-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
+        .corp-people-lbl { margin: 18px 0 6px; font-size: .78rem; color: var(--text3); }
+        .corp-people-top { display: flex; flex-direction: column; max-width: 620px; }
+        .corp-chip { display: grid; grid-template-columns: minmax(130px, 200px) minmax(60px, 1fr) 52px; align-items: center; gap: 14px; width: 100%;
+            padding: 9px 10px; margin: 0 -10px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: .88rem; cursor: pointer; text-align: left; }
+        .corp-chip + .corp-chip { border-top: 1px solid var(--border); border-radius: 0; }
+        .corp-chip:hover { background: var(--surface2); border-radius: 10px; }
+        .corp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+        .corp-chip-name { font-weight: 600; min-width: 0; }
+        .corp-chip small { display: block; font-weight: 400; color: var(--text3); font-size: .74rem; margin-top: 1px; }
+        .corp-chip-meter { height: 6px; border-radius: 99px; background: color-mix(in srgb, var(--text3) 16%, transparent); overflow: hidden; }
+        .corp-chip-meter i { display: block; height: 100%; border-radius: inherit; background: var(--red); }
+        .corp-chip b { text-align: right; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+        /* Risk map: the cell's red deepens with the abnormal share. */
+        .corp-heat table { border-collapse: separate; border-spacing: 3px; min-width: 640px; }
+        .corp-heat th, .corp-heat td { text-align: center; padding: 8px 6px; font-size: .82rem; border: 0; font-variant-numeric: tabular-nums; }
+        .corp-heat th { text-transform: none; letter-spacing: 0; background: transparent; }
+        .corp-heat thead th { font-weight: 600; color: var(--text3); font-size: .74rem; }
+        .corp-heat tbody th { text-align: left; font-weight: 600; color: var(--text); white-space: nowrap; padding-right: 14px; font-size: .86rem; }
+        .corp-heat tbody th small { display: block; font-weight: 400; color: var(--text3); font-size: .7rem; }
+        .corp-heat td { border-radius: 6px; color: var(--text-strong); background: color-mix(in srgb, var(--red) calc(4% + var(--h) * 70%), transparent); }
+        .corp-heat td.is-none { background: transparent; color: var(--text3); }
+        .corp-heat td.corp-heat-all { font-weight: 700; }
+        .corp-heat .corp-heat-sex:nth-last-child(2) { border-left: 10px solid transparent; background-clip: padding-box; }
+        .corp-heat tbody tr { cursor: pointer; }
+        /* The test name stays in view while the groups scroll sideways on a phone. */
+        .corp-heat :is(thead th:first-child, tbody th) { position: sticky; left: 0; z-index: 1; background: var(--surface-solid); }
+        .corp-heat tbody tr:hover th, .corp-heat tbody tr.on th { color: var(--accent2); }
+        .corp-heat tbody tr.on td { box-shadow: inset 0 0 0 1px var(--accent-border, var(--accent)); }
+        .corp-heat tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+        @media (max-width: 700px) {
+            .corp-people { grid-template-columns: minmax(0, 1fr); justify-items: center; padding: 20px 16px; }
+            .corp-people-copy { width: 100%; }
+            .corp-chip { grid-template-columns: minmax(0, 1fr) 70px 48px; }
+        }
+        @media (prefers-reduced-motion: reduce) { .corp-ring-arc { animation: none; } }
+        @media print { .corp-ring-arc { animation: none; } .corp-heat td, .corp-ring, .corp-chip-meter { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
         @media print {
             body.corp-print * { visibility: hidden; }
             body.corp-print #pg-corporate, body.corp-print #pg-corporate * { visibility: visible; }
@@ -2407,11 +2461,11 @@
         #ketuVox { --ketu-surface: linear-gradient(160deg, rgba(36,58,82,.84) 0%, rgba(14,25,38,.92) 60%, rgba(10,19,30,.95) 100%);
                    --ketu-border: var(--border2); --vox-a: #43E2A6; --vox-b: #2FA8D8; --vox-c: #3D8BFD; --vox-d: #9FF0D2; --vox-e: #0C9668; }
         :root[data-theme="light"] #ketuVox { --ketu-surface: linear-gradient(160deg, rgba(255,255,255,.92), rgba(236,244,245,.95)); }
-        .page-head:has(> .ketu-speak) { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 16px; }
-        .page-head:has(> .ketu-speak) > :not(.ketu-speak) { flex: 1 1 60%; min-width: 0; }
-        .page-head:has(> .ketu-speak) > h2 + p { flex-basis: 100%; order: 3; }
-        .page-head > .ketu-speak { order: 2; }
-        .ketu-speak { display: inline-flex; align-items: center; gap: 10px; flex: 0 0 auto; margin-left: auto; cursor: pointer;
+        /* Pinned to the title row and given its own gutter, so each page's header (Rapid Admit, range pickers,
+           switchers) keeps its own layout instead of being reflowed around the pill. */
+        .page-head:has(> .ketu-speak) { position: relative; padding-right: 200px; min-height: 40px; }
+        .page-head > .ketu-speak { position: absolute; top: 0; right: 0; }
+        .ketu-speak { display: inline-flex; align-items: center; gap: 10px; flex: 0 0 auto; cursor: pointer; white-space: nowrap;
                       padding: 6px 16px 6px 6px; border-radius: 999px; font: inherit; font-size: .85rem; font-weight: 600; color: var(--text);
                       background: linear-gradient(var(--surface2), var(--surface2)) padding-box,
                                   linear-gradient(120deg, #43E2A6, #2FA8D8, #3D8BFD) border-box;
@@ -2431,7 +2485,7 @@
                    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: voxFade 180ms ease-out; }
         :root[data-theme="light"] #ketuVox { background: rgba(7,24,32,.18); }
         #ketuVox[hidden] { display: none; }
-        .vox-card { width: min(640px, 100%); max-height: min(78vh, 760px); display: flex; flex-direction: column; color: var(--text);
+        .vox-card { width: min(920px, 100%); max-height: min(calc(100dvh - 32px), 1000px); display: flex; flex-direction: column; color: var(--text);
                     background: var(--ketu-surface); border: 1px solid var(--ketu-border); border-radius: 28px; overflow: hidden;
                     box-shadow: inset 0 1px 0 var(--rim, rgba(255,255,255,.08)), 0 30px 80px rgba(0,0,0,.5), 0 0 60px rgba(47,168,216,.16);
                     -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%);
@@ -2442,12 +2496,26 @@
         .vox-head .ketu-scope { margin-left: auto; }
         .vox-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 18px 4px; display: flex; flex-direction: column; gap: 12px; }
         .vox-log:empty { display: none; }
+        /* Wide voice card: clarify questions sit two to a row so a whole form fits without scrolling. */
+        @media (min-width: 721px) {
+            .vox-log form.ketu-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; align-items: end; }
+            .vox-log form.ketu-card > :is(p, fieldset, .ketu-opt, .ketu-actions) { grid-column: 1 / -1; }
+        }
+        @media (min-width: 1100px) { .vox-log form.ketu-card { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        /* Laptop-height screens: a smaller orb and wave hand the space to the form. */
+        @media (max-height: 820px) {
+            .vox-stage .vox-core { width: 160px; height: 160px; margin: -12px 0 -14px; }
+            .vox-orb { width: 68px; height: 68px; }
+            .vox-stage { padding-bottom: 10px; }
+        }
         .vox-stage { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 18px 16px; }
         .vox-heard { min-height: 1.6em; max-width: 100%; text-align: center; font-size: 1.22rem; line-height: 1.35; font-weight: 600;
                      letter-spacing: -.01em; overflow-wrap: anywhere; }
         .vox-heard.is-hint { color: var(--text2); font-weight: 500; font-size: 1rem; }
         .vox-heard.is-err { color: var(--amber, #f5a524); font-size: .95rem; }
-        .vox-wave { width: 100%; height: 64px; display: block; }
+        .vox-core { position: relative; width: 210px; height: 210px; display: grid; place-items: center; margin: -10px 0 -14px; }
+        .vox-halo { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+        .vox-core .vox-orb { z-index: 1; }
         .vox-orb { --lvl: 0; position: relative; width: 92px; height: 92px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
                    background: transparent; transform: scale(calc(1 + var(--lvl) * .22)); transition: transform 90ms linear; }
         .vox-orb:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
@@ -2475,6 +2543,7 @@
         @keyframes voxRise { from { opacity: 0; transform: translateY(24px) scale(.97); } }
         @media (max-width: 640px) {
             .ketu-speak { padding: 5px; } .ketu-speak-label, .ketu-speak-kbd { display: none; }
+            .page-head:has(> .ketu-speak) { padding-right: 52px; }
             #ketuVox { padding: 8px 8px max(8px, env(safe-area-inset-bottom)); }
             .vox-card { border-radius: 24px; max-height: 86vh; }
             .vox-heard { font-size: 1.05rem; }
@@ -2671,6 +2740,78 @@
             .ipd-pop { left: 0; right: 0; width: auto; }
             .ipd-head select { width: 100%; }
         }
+        /* ── Insights: clinic pulse (monitor trace) + 24-hour dial ── */
+        .ins-pulse { margin-bottom: 20px; padding: 20px 22px 14px; overflow: hidden; }
+        .ins-pulse[hidden] { display: none; }
+        .ins-pulse-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px 32px; flex-wrap: wrap; margin-bottom: 14px; }
+        .ins-pulse-read { min-width: 220px; }
+        .ins-pulse-read h3 { margin: 0 0 10px; font-size: .95rem; font-weight: 600; color: var(--text2); }
+        .ins-pulse-day { margin: 0; font-size: 1.45rem; font-weight: 600; letter-spacing: -.02em; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+        .ins-pulse-line { margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--text2); font-size: .9rem; }
+        .ins-pulse-line b { color: var(--text-strong); font-variant-numeric: tabular-nums; }
+        .ins-vitals { display: grid; grid-template-columns: repeat(4, minmax(104px, auto)); gap: 4px 26px; margin: 0; }
+        .ins-vitals > div { border-left: 2px solid var(--vc); padding: 2px 0 2px 12px; }
+        .ins-vitals dt { font-size: .74rem; color: var(--text3); }
+        .ins-vitals dd { margin: 2px 0 0; font-size: 1.5rem; font-weight: 600; line-height: 1.1; color: var(--vc); font-variant-numeric: tabular-nums; }
+        .ins-vitals small { display: block; font-size: .7rem; font-weight: 500; color: var(--text3); margin-top: 3px; }
+        .ins-vitals .v-avg { --vc: var(--accent); } .ins-vitals .v-peak { --vc: var(--cyan); }
+        .ins-vitals .v-quiet { --vc: var(--amber); } .ins-vitals .v-trend { --vc: var(--accent2); }
+        /* ECG paper: 5 small squares to a large one, in the accent at a whisper. */
+        .ins-monitor { position: relative; height: 190px; border-radius: 14px; cursor: crosshair; touch-action: pan-y;
+            border: 1px solid var(--border);
+            background:
+                linear-gradient(color-mix(in srgb, var(--accent) 9%, transparent) 1px, transparent 1px) 0 0 / 40px 38px,
+                linear-gradient(90deg, color-mix(in srgb, var(--accent) 9%, transparent) 1px, transparent 1px) 0 0 / 40px 38px,
+                linear-gradient(color-mix(in srgb, var(--accent) 4%, transparent) 1px, transparent 1px) 0 0 / 8px 7.6px,
+                linear-gradient(90deg, color-mix(in srgb, var(--accent) 4%, transparent) 1px, transparent 1px) 0 0 / 8px 7.6px,
+                color-mix(in srgb, var(--surface-solid) 60%, transparent); }
+        .ins-monitor:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+        .ins-trace { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+        .ins-trace path { fill: none; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+        .ins-trace-line { stroke: var(--accent); stroke-width: 2; }
+        .ins-trace-glow { stroke: var(--accent); stroke-width: 7; opacity: .16; }
+        .ins-pulse.is-sweeping .ins-trace { animation: insSweep 1.6s cubic-bezier(.45,.05,.3,1) both; }
+        @keyframes insSweep { from { clip-path: inset(-20% 100% -20% 0); } to { clip-path: inset(-20% 0 -20% 0); } }
+        .ins-cursor { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed color-mix(in srgb, var(--text2) 55%, transparent); pointer-events: none;
+            transition: left 90ms ease-out; }
+        .ins-cursor[hidden] { display: none; }
+        .ins-cursor i { position: absolute; left: -6px; top: calc(var(--y, 78%) - 6px); width: 12px; height: 12px; border-radius: 50%;
+            background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 18px var(--accent);
+            transition: top 90ms ease-out; }
+        .ins-cursor.is-flat i { background: var(--text3); box-shadow: 0 0 0 4px color-mix(in srgb, var(--text3) 20%, transparent); }
+        .ins-pulse-axis { position: relative; height: 22px; margin-top: 6px; font-size: .72rem; color: var(--text3); font-variant-numeric: tabular-nums; }
+        .ins-pulse-axis span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+        .ins-pulse-axis span:first-child { transform: none; } .ins-pulse-axis span:last-child { transform: translateX(-100%); }
+        .ins-dial { display: grid; place-items: center; }
+        .ins-dial svg { width: 100%; height: 100%; max-width: 300px; overflow: visible; }
+        .ins-dial path { fill: color-mix(in srgb, var(--cyan) calc(var(--a) * 100%), transparent); transition: fill .15s, transform .15s; cursor: pointer; }
+        .ins-dial path.is-zero { fill: color-mix(in srgb, var(--text3) 18%, transparent); }
+        .ins-dial path.on { fill: var(--accent); }
+        .ins-dial .dial-face { fill: color-mix(in srgb, var(--surface-solid) 70%, transparent); stroke: var(--border); }
+        .ins-dial .dial-rim { fill: none; stroke: var(--border); stroke-dasharray: 2 4; }
+        .ins-dial .dial-now { fill: var(--amber); }
+        .ins-dial text { text-anchor: middle; font-family: inherit; fill: var(--text2); font-variant-numeric: tabular-nums; }
+        .ins-dial .dial-tick { font-size: 11px; fill: var(--text3); }
+        .ins-dial .dial-big { font-size: 17px; font-weight: 600; fill: var(--text-strong); }
+        .ins-dial .dial-small { font-size: 9.5px; }
+        @media (max-width: 900px) { .ins-vitals { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; } }
+        @media (max-width: 640px) { .ins-monitor { height: 150px; } .ins-pulse { padding: 16px 14px 10px; } .ins-pulse-day { font-size: 1.2rem; } .ins-trace-glow { stroke-width: 4; } .ins-trace-line { stroke-width: 1.5; } }
+        @media (prefers-reduced-motion: reduce) {
+            .ins-pulse.is-sweeping .ins-trace { animation: none; }
+            .ins-cursor, .ins-cursor i, .ins-dial path { transition: none; }
+        }
+
+        /* One drawn chevron for every dropdown: the native arrow ignored our padding and sat on the border.
+           !important only on the background longhands, since many rules above reset them via the `background` shorthand. */
+        :root { --select-chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%239FB3C8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E"); }
+        :root[data-theme="light"] { --select-chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%23526577' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E"); }
+        select:not([multiple]):not([size]) {
+            -webkit-appearance: none; appearance: none;
+            background-image: var(--select-chev) !important; background-repeat: no-repeat !important;
+            background-position: right 14px center !important; background-size: 11px 8px !important;
+            padding-right: 38px !important; text-overflow: ellipsis;
+        }
+        select option { background-color: var(--surface-solid); color: var(--text); }
     </style>
 </head>
 <body>
@@ -3266,8 +3407,26 @@
                 <span id="insightsNoteText"></span>
             </div>
 
+            <!-- Clinic pulse: one heartbeat per day, its height that day's bookings. Scrub to read any day. -->
+            <section class="card ins-pulse" id="insPulse" aria-labelledby="insPulseTitle" hidden>
+                <div class="ins-pulse-top">
+                    <div class="ins-pulse-read">
+                        <h3 id="insPulseTitle">Clinic pulse</h3>
+                        <p class="ins-pulse-day" id="insPulseDay"></p>
+                        <p class="ins-pulse-line" id="insPulseLine"></p>
+                    </div>
+                    <dl class="ins-vitals" id="insVitals"></dl>
+                </div>
+                <div class="ins-monitor" id="insMonitor" tabindex="0" role="slider" aria-valuemin="1"
+                     aria-label="Bookings per day. Arrow keys move between days.">
+                    <svg class="ins-trace" id="insTrace" preserveAspectRatio="none" aria-hidden="true" focusable="false"></svg>
+                    <span class="ins-cursor" id="insCursor" aria-hidden="true"><i></i></span>
+                </div>
+                <div class="ins-pulse-axis" id="insPulseAxis" aria-hidden="true"></div>
+            </section>
+
             <!-- Weekly Insights Operational Summary Card (Clinic-wide) -->
-            <div id="weeklyInsightsSummaryCard" class="card" style="margin-bottom:20px; background:linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8)); border:1px solid rgba(99, 102, 241, 0.3);">
+            <div id="weeklyInsightsSummaryCard" class="card" style="margin-bottom:20px; border:1px solid var(--accent-border, var(--border2));">
                 <div class="card-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <h3 style="margin:0; font-size:1.05rem; display:flex; align-items:center; gap:6px;">
@@ -3364,7 +3523,7 @@
                             <span class="chart-sub">When patients message you, by hour (IST)</span>
                         </div>
                     </div>
-                    <div class="chart-box" id="box-hours"><canvas id="ch-hours"></canvas></div>
+                    <div class="chart-box ins-dial" id="box-hours"></div>
                 </div>
             </div>
 
@@ -4728,12 +4887,14 @@
                     <div class="stats" id="corpKpis"></div>
                     <p class="corp-note" id="corpSmallNote" hidden></p>
 
+                    <section class="card corp-people" id="corpPeople" aria-labelledby="corpPeopleTitle"></section>
+
                     <div class="card" style="margin-bottom:18px;">
                         <div class="card-head"><div>
-                            <h3>Health Risk Overview</h3>
-                            <span class="chart-sub">Share of tested employees outside the lab's normal range, per test. Click a bar to explore it.</span>
+                            <h3>Health Risk Map</h3>
+                            <span class="chart-sub">Share of tested employees outside the lab's normal range, by test and group. Deeper red means more employees affected. Select a test to explore it.</span>
                         </div></div>
-                        <div class="chart-box tall" id="box-corp-overview"><canvas id="ch-corp-overview"></canvas></div>
+                        <div class="tbl-wrap corp-heat" id="corpHeat"></div>
                     </div>
 
                     <div class="card" style="margin-bottom:18px;">
@@ -5246,7 +5407,7 @@
                 <!-- Walk-In Token Form -->
                 <div class="form-card" id="opdWalkInCard">
                     <h3>Issue Walk-In Token</h3>
-                    <p style="color:var(--text3); font-size:0.85rem; margin-top:-6px;">Generate real-time token and queue slot for the arrived patient.</p>
+                    <p style="color:var(--text3); font-size:0.85rem; margin:-6px 0 16px;">Generate real-time token and queue slot for the arrived patient.</p>
                     <div class="form-row">
                         <div class="field">
                             <label>Doctor <span style="color:var(--accent);">*</span></label>
@@ -5279,7 +5440,7 @@
                         </div>
                     </div>
                     <div class="form-row">
-                        <div class="field">
+                        <div class="field" style="grid-column:1/-1;">
                             <label>Chief Complaint / Symptoms</label>
                             <input type="text" id="f-opdWalkInSymptoms" placeholder="e.g. Fever 3 days, cough, headache">
                         </div>
@@ -9318,7 +9479,8 @@ async function openLisParams(labTestId) {
     sel.innerHTML = '<option value="">Loading…</option>';
     try {
         const tests = (await api('/admin/lab-tests')) || [];
-        sel.innerHTML = '<option value="">— Choose a test —</option>' + tests.map(t => `<option value="${esc(t.id)}">${esc(t.name)}${t.is_active === false ? ' (inactive)' : ''}</option>`).join('');
+        sel.innerHTML = !tests.length ? '<option value="">No lab tests yet — add them under Lab Tests / Services</option>'
+            : '<option value="">— Choose a test —</option>' + tests.map(t => `<option value="${esc(t.id)}">${esc(t.name)}${t.is_active === false ? ' (inactive)' : ''}</option>`).join('');
     } catch (e) {
         sel.innerHTML = '<option value="">Could not load lab tests</option>';
         return;
@@ -12420,7 +12582,7 @@ function corpSetFocus(key) {
     corpFocus = key;
     document.getElementById('corpFocusSel').value = key;  // table / chart clicks must move the picker too
     if (corpData) renderCorpFocus();
-    document.querySelectorAll('#corpTable .corp-row').forEach(r => r.classList.toggle('on', r.dataset.key === key));
+    document.querySelectorAll('#corpTable .corp-row, #corpHeat tbody tr').forEach(r => r.classList.toggle('on', r.dataset.key === key));
 }
 
 function corpSetStatus(status, btn) {
@@ -12503,6 +12665,7 @@ function renderCorpInsights() {
     renderCorpTable();
     const t = chartTokens();
     renderCorpOverview(t);
+    renderCorpPeople(s);
     renderCorpFocus(t);
     const ages = d.age_bands;
     drawChart('box-corp-gender', 'ch-corp-gender', {
@@ -12517,24 +12680,68 @@ function renderCorpInsights() {
     }, 'No employees');
 }
 
+// Abnormal share of one group's CLASSIFIED results, half-up to one decimal like the server's pct().
+function corpGroupPct(g) {
+    const n = g ? g.normal + g.low + g.high : 0;
+    // +1e-9: a float like 122.49999 for an exact .5 must still round up, as Decimal does server-side.
+    return n ? { n, ab: g.low + g.high, pct: Math.round((g.low + g.high) * 1000 / n + 1e-9) / 10 } : null;
+}
+
+// Tests x groups, coloured by abnormal share; a row opens that test in the detail card below.
 function renderCorpOverview(t) {
     const ranked = corpData.params.filter(p => p.tested > 0).sort((a, b) => b.abnormal_pct - a.abnormal_pct || b.abnormal - a.abnormal);
-    drawChart('box-corp-overview', 'ch-corp-overview', {
-        type: 'bar',
-        data: {
-            labels: ranked.map(p => p.label),
-            datasets: [{ label: 'Abnormal', data: ranked.map(p => p.abnormal_pct), backgroundColor: rankRamp(t.red, ranked.length), borderRadius: 6, maxBarThickness: 18 }]
-        },
-        options: {
-            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-            onClick: (evt, els) => { if (els.length) corpSetFocus(ranked[els[0].index].key); },
-            plugins: {
-                legend: { display: false },
-                tooltip: tooltipStyle(t, { callbacks: { label: ctx => { const p = ranked[ctx.dataIndex]; return ` ${p.abnormal_pct}% abnormal — ${p.abnormal} of ${p.tested - p.unclassified} (low ${p.low}, high ${p.high})`; } } })
-            },
-            scales: { x: Object.assign(valueAxis(t, v => v + '%'), { max: 100 }), y: { grid: { display: false }, border: { display: false }, ticks: { color: t.label, autoSkip: false } } }
-        }
-    }, 'No abnormal results in this group');
+    const box = document.getElementById('corpHeat');
+    if (!ranked.length) { box.innerHTML = '<div class="chart-empty" style="display:flex">No test results in this group</div>'; return; }
+    const cols = [['all', 'All', p => ({ normal: p.normal, low: p.low, high: p.high })]]
+        .concat(corpData.age_bands.map(b => ['age', b, p => p.by_age[b]]))
+        .concat([['sex', 'Male', p => p.by_sex.M], ['sex', 'Female', p => p.by_sex.F]]);
+    const cell = (p, [kind, name, get]) => {
+        const g = corpGroupPct(get(p));
+        if (g && kind === 'all') g.pct = p.abnormal_pct;  // the server's own figure, so the map always matches the table
+        const cls = 'corp-heat-' + kind;
+        if (!g) return `<td class="${cls} is-none" title="No ${esc(p.label)} results for ${esc(name)}">—</td>`;
+        const tip = `${p.label}, ${name}: ${g.ab} of ${g.n} outside range (${g.pct}%)`;
+        return `<td class="${cls}" style="--h:${Math.min(1, g.pct / 100).toFixed(3)}" title="${esc(tip)}"><span>${g.pct}%</span></td>`;
+    };
+    box.innerHTML = `<table><thead><tr><th scope="col">Test</th>${cols.map(([k, n]) => `<th scope="col" class="corp-heat-${k}">${esc(n)}</th>`).join('')}</tr></thead><tbody>` +
+        ranked.map(p => `<tr class="${p.key === corpFocus ? 'on' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-label="${esc(p.label)}: ${p.abnormal_pct}% outside range. Open details">
+            <th scope="row">${esc(p.label)}<small>${esc(p.panel)}</small></th>${cols.map(c => cell(p, c)).join('')}</tr>`).join('') +
+        '</tbody></table>';
+    if (!box.dataset.wired) {
+        box.dataset.wired = '1';
+        const open = tr => { corpSetFocus(tr.dataset.key); document.getElementById('corpFocusTitle').closest('.card').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+        box.addEventListener('click', e => { const tr = e.target.closest('tbody tr'); if (tr) open(tr); });
+        box.addEventListener('keydown', e => { const tr = e.target.closest('tbody tr'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(tr); } });
+    }
+}
+
+// Workforce at a glance: one ring for the share with any out-of-range result (the same at 12 or 12,000
+// employees), beside the most common findings as meters that open the test.
+function renderCorpPeople(s) {
+    const box = document.getElementById('corpPeople');
+    const top = corpData.params.filter(p => p.tested > 0 && p.abnormal > 0).sort((a, b) => b.abnormal_pct - a.abnormal_pct || b.abnormal - a.abnormal).slice(0, 4);
+    const pct = Math.max(0, Math.min(100, Number(s.with_abnormal_pct) || 0));
+    box.innerHTML = `
+        <figure class="corp-ring" role="img" aria-label="${s.with_abnormal_pct}% of employees, ${corpNum(s.with_abnormal)} of ${corpNum(s.employees)}, have at least one result outside the normal range">
+            <svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+                <circle class="corp-ring-track" cx="60" cy="60" r="52"/>
+                ${pct ? `<circle class="corp-ring-arc" cx="60" cy="60" r="52" pathLength="100" style="--p:${pct}"/>` : ''}
+            </svg>
+            <figcaption><b>${s.with_abnormal_pct}%</b><span>need attention</span></figcaption>
+        </figure>
+        <div class="corp-people-copy">
+            <h3 id="corpPeopleTitle"><b>${corpNum(s.with_abnormal)}</b> of ${corpNum(s.employees)} employees have at least one result outside the normal range</h3>
+            <p class="corp-sub">The other ${corpNum(s.employees - s.with_abnormal)} had no low or high results.</p>
+            ${top.length ? `<p class="corp-people-lbl">Most common findings</p><div class="corp-people-top">${top.map(p =>
+                `<button type="button" class="corp-chip" data-key="${esc(p.key)}" aria-label="${esc(p.label)}: ${p.abnormal_pct}% outside range, ${p.low} low, ${p.high} high. Open details">
+                    <span class="corp-chip-name">${esc(p.label)}<small>${p.low} low · ${p.high} high</small></span>
+                    <span class="corp-chip-meter" aria-hidden="true"><i style="width:${Math.min(100, p.abnormal_pct)}%"></i></span>
+                    <b>${p.abnormal_pct}%</b></button>`).join('')}</div>` : ''}
+        </div>`;
+    box.querySelectorAll('.corp-chip').forEach(b => b.addEventListener('click', () => {
+        corpSetFocus(b.dataset.key);
+        document.getElementById('corpFocusTitle').closest('.card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
 }
 
 function renderCorpTable() {
@@ -14178,24 +14385,8 @@ function renderInsights(d) {
         }
     }, 'No bookings in this period');
 
-    // ── Peak booking hours ──────────────────────────────────────────────
-    const hours = b.peak_hours || [];
-    drawChart('box-hours', 'ch-hours', {
-        type: 'bar',
-        data: {
-            labels: hours.map(h => String(h.hour).padStart(2, '0')),
-            datasets: [{
-                label: 'Bookings', data: hours.map(h => h.count),
-                backgroundColor: withAlpha(t.cyan, 0.72), hoverBackgroundColor: t.cyan,
-                borderRadius: 3, borderSkipped: false, barPercentage: 0.85, categoryPercentage: 0.9
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: tooltipStyle(t) },
-            scales: { x: categoryAxis(t, 12), y: valueAxis(t) }
-        }
-    }, 'No bookings in this period');
+    renderPulse(d);
+    renderHourDial(b.peak_hours || []);
 
     // ── Service mix ─────────────────────────────────────────────────────
     const services = b.by_service || [];
@@ -14400,6 +14591,146 @@ function renderInsights(d) {
             }
         }
     }, 'No reports handled in this period');
+}
+
+// ── Clinic pulse: the booking series drawn as a monitor trace, one beat per day ──
+// Each beat's R-peak height is that day's bookings over the period's busiest day, so a
+// quiet day is a true flat line. 100 viewBox units per day; baseline at y=78, full peak at y=12.
+const PULSE_BASE = 78, PULSE_AMP = 66;
+let pulse = null;
+
+function pulseBeat(i, a) {
+    const x = i * 100, B = PULSE_BASE, A = PULSE_AMP * a;
+    return [[x, B], [x + 30, B], [x + 35, B - 0.09 * A], [x + 40, B], [x + 46, B + 0.12 * A], [x + 52, B - A],
+        [x + 58, B + 0.2 * A], [x + 63, B], [x + 68, B - 0.12 * A], [x + 74, B - 0.16 * A], [x + 80, B - 0.08 * A],
+        [x + 85, B], [x + 100, B]].map(p => p[0] + ',' + p[1].toFixed(2)).join(' L');
+}
+
+function pulseDate(iso, opts) {
+    const x = new Date(iso + 'T00:00:00');
+    return isNaN(x) ? iso : x.toLocaleDateString('en-IN', opts || { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function renderPulse(d) {
+    const sec = document.getElementById('insPulse');
+    if (!sec) return;
+    const b = d.bookings;
+    const dates = d.dates || [];
+    if (!b || !dates.length) { sec.hidden = true; pulse = null; return; }
+    const s = b.series || {};
+    const booked = dates.map((_, i) => Number((s.created || [])[i] || 0));
+    const done = dates.map((_, i) => Number((s.completed || [])[i] || 0));
+    const rev = (d.revenue && d.revenue.series && planAllowsFeature('payments_razorpay')) ? d.revenue.series.collected || [] : null;
+    const n = dates.length, max = Math.max(0, ...booked), total = booked.reduce((x, y) => x + y, 0);
+    const busiest = max ? booked.indexOf(max) : n - 1;
+    pulse = { dates, booked, done, rev, max, busiest, i: busiest };
+    sec.hidden = false;
+
+    const svg = document.getElementById('insTrace');
+    svg.setAttribute('viewBox', '0 0 ' + (n * 100) + ' 100');
+    const path = 'M' + booked.map((c, i) => pulseBeat(i, max ? c / max : 0)).join(' L');
+    svg.innerHTML = '<path class="ins-trace-glow" d="' + path + '"/><path class="ins-trace-line" d="' + path + '"/>';
+    // Replay the sweep for this render only (a new range or branch), never on scrub.
+    sec.classList.remove('is-sweeping'); void sec.offsetWidth; sec.classList.add('is-sweeping');
+
+    const half = Math.floor(n / 2);
+    const first = booked.slice(0, half).reduce((x, y) => x + y, 0), last = booked.slice(n - half).reduce((x, y) => x + y, 0);
+    const trend = !half ? '—' : first ? (last >= first ? '+' : '−') + Math.abs(Math.round((last - first) * 100 / first)) + '%' : last ? 'New' : '—';
+    const quiet = booked.filter(c => !c).length;
+    document.getElementById('insVitals').innerHTML = [
+        ['v-avg', 'Average a day', total ? (total / n).toFixed(1) : '0', 'bookings'],
+        ['v-peak', 'Busiest day', max, max ? pulseDate(dates[busiest], { day: 'numeric', month: 'short' }) : 'none yet'],
+        ['v-quiet', 'Quiet days', quiet, 'of ' + n + ' with no bookings'],
+        ['v-trend', 'Trend', trend, half ? 'last ' + half + ' days vs the ' + half + ' before' : ''],
+    ].map(([cls, k, v, sub]) => `<div class="${cls}"><dt>${k}</dt><dd>${esc(String(v))}<small>${esc(sub)}</small></dd></div>`).join('');
+
+    const ticks = Math.min(n, n <= 7 ? 7 : 6);
+    document.getElementById('insPulseAxis').innerHTML = Array.from({ length: ticks }, (_, k) => {
+        const i = ticks === 1 ? 0 : Math.round(k * (n - 1) / (ticks - 1));
+        return `<span style="left:${((i * 100 + 52) / (n * 100) * 100).toFixed(3)}%">${esc(pulseDate(dates[i], { day: 'numeric', month: 'short' }))}</span>`;
+    }).join('');
+
+    const mon = document.getElementById('insMonitor');
+    mon.setAttribute('aria-valuemax', String(n));
+    if (!mon.dataset.wired) {
+        mon.dataset.wired = '1';
+        const at = e => { if (!pulse) return; const r = mon.getBoundingClientRect(); pulseSelect(Math.floor((e.clientX - r.left) / r.width * pulse.dates.length)); };
+        mon.addEventListener('pointermove', at);
+        mon.addEventListener('pointerdown', at);
+        mon.addEventListener('pointerleave', () => { if (pulse && document.activeElement !== mon) pulseSelect(pulse.busiest); });
+        mon.addEventListener('keydown', e => {
+            if (!pulse) return;
+            const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -7, PageUp: 7 }[e.key];
+            const to = e.key === 'Home' ? 0 : e.key === 'End' ? pulse.dates.length - 1 : step !== undefined ? pulse.i + step : null;
+            if (to === null) return;
+            e.preventDefault();
+            pulseSelect(to);
+        });
+    }
+    if (!total) {
+        document.getElementById('insPulseDay').textContent = 'No bookings in this period';
+        document.getElementById('insPulseLine').textContent = 'The trace stays flat until the first booking arrives.';
+        document.getElementById('insCursor').hidden = true;
+        mon.setAttribute('aria-valuenow', String(n));
+        mon.setAttribute('aria-valuetext', 'No bookings in this period');
+        return;
+    }
+    document.getElementById('insCursor').hidden = false;
+    pulseSelect(busiest);
+}
+
+function pulseSelect(i) {
+    const p = pulse;
+    if (!p) return;
+    i = Math.max(0, Math.min(p.dates.length - 1, i));
+    p.i = i;
+    const n = p.dates.length, c = p.booked[i], a = p.max ? c / p.max : 0;
+    const cur = document.getElementById('insCursor');
+    cur.style.left = ((i * 100 + 52) / (n * 100) * 100).toFixed(3) + '%';
+    cur.style.setProperty('--y', (PULSE_BASE - PULSE_AMP * a) + '%');
+    cur.classList.toggle('is-flat', !c);
+    const day = pulseDate(p.dates[i]);
+    document.getElementById('insPulseDay').textContent = day + (i === p.busiest ? ' — busiest day' : '');
+    const parts = [[c, c === 1 ? 'booking' : 'bookings'], [p.done[i], 'completed']];
+    if (p.rev) parts.push([inr(p.rev[i]), 'collected']);
+    document.getElementById('insPulseLine').innerHTML = parts.map(([v, k]) => `<span><b>${esc(String(v))}</b> ${k}</span>`).join('');
+    const mon = document.getElementById('insMonitor');
+    mon.setAttribute('aria-valuenow', String(i + 1));
+    mon.setAttribute('aria-valuetext', day + ': ' + parts.map(([v, k]) => v + ' ' + k).join(', '));
+}
+
+// ── Peak hours as a 24-hour clock: midnight at the top, each wedge's reach is that hour's bookings ──
+function renderHourDial(hours) {
+    const box = document.getElementById('box-hours');
+    if (!box) return;
+    const counts = Array.from({ length: 24 }, (_, h) => Number((hours.find(x => x.hour === h) || {}).count || 0));
+    const max = Math.max(0, ...counts);
+    if (!max) { box.innerHTML = '<div class="chart-empty" style="display:flex">No bookings in this period</div>'; return; }
+    const R0 = 46, R1 = 104, rad = deg => (deg - 90) * Math.PI / 180;
+    const pt = (r, deg) => (r * Math.cos(rad(deg))).toFixed(2) + ' ' + (r * Math.sin(rad(deg))).toFixed(2);
+    const hh = h => String(h).padStart(2, '0') + ':00';
+    const wedges = counts.map((c, h) => {
+        const r = c ? R0 + 4 + (R1 - R0 - 4) * c / max : R0 + 3, a0 = h * 15 + 1.4, a1 = (h + 1) * 15 - 1.4;
+        return `<path data-h="${h}" class="${c ? '' : 'is-zero'}" style="--a:${(0.28 + 0.72 * c / max).toFixed(2)}"
+            d="M${pt(R0, a0)} L${pt(r, a0)} A${r.toFixed(2)} ${r.toFixed(2)} 0 0 1 ${pt(r, a1)} L${pt(R0, a1)} A${R0} ${R0} 0 0 0 ${pt(R0, a0)}Z"/>`;
+    }).join('');
+    const labels = [0, 6, 12, 18].map(h => `<text class="dial-tick" x="${(116 * Math.cos(rad(h * 15))).toFixed(1)}" y="${(116 * Math.sin(rad(h * 15)) + 4).toFixed(1)}">${String(h).padStart(2, '0')}</text>`).join('');
+    const nowH = Number(new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false })) % 24;
+    const busiest = counts.indexOf(max);
+    const top = counts.map((c, h) => [c, h]).filter(x => x[0]).sort((x, y) => y[0] - x[0]).slice(0, 3);
+    box.innerHTML = `<svg viewBox="-128 -128 256 256" role="img" aria-label="Bookings by hour of day. Busiest: ${top.map(([c, h]) => hh(h) + ' (' + c + ')').join(', ')}.">
+        <circle class="dial-rim" r="${R1}"/><circle class="dial-face" r="${R0 - 1}"/>${wedges}${labels}
+        <circle class="dial-now" r="3.5" cx="${((R0 - 9) * Math.cos(rad(nowH * 15 + 7.5))).toFixed(2)}" cy="${((R0 - 9) * Math.sin(rad(nowH * 15 + 7.5))).toFixed(2)}"><title>Now (IST)</title></circle>
+        <text class="dial-big" y="-2"></text><text class="dial-small" y="16"></text></svg>`;
+    const svg = box.querySelector('svg'), big = svg.querySelector('.dial-big'), small = svg.querySelector('.dial-small');
+    const show = h => {
+        big.textContent = hh(h);
+        small.textContent = counts[h] + (counts[h] === 1 ? ' booking' : ' bookings') + (h === busiest ? ' · peak' : '');
+        svg.querySelectorAll('path').forEach(p => p.classList.toggle('on', Number(p.dataset.h) === h));
+    };
+    svg.addEventListener('pointerover', e => { const p = e.target.closest('path'); if (p) show(Number(p.dataset.h)); });
+    svg.addEventListener('pointerleave', () => show(busiest));
+    show(busiest);
 }
 
 // ═══════ WEEKLY OPERATIONAL INSIGHTS SUMMARY (CLINIC-WIDE) ═══════
@@ -26652,8 +26983,8 @@ const ketu = {
             '<div class="vox-log ketu-log" id="ketuVoxLog" role="log" aria-live="polite" aria-relevant="additions"></div>' +
             '<div class="vox-stage">' +
             '<p class="vox-heard is-hint" id="ketuVoxHeard" aria-live="polite"></p>' +
-            '<canvas class="vox-wave" aria-hidden="true"></canvas>' +
-            '<button type="button" class="vox-orb" id="ketuVoxOrb" aria-label="Speak"><i class="o1"></i><i class="o2"></i><i class="o3"></i><i class="o4"></i></button>' +
+            '<div class="vox-core"><canvas class="vox-halo" aria-hidden="true"></canvas>' +
+            '<button type="button" class="vox-orb" id="ketuVoxOrb" aria-label="Speak"><i class="o1"></i><i class="o2"></i><i class="o3"></i><i class="o4"></i></button></div>' +
             '<p class="vox-hint" id="ketuVoxHint"></p>' +
             '</div></div></div>';
         const v = wrap.firstElementChild;
@@ -26777,12 +27108,14 @@ const ketu = {
         }
     },
 
-    // Three Kriya-coloured waves riding the voice level; the orb's --lvl follows the same smoothed value.
+    // A halo of three Kriya-coloured ribbons around the orb, each a closed loop whose ripple rides the voice
+    // level: it breathes when idle, swells with speech, and gains orbiting comets while Ketu thinks.
+    // The orb's --lvl follows the same smoothed value.
     voxDraw(now) {
         if (!this.voxOn) return;
-        const c = this.vox.querySelector('.vox-wave');
+        const c = this.vox.querySelector('.vox-halo');
         const dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
-        if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+        if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
         const g = c.getContext('2d');
         g.setTransform(dpr, 0, 0, dpr, 0, 0);
         g.clearRect(0, 0, w, h);
@@ -26790,21 +27123,46 @@ const ketu = {
         const target = st === 'listening' ? (this.voxTarget || 0) : st === 'thinking' ? 0.22 : 0.05;
         this.voxLvl += (target - this.voxLvl) * 0.18;
         const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        const t = still ? 0 : now / 1000;
+        const t = still ? 0 : now / 1000, lvl = still ? 0 : this.voxLvl;
+        const cx = w / 2, cy = h / 2;
+        const orb = this.vox.querySelector('#ketuVoxOrb');
+        const R = orb.offsetWidth / 2 * (1 + lvl * 0.22) + 10;          // just outside the orb, which scales with --lvl
+        const room = Math.max(2, Math.min(cx, cy) - R - 8);
+        const amp = Math.min(room, st === 'listening' ? 3 + lvl * 40 : st === 'thinking' ? 5 : st === 'error' ? 1.5 : 2.5 + 1.5 * Math.sin(t * 1.3));
+        const err = st === 'error';
         g.globalCompositeOperation = 'lighter';
-        g.lineWidth = 2;
-        [['#43E2A6', 1, 0, 2.4], ['#2FA8D8', 0.75, 1.7, 3.1], ['#3D8BFD', 0.55, 3.3, 3.8]].forEach(([col, k, ph, sp]) => {
-            const amp = (h / 2 - 3) * Math.min(1, 0.04 + this.voxLvl * k * 1.6);
+        g.lineWidth = 1.7;
+        [['#43E2A6', 3, 0, 0.9], ['#2FA8D8', 4, 2.1, -1.2], ['#3D8BFD', 5, 4.2, 1.6]].forEach(([col, n, ph, sp], k) => {
             g.beginPath();
-            for (let x = 0; x <= w; x += 2) {
-                const p = x / w, env = Math.pow(Math.sin(Math.PI * p), 2);
-                const y = h / 2 + amp * env * Math.sin(p * Math.PI * (3 + k * 3) + t * sp + ph);
-                if (x === 0) g.moveTo(x, y); else g.lineTo(x, y);
+            for (let i = 0; i <= 180; i++) {
+                const a = i / 180 * Math.PI * 2;
+                const r = R + 4 + k * 3 + amp * (0.6 * Math.sin(n * a + t * sp + ph) + 0.4 * Math.sin((n + 2) * a - t * sp * 1.4 + ph * 2));
+                const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+                if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
             }
-            g.strokeStyle = col;
-            g.globalAlpha = 0.9;
+            g.closePath();
+            g.strokeStyle = err ? '#F5A524' : col;
+            g.globalAlpha = err ? 0.45 : 0.85;
+            g.shadowColor = g.strokeStyle;
+            g.shadowBlur = 10 + lvl * 16;
             g.stroke();
         });
+        if (st === 'thinking' && !still) {  // three comets chasing round the halo, tails fading behind them
+            const orbit = R + 12 + amp;
+            for (let k = 0; k < 3; k++) {
+                const head = t * 2.6 + k * Math.PI * 2 / 3;
+                for (let s = 0; s < 16; s++) {
+                    const a = head - s * 0.045;
+                    g.globalAlpha = (1 - s / 16) * 0.9;
+                    g.fillStyle = ['#9FF0D2', '#2FA8D8', '#3D8BFD'][k];
+                    g.shadowColor = g.fillStyle;
+                    g.beginPath();
+                    g.arc(cx + orbit * Math.cos(a), cy + orbit * Math.sin(a), 2.6 * (1 - s / 20), 0, Math.PI * 2);
+                    g.fill();
+                }
+            }
+        }
+        g.shadowBlur = 0;
         g.globalAlpha = 1;
         this.vox.querySelector('#ketuVoxOrb').style.setProperty('--lvl', still ? '0' : this.voxLvl.toFixed(3));
         this.voxRaf = requestAnimationFrame(n => this.voxDraw(n));
