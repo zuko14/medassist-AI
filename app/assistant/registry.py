@@ -12,7 +12,15 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from app.assistant import playbooks, present
-from app.services.permissions import PERMISSIONS
+from app.services.permissions import (
+    PERMISSIONS,
+    holds_credit_note_permission,
+    holds_document_permission,
+    holds_emergency_permission,
+    holds_lab_permission,
+    holds_order_permission,
+    holds_ot_permission,
+)
 from app.services.tenant import (
     ai_receptionist_enabled,
     dental_plans_enabled,
@@ -51,6 +59,14 @@ PAGES: dict[str, str] = {
     "ipdadmit": "Admissions",
     "ipdchart": "Inpatient Chart",
     "ipdsetup": "IPD Setup",
+    "ipdfinance": "IPD Receivables",
+    "dxworklist": "Diagnostic Worklist",
+    "lisqueue": "Lab Sign-off",
+    "radiology": "Radiology",
+    "insurance": "Insurance / TPA",
+    "tariffs": "Service Catalogue",
+    "casualty": "Casualty / ER",
+    "ot": "Operation Theatre",
     "leads": "WhatsApp Leads",
     "diagreports": "Report Automation",
     "labreports": "Lab Reports",
@@ -89,6 +105,17 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "ipdadmit": ("admit", "admission", "ipd admission", "admit patient", "bharti", "भर्ती"),
     "ipdchart": ("inpatient chart", "ipd chart", "nursing station", "patient chart"),
     "ipdsetup": ("ipd setup", "ward setup", "bed setup", "bed tariff"),
+    "ipdfinance": ("receivables", "ipd receivables", "deposits held", "corporate bills", "credit bills"),
+    "dxworklist": ("worklist", "lab worklist", "sample collection", "phlebotomy", "pending tests", "test orders"),
+    "casualty": ("casualty", "emergency", "er board", "triage", "mlc", "medico legal"),
+    "ot": ("operation theatre", "operation theater", "theatre", "theater", "operating room", "ot page",
+           "ఆపరేషన్ థియేటర్", "ऑपरेशन थिएटर"),
+    "tariffs": ("service catalogue", "tariff", "price list", "service prices", "rate card"),
+    "lisqueue": ("lab sign-off", "sign lab report", "pathologist queue", "pending validation", "validate results"),
+    "radiology": ("radiology", "imaging", "x-ray reports", "scan reports", "radiology worklist", "form f",
+                  "pcpndt", "రేడియాలజీ", "रेडियोलॉजी"),
+    "insurance": ("insurance", "tpa", "cashless", "pre-auth", "pre authorisation", "claims", "claim settlement",
+                  "tpa ageing", "బీమా", "बीमा"),
     "leads": ("leads", "lead list", "లీడ్స్", "लीड्स"),
     "diagreports": ("report delivery",),
     "labreports": ("ల్యాబ్ రిపోర్ట్స్", "लैब रिपोर्ट"),
@@ -152,6 +179,7 @@ class ActionSpec:
     also: tuple[str, ...] = ()                         # handler only: other permissions it accepts instead
     one_of: tuple[str, ...] = ()                       # optional slots of which at least one is required
     unless: tuple[str, ...] = ()                       # phrases naming another object: any one drops this action
+    holds: Optional[Callable[[Any], bool]] = None      # handler only: the route's own holder (role-implied grants)
 
 
 def prohibited_path(path: str) -> bool:
@@ -172,6 +200,8 @@ def validate(spec: ActionSpec) -> None:
         p.append(f"permission must be None for perm_source={spec.perm_source!r}")
     if spec.perm_source in ("dependency", "handler") and spec.permission is None:
         p.append(f"perm_source={spec.perm_source!r} needs a permission")
+    if spec.holds and spec.perm_source != "handler":
+        p.append("only a handler check takes a holder function")
     if spec.also and spec.perm_source != "handler":
         p.append("only a handler check accepts alternative permissions")
     p.extend(f"unknown permission {a!r}" for a in spec.also if a not in PERMISSIONS)
@@ -310,6 +340,7 @@ def _opd_live(clinic: dict) -> bool:  # _opd_scope(..., live=True): OPD on and i
 READS = (
     _read("stats.summary", "Dashboard figures", "/admin/stats", "dashboard",
           ("dashboard stats", "clinic stats", "monthly stats", "dashboard numbers", "stats summary", "nela stats",
+           "monthly summary", "summary+this month", "summary+last 30 days", "overall summary",
            "mahine ke stats", "గణాంకాలు", "आंकड़े",
            # no-shows (2026-10-26 probe): the same figures, with the rate
            "no show", "no shows", "noshow", "no show rate", "missed appointments", "రాని పేషెంట్లు", "नहीं आए मरीज"),
@@ -373,6 +404,7 @@ READS = (
           query=lambda p: {"days": 30}, perm_source="role", roles=ADMIN_ROLES),
     _read("opd.queue", "Live queue", "/admin/opd/queue", "opdqueue",
           ("who is waiting", "waiting patients", "queue status", "token status", "current token", "next token",
+           "opd queue", "queue+today",
            "evaru wait chestunnaru", "kaun wait kar raha", "వెయిటింగ్ పేషెంట్లు", "कौन इंतज़ार कर रहा"),
           lambda d, p: present.table(f"Queue on {_on(p)}", "opdqueue", (
               ("Token", "token_number", "text"), ("Patient", "patient_name", "text"),
@@ -539,6 +571,7 @@ READS = (
     _read("opd.collections", "Today's collection", "/admin/opd/collections/summary", "opdbilling",
           ("today's collection", "todays collection", "collection today", "today collection", "total collection",
            "collection summary", "daily collection", "cash collected", "ee roju collection", "collection entha",
+           "how much+collect", "how much+collected", "how much+we collect",
            "aaj ka collection", "aaj ki collection", "collection kitna", "ఈ రోజు కలెక్షన్", "కలెక్షన్ ఎంత",
            "आज का कलेक्शन", "कलेक्शन कितना"),
           lambda d, p: present.metrics(f"Collection on {_on(p)}", "opdbilling", d, (
@@ -550,6 +583,7 @@ READS = (
           permission="OPD_BILLING", also=("OPD_ADMIN",), perm_source=_HANDLER, feature=_opd_live),
     _read("opd.unpaid", "Unpaid bills", "/admin/opd/invoices", "opdbilling",
           ("pending payments", "pending payment", "unpaid bills", "unpaid bill", "unpaid invoices", "outstanding bills",
+           "bills+not paid", "not paid+bills",
            "outstanding dues", "pending dues", "dues pending", "balance due", "pending bills", "bills pending",
            "baki bills", "bakaya bills", "baaki payment", "బకాయి బిల్లులు", "बकाया बिल"),
           lambda d, p: present.table("Unpaid bills (latest 50)", "opdbilling", (
@@ -573,6 +607,8 @@ LEAVES = (
                permission="DOCTOR_LEAVES_CREATE", perm_source="dependency", page="leaves",
                endpoint=("POST", "/admin/leaves"), slots=_LEAVE_SLOTS, max_items=playbooks.MAX_LEAVE_DAYS,
                triggers=("on leave", "is on leave", "will be on leave", "add leave", "mark leave", "add+leave", "create+leave", "apply+leave", "chutti",
+                         # spoken: "Dr Anitha leave tomorrow"; STT spells chhutti / chuti too
+                         "leave tomorrow", "leave today", "leave from", "chhutti", "chuti", "chhuti",
                          "chutti pe", "chutti par", "selavu", "selavulo", "=సెలవు", "సెలవులో", "సెలవు పెట్టారు",
                          "=छुट्टी", "छुट्टी पर"),
                preview=playbooks.leave_create_preview, call=playbooks.leave_create_call,
@@ -711,7 +747,8 @@ _NOT_PATIENTS = ("doctor", "dr", "doctors", "staff", "nurse", "receptionist", "c
                  "branch", "test", "lab test", "company", "ward", "bed", "phlebotomist", "technician", "pharmacist",
                  "ambulance", "vehicle", "equipment", "machine", "device", "room", "department", "service", "package",
                  "scheme", "insurance", "insurer", "tpa", "vendor", "supplier", "medicine", "drug", "product", "item",
-                 "hospital", "clinic", "lab", "pharmacy", "theatre", "ot", "icu", "leave", "holiday", "shift", "slot")
+                 "hospital", "clinic", "lab", "pharmacy", "theatre", "ot", "icu", "leave", "holiday", "shift", "slot",
+                 "mlc", "medico legal case", "emergency", "emergency patient", "casualty", "er")  # ER: emergency.register
 _REGISTER_OTHER = tuple(f"register {art}{who}" for who in _NOT_PATIENTS
                         for art in ("", "a ", "an ", "the ", "new ", "a new ")) + tuple(
     f"{who}{tail}" for who in _NOT_PATIENTS for tail in (" registration", " ni register", " ko register",
@@ -896,10 +933,12 @@ DOCTOR_ACTIONS = (
 # ── KK-P4-12: H tier — a person presses the page's own button (KK-FR-025). Nothing here is executable. ──
 
 def _h(id: str, summary: str, page: str, button: str, triggers: tuple, note: str, *, fields=(), slots=(),
-       feature=None, unless=()) -> ActionSpec:
+       feature=None, unless=(), **perm) -> ActionSpec:
+    if perm.get("permission"):  # a page only some logins may use: the same handler check as its route
+        perm.setdefault("perm_source", _HANDLER)
     return ActionSpec(id=id, module=id.split(".")[0], summary=summary, risk="H", page=page, triggers=triggers,
                       slots=slots, feature=feature, unless=unless,
-                      handoff=Handoff(page=page, fields=fields, button=button, note=note))
+                      handoff=Handoff(page=page, fields=fields, button=button, note=note), **perm)
 
 
 _ROW = "Use the buttons on its row in the list."
@@ -1094,7 +1133,8 @@ IPD_ACTIONS = (
               ("Discharged today", "discharged_today", "num"))),
           **_IPD_ANY),
     _read("ipd.inpatients", "Inpatients", "/admin/ipd/admissions", "ipdchart",
-          ("inpatient list", "inpatients", "admitted patients", "who is admitted", "list inpatients", "ward patients",
+          ("inpatient list", "inpatients", "admitted patients", "who is admitted", "patients+admitted now",
+           "patients+admitted right now", "list inpatients", "ward patients",
            "ipd patients", "admit ayina patients", "bharti mareez", "भर्ती मरीज"),
           lambda d, p: present.table("Inpatients", "ipdchart", (
               ("Bed", "bed", "text"), *_IPD_LIST, ("Attending", "attending_doctor", "text"),
@@ -1134,6 +1174,166 @@ IPD_ACTIONS = (
        feature=_ipd_on),
 )
 
+# ── Hospital OS modules (migrations 115-121): reads + hand-offs, the IPD rule (ADR-IPD-08) ──
+# Sample collection, results, sign-off, ER registration, MLC, tariffs, credit notes, certificates,
+# consents and deposits are recorded by a person on the page; Kriya answers questions and opens it.
+
+def _opd_or_ipd(clinic: dict) -> bool:  # the modules' own gate: OPD or IPD entitled
+    return opd_enabled(clinic) or ipd_access(clinic) is not None
+
+
+def _holder(fn, perm: str) -> dict:
+    """A handler check that calls the route's own holder, so role-implied grants count up front too."""
+    return dict(permission=perm, perm_source=_HANDLER, holds=lambda u: fn(u, perm), feature=_opd_or_ipd)
+
+
+def _services_matching(data, params: dict) -> list:
+    """Active services; a price question names one ("price of x ray chest"): every word in its name."""
+    words = (params.get("q") or "").lower().split()
+    rows = [s for s in _rows(data, "services") or [] if isinstance(s, dict) and s.get("active", True)]
+    return [s for s in rows if all(w in (s.get("name") or "").lower() for w in words)]
+
+
+_PT = (("Patient", "patient_name", "text"), ("MRN", "mrn", "text"))
+HOSPITAL_ACTIONS = (
+    _read("orders.to_collect", "Samples to collect", "/admin/diagnostic/worklist", "dxworklist",
+          ("samples to collect", "pending samples", "sample collection list", "tests to collect",
+           "samples+pending", "pending+collection", "pending for collection", "lab orders", "investigation orders", "pending investigations", "collection pending",
+           "sample collect cheyali", "sample lene hai", "సాంపిల్స్", "सैंपल"),
+          lambda d, p: present.table("Samples to collect", "dxworklist", (
+              *_PT, ("Test", "item_name", "text"), ("Urgency", "urgency", "label"), ("Status", "status", "label"),
+              ("Doctor", "doctor_name", "text")), _rows(d, "orders"), d.get("total") if isinstance(d, dict) else None),
+          query=lambda p: {"status": "to_collect", "limit": 100}, **_holder(holds_order_permission, "ORDERS_READ")),
+    _read("lis.pending_signoff", "Results waiting for sign-off", "/admin/lis/results", "lisqueue",
+          ("pending sign off", "pending signoff", "waiting for sign off", "reports to sign", "results to validate",
+           "unsigned reports", "critical results", "critical values", "sign off pending",
+           "sign cheyali", "sign karna hai", "సైన్ చేయాల్సిన", "साइन करना"),
+          lambda d, p: present.table("Waiting for sign-off", "lisqueue", (
+              *_PT, ("Test", "test_name", "text"), ("Critical", "has_critical_value", "yesno"),
+              ("Urgency", "urgency", "label"), ("Entered", "entered_at", "time")),
+              _rows(d, "results"), d.get("total") if isinstance(d, dict) else None),
+          query=lambda p: {"status": "entered", "limit": 100},
+          permission="LAB_VALIDATE", perm_source=_HANDLER, feature=_opd_or_ipd,
+          holds=lambda u: holds_lab_permission(u, "LAB_VALIDATE") or holds_lab_permission(u, "LAB_ENTRY")),
+    _read("emergency.board", "Casualty board", "/admin/emergency/visits", "casualty",
+          ("casualty board", "emergency board", "who+in casualty", "who+in emergency", "who+in er", "emergency patients", "casualty patients",
+           "er patients", "who is in casualty", "who is in er", "triage list", "red patients", "open mlc",
+           "casualty lo evaru", "emergency mein kaun", "క్యాజువాలిటీ", "इमरजेंसी में"),
+          lambda d, p: present.table("Casualty right now", "casualty", (
+              ("Triage", "triage_category", "label"), *_PT, ("Status", "status", "label"),
+              ("Doctor", "doctor_name", "text"), ("MLC", "mlc.mlc_number", "text"), ("Arrived", "created_at", "time")),
+              _rows(d, "visits"), d.get("open") if isinstance(d, dict) else None),
+          **_holder(holds_emergency_permission, "EMERGENCY_READ")),
+    _read("services.prices", "Service prices", "/admin/masters/services", "tariffs",
+          ("service price", "price of", "rate of", "charges for", "tariff of",
+           "procedure price", "procedure charges", "service charges", "ward charges", "ధర ఎంత", "कितने का"),
+          lambda d, p: present.table("Service prices", "tariffs", (
+              ("Code", "code", "text"), ("Service", "name", "text"), ("Category", "category", "label"),
+              ("Price", "standard_price_paise", "paise")), _services_matching(d, p)),
+          query=lambda p: {"active_only": True}, slots=(SlotSpec("q", "price_term", required=False),),
+          unless=("test", "tests", "doctor", "dr", "fee", "fees", "consultation"),  # lab_tests.list / doctors.list
+          permission="SERVICES_MANAGE", also=("OPD_ADMIN", "OPD_BILLING", "OPD_FRONT_DESK", "OPD_CLINICAL",
+                                             "IPD_BILLING", "IPD_ADMIN", "ORDERS_WRITE"), perm_source=_HANDLER),
+    _read("ipd_finance.receivables", "Inpatient money due", "/admin/ipd/receivables", "ipdfinance",
+          ("ipd outstanding", "inpatient outstanding", "ipd dues", "money due from inpatients",
+           "corporate dues", "insurance dues", "tpa dues", "unpaid ipd bills",
+           "due from+tpa", "due from+insurance", "due from+corporate", "pending from+tpa", "ipd balance",
+           "ipd baaki", "ipd bakaya", "ఐపీడీ బాకీ", "आईपीडी बकाया"),
+          lambda d, p: present.metrics("Inpatient money due", "ipdfinance", d, (
+              ("Total due", "total_due_paise", "paise"), ("0-30 days", "ageing_paise.0-30", "paise"),
+              ("31-60 days", "ageing_paise.31-60", "paise"), ("61-90 days", "ageing_paise.61-90", "paise"),
+              ("Over 90 days", "ageing_paise.90+", "paise"), ("Deposits held", "deposits_held_paise", "paise"))),
+          permission="IPD_BILLING", also=("IPD_ADMIN",), perm_source=_HANDLER, feature=_ipd_on),
+    _h("orders.collect", "Collect a sample", "dxworklist", "",
+       ("collect+sample", "sample+collected", "mark+collected", "scan+barcode", "sample+teesko", "sample+le lo"),
+       "Find the order in the worklist, scan or type the tube's barcode and press Collect on its row.",
+       feature=_opd_or_ipd),
+    _h("lis.enter_results", "Enter lab results", "dxworklist", "",
+       ("enter+results", "enter+result", "result+entry", "fill+results", "type+results", "result+enter"),
+       "Open the order from the worklist and enter each value on its worksheet; the range flags appear as you type.",
+       feature=_opd_or_ipd),
+    _h("lis.sign", "Sign off a lab report", "lisqueue", "",
+       ("sign+report", "sign off+report", "validate+report", "validate+result", "approve+report", "sign off",
+        "report+sign cheyyi", "report+sign karo"),
+       "Open the result in Lab Sign-off, check every value, and press Validate yourself. Sign-off is the "
+       "pathologist's, never Kriya's.", feature=_opd_or_ipd,
+       unless=("sign all", "validate all", "approve all", "andarini sign", "sab sign")),
+    _h("emergency.register", "Register an emergency arrival", "casualty", "Rapid Admit",
+       ("register+emergency", "emergency+admit", "rapid admit", "casualty+admit", "new+casualty",
+        "er+registration", "accident+case", "emergency+patient vachharu", "emergency+patient aaya"),
+       "Press Rapid Admit: triage first, an unknown patient can be registered with a temporary name.",
+       feature=_opd_or_ipd),
+    _h("emergency.mlc", "Record a medico-legal case", "casualty", "",
+       ("mlc+record", "register+mlc", "medico legal+case", "police+intimation", "mlc+number", "mark+mlc"),
+       "Open the visit on the casualty board and press MLC: the doctor records it and it locks once signed.",
+       feature=_opd_or_ipd),
+    _h("services.edit", "Add or change a service price", "tariffs", "Add New Service",
+       ("add+service", "new+service", "change+service price", "update+service price", "edit+tariff",
+        "change+tariff", "change+procedure price", "service+price+change"),
+       "Press Add New Service, or edit the service on its row; bills already issued keep their old price.",
+       permission="SERVICES_MANAGE", also=("OPD_ADMIN",)),
+    _h("billing.credit_note", "Issue a credit note", "opdbilling", "",
+       ("credit note", "credit+note", "issue+credit", "partial+refund+bill", "క్రెడిట్ నోట్", "क्रेडिट नोट"),
+       "Open the issued bill and press Credit note: choose the lines and the reason; the GST is reversed with it.",
+       permission="BILLING_CREDIT_NOTE", also=("OPD_ADMIN",), holds=holds_credit_note_permission),
+    _h("billing.gstr1", "GST return summary", "opdbilling", "",
+       ("gstr1", "gstr 1", "gst return", "gst summary", "gst report", "gst filing", "జీఎస్టీ", "जीएसटी"),
+       "Open GST Return Summary (GSTR-1) on OPD Billing, pick the month and download it for your accountant.",
+       permission="OPD_ADMIN"),
+    _h("documents.certificate", "Issue a medical certificate", "opdworkspace", "",
+       ("medical certificate", "fitness certificate", "sick certificate", "leave certificate", "certificate+issue",
+        "certificate+ivvu", "certificate+do", "సర్టిఫికేట్", "सर्टिफिकेट"),
+       "Open the patient's consultation and issue the certificate there; the doctor signs it.",
+       permission="DOCUMENTS_WRITE", holds=lambda u: holds_document_permission(u, "DOCUMENTS_WRITE")),
+    _h("documents.consent", "Record a consent", "ipdchart", "",
+       ("consent+form", "record+consent", "take+consent", "surgery+consent", "high risk+consent",
+        "consent+teesko", "consent+lo", "కన్సెంట్", "सहमति"),
+       "Open the patient's chart, Consents: the patient or relative signs on screen and it is kept with the stay.",
+       permission="DOCUMENTS_WRITE", holds=lambda u: holds_document_permission(u, "DOCUMENTS_WRITE")),
+    _h("ipd_finance.deposit", "Take a deposit or authorise credit", "ipdchart", "",
+       ("take+deposit", "advance+deposit", "collect+deposit", "add+deposit", "authorise+credit",
+        "authorize+credit", "tpa+approval", "insurance+approval", "deposit+teesko", "advance+lo"),
+       "Open the patient's chart, Billing: record the deposit or the payer's credit authorisation there.",
+       feature=_ipd_on),
+)
+
+# ── Operation theatre (migration 122): one read + hand-offs (ADR-IPD-08). Booking, the WHO checklist,
+# the anaesthesia record and finishing a surgery are clinical writes a person makes on the page.
+
+def _ot(perm: str) -> dict:
+    return dict(permission=perm, holds=lambda u: holds_ot_permission(u, perm), feature=_ipd_on)
+
+
+OT_ACTIONS = (
+    _read("ot.today", "Today's theatre list", "/admin/ot/schedule", "ot",
+          ("surgeries today", "today's surgeries", "todays surgeries", "surgery list", "ot list", "ot schedule",
+           "theatre list", "theatre schedule", "operations today", "today's operations", "who is in ot",
+           "surgeries+scheduled", "ot lo evaru", "ivala operations", "ivvala surgeries", "aaj ke operation",
+           "aaj ki surgery", "ot mein kaun", "ఈరోజు ఆపరేషన్లు", "आज के ऑपरेशन"),
+          lambda d, p: present.table("Theatre list today", "ot", (
+              ("Start", "scheduled_start", "time"), ("Theatre", "theatre_name", "text"), *_PT,
+              ("Procedure", "procedure_name", "text"), ("Surgeon", "surgeon_name", "text"),
+              ("Status", "status", "label")), _rows(d, "surgeries")),
+          permission="OT_SCHEDULE", also=("OT_CHECKLIST", "OT_CLINICAL"), perm_source=_HANDLER, feature=_ipd_on,
+          holds=lambda u: holds_ot_permission(u, "OT_ANY")),
+    _h("ot.schedule", "Book a surgery", "ot", "Schedule surgery",
+       ("book+surgery", "schedule+surgery", "book+operation", "schedule+operation", "book+ot", "book+theatre",
+        "ot+booking", "surgery+book cheyyi", "operation+book karo", "operation+fix karo"),
+       "Press Schedule surgery: pick the admitted patient, theatre, surgeon and time. The server refuses a "
+       "theatre or patient that is already booked for that time.", **_ot("OT_SCHEDULE")),
+    _h("ot.checklist", "Fill the WHO surgical safety checklist", "ot", "",
+       ("who+checklist", "safety+checklist", "surgical+checklist", "checklist+surgery", "checklist+ot",
+        "time out+surgery", "sign in+checklist", "sign out+checklist"),
+       "Open the surgery on the theatre list and press Checklist: Sign-In, Time-Out and Sign-Out are ticked "
+       "by the theatre team, in that order.", **_ot("OT_CHECKLIST")),
+    _h("ot.finish", "Finish a surgery", "ot", "",
+       ("finish+surgery", "complete+surgery", "surgery+completed", "surgery+done", "post op+note",
+        "post-op+note", "operative+note", "operation+complete", "operation+ayipoyindi", "operation+ho gaya"),
+       "Open the surgery on the theatre list and press Finish surgery: the surgeon writes the post-op note; "
+       "the procedure charge is posted to the stay automatically.",
+       unless=("all surgeries", "every surgery", "andari", "sab ke"), **_ot("OT_CLINICAL")),
+)
+
 #: action -> the action that does the same job where the first is switched off for the clinic (KK-FR-061).
 VARIANTS: dict[str, str] = {"appointment.check_in": "opd.arrive",
                              # no live OPD (e.g. a diagnostic centre): the money is online bookings
@@ -1159,4 +1359,6 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *BRIEFINGS,
     *BILLING,
     *IPD_ACTIONS,
+    *HOSPITAL_ACTIONS,
+    *OT_ACTIONS,
 )

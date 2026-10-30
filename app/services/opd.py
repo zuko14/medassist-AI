@@ -4,7 +4,6 @@ Registry, walk-ins, live queue, TV display, and setup wizard orchestration.
 Zero-LLM clinical safety compliant.
 """
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -17,6 +16,7 @@ from typing import Any, Optional
 from fastapi import HTTPException
 from postgrest.types import CountMethod
 
+from app.utils.async_tasks import spawn_background_task
 from app.database import (
     check_in_appointment,
     get_doctor_by_name,
@@ -888,7 +888,7 @@ async def create_walk_in(
             doc_name = doctor_title(doc['name'])
             clinic_name = str(clinic.get("name", "Clinic"))
             if tmpl_name:
-                asyncio.create_task(
+                spawn_background_task(
                     whatsapp_service.send_template(
                         clinic,
                         patient["phone"],
@@ -907,7 +907,7 @@ async def create_walk_in(
                     )
                 )
             else:
-                asyncio.create_task(
+                spawn_background_task(
                     whatsapp_service.send_text(
                         clinic,
                         patient["phone"],
@@ -991,7 +991,7 @@ async def arrive(
             doc_name = doctor_title(appt.get('doctor_name'))
             clinic_name = str(clinic.get("name", "Clinic"))
             if tmpl_name:
-                asyncio.create_task(
+                spawn_background_task(
                     whatsapp_service.send_template(
                         clinic,
                         appt["patient_phone"],
@@ -1010,7 +1010,7 @@ async def arrive(
                     )
                 )
             else:
-                asyncio.create_task(
+                spawn_background_task(
                     whatsapp_service.send_text(
                         clinic,
                         appt["patient_phone"],
@@ -1370,7 +1370,7 @@ async def _call_next(clinic: dict, doctor_id: str, actor: Any, branch_id: Option
                     doc_name = doctor_title(claimed_appt.get('doctor_name'))
                     room_name = (opd_settings.get("rooms") or {}).get(str(claimed_appt.get("doctor_id"))) or "Consultation Room"
                     if tmpl_name:
-                        asyncio.create_task(
+                        spawn_background_task(
                             whatsapp_service.send_template(
                                 clinic,
                                 claimed_appt["patient_phone"],
@@ -1389,7 +1389,7 @@ async def _call_next(clinic: dict, doctor_id: str, actor: Any, branch_id: Option
                             )
                         )
                     else:
-                        asyncio.create_task(
+                        spawn_background_task(
                             whatsapp_service.send_text(
                                 clinic,
                                 claimed_appt["patient_phone"],

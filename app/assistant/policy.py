@@ -39,8 +39,8 @@ def precheck(spec: ActionSpec, user, clinic: dict) -> Decision:
     is_admin = user.role in ADMIN_ROLES
     if not is_admin and (user.role not in spec.roles or spec.perm_source == "role"):
         return Decision(False, "forbidden", "Only a clinic admin can do that.")
-    if spec.perm_source in ("dependency", "handler") and not is_admin \
-            and not {spec.permission, *spec.also} & set(user.permissions or []):
+    held = spec.holds(user) if spec.holds else bool({spec.permission, *spec.also} & set(user.permissions or []))
+    if spec.perm_source in ("dependency", "handler") and not is_admin and not held:
         return Decision(False, "forbidden",
                         f"You need the {_label(spec.permission)} permission for that. Ask your clinic admin.")
     return Decision(True)

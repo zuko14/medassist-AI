@@ -549,15 +549,10 @@ class AnalyticsService:
         try:
             from_date = dashboard_period_start(days)
 
-            # Fetch all appointments in period and count in Python
-            query = (
-                supabase.table("appointments")
-                .select("status,department,created_at")
-                .gte("created_at", from_date)
+            # Fetch all appointments in period (paged past the 1000-row cap) and count in Python
+            appts = await _fetch_window(
+                "appointments", clinic_id, "id,status,department,created_at", "created_at", from_date
             )
-            query = query.eq("clinic_id", clinic_id)
-            all_appts = await sb(query)
-            appts = all_appts.data or []
 
             total_appointments = len(appts)
             confirmed = sum(1 for a in appts if a.get("status") == "confirmed")

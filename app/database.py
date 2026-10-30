@@ -256,6 +256,27 @@ class TenantIsolationError(RuntimeError):
 from app.tenancy import TENANT_OWNED_TABLES, is_valid_clinic_scope  # noqa: F401,E402
 
 
+#: PostgREST caps any single response at this many rows; .limit(2000) still returns 1000.
+PAGE_ROWS = 1000
+
+
+async def fetch_all(build_query, max_rows: int = 100_000, label: str = "query") -> list:
+    """Every row of a query, paged past PostgREST's 1000-row response cap.
+
+    `build_query` must return a FRESH builder each call (builders accumulate filters)
+    with a total .order(), or rows shift between pages.
+    """
+    rows: list = []
+    while True:
+        page = (await sb(build_query().range(len(rows), len(rows) + PAGE_ROWS - 1))).data or []
+        rows.extend(page)
+        if len(page) < PAGE_ROWS:
+            return rows
+        if len(rows) >= max_rows:
+            logger.error(f"{label} hit the {max_rows}-row ceiling - result truncated")
+            return rows
+
+
 def restrict_to_branch(query, branch_id: Optional[str]):
     """Limit an appointments query to one branch plus branch-less rows.
 
@@ -400,38 +421,30 @@ async def get_genuine_patients(clinic_id: str, branch_id: Optional[str] = None) 
 
     try:
         import asyncio
-        p_task = sb(
-            supabase.table("patients")
-            .select("*")
-            .eq("clinic_id", clinic_id)
-            .order("phone")
-            .limit(2000)
+
+        def phones(table: str, branch: Optional[str] = None):
+            return fetch_all(
+                lambda: restrict_to_branch(
+                    supabase.table(table).select("id, patient_phone").eq("clinic_id", clinic_id), branch
+                ).order("id"),
+                label=f"genuine_patients:{table}",
+            )
+
+        p_task = fetch_all(
+            lambda: supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").order("id"),
+            label="genuine_patients:patients",
         )
-        a_task = sb(
-            restrict_to_branch(
-                supabase.table("appointments").select("patient_phone").eq("clinic_id", clinic_id), branch_id
-            ).limit(2000)
-        )
-        r_task = sb(
-            supabase.table("lab_reports")
-            .select("patient_phone")
-            .eq("clinic_id", clinic_id)
-            .limit(2000)
-        )
-        pr_task = sb(
-            supabase.table("prescriptions")
-            .select("patient_phone")
-            .eq("clinic_id", clinic_id)
-            .limit(2000)
-        )
+        a_task = phones("appointments", branch_id)
+        r_task = phones("lab_reports")
+        pr_task = phones("prescriptions")
 
         p_res, a_res, r_res, pr_res = await asyncio.gather(
             p_task, a_task, r_task, pr_task
         )
-        raw_patients = p_res.data or []
-        appt_phones = {x["patient_phone"] for x in (a_res.data or []) if x.get("patient_phone")}
-        lab_phones = {x["patient_phone"] for x in (r_res.data or []) if x.get("patient_phone")}
-        presc_phones = {x["patient_phone"] for x in (pr_res.data or []) if x.get("patient_phone")}
+        raw_patients = p_res
+        appt_phones = {x["patient_phone"] for x in a_res if x.get("patient_phone")}
+        lab_phones = {x["patient_phone"] for x in r_res if x.get("patient_phone")}
+        presc_phones = {x["patient_phone"] for x in pr_res if x.get("patient_phone")}
         clinical_phones = appt_phones | lab_phones | presc_phones
         if branch_id:
             # Lab reports and prescriptions have no branch: only a visit here puts a patient on this list.
@@ -459,8 +472,11 @@ async def get_genuine_patients(clinic_id: str, branch_id: Optional[str] = None) 
             return []  # the fallback below is clinic-wide: fail closed for a pinned branch
         # Fallback to basic query if any subquery fails
         try:
-            res = await sb(supabase.table("patients").select("*").eq("clinic_id", clinic_id).limit(2000))
-            return [p for p in (res.data or []) if (p.get("visit_count") or 0) > 0 or p.get("name")]
+            rows = await fetch_all(
+                lambda: supabase.table("patients").select("*").eq("clinic_id", clinic_id).order("phone").order("id"),
+                label="genuine_patients:fallback",
+            )
+            return [p for p in rows if (p.get("visit_count") or 0) > 0 or p.get("name")]
         except Exception:
             return []
 

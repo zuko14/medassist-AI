@@ -202,7 +202,7 @@ def test_walk_in_cross_branch_rejected_via_endpoint(auth_branch_user):
 @pytest.mark.asyncio
 async def test_scheduler_24h_reminders_ignores_walk_ins():
     """24h reminders query must include is_walk_in = False."""
-    with patch("app.services.scheduler.sb", AsyncMock(return_value=MagicMock(data=[]))) as sb_mock:
+    with patch("app.database.sb", AsyncMock(return_value=MagicMock(data=[]))) as sb_mock:
         await scheduler_service.send_24h_reminders()
 
     assert sb_mock.called
@@ -215,7 +215,7 @@ async def test_scheduler_24h_reminders_ignores_walk_ins():
 @pytest.mark.asyncio
 async def test_scheduler_2h_reminders_ignores_walk_ins():
     """2h reminders query must include is_walk_in = False."""
-    with patch("app.services.scheduler.sb", AsyncMock(return_value=MagicMock(data=[]))) as sb_mock:
+    with patch("app.database.sb", AsyncMock(return_value=MagicMock(data=[]))) as sb_mock:
         await scheduler_service.send_2h_reminders()
 
     assert sb_mock.called

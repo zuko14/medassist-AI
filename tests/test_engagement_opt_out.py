@@ -96,7 +96,7 @@ async def _run_followups(opted_in, has_reminders_feature=True):
     visit_date = (date.today() - timedelta(days=2)).isoformat()
 
     (table.select.return_value.eq.return_value.eq.return_value
-        .gte.return_value.lte.return_value.limit.return_value
+        .gte.return_value.lte.return_value.order.return_value.range.return_value
         .execute.return_value) = MagicMock(data=[_appt(appointment_date=visit_date)])
     db.table.return_value = table
     send = AsyncMock(return_value=True)
@@ -184,7 +184,7 @@ async def _run_checkins(opted_in):
     # Self-returning builder: the sweep's filters changed when the job was
     # fixed (date window, status in [...], booking_type); not asserted here.
     q = MagicMock()
-    for m in ("select", "eq", "gte", "lte", "in_", "limit", "update"):
+    for m in ("select", "eq", "gte", "lte", "in_", "limit", "order", "range", "update"):
         getattr(q, m).return_value = q
     q.execute.return_value = MagicMock(
         data=[_appt(status="completed", doctor_name="Dr. Rao", booking_type="consultation")])
@@ -231,6 +231,8 @@ async def test_opted_out_patient_still_gets_appointment_reminders():
     # went quiet rather than failing on anything it actually asserts.
     select = MagicMock()
     select.eq.return_value = select
+    select.order.return_value = select
+    select.range.return_value = select
     select.execute.return_value = MagicMock(
         data=[_appt(status="confirmed", doctor_name="Dr. Rao",
                     appointment_time="10:00", reminder_24h_sent=False,

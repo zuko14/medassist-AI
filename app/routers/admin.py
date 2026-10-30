@@ -479,6 +479,9 @@ _PHLEBOTOMIST_ROUTES = (
     ("PUT", re.compile(r"^/admin/change-username$")),
     ("GET", re.compile(r"^/admin/home-collection/my$")),
     ("POST", re.compile(r"^/admin/home-collection/visits/[^/]+/status$")),
+    # migration 115: the sample-collection desk (branch-scoped in app.routers.orders)
+    ("GET", re.compile(r"^/admin/diagnostic/worklist$")),
+    ("POST", re.compile(r"^/admin/diagnostic/orders/[^/]+/collect$")),
 )
 
 
@@ -519,6 +522,10 @@ def _enforce_corporate_viewer_scope(request: Request, user: AdminUser) -> AdminU
 #: route a granted permission reaches keeps working, and an entry with grants
 #: re-opens for a holder of any of them (the front desk's appointment search).
 _OPD_ROLES = frozenset({"DOCTOR", "CASHIER", "NURSE"})
+#: Logins that sign clinical documents in a doctor's name (prescriptions, lab
+#: reports, migration 118; radiology reports and Form F, migration 123) must be
+#: linked to that doctor's profile.
+_DOCTOR_LINKED_ROLES = frozenset({"DOCTOR", "PATHOLOGIST", "RADIOLOGIST"})
 _OPD_ROLE_DENIED_ROUTES = (
     ("GET", re.compile(r"^/admin/stats$"), ()),
     ("GET", re.compile(r"^/admin/appointments/(recent|upcoming)$"), ()),
@@ -923,7 +930,7 @@ async def get_current_admin(
         # Owner opt-in + ASSISTANT_ENABLED (migration 108): the Kriya Ketu launcher and its mic.
         "assistant_enabled": assistant_on,
         # ...and only with a speech key: a mic the server can't serve would fail on every press
-        "assistant_stt_enabled": assistant_on and settings.assistant_stt_enabled and bool(settings.sarvam_api_key),
+        "assistant_stt_enabled": assistant_on and settings.assistant_stt_enabled and settings.assistant_stt_configured,
         # OPD OS (migration 103): module enabled flag, state, linked doctor ID
         "opd_enabled": opd_enabled(clinic),
         "opd_state": clinic.get("opd_state", "NOT_CONFIGURED"),
@@ -1194,6 +1201,15 @@ def _staff_contact(full_name: Optional[str], phone: Optional[str], required: boo
     return out
 
 
+def _refuse_role_beyond_authority(beyond: list[str], staff_role: str) -> None:
+    if beyond:
+        raise HTTPException(
+            status_code=403,
+            detail=f"A {staff_role} login carries {', '.join(beyond)}, which you do not hold. "
+                   "Ask a clinic admin to set this role.",
+        )
+
+
 @router.get("/staff")
 async def list_staff(
     clinic_id: str = "default",
@@ -1224,6 +1240,7 @@ async def create_staff(
     from app.services.permissions import (
         cap_permissions_to_authority,
         resolve_permissions,
+        role_grants_beyond_authority,
         validate_staff_role,
     )
 
@@ -1240,9 +1257,10 @@ async def create_staff(
             status_code=422,
             detail="Company viewer logins are created for a company from the Corporate Health page.",
         )
+    _refuse_role_beyond_authority(role_grants_beyond_authority(body.staff_role, user), body.staff_role)
 
     # migration 103: DOCTOR requires a doctor profile from the same clinic
-    if body.staff_role == "DOCTOR" and not body.doctor_id:
+    if body.staff_role in _DOCTOR_LINKED_ROLES and not body.doctor_id:
         raise HTTPException(
             status_code=422,
             detail="A doctor account must be linked to a doctor profile.",
@@ -1369,6 +1387,7 @@ async def update_staff(
     from app.services.permissions import (
         cap_permissions_to_authority,
         resolve_permissions,
+        role_grants_beyond_authority,
         validate_staff_role,
     )
 
@@ -1434,6 +1453,8 @@ async def update_staff(
             resolved = resolve_permissions(new_role, body.extra_permissions or [])
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
+        if new_role != target.get("staff_role"):   # an unchanged role was granted by someone with the authority
+            _refuse_role_beyond_authority(role_grants_beyond_authority(new_role, user), new_role)
         update_data["staff_role"] = new_role
         update_data["permissions"] = cap_permissions_to_authority(
             requested=resolved,
@@ -1471,13 +1492,13 @@ async def update_staff(
             update_data["doctor_id"] = body.doctor_id
         else:
             current_or_new_role = body.staff_role if body.staff_role is not None else target.get("staff_role")
-            if current_or_new_role == "DOCTOR":
+            if current_or_new_role in _DOCTOR_LINKED_ROLES:
                 raise HTTPException(
                     status_code=422,
                     detail="A doctor account must be linked to a doctor profile.",
                 )
             update_data["doctor_id"] = None
-    elif body.staff_role == "DOCTOR" and not target.get("doctor_id"):
+    elif body.staff_role in _DOCTOR_LINKED_ROLES and not target.get("doctor_id"):
         raise HTTPException(
             status_code=422,
             detail="A doctor account must be linked to a doctor profile.",

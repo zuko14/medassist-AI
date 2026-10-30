@@ -16,7 +16,7 @@ from app.templates.whatsapp_templates import TEMPLATES
 from app.utils.helpers import format_slot_time
 from app.services.tenant import get_clinic_by_id
 from app.services.subscription import automated_outbound_allowed
-from app.database import sb  # T5.1: off-loop query execution
+from app.database import fetch_all, sb  # T5.1: off-loop query execution
 
 logger = logging.getLogger(__name__)
 
@@ -740,9 +740,9 @@ class SchedulerService:
 
                 tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-                appointments = (
+                appointments = await fetch_all(
                     # unscoped: platform_sweep
-                    await sb(supabase.table("appointments")
+                    lambda: supabase.table("appointments")
                     .select("*")
                     .eq("appointment_date", tomorrow)
                     .eq("status", "confirmed")
@@ -752,10 +752,12 @@ class SchedulerService:
                     # not be swept up here.
                     .eq("booking_type", "consultation")
                     .eq("is_walk_in", False)
-                    .eq("reminder_24h_sent", False))
+                    .eq("reminder_24h_sent", False)
+                    .order("id"),
+                    label="24h_reminders",
                 )
 
-                for appt in appointments.data:
+                for appt in appointments:
                     try:
                         clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
                         if not has_feature(clinic, "reminders"):
@@ -812,9 +814,9 @@ class SchedulerService:
 
                 due = []
                 for day in dates:
-                    res = (
+                    res = await fetch_all(
                         # unscoped: platform_sweep
-                        await sb(supabase.table("appointments")
+                        lambda: supabase.table("appointments")
                         .select("*")
                         .eq("appointment_date", day.strftime("%Y-%m-%d"))
                         .eq("status", "confirmed")
@@ -822,9 +824,11 @@ class SchedulerService:
                         # and no slot time, so they are not reminder material.
                         .eq("booking_type", "consultation")
                         .eq("is_walk_in", False)
-                        .eq("reminder_2h_sent", False))
+                        .eq("reminder_2h_sent", False)
+                        .order("id"),
+                        label="2h_reminders",
                     )
-                    due.extend((day, a) for a in (res.data or []))
+                    due.extend((day, a) for a in res)
 
                 for day, appt in due:
                     # Second layer behind the booking_type filter above. This
@@ -912,15 +916,16 @@ class SchedulerService:
                 today = _today_local().isoformat()
                 now_iso = datetime.now(timezone.utc).isoformat()
 
-                due = (
+                due = await fetch_all(
                     # unscoped: platform_sweep
-                    await sb(supabase.table("appointments")
+                    lambda: supabase.table("appointments")
                     .select("id")
                     .eq("status", "confirmed")
                     .lt("appointment_date", today)
-                    .limit(2000))
+                    .order("id"),
+                    label="auto_complete",
                 )
-                rows = due.data or []
+                rows = due
                 if not rows:
                     return
 
@@ -965,18 +970,19 @@ class SchedulerService:
                 ).isoformat()
                 window_end = (today - timedelta(days=1)).isoformat()
 
-                appointments = (
+                appointments = await fetch_all(
                     # unscoped: platform_sweep
-                    await sb(supabase.table("appointments")
+                    lambda: supabase.table("appointments")
                     .select("*")
                     .eq("status", "completed")
                     .eq("followup_sent", False)
                     .gte("appointment_date", window_start)
                     .lte("appointment_date", window_end)
-                    .limit(2000))
+                    .order("id"),
+                    label="followups",
                 )
 
-                for appt in appointments.data or []:
+                for appt in appointments:
                     try:
                         clinic = await get_clinic_by_id(appt.get("clinic_id", "default"))
 
@@ -1158,19 +1164,20 @@ class SchedulerService:
                     newest = today - timedelta(days=offset_days)
                     oldest = newest - timedelta(days=HEALTH_CHECKIN_RETRY_DAYS)
 
-                    appointments = (
+                    appointments = await fetch_all(
                         # unscoped: platform_sweep
-                        await sb(supabase.table("appointments")
+                        lambda: supabase.table("appointments")
                         .select("*")
                         .gte("appointment_date", oldest.isoformat())
                         .lte("appointment_date", newest.isoformat())
                         .in_("status", ["confirmed", "completed"])
                         .eq("booking_type", "consultation")
                         .eq(flag_field, False)
-                        .limit(2000))
+                        .order("id"),
+                        label="health_checkins",
                     )
 
-                    for appt in appointments.data or []:
+                    for appt in appointments or []:
                         try:
                             if appt.get("treatment_plan_id"):
                                 # Dental sitting: the post-sitting review covers it.

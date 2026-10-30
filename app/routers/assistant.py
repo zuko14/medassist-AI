@@ -40,7 +40,7 @@ router = APIRouter(prefix="/admin/assistant", tags=["assistant"])
 _request_limiter = PersistentRateLimiter(max_attempts=120, window_seconds=3600)  # T-18: per user
 _stt_limiter = PersistentRateLimiter(max_attempts=60, window_seconds=3600)  # T-18 / B.5: per user
 DISPATCH_APP = None  # the app actions are dispatched into; None = app.main.app (tests point it at a fake)
-STT_PROVIDER = None  # None = stt.SarvamRest(); tests point it at stt.FakeStt
+STT_PROVIDER = None  # None = stt.provider() (ASSISTANT_STT_PROVIDER); tests point it at stt.FakeStt
 
 
 class UiContext(BaseModel):
@@ -729,7 +729,7 @@ async def transcribe(request: Request, clinic_id: str = "default",
     scope, _ = await _scope(user, clinic_id)
     if not settings.assistant_stt_enabled:
         raise _err(403, "stt_disabled", "Voice input is not enabled.")
-    if not settings.sarvam_api_key:
+    if not stt.configured():
         raise _err(503, "stt_unavailable", _STT_DOWN)
     mime = stt.audio_mime(request.headers.get("content-type"))
     if not mime:
@@ -749,14 +749,14 @@ async def transcribe(request: Request, clinic_id: str = "default",
 
     size, started = len(audio), time.monotonic()
     language_code, mode = stt.LANGUAGES[language]
-    provider = STT_PROVIDER or stt.SarvamRest()
+    provider = STT_PROVIDER or stt.provider()
     try:
         heard = await provider.transcribe(audio, mime, language_code, mode)
     except Exception as e:
         code = e.code if isinstance(e, stt.SttError) else "failed"
         del audio
-        record_ai_usage_bg(clinic_id=scope, task_type="assistant_stt", provider="sarvam",
-                           model=settings.assistant_stt_model, prompt_tokens=0, completion_tokens=0,
+        record_ai_usage_bg(clinic_id=scope, task_type="assistant_stt", provider=stt.provider_name(),
+                           model=stt.model_name(), prompt_tokens=0, completion_tokens=0,
                            total_tokens=0, cost_paise=0, success=False, error_message=code)
         logger.warning(f"ASSISTANT_STT status={code} error={type(e).__name__} mime={mime} bytes={size} "
                        f"audio_ms={duration_ms} ms={int((time.monotonic() - started) * 1000)}")
@@ -764,9 +764,11 @@ async def transcribe(request: Request, clinic_id: str = "default",
             raise _err(504, "stt_timeout", _STT_DOWN)
         raise _err(502, "stt_failed", _STT_DOWN)
     del audio  # held in request memory only (B.5)
-    record_ai_usage_bg(clinic_id=scope, task_type="assistant_stt", provider="sarvam",
-                       model=settings.assistant_stt_model, prompt_tokens=0, completion_tokens=0, total_tokens=0,
-                       cost_paise=stt.cost_paise(duration_ms, settings.voice_stt_paise_per_minute), success=True)
+    record_ai_usage_bg(clinic_id=scope, task_type="assistant_stt", provider=stt.provider_name(),
+                       model=stt.model_name(), prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                       # shortcut: OpenRouter clips are logged at 0 paise (rate is Sarvam's per-minute), price from usage tokens if it grows
+                       cost_paise=stt.cost_paise(duration_ms, settings.voice_stt_paise_per_minute) if stt.provider_name() == "sarvam" else 0,
+                       success=True)
     logger.info(f"ASSISTANT_STT status=ok lang={heard.language} chars={len(heard.text)} mime={mime} bytes={size} "
                 f"audio_ms={duration_ms} ms={int((time.monotonic() - started) * 1000)}")
     return {"text": heard.text, "language": heard.language, "duration_ms": duration_ms}

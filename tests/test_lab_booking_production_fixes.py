@@ -371,6 +371,8 @@ async def test_2h_reminder_sweep_survives_a_booking_with_no_appointment_time():
     mock_appointments = MagicMock()
     mock_select = MagicMock()
     mock_select.eq.return_value = mock_select
+    mock_select.order.return_value = mock_select
+    mock_select.range.return_value = mock_select
     mock_select.execute.return_value.data = rows
     mock_appointments.select.return_value = mock_select
     mock_appointments.update.return_value.eq.return_value.execute.return_value.data = [{}]

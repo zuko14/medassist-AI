@@ -43,7 +43,7 @@ def _db(rows_3d, rows_7d=()):
             return q
         return _m
 
-    for m in ("select", "eq", "gte", "lte", "in_", "limit", "update"):
+    for m in ("select", "eq", "gte", "lte", "in_", "limit", "order", "range", "update"):
         getattr(q, m).side_effect = rec(m)
     q.execute.side_effect = [MagicMock(data=list(rows_3d)), MagicMock(data=list(rows_7d))] + [MagicMock(data=[])] * 20
     db = MagicMock()

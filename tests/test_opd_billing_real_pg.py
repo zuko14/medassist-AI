@@ -78,6 +78,24 @@ def test_receipt_refund_and_void_are_branch_scoped_and_audited(api, opd_clinic, 
     assert audited == [("OPD_RECEIPT_CREATE", inv), ("OPD_REFUND_CREATE", inv), ("OPD_INVOICE_VOID", inv)]
 
 
+def test_a_retried_refund_pays_out_once(api, opd_clinic):  # noqa: F811
+    inv = _issued_invoice(api, opd_clinic)
+    api.as_(_cashier(api, opd_clinic, perms=("OPD_BILLING", "OPD_ADMIN")))
+    assert api.call("POST", f"/admin/opd/invoices/{inv}/receipts", opd_clinic,
+                    {"mode": "cash", "amount_paise": 30000, "idempotency_key": uuid.uuid4().hex}).status_code == 201
+    body = {"mode": "cash", "amount_paise": 10000, "reason": "Test not done", "idempotency_key": uuid.uuid4().hex}
+    first = api.call("POST", f"/admin/opd/invoices/{inv}/refunds", opd_clinic, body)
+    second = api.call("POST", f"/admin/opd/invoices/{inv}/refunds", opd_clinic, body)
+    assert first.status_code == second.status_code == 200, second.text
+    assert second.json()["id"] == first.json()["id"]
+    assert _q(api.conn, "SELECT count(*) FROM opd_receipts WHERE invoice_id = %s AND kind = 'refund'", inv) == 1
+    assert _q(api.conn, "SELECT paid_paise FROM opd_invoices WHERE id = %s", inv) == 20000
+    # the payment's key cannot be replayed as a refund
+    pay_key = _q(api.conn, "SELECT idempotency_key FROM opd_receipts WHERE invoice_id = %s AND kind = 'payment'", inv)
+    assert api.call("POST", f"/admin/opd/invoices/{inv}/refunds", opd_clinic,
+                    {**body, "idempotency_key": pay_key}).status_code == 409
+
+
 
 def test_desk_moves_only_its_own_branchs_queue(api, opd_clinic):  # noqa: F811
     north = str(_q(api.conn, "INSERT INTO branches (clinic_id, name) VALUES (%s, 'North') RETURNING id", opd_clinic))

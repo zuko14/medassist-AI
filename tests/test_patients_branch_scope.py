@@ -93,3 +93,27 @@ async def test_patients_route_passes_the_pinned_branch(user, expected):
     with patch.object(admin, "get_genuine_patients", fake):
         await admin.get_patients(clinic_id=CID, user=user)
     fake.assert_awaited_once_with(CID, branch_id=expected)
+
+
+class _PagedQ(_Q):
+    """Honours .range() like PostgREST, which never returns more than 1000 rows."""
+
+    def range(self, start, end):
+        self.window = (start, min(end, start + 999))
+        return self
+
+
+@pytest.mark.asyncio
+async def test_a_clinic_past_1000_patients_is_listed_in_full():
+    many = [{"phone": f"9{i:05d}", "name": f"Patient {i}", "visit_count": 1} for i in range(2500)]
+    client = MagicMock()
+    client.table.side_effect = lambda t: _PagedQ(t, [])
+
+    async def _sb(q):
+        rows = many if q.table == "patients" else []
+        lo, hi = q.window
+        return MagicMock(data=rows[lo:hi + 1])
+
+    with patch.object(database, "supabase", client), patch.object(database, "sb", _sb):
+        out = await database.get_genuine_patients(CID)
+    assert len(out) == 2500

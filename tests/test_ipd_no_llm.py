@@ -12,9 +12,30 @@ import pathlib
 
 BANNED = ("app.services.ai_engine", "app.services.ai_gateway", "app.services.faq_engine",
           "app.services.hybrid_search", "app.services.report_summarizer", "app.voice", "app.assistant")
-IPD_FILES = ("app/services/ipd.py", "app/routers/ipd.py")
+IPD_FILES = ("app/services/ipd.py", "app/routers/ipd.py", "app/services/ipd_finance.py",
+             # G1 orders (migration 115): diagnostic orders and worklist are deterministic too
+             "app/services/orders.py", "app/routers/orders.py",
+             # G2 LIS (migration 118): range selection, flagging and sign-off are deterministic
+             "app/services/lis.py", "app/routers/lis.py",
+             # G9 clinical documents (migration 119): rendered from stored rows only
+             "app/services/clinical_documents.py", "app/routers/documents.py",
+             # G12 masters (migration 120): ICD-10 search is deterministic SQL
+             "app/services/masters.py", "app/routers/masters.py",
+             # G7 emergency (migration 121): triage, MLC, disposition, merge
+             "app/services/emergency.py", "app/routers/emergency.py",
+             # G8 operation theatre (migration 122): scheduling, WHO checklist, anaesthesia, completion
+             "app/services/ot.py", "app/routers/ot.py",
+             # G13 radiology (migration 123): modality / obstetric rules, PCPNDT firewall, sign-off
+             "app/services/radiology.py", "app/routers/radiology.py",
+             # G6 insurance / TPA (migration 124): split, settlement and ageing are deterministic money
+             "app/services/insurance.py", "app/routers/insurance.py")
 CLINICAL_TABLES = ("ipd_observations", "ipd_notes", "ipd_orders", "ipd_med_administrations",
-                   "ipd_discharge_summaries", "ipd_admissions")
+                   "ipd_discharge_summaries", "ipd_admissions", "opd_orders", "lab_results", "lab_result_values",
+                   "lab_test_parameters", "clinical_consents", "clinical_certificates",
+                   "emergency_visits", "emergency_mlc_records",
+                   "ot_surgeries", "ot_who_checklists", "ot_anaesthesia_records",
+                   "radiology_reports", "pcpndt_form_f_records",
+                   "ipd_pre_authorizations", "ipd_insurance_claims", "ipd_claim_transactions")
 
 
 def _imports(path: pathlib.Path) -> set[str]:

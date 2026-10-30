@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import httpx
 
+from app.utils.async_tasks import spawn_background_task
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,7 @@ class WhatsAppService:
 
             from app.services.message_accounting import log_outbound
 
-            asyncio.create_task(
+            spawn_background_task(
                 log_outbound(
                     clinic_id=clinic_id,
                     recipient_phone=phone,

@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 ACTIVE_STATUSES = ("pending", "admitted", "discharge_pending")
 IN_BED_STATUSES = ("admitted", "discharge_pending")
 BED_STATUSES = ("available", "reserved", "occupied", "cleaning", "maintenance", "blocked")
-DEFAULT_SETTINGS = {"discharge_cutoff_hour": 12, "bed_tariffs": {}, "reservation_minutes": 120}
+DEFAULT_SETTINGS = {"discharge_cutoff_hour": 12, "bed_tariffs": {}, "reservation_minutes": 120,
+                    # migration 116 (docs/hospital-os/G5-IPD-FINANCE-SPEC.md §2): every staff discount
+                    # needs approval by default; IPD admins approve without a cap unless one is set
+                    "discount_auto_approve_paise": 0, "discount_approver_limit_paise": None}
 
 # error code (prefix before ':') -> (HTTP status, message shown to staff)
 _ERRORS: dict[str, tuple[int, str]] = {
@@ -64,6 +67,9 @@ _ERRORS: dict[str, tuple[int, str]] = {
     "ipd_bill_line_quantity": (422, "A bill line would exceed 999 units."),
     "ipd_bill_lines_locked": (409, "Inpatient bill lines come from posted charges and cannot be edited here."),
     "ipd_discharge_blocked": (409, "Discharge checklist is not complete."),
+    # migration 122: an open surgery holds the stay
+    "ipd_surgery_open": (409, "This patient has a surgery scheduled, in theatre or in recovery. Finish, cancel or "
+                              "postpone it on the Operation Theatre page before starting the discharge."),
     "ipd_settlement_waiver_required": (409, "The bill is not settled. An administrator must record a waiver reason."),
     "ipd_reason_required": (422, "A reason is required."),
     "ipd_reservation_minutes": (422, "Reservation must be between 5 and 1440 minutes."),
@@ -71,6 +77,25 @@ _ERRORS: dict[str, tuple[int, str]] = {
     "ipd_bed_ineligible": (422, "This bed is not eligible for this patient."),
     "ipd_ward_in_use": (409, "A bed in this ward is occupied or reserved. Discharge, transfer or release it before "
                              "changing the ward's branch."),
+    # IPD finance (migration 116)
+    "ipd_deposit_insufficient": (409, "The amount is more than the stay's unused deposit."),
+    "ipd_deposit_unapply_exceeds": (409, "More than was applied to this bill."),
+    "ipd_deposit_via_function_only": (409, "Deposits are applied to a bill only through the bill."),
+    "ipd_finance_via_function_only": (409, "This record changes only through its own action."),
+    "ipd_shift_not_open": (409, "Your cashier shift is closed. Open a shift and try again."),
+    "ipd_shift_not_yours": (409, "That cashier shift belongs to someone else."),
+    "ipd_package_exists": (409, "This stay already has a package. Remove it first."),
+    "ipd_package_not_found": (404, "Package not found or inactive."),
+    "ipd_discount_exists": (409, "This stay already has a discount request or approval."),
+    "ipd_discount_not_found": (404, "Discount not found."),
+    "ipd_discount_pending": (409, "A discount request is waiting for approval. Approve or reject it before issuing."),
+    "ipd_discount_mismatch": (409, "The bill's discount differs from the approved discount. Reload the bill."),
+    "ipd_discount_exceeds_bill": (422, "The discount is larger than the bill."),
+    "ipd_discount_own_request": (403, "You cannot approve your own discount request."),
+    "ipd_bill_issued": (409, "The final bill is already issued. Changes now need a refund or a credit note."),
+    "ipd_credit_exists": (409, "This stay already has an active credit authorisation."),
+    "ipd_credit_not_found": (404, "Credit authorisation not found."),
+    "ipd_key_reused": (409, "This request key was used for another stay. Reload and try again."),
 }
 _INELIGIBLE = {"gender": "This ward is restricted to the other gender.",
                "gender_unknown": "Record the patient's gender before using a gender-restricted ward.",
@@ -119,6 +144,16 @@ async def rpc(name: str, params: dict) -> Any:
 async def _rows(query) -> list[dict]:
     res = await sb(query)
     return list(res.data or [])
+
+
+async def _rows_in(make_query, column: str, ids) -> list[dict]:
+    """IN lookup in batches of 100: a few hundred UUIDs in one URL overflow the API
+    gateway's request-line limit, which a full 250-bed hospital reaches."""
+    ids = list(ids)
+    out: list[dict] = []
+    for i in range(0, len(ids), 100):
+        out += await _rows(make_query().in_(column, ids[i:i + 100]))
+    return out
 
 
 # ── configuration: wards, beds, settings ────────────────────────────────────
@@ -195,10 +230,10 @@ async def _people(clinic_id: str, admissions: list[dict]) -> dict[str, dict]:
     """Display identity per admission id: name, MRN, gender, age (no contact data)."""
     pids = sorted({a["patient_id"] for a in admissions})
     fids = sorted({a["family_member_id"] for a in admissions if a.get("family_member_id")})
-    patients = {p["id"]: p for p in await _rows(
-        scoped_query("patients", clinic_id, "id, name, mrn, gender, age_years").in_("id", pids))} if pids else {}
-    family = {f["id"]: f for f in await _rows(
-        scoped_query("family_members", clinic_id, "id, full_name, mrn, gender, age_years").in_("id", fids))} if fids else {}
+    patients = {p["id"]: p for p in await _rows_in(
+        lambda: scoped_query("patients", clinic_id, "id, name, mrn, gender, age_years"), "id", pids)}
+    family = {f["id"]: f for f in await _rows_in(
+        lambda: scoped_query("family_members", clinic_id, "id, full_name, mrn, gender, age_years"), "id", fids)}
     out = {}
     for a in admissions:
         f = family.get(a.get("family_member_id") or "")
@@ -213,8 +248,8 @@ async def _doctor_names(clinic_id: str, ids: set) -> dict[str, str]:
     ids = sorted(i for i in ids if i)
     if not ids:
         return {}
-    return {d["id"]: doctor_title(d.get("name")) for d in await _rows(
-        scoped_query("doctors", clinic_id, "id, name").in_("id", ids))}
+    return {d["id"]: doctor_title(d.get("name")) for d in await _rows_in(
+        lambda: scoped_query("doctors", clinic_id, "id, name"), "id", ids)}
 
 
 def _parse_ts(value: Any) -> Optional[datetime]:
@@ -246,7 +281,7 @@ async def bed_board(clinic_id: str, branch_id: Optional[str] = None, clinical: b
     ward_ids = [w["id"] for w in wards]
     beds = await _rows(scoped_query("ipd_beds", clinic_id).in_("ward_id", ward_ids).order("code")) if ward_ids else []
     adm_ids = sorted({b[k] for b in beds for k in ("current_admission_id", "reserved_admission_id") if b.get(k)})
-    adms = {a["id"]: a for a in await _rows(scoped_query("ipd_admissions", clinic_id).in_("id", adm_ids))} if adm_ids else {}
+    adms = {a["id"]: a for a in await _rows_in(lambda: scoped_query("ipd_admissions", clinic_id), "id", adm_ids)}
     people = await _people(clinic_id, list(adms.values()))
     doctors = await _doctor_names(clinic_id, {a.get("attending_doctor_id") for a in adms.values()})
     now = datetime.now(timezone.utc)
@@ -579,11 +614,6 @@ async def save_summary_draft(clinic_id: str, admission_id: str, fields: dict, us
     return res.data[0]
 
 
-async def sign_summary(clinic_id: str, summary_id: str, user: Any) -> dict:
-    return await rpc("ipd_sign_discharge_summary", _p(clinic_id, user, summary_id=summary_id,
-                                                      doctor_id=user.doctor_id))
-
-
 # ── charges + final bill ────────────────────────────────────────────────────
 
 async def add_charge(clinic_id: str, admission_id: str, body: dict, user: Any) -> dict:
@@ -632,9 +662,9 @@ async def worklist(clinic_id: str, branch_id: Optional[str] = None) -> dict:
     by_id = {a["id"]: a for a in active}
     people = await _people(clinic_id, active)
     in_bed = [a["id"] for a in active if a["status"] in IN_BED_STATUSES]
-    orders = await _rows(scoped_query("ipd_orders", clinic_id, "id, admission_id, order_type, description, frequency, "
-                                      "priority, is_prn, ordered_at").in_("admission_id", in_bed)
-                         .eq("status", "active")) if in_bed else []
+    orders = await _rows_in(lambda: scoped_query("ipd_orders", clinic_id, "id, admission_id, order_type, description, "
+                                                 "frequency, priority, is_prn, ordered_at").eq("status", "active"),
+                            "admission_id", in_bed)
     cq = scoped_query("ipd_beds", clinic_id, "id, code, ward_id, status_reason, updated_at").eq("status", "cleaning")
     if branch_id:   # a branch-pinned user sees only their branch's (and shared) beds
         wards = [w["id"] for w in await _branch_wards(clinic_id, branch_id, "id, code")]

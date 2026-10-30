@@ -20,7 +20,7 @@ from app.routers.admin import (
     log_admin_action,
     verify_credentials,
 )
-from app.services import ipd
+from app.services import clinical_documents, ipd, ipd_finance
 from app.services.permissions import resolve_owned_branch
 from app.services.tenant import get_clinic_by_id, invalidate_tenant_cache, ipd_access
 
@@ -44,6 +44,9 @@ class SettingsIn(_In):
     bed_tariffs: Optional[dict[str, int]] = None          # bed category -> paise per day
     discharge_cutoff_hour: Optional[int] = Field(None, ge=0, le=23)
     reservation_minutes: Optional[int] = Field(None, ge=5, le=1440)
+    # migration 116: discount authority (G5 spec §2). An explicit null approver limit = no cap.
+    discount_auto_approve_paise: Optional[int] = Field(None, ge=0, le=100_000_000)
+    discount_approver_limit_paise: Optional[int] = Field(None, ge=0, le=100_000_000)
 
     @model_validator(mode="after")
     def _tariffs(self):
@@ -352,6 +355,8 @@ async def put_settings(body: SettingsIn, request: Request, clinic_id: str = "def
                        user: AdminUser = Depends(verify_credentials)):
     scope, clinic = await _ipd_scope(user, clinic_id, "IPD_ADMIN")
     changes = body.model_dump(exclude_none=True)
+    if "discount_approver_limit_paise" in body.model_fields_set:   # null is a real value here: no cap
+        changes["discount_approver_limit_paise"] = body.discount_approver_limit_paise
     merged = {**ipd.DEFAULT_SETTINGS, **(clinic.get("ipd_settings") or {}), **changes}
     # unscoped: this clinic's own row by primary key (scope from enforce_clinic_access)
     await sb(supabase.table("clinics").update({"ipd_settings": merged}).eq("id", scope))
@@ -731,7 +736,8 @@ async def sign_discharge_summary(summary_id: str, request: Request, clinic_id: s
     scope, _ = await _ipd_scope(user, clinic_id, "IPD_CLINICAL")
     _require_doctor(user, "sign a discharge summary")
     row = await _child(user, scope, "ipd_discharge_summaries", summary_id, "Discharge summary")
-    out = await ipd.sign_summary(scope, summary_id, user)
+    # signs, freezes the PDF snapshots and queues WhatsApp delivery (migration 119)
+    out = await clinical_documents.sign_discharge_summary(scope, summary_id, user)
     await _audit(user, request, "ipd_summary_sign", "ipd_admission", row["admission_id"],
                  {"version": out.get("version")})
     return out
@@ -791,3 +797,247 @@ async def generate_final_bill(admission_id: str, request: Request, clinic_id: st
         await _audit(user, request, "ipd_final_bill", "ipd_admission", admission_id,
                      {"invoice_id": out.get("invoice_id")})
     return out
+
+
+# ── finance (migration 116): deposits, running bill, packages, discounts, credit ──
+# Spec: docs/hospital-os/G5-IPD-FINANCE-SPEC.md. Money in and bill work: IPD_BILLING;
+# money out, approvals, credit and the package master: IPD_ADMIN.
+
+PACKAGE_CATEGORIES = Literal["bed", "nursing", "doctor_visit", "procedure", "investigation", "pharmacy",
+                             "consumable", "other"]
+
+
+class DepositIn(_In):
+    mode: Literal["cash", "upi", "card", "bank_transfer"]
+    amount_paise: int = Field(..., ge=1, le=100_000_000)
+    reference: Optional[str] = Field(None, min_length=1, max_length=100)
+    shift_id: Optional[str] = None
+    idempotency_key: str = Field(..., min_length=8, max_length=80)
+
+    @model_validator(mode="after")
+    def _reference(self):
+        if self.mode != "cash" and not self.reference:
+            raise ValueError("A transaction reference (UTR / RRN) is required for this mode.")
+        return self
+
+
+class DepositRefundIn(_In):
+    mode: Literal["cash", "upi", "bank_transfer"]
+    amount_paise: int = Field(..., ge=1, le=100_000_000)
+    reason: str = Field(..., min_length=3, max_length=300)
+    reference: Optional[str] = Field(None, min_length=1, max_length=100)
+    shift_id: Optional[str] = None
+    idempotency_key: str = Field(..., min_length=8, max_length=80)
+
+    @model_validator(mode="after")
+    def _reference(self):
+        if self.mode != "cash" and not self.reference:
+            raise ValueError("A transaction reference (UTR) is required for this mode.")
+        return self
+
+
+class PackageIn(_In):
+    code: str = Field(..., pattern=r"^[A-Z0-9_-]{2,40}$")
+    name: str = Field(..., min_length=2, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+    price_paise: int = Field(..., ge=1, le=100_000_000)
+    included_categories: list[PACKAGE_CATEGORIES] = Field(..., min_length=1, max_length=8)
+    max_days: Optional[int] = Field(None, ge=1, le=365)
+    is_active: bool = True
+
+
+class PackagePatch(_In):
+    name: Optional[str] = Field(None, min_length=2, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+    price_paise: Optional[int] = Field(None, ge=1, le=100_000_000)
+    included_categories: Optional[list[PACKAGE_CATEGORIES]] = Field(None, min_length=1, max_length=8)
+    max_days: Optional[int] = Field(None, ge=1, le=365)
+    is_active: Optional[bool] = None
+
+
+class PackageApplyIn(_In):
+    package_id: str
+
+
+class DiscountIn(_In):
+    amount_paise: int = Field(..., ge=1, le=100_000_000)
+    reason: str = Field(..., min_length=5, max_length=300)
+    idempotency_key: str = Field(..., min_length=8, max_length=80)
+
+
+class DiscountDecisionIn(_In):
+    decision: Literal["approved", "rejected", "cancelled"]
+    note: Optional[str] = Field(None, max_length=300)
+
+
+class CreditIn(_In):
+    payer_name: str = Field(..., min_length=2, max_length=120)
+    reference: str = Field(..., min_length=2, max_length=100)
+    amount_paise: int = Field(..., ge=1, le=100_000_000)
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+@router.get("/admissions/{admission_id}/running-bill")
+async def get_running_bill(admission_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING", "IPD_ADMIN")
+    await _admission(user, scope, admission_id)
+    return await ipd_finance.running_bill(scope, admission_id)
+
+
+@router.get("/admissions/{admission_id}/deposits")
+async def list_deposits(admission_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING", "IPD_ADMIN")
+    await _admission(user, scope, admission_id)
+    return {"deposits": await ipd_finance.list_deposits(scope, admission_id)}
+
+
+@router.post("/admissions/{admission_id}/deposits", status_code=status.HTTP_201_CREATED)
+async def take_deposit(admission_id: str, body: DepositIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING")
+    await _admission(user, scope, admission_id)
+    row = await ipd_finance.take_deposit(scope, admission_id, body.model_dump(), user)
+    if not row.get("replayed"):
+        await _audit(user, request, "ipd_deposit_take", "ipd_admission", admission_id,
+                     {"deposit_id": row["id"], "mode": body.mode, "amount_paise": body.amount_paise})
+    return row
+
+
+@router.post("/admissions/{admission_id}/deposits/refund", status_code=status.HTTP_201_CREATED)
+async def refund_deposit(admission_id: str, body: DepositRefundIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN")
+    await _admission(user, scope, admission_id)
+    row = await ipd_finance.refund_deposit(scope, admission_id, body.model_dump(), user)
+    if not row.get("replayed"):
+        await _audit(user, request, "ipd_deposit_refund", "ipd_admission", admission_id,
+                     {"deposit_id": row["id"], "mode": body.mode, "amount_paise": body.amount_paise})
+    return row
+
+
+@router.post("/admissions/{admission_id}/deposits/apply")
+async def apply_deposits(admission_id: str, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING")
+    await _admission(user, scope, admission_id)
+    out = await ipd_finance.apply_deposits(scope, admission_id, user)
+    if out.get("applied_paise"):
+        await _audit(user, request, "ipd_deposit_apply", "ipd_admission", admission_id, out)
+    return out
+
+
+@router.get("/packages")
+async def list_packages(active: bool = False, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING", "IPD_ADMIN")
+    return {"packages": await ipd_finance.list_packages(scope, active_only=active)}
+
+
+@router.post("/packages", status_code=status.HTTP_201_CREATED)
+async def create_package(body: PackageIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN", new_work=True)
+    pkg = await ipd_finance.create_package(scope, body.model_dump(), user)
+    await _audit(user, request, "ipd_package_create", "ipd_package", pkg["id"],
+                 {"code": body.code, "price_paise": body.price_paise})
+    return pkg
+
+
+@router.patch("/packages/{package_id}")
+async def patch_package(package_id: str, body: PackagePatch, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN")
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    pkg = await ipd_finance.update_package(scope, package_id, patch)
+    await _audit(user, request, "ipd_package_update", "ipd_package", package_id, {"keys": sorted(patch)})
+    return pkg
+
+
+@router.post("/admissions/{admission_id}/package")
+async def apply_package(admission_id: str, body: PackageApplyIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING")
+    await _admission(user, scope, admission_id)
+    out = await ipd_finance.apply_package(scope, admission_id, body.package_id, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "ipd_package_apply", "ipd_admission", admission_id, {"package_id": body.package_id})
+    return out
+
+
+@router.post("/admissions/{admission_id}/package/remove")
+async def remove_package(admission_id: str, body: ReasonIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING")
+    await _admission(user, scope, admission_id)
+    out = await ipd_finance.remove_package(scope, admission_id, body.reason, user)
+    await _audit(user, request, "ipd_package_remove", "ipd_admission", admission_id, {"reason": body.reason})
+    return out
+
+
+@router.post("/admissions/{admission_id}/discounts", status_code=status.HTTP_201_CREATED)
+async def request_discount(admission_id: str, body: DiscountIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _ipd_scope(user, clinic_id, "IPD_BILLING", "IPD_ADMIN")
+    await _admission(user, scope, admission_id)
+    out = await ipd_finance.request_discount(scope, admission_id, body.model_dump(), clinic.get("ipd_settings") or {},
+                                             user)
+    if not out.get("replayed"):
+        await _audit(user, request, "ipd_discount_request", "ipd_admission", admission_id,
+                     {"discount_id": out["id"], "amount_paise": body.amount_paise, "status": out["status"]})
+    return out
+
+
+@router.get("/discounts/pending")
+async def pending_discounts(branch_id: Optional[str] = None, clinic_id: str = "default",
+                            user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN")
+    return {"discounts": await ipd_finance.list_pending_discounts(scope, _read_branch(user, branch_id))}
+
+
+@router.post("/discounts/{discount_id}/decision")
+async def decide_discount(discount_id: str, body: DiscountDecisionIn, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _ipd_scope(user, clinic_id, "IPD_BILLING", "IPD_ADMIN")
+    discount = await ipd_finance.get_discount(scope, discount_id)
+    await _admission(user, scope, discount["admission_id"])
+    # rejecting is an approver's call; cancelling is the requester's (or an approver's)
+    if body.decision == "rejected" or (body.decision == "cancelled" and str(discount.get("requested_by"))
+                                       != str(getattr(user, "user_id", ""))):
+        if not _holds(user, "IPD_ADMIN"):
+            raise HTTPException(status_code=403, detail="Missing permission: IPD_ADMIN")
+    out = await ipd_finance.decide_discount(scope, discount, body.decision, body.note,
+                                            clinic.get("ipd_settings") or {}, user)
+    if not out.get("replayed"):
+        await _audit(user, request, f"ipd_discount_{body.decision}", "ipd_admission", discount["admission_id"],
+                     {"discount_id": discount_id, "amount_paise": discount["amount_paise"]})
+    return out
+
+
+@router.post("/admissions/{admission_id}/credit", status_code=status.HTTP_201_CREATED)
+async def authorize_credit(admission_id: str, body: CreditIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN")
+    await _admission(user, scope, admission_id)
+    out = await ipd_finance.authorize_credit(scope, admission_id, body.model_dump(), user)
+    await _audit(user, request, "ipd_credit_authorize", "ipd_admission", admission_id,
+                 {"credit_id": out["id"], "payer": body.payer_name, "amount_paise": body.amount_paise})
+    return out
+
+
+@router.post("/credit/{credit_id}/revoke")
+async def revoke_credit(credit_id: str, body: ReasonIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_ADMIN")
+    credit = await ipd_finance.get_credit(scope, credit_id)
+    await _admission(user, scope, credit["admission_id"])
+    out = await ipd_finance.revoke_credit(scope, credit_id, body.reason, user)
+    await _audit(user, request, "ipd_credit_revoke", "ipd_admission", credit["admission_id"], {"credit_id": credit_id})
+    return out
+
+
+@router.get("/receivables")
+async def get_receivables(branch_id: Optional[str] = None, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, "IPD_BILLING", "IPD_ADMIN")
+    return await ipd_finance.receivables(scope, _read_branch(user, branch_id))

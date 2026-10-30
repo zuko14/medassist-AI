@@ -270,12 +270,19 @@ class Settings(BaseSettings):
     assistant_llm_timeout_seconds: float = 5.0  # one attempt
     assistant_llm_max_tokens: int = 200
     assistant_llm_rate_per_hour: int = 20       # per user
-    assistant_stt_enabled: bool = True          # mic (owner, 2026-10-26); shown only with SARVAM_API_KEY set.
+    assistant_stt_enabled: bool = True          # mic (owner, 2026-10-26); shown only when the STT provider's key is set.
                                                 # ASSISTANT_STT_ENABLED=false hides it everywhere at once
     assistant_stt_model: str = "saaras:v3"
+    assistant_stt_provider: str = "sarvam"      # sarvam | openrouter (audio-capable model below, OPENROUTER_API_KEY)
+    assistant_stt_openrouter_model: str = "google/gemini-2.5-flash"
     assistant_stt_timeout_seconds: float = 10.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def assistant_stt_configured(self) -> bool:
+        """The chosen STT provider has its key (the Kriya Ketu mic is offered only then)."""
+        return bool(self.openrouter_api_key if self.assistant_stt_provider == "openrouter" else self.sarvam_api_key)
 
 
 settings = Settings()

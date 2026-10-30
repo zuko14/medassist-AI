@@ -69,6 +69,12 @@ class FakeTable:
     def limit(self, *a, **k):
         return self
 
+    def order(self, *a, **k):
+        return self
+
+    def range(self, *a, **k):
+        return self
+
     def _matches(self, row):
         for (op, col), val in self._filters.items():
             actual = row.get(col)

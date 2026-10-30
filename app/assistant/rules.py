@@ -77,6 +77,19 @@ _CHAT_FILLER = ("kriya ketu", "kriya", "ketu", "ok", "okay", "please", "pls", "s
 # "Hi, open leads" / "hello kriya, show today's appointments": the greeting is dropped and the rest routed.
 _GREETING_PREFIX = re.compile(r"^\s*(?:hi+|hello|helo|hey|hai|namaste|namaskar(?:am)?)\b[\s,.!:-]*"
                               r"(?:(?:kriya\s*)?ketu|kriya)?\b[\s,.!:-]*", re.I)
+# Speech leads with the assistant's name and fillers ("Kriya, ...", "ok so, uh, ..."): never part of the request.
+_SPOKEN_LEAD = re.compile(r"^\s*(?:(?:hey|ok|okay|hi|hello)\s+)?(?:kriya(?:\s*ketu)?|ketu)\b[\s,.!:-]*"
+                          r"|^\s*(?:u+m+|u+h+m*|hm+|er+m*|a+h+|ok(?:ay)?\s+so|so|and|please)\b[\s,.!:-]+", re.I)
+
+
+def strip_spoken_lead(text: str) -> str:
+    """Drop the wake word and leading fillers; the request itself is never touched."""
+    prev = None
+    while prev != text:
+        prev, text = text, _SPOKEN_LEAD.sub("", text, count=1)
+    return text
+
+
 _CHAT_FINDERS = sorted(((kind, w) for kind, words in SMALL_TALK.items() for w in words),
                        key=lambda x: -len(x[1]))
 
@@ -414,6 +427,9 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
     actions = {k: s for k, s in (REGISTRY if actions is None else actions).items() if s.triggers}
     visible = None if visible_pages is None else set(visible_pages)
     now = now or _now()
+    lead = strip_spoken_lead(text)
+    if lead.strip() and lead != text:
+        return route(lead, visible_pages=visible_pages, ui_page=ui_page, actions=actions, doctors=doctors, now=now)
     t = _norm(text)
     if not t:
         return Route("none")

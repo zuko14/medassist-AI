@@ -16,7 +16,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.database import sb, supabase
+from app.database import fetch_all, sb, supabase
 from app.services import config_store  # D-13: config saves write only the changed keys, atomically
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
 from app.services.tenant import ai_receptionist_enabled, get_clinic_by_id, invalidate_tenant_cache
@@ -159,11 +159,12 @@ async def analytics(clinic_id: str = "default", days: int = 7, user: AdminUser =
     scope, _ = await _scope(user, clinic_id, "VOICE_VIEW")
     days = max(1, min(days, 90))
     since = (datetime.now(IST) - timedelta(days=days)).isoformat()
-    # ponytail: 5000 most recent calls per window; page this when a clinic exceeds it.
-    res = await sb(supabase.table("voice_calls").select("status, direction, language, primary_intent, outcome, "
-                                                        "quality, cost_paise, telephony_seconds, dialog")
-                   .eq("clinic_id", scope).gte("started_at", since).order("started_at", desc=True).limit(5000))
-    rows = res.data or []
+    rows = await fetch_all(
+        lambda: supabase.table("voice_calls").select("id, status, direction, language, primary_intent, outcome, "
+                                                     "quality, cost_paise, telephony_seconds, dialog")
+        .eq("clinic_id", scope).gte("started_at", since).order("started_at", desc=True).order("id"),
+        max_rows=20_000, label="voice_analytics",
+    )
     by_status, by_intent, by_lang = Counter(), Counter(), {}
     per_wf: dict = {}
     scores = []

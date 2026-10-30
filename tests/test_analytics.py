@@ -99,20 +99,11 @@ class TestDashboardStats:
             {"created_at": "2025-01-01"},  # old patient
         ]
 
-        with patch("app.services.analytics.supabase") as mock_sb:
-            mock_sb.table.return_value.select.return_value.gte.return_value.execute.return_value = (
-                mock_appts
-            )
-            mock_sb.table.return_value.select.return_value.gte.return_value.eq.return_value.execute.return_value = (
-                mock_appts
-            )
-            mock_sb.table.return_value.select.return_value.execute.return_value = (
-                mock_patients
-            )
-            mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = (
-                mock_patients
-            )
-
+        with patch(
+            "app.services.analytics._fetch_window", new=AsyncMock(return_value=mock_appts.data)
+        ), patch(
+            "app.services.analytics.get_genuine_patients", new=AsyncMock(return_value=mock_patients.data)
+        ):
             stats = await analytics_svc.get_dashboard_stats(CLINIC_ID, days=30)
 
             assert stats["total_appointments"] == 5

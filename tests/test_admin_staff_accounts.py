@@ -250,3 +250,50 @@ async def test_update_staff_rejects_non_staff_target():
             )
     assert exc.value.status_code == 404
 
+
+# A role implies grants by itself (CASHIER -> credit notes, TPA_DESK -> insurance), so the
+# stored-grant cap alone would let a staff granter mint authority they lack by picking it.
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["CASHIER", "TPA_DESK"])
+async def test_staff_granter_cannot_create_a_role_carrying_authority_they_lack(role):
+    body = StaffCreate(username="cash9", password="password1", staff_role=role)
+    mock_sb = MagicMock()
+    with patch("app.routers.admin.supabase", mock_sb):
+        with pytest.raises(HTTPException) as exc:
+            await create_staff(body=body, request=_mock_request(),
+                               user=_staff_with_perms(["STAFF_CREATE", "OPD_FRONT_DESK"]))
+    assert exc.value.status_code == 403
+    mock_sb.table.return_value.insert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_staff_granter_holding_the_authority_may_create_the_role():
+    body = StaffCreate(username="cash10", password="password1", staff_role="CASHIER")
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+    mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "new-9", "username": "cash10", "role": "staff"}]
+    )
+    with patch("app.routers.admin.supabase", mock_sb), patch("app.routers.admin.log_admin_action"):
+        result = await create_staff(body=body, request=_mock_request(),
+                                    user=_staff_with_perms(["STAFF_CREATE", "OPD_BILLING", "BILLING_CREDIT_NOTE"]))
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_staff_editor_cannot_promote_an_account_to_a_role_beyond_their_authority():
+    from app.routers.admin import StaffUpdate, update_staff
+
+    mock_sb = MagicMock()
+    mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "s-del", "clinic_id": "clinic-1", "role": "staff", "staff_role": "STAFF",
+               "permissions": ["STAFF_UPDATE"], "branch_id": None}]
+    )
+    with patch("app.routers.admin.supabase", mock_sb):
+        with pytest.raises(HTTPException) as exc:   # their own account: no self-promotion either
+            await update_staff(staff_id="s-del", body=StaffUpdate(staff_role="TPA_DESK"),
+                               request=_mock_request(), user=_staff_with_perms(["STAFF_UPDATE"]))
+    assert exc.value.status_code == 403
+    mock_sb.table.return_value.update.assert_not_called()
+

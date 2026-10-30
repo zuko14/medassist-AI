@@ -350,6 +350,8 @@ async def _run_2h_sweep(fake_now, rows_by_date):
                 return q
 
             q.eq.side_effect = eq
+            q.order.return_value = q
+            q.range.return_value = q
             q.execute.side_effect = lambda: (
                 queried.append(state.get("appointment_date"))
                 or MagicMock(data=rows_by_date.get(state.get("appointment_date"), []))

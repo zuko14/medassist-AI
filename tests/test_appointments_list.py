@@ -126,17 +126,14 @@ class TestWindow:
         """The tile and its list must share one boundary, not two derivations."""
         appts = MagicMock()
         appts.data = _statuses("confirmed", "cancelled")
+        fetch = AsyncMock(return_value=appts.data)
         with patch(
             "app.services.analytics.dashboard_period_start", return_value="2026-08-14"
-        ), patch("app.services.analytics.supabase") as mock_sb, patch(
-            "app.services.analytics.sb", new=AsyncMock(return_value=appts)
-        ), patch(
+        ), patch("app.services.analytics._fetch_window", new=fetch), patch(
             "app.services.analytics.get_genuine_patients", new=AsyncMock(return_value=[])
         ):
             stats = await AnalyticsService().get_dashboard_stats(CLINIC_UUID, days=30)
-        mock_sb.table.return_value.select.return_value.gte.assert_called_with(
-            "created_at", "2026-08-14"
-        )
+        assert fetch.call_args.args[3:] == ("created_at", "2026-08-14")
         assert stats["period_start"] == "2026-08-14"
         assert stats["total_appointments"] == 2
 

@@ -40,6 +40,9 @@ READS = {
     "lab_tests.cleanup",  # KK-P4-09
     "voice.learning_review",  # KK-P4-13
     "ipd.census", "ipd.inpatients", "ipd.waiting", "ipd.discharges",  # IPD OS (migration 111)
+    "orders.to_collect", "lis.pending_signoff", "emergency.board", "services.prices",  # Hospital OS
+    "ipd_finance.receivables",
+    "ot.today",  # operation theatre (migration 122)
     "opd.collections", "opd.unpaid", "holidays.list",  # 2026-10-26: everyday questions from the probe
 }
 NOT_YET = {"patient.view", "voice.call_detail", "patient.duplicate_check", "voice.test_turn"}
@@ -190,6 +193,23 @@ DATA = {
                              "patient_snapshot": {"name": "Ravi Kumar", "phone": PHONE}}],
     "/admin/holidays": [{"holiday_date": "2020-01-26", "name": "Republic Day 2020"},
                         {"holiday_date": "2099-11-01", "name": "Diwali"}],
+    "/admin/diagnostic/worklist": {"orders": [{"patient_name": "Ravi Kumar", "mrn": "MRN-1", "item_name": "CBC",
+                                               "urgency": "stat", "status": "billed", "doctor_name": "Dr Arjun"}],
+                                   "total": 1},
+    "/admin/lis/results": {"results": [{"patient_name": "Sita", "mrn": "MRN-2", "test_name": "LFT",
+                                        "has_critical_value": True, "urgency": "routine",
+                                        "entered_at": "2026-10-14T04:30:00+00:00"}], "total": 1},
+    "/admin/emergency/visits": {"visits": [{"patient_name": "Unknown Male 1", "mrn": "T-1", "triage_category": "red",
+                                            "status": "in_treatment", "doctor_name": "Dr Ravi",
+                                            "mlc": {"mlc_number": "MLC-7"}, "created_at": "2026-10-14T04:30:00+00:00"}],
+                                "counts": {"red": 1}, "open": 1},
+    "/admin/ot/schedule": {"surgeries": [{"scheduled_start": "2026-10-14T03:30:00+00:00", "theatre_name": "OT 1",
+                                          "patient_name": "Ravi", "mrn": "MRN-3", "procedure_name": "Appendicectomy",
+                                          "surgeon_name": "Dr. Iyer", "status": "scheduled"}], "active": 1},
+    "/admin/masters/services": {"services": [{"code": "XR1", "name": "X Ray Chest PA", "category": "radiology",
+                                              "standard_price_paise": 45000}], "can_manage": True},
+    "/admin/ipd/receivables": {"bills": [], "ageing_paise": {"0-30": 1250000, "31-60": 0, "61-90": 0, "90+": 0},
+                               "total_due_paise": 1250000, "deposits_held": [], "deposits_held_paise": 50000},
     "/admin/lab-tests": [{"name": "CBC", "price_paise": 35000, "sample_type": "blood", "is_active": True}],
     "/admin/treatments": [{"name": "Root canal", "category": "Dental", "price_from_paise": 450000, "is_active": True}],
     "/admin/reports/deliveries": {"deliveries": [{"sent_at": "2026-10-14T04:30:00+00:00", "patient_name": "Ravi",
@@ -253,6 +273,14 @@ CASES = [
      "Ravi Kumar", 1),
     ("pending admissions today", "ipd.waiting", "/admin/ipd/worklist", {}, "Sita", 1),
     ("pending discharges", "ipd.discharges", "/admin/ipd/worklist", {}, "Ravi Kumar", 1),
+    ("how many samples to collect", "orders.to_collect", "/admin/diagnostic/worklist",
+     {"status": "to_collect", "limit": "100"}, "Ravi Kumar", 1),
+    ("reports pending sign off", "lis.pending_signoff", "/admin/lis/results", {"status": "entered", "limit": "100"},
+     "Sita", 1),
+    ("who is in casualty", "emergency.board", "/admin/emergency/visits", {}, "MLC-7", 1),
+    ("surgeries today", "ot.today", "/admin/ot/schedule", {}, "Appendicectomy", 1),
+    ("price of x ray chest", "services.prices", "/admin/masters/services", {"active_only": "true"}, "₹450", 1),
+    ("ipd outstanding", "ipd_finance.receivables", "/admin/ipd/receivables", {}, "₹12,500", None),
     ("dashboard stats", "stats.summary", "/admin/stats", {"days": "30"}, "42", None),
     ("booking trends", "insights.view", "/admin/insights", {"days": "30"}, "50", None),
     ("opd footfall", "opd.analytics", "/admin/opd/analytics", {"from": TODAY, "to": TODAY}, "18", None),
@@ -380,7 +408,8 @@ def test_handler_reads_are_the_expected_ones():
                                   "homecollect.visits", "voice.calls", "voice.live",
                                   "voice.analytics", "voice.usage", "voice.outbound_list",
                                   "voice.learning_review", "ipd.census", "ipd.inpatients", "ipd.waiting",
-                                  "ipd.discharges"}
+                                  "ipd.discharges", "orders.to_collect", "lis.pending_signoff", "emergency.board",
+                                  "services.prices", "ipd_finance.receivables", "ot.today"}
 
 
 @pytest.mark.parametrize("aid", HANDLER_READS)

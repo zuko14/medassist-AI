@@ -40,6 +40,8 @@ async def test_send_24h_reminders_idempotency_and_update(scheduler_service):
     mock_appointments_table = MagicMock()
     mock_select = MagicMock()
     mock_select.eq.return_value = mock_select
+    mock_select.order.return_value = mock_select
+    mock_select.range.return_value = mock_select
     mock_select.execute.return_value.data = fake_appointments
     mock_appointments_table.select.return_value = mock_select
     mock_appointments_table.update.return_value.eq.return_value.execute.return_value.data = [{"id": "appt_1"}]
@@ -73,6 +75,8 @@ async def test_scheduler_error_isolation_in_batch(scheduler_service):
 
     mock_select = MagicMock()
     mock_select.eq.return_value = mock_select
+    mock_select.order.return_value = mock_select
+    mock_select.range.return_value = mock_select
     mock_select.execute.return_value.data = fake_appointments
 
     mock_table = MagicMock()
@@ -86,3 +90,35 @@ async def test_scheduler_error_isolation_in_batch(scheduler_service):
 
         # Should complete without raising exception
         await scheduler_service.send_24h_reminders()
+
+
+@pytest.mark.asyncio
+async def test_24h_reminders_reach_every_patient_past_1000_bookings(scheduler_service):
+    """One sweep covers every clinic: PostgREST returns at most 1000 rows per request,
+    so a platform past 1000 bookings a day must be paged or the rest get no reminder."""
+    rows = [{"id": f"a{i:05d}", "clinic_id": "clinic_a", "doctor_name": "Dr. A", "patient_phone": "+919999999991",
+             "appointment_time": "10:00:00"} for i in range(2300)]
+
+    class Q:
+        def __getattr__(self, name):
+            return lambda *a, **k: self
+
+        def range(self, lo, hi):
+            self.window = (lo, min(hi, lo + 999))
+            return self
+
+    async def fake_sb(q):
+        if hasattr(q, "window"):
+            lo, hi = q.window
+            return MagicMock(data=rows[lo:hi + 1])
+        return MagicMock(data=[{"id": "x"}])
+
+    with patch("app.services.scheduler.supabase.table", side_effect=lambda t: Q()), \
+         patch("app.database.sb", side_effect=fake_sb), \
+         patch("app.services.scheduler.sb", side_effect=fake_sb), \
+         patch("app.services.scheduler.get_clinic_by_id", new_callable=AsyncMock, return_value={"id": "clinic_a"}), \
+         patch("app.services.tenant.has_feature", return_value=True), \
+         patch("app.services.scheduler.automated_outbound_allowed", return_value=True), \
+         patch("app.services.scheduler.whatsapp_service.send_template", new_callable=AsyncMock) as send:
+        await scheduler_service.send_24h_reminders()
+    assert send.await_count == 2300

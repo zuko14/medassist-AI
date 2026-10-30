@@ -100,19 +100,25 @@ def test_103_idempotency_and_indexdef(real_pg_conn):
     with open(migration_path, "r", encoding="utf-8") as f:
         sql = f.read()
 
-    # Should execute without error
-    cur.execute(sql)
+    # Should execute without error. Rolled back: re-applying 103 committed would replace the
+    # newer definitions later migrations gave its functions (e.g. 116's opd_close_shift)
+    # in the shared test database, for every test that runs after this one.
+    cur.execute("BEGIN")
+    try:
+        cur.execute(sql)
 
-    # Verify appointments slot indexes include 'is_walk_in = false'
-    cur.execute(
-        """
-        SELECT count(*) FROM pg_indexes
-        WHERE tablename = 'appointments'
-          AND indexname IN ('uq_appointment_active_slot', 'uq_appointment_active_slot_unassigned')
-          AND indexdef ILIKE '%is_walk_in = false%';
-        """
-    )
-    assert cur.fetchone()[0] == 2
+        # Verify appointments slot indexes include 'is_walk_in = false'
+        cur.execute(
+            """
+            SELECT count(*) FROM pg_indexes
+            WHERE tablename = 'appointments'
+              AND indexname IN ('uq_appointment_active_slot', 'uq_appointment_active_slot_unassigned')
+              AND indexdef ILIKE '%is_walk_in = false%';
+            """
+        )
+        assert cur.fetchone()[0] == 2
+    finally:
+        cur.execute("ROLLBACK")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -745,10 +751,68 @@ def test_103_down_rollback_and_reapply(real_pg_conn):
     with open(up_path, "r", encoding="utf-8") as f:
         up_sql = f.read()
 
-    # Rollbacks run newest-first: 111 (IPD) depends on 103, so 111_down goes first.
+    # Rollbacks run newest-first: 115 (orders) and 111 (IPD) depend on 103, so their downs go first.
     # One transaction, rolled back at the end, so the shared test DB keeps its data.
     ipd_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback", "111_down.sql")
+    orders_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback",
+                               "115_investigation_and_procedure_orders.down.sql")
+    finance_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback", "116_down.sql")
+    gst_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback", "117_down.sql")
+    lis_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback", "118_down.sql")
+    docs_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback", "119_down.sql")
+    masters_down = os.path.join(os.path.dirname(__file__), "..", "migrations", "rollback", "120_down.sql")
     cur.execute("BEGIN")
+    from tests.test_migration_121_emergency import unwind_121
+    unwind_121(cur)   # newest first: 121 references 103's tables
+    cur.execute("SELECT to_regclass('public.billable_services') IS NOT NULL")
+    if cur.fetchone()[0]:
+        # 120_down refuses master-only services; the transaction is rolled back below
+        cur.execute("DELETE FROM billable_services")
+        with open(masters_down, "r", encoding="utf-8") as f:
+            cur.execute(f.read())
+    cur.execute("SELECT to_regclass('public.clinical_certificates') IS NOT NULL")
+    if cur.fetchone()[0]:
+        # 119_down refuses consents and certificates; only a purge-flagged delete removes them
+        cur.execute("SELECT DISTINCT clinic_id FROM clinical_certificates UNION SELECT clinic_id FROM clinical_consents")
+        for (clinic,) in cur.fetchall():
+            cur.execute("SELECT set_config('kriya.opd_purge_clinic', %s, true)", (str(clinic),))
+            cur.execute("DELETE FROM clinical_certificates WHERE clinic_id = %s", (clinic,))
+            cur.execute("DELETE FROM clinical_consents WHERE clinic_id = %s", (clinic,))
+        cur.execute("SELECT set_config('kriya.opd_purge_clinic', '', true)")
+        with open(docs_down, "r", encoding="utf-8") as f:
+            cur.execute(f.read())
+    cur.execute("SELECT to_regclass('public.lab_results') IS NOT NULL")
+    if cur.fetchone()[0]:
+        # 118_down refuses lab results; the owner purge is the only path that removes them
+        cur.execute("SELECT ipd_purge_clinic(clinic_id) FROM (SELECT DISTINCT clinic_id FROM lab_results) x")
+        with open(lis_down, "r", encoding="utf-8") as f:
+            cur.execute(f.read())
+    cur.execute("SELECT to_regclass('public.opd_credit_notes') IS NOT NULL")
+    if cur.fetchone()[0]:
+        # 117_down refuses credit notes and taxed lines; the owner purge is the only path that removes them
+        cur.execute("""SELECT ipd_purge_clinic(x.clinic_id) FROM (
+                         SELECT clinic_id FROM opd_credit_notes UNION SELECT clinic_id FROM opd_invoices
+                         WHERE credited_paise <> 0 UNION SELECT clinic_id FROM opd_invoice_items WHERE tax_rate_bps <> 0
+                         UNION SELECT clinic_id FROM ipd_charges WHERE tax_rate_bps <> 0) x""")
+        with open(gst_down, "r", encoding="utf-8") as f:
+            cur.execute(f.read())
+    cur.execute("SELECT to_regclass('public.ipd_deposits') IS NOT NULL")
+    if cur.fetchone()[0]:
+        # 116_down refuses finance records; the owner purge is the only path that removes them
+        cur.execute("""SELECT ipd_purge_clinic(x.clinic_id) FROM (
+                         SELECT clinic_id FROM ipd_deposits UNION SELECT clinic_id FROM ipd_discounts
+                         UNION SELECT clinic_id FROM ipd_credit_authorizations
+                         UNION SELECT clinic_id FROM ipd_admission_packages
+                         UNION SELECT clinic_id FROM ipd_charges WHERE source = 'package'
+                         UNION SELECT clinic_id FROM opd_receipts WHERE mode IN ('deposit', 'bank_transfer')) x""")
+        with open(finance_down, "r", encoding="utf-8") as f:
+            cur.execute(f.read())
+    cur.execute("SELECT to_regclass('public.opd_orders') IS NOT NULL")
+    if cur.fetchone()[0]:
+        # 115_down refuses open orders; the owner purge is the only path that removes them
+        cur.execute("SELECT ipd_purge_clinic(clinic_id) FROM (SELECT DISTINCT clinic_id FROM opd_orders) x")
+        with open(orders_down, "r", encoding="utf-8") as f:
+            cur.execute(f.read())
     cur.execute("SELECT to_regclass('public.ipd_admissions') IS NOT NULL")
     if cur.fetchone()[0]:
         cur.execute("SELECT ipd_purge_clinic(clinic_id) FROM (SELECT DISTINCT clinic_id FROM ipd_admissions) x")

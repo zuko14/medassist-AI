@@ -243,8 +243,12 @@ class LabReportService:
         match_source: Optional[str] = None,
         matched_patient_id: Optional[str] = None,
         sample_barcode: Optional[str] = None,
+        ai_summary: bool = True,
     ) -> dict:
         """Full pipeline: extract text, AI summary, upload, send via WhatsApp, save record.
+
+        `ai_summary=False` sends the PDF with the generic message and never
+        passes its text to a model (obstetric ultrasound reports, PCPNDT).
 
         `external_report_id` is the shared dedup key across every intake path that can
         deliver a report for this clinic (admin upload, generic EMR connector, CallMedex).
@@ -352,10 +356,12 @@ class LabReportService:
         pdf_text = extract_text_from_pdf(file_bytes)
 
         # Step B — AI summary
-        summarizer = ReportSummarizer()
-        ai_result = await summarizer.summarize(pdf_text, patient_name, report_type, clinic_id=clinic_id)
+        if ai_summary:
+            ai_result = await ReportSummarizer().summarize(pdf_text, patient_name, report_type, clinic_id=clinic_id)
+        else:
+            ai_result = {"summary": None, "has_abnormal": False, "fallback": True, "patient_message": None}
 
-        if ai_result.get("fallback"):
+        if ai_result.get("fallback") and ai_summary:
             logger.warning(
                 f"AI summarizer returned fallback for report '{report_name}' "
                 f"(type={report_type}, patient={patient_name[:3]}***, "

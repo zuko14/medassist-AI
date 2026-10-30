@@ -145,3 +145,16 @@ def test_draft_prescription_refuses_pdf():
         render_prescription_pdf(draft_rx, SAMPLE_ITEMS)
     assert exc_info.value.status_code == 409
     assert "Draft prescriptions" in exc_info.value.detail
+
+
+def test_hindi_and_telugu_text_is_embedded_not_dropped():
+    """fpdf2 keys fonts in lower case: the Indic fallback fonts used to be skipped,
+    silently dropping every Hindi / Telugu character from prescriptions."""
+    from app.services.opd_pdf import OPDDocument
+
+    pdf = OPDDocument()
+    pdf.add_page()
+    pdf.set_font("NotoSans", "B", 10)   # bold text falls back to the regular Indic face
+    pdf.cell(0, 5, "సమ్మతి सहमति")
+    out = bytes(pdf.output())
+    assert b"Telugu" in out and b"Devanagari" in out

@@ -4537,6 +4537,344 @@
    "text": "doctor fee entha",
    "expect": "action:doctors.list",
    "lang": "te-Latin"
+  },
+  {
+   "text": "how many samples to collect",
+   "expect": "action:orders.to_collect",
+   "lang": "en"
+  },
+  {
+   "text": "show pending samples",
+   "expect": "action:orders.to_collect",
+   "lang": "en"
+  },
+  {
+   "text": "list pending investigations",
+   "expect": "action:orders.to_collect",
+   "lang": "en"
+  },
+  {
+   "text": "ee roju enni sample collect cheyali",
+   "expect": "action:orders.to_collect",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kitne sample lene hai",
+   "expect": "action:orders.to_collect",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "సాంపిల్స్ ఎన్ని పెండింగ్",
+   "expect": "action:orders.to_collect",
+   "lang": "te"
+  },
+  {
+   "text": "कितने सैंपल बाकी",
+   "expect": "action:orders.to_collect",
+   "lang": "hi"
+  },
+  {
+   "text": "open diagnostic worklist",
+   "expect": "nav:dxworklist",
+   "lang": "en",
+   "near": "orders.to_collect"
+  },
+  {
+   "text": "collect sample for ravi",
+   "expect": "action:orders.collect",
+   "lang": "en",
+   "near": "orders.to_collect"
+  },
+  {
+   "text": "reports pending sign off",
+   "expect": "action:lis.pending_signoff",
+   "lang": "en"
+  },
+  {
+   "text": "any critical results today",
+   "expect": "action:lis.pending_signoff",
+   "lang": "en"
+  },
+  {
+   "text": "show unsigned reports",
+   "expect": "action:lis.pending_signoff",
+   "lang": "en"
+  },
+  {
+   "text": "enni reports sign cheyali",
+   "expect": "action:lis.pending_signoff",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "kitni reports sign karna hai",
+   "expect": "action:lis.pending_signoff",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "సైన్ చేయాల్సిన రిపోర్ట్స్",
+   "expect": "action:lis.pending_signoff",
+   "lang": "te"
+  },
+  {
+   "text": "कितनी रिपोर्ट साइन करना बाकी",
+   "expect": "action:lis.pending_signoff",
+   "lang": "hi"
+  },
+  {
+   "text": "open lab sign-off",
+   "expect": "nav:lisqueue",
+   "lang": "en",
+   "near": "lis.pending_signoff"
+  },
+  {
+   "text": "sign the report for meena",
+   "expect": "action:lis.sign",
+   "lang": "en",
+   "near": "lis.pending_signoff"
+  },
+  {
+   "text": "who is in casualty",
+   "expect": "action:emergency.board",
+   "lang": "en"
+  },
+  {
+   "text": "who is in er",
+   "expect": "action:emergency.board",
+   "lang": "en"
+  },
+  {
+   "text": "casualty board now",
+   "expect": "action:emergency.board",
+   "lang": "en"
+  },
+  {
+   "text": "casualty lo evaru unnaru",
+   "expect": "action:emergency.board",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "emergency mein kaun hai",
+   "expect": "action:emergency.board",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "క్యాజువాలిటీ లో ఎవరు",
+   "expect": "action:emergency.board",
+   "lang": "te"
+  },
+  {
+   "text": "इमरजेंसी में कौन है",
+   "expect": "action:emergency.board",
+   "lang": "hi"
+  },
+  {
+   "text": "open casualty",
+   "expect": "nav:casualty",
+   "lang": "en",
+   "near": "emergency.board"
+  },
+  {
+   "text": "rapid admit an accident case",
+   "expect": "action:emergency.register",
+   "lang": "en",
+   "near": "emergency.board"
+  },
+  {
+   "text": "price of x ray chest",
+   "expect": "action:services.prices",
+   "lang": "en"
+  },
+  {
+   "text": "what are the charges for physiotherapy",
+   "expect": "action:services.prices",
+   "lang": "en"
+  },
+  {
+   "text": "procedure charges for dressing",
+   "expect": "action:services.prices",
+   "lang": "en"
+  },
+  {
+   "text": "x ray ki price of batao",
+   "expect": "action:services.prices",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "dressing rate of enta",
+   "expect": "action:services.prices",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "ఎక్స్ రే ధర ఎంత",
+   "expect": "action:services.prices",
+   "lang": "te"
+  },
+  {
+   "text": "एक्स रे कितने का है",
+   "expect": "action:services.prices",
+   "lang": "hi"
+  },
+  {
+   "text": "add a new service for physiotherapy",
+   "expect": "action:services.edit",
+   "lang": "en",
+   "near": "services.prices"
+  },
+  {
+   "text": "ipd outstanding",
+   "expect": "action:ipd_finance.receivables",
+   "lang": "en"
+  },
+  {
+   "text": "how much tpa dues are pending",
+   "expect": "action:ipd_finance.receivables",
+   "lang": "en"
+  },
+  {
+   "text": "unpaid ipd bills",
+   "expect": "action:ipd_finance.receivables",
+   "lang": "en"
+  },
+  {
+   "text": "ipd baaki entha undi",
+   "expect": "action:ipd_finance.receivables",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "ipd bakaya kitna hai",
+   "expect": "action:ipd_finance.receivables",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ఐపీడీ బాకీ ఎంత",
+   "expect": "action:ipd_finance.receivables",
+   "lang": "te"
+  },
+  {
+   "text": "आईपीडी बकाया कितना",
+   "expect": "action:ipd_finance.receivables",
+   "lang": "hi"
+  },
+  {
+   "text": "open ipd receivables",
+   "expect": "nav:ipdfinance",
+   "lang": "en",
+   "near": "ipd_finance.receivables"
+  },
+  {
+   "text": "take advance deposit from bed 12",
+   "expect": "action:ipd_finance.deposit",
+   "lang": "en",
+   "near": "ipd_finance.receivables"
+  },
+  {
+   "text": "open service catalogue",
+   "expect": "nav:tariffs",
+   "lang": "en",
+   "near": "services.prices"
+  },
+  {
+   "text": "edit tariff for dressing",
+   "expect": "action:services.edit",
+   "lang": "en",
+   "near": "services.prices"
+  },
+  {
+   "text": "surgeries today",
+   "expect": "action:ot.today",
+   "lang": "en"
+  },
+  {
+   "text": "show the ot list",
+   "expect": "action:ot.today",
+   "lang": "en"
+  },
+  {
+   "text": "who is in ot right now",
+   "expect": "action:ot.today",
+   "lang": "en"
+  },
+  {
+   "text": "theatre schedule for today",
+   "expect": "action:ot.today",
+   "lang": "en"
+  },
+  {
+   "text": "ivala operations enni",
+   "expect": "action:ot.today",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "ot lo evaru unnaru",
+   "expect": "action:ot.today",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "aaj ke operation kitne hai",
+   "expect": "action:ot.today",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ot mein kaun hai",
+   "expect": "action:ot.today",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ఈరోజు ఆపరేషన్లు",
+   "expect": "action:ot.today",
+   "lang": "te"
+  },
+  {
+   "text": "आज के ऑपरेशन",
+   "expect": "action:ot.today",
+   "lang": "hi"
+  },
+  {
+   "text": "open operation theatre",
+   "expect": "nav:ot",
+   "lang": "en",
+   "near": "ot.today"
+  },
+  {
+   "text": "book a surgery for tomorrow",
+   "expect": "action:ot.schedule",
+   "lang": "en",
+   "near": "ot.today"
+  },
+  {
+   "text": "schedule surgery for ravi",
+   "expect": "action:ot.schedule",
+   "lang": "en"
+  },
+  {
+   "text": "operation book karo",
+   "expect": "action:ot.schedule",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "fill the who checklist",
+   "expect": "action:ot.checklist",
+   "lang": "en"
+  },
+  {
+   "text": "surgical safety checklist for bed 4",
+   "expect": "action:ot.checklist",
+   "lang": "en"
+  },
+  {
+   "text": "finish surgery for meena",
+   "expect": "action:ot.finish",
+   "lang": "en"
+  },
+  {
+   "text": "write the post op note",
+   "expect": "action:ot.finish",
+   "lang": "en"
+  },
+  {
+   "text": "operation ho gaya",
+   "expect": "action:ot.finish",
+   "lang": "hi-Latin"
   }
  ],
  "doctors": [

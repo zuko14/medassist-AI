@@ -95,6 +95,15 @@ MOCK_CLINIC = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _effective_catalog():
+    """Billing reads the catalogue through the service master (migration 120). With no
+    master rows it is exactly the clinic's legacy JSON, which is what these tests price from."""
+    with patch("app.services.opd_billing.effective_catalog",
+               AsyncMock(return_value=MOCK_CLINIC["opd_settings"]["service_catalog"])):
+        yield
+
+
 def _q_path(query) -> str:
     """Helper to extract table path from Supabase PostgREST query object."""
     return str(getattr(getattr(query, "request", None), "path", ""))

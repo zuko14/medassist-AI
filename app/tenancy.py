@@ -81,6 +81,27 @@ TENANT_OWNED_TABLES = frozenset({
     "ipd_wards", "ipd_beds", "ipd_admissions", "ipd_bed_assignments", "ipd_events",
     "ipd_observations", "ipd_notes", "ipd_orders", "ipd_med_administrations",
     "ipd_charges", "ipd_discharge_summaries",
+    # Migration 115: investigation & procedure orders (OPD encounters + mirrored IPD orders)
+    "opd_orders",
+    # Migration 116: IPD finance (deposit ledger, packages, discounts, credit authorisations)
+    "ipd_deposits", "ipd_packages", "ipd_admission_packages", "ipd_discounts", "ipd_credit_authorizations",
+    # Migration 117: GST credit notes (CRN-) against issued invoices
+    "opd_credit_notes",
+    # Migration 118: in-house LIS (parameter definitions, signed results and their values)
+    "lab_test_parameters", "lab_results", "lab_result_values",
+    # Migration 119: clinical documents (recorded consents, numbered certificates)
+    "clinical_consents", "clinical_certificates",
+    # Migration 120: the clinic's service / tariff master (icd10_codes is shared reference data, no clinic_id)
+    "billable_services",
+    # Migration 121: casualty register, medico-legal cases, identity-merge provenance
+    "emergency_visits", "emergency_mlc_records", "patient_merge_log",
+    # Migration 122: operation theatre (theatres, surgeries, WHO checklists, anaesthesia records)
+    "ot_theatres", "ot_surgeries", "ot_who_checklists", "ot_anaesthesia_records",
+    # Migration 123: radiology reports and the statutory PCPNDT Form F register
+    "radiology_reports", "pcpndt_form_f_records",
+    # Migration 124: insurance / TPA (payers, policies, pre-authorisations, claims and their payer ledger)
+    "insurance_payers", "patient_insurance_policies", "ipd_pre_authorizations", "ipd_insurance_claims",
+    "ipd_claim_transactions",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

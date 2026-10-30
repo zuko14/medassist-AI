@@ -317,6 +317,40 @@ def is_sex_determination_request(message: str) -> bool:
     )
 
 
+# Radiology reports and PCPNDT Form F (migration 123). Mirrors the SQL rule
+# radiology_fetal_sex_text, which refuses the same text in the database
+# (tests/test_migration_123_radiology.py checks they agree). Every report: the
+# explicit phrases. An obstetric record: any sex / gender / genital word at all,
+# zero tolerance - the radiologist rephrases.
+_REPORT_FETAL_SEX = re.compile(
+    r"\b(?:sex[- ]?determination|gender[- ]?(?:determination|test|scan|prediction|reveal)"
+    r"|(?:gender|sex) of (?:the |a |an )?(?:baby|babies|foetus\w*|fetus\w*|unborn|child)"
+    r"|(?:baby|babies|foetal|fetal|foetus|fetus|unborn)(?:'s|s)? (?:gender|sex)"
+    r"|(?:male|female) (?:foetus\w*|fetus\w*|baby|babies|child in (?:the )?womb))\b",
+    re.IGNORECASE,
+)
+_REPORT_FETAL_SEX_SCRIPTS = re.compile(r"लड़का|लड़की|लिंग\s*(?:जांच|जाँच|परीक्षण)|అబ్బాయి|అమ్మాయి|లింగ\s*నిర్ధారణ|♂|♀")
+_OBSTETRIC_SEX_WORDS = re.compile(
+    r"\b(?:sex|sexes|gender|male|female|boy|boys|girl|girls|genital\w*|scrot\w*|penis|penile|phallus|labia|labial"
+    r"|clitor\w*|testis|testes|testic\w*|turtle sign|hamburger sign|xx|xy)\b",
+    re.IGNORECASE,
+)
+
+
+def fetal_sex_disclosure(text: Optional[str], obstetric: bool) -> Optional[str]:
+    """The words in `text` that determine or disclose the sex of the foetus
+    (PCPNDT Act, 1994), or None. Used on radiology reports and Form F before
+    anything is saved."""
+    if not text:
+        return None
+    for pattern in ((_REPORT_FETAL_SEX, _REPORT_FETAL_SEX_SCRIPTS, _OBSTETRIC_SEX_WORDS) if obstetric
+                    else (_REPORT_FETAL_SEX, _REPORT_FETAL_SEX_SCRIPTS)):
+        m = pattern.search(text)
+        if m:
+            return m.group(0)
+    return None
+
+
 # ── Safe static response templates ────────────────────────────────────────────
 
 _SAFE_RESPONSE = {

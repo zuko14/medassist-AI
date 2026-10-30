@@ -11,14 +11,23 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal, Optional, Sequence
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.utils.async_tasks import spawn_background_task
 from app.database import (
     sb,
     scoped_query,
     supabase,
 )
-from app.services.permissions import resolve_owned_branch
+from app.services.gst_billing import (
+    CREDIT_NOTE_REASONS,
+    export_gstr1_report,
+    issue_credit_note,
+    list_credit_notes,
+    valid_gstin,
+)
+from app.services.masters import import_legacy_catalog
+from app.services.permissions import holds_credit_note_permission, resolve_owned_branch
 from app.routers.admin import (
     AdminUser,
     enforce_branch_scope,
@@ -89,6 +98,7 @@ from app.utils.helpers import doctor_title, today_ist
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/opd", tags=["OPD Admin"])
+billing_router = APIRouter(prefix="/admin/billing", tags=["Billing"])
 public_router = APIRouter(prefix="/public", tags=["Public OPD Display"])
 
 
@@ -126,6 +136,18 @@ class CatalogItem(BaseModel):
     item_type: Literal["nursing", "diagnostic", "procedure", "other"] = "other"
     price_paise: int = Field(..., ge=0, le=100_000_000)
     active: bool = True
+    # GST (migration 117): charged only once the clinic sets its GSTIN. Health care
+    # services are exempt; a rate belongs on non-exempt items (cosmetic procedures etc.).
+    hsn_sac: Optional[str] = Field(None, pattern=r"^[0-9]{4,8}$")
+    tax_rate_bps: Literal[0, 500, 1200, 1800, 2800, 4000] = 0
+
+
+def _gstin_or_blank(v: Optional[str]) -> Optional[str]:
+    if v:
+        v = v.strip().upper()
+        if not valid_gstin(v):
+            raise ValueError("Not a valid GSTIN (15 characters, check digit must match)")
+    return v
 
 
 class OpdSettingsPatch(BaseModel):
@@ -148,6 +170,10 @@ class OpdSettingsPatch(BaseModel):
     ]] = None
     service_catalog: Optional[list[CatalogItem]] = None
     confirmed_steps: Optional[list[str]] = None
+    # The clinic's GST registration, printed on every bill; "" clears it. Without it no GST is charged.
+    gstin: Optional[str] = Field(None, max_length=15)
+
+    check_gstin = field_validator("gstin")(_gstin_or_blank)
 
 
 class DuplicateCheckIn(BaseModel):
@@ -247,7 +273,8 @@ class VitalsIn(BaseModel):
 
 class Diagnosis(BaseModel):
     system: Optional[Literal["ICD-10"]] = None
-    code: Optional[str] = Field(None, pattern=r"^[A-TV-Z][0-9][0-9AB](\.[0-9A-TV-Z]{1,4})?$")
+    # U00-U85 (COVID-19 U07.1 etc.) are WHO codes too
+    code: Optional[str] = Field(None, pattern=r"^[A-Z][0-9][0-9AB](\.[0-9A-Z]{1,4})?$")
     text: str = Field(..., min_length=2, max_length=200)
 
     @model_validator(mode="after")
@@ -326,6 +353,8 @@ class InvoiceItemIn(BaseModel):
     quantity: int = Field(1, ge=1, le=999)
     unit_price_paise: int = Field(..., ge=0, le=100_000_000)
     discount_paise: int = Field(0, ge=0)
+    # The doctor's order this line bills (migration 115); its price is the order's snapshot.
+    order_id: Optional[str] = Field(None, pattern=r"^[0-9a-fA-F-]{36}$")
 
 
 class InvoiceDraftIn(BaseModel):
@@ -334,6 +363,10 @@ class InvoiceDraftIn(BaseModel):
     discount_paise: int = Field(0, ge=0)
     discount_reason: Optional[str] = Field(None, max_length=200)
     notes: Optional[str] = Field(None, max_length=1000)
+    # a business buyer's GSTIN (B2B in GSTR-1); "" clears it
+    patient_gstin: Optional[str] = Field(None, max_length=15)
+
+    check_gstin = field_validator("patient_gstin")(_gstin_or_blank)
 
     @model_validator(mode="after")
     def check_discount_reason(self) -> "InvoiceDraftIn":
@@ -351,6 +384,9 @@ class InvoiceCreateIn(BaseModel):
     discount_reason: Optional[str] = Field(None, max_length=200)
     notes: Optional[str] = Field(None, max_length=1000)
     branch_id: Optional[str] = None
+    patient_gstin: Optional[str] = Field(None, max_length=15)
+
+    check_gstin = field_validator("patient_gstin")(_gstin_or_blank)
 
     @model_validator(mode="after")
     def check_discount_reason(self) -> "InvoiceCreateIn":
@@ -360,7 +396,8 @@ class InvoiceCreateIn(BaseModel):
 
 
 class ReceiptIn(BaseModel):
-    mode: Literal["cash", "upi", "card"]
+    # bank_transfer: a corporate / payer settling a credit bill (migration 116); needs the UTR
+    mode: Literal["cash", "upi", "card", "bank_transfer"]
     amount_paise: int = Field(..., ge=1, le=100_000_000)
     reference: Optional[str] = Field(None, max_length=100)
     idempotency_key: str = Field(..., min_length=8, max_length=64)
@@ -372,6 +409,25 @@ class RefundIn(BaseModel):
     amount_paise: int = Field(..., ge=1)
     reason: str = Field(..., min_length=5, max_length=300)
     reference: Optional[str] = Field(None, max_length=100)
+    # Optional so older panels keep working; the current panel always sends one.
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=64)
+
+
+class CreditNoteIn(BaseModel):
+    amount_paise: int = Field(..., ge=1, le=100_000_000)   # tax-inclusive amount credited
+    reason: Literal[CREDIT_NOTE_REASONS]
+    reason_notes: Optional[str] = Field(None, max_length=300)
+    # needed only when the patient has paid more than the reduced bill
+    refund_mode: Optional[Literal["cash", "upi"]] = None
+    refund_reference: Optional[str] = Field(None, max_length=100)
+    shift_id: Optional[str] = None
+    idempotency_key: str = Field(..., min_length=8, max_length=80)
+
+    @model_validator(mode="after")
+    def check_notes(self) -> "CreditNoteIn":
+        if self.reason == "other" and not (self.reason_notes and self.reason_notes.strip()):
+            raise ValueError("Describe the reason when it is 'other'")
+        return self
 
 
 class ShiftOpenIn(BaseModel):
@@ -547,6 +603,10 @@ async def update_setup_settings(
         )
         if res.data:
             break
+
+    if patch_dict.get("service_catalog") is not None:
+        # migration 120: the service master is what billing reads; the JSON stays for rollback
+        await import_legacy_catalog(scope, patch_dict["service_catalog"], overwrite=True)
 
     await log_admin_action(
         user=user,
@@ -1402,6 +1462,7 @@ async def create_ad_hoc_invoice(
         discount_reason=body.discount_reason,
         notes=body.notes,
         branch_id=await _write_branch(user, scope, body.branch_id),
+        patient_gstin=body.patient_gstin,
         actor=user,
     )
 
@@ -1424,6 +1485,7 @@ async def update_invoice_draft(
         discount_paise=body.discount_paise,
         discount_reason=body.discount_reason,
         notes=body.notes,
+        patient_gstin=body.patient_gstin,
         actor=user,
     )
 
@@ -1485,7 +1547,7 @@ async def generate_payment_link(
         )
     total = inv.get("total_paise", 0)
     paid = inv.get("paid_paise", 0)
-    balance = max(0, total - paid)
+    balance = max(0, total - inv.get("credited_paise", 0) - paid)
     if balance <= 0:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice is already fully paid.")
 
@@ -1496,7 +1558,6 @@ async def generate_payment_link(
     # Dispatch WhatsApp payment link if patient phone is present
     if patient.get("phone"):
         try:
-            import asyncio
             from app.services.whatsapp import whatsapp_service
             templates = (clinic.get("opd_settings") or {}).get("templates") or {}
             tmpl_name = templates.get("payment_link") or templates.get("opd_payment_link")
@@ -1504,7 +1565,7 @@ async def generate_payment_link(
             amt_inr = f"₹{balance / 100:.2f}"
             inv_num = inv.get("invoice_number") or f"INV-{invoice_id[:8]}"
             if tmpl_name:
-                asyncio.create_task(
+                spawn_background_task(
                     whatsapp_service.send_template(
                         clinic,
                         patient["phone"],
@@ -1523,7 +1584,7 @@ async def generate_payment_link(
                     )
                 )
             elif pay_url:
-                asyncio.create_task(
+                spawn_background_task(
                     whatsapp_service.send_text(
                         clinic,
                         patient["phone"],
@@ -1556,11 +1617,62 @@ async def record_invoice_refund(
         reason=body.reason,
         reference=body.reference,
         actor=user,
+        idempotency_key=body.idempotency_key,
     )
     await log_admin_action(user=user, action="OPD_REFUND_CREATE", resource_type="opd_invoice", resource_id=invoice_id,
                            details={"receipt_id": refund.get("id"), "mode": body.mode,
                                     "amount_paise": body.amount_paise, "reason": body.reason})
     return refund
+
+
+@router.post("/invoices/{invoice_id}/credit-notes", status_code=status.HTTP_201_CREATED)
+async def create_invoice_credit_note(
+    invoice_id: str,
+    body: CreditNoteIn,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """Issue a CRN- credit note against an issued bill (migration 117); refunds any excess paid."""
+    if not holds_credit_note_permission(user):
+        raise HTTPException(status_code=403, detail="Missing permission: BILLING_CREDIT_NOTE")
+    scope, clinic = await _opd_scope(user, clinic_id)
+    enforce_branch_scope(user, (await get_invoice(scope, invoice_id)).get("branch_id"))
+    cn = await issue_credit_note(
+        scope, invoice_id, body.amount_paise, body.reason, body.reason_notes, user,
+        idempotency_key=body.idempotency_key, refund_mode=body.refund_mode,
+        refund_reference=body.refund_reference, shift_id=body.shift_id,
+    )
+    if not cn.get("replayed"):
+        await log_admin_action(user=user, action="OPD_CREDIT_NOTE_CREATE", resource_type="opd_invoice",
+                               resource_id=invoice_id,
+                               details={"credit_note_number": cn.get("credit_note_number"),
+                                        "amount_paise": body.amount_paise, "reason": body.reason,
+                                        "refund_paise": cn.get("refund_paise", 0)})
+    return cn
+
+
+@router.get("/invoices/{invoice_id}/credit-notes")
+async def get_invoice_credit_notes(
+    invoice_id: str,
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """The credit notes issued against one bill, oldest first."""
+    scope, clinic = await _opd_scope(user, clinic_id, "OPD_BILLING", "OPD_FRONT_DESK", "OPD_ADMIN")
+    enforce_branch_scope(user, (await get_invoice(scope, invoice_id)).get("branch_id"))
+    return {"items": await list_credit_notes(scope, invoice_id)}
+
+
+@billing_router.get("/gstr1")
+async def gstr1_summary(
+    month: int = Query(..., ge=1, le=12),
+    year: int = Query(..., ge=2017, le=2100),
+    clinic_id: str = "default",
+    user: AdminUser = Depends(verify_credentials),
+):
+    """GSTR-1 working summary for one month: B2B, B2C small by rate, exempt, credit notes."""
+    scope, clinic = await _opd_scope(user, clinic_id, "OPD_ADMIN", live=False)
+    return await export_gstr1_report(scope, month, year, actor=user)
 
 
 @router.post("/invoices/{invoice_id}/void")

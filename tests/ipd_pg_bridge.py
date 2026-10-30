@@ -67,6 +67,19 @@ class PgBridge:
         for key, raw in params:
             if key in _RESERVED:
                 continue
+            if key == "or":   # or=(col.op.val,col.is.null) - restrict_to_branch's shape only
+                parts = []
+                for item in raw.strip("()").split(","):
+                    col_name, op, val = item.split(".", 2)
+                    if op == "is":
+                        parts.append(f"{_ident(col_name)} IS {'NULL' if val == 'null' else val.upper()}")
+                    elif op in _OPS:
+                        parts.append(f"{_ident(col_name)} {_OPS[op]} %s")
+                        args.append(val.replace("*", "%") if op in ("like", "ilike") else val)
+                    else:
+                        raise ValueError(f"bridge: unsupported or-filter {item}")
+                clauses.append("(" + " OR ".join(parts) + ")")
+                continue
             op, _, val = raw.partition(".")
             col = _ident(key)
             if op == "not":   # not.is.null / not.eq.x
@@ -134,7 +147,12 @@ class PgBridge:
                 named = ", ".join(f"{_ident(k)} => %s::{types[k]}" for k in body)
                 values = [psycopg2.extras.Json(v) if isinstance(v, (dict, list)) and types[k].startswith("json")
                           else v for k, v in body.items()]
-                cur.execute(f"SELECT to_jsonb({_ident(fn)}({named}))", values)
+                cur.execute("SELECT bool_or(proretset) FROM pg_proc WHERE proname = %s", (fn,))
+                if cur.fetchone()[0]:   # SETOF: PostgREST answers with an array of rows
+                    cur.execute(f"SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) FROM {_ident(fn)}({named}) t",
+                                values)
+                else:
+                    cur.execute(f"SELECT to_jsonb({_ident(fn)}({named}))", values)
                 return SimpleNamespace(data=cur.fetchone()[0], count=None)
             table = _ident(path.rstrip("/").rsplit("/", 1)[-1])
             where, args = self._where(params)

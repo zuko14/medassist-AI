@@ -505,7 +505,8 @@ async def sign_encounter(
             raise HTTPException(status_code=409, detail="Encounter is locked or not a draft")
         if "opd_not_treating_doctor" in err_msg:
             raise HTTPException(status_code=403, detail="Not treating doctor")
-        raise HTTPException(status_code=500, detail=f"Failed to sign encounter: {e}")
+        logger.error(f"OPD sign encounter failed: {e}")
+        raise HTTPException(status_code=500, detail="Could not sign the encounter. Please try again.")
 
     signed_row = dict(rpc_res.data[0] if isinstance(rpc_res.data, list) and rpc_res.data else (rpc_res.data or {}))
 
@@ -1038,7 +1039,8 @@ async def sign_prescription(
             raise HTTPException(status_code=422, detail="Encounter must be signed before signing prescription")
         if "opd_prescription_empty" in err_msg:
             raise HTTPException(status_code=422, detail="Prescription has no items")
-        raise HTTPException(status_code=500, detail=f"Failed to sign prescription: {e}")
+        logger.error(f"OPD sign prescription failed: {e}")
+        raise HTTPException(status_code=500, detail="Could not sign the prescription. Please try again.")
 
     signed_rx = dict(rpc_res.data[0] if isinstance(rpc_res.data, list) and rpc_res.data else (rpc_res.data or {}))
     signed_rx["items"] = items

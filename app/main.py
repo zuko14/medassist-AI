@@ -11,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 from app.config import settings
-from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd, ipd
+from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd, ipd, orders, lis, documents, masters, emergency, ot, radiology, insurance
 from app.routers import voice_admin, voice_platform, assistant
 from app.voice import gateway as voice_gateway
 from app.routers.integrations import router as integrations_router
@@ -390,7 +390,26 @@ app.include_router(callmedex_v1_router)
 # Kriya OPD OS core & public display (Phase 1.2)
 app.include_router(opd.router)
 app.include_router(opd.public_router)
+app.include_router(opd.billing_router)
 app.include_router(ipd.router)
+# Investigation & procedure orders + diagnostic worklist (migration 115)
+app.include_router(orders.opd_router)
+app.include_router(orders.diagnostic_router)
+# In-house LIS: result entry, pathologist sign-off, signed PDF (migration 118)
+app.include_router(lis.router)
+# Clinical documents: discharge summary PDF, consents, certificates (migration 119)
+app.include_router(documents.ipd_docs_router)
+app.include_router(documents.router)
+# Central masters: tariff master, ICD-10 search (migration 120)
+app.include_router(masters.router)
+# Emergency / casualty, MLC register, identity merge (migration 121)
+app.include_router(emergency.router)
+app.include_router(ot.router)
+# Radiology reporting, PACS link, PCPNDT Form F (migration 123)
+app.include_router(radiology.router)
+# Insurance / TPA: payers, policies, cashless pre-auth, claims, settlement, ageing (migration 124)
+app.include_router(insurance.router)
+app.include_router(insurance.ipd_router)
 
 
 @app.get("/")

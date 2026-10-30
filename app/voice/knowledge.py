@@ -108,6 +108,7 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
     from app.database import get_doctors, get_lab_tests
     from app.services import home_collection as hc
     from app.services.faq_engine import answer as faq_answer
+    from app.services.masters import effective_catalog
     from .tools import _speakable
 
     cid = clinic["id"]
@@ -116,7 +117,8 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
     async def offered_home():
         return hc.is_offered(clinic, await hc.get_settings(clinic, branch_id))
 
-    (hours, location, contact, doctors, treat_res, link_res, tests, home, qa_res, branch_res) = await asyncio.gather(
+    (hours, location, contact, doctors, treat_res, link_res, tests, home, qa_res, branch_res,
+     services) = await asyncio.gather(
         _safe("FAQ", cid, faq_answer(clinic, "hours", "en")),
         _safe("FAQ", cid, faq_answer(clinic, "location", "en")),
         _safe("FAQ", cid, faq_answer(clinic, "contact", "en")),
@@ -136,6 +138,7 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
         _safe("BRANCHES", cid, sb(
             supabase.table("branches").select("name, address, landmark, phone")
             .eq("clinic_id", cid).eq("is_active", True).order("display_order").limit(20))),
+        _safe("SERVICES", cid, effective_catalog(cid)),   # tariff master (migration 120)
     )
 
     def add(kind: str, text: str) -> None:
@@ -235,7 +238,8 @@ async def load(clinic: dict, branch_id: Optional[str]) -> dict:
         if modes:
             add("opd", "Payment at the hospital counter: " + ", ".join(m.upper() if m == "upi" else m
                                                                          for m in modes) + ".")
-        items = [c for c in (opd.get("service_catalog") or []) if isinstance(c, dict) and c.get("active", True)
+        catalog = services if services is not None else (opd.get("service_catalog") or [])
+        items = [c for c in catalog if isinstance(c, dict) and c.get("active", True)
                  and c.get("name")]
         if items:
             add("opd", "Other services at the hospital: " + "; ".join(
