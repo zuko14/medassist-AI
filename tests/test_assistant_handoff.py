@@ -39,9 +39,9 @@ def _section(page: str) -> str:
 # ── registration ─────────────────────────────────────────────────────────────
 
 def test_the_hand_offs_of_the_plan_are_registered():
-    assert {"staff.create", "staff.manage", "payment.settings", "opd.record_payment", "opd.refund", "opd.void",
-            "visit.sign", "doctor.delete", "lab_test.delete", "treatment.delete", "branch.manage", "data.export",
-            "data.import", "corporate.manage", "voice.takeover", "doctor.fee"} <= set(H_ACTIONS)
+    assert {"staff.create", "staff.manage", "payment.settings",
+            "visit.sign", "lab_test.delete", "treatment.delete", "branch.manage", "data.export",
+            "data.import", "corporate.manage", "voice.takeover"} <= set(H_ACTIONS)
 
 
 @pytest.mark.parametrize("aid", H_ACTIONS)
@@ -91,21 +91,14 @@ def test_sec18_policy_never_builds_a_plan_for_h():
     ("reset Ramesh's password", "staff.manage"),
     ("change the razorpay key", "payment.settings"),
     ("update payment settings", "payment.settings"),
-    ("record cash payment for token 5", "opd.record_payment"),
-    ("refund the invoice for Ravi", "opd.refund"),
-    ("void the invoice for Ravi", "opd.void"),
     ("sign the visit", "visit.sign"),  # "prescription" is refused by the clinical screen (kept strict)
-    ("delete doctor Rao", "doctor.delete"),
     ("delete the CBC test", "lab_test.delete"),
     ("delete the PRP treatment", "treatment.delete"),
-    ("add a new branch", "branch.manage"),
+    ("delete the Gajuwaka branch", "branch.manage"),
     ("export patient data", "data.export"),
     ("import patients from excel", "data.import"),
-    ("add a corporate company", "corporate.manage"),
+    ("upload corporate reports", "corporate.manage"),
     ("take over the live call", "voice.takeover"),
-    ("change dr meena consultation fee to 600", "doctor.fee"),   # 2026-10-26 probe
-    ("update Dr Rao's fee", "doctor.fee"),
-    ("doctor fee marchu", "doctor.fee"),
 ])
 def test_routes(text, action):
     r = rules.route(text)
@@ -166,8 +159,8 @@ def test_staff_hand_off_card_lists_the_prefill_and_sends_nothing(db, h):  # noqa
 
 
 def test_a_hand_off_without_fields_points_to_the_row_buttons(db, h):  # noqa: F811
-    card = _ask("delete doctor Rao")["cards"][0]
-    assert (card["type"], card["page"], card["fields"], card["button"]) == ("handoff", "doctors", [], "")
+    card = _ask("delete the CBC test")["cards"][0]
+    assert (card["type"], card["page"], card["fields"], card["button"]) == ("handoff", "labtests", [], "")
     assert "row" in card["text"] and CALLS == []
 
 

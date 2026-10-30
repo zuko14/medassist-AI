@@ -3408,7 +3408,7 @@
   },
   {
    "text": "record cash payment for token 5",
-   "expect": "action:opd.record_payment",
+   "expect": "clarify",
    "lang": "en"
   },
   {
@@ -3434,7 +3434,7 @@
   },
   {
    "text": "delete doctor Rao",
-   "expect": "action:doctor.delete",
+   "expect": "action:doctor.active",
    "lang": "en"
   },
   {
@@ -3476,7 +3476,7 @@
    "text": "don't delete doctor Rao",
    "expect": "negated",
    "lang": "en",
-   "near": "doctor.delete"
+   "near": "doctor.active"
   },
   {
    "text": "teach the receptionist an answer",
@@ -4168,7 +4168,12 @@
   },
   {
    "text": "block bed 12",
-   "expect": "none",
+   "expect": "action:ipd.bed_status",
+   "lang": "en"
+  },
+  {
+   "text": "what if all the beds are full",
+   "expect": "hypothetical",
    "lang": "en",
    "near": "ipd.census"
   },
@@ -4298,7 +4303,7 @@
   },
   {
    "text": "complete discharge",
-   "expect": "action:ipd.discharge",
+   "expect": "clarify",
    "lang": "en",
    "near": "ipd.discharges"
   },

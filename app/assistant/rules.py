@@ -267,8 +267,8 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
         return resolve.resolve_days(text), ()
     if slot.kind == "new_doctor":
         return resolve.resolve_new_doctor(text), ()
-    if slot.kind == "text_field":       # only ever answered on the form
-        return None, ()
+    if slot.kind == "text_field":       # only when said outright ("specialization is ..."), else the form asks
+        return resolve.resolve_stated(text, slot.name), ()
     if slot.kind == "branch":
         return resolve.resolve_branch(text), ()
     if slot.kind == "assign_session":
@@ -311,6 +311,64 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
         return resolve.resolve_lab_scope(text), ()
     if slot.kind == "time_window":
         return resolve.resolve_time_window(text), ()
+    if slot.kind == "vitals":
+        return resolve.resolve_vitals(text), ()
+    if slot.kind == "patient_target":
+        return resolve.resolve_patient_target(text), ()
+    if slot.kind == "now":              # when it was said: fixed in the params so the plan hash holds at confirm
+        return (now or _now()).isoformat(timespec="seconds"), ()
+    if slot.kind == "to_bed":
+        return resolve.resolve_to_bed(text), ()
+    if slot.kind == "pay_mode":
+        return resolve.resolve_pay_mode(text), ()
+    if slot.kind == "pay_ref":
+        return resolve.resolve_pay_ref(text), ()
+    if slot.kind == "paid_amount":
+        return resolve.resolve_paid_amount(text), ()
+    if slot.kind == "doctor_switch":
+        return resolve.resolve_doctor_switch(text), ()
+    if slot.kind == "admit_patient":
+        return resolve.resolve_admit_patient(text), ()
+    if slot.kind == "admit_bed":
+        return resolve.resolve_admit_bed(text), ()
+    if slot.kind == "reason":            # the staff member's own words, never composed
+        return resolve.resolve_reason(text), ()
+    if slot.kind == "why":               # only a reason said as one, never "for <patient>"
+        return resolve.resolve_why(text), ()
+    if slot.kind == "priority":
+        return resolve.resolve_priority(text), ()
+    if slot.kind == "discharge_type":
+        return resolve.resolve_discharge_type(text), ()
+    if slot.kind == "bed_state":
+        return resolve.resolve_bed_state(text), ()
+    if slot.kind == "money":
+        return resolve.resolve_money(text), ()
+    if slot.kind in ("triage", "unknown", "er_name", "age", "gender", "complaint", "procedure", "theatre", "indication"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind == "arrival":
+        return resolve.resolve_arrival(text), ()
+    if slot.kind == "admission_patch":
+        return resolve.resolve_admission_patch(text, now=now), ()
+    if slot.kind in ("package_name", "package_cover", "package_days", "credit_amount", "credit_payer", "credit_ref",
+                     "preauth_amount", "stay_days", "payer_term", "disallow_code", "disallowed"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind in ("stay_target", "discount_amount", "decision", "package_term", "preauth_target", "approved_amount",
+                     "approval_ref", "preauth_reply", "preauth_action", "enhancement"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind in ("opd_change", "room", "ipd_change", "payer_name", "payer_kind", "claim_target", "received",
+                     "utr", "tds", "claim_action", "claim_note"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind in ("new_ward", "ward_type", "bed_plan", "ward_term", "bed_category"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind == "service_price":
+        return resolve.resolve_service_price(text), ()
+    if slot.kind in ("slot_minutes", "service_name", "service_category", "credit_reason", "company"):
+        fn = {"slot_minutes": resolve.resolve_slot_minutes, "service_name": resolve.resolve_service_name,
+              "service_category": resolve.resolve_service_category, "credit_reason": resolve.resolve_credit_reason,
+              "company": resolve.resolve_company}[slot.kind]
+        return fn(text), ()
+    if slot.kind in ("ot_target", "ot_action", "staff_target", "new_branch", "branch_rename"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
     if slot.kind == "doctor":
         found = resolve.resolve_doctor(text, doctors or [])
         if len(found) == 1:
@@ -372,6 +430,7 @@ def fill(spec: ActionSpec, text: str, *, doctors=None, now=None, question: bool 
     """Resolve one known action's slots from text (rules, the LLM fallback and clarify replies share
     this). `given` holds slots already answered on a clarify form; they are not re-parsed."""
     now = now or _now()
+    text = resolve.spoken_numbers(text)
     if (spec.risk == "R0" and has_any(_norm(text), WRITE_VERBS)) or (given is None and _names_other(_norm(text), spec)):
         return Route("none")  # also guards the LLM fallback and clarify replies, which come through here
     if spec.risk == "H" and visible is not None and spec.handoff.page not in visible:
@@ -400,12 +459,17 @@ def fill(spec: ActionSpec, text: str, *, doctors=None, now=None, question: bool 
 # evidence in the text. Free-word kinds (a booking, a search term) would read any sentence as an answer.
 FOLLOW_UP_KINDS = frozenset({"date", "amount", "price", "percent", "days", "session", "session_window",
                              "morning_window", "evening_window", "time_window", "clock", "phone", "sittings",
-                             "new_doctor", "doctor"})
+                             "new_doctor", "doctor", "vitals", "paid_amount", "pay_mode", "pay_ref", "to_bed",
+                             "admit_bed", "bed_state", "money", "triage", "theatre",
+                             "slot_minutes", "service_price", "bed_plan", "ward_term", "bed_category",
+                             "room", "received", "utr", "tds", "discount_amount", "approved_amount", "approval_ref",
+                             "enhancement", "credit_amount", "credit_ref", "preauth_amount", "disallowed",
+                             "package_cover"})
 
 
 def follow_up(spec: ActionSpec, missing, text: str, given: dict, *, doctors=None, now=None) -> dict:
     """Answers to an open form's `missing` slots read from a typed reply; {} when it answers none."""
-    out = {}
+    out, text = {}, resolve.spoken_numbers(text)
     for slot in spec.slots:
         if slot.name not in missing or slot.kind not in FOLLOW_UP_KINDS:
             continue
@@ -426,6 +490,7 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
     `visible_pages` = the sidebar pages the user can see (None = unknown, navigation allowed)."""
     actions = {k: s for k, s in (REGISTRY if actions is None else actions).items() if s.triggers}
     visible = None if visible_pages is None else set(visible_pages)
+    text = resolve.spoken_numbers(text)  # "six hundred" -> "600" before anything reads the numbers
     now = now or _now()
     lead = strip_spoken_lead(text)
     if lead.strip() and lead != text:

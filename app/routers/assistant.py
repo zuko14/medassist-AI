@@ -66,7 +66,7 @@ class RequestIn(BaseModel):
 class ConfirmIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     plan_hash: str = Field(min_length=1, max_length=128)
-    typed_count: Optional[int] = Field(default=None, ge=0, le=10000)
+    typed_count: Optional[int] = Field(default=None, ge=0, le=1_000_000)  # an R3 amount in rupees up to ReceiptIn's ceiling
     ack_duplicate: bool = False
 
 
@@ -339,6 +339,8 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
         value = answers[slot.name]
         if not slot.required and isinstance(value, str) and not value.strip():
             continue  # an optional field left blank ("Evening hours" for a mornings-only doctor)
+        if isinstance(value, str) and slot.kind not in ("doctor", "date", "verbatim", "message", "quoted", "test_name"):
+            value = resolve.spoken_numbers(value)  # a dictated "six hundred" in the amount box; never typed text
         if slot.kind == "doctor":
             if value not in candidates:
                 raise ValueError("doctor not offered")
@@ -424,7 +426,7 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
             if not 2 <= len(text) <= 600:
                 raise ValueError("text length")
             out[slot.name] = text
-        elif slot.kind == "price":  # on the form a bare number is the price in rupees
+        elif slot.kind in ("price", "service_price"):  # on the form a bare number is the price in rupees
             v = str(value).strip()[:40]
             found = resolve.resolve_price(v) or (
                 ["amount", v.replace(",", "")] if re.fullmatch(r"[1-9][\d,]{0,9}", v) else None)
@@ -448,6 +450,126 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
             found = resolve.resolve_voice_setting(str(value)[:120])
             if not found:
                 raise ValueError("setting not understood")
+            out[slot.name] = found
+        elif slot.kind in ("vitals", "pay_mode", "pay_ref", "doctor_switch"):  # the same resolver as the sentence
+            v = str(value)[:200]
+            found = {"vitals": resolve.resolve_vitals, "pay_mode": resolve.resolve_pay_mode,
+                     "doctor_switch": resolve.resolve_doctor_switch,
+                     "pay_ref": lambda s: resolve.resolve_pay_ref(s) or resolve.resolve_pay_ref(f"ref {s}")}[slot.kind](v)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("admit_patient", "reason", "why"):  # a name / phone, or the reason in their own words
+            text = " ".join(str(value).split())
+            limit = 60 if slot.kind == "admit_patient" else 300
+            if not (3 <= len(text) <= limit and re.fullmatch(r"[\w][\w .,'/()&+-]*", text)):
+                raise ValueError(f"{slot.kind} not understood")
+            digits = re.sub(r"\D", "", text)
+            out[slot.name] = digits[-10:] if slot.kind == "admit_patient" and len(digits) >= 10 else text
+        elif slot.kind in ("admit_bed", "bed_state"):
+            v = " ".join(str(value).split())[:40]
+            found = (resolve.resolve_admit_bed(v if v.lower().startswith("bed") else f"bed {v}")
+                     if slot.kind == "admit_bed" else resolve.resolve_bed_state(v))
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("complaint", "procedure", "indication", "er_name"):  # their own words, as typed
+            text = " ".join(str(value).split())
+            if not (2 <= len(text) <= 300 and re.fullmatch(r"[\w][\w .,'/()&+-]*", text)):
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = text
+        elif slot.kind in ("triage", "theatre", "unknown", "gender"):
+            v = str(value)[:60]
+            found = {"triage": resolve.resolve_triage, "theatre": lambda x: resolve.resolve_theatre(f"OT {x}")
+                     if not resolve.resolve_theatre(x) else resolve.resolve_theatre(x),
+                     "unknown": resolve.resolve_unknown, "gender": resolve.resolve_gender}[slot.kind](v)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("admission_patch", "ot_action", "branch_rename", "staff_target", "ot_target", "new_branch"):
+            v = " ".join(str(value).split())[:200]
+            found = (resolve.resolve_admission_patch(v) if slot.kind == "admission_patch" else
+                     resolve.resolve_ot_action(v) if slot.kind == "ot_action" else
+                     resolve.resolve_branch_rename(v) if slot.kind == "branch_rename" else
+                     (v if re.fullmatch(r"[A-Za-z][A-Za-z .'-]{1,39}", v) else None) if slot.kind == "new_branch" else
+                     (" ".join(v.lower().split()) if re.fullmatch(r"[A-Za-z][A-Za-z .'_0-9-]{1,59}", v) else None))
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("slot_minutes", "service_name", "company"):
+            v = " ".join(str(value).split())[:120]
+            found = (resolve.resolve_slot_minutes(v if re.search(r"min", v, re.I) else f"{v} minutes")
+                     if slot.kind == "slot_minutes" else
+                     v if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 &.'()/-]{1,119}", v) else None)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("bed_plan", "ward_term", "bed_category", "new_ward"):
+            v = " ".join(str(value).split())[:80]
+            found = (resolve.resolve_bed_plan(v if re.search(r"bed", v, re.I) else f"beds {v}") if slot.kind == "bed_plan"
+                     else resolve.resolve_bed_category(f"{v} bed") if slot.kind == "bed_category"
+                     else " ".join(v.lower().split()) if slot.kind == "ward_term" and len(v) >= 2
+                     else v if slot.kind == "new_ward" and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 &.'()/-]{0,79}", v) else None)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("opd_change", "ipd_change", "room", "payer_name", "claim_target", "received", "utr", "tds",
+                           "claim_action", "claim_note"):  # the same reader as the sentence; a bare number / word helps
+            v = " ".join(str(value).split())[:300]
+            prefix = {"room": "room ", "received": "received ", "utr": "UTR ", "tds": "TDS ", "claim_note": "because ",
+                      "payer_name": "add payer "}.get(slot.kind, "")
+            found = getattr(resolve, f"resolve_{slot.kind}")(v) or getattr(resolve, f"resolve_{slot.kind}")(prefix + v)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("stay_target", "discount_amount", "decision", "package_term", "preauth_target",
+                           "approved_amount", "approval_ref", "preauth_reply", "preauth_action", "enhancement"):
+            v = " ".join(str(value).split())[:300]
+            prefix = {"discount_amount": "discount ", "approved_amount": "approved ", "approval_ref": "approval ref ",
+                      "enhancement": "enhancement ", "package_term": "on ", "stay_target": "for "}.get(slot.kind, "")
+            suffix = " package" if slot.kind == "package_term" else ""
+            fn = getattr(resolve, f"resolve_{slot.kind}")
+            found = fn(v) or fn(prefix + v + suffix)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("package_name", "package_cover", "package_days", "credit_amount", "credit_payer",
+                           "credit_ref", "preauth_amount", "stay_days", "disallowed"):
+            v = " ".join(str(value).split())[:200]
+            prefix = {"package_name": "create package ", "package_cover": "covering ", "package_days": "up to ",
+                      "credit_amount": "credit of ", "credit_payer": "from ", "credit_ref": "reference ",
+                      "preauth_amount": "pre-auth of ", "stay_days": "", "disallowed": "disallowed "}[slot.kind]
+            suffix = " days" if slot.kind in ("package_days", "stay_days") else ""
+            fn = getattr(resolve, f"resolve_{slot.kind}")
+            found = fn(v) or fn(prefix + v + suffix)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind == "staff_role":  # "cashier" / "front desk": the same words as the sentence
+            found = resolve.resolve_staff_role(str(value)[:60])
+            if not found:
+                raise ValueError("role not understood")
+            out[slot.name] = found
+        elif slot.kind == "age":
+            v = str(value).strip()
+            if not re.fullmatch(r"\d{1,3}", v) or int(v) > 130:
+                raise ValueError("age not understood")
+            out[slot.name] = int(v)
+        elif slot.kind in ("paid_amount", "money"):  # on the form a bare number is rupees
+            v = str(value).strip().replace(",", "").lstrip("₹").strip()[:12]
+            if not re.fullmatch(r"[1-9]\d{0,7}", v):
+                raise ValueError("amount not understood")
+            out[slot.name] = v
+        elif slot.kind in ("patient_target", "to_bed"):  # "5" = a token (or a bed), "bed 12", or a name
+            v = " ".join(str(value).split())[:60]
+            if slot.kind == "to_bed":
+                found = resolve.resolve_to_bed(f"to bed {v}") if re.fullmatch(r"(?i)(?:bed\s*)?[a-z]{0,4}[\s-]?\d{1,4}[a-z]?", v) else None
+            elif re.fullmatch(r"\d{1,4}", v):  # an inpatient is found by bed, an OPD visit by token
+                found = f"bed:{v}" if spec.module == "ipd" else f"#{int(v)}"
+            else:
+                found = resolve.resolve_patient_target(v)
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
             out[slot.name] = found
         elif slot.kind == "message":  # the staff member's own words, sent as typed
             text = str(value).strip()

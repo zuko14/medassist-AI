@@ -54,7 +54,7 @@ VOICE_SET = [
  ("Ravi Kumar has arrived.", "appointment.check_in"),
  ("Show the OPD queue.", "opd.queue"),
  ("Admit a patient.", "ipd.admit"),
- ("Discharge the patient in bed 12.", "ipd.discharge"),
+ ("Discharge the patient in bed 12.", "ipd.discharge_start"),
  ("Record vitals for bed 5.", "ipd.vitals"),
  ("Rapid admit, road accident case.", "emergency.register"),
  ("Register an emergency patient.", "emergency.register"),

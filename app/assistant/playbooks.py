@@ -20,6 +20,7 @@ import re
 from collections import Counter
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Optional
 
 from app import database
 from app.assistant import present, resolve
@@ -1581,8 +1582,42 @@ def _doctor_after(did: str, ok, said: str):
         row = next((d for d in out.data if isinstance(d, dict) and str(d.get("id")) == did), None)
         if row is None:
             return None, "Couldn't find the doctor to check"
-        return (True, said) if ok(row) else (False, "The Doctors list shows other hours")
+        return (True, said) if ok(row) else (False, f"The Doctors list does not show {said}")
     return verify
+
+
+async def doctor_fee_preview(read, params: dict) -> dict:
+    doc = await _doctor(read, params["doctor"])
+    cur = int(doc.get("consultation_fee") or 0)
+    kind, value = params["fee"][0], Decimal(params["fee"][1])
+    new = value if kind == "amount" else cur + value if kind == "delta" else cur * (1 + value / 100)
+    fee = int(new.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    if not 0 < fee <= MAX_CONSULTATION_FEE:
+        raise EmptyPlan(f"A consultation fee of {_inr(fee)} is outside ₹1 to {_inr(MAX_CONSULTATION_FEE)}.")
+    if fee == cur:
+        raise EmptyPlan(f"{doc.get('name')}'s fee is already {_inr(cur)}.")
+    return {"title": f"Change {doc.get('name')}'s fee", "bullets": [f"Consultation fee: {_inr(cur)} → {_inr(fee)}."],
+            "warnings": ["New bookings and WhatsApp quotes use the new fee straight away."],
+            "snapshot": {"id": str(doc["id"]), "fee": cur},
+            "steps": [_step(f"Save {doc.get('name')}'s fee",
+                            _call("PUT", f"/admin/doctors/{doc['id']}", json={"consultation_fee": fee}),
+                            verify=_doctor_after(str(doc["id"]), lambda r: int(r.get("consultation_fee") or 0) == fee,
+                                                 f"fee {_inr(fee)}"))]}
+
+
+async def doctor_details_preview(read, params: dict) -> dict:
+    doc = await _doctor(read, params["doctor"])
+    body = {f: params[f] for f in ("specialization", "department")
+            if params.get(f) and params[f].strip().lower() != str(doc.get(f) or "").strip().lower()}
+    if not body:
+        raise EmptyPlan(f"{doc.get('name')} already has those details.")
+    bullets = [f"{f.capitalize()}: {doc.get(f) or 'none'} → {v}." for f, v in body.items()]
+    return {"title": f"Change {doc.get('name')}'s details", "bullets": bullets,
+            "warnings": ["Patients see this on WhatsApp straight away."],
+            "snapshot": {"id": str(doc["id"]), **{f: doc.get(f) for f in body}},
+            "steps": [_step(f"Save {doc.get('name')}'s details", _call("PUT", f"/admin/doctors/{doc['id']}", json=body),
+                            verify=_doctor_after(str(doc["id"]), lambda r: all(r.get(f) == v for f, v in body.items()),
+                                                 ", ".join(f"{f} {v}" for f, v in body.items())))]}
 
 
 async def doctor_schedule_preview(read, params: dict) -> dict:
@@ -2385,3 +2420,1725 @@ async def voice_settings_preview(read, params: dict) -> dict:
             "warnings": [w for w in (_VS_WARN.get(field), "The other voice settings are sent back unchanged.") if w],
             "snapshot": _digest([json.dumps(settings, sort_keys=True)]),
             "steps": [_step("Save voice settings", _call("PUT", "/admin/voice/settings", json=body), verify=verify)]}
+
+
+# ── Voice-first entry: OPD vitals, counter payments, doctor on/off, IPD vitals and bed moves ──
+
+_VITAL_LABELS = {"bp": "BP", "pulse_bpm": "Pulse", "temperature_c": "Temperature", "spo2_pct": "SpO2",
+                 "weight_kg": "Weight", "height_cm": "Height", "resp_rate": "Resp. rate",
+                 "blood_glucose_mg_dl": "Blood sugar", "pain_score": "Pain score"}
+_VITAL_UNITS = {"pulse_bpm": " /min", "temperature_c": " °C", "spo2_pct": "%", "weight_kg": " kg", "height_cm": " cm",
+                "resp_rate": " /min", "blood_glucose_mg_dl": " mg/dL", "pain_score": "/10"}
+_OPD_VITALS = ("bp_systolic", "bp_diastolic", "pulse_bpm", "temperature_c", "spo2_pct", "weight_kg", "height_cm")
+
+
+def _vital_lines(vitals: dict, before: dict = None) -> list:
+    before = before or {}
+    out = []
+    if "bp_systolic" in vitals:
+        old = f"{before['bp_systolic']}/{before['bp_diastolic']} → " if before.get("bp_systolic") else ""
+        out.append(f"BP: {old}{vitals['bp_systolic']}/{vitals['bp_diastolic']}")
+    for k, v in vitals.items():
+        if k in _VITAL_LABELS:
+            old = f"{_num_str(before[k])}{_VITAL_UNITS.get(k, '')} → " if before.get(k) is not None else ""
+            out.append(f"{_VITAL_LABELS[k]}: {old}{_num_str(v)}{_VITAL_UNITS.get(k, '')}")
+    return out
+
+
+def _num_str(v) -> str:
+    return format(Decimal(str(v)).normalize(), "f")
+
+
+def _same_number(a, b) -> bool:
+    try:
+        return a is not None and b is not None and Decimal(str(a)) == Decimal(str(b))
+    except ArithmeticError:
+        return False
+
+
+async def opd_vitals_preview(read, params: dict) -> dict:
+    """The encounter endpoint writes every vital it is given and blanks the rest, so the body is the chart's
+    current vitals with only the ones said replaced: "weight 62" never wipes the BP taken earlier."""
+    if params["target"].startswith("bed:"):
+        raise EmptyPlan("A bed is an inpatient: say \"vitals for bed …\" on an IPD clinic, or the OPD token.")
+    said = {k: v for k, v in params["vitals"].items() if k in _OPD_VITALS}
+    other = [_VITAL_LABELS[k] for k in params["vitals"] if k not in _OPD_VITALS and k in _VITAL_LABELS]
+    if not said:
+        raise EmptyPlan("The OPD chart takes BP, pulse, temperature, SpO2, weight and height.")
+    r = await _queue_row(read, params)
+    aid = str(r["appointment_id"])
+    enc = await _get_or_refuse(read, f"/admin/opd/encounters/by-appointment/{aid}", need="OPD Front Desk")
+    if not isinstance(enc, dict) or enc.get("status", "draft") != "draft":
+        raise EmptyPlan(f"{_token(r)}'s visit is already signed: vitals are changed by the doctor's amendment.")
+    current = {k: enc.get(k) for k in _OPD_VITALS if enc.get(k) is not None}
+    if all(_same_number(current.get(k), v) for k, v in said.items()):
+        raise EmptyPlan(f"{_token(r)}'s chart already has those vitals.")
+    body = {**current, **said}
+    warnings = [f"Not on the OPD chart, so not saved: {', '.join(other)}."] if other else []
+    if r.get("stage") == "vitals_pending":
+        warnings.append("The patient moves from vitals to waiting.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"/admin/opd/encounters/by-appointment/{aid}"))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the chart back"
+        ok = all(_same_number(out.data.get(k), v) for k, v in said.items())
+        return (True, "On the chart") if ok else (False, "The chart shows other values")
+
+    return {"title": f"Record vitals for {_token(r)}", "bullets": _vital_lines(said, current), "warnings": warnings,
+            "snapshot": {"appointment_id": aid, "vitals": current, "stage": r.get("stage")},
+            "steps": [_step("Save the vitals", _call("PUT", f"/admin/opd/encounters/by-appointment/{aid}/vitals",
+                                                     json=body), verify=verify)]}
+
+
+MAX_RECEIPT_RUPEES = 1_000_000  # ReceiptIn's own ceiling (100,000,000 paise)
+
+
+async def receipt_preview(read, params: dict) -> dict:
+    """R3, typed amount in rupees. The idempotency key is derived from the invoice, what it had been paid
+    and this payment: a retry or a double confirm records one receipt; the next payment gets a new key."""
+    who, mode, ref = params["who"], params["mode"], params.get("reference")
+    rupees = int(Decimal(params["amount"]))
+    if not 0 < rupees <= MAX_RECEIPT_RUPEES:
+        raise EmptyPlan(f"{_inr(rupees)} is not an amount Kriya records. {_BILLING}")
+    if mode in ("upi", "card") and not ref:
+        raise EmptyPlan(f"A {mode.upper()} payment needs its transaction reference (UTR / RRN). "
+                        f"Say it, e.g. \"UTR 412345678901\".")
+    if who.startswith("bed:"):
+        raise EmptyPlan("Say the patient's name or token for the OPD bill.")
+    if who.startswith("#"):  # today's token -> its visit's invoice
+        queue = _queue_of(await _get_or_refuse(read, "/admin/opd/queue", {"date": _now().date().isoformat()},
+                                               "OPD Front Desk"))
+        r = _only([q for q in queue if str(q.get("token_number")) == who[1:]], f"token {who[1:]}", "token today", _token)
+        rows = [i for i in await _invoices(read, str(r.get("patient_name") or "").lower())
+                if str(i.get("appointment_id")) == str(r.get("appointment_id"))]
+    else:
+        rows = await _invoices(read, who)
+    due = [i for i in rows if i.get("status") in ("issued", "partially_paid")]
+    if not due:
+        why = ("the invoice is still a draft: issue it first" if any(i.get("status") == "draft" for i in rows)
+               else "nothing is due" if rows else "there is no invoice for that name")
+        raise EmptyPlan(f'No payment to record for "{who}": {why}.')
+    inv = _only(due, who, "invoice with a balance", _inv_line)
+    iid = str(inv.get("id"))
+    inv = await _get_or_refuse(read, f"{_INVOICES}/{iid}")
+    paid, total = int(inv.get("paid_paise") or 0), int(inv.get("total_paise") or 0)
+    balance = total - int(inv.get("credited_paise") or 0) - paid
+    if rupees * 100 > balance:
+        raise EmptyPlan(f"{_inr(rupees)} is more than the {present.fmt(balance, 'paise')} due on "
+                        f"{inv.get('invoice_number') or 'the invoice'}.")
+    key = hashlib.sha256(f"ketu-receipt:{iid}:{paid}:{rupees}:{mode}:{ref or ''}".encode()).hexdigest()[:40]
+    body = {"mode": mode, "amount_paise": rupees * 100, "idempotency_key": key, **({"reference": ref} if ref else {})}
+    left = balance - rupees * 100
+    bullets = [f"{inv.get('invoice_number') or 'Invoice'}: {present.fmt(balance, 'paise')} due.",
+               f"{mode.upper()} {_inr(rupees)}" + (f", ref {ref}" if ref else "") + ".",
+               "Paid in full." if left == 0 else f"{present.fmt(left, 'paise')} still due after this."]
+    warnings = ["Cash goes into your open cash drawer shift."] if mode == "cash" else []
+    return {"title": f"Record {_inr(rupees)} from {_inv_name(inv)}", "bullets": bullets, "warnings": warnings,
+            "affected": rupees, "snapshot": {"id": iid, "paid": paid, "status": inv.get("status")},
+            "steps": [_step("Record the payment", _call("POST", f"{_INVOICES}/{iid}/receipts", json=body),
+                            verify=_invoice_is(iid, lambda i: int(i.get("paid_paise") or 0) >= paid + rupees * 100,
+                                               lambda i: f"Recorded; {i.get('status', '').replace('_', ' ')}"))]}
+
+
+async def doctor_active_preview(read, params: dict) -> dict:
+    """Removing a doctor by voice switches them off (is_active): the row, history and bills stay. The hard
+    delete stays on the Doctors page."""
+    doc = await _doctor(read, params["doctor"])
+    on = params["switch"] == "on"
+    if bool(doc.get("is_active", True)) == on:
+        raise EmptyPlan(f"{doc.get('name')} is already {'active' if on else 'switched off'}.")
+    warnings = []
+    if not on:
+        today = _now().date()
+        booked = [a for a in await _bookings(read, doc["name"], today, today + timedelta(days=SCHEDULE_LOOKAHEAD_DAYS))
+                  if a.get("doctor_name") == doc["name"]]
+        warnings.append("Patients can no longer book this doctor on WhatsApp or by phone.")
+        if booked:
+            warnings.insert(0, f"{_plural(len(booked), 'booking')} in the next {SCHEDULE_LOOKAHEAD_DAYS} days "
+                               "stay as they are: cancel or move them from the Appointments page.")
+    return {"title": f"{'Switch on' if on else 'Switch off'} {doc.get('name')}",
+            "bullets": [f"{doc.get('name')}: {'off → active' if on else 'active → off'}."], "warnings": warnings,
+            "snapshot": {"id": str(doc["id"]), "active": doc.get("is_active", True)},
+            "steps": [_step(f"{'Switch on' if on else 'Switch off'} {doc.get('name')}",
+                            _call("PUT", f"/admin/doctors/{doc['id']}", json={"is_active": on}),
+                            verify=_doctor_after(str(doc["id"]), lambda r: bool(r.get("is_active")) == on,
+                                                 "active" if on else "switched off"))]}
+
+
+_IPD = "/admin/ipd"
+
+
+def _beds(board) -> list:
+    return [{**b, "_ward": w.get("name") or w.get("code")} for w in (board or {}).get("wards") or []
+            if isinstance(w, dict) for b in w.get("beds") or [] if isinstance(b, dict)]
+
+
+def _bed_ref(ref: str) -> tuple:
+    """"12@icu" -> ("12", "icu"); a bed code is unique only inside its ward."""
+    code, _, ward = str(ref).partition("@")
+    return code, ward or None
+
+
+def _in_ward(beds: list, ward) -> list:
+    return [b for b in beds if not ward or ward in str(b.get("_ward") or "").lower()]
+
+
+def _one_bed(beds: list, ref: str) -> dict:
+    """Exactly one bed for "12" / "12@icu"; the same code in two wards is asked, never guessed."""
+    code, ward = _bed_ref(ref)
+    found = _in_ward([b for b in beds if _same_code(b.get("code"), code)], ward)
+    if not found:
+        raise EmptyPlan(f"There is no bed {code}" + (f" in {ward}" if ward else "") + ".")
+    if len(found) > 1:
+        raise EmptyPlan(f"Bed {code} is in {len(found)} wards ({', '.join(str(b.get('_ward')) for b in found[:5])}). "
+                        f"Say the ward too, e.g. \"bed {code} in {found[0].get('_ward')}\".")
+    return found[0]
+
+
+def _bed_line(b: dict) -> str:
+    occ = b.get("occupant") or {}
+    return f"bed {b.get('code')} ({occ.get('patient_name') or 'patient'})"
+
+
+def _same_code(a, b) -> bool:
+    norm = lambda s: re.sub(r"[\s-]", "", str(s or "")).upper()  # noqa: E731
+    return norm(a) == norm(b)
+
+
+async def _inpatient_bed(read, target: str) -> dict:
+    """The one occupied bed the target names ("bed:12" or the patient's name)."""
+    beds = [b for b in _beds(await _get_or_refuse(read, f"{_IPD}/board", need="IPD"))
+            if (b.get("occupant") or {}).get("admission_id") and b.get("status") == "occupied"]
+    if target.startswith("bed:"):
+        code, ward = _bed_ref(target[4:])
+        found = _in_ward([b for b in beds if _same_code(b.get("code"), code)], ward)
+        label = f"bed {code}" + (f" in {ward}" if ward else "")
+    elif target.startswith("#"):
+        raise EmptyPlan("A token is an OPD visit: say the inpatient's bed or name.")
+    else:
+        found = _named(beds, target, lambda b: (b.get("occupant") or {}).get("patient_name"))
+        label = f'"{target}"'
+    if not found:
+        raise EmptyPlan(f"No admitted patient is in {label}." if target.startswith("bed:")
+                        else f"No admitted patient matches {label}.")
+    if len(found) > 1:
+        raise EmptyPlan(f"{len(found)} inpatients match {label}: "
+                        f"{'; '.join(_bed_line(b) + ' in ' + str(b.get('_ward')) for b in found[:5])}. "
+                        "Say the bed and its ward, e.g. \"bed 5 in ICU\".")
+    return found[0]
+
+
+async def ipd_vitals_preview(read, params: dict) -> dict:
+    """A nurse's charted observation, as said: one row, timed when it was said (params.observed_at)."""
+    b = await _inpatient_bed(read, params["target"])
+    occ = b["occupant"]
+    adm = str(occ["admission_id"])
+    body = {"kind": "vitals", "observed_at": params["observed_at"],
+            **{k: v for k, v in params["vitals"].items() if k not in ("weight_kg", "height_cm")}}
+    skipped = [_VITAL_LABELS[k] for k in ("weight_kg", "height_cm") if k in params["vitals"]]
+    if len(body) == 2:
+        raise EmptyPlan("The inpatient chart takes BP, pulse, temperature, SpO2, resp. rate, sugar and pain score.")
+    when = present.fmt(params["observed_at"][11:16])
+
+    async def verify(read, data, call):
+        oid = data.get("id") if isinstance(data, dict) else None
+        out = await read(_call("GET", f"{_IPD}/admissions/{adm}"))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the chart back"
+        rows = [o for o in out.data.get("observations") or [] if isinstance(o, dict)]
+        hit = next((o for o in rows if oid and str(o.get("id")) == str(oid)), None) or next(
+            (o for o in rows if all(_same_number(o.get(k), v) for k, v in body.items() if k not in ("kind", "observed_at"))
+             and str(o.get("observed_at") or "")[:16] == params["observed_at"][:16]), None)
+        return (True, "On the inpatient chart") if hit else (False, "Not on the inpatient chart")
+
+    return {"title": f"Chart vitals for {_bed_line(b)}",
+            "bullets": _vital_lines({k: v for k, v in body.items() if k not in ("kind", "observed_at")}) +
+            [f"Taken at {when}."],
+            "warnings": [f"Not on the inpatient vitals chart, so not saved: {', '.join(skipped)}."] if skipped else [],
+            "snapshot": {"admission_id": adm, "bed": b.get("code")},
+            "steps": [_step("Chart the vitals", _call("POST", f"{_IPD}/admissions/{adm}/observations", json=body),
+                            verify=verify)]}
+
+
+async def ipd_transfer_preview(read, params: dict) -> dict:
+    """The server re-checks the target bed is free and the patient is still where the preview saw them
+    (expected_bed_id): a stale preview gets a 409, never a double booking."""
+    board = await _get_or_refuse(read, f"{_IPD}/board", need="IPD")
+    b = await _inpatient_bed(read, params["target"])
+    dest = _one_bed(_beds(board), params["to_bed"])
+    if dest.get("id") == b.get("id"):
+        raise EmptyPlan(f"{_bed_line(b)} is already in bed {dest.get('code')}.")
+    if dest.get("status") != "available" or not dest.get("is_active", True):
+        raise EmptyPlan(f"Bed {dest.get('code')} is {str(dest.get('status') or 'not available').replace('_', ' ')}. "
+                        "Pick a free bed (say \"free beds\" to see them).")
+    adm = str(b["occupant"]["admission_id"])
+    reason = params.get("reason") or "Bed change (by voice)"
+    body = {"to_bed_id": str(dest["id"]), "expected_bed_id": str(b["id"]), "reason": reason}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/board"))
+        if out.status != "ok":
+            return None, "Couldn't read the bed board back"
+        now_in = next((x for x in _beds(out.data) if str((x.get("occupant") or {}).get("admission_id")) == adm), None)
+        if now_in is None:
+            return None, "Couldn't find the patient on the bed board"
+        return (str(now_in.get("id")) == str(dest["id"])), f"In bed {now_in.get('code')}"
+
+    return {"title": f"Move {(b['occupant'].get('patient_name') or 'the patient')} to bed {dest.get('code')}",
+            "bullets": [f"Bed {b.get('code')} → bed {dest.get('code')}"
+                        + (f" ({dest.get('bed_category')})" if dest.get("bed_category") else "") + ".",
+                        f"Reason: {reason}."],
+            "warnings": [f"Bed {b.get('code')} is marked for cleaning."],
+            "snapshot": {"admission_id": adm, "from": str(b["id"]), "to": str(dest["id"]),
+                         "to_status": dest.get("status"), "to_version": dest.get("version")},
+            "steps": [_step("Move the patient", _call("POST", f"{_IPD}/admissions/{adm}/transfer", json=body),
+                            verify=verify)]}
+
+
+async def _ipd_admission(read, adm: str) -> Optional[dict]:
+    out = await read(_call("GET", f"{_IPD}/admissions/{adm}"))
+    return out.data.get("admission") if out.status == "ok" and isinstance(out.data, dict) else None
+
+
+def _admission_is(adm: str, statuses: tuple, said: str):
+    async def verify(read, data, call):
+        row = await _ipd_admission(read, adm)
+        if row is None:
+            return None, "Couldn't read the admission back"
+        return (row.get("status") in statuses), (said if row.get("status") in statuses else f"Status: {row.get('status')}")
+    return verify
+
+
+async def ipd_admit_preview(read, params: dict) -> dict:
+    """A registered patient, an admitting doctor, the reason said, and a free bed if one is named (else the
+    patient waits for a bed). The key is per patient per day, and the server allows one active stay: a
+    repeated confirm never makes a second admission."""
+    who = params["patient"]
+    hits = await _get_or_refuse(read, "/admin/opd/patients/search", {"q": who}, "IPD Admissions")
+    hits = [h for h in hits or [] if isinstance(h, dict)]
+    found = hits if who.isdigit() else _named(hits, who.lower(), lambda h: h.get("name"))
+    if not found:
+        raise EmptyPlan(f'"{who}" is not registered. Register them first ("register {who}, phone …"), then admit.')
+    p = _only(found, who, "registered patient",
+              lambda h: f"{h.get('name')} ({h.get('mrn') or h.get('phone') or 'no MRN'})")
+    doc = _doctor_row(await _get(read, "/admin/doctors"), params["doctor"])
+    if not doc or not doc.get("id"):
+        raise EmptyPlan(f"{params['doctor']} isn't on the doctor list.")
+    bed = None
+    if params.get("bed"):
+        bed = _one_bed(_beds(await _get_or_refuse(read, f"{_IPD}/board", need="IPD")), params["bed"])
+        if bed.get("status") != "available" or not bed.get("is_active", True):
+            raise EmptyPlan(f"Bed {bed.get('code')} is {str(bed.get('status')).replace('_', ' ')}. "
+                            "Name a free bed, or admit without one (the patient waits for a bed).")
+    day = _now().date().isoformat()
+    key = hashlib.sha256(f"ketu-admit:{p.get('patient_id')}:{p.get('family_member_id')}:{day}".encode()).hexdigest()[:40]
+    body = {"patient_id": str(p["patient_id"]), "admitting_doctor_id": str(doc["id"]),
+            "attending_doctor_id": str(doc["id"]), "reason": params["reason"], "priority": params["priority"],
+            "idempotency_key": key, **({"family_member_id": str(p["family_member_id"])} if p.get("family_member_id") else {}),
+            **({"bed_id": str(bed["id"])} if bed else {})}
+
+    async def verify(read, data, call):
+        adm = data.get("id") if isinstance(data, dict) else None
+        if not adm:
+            return None, "Couldn't tell which admission was made"
+        row = await _ipd_admission(read, str(adm))
+        if row is None:
+            return None, "Couldn't read the admission back"
+        want = ("admitted",) if bed else ("pending", "admitted")
+        num = row.get("admission_number") or ""
+        return (row.get("status") in want), (f"Admitted {num}".strip() if row.get("status") == "admitted"
+                                             else f"Waiting for a bed {num}".strip())
+
+    return {"title": f"Admit {p.get('name')}",
+            "bullets": [f"{p.get('name')} ({p.get('mrn') or p.get('phone') or 'no MRN'}) under {doc.get('name')}.",
+                        f"Reason: {params['reason']}.", f"Priority: {params['priority']}.",
+                        f"Bed {bed.get('code')}." if bed else "No bed yet: the patient goes on the waiting list."],
+            "warnings": ["Payer is self-pay; record insurance, attendant and the admission consent on the chart."],
+            "snapshot": {"patient": str(p["patient_id"]), "bed": bed and str(bed["id"]),
+                         "bed_status": bed and bed.get("status")},
+            "steps": [_step(f"Admit {p.get('name')}", _call("POST", f"{_IPD}/admissions", json=body), verify=verify)]}
+
+
+_DISCHARGE_LABEL = {"regular": "Regular discharge", "lama": "Left against medical advice (LAMA)",
+                    "dama": "Discharged against medical advice (DAMA)", "absconded": "Absconded",
+                    "transfer_out": "Transfer out to another hospital"}
+
+
+async def ipd_discharge_preview(read, params: dict) -> dict:
+    """Starts a discharge (admitted -> discharge pending). A death is recorded on the chart by the doctor, never
+    by voice; completion (settlement) and the signed summary stay on the chart."""
+    kind = params["discharge_type"]
+    if kind == "death":
+        raise EmptyPlan("A death is recorded on the patient's chart by the doctor, not by voice.")
+    b = await _inpatient_bed(read, params["target"])
+    occ, adm = b["occupant"], str(b["occupant"]["admission_id"])
+    if occ.get("status") == "discharge_pending":
+        raise EmptyPlan(f"{_bed_line(b)}'s discharge is already in progress.")
+    warnings = ["Then: discharge summary, bill settlement and Complete discharge on the chart."]
+    if kind in ("regular", "transfer_out"):
+        warnings.insert(0, "This is the doctor's decision: only a doctor's own login can start it.")
+    return {"title": f"Start discharge for {_bed_line(b)}", "bullets": [f"{_DISCHARGE_LABEL[kind]}."],
+            "warnings": warnings, "snapshot": {"admission_id": adm, "status": occ.get("status")},
+            "steps": [_step("Start the discharge", _call("POST", f"{_IPD}/admissions/{adm}/discharge/initiate",
+                                                         json={"discharge_type": kind}),
+                            verify=_admission_is(adm, ("discharge_pending",), "Discharge in progress"))]}
+
+
+async def ipd_bed_status_preview(read, params: dict) -> dict:
+    """Housekeeping: a bed in use (occupied / reserved) is never changed; taking one out of service needs a
+    reason, and the server allows it only to an IPD admin."""
+    to = params["state"]
+    b = _one_bed(_beds(await _get_or_refuse(read, f"{_IPD}/board", need="IPD")), params["bed"])
+    if b.get("status") in ("occupied", "reserved"):
+        raise EmptyPlan(f"Bed {b.get('code')} is {b.get('status')}: it changes when the patient moves or leaves.")
+    if b.get("status") == to:
+        raise EmptyPlan(f"Bed {b.get('code')} is already {to}.")
+    reason = params.get("reason")
+    if to in ("maintenance", "blocked") and not reason:
+        raise EmptyPlan(f"Say why bed {b.get('code')} is out of service, e.g. \"because the oxygen point is broken\".")
+    body = {"status": to, **({"reason": reason} if reason else {})}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/board"))
+        row = next((x for x in _beds(out.data) if str(x.get("id")) == str(b["id"])), None) if out.status == "ok" else None
+        if row is None:
+            return None, "Couldn't read the bed board back"
+        return (row.get("status") == to), f"Bed {row.get('code')}: {row.get('status')}"
+
+    label = {"available": "free (ready for a patient)", "cleaning": "for cleaning",
+             "maintenance": "under maintenance", "blocked": "blocked"}[to]
+    return {"title": f"Mark bed {b.get('code')} {label}",
+            "bullets": [f"Bed {b.get('code')}: {b.get('status')} → {to}."] + ([f"Reason: {reason}."] if reason else []),
+            "warnings": ["Admissions can use it straight away."] if to == "available" else [],
+            "snapshot": {"id": str(b["id"]), "status": b.get("status"), "version": b.get("version")},
+            "steps": [_step(f"Mark bed {b.get('code')} {to}", _call("POST", f"{_IPD}/beds/{b['id']}/status", json=body),
+                            verify=verify)]}
+
+
+_SERVICES = "/admin/masters/services"
+_SERVICE_NOISE = {"charge", "charges", "price", "prices", "rate", "rates", "tariff", "service", "services", "procedure",
+                  "for", "the", "of", "a", "cost"}
+
+
+async def service_price_preview(read, params: dict) -> dict:
+    """One tariff row by its name words; the write carries the row's updated_at so a change made on the page
+    meanwhile is refused (409) instead of overwritten. Bills already issued keep their price."""
+    # price words are how it was asked, not part of the service's name ("room charges" -> "room")
+    words = [w for w in params["service"].split() if w not in _SERVICE_NOISE] or params["service"].split()
+    rows = [s for s in (await _get_or_refuse(read, _SERVICES, {"active_only": True}, "Services Manage") or {})
+            .get("services") or [] if isinstance(s, dict)]
+    found = [s for s in rows if all(w in str(s.get("name") or "").lower() for w in words)]
+    exact = [s for s in found if " ".join(str(s.get("name") or "").lower().split()) == " ".join(words)]
+    s = _only(exact or found, params["service"], "service",
+              lambda s: f"{s.get('name')} ({present.fmt(s.get('price_paise'), 'paise')})")
+    if s.get("source") != "master" or not s.get("id"):
+        raise EmptyPlan(f"{s.get('name')} is an older price-list entry. Save it once on the Service Catalogue page.")
+    old = Decimal(int(s.get("price_paise") or 0)) / 100
+    new = new_price(old, params["price"])
+    if not 0 < new <= 1_000_000:
+        raise EmptyPlan(f"The new price for {s.get('name')} would be {_inr(new)}.")
+    if new == old:
+        raise EmptyPlan(f"{s.get('name')} is already {_inr(new)}.")
+    sid = str(s["id"])
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", _SERVICES, {"active_only": True}))
+        rows = (out.data or {}).get("services") if out.status == "ok" and isinstance(out.data, dict) else None
+        row = next((r for r in rows or [] if isinstance(r, dict) and str(r.get("id")) == sid), None)
+        if row is None:
+            return None, "Couldn't read the service back"
+        return (int(row.get("price_paise") or 0) == new * 100), f"{row.get('name')}: {present.fmt(row.get('price_paise'), 'paise')}"
+
+    return {"title": f"Change {s.get('name')}'s price",
+            "bullets": [f"{s.get('name')}: {_inr(int(old))} → {_inr(new)}."],
+            "warnings": ["New bills use the new price; bills already issued keep theirs."],
+            "snapshot": {"id": sid, "price": s.get("price_paise"), "updated_at": s.get("updated_at")},
+            "steps": [_step(f"Save {s.get('name')}'s price",
+                            _call("PATCH", f"{_SERVICES}/{sid}",
+                                  json={"standard_price_paise": new * 100,
+                                        **({"expected_updated_at": s["updated_at"]} if s.get("updated_at") else {})}),
+                            verify=verify)]}
+
+
+# ── Voice-first batch 3: refunds, voids, deposits, casualty registration, theatre booking ──
+
+async def _bill_for(read, who: str) -> list:
+    """The patient's OPD invoices, by name or by today's token."""
+    if who.startswith("bed:"):
+        raise EmptyPlan("Say the patient's name or token for the OPD bill.")
+    if not who.startswith("#"):
+        return await _invoices(read, who)
+    queue = _queue_of(await _get_or_refuse(read, "/admin/opd/queue", {"date": _now().date().isoformat()},
+                                           "OPD Front Desk"))
+    r = _only([q for q in queue if str(q.get("token_number")) == who[1:]], f"token {who[1:]}", "token today", _token)
+    return [i for i in await _invoices(read, str(r.get("patient_name") or "").lower())
+            if str(i.get("appointment_id")) == str(r.get("appointment_id"))]
+
+
+async def refund_preview(read, params: dict) -> dict:
+    """R3, typed rupees, OPD admin only (the route). Never more than was paid; the key comes from the invoice,
+    what it holds as paid, and this refund, so a double confirm returns one refund."""
+    who, mode, rupees = params["who"], params["mode"], int(Decimal(params["amount"]))
+    if mode == "card":
+        raise EmptyPlan("Card payments are refunded through the card machine; record it on the OPD Billing page.")
+    paid = [i for i in await _bill_for(read, who) if int(i.get("paid_paise") or 0) > 0]
+    if not paid:
+        raise EmptyPlan(f'Nothing has been paid on "{who}"\'s bills, so there is nothing to refund.')
+    inv = _only(paid, who, "paid invoice", _inv_line)
+    iid = str(inv.get("id"))
+    inv = await _get_or_refuse(read, f"{_INVOICES}/{iid}")
+    held = int(inv.get("paid_paise") or 0)
+    if rupees * 100 > held:
+        raise EmptyPlan(f"{_inr(rupees)} is more than the {present.fmt(held, 'paise')} paid on "
+                        f"{inv.get('invoice_number') or 'the bill'}.")
+    ref = params.get("reference")
+    key = hashlib.sha256(f"ketu-refund:{iid}:{held}:{rupees}:{mode}:{ref or ''}".encode()).hexdigest()[:40]
+    body = {"mode": mode, "amount_paise": rupees * 100, "reason": params["reason"], "idempotency_key": key,
+            **({"reference": ref} if ref else {})}
+    return {"title": f"Refund {_inr(rupees)} to {_inv_name(inv)}",
+            "bullets": [f"{inv.get('invoice_number') or 'Invoice'}: {present.fmt(held, 'paise')} paid.",
+                        f"{mode.upper()} refund {_inr(rupees)}. Reason: {params['reason']}."],
+            "warnings": ["Cash refunds come out of your open cash drawer shift."] if mode == "cash" else [],
+            "affected": rupees, "snapshot": {"id": iid, "paid": held},
+            "steps": [_step("Record the refund", _call("POST", f"{_INVOICES}/{iid}/refunds", json=body),
+                            verify=_invoice_is(iid, lambda i: int(i.get("paid_paise") or 0) == held - rupees * 100,
+                                               lambda i: f"Refunded; {present.fmt(i.get('paid_paise'), 'paise')} "
+                                                         "still paid"))]}
+
+
+async def void_preview(read, params: dict) -> dict:
+    """R3: the typed number is the bill's total in rupees. Only an unpaid bill is voided (the server agrees)."""
+    who = params["who"]
+    rows = [i for i in await _bill_for(read, who) if i.get("status") in ("draft", "issued")]
+    if not rows:
+        raise EmptyPlan(f'No open bill for "{who}" to void.')
+    inv = _only(rows, who, "open invoice", _inv_line)
+    iid = str(inv.get("id"))
+    inv = await _get_or_refuse(read, f"{_INVOICES}/{iid}")
+    if int(inv.get("paid_paise") or 0) > 0:
+        raise EmptyPlan(f"{inv.get('invoice_number') or 'The bill'} has {present.fmt(inv.get('paid_paise'), 'paise')} "
+                        "paid: refund it first, then void.")
+    total = int(inv.get("total_paise") or 0) // 100
+    return {"title": f"Void {_inv_name(inv)}'s bill",
+            "bullets": [f"{inv.get('invoice_number') or 'Draft'}: {present.fmt(inv.get('total_paise'), 'paise')}.",
+                        f"Reason: {params['reason']}."],
+            "warnings": ["A voided bill can't be used again; make a new one if the visit is billed later."],
+            "affected": total, "snapshot": {"id": iid, "status": inv.get("status"), "updated_at": inv.get("updated_at")},
+            "steps": [_step("Void the bill", _call("POST", f"{_INVOICES}/{iid}/void", json={"reason": params["reason"]}),
+                            verify=_invoice_is(iid, lambda i: i.get("status") == "void", lambda i: "Voided"))]}
+
+
+async def deposit_preview(read, params: dict) -> dict:
+    """R3, typed rupees: an inpatient's advance. The key comes from the stay, its ledger so far and this deposit."""
+    mode, ref, rupees = params["mode"], params.get("reference"), int(Decimal(params["amount"]))
+    if mode in ("upi", "card") and not ref:
+        raise EmptyPlan(f"A {mode.upper()} deposit needs its transaction reference (UTR / RRN).")
+    b = await _inpatient_bed(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    ledger = await _get_or_refuse(read, f"{_IPD}/admissions/{adm}/deposits", need="IPD Billing")
+    rows = [d for d in (ledger or {}).get("deposits") or [] if isinstance(d, dict)]
+    held = sum(int(d.get("amount_paise") or 0) for d in rows if d.get("kind") == "deposit")
+    key = hashlib.sha256(f"ketu-deposit:{adm}:{len(rows)}:{rupees}:{mode}:{ref or ''}".encode()).hexdigest()[:40]
+    body = {"mode": mode, "amount_paise": rupees * 100, "idempotency_key": key, **({"reference": ref} if ref else {})}
+
+    async def verify(read, data, call):
+        did = data.get("id") if isinstance(data, dict) else None
+        out = await read(_call("GET", f"{_IPD}/admissions/{adm}/deposits"))
+        rows = (out.data or {}).get("deposits") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None:
+            return None, "Couldn't read the deposits back"
+        ok = any(isinstance(d, dict) and (str(d.get("id")) == str(did) or d.get("idempotency_key") == key) for d in rows)
+        return ok, "On the stay's deposits" if ok else "Not on the stay's deposits"
+
+    return {"title": f"Take {_inr(rupees)} deposit for {_bed_line(b)}",
+            "bullets": [f"{mode.upper()} {_inr(rupees)}" + (f", ref {ref}" if ref else "") + ".",
+                        f"Deposits so far: {present.fmt(held, 'paise')}."],
+            "warnings": ["Cash goes into your open cash drawer shift."] if mode == "cash" else [],
+            "affected": rupees, "snapshot": {"admission_id": adm, "ledger": len(rows)},
+            "steps": [_step("Record the deposit", _call("POST", f"{_IPD}/admissions/{adm}/deposits", json=body),
+                            verify=verify)]}
+
+
+_ER_VITALS = {"bp_systolic": "bp_sys", "bp_diastolic": "bp_dia", "pulse_bpm": "pulse", "spo2_pct": "spo2",
+              "temperature_c": "temp", "resp_rate": "rr", "blood_glucose_mg_dl": "grbs"}
+
+
+async def emergency_register_preview(read, params: dict) -> dict:
+    """Rapid casualty registration. Unknown patients get a temporary name from the server. Black (dead on
+    arrival) is never registered by voice."""
+    triage = params["triage"]
+    if triage == "black":
+        raise EmptyPlan("A patient brought dead is registered on the Casualty page by the doctor.")
+    body = {"triage_category": triage, "chief_complaints": params["complaint"], "arrival_mode": params["arrival"],
+            "idempotency_key": hashlib.sha256(f"ketu-er:{params['said_at']}:{params['complaint']}".encode())
+            .hexdigest()[:40]}
+    if params.get("unknown") == "yes":
+        body["is_unknown"] = True
+        body.update({k: v for k, v in (("estimated_gender", params.get("gender")),
+                                       ("estimated_age", params.get("age"))) if v is not None})
+        who = "Unknown patient" + (f", {params['gender']}" if params.get("gender") else "") + \
+            (f", about {params['age']}" if params.get("age") is not None else "")
+    elif params.get("name") and params.get("phone"):
+        body.update({"name": params["name"], "phone": params["phone"]})
+        body.update({k: v for k, v in (("gender", params.get("gender")), ("age", params.get("age"))) if v is not None})
+        who = f"{params['name']} ({params['phone']})"
+    else:
+        raise EmptyPlan("Say the patient's name and phone, or \"unknown patient\".")
+    vitals = {_ER_VITALS[k]: v for k, v in (params.get("vitals") or {}).items() if k in _ER_VITALS}
+    if vitals:
+        body["initial_vitals"] = vitals
+
+    async def verify(read, data, call):
+        vid = data.get("id") if isinstance(data, dict) else None
+        out = await read(_call("GET", "/admin/emergency/visits"))
+        rows = (out.data or {}).get("visits") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None or not vid:
+            return None, "Couldn't read the casualty board back"
+        row = next((v for v in rows if isinstance(v, dict) and str(v.get("id")) == str(vid)), None)
+        return (row is not None), (f"On the casualty board: {row.get('visit_number') or ''}".strip() if row
+                                   else "Not on the casualty board")
+
+    return {"title": f"Register a {triage.upper()} casualty",
+            "bullets": [who + ".", f"Complaint: {params['complaint']}.", f"Arrived: {params['arrival'].replace('_', ' ')}."]
+            + _vital_lines({k: v for k, v in (params.get("vitals") or {}).items() if k in _ER_VITALS}),
+            "warnings": ["Medico-legal details (police intimation) are recorded on the Casualty page."],
+            "snapshot": None,
+            "steps": [_step("Register the casualty", _call("POST", "/admin/emergency/register", json=body),
+                            verify=verify)]}
+
+
+async def ot_schedule_preview(read, params: dict) -> dict:
+    """An admitted patient, a theatre, a surgeon and a time; the server refuses a theatre or patient already
+    booked then. The key is the stay, theatre and start, so a double confirm books once."""
+    opts = await _get_or_refuse(read, "/admin/ot/options", need="OT Schedule")
+    target = params["target"]
+    adms = [a for a in (opts or {}).get("admissions") or [] if isinstance(a, dict)]
+    if target.startswith("bed:"):
+        found = [a for a in adms if _same_code(a.get("bed"), _bed_ref(target[4:])[0])]
+    elif target.startswith("#"):
+        raise EmptyPlan("Surgery is booked for an admitted patient: say the bed or the patient's name.")
+    else:
+        found = _named(adms, target, lambda a: a.get("patient_name"))
+    a = _only(found, target.replace("bed:", "bed "), "admitted patient",
+              lambda a: f"{a.get('patient_name')} (bed {a.get('bed') or '—'})")
+    theatres = [t for t in (opts or {}).get("theatres") or [] if isinstance(t, dict)]
+    if params.get("theatre"):
+        want = params["theatre"].lower()
+        pick = [t for t in theatres if re.search(rf"(?<![a-z0-9]){re.escape(want)}(?![a-z0-9])", str(t.get("name")).lower())]
+    else:
+        pick = theatres if len(theatres) == 1 else []
+    if len(pick) != 1:
+        names = ", ".join(str(t.get("name")) for t in theatres[:8]) or "none"
+        raise EmptyPlan(f"Say which theatre ({names}).")
+    th = pick[0]
+    doc = next((d for d in (opts or {}).get("doctors") or [] if isinstance(d, dict) and d.get("name") == params["surgeon"]),
+               None)
+    if not doc:
+        raise EmptyPlan(f"{params['surgeon']} isn't an active doctor here.")
+    day = date.fromisoformat(params["date"])
+    if day < _now().date():
+        raise EmptyPlan("That date has passed.")
+    start, end = params["window"].split("-")
+    start_at = datetime.combine(day, time.fromisoformat(start), IST)
+    end_at = datetime.combine(day, time.fromisoformat(end), IST)
+    if start_at <= _now():
+        raise EmptyPlan("That time has passed.")
+    key = hashlib.sha256(f"ketu-ot:{a['id']}:{th['id']}:{start_at.isoformat()}".encode()).hexdigest()[:40]
+    body = {"admission_id": str(a["id"]), "theatre_id": str(th["id"]), "procedure_name": params["procedure"],
+            "scheduled_start": start_at.isoformat(), "scheduled_end": end_at.isoformat(),
+            "primary_surgeon_id": str(doc["id"]), "priority": params["priority"],
+            "pre_op_diagnosis": params["indication"], "idempotency_key": key}
+    proc = next((s for s in (opts or {}).get("services") or [] if isinstance(s, dict)
+                 and str(s.get("name") or "").lower() == params["procedure"].lower()), None)
+    if proc:
+        body["service_id"] = str(proc["id"])
+
+    async def verify(read, data, call):
+        sid = data.get("id") if isinstance(data, dict) else None
+        out = await read(_call("GET", "/admin/ot/schedule", {"date": day.isoformat()}))
+        rows = (out.data or {}).get("surgeries") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None or not sid:
+            return None, "Couldn't read the theatre list back"
+        row = next((s for s in rows if isinstance(s, dict) and str(s.get("id")) == str(sid)), None)
+        return (row is not None), (f"On the theatre list: {row.get('surgery_number') or ''}".strip() if row
+                                   else "Not on the theatre list")
+
+    return {"title": f"Book {params['procedure']} for {a.get('patient_name')}",
+            "bullets": [f"{a.get('patient_name')} (bed {a.get('bed') or '—'}), {th.get('name')}.",
+                        f"{present.fmt(day.isoformat(), 'date')} {start}–{end} with {doc.get('name')}.",
+                        f"Pre-op: {params['indication']}. Priority: {params['priority']}."]
+            + ([f"Charge: {proc.get('name')} {present.fmt(proc.get('standard_price_paise'), 'paise')}."] if proc else []),
+            "warnings": ["The WHO checklist, anaesthesia record and post-op note are done in the theatre."],
+            "snapshot": {"admission": str(a["id"]), "theatre": str(th["id"])},
+            "steps": [_step("Book the surgery", _call("POST", "/admin/ot/surgeries", json=body), verify=verify)]}
+
+
+# ── Voice-first batch 4: admission details, discharge completion, OT status, staff logins, branches ──
+
+_PATCH_LABELS = {"payer_type": "Payer", "payer_name": "Payer name", "policy_number": "Policy / card no.",
+                 "attendant_name": "Attendant", "attendant_relation": "Relation", "attendant_phone": "Attendant phone",
+                 "expected_discharge_on": "Expected discharge"}
+
+
+async def admission_update_preview(read, params: dict) -> dict:
+    """Administrative fields only (the trigger refuses clinical and state fields); old -> new from a fresh read."""
+    b = await _inpatient_bed(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    row = await _ipd_admission(read, adm)
+    if row is None:
+        raise RuntimeError("read admission failed")
+    patch = {k: v for k, v in params["changes"].items() if str(row.get(k) or "") != str(v)}
+    if not patch:
+        raise EmptyPlan(f"{_bed_line(b)} already has those details.")
+    if patch.get("expected_discharge_on") and patch["expected_discharge_on"] < _now().date().isoformat():
+        raise EmptyPlan("The expected discharge date has passed.")
+    bullets = [f"{_PATCH_LABELS[k]}: {row.get(k) or 'none'} → {str(v).replace('_', ' ')}." for k, v in patch.items()]
+
+    async def verify(read, data, call):
+        now = await _ipd_admission(read, adm)
+        if now is None:
+            return None, "Couldn't read the admission back"
+        ok = all(str(now.get(k) or "") == str(v) for k, v in patch.items())
+        return ok, "Saved on the admission" if ok else "The admission shows other details"
+
+    return {"title": f"Update {_bed_line(b)}'s admission", "bullets": bullets,
+            "snapshot": {"admission_id": adm, **{k: row.get(k) for k in patch}},
+            "steps": [_step("Save the admission details", _call("PATCH", f"{_IPD}/admissions/{adm}", json=patch),
+                            verify=verify)]}
+
+
+_CHECK_LABELS = {"discharge_initiated": "discharge started", "summary_signed": "discharge summary signed",
+                 "orders_closed": "active orders closed", "charges_reviewed": "proposed charges reviewed",
+                 "discount_decided": "discount requests decided", "final_bill_issued": "final bill issued",
+                 "all_charges_billed": "every charge on the final bill", "deposits_cleared": "deposits applied or refunded",
+                 "bill_settled": "bill paid"}
+
+
+async def discharge_complete_preview(read, params: dict) -> dict:
+    """Completes a discharge only when the stay's own checklist is all done; a settlement waiver is an IPD
+    admin's decision on the chart, never by voice."""
+    b = await _inpatient_bed(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    check = await _get_or_refuse(read, f"{_IPD}/admissions/{adm}/discharge/checklist", need="IPD")
+    items = [i for i in (check or {}).get("items") or [] if isinstance(i, dict)]
+    pending = [_CHECK_LABELS.get(i.get("key"), str(i.get("key")).replace("_", " ")) for i in items if not i.get("done")]
+    if pending or not (check or {}).get("ready"):
+        raise EmptyPlan(f"{_bed_line(b)} can't be discharged yet. Still to do: {', '.join(pending) or 'the checklist'}.")
+    return {"title": f"Complete discharge for {_bed_line(b)}",
+            "bullets": ["Every checklist item is done.", f"Bed {b.get('code')} goes for cleaning."],
+            "warnings": ["This closes the stay: nothing more can be charged or charted on it."],
+            "snapshot": {"admission_id": adm, "items": [i.get("key") for i in items]},
+            "steps": [_step("Complete the discharge", _call("POST", f"{_IPD}/admissions/{adm}/discharge/complete",
+                                                            json={}),
+                            verify=_admission_is(adm, ("discharged",), "Discharged"))]}
+
+
+_OT_TO = {"start": "in_theatre", "recovery": "recovery", "cancel": "cancelled", "postpone": "postponed"}
+_OT_FROM = {"start": ("scheduled",), "recovery": ("in_theatre",), "cancel": ("scheduled", "in_theatre"),
+            "postpone": ("scheduled",)}
+
+
+async def ot_status_preview(read, params: dict) -> dict:
+    """One of today's surgeries moves on (start / recovery) or is called off (cancel / postpone, reason said)."""
+    action, day = params["action"], (params.get("date") or _now().date().isoformat())
+    if action in ("cancel", "postpone") and not params.get("reason"):
+        raise EmptyPlan(f"Say why the surgery is {'cancelled' if action == 'cancel' else 'postponed'}, "
+                        "e.g. \"because the blood is not arranged\".")
+    rows = [s for s in (await _get_or_refuse(read, "/admin/ot/schedule", {"date": day}, "OT") or {}).get("surgeries") or []
+            if isinstance(s, dict) and s.get("status") in _OT_FROM[action]]
+    target = params["target"]
+    if target.startswith("bed:"):
+        code, ward = _bed_ref(target[4:])
+        beds = [x for x in _in_ward(_beds(await _get_or_refuse(read, f"{_IPD}/board", need="IPD")), ward)
+                if _same_code(x.get("code"), code) and (x.get("occupant") or {}).get("admission_id")]
+        adm = {str(x["occupant"]["admission_id"]) for x in beds}
+        found = [s for s in rows if str(s.get("admission_id")) in adm]
+    else:
+        found = _named(rows, target, lambda s: s.get("patient_name"))
+    s = _only(found, target.replace("bed:", "bed "), "surgery that can be " + {"start": "started", "recovery":
+              "moved to recovery", "cancel": "cancelled", "postpone": "postponed"}[action],
+              lambda s: f"{s.get('patient_name')}: {s.get('procedure_name')} at {present.fmt(s.get('scheduled_start'), 'time')}")
+    sid, to = str(s["id"]), _OT_TO[action]
+    body = {"action": action, **({"reason": params["reason"]} if action in ("cancel", "postpone") else {})}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/ot/schedule", {"date": day}))
+        rows = (out.data or {}).get("surgeries") if out.status == "ok" and isinstance(out.data, dict) else None
+        row = next((r for r in rows or [] if isinstance(r, dict) and str(r.get("id")) == sid), None)
+        if row is None:
+            return None, "Couldn't read the theatre list back"
+        return (row.get("status") == to), f"Now {str(row.get('status')).replace('_', ' ')}"
+
+    warnings = {"start": ["The WHO sign-in should be done before the patient goes in."],
+                "cancel": ["The theatre slot is freed; tell the patient's family."],
+                "postpone": ["Book the new time with \"book … surgery\" when it is fixed."]}.get(action, [])
+    return {"title": f"{action.capitalize()} {s.get('patient_name')}'s {s.get('procedure_name')}",
+            "bullets": [f"{s.get('theatre_name') or 'Theatre'}, {present.fmt(s.get('scheduled_start'), 'time')}, "
+                        f"{s.get('surgeon_name') or 'surgeon'}.",
+                        f"{str(s.get('status')).replace('_', ' ')} → {to.replace('_', ' ')}."]
+            + ([f"Reason: {params['reason']}."] if action in ("cancel", "postpone") else []),
+            "warnings": warnings, "snapshot": {"id": sid, "status": s.get("status")},
+            "steps": [_step(f"{action.capitalize()} the surgery", _call("POST", f"/admin/ot/surgeries/{sid}/status",
+                                                                        json=body), verify=verify)]}
+
+
+async def _staff_row(read, who: str) -> dict:
+    rows = [r for r in (await _get_or_refuse(read, "/admin/staff", need="Staff View") or {}).get("staff") or []
+            if isinstance(r, dict)]
+    exact = [r for r in rows if who in (str(r.get("username") or "").lower(), str(r.get("full_name") or "").lower())]
+    found = exact or _named(rows, who, lambda r: f"{r.get('full_name') or ''} {r.get('username') or ''}")
+    return _only(found, who, "staff login",
+                 lambda r: f"{r.get('full_name') or r.get('username')} ({r.get('username')}, {r.get('staff_role')})")
+
+
+def _staff_name(r: dict) -> str:
+    return str(r.get("full_name") or r.get("username"))
+
+
+def _staff_after(sid: str, ok, said: str):
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/staff"))
+        rows = (out.data or {}).get("staff") if out.status == "ok" and isinstance(out.data, dict) else None
+        row = next((r for r in rows or [] if isinstance(r, dict) and str(r.get("id")) == sid), None)
+        if row is None:
+            return None, "Couldn't read the staff list back"
+        return (True, said) if ok(row) else (False, "The staff list shows otherwise")
+    return verify
+
+
+async def staff_active_preview(read, params: dict) -> dict:
+    """Switching a login off ends the sessions it holds now and frees a phlebotomist's visits (the toggle route
+    does both). The route toggles, so the preview's read of the current state is in the plan hash: a change
+    made meanwhile means a new preview, never a flip the wrong way."""
+    r = await _staff_row(read, params["who"])
+    on = params["switch"] == "on"
+    if bool(r.get("is_active")) == on:
+        raise EmptyPlan(f"{_staff_name(r)}'s login is already {'on' if on else 'off'}.")
+    sid = str(r["id"])
+    warnings = (["They are signed out everywhere straight away."]
+                + (["Their upcoming home visits go back to be reassigned."] if r.get("staff_role") == "PHLEBOTOMIST"
+                   else [])) if not on else ["They can sign in again with their existing password."]
+    return {"title": f"Switch {_staff_name(r)}'s login {'on' if on else 'off'}",
+            "bullets": [f"{_staff_name(r)} ({r.get('username')}, {str(r.get('staff_role')).replace('_', ' ').lower()}): "
+                        f"{'off → on' if on else 'on → off'}."],
+            "warnings": warnings, "snapshot": {"id": sid, "active": r.get("is_active")},
+            "steps": [_step("Switch the login", _call("PUT", f"/admin/staff/{sid}/toggle"),
+                            verify=_staff_after(sid, lambda x: bool(x.get("is_active")) == on, "on" if on else "off"))]}
+
+
+async def staff_role_preview(read, params: dict) -> dict:
+    """The role's permission set replaces the old one (the route validates it and who may grant it); passwords
+    and individual permissions stay on the Staff page."""
+    r = await _staff_row(read, params["who"])
+    role = params["role"]
+    if r.get("staff_role") == role:
+        raise EmptyPlan(f"{_staff_name(r)} is already {role.replace('_', ' ').lower()}.")
+    sid = str(r["id"])
+    return {"title": f"Make {_staff_name(r)} {role.replace('_', ' ').lower()}",
+            "bullets": [f"Role: {str(r.get('staff_role')).replace('_', ' ').lower()} → {role.replace('_', ' ').lower()}."],
+            "warnings": ["Their permissions change to the new role's, and they are signed out to pick them up."],
+            "snapshot": {"id": sid, "role": r.get("staff_role")},
+            "steps": [_step("Change the role", _call("PUT", f"/admin/staff/{sid}", json={"staff_role": role}),
+                            verify=_staff_after(sid, lambda x: x.get("staff_role") == role, f"Now {role}"))]}
+
+
+async def _branch_list(read) -> list:
+    return branch_rows(await _get_or_refuse(read, "/admin/branches", need="Branches"))
+
+
+def _branch_after(ok, said: str):
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/branches"))
+        if out.status != "ok":
+            return None, "Couldn't read the branches back"
+        return (True, said) if any(ok(b) for b in branch_rows(out.data)) else (False, "Not on the branch list")
+    return verify
+
+
+async def branch_create_preview(read, params: dict) -> dict:
+    name = params["name"]
+    branches = await _branch_list(read)
+    same = [b for b in branches if name.lower() in (str(b.get("short_name") or "").lower(), str(b.get("name") or "").lower())]
+    if same:
+        raise EmptyPlan(f"{same[0].get('name')} is already a branch.")
+    return {"title": f"Add the {name} branch",
+            "bullets": [f"Locality: {name}. Address, phone and map link are added on the Branches page."],
+            "warnings": ["Patients see the branch on WhatsApp once it has doctors assigned."],
+            "snapshot": {"branches": sorted(str(b.get("id")) for b in branches)},
+            "steps": [_step(f"Add {name}", _call("POST", "/admin/branches", json={"short_name": name}),
+                            verify=_branch_after(lambda b: str(b.get("short_name") or "").lower() == name.lower(),
+                                                 "On the branch list"))]}
+
+
+async def branch_rename_preview(read, params: dict) -> dict:
+    old, new = params["rename"]
+    branches = await _branch_list(read)
+    found = [b for b in branches if old in (str(b.get("short_name") or "").lower(), str(b.get("name") or "").lower())] \
+        or [b for b in branches if old in str(b.get("name") or "").lower()]
+    b = _only(found, old, "branch", lambda b: str(b.get("name")))
+    if str(b.get("short_name") or "") == new:
+        raise EmptyPlan(f"The branch is already called {new}.")
+    bid = str(b["id"])
+    return {"title": f"Rename {b.get('short_name') or b.get('name')} to {new}",
+            "bullets": [f"Locality name: {b.get('short_name') or b.get('name')} → {new}."],
+            "warnings": ["Patients see the new name on WhatsApp straight away."],
+            "snapshot": {"id": bid, "short_name": b.get("short_name"), "name": b.get("name")},
+            "steps": [_step("Rename the branch", _call("PUT", f"/admin/branches/{bid}", json={"short_name": new}),
+                            verify=_branch_after(lambda x: str(x.get("id")) == bid and x.get("short_name") == new,
+                                                 f"Now {new}"))]}
+
+
+# ── Voice-first batch 5: doctor days / slot length, new services, credit notes, corporate companies ──
+
+async def _upcoming(read, doc: dict) -> list:
+    today = _now().date()
+    return [a for a in await _bookings(read, doc["name"], today, today + timedelta(days=SCHEDULE_LOOKAHEAD_DAYS))
+            if a.get("doctor_name") == doc["name"]]
+
+
+async def doctor_days_preview(read, params: dict) -> dict:
+    doc = await _doctor(read, params["doctor"])
+    new, old = params["days"], str(doc.get("available_days") or "")
+    if set(new.split(",")) == set(filter(None, old.split(","))):
+        raise EmptyPlan(f"{doc.get('name')} already works {old}.")
+    dropped = set(filter(None, old.split(","))) - set(new.split(","))
+    outside = [a for a in await _upcoming(read, doc) if date.fromisoformat(str(a.get("appointment_date"))[:10])
+               .strftime("%a") in dropped]
+    warnings = ["Patients booking on WhatsApp see the new days straight away."]
+    if outside:
+        warnings.insert(0, f"{_plural(len(outside), 'booking')} in the next {SCHEDULE_LOOKAHEAD_DAYS} days "
+                           f"{'falls' if len(outside) == 1 else 'fall'} on a day dropped. They are not moved: "
+                           "cancel or call them from the Appointments page.")
+    return {"title": f"Change {doc.get('name')}'s working days", "bullets": [f"Days: {old or 'none'} → {new}."],
+            "warnings": warnings, "rows": _booking_rows(outside),
+            "snapshot": {"id": str(doc["id"]), "days": old, "outside": sorted(str(a.get("id")) for a in outside)},
+            "steps": [_step(f"Save {doc.get('name')}'s days",
+                            _call("PUT", f"/admin/doctors/{doc['id']}", json={"available_days": new}),
+                            verify=_doctor_after(str(doc["id"]), lambda r: set(str(r.get("available_days") or "")
+                                                                               .split(",")) == set(new.split(",")),
+                                                 f"days {new}"))]}
+
+
+async def doctor_slot_preview(read, params: dict) -> dict:
+    """The endpoint regenerates slots only when it is sent the shifts, so the body is the doctor's current
+    shifts with the new length (D-34). Bookings at times the new grid no longer has are listed, not moved."""
+    doc = await _doctor(read, params["doctor"])
+    minutes = int(params["minutes"])
+    old = int(doc.get("slot_duration_minutes") or 30)
+    if minutes == old:
+        raise EmptyPlan(f"{doc.get('name')}'s slots are already {minutes} minutes.")
+    cur = {k: _hm(doc.get(k)) for k in _SHIFTS}
+    keep, bullets = set(), [f"Slot length: {old} → {minutes} minutes."]
+    for s in ("morning", "evening"):
+        if cur[f"{s}_start"] and cur[f"{s}_end"]:
+            grid = _slots(cur[f"{s}_start"], cur[f"{s}_end"], minutes)
+            keep |= set(grid)
+            bullets.append(f"{s.capitalize()} {cur[f'{s}_start']}–{cur[f'{s}_end']}: {len(grid)} slots.")
+    if not keep:
+        raise EmptyPlan(f"{doc.get('name')} has no hours set: set them first (\"Dr … morning 9 to 1\").")
+    outside = [a for a in await _upcoming(read, doc) if str(a.get("appointment_time") or "")[:5] not in keep]
+    warnings = ["Patients booking on WhatsApp see the new slots straight away."]
+    if outside:
+        warnings.insert(0, f"{_plural(len(outside), 'booking')} in the next {SCHEDULE_LOOKAHEAD_DAYS} days "
+                           f"{'is' if len(outside) == 1 else 'are'} at a time the new slots don't have. They are kept "
+                           "as booked.")
+    body = {**{k: v for k, v in cur.items() if v}, "slot_duration_minutes": minutes}
+    return {"title": f"Change {doc.get('name')}'s slot length", "bullets": bullets, "warnings": warnings,
+            "rows": _booking_rows(outside),
+            "snapshot": {"id": str(doc["id"]), "shifts": cur, "minutes": old,
+                         "outside": sorted(str(a.get("id")) for a in outside)},
+            "steps": [_step(f"Save {doc.get('name')}'s slots", _call("PUT", f"/admin/doctors/{doc['id']}", json=body),
+                            verify=_doctor_after(str(doc["id"]),
+                                                 lambda r: int(r.get("slot_duration_minutes") or 0) == minutes,
+                                                 f"{minutes}-minute slots"))]}
+
+
+def _service_code(name: str, taken: set) -> str:
+    base = re.sub(r"[^A-Z0-9]+", "-", name.upper()).strip("-")[:36] or "SVC"
+    code, n = base, 2
+    while code in taken:
+        code, n = f"{base}-{n}", n + 1
+    return code
+
+
+async def service_create_preview(read, params: dict) -> dict:
+    """A new tariff row from its name and price; the code is made from the name (unique), GST 0% (healthcare
+    services are exempt) and SAC 999312 unless changed on the page afterwards."""
+    name = params["name"]
+    kind, value = params["price"][0], Decimal(params["price"][1])
+    if kind != "amount" or not 0 < value <= 1_000_000:
+        raise EmptyPlan("Say the price in rupees, e.g. \"at ₹300\".")
+    rows = [s for s in (await _get_or_refuse(read, _SERVICES, None, "Services Manage") or {}).get("services") or []
+            if isinstance(s, dict)]
+    same = [s for s in rows if " ".join(str(s.get("name") or "").lower().split()) == name.lower()]
+    if same:
+        raise EmptyPlan(f"{same[0].get('name')} is already in the catalogue at "
+                        f"{present.fmt(same[0].get('price_paise'), 'paise')}. Change its price instead.")
+    code = _service_code(name, {str(s.get("code") or "") for s in rows})
+    rupees = int(value)
+    body = {"service_code": code, "name": name, "category": params["category"], "standard_price_paise": rupees * 100}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", _SERVICES))
+        rows = (out.data or {}).get("services") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None:
+            return None, "Couldn't read the catalogue back"
+        ok = any(isinstance(s, dict) and s.get("code") == code for s in rows)
+        return ok, f"In the catalogue as {code}" if ok else "Not in the catalogue"
+
+    return {"title": f"Add {name} to the service catalogue",
+            "bullets": [f"{name} ({params['category'].replace('_', ' ')}): {_inr(rupees)}.", f"Code {code}, GST 0%."],
+            "warnings": ["Change GST or SAC on the Service Catalogue page if this service is taxable."],
+            "snapshot": {"codes": len(rows)},
+            "steps": [_step(f"Add {name}", _call("POST", _SERVICES, json=body), verify=verify)]}
+
+
+_CN_LABEL = {"billing_error": "billing error", "cancellation": "service not given", "discount_post_issue": "discount",
+             "service_deficiency": "service deficiency", "other": "other"}
+
+
+async def credit_note_preview(read, params: dict) -> dict:
+    """R3, typed rupees. A credit note lowers an issued bill; when the patient has paid more than the bill
+    now asks for, the excess is refunded in cash or UPI, which must be said."""
+    who, rupees, code = params["who"], int(Decimal(params["amount"])), params["code"]
+    rows = [i for i in await _bill_for(read, who) if i.get("status") in ("issued", "partially_paid", "paid")]
+    if not rows:
+        raise EmptyPlan(f'No issued bill for "{who}" to credit.')
+    inv = _only(rows, who, "issued bill", _inv_line)
+    iid = str(inv.get("id"))
+    inv = await _get_or_refuse(read, f"{_INVOICES}/{iid}")
+    credited = int(inv.get("credited_paise") or 0)
+    due = int(inv.get("subtotal_paise") or 0) - int(inv.get("discount_paise") or 0) - credited
+    if rupees * 100 > due:
+        raise EmptyPlan(f"{_inr(rupees)} is more than the {present.fmt(due, 'paise')} left to credit on "
+                        f"{inv.get('invoice_number') or 'the bill'}.")
+    paid, after = int(inv.get("paid_paise") or 0), int(inv.get("total_paise") or 0) - credited - rupees * 100
+    excess = max(paid - after, 0)
+    mode, ref = params.get("mode"), params.get("reference")
+    if excess and mode not in ("cash", "upi"):
+        raise EmptyPlan(f"The patient has paid {present.fmt(excess, 'paise')} more than the bill will ask for: say "
+                        "\"refund in cash\" or \"by UPI\" with the credit note.")
+    if excess and mode == "upi" and not ref:
+        raise EmptyPlan("A UPI refund needs its transaction reference (UTR).")
+    notes = params.get("notes")
+    if code == "other" and not notes:
+        raise EmptyPlan("Say why, e.g. \"because the patient was charged twice\".")
+    key = hashlib.sha256(f"ketu-cn:{iid}:{credited}:{rupees}:{code}".encode()).hexdigest()[:40]
+    body = {"amount_paise": rupees * 100, "reason": code, "idempotency_key": key,
+            **({"reason_notes": notes} if notes else {}),
+            **({"refund_mode": mode, **({"refund_reference": ref} if ref else {})} if excess else {})}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_INVOICES}/{iid}/credit-notes"))
+        items = (out.data or {}).get("items") if out.status == "ok" and isinstance(out.data, dict) else None
+        if items is None:
+            return None, "Couldn't read the credit notes back"
+        hit = next((c for c in items if isinstance(c, dict) and int(c.get("amount_paise") or 0) == rupees * 100
+                    and (not isinstance(data, dict) or not data.get("id") or str(c.get("id")) == str(data["id"]))), None)
+        return (hit is not None), (f"Issued {hit.get('credit_note_number') or ''}".strip() if hit else "Not issued")
+
+    return {"title": f"Credit note of {_inr(rupees)} on {_inv_name(inv)}'s bill",
+            "bullets": [f"{inv.get('invoice_number')}: {present.fmt(due, 'paise')} can be credited.",
+                        f"Reason: {_CN_LABEL[code]}" + (f" ({notes})" if notes else "") + "."]
+            + ([f"Refund {present.fmt(excess, 'paise')} by {mode.upper()}."] if excess else []),
+            "warnings": ["A credit note is a GST document: it is numbered and cannot be undone."],
+            "affected": rupees, "snapshot": {"id": iid, "credited": credited, "paid": paid},
+            "steps": [_step("Issue the credit note", _call("POST", f"{_INVOICES}/{iid}/credit-notes", json=body),
+                            verify=verify)]}
+
+
+async def company_create_preview(read, params: dict) -> dict:
+    name = params["name"]
+    rows = [c for c in (await _get_or_refuse(read, "/admin/corporate-health/companies", need="Corporate Health Manage")
+                        or {}).get("companies") or [] if isinstance(c, dict)]
+    same = next((c for c in rows if " ".join(str(c.get("name") or "").lower().split()) == name.lower()), None)
+    if same:
+        raise EmptyPlan(f"{same.get('name')} is already a corporate client.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/corporate-health/companies"))
+        rows = (out.data or {}).get("companies") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None:
+            return None, "Couldn't read the companies back"
+        ok = any(isinstance(c, dict) and c.get("name") == name for c in rows)
+        return ok, "On the corporate client list" if ok else "Not on the list"
+
+    return {"title": f"Add {name} as a corporate client", "bullets": [f"Company: {name}."],
+            "warnings": ["Upload its employee reports and add viewer logins on the Corporate Health page."],
+            "snapshot": {"companies": len(rows)},
+            "steps": [_step(f"Add {name}", _call("POST", "/admin/corporate-health/companies", json={"name": name}),
+                            verify=verify)]}
+
+
+# ── Voice-first batch 6: IPD setup (wards, beds, bed tariffs); IPD admin only (the routes) ──
+
+async def _ipd_setup(read) -> dict:
+    return await _get_or_refuse(read, f"{_IPD}/setup", need="IPD Admin") or {}
+
+
+def _code_from(name: str, taken: set, limit: int = 20) -> str:
+    base = re.sub(r"[^A-Z0-9]+", "-", name.upper()).strip("-")[:limit - 3] or "W"
+    code, n = base, 2
+    while code.lower() in taken:
+        code, n = f"{base}-{n}", n + 1
+    return code
+
+
+async def ward_create_preview(read, params: dict) -> dict:
+    name, kind = params["name"], params["ward_type"]
+    wards = [w for w in (await _ipd_setup(read)).get("wards") or [] if isinstance(w, dict)]
+    same = next((w for w in wards if str(w.get("name") or "").lower() == name.lower()), None)
+    if same:
+        raise EmptyPlan(f"{same.get('name')} is already a ward.")
+    code = _code_from(name, {str(w.get("code") or "").lower() for w in wards})
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/setup"))
+        rows = (out.data or {}).get("wards") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None:
+            return None, "Couldn't read the wards back"
+        ok = any(isinstance(w, dict) and w.get("code") == code for w in rows)
+        return ok, f"Ward {code} added" if ok else "Not on the ward list"
+
+    return {"title": f"Add the {name} ward", "bullets": [f"{name}: {kind.replace('_', ' ')} ward, code {code}."],
+            "warnings": ["Add its beds next, e.g. \"add beds 1 to 10 to the " + name + " ward\"."],
+            "snapshot": {"wards": sorted(str(w.get("code")) for w in wards)},
+            "steps": [_step(f"Add {name}", _call("POST", f"{_IPD}/wards", json={"code": code, "name": name,
+                                                                                 "ward_type": kind}), verify=verify)]}
+
+
+_WARD_CATEGORY = {"semi_private": "semi_private", "private": "private", "icu": "icu", "nicu": "nicu", "picu": "picu",
+                  "hdu": "hdu", "isolation": "isolation", "maternity": "general", "daycare": "daycare"}
+
+
+async def beds_create_preview(read, params: dict) -> dict:
+    """R3, typed count of beds. Codes are the range said, or the next numbers after the ward's own; a code
+    already in the ward is refused before anything is written."""
+    setup = await _ipd_setup(read)
+    wards = [w for w in setup.get("wards") or [] if isinstance(w, dict) and w.get("is_active", True)]
+    term = params["ward"]
+    found = [w for w in wards if term in (str(w.get("name") or "").lower(), str(w.get("code") or "").lower())] \
+        or [w for w in wards if all(x in f"{w.get('name')} {w.get('code')}".lower() for x in term.split())]
+    ward = _only(found, term, "ward", lambda w: f"{w.get('name')} ({w.get('code')})")
+    board_beds = [b for b in _beds(await _get_or_refuse(read, f"{_IPD}/board", need="IPD"))
+                  if str(b.get("_ward")) in (str(ward.get("name")), str(ward.get("code")))]
+    have = {str(b.get("code") or "").upper() for b in board_beds}
+    plan = params["plan"]
+    if "count" in plan:
+        nums = [(m.group(1), int(m.group(2))) for c in have if (m := re.fullmatch(r"([A-Z-]*?)(\d+)", c))]
+        prefix = Counter(p for p, _ in nums).most_common(1)[0][0] if nums else ""
+        start = max((n for p, n in nums if p == prefix), default=0) + 1
+        codes = [f"{prefix}{n}" for n in range(start, start + plan["count"])]
+    else:
+        codes = [f"{plan['prefix']}{n}" for n in range(plan["from"], plan["to"] + 1)]
+    clash = [c for c in codes if c in have]
+    if clash:
+        raise EmptyPlan(f"{ward.get('name')} already has bed {', '.join(clash[:5])}. Say a range that is free.")
+    category = params.get("category") or _WARD_CATEGORY.get(str(ward.get("ward_type")), "general")
+    tariff = (setup.get("settings") or {}).get("bed_tariffs", {}).get(category)
+    body = {"beds": [{"code": c, "bed_category": category} for c in codes]}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/board"))
+        if out.status != "ok":
+            return None, "Couldn't read the bed board back"
+        now = {str(b.get("code")).upper() for b in _beds(out.data) if str(b.get("_ward")) == str(ward.get("name"))}
+        missing = [c for c in codes if c not in now]
+        return (not missing), "On the bed board" if not missing else f"{len(missing)} not on the bed board"
+
+    return {"title": f"Add {_plural(len(codes), 'bed')} to {ward.get('name')}",
+            "bullets": [f"Beds {codes[0]}" + (f" to {codes[-1]}" if len(codes) > 1 else "") + f", {_cat_label(category, lower=True)}.",
+                        f"Bed tariff: {present.fmt(tariff, 'paise')} a day." if tariff is not None else
+                        f"No tariff is set for {_cat_label(category, lower=True)} beds yet."],
+            "warnings": ["New beds are free for admission straight away."], "affected": len(codes),
+            "snapshot": {"ward": str(ward.get("id")), "have": sorted(have)},
+            "steps": [_step("Add the beds", _call("POST", f"{_IPD}/wards/{ward['id']}/beds", json=body), verify=verify)]}
+
+
+def _cat_label(cat: str, lower: bool = False) -> str:
+    """"icu" -> "ICU", "semi_private" -> "Semi private" (or "semi private" mid-sentence)."""
+    words = [w.upper() if w in ("icu", "nicu", "picu", "hdu", "ccu") else w for w in cat.split("_")]
+    text = " ".join(words)
+    return text if lower or text[:1].isupper() else text[:1].upper() + text[1:]
+
+
+async def bed_tariff_preview(read, params: dict) -> dict:
+    """The settings write replaces the whole tariff table, so the body is every current tariff with this one
+    changed: setting ICU never drops the general ward's price."""
+    cat = params["category"]
+    kind, value = params["price"][0], Decimal(params["price"][1])
+    tariffs = dict(((await _ipd_setup(read)).get("settings") or {}).get("bed_tariffs") or {})
+    old = Decimal(int(tariffs.get(cat) or 0)) / 100
+    new = new_price(old, params["price"]) if kind != "amount" else int(value)
+    if not 0 < new <= 1_000_000:
+        raise EmptyPlan(f"A bed tariff of {_inr(new)} a day is outside ₹1 to ₹10,00,000.")
+    if cat in tariffs and new * 100 == int(tariffs[cat]):
+        raise EmptyPlan(f"{_cat_label(cat)} beds are already {_inr(new)} a day.")
+    body = {"bed_tariffs": {**tariffs, cat: new * 100}}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/setup"))
+        got = ((out.data or {}).get("settings") or {}).get("bed_tariffs") if out.status == "ok" and isinstance(out.data, dict) else None
+        if got is None:
+            return None, "Couldn't read the tariffs back"
+        ok = int(got.get(cat) or -1) == new * 100 and all(int(got.get(k) or -1) == int(v) for k, v in tariffs.items() if k != cat)
+        return ok, f"{_cat_label(cat)}: {_inr(new)} a day" if ok else "The tariffs read back differ"
+
+    was = _inr(int(old)) if cat in tariffs else "not set"
+    others = [f"{_cat_label(k, lower=True)} {present.fmt(v, 'paise')}" for k, v in tariffs.items() if k != cat]
+    return {"title": f"Set the {_cat_label(cat, lower=True)} bed tariff",
+            "bullets": [f"{_cat_label(cat)} beds: {was} → {_inr(new)} a day."]
+            + ([f"Unchanged: {', '.join(others)}."] if others else []),
+            # ipd_accrue_bed_charges prices each day when it is charged, at the tariff of that moment
+            "warnings": ["Bed days not charged yet use the new tariff, including earlier days of patients admitted "
+                         "now; days already charged keep their price."],
+            "snapshot": {"tariffs": tariffs},
+            "steps": [_step("Save the tariff", _call("PUT", f"{_IPD}/settings", json=body), verify=verify)]}
+
+
+# ── Voice-first batch 7: OPD / IPD settings, insurance payers and claims ──
+
+_OPD_SETUP = "/admin/opd/setup"
+_OPD_LABELS = {"vitals_required": ("Vitals", {True: "required", False: "optional"}),
+               "billing_after_consult": ("Billing", {True: "after the consultation", False: "before the consultation"}),
+               "auto_open_shift": ("Open a cash shift automatically", {True: "on", False: "off"}),
+               "after_checkin_stage": ("After check-in", {"vitals_pending": "vitals", "waiting": "waiting",
+                                                          "registered": "registered"}),
+               "payment_modes": ("Payment modes", None)}
+
+
+def _opd_value(key, value) -> str:
+    names = _OPD_LABELS[key][1]
+    if names is None:
+        return ", ".join(str(v).upper() for v in value or []) or "none"
+    return names.get(value, str(value)) if value is not None else "not set"
+
+
+async def opd_setting_preview(read, params: dict) -> dict:
+    current = (await _get_or_refuse(read, _OPD_SETUP, need="OPD Admin") or {}).get("settings") or {}
+    patch = {k: v for k, v in params["changes"].items() if current.get(k) != v}
+    if not patch:
+        raise EmptyPlan("OPD is already set that way.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", _OPD_SETUP))
+        got = (out.data or {}).get("settings") if out.status == "ok" and isinstance(out.data, dict) else None
+        if got is None:
+            return None, "Couldn't read the OPD settings back"
+        ok = all(got.get(k) == v for k, v in patch.items())
+        return ok, "Saved" if ok else "The OPD settings read back differ"
+
+    return {"title": "Change OPD settings",
+            "bullets": [f"{_OPD_LABELS[k][0]}: {_opd_value(k, current.get(k))} → {_opd_value(k, v)}." for k, v in patch.items()],
+            "warnings": ["The front desk and queue use this straight away."],
+            "snapshot": {k: current.get(k) for k in patch},
+            "steps": [_step("Save OPD settings", _call("PUT", f"{_OPD_SETUP}/settings", json=patch), verify=verify)]}
+
+
+async def opd_room_preview(read, params: dict) -> dict:
+    """The settings write replaces the whole room table, so every doctor's current room is sent with this one."""
+    doc = await _doctor(read, params["doctor"])
+    rooms = dict(((await _get_or_refuse(read, _OPD_SETUP, need="OPD Admin") or {}).get("settings") or {}).get("rooms") or {})
+    did, room = str(doc["id"]), params["room"]
+    if rooms.get(did) == room:
+        raise EmptyPlan(f"{doc.get('name')} is already in {room}.")
+    taken = [d.get("name") for d in await _get(read, "/admin/doctors") if isinstance(d, dict)
+             and rooms.get(str(d.get("id"))) == room and str(d.get("id")) != did]
+    body = {"rooms": {**rooms, did: room}}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", _OPD_SETUP))
+        got = ((out.data or {}).get("settings") or {}).get("rooms") if out.status == "ok" and isinstance(out.data, dict) else None
+        if got is None:
+            return None, "Couldn't read the rooms back"
+        ok = got.get(did) == room and all(got.get(k) == v for k, v in rooms.items() if k != did)
+        return ok, f"{doc.get('name')}: {room}" if ok else "The rooms read back differ"
+
+    return {"title": f"Put {doc.get('name')} in {room}",
+            "bullets": [f"{doc.get('name')}: {rooms.get(did) or 'no room'} → {room}."],
+            "warnings": (["Patients are called to this room on WhatsApp and the queue screen."]
+                         + ([f"{', '.join(taken)} also {'uses' if len(taken) == 1 else 'use'} {room}."] if taken else [])),
+            "snapshot": {"rooms": rooms},
+            "steps": [_step("Save the room", _call("PUT", f"{_OPD_SETUP}/settings", json=body), verify=verify)]}
+
+
+_IPD_LABELS = {"discharge_cutoff_hour": "Discharge cut-off", "reservation_minutes": "A reserved bed is held for"}
+
+
+def _ipd_value(key, value) -> str:
+    if value is None:
+        return "not set"
+    return f"{int(value):02d}:00" if key == "discharge_cutoff_hour" else f"{value} minutes"
+
+
+async def ipd_settings_preview(read, params: dict) -> dict:
+    current = (await _ipd_setup(read)).get("settings") or {}
+    patch = {k: v for k, v in params["changes"].items() if current.get(k) != v}
+    if not patch:
+        raise EmptyPlan("IPD is already set that way.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/setup"))
+        got = (out.data or {}).get("settings") if out.status == "ok" and isinstance(out.data, dict) else None
+        if got is None:
+            return None, "Couldn't read the IPD settings back"
+        ok = all(got.get(k) == v for k, v in patch.items())
+        return ok, "Saved" if ok else "The IPD settings read back differ"
+
+    warnings = ["The cut-off decides whether the discharge day is charged as a bed day."] \
+        if "discharge_cutoff_hour" in patch else []
+    return {"title": "Change IPD settings",
+            "bullets": [f"{_IPD_LABELS[k]}: {_ipd_value(k, current.get(k))} → {_ipd_value(k, v)}." for k, v in patch.items()],
+            "warnings": warnings, "snapshot": {k: current.get(k) for k in patch},
+            "steps": [_step("Save IPD settings", _call("PUT", f"{_IPD}/settings", json=patch), verify=verify)]}
+
+
+_INS = "/admin/insurance"
+_PAYER_LABEL = {"tpa": "TPA", "private_insurance": "insurer", "government_scheme": "government scheme",
+                "corporate": "corporate payer"}
+
+
+async def payer_create_preview(read, params: dict) -> dict:
+    name, kind = params["name"], params["kind"]
+    rows = [p for p in (await _get_or_refuse(read, f"{_INS}/payers", need="Insurance") or {}).get("payers") or []
+            if isinstance(p, dict)]
+    same = next((p for p in rows if str(p.get("name") or "").lower() == name.lower()), None)
+    if same:
+        raise EmptyPlan(f"{same.get('name')} is already in the payer list.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_INS}/payers"))
+        got = (out.data or {}).get("payers") if out.status == "ok" and isinstance(out.data, dict) else None
+        if got is None:
+            return None, "Couldn't read the payers back"
+        ok = any(isinstance(p, dict) and p.get("name") == name for p in got)
+        return ok, "In the payer list" if ok else "Not in the payer list"
+
+    return {"title": f"Add {name}", "bullets": [f"{name}: {_PAYER_LABEL[kind]}."],
+            "warnings": ["Add its portal, email and phone on the Insurance page."], "snapshot": {"payers": len(rows)},
+            "steps": [_step(f"Add {name}", _call("POST", f"{_INS}/payers", json={"name": name, "payer_type": kind}),
+                            verify=verify)]}
+
+
+async def _claim(read, target: str) -> dict:
+    rows = [c for c in (await _get_or_refuse(read, f"{_INS}/claims", {"view": "open"}, "Insurance") or {}).get("items")
+            or [] if isinstance(c, dict)]
+    if target.startswith("claim:"):
+        found = [c for c in rows if str(c.get("claim_number") or "").upper().replace("-", "")
+                 == target[6:].replace("-", "")]
+    elif target.startswith("bed:"):
+        b = await _inpatient_bed(read, target)
+        found = [c for c in rows if str(c.get("admission_id")) == str(b["occupant"]["admission_id"])]
+    else:
+        found = _named(rows, target, lambda c: c.get("patient_name"))
+    return _only(found, target.replace("claim:", "claim ").replace("bed:", "bed "), "open claim",
+                 lambda c: f"{c.get('claim_number')} ({c.get('patient_name')}, {c.get('payer_name') or 'payer'})")
+
+
+def _claim_after(cid: str, ok, said):
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_INS}/claims/{cid}"))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the claim back"
+        return (True, said(out.data)) if ok(out.data) else (False, f"The claim is {out.data.get('status')}")
+    return verify
+
+
+async def settlement_preview(read, params: dict) -> dict:
+    """R3, typed rupees received. Disallowances are reason-coded on the claim page; the key comes from the
+    claim, what it has been paid, and this payment, so a double confirm records one settlement."""
+    c = await _claim(read, params["target"])
+    received, tds = int(Decimal(params["amount"])), int(Decimal(params.get("tds") or 0))
+    if received and not params.get("utr"):
+        raise EmptyPlan("Say the UTR / NEFT reference of the payment, e.g. \"UTR AXIS123456\".")
+    split = c.get("split") or {}
+    left = int(split.get("payer_payable_paise") or 0) - int(split.get("payer_received_paise") or 0) \
+        - int(split.get("tds_paise") or 0) - int(split.get("disallowed_paise") or 0)
+    if (received + tds) * 100 > left:
+        raise EmptyPlan(f"{_inr(received + tds)} is more than the {present.fmt(left, 'paise')} still due on "
+                        f"{c.get('claim_number')}.")
+    cid, settled = str(c["id"]), int(c.get("settled_amount_paise") or 0)
+    key = hashlib.sha256(f"ketu-settle:{cid}:{settled}:{received}:{tds}:{params.get('utr')}".encode()).hexdigest()[:40]
+    body = {"amount_received_paise": received * 100, "tds_paise": tds * 100, "idempotency_key": key,
+            **({"utr_number": params["utr"]} if params.get("utr") else {})}
+    after = left - (received + tds) * 100
+    return {"title": f"Record {_inr(received)} from {c.get('payer_name') or 'the insurer'}",
+            "bullets": [f"{c.get('claim_number')}: {c.get('patient_name')}, {present.fmt(left, 'paise')} due.",
+                        f"Received {_inr(received)}" + (f", TDS {_inr(tds)}" if tds else "")
+                        + (f", UTR {params['utr']}" if params.get("utr") else "") + ".",
+                        "Fully settled." if after == 0 else f"{present.fmt(after, 'paise')} still due after this."],
+            "warnings": ["Record any disallowed amount with its reason on the Insurance page."],
+            "affected": received, "snapshot": {"id": cid, "settled": settled, "left": left},
+            "steps": [_step("Record the settlement", _call("POST", f"{_INS}/claims/{cid}/settlement", json=body),
+                            verify=_claim_after(cid, lambda x: int(x.get("settled_amount_paise") or 0)
+                                                >= settled + received * 100,
+                                                lambda x: f"Claim {str(x.get('status')).replace('_', ' ')}"))]}
+
+
+_CLAIM_TO = {"query": "query_raised", "in_process": "in_process", "withdraw": "withdrawn"}
+
+
+async def claim_status_preview(read, params: dict) -> dict:
+    action, note = params["action"], params.get("note")
+    if action in ("query", "withdraw") and not note:
+        raise EmptyPlan("Say the insurer's query, e.g. \"query: discharge summary missing\"." if action == "query"
+                        else "Say why the claim is withdrawn, e.g. \"because the patient will pay\".")
+    c = await _claim(read, params["target"])
+    to = _CLAIM_TO[action]
+    if c.get("status") == to and action != "query":   # a second query replaces the first one's details
+        raise EmptyPlan(f"{c.get('claim_number')} is already {to.replace('_', ' ')}.")
+    if action == "withdraw" and int(c.get("settled_amount_paise") or 0) + int(c.get("tds_deducted_paise") or 0) > 0:
+        raise EmptyPlan(f"{c.get('claim_number')} has money recorded against it, so it can't be withdrawn.")
+    cid = str(c["id"])
+    return {"title": f"Mark {c.get('claim_number')} {to.replace('_', ' ')}",
+            "bullets": [f"{c.get('claim_number')}: {c.get('patient_name')}, {c.get('payer_name') or 'payer'}.",
+                        f"{str(c.get('status')).replace('_', ' ')} → {to.replace('_', ' ')}."]
+            + ([f"{'Query' if action == 'query' else 'Reason'}: {note}."] if note else []),
+            "warnings": ["A withdrawn claim can't be reopened."] if action == "withdraw" else [],
+            "snapshot": {"id": cid, "status": c.get("status")},
+            "steps": [_step("Update the claim", _call("POST", f"{_INS}/claims/{cid}/action",
+                                                      json={"action": action, **({"note": note} if note else {})}),
+                            verify=_claim_after(cid, lambda x: x.get("status") == to,
+                                                lambda x: f"Now {str(x.get('status')).replace('_', ' ')}"))]}
+
+
+# ── Voice-first batch 8: IPD discounts, packages, insurance pre-authorisations ──
+
+async def _stay(read, target: str) -> dict:
+    """The occupied bed of an inpatient named by bed or name (the same rules as every IPD action)."""
+    return await _inpatient_bed(read, target)
+
+
+async def _running_bill(read, adm: str) -> Optional[dict]:
+    out = await read(_call("GET", f"{_IPD}/admissions/{adm}/running-bill"))
+    return out.data if out.status == "ok" and isinstance(out.data, dict) else None
+
+
+async def discount_request_preview(read, params: dict) -> dict:
+    """R3, typed rupees. Within the requester's own limit it is approved at once, else it waits for an approver
+    (the server decides; never the same person). The key is per stay, amount and reason."""
+    rupees, reason = int(Decimal(params["amount"])), params["reason"]
+    if len(reason) < 5:
+        raise EmptyPlan("Say the reason in a few words, e.g. \"because of family hardship\".")
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    bill = await _running_bill(read, adm) or {}
+    payable = int(bill.get("payable_paise") or 0)
+    if bill and rupees * 100 > payable:
+        raise EmptyPlan(f"{_inr(rupees)} is more than the {present.fmt(payable, 'paise')} the stay owes.")
+    key = hashlib.sha256(f"ketu-discount:{adm}:{rupees}:{reason.lower()}".encode()).hexdigest()[:40]
+
+    async def verify(read, data, call):
+        status = data.get("status") if isinstance(data, dict) else None
+        after = await _running_bill(read, adm)
+        if status not in ("requested", "approved") or after is None:
+            return None, "Couldn't read the discount back"
+        seen = after.get("discount") if status == "approved" else after.get("pending_discount")
+        return (bool(seen), "Approved" if status == "approved" else "Waiting for an approver") if seen else \
+            (False, "Not on the running bill")
+
+    return {"title": f"Discount {_inr(rupees)} for {_bed_line(b)}",
+            "bullets": [f"Reason: {reason}."] + ([f"The stay owes {present.fmt(payable, 'paise')} now."] if bill else []),
+            "warnings": ["Above your approval limit it waits for an IPD admin to approve."],
+            "affected": rupees, "snapshot": {"admission_id": adm, "payable": payable},
+            "steps": [_step("Request the discount", _call("POST", f"{_IPD}/admissions/{adm}/discounts",
+                                                          json={"amount_paise": rupees * 100, "reason": reason,
+                                                                "idempotency_key": key}), verify=verify)]}
+
+
+async def discount_decision_preview(read, params: dict) -> dict:
+    """R3, typed rupees of the request. Approve / reject by an IPD admin (the server also checks the approver's
+    limit and that nobody approves their own request)."""
+    decision = params["decision"]
+    rows = [d for d in (await _get_or_refuse(read, f"{_IPD}/discounts/pending", need="IPD Admin") or {}).get("discounts")
+            or [] if isinstance(d, dict)]
+    target = params["target"]
+    if target.startswith("bed:"):
+        b = await _stay(read, target)
+        found = [d for d in rows if str(d.get("admission_id")) == str(b["occupant"]["admission_id"])]
+    else:
+        found = _named(rows, target, lambda d: d.get("patient_name"))
+    d = _only(found, target.replace("bed:", "bed "), "pending discount",
+              lambda d: f"{d.get('patient_name')}: {present.fmt(d.get('amount_paise'), 'paise')}")
+    rupees, did = int(d.get("amount_paise") or 0) // 100, str(d["id"])
+    note = params.get("note")
+
+    async def verify(read, data, call):
+        status = data.get("status") if isinstance(data, dict) else None
+        out = await read(_call("GET", f"{_IPD}/discounts/pending"))
+        still = any(isinstance(x, dict) and str(x.get("id")) == did for x in (out.data or {}).get("discounts") or []) \
+            if out.status == "ok" and isinstance(out.data, dict) else None
+        if still is None:
+            return None, "Couldn't read the discounts back"
+        return (status == decision and not still), f"{decision.capitalize()}" if not still else "Still pending"
+
+    return {"title": f"{'Approve' if decision == 'approved' else 'Reject'} {_inr(rupees)} discount for "
+                     f"{d.get('patient_name')}",
+            "bullets": [f"Requested by {d.get('requested_by_name') or 'staff'}: {d.get('reason') or ''}"] +
+                       ([f"Note: {note}."] if note else []),
+            "warnings": ["Approved discounts lower the final bill."] if decision == "approved" else [],
+            "affected": rupees, "snapshot": {"id": did, "amount": d.get("amount_paise")},
+            "steps": [_step(f"{decision.capitalize()} the discount", _call("POST", f"{_IPD}/discounts/{did}/decision",
+                                                                         json={"decision": decision,
+                                                                               **({"note": note} if note else {})}),
+                            verify=verify)]}
+
+
+async def package_apply_preview(read, params: dict) -> dict:
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    pkgs = [p for p in (await _get_or_refuse(read, f"{_IPD}/packages", {"active": True}, "IPD Billing") or {})
+            .get("packages") or [] if isinstance(p, dict)]
+    words = params["package"].split()
+    found = [p for p in pkgs if all(w in f"{p.get('name')} {p.get('code')}".lower() for w in words)]
+    pkg = _only(found, params["package"], "active package",
+                lambda p: f"{p.get('name')} ({present.fmt(p.get('price_paise'), 'paise')})")
+    bill = await _running_bill(read, adm) or {}
+    if bill.get("package"):
+        raise EmptyPlan(f"{_bed_line(b)} already has a package. Remove it on the chart first.")
+
+    async def verify(read, data, call):
+        after = await _running_bill(read, adm)
+        if after is None:
+            return None, "Couldn't read the running bill back"
+        got = after.get("package") or {}
+        ok = str(got.get("package_id") or got.get("id") or "") == str(pkg["id"]) or got.get("name") == pkg.get("name")
+        return ok, f"On {pkg.get('name')}" if ok else "No package on the running bill"
+
+    cats = ", ".join(str(c).replace("_", " ") for c in pkg.get("included_categories") or [])
+    return {"title": f"Put {_bed_line(b)} on {pkg.get('name')}",
+            "bullets": [f"{pkg.get('name')}: {present.fmt(pkg.get('price_paise'), 'paise')}"
+                        + (f", up to {pkg['max_days']} days" if pkg.get("max_days") else "") + ".",
+                        f"Covers: {cats or 'as set on the package'}."],
+            "warnings": ["Charges in the covered categories move into the package price."],
+            "snapshot": {"admission_id": adm, "package": str(pkg["id"])},
+            "steps": [_step("Apply the package", _call("POST", f"{_IPD}/admissions/{adm}/package",
+                                                       json={"package_id": str(pkg["id"])}), verify=verify)]}
+
+
+async def _preauth(read, target: str, statuses: tuple) -> dict:
+    rows = [p for p in (await _get_or_refuse(read, f"{_INS}/pre-auths", None, "Insurance") or {}).get("items") or []
+            if isinstance(p, dict) and p.get("status") in statuses]
+    if target.startswith("preauth:"):
+        found = [p for p in rows if str(p.get("pre_auth_number") or "").upper().replace("-", "")
+                 == target[8:].replace("-", "")]
+    elif target.startswith("bed:"):
+        b = await _stay(read, target)
+        found = [p for p in rows if str(p.get("admission_id")) == str(b["occupant"]["admission_id"])]
+    else:
+        found = _named(rows, target, lambda p: p.get("patient_name"))
+    return _only(found, target.split(":", 1)[-1], "pre-authorisation that can take this",
+                 lambda p: f"{p.get('pre_auth_number')} ({p.get('patient_name')}, {str(p.get('status')).replace('_', ' ')})")
+
+
+def _requested(p: dict) -> int:
+    return int(p.get("initial_requested_paise") or 0) + int(p.get("enhanced_requested_paise") or 0)
+
+
+def _preauth_after(pid: str, ok, said: str):
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_INS}/pre-auths"))
+        rows = (out.data or {}).get("items") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None:
+            return None, "Couldn't read the pre-authorisations back"
+        row = next((r for r in rows if isinstance(r, dict) and str(r.get("id")) == pid), None)
+        return (True, said) if row is not None and ok(row) else (False, "The pre-authorisation shows otherwise")
+    return verify
+
+
+async def preauth_approve_preview(read, params: dict) -> dict:
+    """R3, typed rupees: the TOTAL the insurer's latest letter approves, with its approval reference."""
+    p = await _preauth(read, params["target"], ("submitted", "query_raised", "enhancement_requested"))
+    rupees, ref, pid = int(Decimal(params["amount"])), params["ref"], str(p["id"])
+    before = int(p.get("total_approved_paise") or 0)
+    if before and rupees * 100 < before:
+        raise EmptyPlan(f"The insurer had approved {present.fmt(before, 'paise')} already. Say the new TOTAL from "
+                        "their latest letter.")
+    return {"title": f"Record {_inr(rupees)} approved for {p.get('patient_name')}",
+            "bullets": [f"{p.get('pre_auth_number')}: {present.fmt(_requested(p), 'paise')} requested"
+                        + (f", {present.fmt(before, 'paise')} approved before" if before else "") + ".",
+                        f"Approved total {_inr(rupees)}, reference {ref}."],
+            "warnings": ["This is the TOTAL approved, not the extra amount. Attach the approval letter on the "
+                         "Insurance page."],
+            "affected": rupees, "snapshot": {"id": pid, "status": p.get("status"), "approved": before},
+            "steps": [_step("Record the approval", _call("PATCH", f"/admin/ipd/pre-auth/{pid}/decision",
+                                                         json={"decision": "approved", "approved_amount_paise": rupees * 100,
+                                                               "approval_ref": ref}),
+                            verify=_preauth_after(pid, lambda r: int(r.get("total_approved_paise") or 0) == rupees * 100,
+                                                  f"Approved {_inr(rupees)}"))]}
+
+
+async def preauth_reply_preview(read, params: dict) -> dict:
+    decision, note = params["decision"], params.get("note")
+    if not note:
+        raise EmptyPlan("Say what the insurer said, e.g. \"query: need the ultrasound report\" or "
+                        "\"rejected because the policy lapsed\".")
+    statuses = ("enhancement_requested",) if decision == "enhancement_denied" else ("submitted", "enhancement_requested",
+                                                                                     "query_raised")
+    p = await _preauth(read, params["target"], statuses)
+    pid = str(p["id"])
+    label = {"query_raised": "query raised", "rejected": "rejected", "enhancement_denied": "enhancement denied"}[decision]
+    return {"title": f"Record the insurer's {label} for {p.get('patient_name')}",
+            "bullets": [f"{p.get('pre_auth_number')}: {str(p.get('status')).replace('_', ' ')} → {label}.",
+                        f"Insurer: {note}."],
+            "warnings": ["A rejected pre-authorisation makes the stay self-pay unless a new one is approved."]
+            if decision == "rejected" else [],
+            "snapshot": {"id": pid, "status": p.get("status")},
+            "steps": [_step("Record the reply", _call("PATCH", f"/admin/ipd/pre-auth/{pid}/decision",
+                                                      json={"decision": decision, "note": note}),
+                            verify=_preauth_after(pid, lambda r: r.get("status") == decision,
+                                                  label.capitalize()))]}
+
+
+async def preauth_action_preview(read, params: dict) -> dict:
+    """Submit a draft to the insurer, or ask for more (an enhancement of the extra amount)."""
+    action = params["action"]
+    if action == "request_enhancement" and not params.get("amount"):
+        raise EmptyPlan("Say how much more to ask for, e.g. \"request enhancement of 20,000\".")
+    p = await _preauth(read, params["target"], ("draft",) if action == "submit" else ("approved",))
+    pid = str(p["id"])
+    body = {"action": action, **({"amount_paise": int(Decimal(params["amount"])) * 100} if action == "request_enhancement"
+                                 else {})}
+    to = "submitted" if action == "submit" else "enhancement_requested"
+    return {"title": (f"Submit {p.get('patient_name')}'s pre-authorisation" if action == "submit"
+                      else f"Ask {_inr(int(Decimal(params['amount'])))} more for {p.get('patient_name')}"),
+            "bullets": [f"{p.get('pre_auth_number')}: {present.fmt(_requested(p), 'paise')} requested"
+                        + (f", {present.fmt(p.get('total_approved_paise'), 'paise')} approved" if p.get("total_approved_paise")
+                           else "") + "."],
+            "warnings": ["Send the forms through the insurer's portal as usual; this records it here."],
+            "snapshot": {"id": pid, "status": p.get("status")},
+            "steps": [_step("Update the pre-authorisation", _call("POST", f"/admin/ipd/pre-auth/{pid}/action", json=body),
+                            verify=_preauth_after(pid, lambda r: r.get("status") == to, to.replace("_", " ").capitalize()))]}
+
+
+# ── Voice-first batch 9: package create, credit authorisation, new pre-auth, disallowances ──
+
+async def package_create_preview(read, params: dict) -> dict:
+    name, cover = params["name"], params["cover"]
+    kind, value = params["price"][0], Decimal(params["price"][1])
+    if kind != "amount" or not 0 < value <= 1_000_000:
+        raise EmptyPlan("Say the package price in rupees, e.g. \"at 25,000\".")
+    pkgs = [p for p in (await _get_or_refuse(read, f"{_IPD}/packages", None, "IPD Admin") or {}).get("packages") or []
+            if isinstance(p, dict)]
+    same = next((p for p in pkgs if str(p.get("name") or "").lower() == name.lower()), None)
+    if same:
+        raise EmptyPlan(f"{same.get('name')} is already a package at {present.fmt(same.get('price_paise'), 'paise')}.")
+    code = _code_from(name, {str(p.get("code") or "").lower() for p in pkgs}, limit=40)
+    rupees = int(value)
+    body = {"code": code, "name": name, "price_paise": rupees * 100, "included_categories": cover,
+            **({"max_days": params["days"]} if params.get("days") else {})}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/packages"))
+        rows = (out.data or {}).get("packages") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None:
+            return None, "Couldn't read the packages back"
+        ok = any(isinstance(p, dict) and p.get("code") == code for p in rows)
+        return ok, f"Package {code} added" if ok else "Not in the package list"
+
+    return {"title": f"Create the {name} package",
+            "bullets": [f"{name}: {_inr(rupees)}" + (f", up to {params['days']} days" if params.get("days") else "") + ".",
+                        f"Covers: {', '.join(c.replace('_', ' ') for c in cover)}.", f"Code {code}."],
+            "warnings": ["Charges in the covered categories are absorbed into the package price for stays put on it."],
+            "snapshot": {"packages": len(pkgs)},
+            "steps": [_step(f"Create {name}", _call("POST", f"{_IPD}/packages", json=body), verify=verify)]}
+
+
+async def credit_preview(read, params: dict) -> dict:
+    """R3, typed rupees: a corporate / payer's written credit for a stay, with its reference."""
+    b = await _stay(read, params["target"])
+    adm, rupees = str(b["occupant"]["admission_id"]), int(Decimal(params["amount"]))
+    bill = await _running_bill(read, adm) or {}
+    if bill.get("credit"):
+        raise EmptyPlan(f"{_bed_line(b)} already has a credit authorisation. Revoke it on the chart first.")
+    body = {"payer_name": params["payer"], "reference": params["ref"], "amount_paise": rupees * 100}
+
+    async def verify(read, data, call):
+        after = await _running_bill(read, adm)
+        if after is None:
+            return None, "Couldn't read the running bill back"
+        return (bool(after.get("credit")), "On the running bill" if after.get("credit") else "Not on the running bill")
+
+    return {"title": f"Authorise {_inr(rupees)} credit for {_bed_line(b)}",
+            "bullets": [f"Payer: {params['payer']}, reference {params['ref']}."]
+            + ([f"The stay owes {present.fmt(bill.get('payable_paise'), 'paise')} now."] if bill else []),
+            "warnings": ["The patient is not asked for the covered amount at discharge; keep the payer's letter."],
+            "affected": rupees, "snapshot": {"admission_id": adm},
+            "steps": [_step("Authorise the credit", _call("POST", f"{_IPD}/admissions/{adm}/credit", json=body),
+                            verify=verify)]}
+
+
+async def preauth_create_preview(read, params: dict) -> dict:
+    """The stay's patient's valid policy (the one whose insurer is named, if several); the server allows one live
+    pre-authorisation per stay, so a repeat is refused there too."""
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    row = await _ipd_admission(read, adm)
+    if row is None or not row.get("patient_id"):
+        raise RuntimeError("read admission failed")
+    pols = [p for p in (await _get_or_refuse(read, f"{_INS}/policies/{row['patient_id']}", None, "Insurance") or {})
+            .get("policies") or [] if isinstance(p, dict) and p.get("is_valid_today")
+            and str(p.get("family_member_id") or "") == str(row.get("family_member_id") or "")]
+    if params.get("payer"):
+        pols = [p for p in pols if params["payer"] in str((p.get("payer") or {}).get("name") or "").lower()] or pols
+    if not pols:
+        raise EmptyPlan(f"{_bed_line(b)} has no valid insurance policy on file. Add it on the Insurance page first.")
+    if len(pols) > 1:
+        raise EmptyPlan(f"{len(pols)} valid policies: " + "; ".join(
+            f"{(p.get('payer') or {}).get('name')} {p.get('policy_number')}" for p in pols[:4])
+            + ". Say the insurer too, e.g. \"under Star Health\".")
+    pol, rupees = pols[0], int(Decimal(params["amount"]))
+    body = {"policy_id": str(pol["id"]), "requested_paise": rupees * 100, "provisional_diagnosis": params["indication"],
+            **({"expected_stay_days": params["days"]} if params.get("days") else {})}
+
+    async def verify(read, data, call):
+        pid = data.get("id") if isinstance(data, dict) else None
+        out = await read(_call("GET", f"{_INS}/pre-auths"))
+        rows = (out.data or {}).get("items") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None or not pid:
+            return None, "Couldn't read the pre-authorisations back"
+        hit = next((r for r in rows if isinstance(r, dict) and str(r.get("id")) == str(pid)), None)
+        return (hit is not None), (f"Submitted {hit.get('pre_auth_number')}" if hit else "Not in the pipeline")
+
+    return {"title": f"Request {_inr(rupees)} pre-authorisation for {_bed_line(b)}",
+            "bullets": [f"{(pol.get('payer') or {}).get('name')}, policy {pol.get('policy_number')}.",
+                        f"For: {params['indication']}." + (f" Expected stay {params['days']} days." if params.get("days") else "")],
+            "warnings": ["Send the insurer's forms through their portal as usual; this records it as submitted."],
+            "snapshot": {"admission_id": adm, "policy": str(pol["id"])},
+            "steps": [_step("Request the pre-authorisation", _call("POST", f"/admin/ipd/admissions/{adm}/pre-auth",
+                                                                   json=body), verify=verify)]}
+
+
+_DISALLOW_LABEL = {"non_payable_item": "non-payable items", "room_rent_proportionate": "room rent (proportionate)",
+                   "copay": "co-pay", "policy_limit": "policy / sub-limit", "excess_over_tariff": "over the tariff",
+                   "documentation_incomplete": "documents incomplete", "not_medically_necessary": "not medically necessary",
+                   "repudiated": "repudiated", "other": "other"}
+
+
+async def disallowance_preview(read, params: dict) -> dict:
+    """R3, typed rupees: an insurer's deduction on a claim, reason-coded; recorded through the settlement call
+    with nothing received, so the claim's own arithmetic decides what stays outstanding."""
+    c = await _claim(read, params["target"])
+    rupees, code, note = int(Decimal(params["amount"])), params["code"], params.get("note")
+    if code == "other" and not note:
+        raise EmptyPlan("Say why the insurer deducted it, e.g. \"because documents were missing\".")
+    split = c.get("split") or {}
+    left = int(split.get("payer_payable_paise") or 0) - int(split.get("payer_received_paise") or 0) \
+        - int(split.get("tds_paise") or 0) - int(split.get("disallowed_paise") or 0)
+    if rupees * 100 > left:
+        raise EmptyPlan(f"{_inr(rupees)} is more than the {present.fmt(left, 'paise')} still due on {c.get('claim_number')}.")
+    cid = str(c["id"])
+    before = int(split.get("disallowed_paise") or 0)
+    key = hashlib.sha256(f"ketu-disallow:{cid}:{before}:{rupees}:{code}".encode()).hexdigest()[:40]
+    body = {"amount_received_paise": 0, "tds_paise": 0, "idempotency_key": key,
+            "disallowances": [{"amount_paise": rupees * 100, "reason_code": code, **({"note": note} if note else {})}]}
+    return {"title": f"Record {_inr(rupees)} disallowed on {c.get('claim_number')}",
+            "bullets": [f"{c.get('patient_name')}, {c.get('payer_name') or 'payer'}: {present.fmt(left, 'paise')} due.",
+                        f"Reason: {_DISALLOW_LABEL[code]}" + (f" ({note})" if note else "") + "."],
+            "warnings": ["Decide later on the Insurance page whether it is written off or collected from the patient."],
+            "affected": rupees, "snapshot": {"id": cid, "disallowed": before},
+            "steps": [_step("Record the disallowance", _call("POST", f"{_INS}/claims/{cid}/settlement", json=body),
+                            verify=_claim_after(cid, lambda x: int((x.get("split") or {}).get("disallowed_paise")
+                                                                   or x.get("disallowed_amount_paise") or 0)
+                                                >= before + rupees * 100, lambda x: "Recorded"))]}

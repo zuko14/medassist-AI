@@ -13,9 +13,12 @@ from app.assistant.registry import REGISTRY
 
 NEW_READS = ("orders.to_collect", "lis.pending_signoff", "emergency.board", "services.prices",
              "ipd_finance.receivables")
-NEW_HANDOFFS = ("orders.collect", "lis.enter_results", "lis.sign", "emergency.register", "emergency.mlc",
-                "services.edit", "billing.credit_note", "billing.gstr1", "documents.certificate",
-                "documents.consent", "ipd_finance.deposit")
+NEW_HANDOFFS = ("orders.collect", "lis.enter_results", "lis.sign", "emergency.mlc",
+                "services.edit", "billing.gstr1", "documents.certificate",
+                "documents.consent")
+# voice-first (2026-10-30): confirmed writes with a read-back
+VOICE_WRITES = ("emergency.register", "ipd_finance.deposit", "services.price", "ot.schedule", "services.create",
+                "billing.credit_note", "ipd_finance.credit")
 CLINIC = {"id": "c1", "plan": "hospital", "opd_enabled": True, "opd_state": "READY", "ipd_access": "ACTIVE",
           "features": {"kriya_ketu": True, "opd": True, "ipd": True}}
 
@@ -28,6 +31,7 @@ def _user(role="staff", perms=(), staff_role=None):
 def test_registered_with_the_right_tier():
     assert all(REGISTRY[a].risk == "R0" for a in NEW_READS)
     assert all(REGISTRY[a].risk == "H" for a in NEW_HANDOFFS)
+    assert all(REGISTRY[a].risk in ("R2", "R3") and REGISTRY[a].verify for a in VOICE_WRITES)
 
 
 @pytest.mark.parametrize("text, action", [
@@ -48,7 +52,7 @@ def test_registered_with_the_right_tier():
     ("rapid admit an accident case", "emergency.register"),
     ("register mlc for the accident patient", "emergency.mlc"),
     ("register emergency patient", "emergency.register"),
-    ("add a new service for physiotherapy", "services.edit"),
+    ("add a new service for physiotherapy", "services.create"),
     ("issue a credit note on bill 104", "billing.credit_note"),
     ("download gstr1 for october", "billing.gstr1"),
     ("give a medical certificate to ravi", "documents.certificate"),
@@ -112,8 +116,8 @@ def test_cards_show_the_page_rows():
     assert ["Total due", "₹12,500"] in rows and ["Deposits held", "₹500"] in rows
 
     services = {"services": [{"code": "XR1", "name": "X Ray Chest PA", "category": "radiology",
-                              "standard_price_paise": 45000}, {"code": "US1", "name": "USG Abdomen",
-                              "standard_price_paise": 90000}, {"code": "OLD", "name": "X Ray Chest old",
+                              "price_paise": 45000}, {"code": "US1", "name": "USG Abdomen",
+                              "price_paise": 90000}, {"code": "OLD", "name": "X Ray Chest old",
                               "active": False}]}
     card = REGISTRY["services.prices"].present([SimpleNamespace(data=services)], {"q": "x ray chest"})["cards"][0]
     assert card["rows"] == [["XR1", "X Ray Chest PA", "Radiology", "₹450"]]
@@ -121,7 +125,7 @@ def test_cards_show_the_page_rows():
 
 # ── Operation theatre (migration 122): one read, three hand-offs ─────────────
 
-OT_HANDOFFS = ("ot.schedule", "ot.checklist", "ot.finish")
+OT_HANDOFFS = ("ot.checklist", "ot.finish")  # booking is by voice now; the theatre records are not
 
 
 def test_ot_actions_are_a_read_and_hand_offs_only():

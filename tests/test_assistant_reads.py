@@ -207,7 +207,7 @@ DATA = {
                                           "patient_name": "Ravi", "mrn": "MRN-3", "procedure_name": "Appendicectomy",
                                           "surgeon_name": "Dr. Iyer", "status": "scheduled"}], "active": 1},
     "/admin/masters/services": {"services": [{"code": "XR1", "name": "X Ray Chest PA", "category": "radiology",
-                                              "standard_price_paise": 45000}], "can_manage": True},
+                                              "price_paise": 45000}], "can_manage": True},
     "/admin/ipd/receivables": {"bills": [], "ageing_paise": {"0-30": 1250000, "31-60": 0, "61-90": 0, "90+": 0},
                                "total_due_paise": 1250000, "deposits_held": [], "deposits_held_paise": 50000},
     "/admin/lab-tests": [{"name": "CBC", "price_paise": 35000, "sample_type": "blood", "is_active": True}],
@@ -502,7 +502,7 @@ def test_no_show_rate_is_computed_from_the_same_figures():
     ("doctor fee kitna hai", "doctors.list"), ("show doctor fees", "doctors.list"),
     ("change dr meena consultation fee to 600", "doctor.fee"), ("update Dr Rao's fee", "doctor.fee"),
 ])
-def test_a_fee_question_reads_the_fees_and_a_fee_change_is_handed_to_the_page(text, aid):
+def test_a_fee_question_reads_the_fees_and_a_fee_change_is_the_fee_action(text, aid):
     r = rules.route(text)
     assert r.action_id == aid, r
 

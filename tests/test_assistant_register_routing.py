@@ -44,8 +44,8 @@ def test_doctor_name_is_read_from_the_sentence(text, name):
 @pytest.mark.parametrize("text,action", [
     ("register staff Priya", "staff.create"), ("register a nurse", "staff.create"),
     ("register nurse Priya", "staff.create"), ("add nurse Priya", "staff.create"),
-    ("register receptionist", "staff.create"), ("register branch Kukatpally", "branch.manage"),
-    ("register company Infosys", "corporate.manage"),
+    ("register receptionist", "staff.create"), ("register branch Kukatpally", "branch.create"),
+    ("register company Infosys", "corporate.create"),
 ])
 def test_other_registrations_hand_off_to_their_own_page(text, action):
     r = _route(text)
@@ -108,7 +108,7 @@ def test_a_clarify_reply_on_an_open_patient_form_is_not_vetoed():
 
 
 @pytest.mark.parametrize("text,action", [
-    ("admit Ravi to ward", "ipd.admit"), ("discharge Ravi", "ipd.discharge"),
+    ("admit Ravi to ward", "ipd.admit"), ("discharge Ravi", "ipd.discharge_start"),
     ("transfer Ravi to ICU", "ipd.transfer"), ("show inpatients", "ipd.inpatients"),
     ("pending discharges", "ipd.discharges"), ("discharge list", "ipd.discharges"),
     ("who is admitted", "ipd.inpatients"),
@@ -123,5 +123,8 @@ def test_a_bulk_discharge_is_never_offered(text):
 
 
 def test_ipd_hand_offs_never_execute():
-    for aid in ("ipd.admit", "ipd.discharge", "ipd.transfer", "ipd.vitals"):
+    for aid in ("ipd.discharge", "ipd.nursing"):
         assert REGISTRY[aid].risk == "H" and REGISTRY[aid].call is None, aid
+    # voice-first (2026-10-30): a bed move and charted vitals are confirmed writes with a read-back
+    for aid in ("ipd.transfer", "ipd.vitals", "ipd.admit", "ipd.discharge_start", "ipd.bed_status"):
+        assert REGISTRY[aid].risk == "R2" and REGISTRY[aid].verify is not None, aid

@@ -83,9 +83,28 @@ def test_resolve_days(text, days):
     ("create the doctor srikanth cardiology department", "Dr Srikanth"),
     ("create the doctor Dr srikant", "Dr srikant"), ("add a new doctor Sunil Kumar mornings 9 to 1", "Dr Sunil Kumar"),
     ("create a doctor Meera for dermatology", "Dr Meera"), ("create doctor leave for Rao", None),
+    ("the doctor's name is Ramesh Kumar and his specialization is dermatologist", "Dr Ramesh Kumar"),
+    ("name of the doctor is Dr Priya, fee 500", "Dr Priya"), ("doctor name is", None),
 ])
 def test_resolve_new_doctor(text, name):
     assert resolve.resolve_new_doctor(text) == name
+
+
+@pytest.mark.parametrize("text, field, value", [
+    ("his specialization is dermatologist and his fees is ₹100", "specialization", "Dermatologist"),
+    ("specialisation is general medicine, department is OPD", "specialization", "General medicine"),
+    ("specialisation is general medicine, department is OPD", "department", "OPD"),
+    ("Add Dr Kiran Kumar, dermatologist, ₹600", "specialization", None),  # a mention is not a statement
+    ("create the doctor srikanth cardiology department", "department", None),
+])
+def test_resolve_stated(text, field, value):
+    assert resolve.resolve_stated(text, field) == value
+
+
+# The STT transcript from the field: "add" heard as "at", a full spoken profile (fee + both sessions).
+SPOKEN_PROFILE = ("So, at the doctor, the doctor's name is Ramesh Kumar and his specialization is dermatologist "
+                  "and his fees is ₹100 on his timing slots like morning session from 10 to 1 o'clock and from "
+                  "evening session 5 to 8 o'clock and also")
 
 
 @pytest.mark.parametrize("text, branch", [
@@ -110,6 +129,12 @@ DOCTORS = [{"id": D1, "name": "Dr. Anitha"}]
     ("new doctor Dr Kiran ₹600 weekdays evenings 5 to 8", "doctor.create"),
     ("create the doctor srikanth cardiology department", "doctor.create"),
     ("create Dr Srikanth, ₹800, Mon-Sat mornings 9 to 12", "doctor.create"),
+    (SPOKEN_PROFILE, "doctor.create"),
+    ("change dr anitha consultation fee to 600", "doctor.fee"), ("update Dr Anitha's fee", "doctor.fee"),
+    ("doctor fee marchu", "doctor.fee"), ("increase Dr Anitha's fee by 100", "doctor.fee"),
+    ("change Dr Anitha's specialization to cosmetology", "doctor.details"),
+    ("change Dr Anitha's department from ENT to Skin", "doctor.details"),
+    ("add the doctor Ramesh, ₹500, mornings 9 to 1", "doctor.create"),
     ("assign Dr Anitha to Kukatpally branch mornings", "branch.doctor_assign"),
     ("Dr Anitha ni Kukatpally branch ki assign cheyyi", "branch.doctor_assign"),
     ("Dr Anitha ko Kukatpally branch mein assign karo", "branch.doctor_assign"),
@@ -273,6 +298,55 @@ def test_doctor_create_asks_specialization_and_department_then_previews_slots(db
     assert body == {"name": "Dr Kiran Kumar", "specialization": "Dermatology", "department": "Skin",
                     "consultation_fee": 600, "available_days": "Mon,Tue,Wed,Thu,Fri,Sat",
                     "morning_start": "09:00", "morning_end": "13:00", "slot_duration_minutes": 30}
+
+
+def test_spoken_profile_fills_everything_said_and_asks_only_the_rest(db, docs):  # noqa: F811
+    out = _ask(SPOKEN_PROFILE)
+    assert out["state"] == "NEEDS_CLARIFICATION", out
+    asked = {f["name"] for f in out["cards"][0]["fields"] if not f.get("optional")}
+    assert asked == {"department", "days"}, out
+    out = _answer(out, department="Skin", days="Mon-Sat")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    (_, body), = S["writes"]
+    assert body == {"name": "Dr Ramesh Kumar", "specialization": "Dermatologist", "department": "Skin",
+                    "consultation_fee": 100, "available_days": "Mon,Tue,Wed,Thu,Fri,Sat",
+                    "morning_start": "10:00", "morning_end": "13:00", "evening_start": "17:00",
+                    "evening_end": "20:00", "slot_duration_minutes": 30}
+
+
+@pytest.mark.parametrize("text, fee", [
+    ("change Dr Anitha's consultation fee to 600", 600), ("increase Dr Anitha's fee by 100", 600),
+    ("reduce Dr Anitha's fee by 10%", 450),
+])
+def test_fee_change_previews_old_and_new_then_saves_only_the_fee(db, docs, text, fee):  # noqa: F811
+    out = _ask(text)
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert "₹500" in str(out["cards"]) and S["writes"] == []
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    assert S["writes"] == [("PUT", D1, {"consultation_fee": fee})]
+
+
+def test_fee_change_asks_the_amount_and_refuses_same_or_out_of_bounds(db, docs):  # noqa: F811
+    asked = _ask("change Dr Anitha's fee")
+    assert asked["state"] == "NEEDS_CLARIFICATION", asked
+    assert _answer(asked, fee="700")["state"] == "NEEDS_CONFIRMATION"
+    assert _ask("change Dr Anitha's fee to 500")["error_code"] == "nothing_to_do"
+    assert _ask("change Dr Anitha's fee to 200000")["state"] != "NEEDS_CONFIRMATION"
+    assert S["writes"] == []
+
+
+def test_fee_change_needs_the_permission(db, docs):  # noqa: F811
+    docs["user"] = _staff("DOCTORS_CREATE")
+    assert _ask("change Dr Anitha's fee to 600")["state"] == "REJECTED"
+
+
+def test_details_change_saves_only_what_changed(db, docs):  # noqa: F811
+    out = _ask("change Dr Anitha's department from ENT to Skin")
+    assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
+    assert S["writes"] == [("PUT", D1, {"department": "Skin"})]
+    assert _ask("change Dr Anitha's specialization to dermatology")["error_code"] == "nothing_to_do"
 
 
 def test_doctor_create_without_hours_asks_for_them(db, docs):  # noqa: F811
