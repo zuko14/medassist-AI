@@ -17,7 +17,7 @@ from typing import Optional
 
 from app.assistant import resolve
 from app.assistant.help import HANDOFFS, HELP, HelpEntry
-from app.assistant.registry import PAGE_SYNONYMS, PAGES, REGISTRY, ActionSpec, SlotSpec
+from app.assistant.registry import DOCTOR_EDITS, PAGE_SYNONYMS, PAGES, REGISTRY, ActionSpec, SlotSpec
 from app.services.clinical_firewall import is_sex_determination_request, screen_message
 from app.voice.dates import IST, has_any, last_index
 from app.voice.nlu_rules import W, is_question
@@ -401,12 +401,44 @@ def _match_action(text: str, t: str, actions: dict, ui_page: Optional[str], doct
         return Route("none")
     best = max(h for h, _ in scored)
     top: list[ActionSpec] = [s for h, s in scored if h == best]
+    create = actions.get("doctor.create")
+    if create and not _names_other(t, create) and prefer_new_doctor([s.id for s in top], text, doctors):
+        top = [create]  # a full profile for a name not on the list: add that doctor, never edit a look-alike
     if len(top) > 1:
         on_page = [s for s in top if ui_page and s.page == ui_page]
         if len(on_page) != 1:
             return Route("clarify", missing=("action",), candidate_actions=tuple(s.id for s in top))
         top = on_page
     return fill(top[0], text, doctors=doctors, now=now, question=asks(_instruction(text, top[0])), visible=visible)
+
+
+# Words that change an existing doctor's details: with any of them, a profile-like sentence stays an edit.
+_EDIT_DOCTOR = ("change", "update", "edit", "correct", "modify", "set", "make", "shift", "move", "increase",
+                "decrease", "reduce", "raise", "is now", "are now", "instead of", "marchu", "marchandi", "badlo",
+                "badal do", "మార్చు", "మార్చండి", "बदलो", "बदलें")
+PROFILE_FACETS = 3
+
+
+def prefer_new_doctor(action_ids, text: str, doctors: Optional[list]) -> bool:
+    """A sentence routed to "change a doctor's ..." that really dictates a NEW doctor's profile: it states three
+    or more of fee / specialty / hours / days / branch, has no change verb, and the doctor list (known) holds
+    nobody it names. Then it is "Add a doctor"; the preview still shows everything before anything is saved."""
+    if not action_ids or not set(action_ids) <= DOCTOR_EDITS or doctors is None:
+        return False
+    if has_any(_norm(text), _EDIT_DOCTOR) or resolve.resolve_doctor(text, doctors):
+        return False
+    return len(resolve.doctor_profile_facets(text)) >= PROFILE_FACETS
+
+
+# "I mean, register a new doctor" / "no, I meant add a doctor" / "it's a new doctor": the request just above was
+# understood as the wrong task (assistant._corrected carries its details over to the right one).
+_CORRECTION = re.compile(r"^\s*(?:(?:no|nope|sorry|oh|wait|actually|ok|okay)\b[\s,.!:-]*)*"
+                         r"(?:i\s+(?:mean|meant|said)\b|not\s+that\b|(?:it|he|she|this)(?:'s|\s+is)\s+(?:a\s+)?new\b)",
+                         re.I)
+
+
+def is_correction(text: str) -> bool:
+    return bool(_CORRECTION.search(strip_spoken_lead((text or "").replace("’", "'"))))
 
 
 _VERBATIM = {"message": True, "quoted": False, "test_name": False}  # slot kind -> a colon also starts it

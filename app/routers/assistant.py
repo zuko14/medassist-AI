@@ -236,7 +236,10 @@ def _from_llm(intent: llm.Intent, body: RequestIn, visible, doctors=None) -> rul
         entry = rules.find_help(body.text, visible, intent.slots.page)
         return rules.Route("help", page=entry.page, help=entry) if entry else rules.Route("none")
     surface = " ".join(v for v in (intent.slots.doctor_text, intent.slots.date_text) if v)
-    return rules.fill(REGISTRY[intent.action_id], f"{surface} {body.text}".strip(), doctors=doctors,
+    spec = REGISTRY[intent.action_id]
+    if rules.prefer_new_doctor([spec.id], body.text, doctors):  # the same rule as the router: never edit a look-alike
+        spec = REGISTRY["doctor.create"]
+    return rules.fill(spec, f"{surface} {body.text}".strip(), doctors=doctors,
                       question=intent.kind == "question", visible=visible)
 
 
@@ -264,6 +267,9 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
         if len(live) == 1:
             r = _variant(rules.fill(REGISTRY[live[0]], body.text, doctors=doctors, question=rules.asks(body.text),
                                     visible=None if visible is None else set(visible)), clinic)
+    corrected = await _corrected(body, r, scope, user, clinic, auth, run_id)
+    if corrected is not None:
+        return corrected
     if not (r.kind == "none" or (r.kind == "clarify" and r.candidate_actions)):
         return _with_chat(_fields(r, "rules"), user, clinic)
     if r.kind == "none" and not rules.asks(body.text):
@@ -291,6 +297,34 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
     if fields["to"] == "NEEDS_CLARIFICATION" and out.intent.question_for_user:
         fields["result"]["message"] = out.intent.question_for_user  # plain text; the widget escapes it
     return {**fields, **spent}
+
+
+async def _corrected(body: RequestIn, r: rules.Route, scope: str, user: AdminUser, clinic: dict, auth: CallerAuth,
+                     run_id: str) -> Optional[dict]:
+    """"I mean, register a new doctor" right after Kriya understood the sentence above as another task of the
+    same module ("Change a doctor's specialization"): the details already said carry over to the task named now,
+    and the wrong form or preview closes ("corrected"). Only the user's latest earlier run, only while it is still
+    open (form or unconfirmed preview), only within one module, and only when the earlier words add details.
+    None = not a correction; the caller routes the text as usual. Nothing is executed here."""
+    if r.kind not in ("clarify", "action") or r.action_id not in REGISTRY or not rules.is_correction(body.text):
+        return None
+    spec = REGISTRY[r.action_id]
+    prev = next((x for x in await store.list_runs(scope, user.username, False, 2) if x["id"] != run_id), None)
+    if not prev or prev["state"] not in store.EXPIRING_STATES or prev.get("action_id") == spec.id:
+        return None
+    old = REGISTRY.get(prev.get("action_id") or "")
+    if old is None or old.module != spec.module or not prev.get("input_text"):
+        return None
+    doctors = await _doctors(auth, scope, run_id) if any(s.kind == "doctor" for s in spec.slots) else None
+    visible = body.ui_context.visible_pages
+    merged = rules.fill(spec, f"{body.text} {prev['input_text']}", doctors=doctors,
+                        visible=set(visible) if visible is not None else None)
+    if merged.kind not in ("clarify", "action") or merged.action_id != spec.id or len(merged.params) <= len(r.params):
+        return None
+    if not await store.transition(scope, user.username, prev["id"], store.EXPIRING_STATES, "CANCELLED",
+                                  error_code="corrected"):
+        return None  # confirmed, answered or expired meanwhile: route the text on its own
+    return _fields(_variant(merged, clinic), "rules")
 
 
 async def _follow_up(body: RequestIn, scope: str, user: AdminUser, clinic: dict, auth: CallerAuth,

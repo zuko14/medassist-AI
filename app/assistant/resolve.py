@@ -8,6 +8,7 @@ ambiguous name, so the caller asks instead of guessing).
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from difflib import SequenceMatcher
 from typing import Iterable, Optional
 
 from app.voice.dates import _MONTHS, parse_date, parse_time_period
@@ -207,16 +208,65 @@ def resolve_holiday_name(text: str) -> Optional[str]:
     return name if name and len(name) <= 100 else None
 
 
+_NAME_NOISE = {"doctor", "the", "for", "and", "leave", "today", "tomorrow", "from", "until", "till", "cancel",
+               "remove", "delete", "add", "mark", "off", "not", "chutti", "selavu", "kal", "aaj", "repu"}
+
+
 def resolve_doctor(text: str, doctors: list, tenant_entries: Iterable[dict] = ()) -> list:
     """Every doctor the text could mean: [] none, [one] exact, several = ask the user.
     The voice matcher ignores words under 4 letters (call noise), which misses short surnames
     ("Dr Rao", "Das", "Jha"); typed text gets an exact-word fallback for those (still never a guess:
     two doctors called Rao are both returned)."""
     found = match_doctors(text, doctors, tenant_entries)
-    if found:
-        return found
-    words = set(re.findall(r"[a-z]{3,}", (text or "").lower())) - _NAME_NOISE
-    return [d for d in doctors if words & set(re.findall(r"[a-z]{3,}", str(d.get("name", "")).lower()))]
+    if not found:
+        words = set(re.findall(r"[a-z]{3,}", (text or "").lower())) - _NAME_NOISE
+        found = [d for d in doctors if words & set(re.findall(r"[a-z]{3,}", str(d.get("name", "")).lower()))]
+    return [d for d in found if not names_someone_else(text, d)]
+
+
+# Words that may stand right before a doctor's name without being part of it ("change Kumar's fee",
+# "Monday Kumar is off"). Anything else of 4+ letters there is read as the person's first name.
+_BEFORE_NAME_OK = _NAME_NOISE | {
+    "change", "update", "edit", "correct", "make", "shift", "move", "assign", "remove", "delete", "enable", "disable",
+    "activate", "deactivate", "reactivate", "show", "list", "find", "call", "book", "send", "resend", "message",
+    "with", "about", "when", "what", "which", "where", "does", "will", "should", "would", "could", "have", "this",
+    "that", "their", "there", "also", "only", "just", "please", "kindly", "sorry", "actually", "okay", "named",
+    "called", "name", "under", "after", "before", "since", "until", "till", "into", "onto", "next", "today",
+    "tomorrow", "yesterday", "morning", "evening", "afternoon", "night", "week", "month", "year", "senior", "junior",
+    "consultant", "visiting", "chief", "head", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday", "january", "february", "march", "april", "june", "july", "august", "september", "october",
+    "november", "december", "patient", "patients", "appointment", "appointments", "booking", "bookings", "slots",
+    "timing", "timings", "hours", "fees", "leave", "holiday", "queue", "branch", "department", "specialization",
+    "garu", "gaaru", "sahab", "saab", "madam", "ma'am", "sir", "dear"}
+_LATIN_WORD = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+
+
+def names_someone_else(text: str, doctor: dict) -> bool:
+    """True when the text names a different person who only shares a word with this doctor: "Ramesh Kumar"
+    must never resolve to Dr Suresh Kumar. A matched name word directly preceded (whitespace only) by a
+    4+ letter word that is neither an instruction word nor part of this doctor's name means another first
+    name was said. Latin script only; a dropped match falls back to the picker, never to a guess."""
+    dtoks = [w for w in re.findall(r"[a-z]+", str(doctor.get("name") or "").lower()) if w not in ("dr", "doctor")]
+    if not dtoks:
+        return False
+
+    def mine(word: str) -> bool:
+        return max(SequenceMatcher(None, word, n).ratio() for n in dtoks) >= 0.8
+
+    words = list(_LATIN_WORD.finditer(text or ""))
+    clashes = clean = 0
+    for i, m in enumerate(words):
+        w = re.sub(r"'s$", "", m.group(0).lower())
+        if len(w) < 3 or not mine(w):
+            continue
+        p = words[i - 1] if i else None
+        prev = re.sub(r"'s$", "", p.group(0).lower()) if p else ""
+        if (p is None or (text or "")[p.end():m.start()].strip() or len(prev) < 4 or prev in _BEFORE_NAME_OK
+                or mine(prev)):
+            clean += 1  # "Dr Kumar", "Suresh Kumar", "change Kumar's fee": this doctor, as far as words go
+        else:
+            clashes += 1
+    return clashes > 0 and clean == 0  # every mention carries another first name
 
 
 # ── KK-P4-06: lead calls (PB-03) and the automatic lead calls switch (PB-05) ──
@@ -322,10 +372,6 @@ def resolve_visit_type(text: str) -> str:
     return "followup" if re.search(r"follow[\s-]?up", t) else "review" if re.search(r"\breview\b", t) else "new"
 
 
-_NAME_NOISE = {"doctor", "the", "for", "and", "leave", "today", "tomorrow", "from", "until", "till", "cancel",
-               "remove", "delete", "add", "mark", "off", "not", "chutti", "selavu", "kal", "aaj", "repu"}
-
-
 # ── KK-P4-08 lab catalogue: test names, prices, rounding, collection hours ──
 
 _UP = re.compile(r"\b(?:increase|raise|hike|up|penchu|penchandi|badhao|badhaa|badha)\b|పెంచు|बढ़ा", re.I)
@@ -362,6 +408,14 @@ def _direction(text: str) -> int:
     return 1 if up and not down else -1 if down and not up else 0
 
 
+# "morning 10 to 12": the "to 12" ends a time window and is never a price.
+_ENDS_WINDOW = re.compile(r"(?<![\d,])\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*$", re.I)
+_PRICE_STATED = re.compile(r"\b(?:fees?|price|rate|cost|charges?)\b(?:\s+(?:is|are|was|will be|should be|of|about|around|"
+                           r"approximately|approx|just|only|rs\.?|inr))*\s*[:=]?\s*(\d[\d,]*)\b"
+                           r"(?!\s*(?:%|per\s?cent|pc\b|[:.]\d|am\b|pm\b|a\.m|p\.m|o'?\s?clock|to\s+\d|-\s*\d|"
+                           r"minutes?|mins?|days?|slots?|patients?|tests?))", re.I)
+
+
 def resolve_price(text: str) -> Optional[list]:
     """A price change, JSON-safe: ["amount", "350"] (set to), ["delta", "-100"] (by rupees) or
     ["percent", "10"] (signed). A percent needs a direction word ("increase"/"reduce" ...); a bare number
@@ -377,7 +431,11 @@ def resolve_price(text: str) -> Optional[list]:
         if _BY_END.search(before) or (sign and not _TO_END.search(before)):
             return ["delta", _num(found[1] * (sign or 1))]
         return ["amount", _num(found[1])]
-    m = _TO_BARE.search(t)
+    m = next((x for x in _TO_BARE.finditer(t) if not _ENDS_WINDOW.search(t[:x.start()])), None)
+    if m:
+        value = Decimal(m.group(1).replace(",", ""))
+        return ["amount", _num(value)] if value > 0 else None
+    m = _PRICE_STATED.search(t) if not sign else None  # "his fees is 500", "fee: 500", "consultation fee 600"
     if m:
         value = Decimal(m.group(1).replace(",", ""))
         return ["amount", _num(value)] if value > 0 else None
@@ -455,11 +513,19 @@ def _clock(h: str, m: Optional[str], mer: Optional[str]) -> Optional[int]:
     return hour * 60 + minute
 
 
+_OCLOCK = re.compile(r"\s*\bo\s?['’]?\s?clock\b", re.I)
+
+
+def no_oclock(text: str) -> str:
+    """"10 o'clock to 12 o'clock" -> "10 to 12": speech says the hours that way."""
+    return _OCLOCK.sub("", text or "")
+
+
 def resolve_time_window(text: str) -> Optional[str]:
     """Collection hours "HH:MM-HH:MM" from "7 to 11", "6:30 am to 10:30 am", "9 am to 1 pm", "07:00-11:30".
     One am/pm applies to both ends unless that puts the start after the end ("11 to 2 pm" = 11:00-14:00);
     with none, an end not after the start is read as pm ("7 to 1" = 07:00-13:00). Start >= end -> None."""
-    m = _WINDOW.search(text or "")
+    m = _WINDOW.search(no_oclock(text))
     if not m:
         return None
     h1, m1, p1, h2, m2, p2 = m.groups()
@@ -573,20 +639,24 @@ _MORNING = re.compile(r"\bmornings?\b|ఉదయం|सुबह", re.I)
 _EVENING = re.compile(r"\bevenings?\b|సాయంత్రం|शाम", re.I)
 _MERIDIEM = re.compile(r"\d\s*(?:am|pm|a\.m\.|p\.m\.)", re.I)
 _DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-_DAY_WORD = r"(mon|tue|wed|thu|fri|sat|sun)[a-z]*"
+_DAY_TAIL = r"(?:day|sday|nesday|rsday|urday|rs|r|s)?s?"
+_DAY_WORD = r"(mon|tue|wed|thu|fri|sat|sun)" + _DAY_TAIL + r"\b"
 _DAY_RANGE = re.compile(_DAY_WORD + r"\s*(?:-|–|to|till|se)\s*" + _DAY_WORD, re.I)
-_NEW_DOCTOR = re.compile(r"\b(?:add|new|create|register|onboard)\b(?:\s+(?:a|the))?(?:\s+new)?(?:\s+doctor)?\s+"
-                         r"(dr\.?\s+[A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
+_CALLED = r"(?:\s+(?:named|called|by\s+name|whose\s+name\s+is))?"
+_NEW_DOCTOR = re.compile(r"\b(?:add|new|create|register|onboard)\b(?:\s+(?:a|the))?(?:\s+new)?(?:\s+doctor)?" + _CALLED +
+                         r"\s+(dr\.?\s+[A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
 # "create the doctor srikanth": no "Dr", so the name is the words after "doctor" up to a non-name word.
-_NEW_DOCTOR_BARE = re.compile(r"\b(?:add|new|create|register|onboard)\b(?:\s+(?:a|the))?(?:\s+new)?\s+doctor\s+"
-                              r"([A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
-_NOT_NAME = re.compile(r"^(?:for|with|in|on|at|of|and|as|from|to|is|fee|fees|rs|inr|department|dept|"
+_NEW_DOCTOR_BARE = re.compile(r"\b(?:add|new|create|register|onboard)\b(?:\s+(?:a|the))?(?:\s+new)?\s+doctor" + _CALLED +
+                              r"\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
+_NOT_NAME = re.compile(r"^(?:for|with|in|on|at|of|and|as|from|to|is|was|his|her|he|she|who|whose|name|named|called|"
+                       r"the|also|fee|fees|rs|inr|department|dept|"
                        r"specialist|specialization|mornings?|evenings?|weekdays?|daily|leave|"
                        r"(?:mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?|sun)(?:day)?|"
                        r"[a-z]+(?:logy|logist|ics|iatry|iatrician|"
                        r"ist|surgery|surgeon|medicine|physician))$", re.I)
 _BRANCH_NAME = re.compile(r"\b(?:to|at|in|ni|ko|ki)?\s*(?:the\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+branch\b", re.I)
-_BRANCH_NOISE = {"to", "at", "in", "the", "ni", "ko", "ki", "assign", "dr", "doctor", "a", "this", "that", "same"}
+_BRANCH_NOISE = {"to", "at", "in", "the", "ni", "ko", "ki", "assign", "dr", "doctor", "a", "this", "that", "same",
+                 "from", "his", "her", "he", "she", "is", "and", "also", "of", "s"}
 
 
 def resolve_session(text: str) -> Optional[str]:
@@ -623,14 +693,18 @@ def resolve_days(text: str) -> Optional[str]:
     if m:
         a, b = (_DAY_NAMES.index(x.capitalize()) for x in m.groups())
         return ",".join(_DAY_NAMES[a:b + 1]) if a <= b else None
-    found = [d for d in _DAY_NAMES if re.search(rf"\b{d.lower()}[a-z]*\b", t)]
+    # Day words only ("Mon", "Tuesday", "thurs"): never the start of another word ("Sunil", "money", "Saturn").
+    found = [d for d in _DAY_NAMES if re.search(rf"\b{d.lower()}{_DAY_TAIL}\b", t)]
     return ",".join(found) if found else None
 
 
 # Spoken profiles: "the doctor's name is Ramesh Kumar", "name of the doctor is Dr Priya".
-_NAMED_DOCTOR = re.compile(r"\b(?:(?:doctor|dr)(?:'?s)?\s+name|name\s+of\s+(?:the\s+)?(?:new\s+)?(?:doctor|dr)|"
-                           r"(?:his|her)\s+name)\s+(?:is|will be|should be)\s+(?:dr\.?\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)",
-                           re.I)
+# Speech often says "was" ("doctor name was Ramesh Kumar"): the same statement.
+_NAMED_DOCTOR = re.compile(r"\b(?:(?:(?:doctor|dr)(?:'?s)?\s+name|name\s+of\s+(?:the\s+)?(?:new\s+)?(?:doctor|dr)|"
+                           r"(?:his|her)\s+name)\s+(?:is|was|will be|should be|:)|(?:doctor|dr)\s+(?:named|called))"
+                           r"\s+(?:dr\.?\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
+# Last resort for a new doctor's name: "Dr Ramesh Kumar" said with capitals anywhere in the profile.
+_TITLED_DOCTOR = re.compile(r"\b(?i:dr\.?|doctor)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b")
 # A value said outright ("his specialization is dermatologist", "department from ENT to Skin");
 # a mere mention is never read as one.
 _SAID_AS = r"\s+(?:from\s+[A-Za-z&\- ]+?\s+)?(?:to|as|is now|is|will be|should be|:)\s+(?:an?\s+|the\s+)?"
@@ -658,17 +732,30 @@ def resolve_new_doctor(text: str) -> Optional[str]:
     m = _NEW_DOCTOR.search(text or "")
     if m:
         name = " ".join(m.group(1).split())
-    elif m := (_NEW_DOCTOR_BARE.search(text or "") or _NAMED_DOCTOR.search(text or "")):
+    elif m := (_NAMED_DOCTOR.search(text or "") or _NEW_DOCTOR_BARE.search(text or "")
+               or _TITLED_DOCTOR.search(text or "")):
         name = _doctor_name(m.group(1))
     else:
         return None
     return name if 4 <= len(name) <= 60 else None
 
 
+_SPECIALTY = (r"(?:[A-Za-z]+(?:logy|logist|logists|ics|iatry|iatrist|iatrician|ectomy)|ENT|dental|dentistry|"
+              r"skin|eye|general\s+(?:medicine|surgery)|internal\s+medicine|physiotherapy|orthopaedics|"
+              r"orthopedics|ortho|paediatrics|pediatrics|gynaecology|gynecology|obstetrics|cardiac|neuro)")
+# Said with no "is" ("and also the department dermatology"): only a specialty-looking word counts.
+_STATED_BARE = {
+    "specialization": re.compile(r"\b(?:speciali[sz]ation|specialty|speciality)\s+(?:of\s+|in\s+)?(" + _SPECIALTY
+                                 + r")\b", re.I),
+    "department": re.compile(r"\b(?:department|dept)\s+(?:of\s+|in\s+)?(" + _SPECIALTY + r")\b", re.I),
+}
+
+
 def resolve_stated(text: str, field: str) -> Optional[str]:
-    """A doctor's specialization / department only when said as "<field> is X"; 2..60 chars, else None."""
+    """A doctor's specialization / department only when said as "<field> is X" (or "<field> <specialty>");
+    2..60 chars, else None."""
     rx = _STATED.get(field)
-    m = rx.search(text or "") if rx else None
+    m = (rx.search(text or "") or _STATED_BARE[field].search(text or "")) if rx else None
     value = " ".join(m.group(1).split()) if m else ""
     return value[:1].upper() + value[1:] if 2 <= len(value) <= 60 else None
 
@@ -679,6 +766,26 @@ def resolve_branch(text: str) -> Optional[str]:
     words = [w for w in (m.group(1).lower().split() if m else []) if w not in _BRANCH_NOISE]
     term = " ".join(words)
     return term if 2 <= len(term) <= 60 else None
+
+
+def doctor_profile_facets(text: str) -> set:
+    """Which parts of a doctor's profile the text states: fee, specialty, hours, days, branch. A sentence that
+    states three or more is someone dictating a profile, not changing one field of an existing doctor."""
+    t = no_oclock(text)
+    out = set()
+    amount = resolve_amount(t)
+    if (amount and amount[0] == "amount") or _PRICE_STATED.search(t):
+        out.add("fee")
+    if resolve_stated(t, "specialization") or resolve_stated(t, "department"):
+        out.add("specialty")
+    if (resolve_window_after(t, "morning") or resolve_window_after(t, "evening") or resolve_bare_windows(t)
+            or resolve_time_window(t)):
+        out.add("hours")
+    if resolve_days(t):
+        out.add("days")
+    if resolve_branch(t):
+        out.add("branch")
+    return out
 
 
 def resolve_assign_session(text: str) -> str:
@@ -715,7 +822,7 @@ def resolve_bare_windows(text: str) -> dict:
     """{"morning": "HH:MM-HH:MM", "evening": ...} for hours said with no session word ("9 to 1",
     "9 to 1 and 6 to 8"). {} when a session word is present (resolve_window_after reads those), when a
     window can't be read, or when two windows land in the same session: then the form keeps asking."""
-    t = text or ""
+    t = no_oclock(text)
     if _MORNING.search(t) or _EVENING.search(t):
         return {}
     out: dict = {}

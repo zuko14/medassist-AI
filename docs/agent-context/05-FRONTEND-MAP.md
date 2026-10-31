@@ -31,6 +31,16 @@ Served at routes `/admin-panel`, `/hospital-panel`, `/derma-panel`, `/eye-panel`
 
 The sidebar dynamically renders 18 tabs based on user role (`admin`, `staff`, `doctor`, `receptionist`) and clinic plan features (`clinic.plan` / `clinic.config.features`):
 
+> **Sidebar groups (session 52).** The OPD OS pages (`opdsetup` … `opdanalytics`, incl. `casualty`, `tariffs`), the
+> IPD OS pages (`ipdboard` … `ipdsetup`, incl. `ot`, `insurance`) and Diagnostics (`dxworklist`, `lisqueue`,
+> `radiology`) sit inside `<div class="nav-group" data-nav-group="opd|ipd|dx">` wrappers with a button head
+> (`navGroupToggle`). The links themselves are unchanged and keep their own `data-*` gates. `navGroupsSync()`
+> (MutationObserver on the links' `style`) hides a group with no visible link and shows a one-link group flat.
+> `go()` calls `navGroupReveal(page)`; open/closed is remembered in `localStorage['kriya.nav.groups']`.
+> **Never fold a group with `display:none`**: `ketuVisiblePages()` reads `getClientRects()`, and Kriya Ketu would
+> answer "not available" for every folded page. Folding uses `grid-template-rows: 0fr` + `visibility: hidden`.
+> The old `nav-section-label` divs (`data-opd="nav"`, `data-ipd="nav"`) were removed from the sidebar.
+
 | Page ID | Label | Required Role | Required Feature / Plan Flag | Key API Endpoints | Primary Components & Functionality |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `dashboard` | Overview | All | None | `GET /admin/stats`, `GET /admin/appointments/upcoming` | Live KPI cards (Today's Bookings, Completed, Pending, Revenue), quick action buttons, upcoming patient stream. |

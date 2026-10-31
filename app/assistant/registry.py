@@ -894,10 +894,15 @@ DENTAL = (
 # ── KK-P4-11: PB-11 doctor schedule change, doctor create, branch assignment ──
 # How a new doctor's profile is dictated; never said when changing an existing doctor.
 _NAMING_DOCTOR = ("doctor's name is", "doctors name is", "doctor name is", "dr's name is", "dr name is",
-                  "name of the doctor", "name of doctor", "name of the new doctor")
+                  "name of the doctor", "name of doctor", "name of the new doctor",
+                  # speech says it in the past tense too ("doctor name was Ramesh Kumar")
+                  "doctor's name was", "doctors name was", "doctor name was", "dr's name was", "dr name was")
 _NEW_DOCTOR_SIGNS = _NAMING_DOCTOR + ("specialization is", "specialisation is", "speciality is", "specialty is")
 _EDIT_WORDS = ("change", "update", "edit", "correct", "marchu", "badlo", "badal do", "మార్చు", "बदलो")
 _SPEC_WORDS = ("specialization", "specialisation", "speciality", "specialty", "department", "dept")
+#: Actions that change an EXISTING doctor. A full profile dictated for a name that is not on the list is a new
+#: doctor instead (rules.prefer_new_doctor), never an edit of whichever doctor shares a word with it.
+DOCTOR_EDITS = frozenset({"doctor.schedule", "doctor.details", "doctor.fee", "doctor.days", "doctor.slot_length"})
 DOCTOR_ACTIONS = (
     # Full current shifts + the doctor's own duration are sent, never a branch field (SCH-02, D-34).
     _desk("doctor.schedule", "Change a doctor's hours", "R2", "PUT", "/admin/doctors/{doctor_id}", "doctors",
