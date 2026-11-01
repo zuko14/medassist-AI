@@ -301,16 +301,15 @@ def test_doctor_create_asks_specialization_and_department_then_previews_slots(db
 
 
 def test_spoken_profile_fills_everything_said_and_asks_only_the_rest(db, docs):  # noqa: F811
+    """Session 54: nothing left to ask here. One specialty said fills both fields, and the unsaid days are the
+    Doctors page default, marked as assumed in the preview; still nothing is written before Confirm."""
     out = _ask(SPOKEN_PROFILE)
-    assert out["state"] == "NEEDS_CLARIFICATION", out
-    asked = {f["name"] for f in out["cards"][0]["fields"] if not f.get("optional")}
-    assert asked == {"department", "days"}, out
-    out = _answer(out, department="Skin", days="Mon-Sat")
     assert out["state"] == "NEEDS_CONFIRMATION", out
+    assert "you did not say them" in str(out["cards"]) and S["writes"] == []
     assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
     (_, body), = S["writes"]
-    assert body == {"name": "Dr Ramesh Kumar", "specialization": "Dermatologist", "department": "Skin",
-                    "consultation_fee": 100, "available_days": "Mon,Tue,Wed,Thu,Fri,Sat",
+    assert body == {"name": "Dr Ramesh Kumar", "specialization": "Dermatologist", "department": "Dermatology",
+                    "consultation_fee": 100, "available_days": "Mon,Tue,Wed,Thu,Fri",
                     "morning_start": "10:00", "morning_end": "13:00", "evening_start": "17:00",
                     "evening_end": "20:00", "slot_duration_minutes": 30}
 

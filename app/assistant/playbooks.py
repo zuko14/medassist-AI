@@ -1693,6 +1693,9 @@ async def doctor_create_preview(read, params: dict) -> dict:
     body = {"name": name, "specialization": params["specialization"], "department": params["department"],
             "consultation_fee": fee_rupees, "available_days": params["days"]}
     bullets = [f"{params['specialization']} ({params['department']}), {_inr(fee_rupees)}, {params['days']}."]
+    if "days" in (params.get("assumed") or ()):
+        bullets.append(f"Working days {params['days'].replace(',', ', ')}: you did not say them, so this is the Doctors "
+                       "page's default. Say \"Dr … works Mon to Sat\" afterwards to change them.")
     for s, w in windows.items():
         body[f"{s}_start"], body[f"{s}_end"] = w.split("-")
         bullets.append(f"{s.capitalize()} {w.replace('-', '–')}: "
@@ -4142,3 +4145,493 @@ async def disallowance_preview(read, params: dict) -> dict:
                             verify=_claim_after(cid, lambda x: int((x.get("split") or {}).get("disallowed_paise")
                                                                    or x.get("disallowed_amount_paise") or 0)
                                                 >= before + rupees * 100, lambda x: "Recorded"))]}
+
+
+# ── Session 54: the rest of the panel by voice. Same contract as above: the preview reads what is there, shows
+# exactly what changes (old -> new), refuses when there is nothing to do, and each write has its own read-back. ──
+
+_PROFILE_LABELS = {"name": "Hospital name", "hospital_address": "Address", "hospital_maps_link": "Google Maps link",
+                   "hospital_emergency_number": "Emergency number", "hospital_staff_phone": "Reception number",
+                   "followup_enabled": "Patient follow-ups", "followup_days": "Follow-up after (days)",
+                   "health_checkins_enabled": "Health check-ins"}
+_PROFILE_WARN = {"name": "Patients see the new name on WhatsApp straight away.",
+                 "hospital_address": "The new address is what Kriya sends patients who ask for directions.",
+                 "hospital_emergency_number": "Patients are given this number in an emergency: check every digit.",
+                 "hospital_staff_phone": "Patients who ask to talk to staff are given this number."}
+
+
+def _profile_value(field: str, value) -> str:
+    if isinstance(value, bool):
+        return "On" if value else "Off"
+    return str(value) if value not in (None, "") else "(not set)"
+
+
+async def profile_update_preview(read, params: dict) -> dict:
+    """PUT /admin/profile with only the fields said (the endpoint writes nothing else, D-13)."""
+    changes = {k: v for k, v in (params.get("changes") or {}).items() if k in _PROFILE_LABELS}
+    if not changes:
+        raise EmptyPlan("Say what to change, e.g. \"change the hospital address to …\".")
+    current = await _get(read, "/admin/profile")
+    current = current if isinstance(current, dict) else {}
+    diff = {k: v for k, v in changes.items() if current.get(k) != v}
+    if not diff:
+        raise EmptyPlan("The hospital profile already says that.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/profile"))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the hospital profile back"
+        ok = all(out.data.get(k) == v for k, v in diff.items())
+        return ok, "Saved on the Hospital Profile" if ok else "The profile does not show the change"
+
+    rows = [[_PROFILE_LABELS[k], _profile_value(k, current.get(k)), _profile_value(k, v)] for k, v in diff.items()]
+    return {"title": "Update the hospital profile", "rows": rows,
+            "warnings": [_PROFILE_WARN[k] for k in diff if k in _PROFILE_WARN],
+            "snapshot": {k: current.get(k) for k in diff},
+            "steps": [_step("Save the hospital profile", _call("PUT", "/admin/profile", json=diff), verify=verify)]}
+
+
+async def holiday_delete_preview(read, params: dict) -> dict:
+    day = params["date"]
+    existing = await _get(read, "/admin/holidays")
+    same = next((h for h in existing if isinstance(h, dict) and str(h.get("holiday_date"))[:10] == day), None) \
+        if isinstance(existing, list) else None
+    if not same:
+        raise EmptyPlan(f"{present.fmt(day, 'date')} is not a hospital holiday.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/holidays"))
+        if out.status != "ok" or not isinstance(out.data, list):
+            return None, "Couldn't read the Holidays list"
+        gone = not any(isinstance(h, dict) and str(h.get("holiday_date"))[:10] == day for h in out.data)
+        return gone, "No longer a holiday" if gone else "Still on the Holidays list"
+
+    return {"title": f"Remove the holiday on {present.fmt(day, 'date')}: {same.get('name') or 'Clinic closed'}",
+            "warnings": [f"Patients can book {present.fmt(day, 'date')} again on WhatsApp and the phone line."],
+            "snapshot": {"holiday": str(same.get("holiday_date"))[:10]},
+            "steps": [_step(f"Remove holiday {present.fmt(day, 'date')}", _call("DELETE", f"/admin/holidays/{day}"),
+                            verify=verify)]}
+
+
+async def leave_move_preview(read, params: dict) -> dict:
+    """A leave moved to another day: the new day is ADDED FIRST, then the old one removed, so a failure part-way
+    leaves the doctor on leave twice (shown as partly done), never on no leave at all."""
+    doctor, (old, new) = params["doctor"], params["move"]
+    me = await _get(read, "/admin/me")
+    if not (isinstance(me, dict) and (me.get("role") in ("clinic_admin", "super_admin")
+                                      or "DOCTOR_LEAVES_DELETE" in (me.get("permissions") or []))):
+        raise EmptyPlan("Moving a leave also removes the old day, and your login cannot remove leaves. "
+                        "Ask an admin, or add the new day only.")  # checked first: never half a move
+    old_rows = (await _existing(read, doctor)).get(old, [])
+    if not old_rows:
+        raise EmptyPlan(f"No leave found for {doctor} on {present.fmt(old, 'date')}.")
+    leave_type = old_rows[0].get("leave_type") or "full"
+    add_params = {"doctor": doctor, "date": new, "leave_type": leave_type}
+    added = await leave_create_preview(read, add_params)
+    removed = await leave_delete_preview(read, {"doctor": doctor, "date": old})
+    preview = {**added, "title": f"Move {doctor}'s leave: {present.fmt(old, 'date')} → {present.fmt(new, 'date')}",
+               "bullets": [f"Add {present.fmt(new, 'date')} ({LEAVE_LABEL[leave_type]}), then remove "
+                           f"{present.fmt(old, 'date')}.", *added.get("bullets", [])[1:]],
+               "warnings": [*added.get("warnings", []), *removed.get("warnings", [])],
+               "snapshot": {"add": added.get("snapshot"), "remove": removed.get("snapshot")},
+               "steps": [*leave_create_call(add_params), *removed["steps"]]}
+    preview["affected"] = len(preview["steps"])
+    return preview
+
+
+async def treatment_create_preview(read, params: dict) -> dict:
+    name, category, price = params["name"], params["category"], params["price"]
+    if price[0] != "amount":
+        raise EmptyPlan("Say the price in rupees, e.g. \"for ₹4000\".")
+    rupees = int(Decimal(price[1]))
+    if not 0 < rupees <= MAX_TREATMENT_PRICE:
+        raise EmptyPlan(f"A treatment price of {_inr(rupees)} is outside ₹1 to {_inr(MAX_TREATMENT_PRICE)}.")
+    rows = await _treatments(read)
+    same = next((t for t in rows if _same(t.get("name"), name)), None)
+    if same:
+        raise EmptyPlan(f"{same.get('name')} is already on the Treatments list ({_trt_line(same)}).")
+
+    async def verify(read, data, call):
+        out = await _treatments(read)
+        ok = any(_same(t.get("name"), name) for t in out)
+        return ok, "On the Treatments list" if ok else "Not on the Treatments list"
+
+    return {"title": f"Add treatment {name}", "rows": [[name, category, f"from {_inr(rupees)}"]],
+            "warnings": ["Patients see it in the WhatsApp treatment menu straight away. Add its description and "
+                         "doctors on the Treatments page (or ask me: \"only Dr … does …\")."],
+            "snapshot": {"treatments": len(rows)},
+            "steps": [_step(f"Add {name}", _call("POST", "/admin/treatments", json={
+                "name": name, "category": category, "price_from_rupees": rupees}), verify=verify)]}
+
+
+async def branch_unassign_preview(read, params: dict) -> dict:
+    doc = await _doctor(read, params["doctor"])
+    branches = branch_rows(await _get(read, "/admin/branches"))
+    found = _match_branch(branches, params["branch"])
+    names = ", ".join(str(b.get("name")) for b in branches[:12]) or "none"
+    if len(found) != 1:
+        raise EmptyPlan(f'{"No branch" if not found else f"{len(found)} branches"} match "{params["branch"]}". '
+                        f"Branches: {names}.")
+    branch = found[0]
+    path = f"/admin/branches/{branch['id']}/doctors"
+    current = await _get(read, path)
+    assigned = {str(r.get("doctor_id")) for r in (current.get("doctor_branches") or [] if isinstance(current, dict) else [])
+                if isinstance(r, dict)}
+    if str(doc["id"]) not in assigned:
+        raise EmptyPlan(f"{doc.get('name')} is not assigned to {branch.get('name')}.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", path))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the branch's doctors back"
+        gone = not any(isinstance(r, dict) and str(r.get("doctor_id")) == str(doc["id"])
+                       for r in out.data.get("doctor_branches") or [])
+        return gone, f"No longer at {branch.get('name')}" if gone else "Still on the branch's doctors"
+
+    return {"title": f"Take {doc.get('name')} off {branch.get('name')}",
+            "warnings": [f"Patients can no longer book {doc.get('name')} at {branch.get('name')}; bookings already "
+                         "made stay."],
+            "snapshot": {"assigned": sorted(assigned)},
+            "steps": [_step(f"Remove {doc.get('name')} from {branch.get('name')}",
+                            _call("DELETE", f"{path}/{doc['id']}"), verify=verify)]}
+
+
+async def call_number_preview(read, params: dict) -> dict:
+    """POST /admin/voice/outbound: one call by the AI receptionist. The server refuses people who opted out,
+    numbers already queued and calls outside the clinic's settings (409, shown as Kriya's own message)."""
+    phone, interest = params["phone"], params.get("interest")
+    jobs = await _get(read, "/admin/voice/outbound")
+    live = [j for j in (jobs.get("jobs") or [] if isinstance(jobs, dict) else [])
+            if isinstance(j, dict) and str(j.get("patient_phone", ""))[-10:] == phone[-10:]
+            and j.get("status") in ("queued", "dialing")]
+    if live:
+        raise EmptyPlan(f"A call to {phone} is already in the queue.")
+    return {"title": f"Kriya calls {phone}" + (f" about {interest}" if interest else ""),
+            "bullets": ["Kriya greets them, talks about what they asked for and books on the call."],
+            "warnings": ["The call goes out inside your outbound call hours. People who opted out are never called."],
+            "snapshot": {"phone": phone},
+            "steps": [_step(f"Queue a call to {phone}",
+                            _call("POST", "/admin/voice/outbound",
+                                  json={"phone": phone, "purpose": "lead_followup", "interest": interest}),
+                            verify=_one_call_queued(phone))]}
+
+
+def _one_call_queued(phone: str):
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/voice/outbound"))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the call queue back"
+        ok = any(isinstance(j, dict) and str(j.get("patient_phone", ""))[-10:] == phone[-10:]
+                 and j.get("status") in ("queued", "dialing", "completed", "in_progress")
+                 for j in out.data.get("jobs") or [])
+        return ok, "In the call queue" if ok else "Not in the call queue"
+    return verify
+
+
+# ── Session 55: money and inpatient tasks. Every money step is R3 (the amount in rupees is typed to confirm),
+# carries an idempotency key or source reference derived from what was read (a repeated confirm never writes
+# twice), and the preview refuses what the server would refuse, before anything is sent. ──
+
+def _stay_key(kind: str, *parts) -> str:
+    return hashlib.sha256(":".join(["ketu", kind, *map(str, parts)]).encode()).hexdigest()[:40]
+
+
+async def _stay_detail(read, adm: str) -> dict:
+    """GET /admin/ipd/admissions/{id}: charges and bills come only with a billing grant."""
+    data = await _get_or_refuse(read, f"{_IPD}/admissions/{adm}", need="IPD Billing")
+    return data if isinstance(data, dict) else {}
+
+
+async def ipd_charge_add_preview(read, params: dict) -> dict:
+    c = params["charge"]
+    qty, unit = int(c["quantity"]), int(c["unit_rupees"])
+    total = qty * unit
+    if not 0 < total <= MAX_RECEIPT_RUPEES:
+        raise EmptyPlan(f"A charge of {_inr(total)} is outside ₹1 to {_inr(MAX_RECEIPT_RUPEES)}.")
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    detail = await _stay_detail(read, adm)
+    charges = [x for x in detail.get("charges") or [] if isinstance(x, dict)]
+    day = _now().date().isoformat()
+    ref = _stay_key("charge", adm, c["description"].lower(), qty, unit, day, len(charges))
+    body = {"category": c["category"], "description": c["description"], "service_date": day, "quantity": qty,
+            "unit_price_paise": unit * 100, "source_ref": ref}
+
+    async def verify(read, data, call):
+        out = await _ipd_detail_read(read, adm)
+        if out is None:
+            return None, "Couldn't read the stay's charges back"
+        ok = any(isinstance(x, dict) and x.get("source_ref") == ref and x.get("status") != "void"
+                 for x in out.get("charges") or [])
+        return ok, "On the stay's charges (proposed)" if ok else "Not on the stay's charges"
+
+    return {"title": f"Charge {_bed_line(b)}: {c['description']}",
+            "bullets": [f"{qty} × {_inr(unit)} = {_inr(total)} ({c['category'].replace('_', ' ')}), dated {present.fmt(day, 'date')}."],
+            "warnings": ["It is added as proposed and counts on the bill once billing posts it "
+                         "(\"post the charges for bed …\")."],
+            "affected": total, "snapshot": {"admission_id": adm, "charges": len(charges)},
+            "steps": [_step(f"Add {c['description']}", _call("POST", f"{_IPD}/admissions/{adm}/charges", json=body),
+                            verify=verify)]}
+
+
+async def _ipd_detail_read(read, adm: str) -> Optional[dict]:
+    out = await read(_call("GET", f"{_IPD}/admissions/{adm}"))
+    return out.data if out.status == "ok" and isinstance(out.data, dict) else None
+
+
+def _charge_line(x: dict) -> str:
+    return (f"{x.get('description')} {int(x.get('quantity') or 1)} × "
+            f"{present.fmt(x.get('unit_price_paise'), 'paise')} ({x.get('status')}, {present.fmt(x.get('service_date'), 'date')})")
+
+
+async def ipd_charge_void_preview(read, params: dict) -> dict:
+    reason = params["reason"]
+    if len(reason) < 3:
+        raise EmptyPlan("Say why, e.g. \"because it was entered twice\".")
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    rows = [x for x in (await _stay_detail(read, adm)).get("charges") or []
+            if isinstance(x, dict) and x.get("status") != "void"]
+    words = params["charge"].split()
+    found = [x for x in rows if all(w in str(x.get("description") or "").lower() for w in words)]
+    billed = [x for x in found if x.get("invoice_id")]
+    found = [x for x in found if not x.get("invoice_id")]
+    if not found and billed:
+        raise EmptyPlan("That charge is already on the final bill; correct it with a credit note on OPD Billing.")
+    x = _only(found, params["charge"], f"open charge on {_bed_line(b)}", _charge_line)
+    cid, rupees = str(x["id"]), int(x.get("quantity") or 1) * int(x.get("unit_price_paise") or 0) // 100
+
+    async def verify(read, data, call):
+        out = await _ipd_detail_read(read, adm)
+        if out is None:
+            return None, "Couldn't read the stay's charges back"
+        row = next((c for c in out.get("charges") or [] if isinstance(c, dict) and str(c.get("id")) == cid), None)
+        return (bool(row) and row.get("status") == "void"), "Voided" if row and row.get("status") == "void" else "Not voided"
+
+    return {"title": f"Void {x.get('description')} on {_bed_line(b)}",
+            "bullets": [_charge_line(x) + ".", f"Reason: {reason}."],
+            "warnings": ["A voided charge stays on the record, marked void."],
+            "affected": rupees, "snapshot": {"id": cid, "status": x.get("status")},
+            "steps": [_step("Void the charge", _call("POST", f"{_IPD}/charges/{cid}/void", json={"reason": reason}),
+                            verify=verify)]}
+
+
+async def ipd_charges_post_preview(read, params: dict) -> dict:
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    rows = [x for x in (await _stay_detail(read, adm)).get("charges") or []
+            if isinstance(x, dict) and x.get("status") == "proposed"]
+    if not rows:
+        raise EmptyPlan(f"{_bed_line(b)} has no proposed charges to post.")
+    ids = sorted(str(x["id"]) for x in rows)
+    rupees = sum(int(x.get("quantity") or 1) * int(x.get("unit_price_paise") or 0) for x in rows) // 100
+
+    async def verify(read, data, call):
+        out = await _ipd_detail_read(read, adm)
+        if out is None:
+            return None, "Couldn't read the stay's charges back"
+        left = [c for c in out.get("charges") or [] if isinstance(c, dict) and str(c.get("id")) in ids
+                and c.get("status") == "proposed"]
+        return (not left), "Posted" if not left else f"{len(left)} still proposed"
+
+    return {"title": f"Post {_plural(len(rows), 'charge')} for {_bed_line(b)}: {_inr(rupees)}",
+            "rows": [[x.get("description"), str(int(x.get("quantity") or 1)), present.fmt(x.get("unit_price_paise"), "paise"),
+                      present.fmt(x.get("service_date"), "date")] for x in rows[:25]],
+            "warnings": ["Posted charges go on the final bill."],
+            "affected": rupees, "snapshot": {"ids": ids},
+            "steps": [_step("Post the charges", _call("POST", f"{_IPD}/admissions/{adm}/charges/post",
+                                                      json={"charge_ids": ids}), verify=verify)]}
+
+
+async def ipd_final_bill_preview(read, params: dict) -> dict:
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    detail = await _stay_detail(read, adm)
+    status = (detail.get("admission") or {}).get("status")
+    bill = next((x for x in detail.get("bills") or [] if isinstance(x, dict) and x.get("status") != "void"), None)
+    if bill:
+        raise EmptyPlan(f"{_bed_line(b)} already has bill {bill.get('invoice_number') or '(draft)'} "
+                        f"for {present.fmt(bill.get('total_paise'), 'paise')}.")
+    if status != "discharge_pending":
+        raise EmptyPlan(f"Start the discharge for {_bed_line(b)} first; the final bill follows it.")
+    rb = await _running_bill(read, adm) or {}
+    proposed = int((rb.get("proposed") or {}).get("count") or 0)
+    if proposed:
+        raise EmptyPlan(f"{_plural(proposed, 'charge')} on {_bed_line(b)} still wait to be posted: "
+                        "\"post the charges for bed …\" first.")
+
+    async def verify(read, data, call):
+        out = await _ipd_detail_read(read, adm)
+        if out is None:
+            return None, "Couldn't read the stay's bills back"
+        made = next((x for x in out.get("bills") or [] if isinstance(x, dict) and x.get("status") != "void"), None)
+        return (bool(made)), (f"Bill {made.get('invoice_number') or 'made'}" if made else "No bill on the stay")
+
+    return {"title": f"Final bill for {_bed_line(b)}",
+            "bullets": [f"Total {present.fmt(rb.get('total_paise'), 'paise')}; deposits "
+                        f"{present.fmt((rb.get('deposits') or {}).get('balance_paise'), 'paise')}; payable "
+                        f"{present.fmt(rb.get('payable_paise'), 'paise')}."] if rb else [],
+            "warnings": ["The bill is made from the posted charges; collect or settle it on IPD Receivables."],
+            "snapshot": {"admission_id": adm, "status": status},
+            "steps": [_step("Make the final bill", _call("POST", f"{_IPD}/admissions/{adm}/final-bill"), verify=verify)]}
+
+
+async def deposit_refund_preview(read, params: dict) -> dict:
+    mode, ref, rupees, reason = params["mode"], params.get("reference"), int(Decimal(params["amount"])), params["reason"]
+    if mode == "card":
+        raise EmptyPlan("A deposit is refunded in cash, by UPI or by bank transfer, never to a card.")
+    if mode != "cash" and not ref:
+        raise EmptyPlan(f"A {mode.upper().replace('_', ' ')} refund needs its transaction reference (UTR).")
+    if len(reason) < 3:
+        raise EmptyPlan("Say why, e.g. \"because the patient is moving to another hospital\".")
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    rb = await _running_bill(read, adm) or {}
+    held = int((rb.get("deposits") or {}).get("balance_paise") or 0)
+    refundable = int(rb.get("refundable_paise") or 0)
+    if rupees * 100 > held:
+        raise EmptyPlan(f"Only {present.fmt(held, 'paise')} of deposits is unused on {_bed_line(b)}.")
+    ledger = (await _get_or_refuse(read, f"{_IPD}/admissions/{adm}/deposits", need="IPD Admin") or {}).get("deposits") or []
+    key = _stay_key("refund", adm, len(ledger), rupees, mode, ref or "")
+    body = {"mode": mode, "amount_paise": rupees * 100, "reason": reason, "idempotency_key": key,
+            **({"reference": ref} if ref else {})}
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_IPD}/admissions/{adm}/deposits"))
+        rows = (out.data or {}).get("deposits") if out.status == "ok" and isinstance(out.data, dict) else None
+        if rows is None:
+            return None, "Couldn't read the deposits back"
+        ok = any(isinstance(d, dict) and d.get("idempotency_key") == key for d in rows)
+        return ok, "On the stay's deposits as a refund" if ok else "Not on the stay's deposits"
+
+    warnings = ["Cash comes out of your open cash drawer shift."] if mode == "cash" else []
+    if rupees * 100 > refundable:
+        warnings.append(f"After this the stay owes more: only {present.fmt(refundable, 'paise')} is over and above "
+                        "the bill so far.")
+    return {"title": f"Refund {_inr(rupees)} deposit to {_bed_line(b)}",
+            "bullets": [f"{mode.upper().replace('_', ' ')}" + (f", ref {ref}" if ref else "") + f". Reason: {reason}.",
+                        f"Unused deposits now: {present.fmt(held, 'paise')}."],
+            "warnings": warnings, "affected": rupees, "snapshot": {"admission_id": adm, "ledger": len(ledger), "held": held},
+            "steps": [_step("Refund the deposit", _call("POST", f"{_IPD}/admissions/{adm}/deposits/refund", json=body),
+                            verify=verify)]}
+
+
+async def _waiting_admission(read, who: str) -> dict:
+    data = await _get_or_refuse(read, f"{_IPD}/admissions", {"status": "pending", "limit": 200}, "IPD Admissions")
+    rows = [a for a in (data or {}).get("admissions") or [] if isinstance(a, dict)]
+    found = _named(rows, who, lambda a: a.get("patient_name"))
+    if not found:
+        raise EmptyPlan(f'Nobody named "{who}" is waiting for a bed.')
+    return _only(found, who, "patient waiting for a bed",
+                 lambda a: f"{a.get('patient_name')} ({a.get('admission_number') or 'no number'})")
+
+
+async def ipd_assign_bed_preview(read, params: dict) -> dict:
+    a = await _waiting_admission(read, params["patient"])
+    bed = _one_bed(_beds(await _get_or_refuse(read, f"{_IPD}/board", need="IPD")), params["bed"])
+    if bed.get("status") != "available" or not bed.get("is_active", True):
+        raise EmptyPlan(f"Bed {bed.get('code')} is {str(bed.get('status')).replace('_', ' ')}; name a free bed.")
+    adm = str(a["id"])
+    return {"title": f"Give bed {bed.get('code')} to {a.get('patient_name')}",
+            "bullets": [f"{a.get('patient_name')} ({a.get('admission_number') or 'waiting'}) → bed {bed.get('code')}"
+                        + (f" ({bed.get('bed_category')})" if bed.get("bed_category") else "") + "."],
+            "warnings": ["The stay's bed charges start from now."],
+            "snapshot": {"admission_id": adm, "bed": str(bed["id"]), "bed_status": bed.get("status")},
+            "steps": [_step("Assign the bed", _call("POST", f"{_IPD}/admissions/{adm}/assign-bed",
+                                                    json={"bed_id": str(bed["id"])}),
+                            verify=_admission_is(adm, ("admitted",), f"In bed {bed.get('code')}"))]}
+
+
+async def ipd_admission_cancel_preview(read, params: dict) -> dict:
+    reason = params["reason"]
+    if len(reason) < 3:
+        raise EmptyPlan("Say why, e.g. \"because the patient went home\".")
+    a = await _waiting_admission(read, params["patient"])
+    adm = str(a["id"])
+    return {"title": f"Cancel {a.get('patient_name')}'s admission",
+            "bullets": [f"{a.get('admission_number') or 'Waiting'}: {a.get('patient_name')}.", f"Reason: {reason}."],
+            "warnings": ["Only a patient still waiting for a bed can be cancelled; a reserved bed is freed."],
+            "snapshot": {"admission_id": adm, "status": a.get("status")},
+            "steps": [_step("Cancel the admission", _call("POST", f"{_IPD}/admissions/{adm}/cancel",
+                                                          json={"reason": reason}),
+                            verify=_admission_is(adm, ("cancelled",), "Cancelled"))]}
+
+
+async def package_remove_preview(read, params: dict) -> dict:
+    reason = params["reason"]
+    if len(reason) < 3:
+        raise EmptyPlan("Say why, e.g. \"because the surgery was not done\".")
+    b = await _stay(read, params["target"])
+    adm = str(b["occupant"]["admission_id"])
+    rb = await _running_bill(read, adm) or {}
+    pkg = rb.get("package")
+    if not pkg:
+        raise EmptyPlan(f"{_bed_line(b)} is not on a package.")
+
+    async def verify(read, data, call):
+        after = await _running_bill(read, adm)
+        if after is None:
+            return None, "Couldn't read the running bill back"
+        return (not after.get("package")), "Off the package" if not after.get("package") else "Still on the package"
+
+    name = pkg.get("name") if isinstance(pkg, dict) else "the package"
+    return {"title": f"Take {_bed_line(b)} off {name}",
+            "bullets": [f"Reason: {reason}."],
+            "warnings": ["Every charge is billed item by item again from now."],
+            "snapshot": {"admission_id": adm, "package": name},
+            "steps": [_step("Remove the package", _call("POST", f"{_IPD}/admissions/{adm}/package/remove",
+                                                        json={"reason": reason}), verify=verify)]}
+
+
+_CASH_SHIFTS = "/admin/opd/shifts"
+
+
+async def _my_shift(read) -> Optional[dict]:
+    out = await read(_call("GET", f"{_CASH_SHIFTS}/current"))
+    if out.status != "ok":
+        if out.error_code == "forbidden":
+            raise EmptyPlan("Your login has no cash drawer (it needs OPD Billing).")
+        raise EmptyPlan("Couldn't read your cash drawer shift. Please try again.")
+    return out.data if isinstance(out.data, dict) and out.data.get("id") else None
+
+
+def _shift_open_now(want_open: bool):
+    async def verify(read, data, call):
+        out = await read(_call("GET", f"{_CASH_SHIFTS}/current"))
+        if out.status != "ok":
+            return None, "Couldn't read your shift back"
+        is_open = isinstance(out.data, dict) and bool(out.data.get("id"))
+        return (is_open == want_open), ("Shift open" if is_open else "Shift closed")
+    return verify
+
+
+async def shift_open_preview(read, params: dict) -> dict:
+    rupees = int(params.get("float") or 0)
+    if rupees > MAX_RECEIPT_RUPEES:
+        raise EmptyPlan(f"An opening float of {_inr(rupees)} is more than {_inr(MAX_RECEIPT_RUPEES)}.")
+    if await _my_shift(read):
+        raise EmptyPlan("Your cash drawer shift is already open.")
+    return {"title": f"Open your cash drawer with {_inr(rupees)}",
+            "bullets": [f"Opening float {_inr(rupees)}" + ("" if params.get("float") else " (none said).")],
+            "warnings": ["Cash you take is counted against this shift until you close it."],
+            "snapshot": {"open": False},
+            "steps": [_step("Open the shift", _call("POST", f"{_CASH_SHIFTS}/open", json={"opening_float_paise": rupees * 100}),
+                            verify=_shift_open_now(True))]}
+
+
+async def shift_close_preview(read, params: dict) -> dict:
+    declared = int(Decimal(params["declared"]))
+    shift = await _my_shift(read)
+    if not shift:
+        raise EmptyPlan("You have no open cash drawer shift.")
+    expected = int(shift.get("expected_cash_paise") or 0)
+    diff = declared * 100 - expected
+    note = "matches" if diff == 0 else (f"{present.fmt(abs(diff), 'paise')} {'over' if diff > 0 else 'short'}")
+    return {"title": f"Close your cash drawer: {_inr(declared)} counted",
+            "bullets": [f"Expected in the drawer: {present.fmt(expected, 'paise')}.", f"Counted: {_inr(declared)} ({note})."],
+            "warnings": ["A closed shift can't be reopened; count again if unsure."] + (
+                [f"The drawer is {note}: it is recorded against your shift."] if diff else []),
+            "affected": declared, "snapshot": {"id": str(shift["id"]), "expected": expected},
+            "steps": [_step("Close the shift", _call("POST", f"{_CASH_SHIFTS}/{shift['id']}/close",
+                                                     json={"declared_cash_paise": declared * 100}),
+                            verify=_shift_open_now(False))]}

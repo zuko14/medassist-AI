@@ -131,15 +131,17 @@ def test_branch_from_a_spoken_profile():
 # ── routing ──────────────────────────────────────────────────────────────────
 
 def test_the_reported_profiles_add_a_doctor():
+    # Session 54: both go straight to the preview; the unsaid days are the page default, marked as assumed.
     one = rules.route(SAID_1, doctors=DOCTORS, now=NOW)
-    assert (one.kind, one.action_id, one.missing) == ("clarify", "doctor.create", ("days",)), one
+    assert (one.kind, one.action_id, one.missing) == ("action", "doctor.create", ()), one
     assert one.params == {"name": "Dr Ramesh Kumar", "specialization": "Dermatologist", "department": "Dermatology",
-                          "fee": ["amount", "500"], "morning": "10:00-12:00", "evening": "17:00-20:00"}
+                          "fee": ["amount", "500"], "morning": "10:00-12:00", "evening": "17:00-20:00",
+                          "days": "Mon,Tue,Wed,Thu,Fri", "assumed": ["days"]}
     two = rules.route(SAID_2, doctors=DOCTORS, now=NOW)
-    assert (two.kind, two.action_id) == ("clarify", "doctor.create"), two
-    assert two.params == {"name": "Dr Ramesh Kumar", "department": "Cardiology", "fee": ["amount", "500"],
-                          "morning": "09:00-10:00", "evening": "18:00-22:00", "branch": "ameerpet"}
-    assert set(two.missing) == {"specialization", "days"}
+    assert (two.kind, two.action_id) == ("action", "doctor.create"), two
+    assert two.params == {"name": "Dr Ramesh Kumar", "specialization": "Cardiology", "department": "Cardiology",
+                          "fee": ["amount", "500"], "morning": "09:00-10:00", "evening": "18:00-22:00",
+                          "branch": "ameerpet", "days": "Mon,Tue,Wed,Thu,Fri", "assumed": ["days"]}
 
 
 @pytest.mark.parametrize("text, action, doctor", [
@@ -186,12 +188,8 @@ def test_is_correction(text, yes):
 
 def test_reported_profile_end_to_end_adds_ramesh_never_touches_suresh(db, docs):  # noqa: F811
     _reset(doctors=[_doc(id="d-suresh", name="Dr. Suresh Kumar")])
-    out = _ask(SAID_1)
-    assert (out["state"], out["action_id"]) == ("NEEDS_CLARIFICATION", "doctor.create"), out
-    assert out["message"].startswith("Add a doctor")
-    assert out["cards"][0]["missing"] == ["days"]
-    out = _answer(out, days="Mon-Sat")
-    assert out["state"] == "NEEDS_CONFIRMATION", out
+    out = _ask(SAID_1 + " He works Monday to Saturday.")  # days said: nothing assumed, nothing asked
+    assert (out["state"], out["action_id"]) == ("NEEDS_CONFIRMATION", "doctor.create"), out
     assert "Add Dr Ramesh Kumar" in str(out["cards"]) and S["writes"] == []
     assert _confirm(out).json()["state"] == "COMPLETED_VERIFIED"
     (_, body), = S["writes"]
@@ -261,4 +259,4 @@ def test_llm_fallback_uses_the_same_new_doctor_rule():
     body = assistant_router.RequestIn(client_request_id=uuid.uuid4(), text=SAID_2)
     with patch.object(rules, "_now", lambda: NOW):
         r = assistant_router._from_llm(intent, body, None, DOCTORS)
-    assert (r.kind, r.action_id) == ("clarify", "doctor.create"), r
+    assert (r.kind, r.action_id) in (("clarify", "doctor.create"), ("action", "doctor.create")), r

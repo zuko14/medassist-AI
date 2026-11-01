@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Optional
 
-from app.assistant import playbooks, present
+from app.assistant import playbooks, present, resolve
 from app.services.permissions import (
     PERMISSIONS,
     holds_credit_note_permission,
@@ -187,6 +187,9 @@ class ActionSpec:
     # words do not make the sentence a change request for this read only (rules._writing).
     asks_about: tuple[str, ...] = ()
     keep: tuple[str, ...] = ()                          # said outright: these phrases override `unless`
+    # (params, text) -> params: what the sentence implies but does not say ("dermatologist" is also the
+    # department; unsaid working days are the Doctors page's default). Never overrides a slot that was said.
+    derive: Optional[Callable[[dict, str], dict]] = None
 
 
 def prohibited_path(path: str) -> bool:
@@ -907,6 +910,26 @@ _SPEC_WORDS = ("specialization", "specialisation", "speciality", "specialty", "d
 #: Actions that change an EXISTING doctor. A full profile dictated for a name that is not on the list is a new
 #: doctor instead (rules.prefer_new_doctor), never an edit of whichever doctor shares a word with it.
 DOCTOR_EDITS = frozenset({"doctor.schedule", "doctor.details", "doctor.fee", "doctor.days", "doctor.slot_length"})
+#: What POST /admin/doctors and the Doctors page form use when no days are given (DoctorCreate.available_days).
+DOCTOR_DEFAULT_DAYS = "Mon,Tue,Wed,Thu,Fri"
+
+
+def _derive_new_doctor(params: dict, text: str) -> dict:
+    """A spoken profile rarely says both specialization and department, or the days: one specialty said fills
+    both ("dermatologist" -> Dermatologist / Dermatology), and unsaid days are the page's default. The preview
+    shows every value (assumed ones marked) before anything is saved."""
+    spec, dept = params.get("specialization"), params.get("department")
+    if spec and not dept:
+        params["department"] = resolve.doctor_department(spec)
+    elif dept and not spec:
+        params["specialization"] = dept
+        params["department"] = resolve.doctor_department(dept)
+    if not params.get("days"):
+        params["days"] = DOCTOR_DEFAULT_DAYS
+        params["assumed"] = sorted({*params.get("assumed", ()), "days"})
+    return params
+
+
 DOCTOR_ACTIONS = (
     # Full current shifts + the doctor's own duration are sent, never a branch field (SCH-02, D-34).
     _desk("doctor.schedule", "Change a doctor's hours", "R2", "PUT", "/admin/doctors/{doctor_id}", "doctors",
@@ -942,6 +965,7 @@ DOCTOR_ACTIONS = (
                  # Offered as a pick on the form only at a clinic with several branches (assistant._offer_branch).
                  SlotSpec("branch", "branch", False, "Branch")),
           permission="DOCTORS_CREATE", perm_source="dependency", one_of=("morning", "evening"),
+          derive=_derive_new_doctor,
           # "add dr Rao leave tomorrow" is a leave; "doctor registration number" or "change ..." an existing doctor
           unless=("leave", "leaves", "chutti", "selavu", "సెలవు", "छुट्टी", "holiday", "registration number",
                   "registration no", "reg number", "reg no", *_EDIT_WORDS)),
@@ -1741,6 +1765,142 @@ VOICE_ENTRY_9 = (
 )
 
 
+# ── Session 54: the rest of the panel by voice (each an existing endpoint, R2, preview + read-back) ──
+_CALL_NUMBER = r"re:\bcall\b(?!\s+(?:next|token))[^0-9]{0,40}(?:\d[\s-]?){10}"
+AUTONOMY = (
+    _desk("profile.update", "Change the hospital profile", "R2", "PUT", "/admin/profile", "profile",
+          ("hospital name", "clinic name", "rename+hospital", "rename+clinic", "hospital address", "clinic address",
+           "our address", "address+to", "maps link", "map link", "location link", "hospital emergency",
+           "clinic emergency", "hospital's emergency", "reception number", "front desk number", "staff number",
+           "follow ups", "follow-ups",
+           "followups", "follow up messages", "health check-ins", "health checkins", "check-ins+on", "check-ins+off"),
+          playbooks.profile_update_preview,
+          slots=(SlotSpec("changes", "profile_change", label="What to change, e.g. the address to …"),),
+          perm_source="role", roles=ADMIN_ROLES,
+          unless=("patient address", "patient's address", "new patient", "token", "follow up visit", "followup visit",
+                  "home visit", "collection", "register", "booking", "doctor", "dr", "receptionist", "lead", "leads",
+                  "message to", "what is", "show", "how", "transfer")),
+    _desk("holiday.delete", "Remove a hospital holiday", "R2", "DELETE", "/admin/holidays/{holiday_date}", "holidays",
+          ("remove+holiday", "cancel+holiday", "delete+holiday", "not a holiday", "no holiday", "open+on+holiday",
+           "holiday+raddu", "holiday+hatao", "holiday+teeseyi", "హాలిడే+రద్దు", "छुट्टी+रद्द"),
+          playbooks.holiday_delete_preview, slots=(SlotSpec("date", "date"),),
+          permission="HOLIDAYS_DELETE", perm_source="dependency"),
+    _desk("doctor_leave.move", "Move a doctor's leave to another day", "R2", "POST", "/admin/leaves", "leaves",
+          ("move+leave", "shift+leave", "postpone+leave", "prepone+leave", "reschedule+leave", "change+leave+to",
+           "leave+instead", "leave+marchu", "leave+badlo", "chutti+badlo", "selavu+marchu"),
+          playbooks.leave_move_preview,
+          slots=(SlotSpec("doctor", "doctor"), SlotSpec("move", "leave_move", label="From which day to which day, "
+                                                                                     "e.g. 5 Nov to 7 Nov")),
+          permission="DOCTOR_LEAVES_CREATE", perm_source="dependency", max_items=4),
+    _desk("treatment.create", "Add a treatment", "R2", "POST", "/admin/treatments", "treatments",
+          ("add+treatment", "new+treatment", "create+treatment", "add a treatment", "naya treatment",
+           "kotha treatment", "ట్రీట్మెంట్+జోడించు", "ट्रीटमेंट+जोड़ो"),
+          playbooks.treatment_create_preview,
+          slots=(SlotSpec("name", "new_treatment", label="Treatment name"),
+                 SlotSpec("category", "treatment_category", label="Category, e.g. Hair & Scalp"),
+                 SlotSpec("price", "service_price", label="Price from, in rupees")),
+          unless=("plan", "sitting", "price to", "price by", "hide", "show", "doctor", "dr", "lab test", "service",
+                  "description"), **_TRT),
+    _desk("branch.doctor_unassign", "Take a doctor off a branch", "R2", "DELETE",
+          "/admin/branches/{branch_id}/doctors/{doctor_id}", "branches",
+          ("remove+from+branch", "unassign", "take+off+branch", "remove+branch+dr", "remove+branch+doctor",
+           "no longer+branch", "branch+nundi+teeseyi", "branch+se+hatao"),
+          playbooks.branch_unassign_preview,
+          slots=(SlotSpec("doctor", "doctor"), SlotSpec("branch", "branch", label="Branch")),
+          permission="DOCTOR_BRANCH_ASSIGN", perm_source="dependency"),
+    _desk("voice.call_number", "Have the AI receptionist call someone", "R2", "POST", "/admin/voice/outbound", "voice",
+          (_CALL_NUMBER, "ask kriya to call", "kriya+call+number"), playbooks.call_number_preview,
+          slots=(SlotSpec("phone", "phone"), SlotSpec("interest", "call_interest", False)),
+          unless=("leads", "token", "next patient", "missed", "who called", "call log", "calls"), **_VOICE_ON),
+)
+
+# ── Session 55: money and inpatient tasks. Money moves are R3 (the rupees are typed to confirm); every one an
+# existing /admin/ipd or /admin/opd endpoint with its own permission, run as the logged-in user. ──
+_STAY_T = SlotSpec("target", "stay_target", label="Patient's bed or name")
+_IPD_BILL = dict(permission="IPD_BILLING", perm_source=_HANDLER, feature=_ipd_on)
+_ADMIT = dict(permission="IPD_ADMISSIONS", perm_source=_HANDLER, feature=_ipd_on)
+_CASH = dict(permission="OPD_BILLING", also=("OPD_ADMIN",), perm_source=_HANDLER, feature=_opd_live)
+_NOT_STAY_MONEY = ("deposit", "advance", "discount", "concession", "package", "token", "opd", "consultation fee",
+                   "doctor fee", "lab test", "price", "tariff", "service charge", "ward charges", "room charges", "credit note")
+MONEY_AND_IPD = (
+    _desk("ipd.charge_add", "Add a charge to an inpatient's bill", "R3", "POST",
+          "/admin/ipd/admissions/{admission_id}/charges", "ipdchart",
+          ("add+charge", "add+charges", "charge+bed", r"re:\bcharges?\s+(?:of\s+|for\s+|is\s+)?(?:rs\s*)?\d",
+           r"re:\b\d{1,3}\s+(?:x\s+)?[a-z][a-z ]*\s+(?:at|of)\s+(?:rs\s*)?\d+\s*(?:rupees\s+)?(?:each|per)\b",
+           r"re:\b(?:rs\s*)?\d+\s+(?:rupees\s+)?for\s+(?:an?\s+|the\s+)?[a-z].*\bbed\b"),
+          playbooks.ipd_charge_add_preview,
+          slots=(_STAY_T, SlotSpec("charge", "ipd_charge", label="What and how much, e.g. dressing 500")),
+          unless=("void", "remove", "cancel", "delete", "reverse", "post the", "post all", "refund", "change", "set",
+                  "increase", "reduce", *_NOT_STAY_MONEY), max_items=playbooks.MAX_RECEIPT_RUPEES, **_IPD_BILL),
+    _desk("ipd.charge_void", "Void a charge on an inpatient's bill", "R3", "POST", "/admin/ipd/charges/{charge_id}/void",
+          "ipdchart", ("void+charge", "remove+charge", "cancel+charge", "delete+charge", "reverse+charge",
+                       "take off+charge", "charge+entered twice", "wrong+charge"),
+          playbooks.ipd_charge_void_preview,
+          slots=(_STAY_T, SlotSpec("charge", "charge_term", label="Which charge, e.g. dressing"),
+                 SlotSpec("reason", "why", label="Reason")),
+          unless=_NOT_STAY_MONEY, max_items=playbooks.MAX_RECEIPT_RUPEES, **_IPD_BILL),
+    _desk("ipd.charges_post", "Post an inpatient's proposed charges", "R3", "POST",
+          "/admin/ipd/admissions/{admission_id}/charges/post", "ipdchart",
+          ("post+charges", "post+the charges", "post+charge", "approve+charges", "confirm+charges", "charges+post"),
+          playbooks.ipd_charges_post_preview, slots=(_STAY_T,),
+          unless=("add", "void", "remove", "cancel", "delete", *_NOT_STAY_MONEY), max_items=playbooks.MAX_RECEIPT_RUPEES,
+          **_IPD_BILL),
+    _desk("ipd.final_bill", "Make an inpatient's final bill", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/final-bill", "ipdfinance",
+          ("final+bill", "discharge+bill", "bill+bed", "ipd+bill", "final+invoice", "final bill+banao",
+           "final bill+cheyyi"),
+          playbooks.ipd_final_bill_preview, slots=(_STAY_T,),
+          unless=("how much", "show", "what is", "token", "opd", "void", "cancel", "refund"), **_IPD_BILL),
+    _desk("ipd_finance.deposit_refund", "Refund an inpatient's deposit", "R3", "POST",
+          "/admin/ipd/admissions/{admission_id}/deposits/refund", "ipdfinance",
+          ("refund+deposit", "deposit+refund", "return+deposit", "refund+advance", "advance+refund", "return+advance",
+           "deposit+wapas", "advance+wapas", "deposit+tirigi"),
+          playbooks.deposit_refund_preview,
+          slots=(_STAY_T, SlotSpec("amount", "money", label="Refund in rupees"),
+                 SlotSpec("mode", "pay_mode", label="Cash, UPI or bank transfer"),
+                 SlotSpec("reason", "why", label="Reason"),
+                 SlotSpec("reference", "pay_ref", False, "UTR (UPI / bank transfer only)")),
+          unless=("take", "collect", "how much", "show", "list", "booking", "online"),
+          permission="IPD_ADMIN", perm_source=_HANDLER, feature=_ipd_on, max_items=playbooks.MAX_RECEIPT_RUPEES),
+    _desk("ipd.assign_bed", "Give a waiting patient a bed", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/assign-bed", "ipdadmit",
+          ("give+bed", "assign+bed", "allot+bed", "allocate+bed", r"re:\b(?:put|place)\s+[a-z ]+?\s+in(?:to)?\s+bed\b"),
+          playbooks.ipd_assign_bed_preview,
+          slots=(SlotSpec("patient", "waiting_patient", label="Patient waiting for a bed"),
+                 SlotSpec("bed", "admit_bed", label="Bed, e.g. 12")),
+          unless=("admit", "transfer", "move", "shift", "clean", "maintenance", "service", "branch", "doctor", "dr",
+                  "how many", "show", "free beds"), **_ADMIT),
+    _desk("ipd.admission_cancel", "Cancel an admission still waiting for a bed", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/cancel", "ipdadmit",
+          ("cancel+admission", "admission+cancel", "withdraw+admission", "call off+admission", "admission+raddu",
+           "admission+radd"),
+          playbooks.ipd_admission_cancel_preview,
+          slots=(SlotSpec("patient", "waiting_patient", label="Patient waiting for a bed"),
+                 SlotSpec("reason", "why", label="Reason")),
+          unless=("discharge", "surgery", "ot", "appointment", "booking"), **_ADMIT),
+    _desk("ipd.package_remove", "Take an inpatient off a package", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/package/remove", "ipdchart",
+          ("remove+package", "off+package", "package+remove", "drop+package", "cancel+package", "package+hatao",
+           "package+teeseyi"),
+          playbooks.package_remove_preview, slots=(_STAY_T, SlotSpec("reason", "why", label="Reason")),
+          unless=("create", "new package", "add package", "apply", "put", "list", "show"), **_IPD_BILL),
+    _desk("opd.shift_open", "Open your cash drawer shift", "R2", "POST", "/admin/opd/shifts/open", "opdbilling",
+          ("open+shift", "open+counter", "open+cash counter", "start+shift", "open+drawer", "start+counter",
+           "shift+open", "counter+open", "start+cash"),
+          playbooks.shift_open_preview, slots=(SlotSpec("float", "shift_float", False, "Opening float in rupees"),),
+          # "turn off auto open shift" is the OPD setting (opd.setting), never opening a drawer now
+          unless=("close", "end", "how much", "show", "ot", "theatre", "surgery", "bed", "ward", "auto", "automatic",
+                  "automatically", "turn off", "turn on", "switch off", "switch on", "setting", "after check"), **_CASH),
+    _desk("opd.shift_close", "Close your cash drawer shift", "R3", "POST", "/admin/opd/shifts/{shift_id}/close",
+          "opdbilling",
+          ("close+shift", "close+counter", "close+drawer", "end+shift", "close+cash counter", "shift+close",
+           "counter+close", "close my cash", "end+counter"),
+          playbooks.shift_close_preview,
+          slots=(SlotSpec("declared", "declared_cash", label="Cash counted in the drawer, in rupees"),),
+          unless=("open", "start", "how much", "show", "ot", "theatre", "surgery", "bed", "ward", "day"),
+          max_items=playbooks.MAX_RECEIPT_RUPEES, **_CASH),
+)
+
 REGISTRY: dict[str, ActionSpec] = _build(
     ActionSpec(id="nav.open", module="nav", summary="Open a page", risk="R0"),       # client go(page)
     ActionSpec(id="help.howto", module="help", summary="How do I…", risk="R0"),      # static, app/assistant/help.py
@@ -1771,6 +1931,8 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *VOICE_ENTRY_7,
     *VOICE_ENTRY_8,
     *VOICE_ENTRY_9,
+    *AUTONOMY,
+    *MONEY_AND_IPD,
 )
 
 
@@ -1976,7 +2138,29 @@ _THIRD: dict[str, dict] = {
 }
 
 
-for _k, _v in (*_MORE.items(), *_THIRD.items()):
+# Session 54: the new actions (AUTONOMY) take these sentences from their older neighbours.
+_FOURTH: dict[str, dict] = {
+    # Session 55: the IPD final bill / admission / package / deposit refund take these
+    "opd.invoice_create": {"unless": ("final bill", "bed", "inpatient", "ipd", "discharge bill")},
+    "ipd.admit": {"unless": ("cancel", "withdraw", "give bed", "assign bed", "allot bed")},
+    "ipd.package_create": {"unless": ("off", "drop", "cancel")},
+    "ipd.package_apply": {"unless": ("off", "drop", "cancel")},
+    "ipd.bed_status": {"unless": ("give bed", "assign bed", "allot bed", "allocate bed")},
+    "services.price": {"unless": ("bed", "inpatient", "add a", "add an")},
+    # "move ... to ..." about a leave is never a queue move
+    "opd.stage": {"unless": ("leave", "leaves", "chutti", "selavu")},
+    # the hospital's own emergency number is the profile; the receptionist's transfer number stays here
+    "voice.settings_update": {"unless": ("hospital emergency", "clinic emergency", "hospital's emergency",
+                                         "clinic's emergency", "hospital profile")},
+    "holiday.create": {"unless": ("remove", "cancel", "delete", "not a holiday", "no holiday", "raddu", "hatao",
+                                  "teeseyi")},
+    "doctor_leave.create": {"unless": ("move", "shift", "postpone", "prepone", "reschedule", "instead")},
+    "doctor_leave.delete": {"unless": ("move", "shift", "postpone", "prepone", "reschedule", "instead")},
+    "branch.doctor_assign": {"unless": ("remove", "unassign", "take off", "no longer", "teeseyi", "hatao")},
+}
+
+
+for _k, _v in (*_MORE.items(), *_THIRD.items(), *_FOURTH.items()):
     _have = PHRASINGS.setdefault(_k, {})
     for _f, _vals in _v.items():
         _have[_f] = tuple(_have.get(_f, ())) + tuple(_vals)

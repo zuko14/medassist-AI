@@ -701,7 +701,8 @@ def resolve_days(text: str) -> Optional[str]:
 # Spoken profiles: "the doctor's name is Ramesh Kumar", "name of the doctor is Dr Priya".
 # Speech often says "was" ("doctor name was Ramesh Kumar"): the same statement.
 _NAMED_DOCTOR = re.compile(r"\b(?:(?:(?:doctor|dr)(?:'?s)?\s+name|name\s+of\s+(?:the\s+)?(?:new\s+)?(?:doctor|dr)|"
-                           r"(?:his|her)\s+name)\s+(?:is|was|will be|should be|:)|(?:doctor|dr)\s+(?:named|called))"
+                           r"(?:his|her|the)\s+name|(?<![\w'])name)\s+(?:is|was|will be|should be|:)|"
+                           r"(?:doctor|dr)\s+(?:named|called))"
                            r"\s+(?:dr\.?\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
 # Last resort for a new doctor's name: "Dr Ramesh Kumar" said with capitals anywhere in the profile.
 _TITLED_DOCTOR = re.compile(r"\b(?i:dr\.?|doctor)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b")
@@ -1447,7 +1448,8 @@ def resolve_ot_target(text: str) -> Optional[str]:
     return name if 2 <= len(name) <= 40 else None
 
 
-_WHY_SAID = re.compile(r"\b(?:because(?:\s+of)?|due\s+to|reason(?:\s+is)?|since|as\s+the)\s*[:,-]?\s+(.+?)"
+_WHY_SAID = re.compile(r"\b(?:because(?:\s+of)?|due\s+to|reason(?:\s+is)?|since|as\s+the|as(?=\s+(?:she|he|they|it|we|patient)\b))"
+                       r"\s*[:,-]?\s+(.+?)"
                        r"(?=\s*,\s*(?:refund|pay|paid|by|in|via|through|utr)\b|\s*[.]?$)", re.I)
 
 
@@ -1643,7 +1645,7 @@ def resolve_company(text: str) -> Optional[str]:
     return name if 2 <= len(name) <= 120 else None
 
 
-_AT_PRICE = re.compile(r"\b(?:at|for|price|priced|costing|cost|of|rate|charges?|rent|tariff)\s+(?:is\s+)?(?:rs\.?\s*|₹\s*|inr\s*)?(\d[\d,]*)\b(?!\s*%)",
+_AT_PRICE = re.compile(r"\b(?:at|for|price|priced|costing|cost|of|rate|charges?|rent|tariff)\s+(?:is\s+)?(?:rs\.?\s*|₹\s*|inr\s*)?(\d[\d,]*)\b(?!\s*(?:%|days?\b|mins?\b|minutes?\b|hours?\b|hrs?\b|sittings?\b|sessions?\b|weeks?\b|months?\b|years?\b|beds?\b|patients?\b))",
                        re.I)
 
 
@@ -2157,3 +2159,236 @@ def resolve_disallowed(text: str) -> Optional[str]:
         return str(int((m.group(1) or m.group(2)).replace(",", "")))
     found = resolve_amount(t)
     return str(int(found[1])) if found and found[0] == "amount" else None
+
+
+# ── Session 54: the rest of the panel by voice ───────────────────────────────
+
+def doctor_department(value: str) -> str:
+    """The department a specialty belongs to, said either way: "Dermatologist" -> "Dermatology",
+    "Paediatrician" -> "Paediatrics", "Orthopaedic surgeon" -> "Orthopaedics"; anything else as said."""
+    v = " ".join((value or "").split())
+    low = v.lower()
+    if low.endswith("ologist"):
+        return v[:-3] + "y"
+    for tail, dept in (("iatrician", "iatrics"), ("iatrist", "iatry")):
+        if low.endswith(tail):
+            return v[: len(v) - len(tail)] + dept
+    if re.fullmatch(r"(?i)orthop(?:a)?edic(?:\s+surgeon)?", v):
+        return "Orthopaedics"
+    if re.fullmatch(r"(?i)(?:general\s+)?physician", v):
+        return "General Medicine"
+    if re.fullmatch(r"(?i)dentist|dental\s+surgeon", v):
+        return "Dental"
+    return v
+
+
+_PROFILE_STOP = r"(?=\s*(?:[.;]|\band\s+(?:the\s+)?(?:address|emergency|reception|front\s*desk|staff|maps?|hospital|clinic)\b|$))"
+_PROFILE_PHONE = r"((?:\+?91[\s-]?)?\d(?:[\s-]?\d){9})"
+_PROFILE = {
+    "name": re.compile(r"\b(?:rename\s+(?:the\s+|our\s+)?(?:hospital|clinic)\s+(?:to|as)\s+|(?:hospital|clinic)(?:'s)?\s+name\s+"
+                       r"(?:to|as|is|should be|will be|:)\s+)(?:\"([^\"]{2,80})\"|([A-Za-z0-9][A-Za-z0-9 &.'()-]{1,79}?))"
+                       + _PROFILE_STOP, re.I),
+    "hospital_address": re.compile(r"\baddress\s+(?:to|as|is|should be|will be|:)\s+(?:\"([^\"]{5,300})\"|(.{5,300}?))"
+                                   r"(?=\s*(?:\band\s+(?:the\s+)?(?:emergency|reception|front\s*desk|staff|maps?)\b|$))", re.I),
+    "hospital_maps_link": re.compile(r"(https?://(?:maps\.app\.goo\.gl|goo\.gl/maps|(?:www\.)?google\.[a-z.]+/maps|"
+                                     r"maps\.google\.[a-z.]+)\S*)", re.I),
+    "hospital_emergency_number": re.compile(r"\bemergency\s+(?:number|phone|no\.?|contact|line)\s+(?:to|as|is|:)?\s*"
+                                            + _PROFILE_PHONE, re.I),
+    "hospital_staff_phone": re.compile(r"\b(?:reception|front\s*desk|staff|talk\s+to\s+staff)\s+(?:number|phone|no\.?|line)\s+"
+                                       r"(?:to|as|is|:)?\s*" + _PROFILE_PHONE, re.I),
+}
+_FOLLOWUP = re.compile(r"\bfollow[\s-]?ups?\b", re.I)
+_CHECKINS = re.compile(r"\b(?:health\s+)?check[\s-]?ins?\b", re.I)
+_FOLLOWUP_DAYS = re.compile(r"\bfollow[\s-]?ups?\b.*?\b(?:after|in)\s+(\d{1,2})\s+days?\b", re.I)
+
+
+def resolve_profile_change(text: str) -> Optional[dict]:
+    """Hospital profile fields said outright, as PUT /admin/profile names them. Never the WhatsApp routing id
+    or the sandbox flag (they move a clinic's messages). None when nothing is stated."""
+    t, out = text or "", {}
+    for field, rx in _PROFILE.items():
+        m = rx.search(t)
+        if not m:
+            continue
+        value = next((g for g in m.groups() if g), "").strip().strip(".,")
+        if field in ("hospital_emergency_number", "hospital_staff_phone"):
+            value = re.sub(r"[\s-]", "", value)
+        if value:
+            out[field] = value
+    if _FOLLOWUP.search(t) and not re.search(r"\bmessage\b", t, re.I):
+        m = _FOLLOWUP_DAYS.search(t)
+        if m and 1 <= int(m.group(1)) <= 30:
+            out["followup_days"] = int(m.group(1))
+        state = resolve_on_off(_FOLLOWUP_DAYS.sub(" ", t))
+        if state and not _CHECKINS.search(t):
+            out["followup_enabled"] = state == "on"
+    if _CHECKINS.search(t) and not re.search(r"\bcheck[\s-]?in\s+(?:the\s+)?(?:patient|token|booking|[A-Z])", t):
+        state = resolve_on_off(t)
+        if state:
+            out["health_checkins_enabled"] = state == "on"
+    return out or None
+
+
+_MOVE_SPLIT = re.compile(r"\b(?:to|till|until|→|->|se|ki\s+jagah)\b", re.I)
+
+
+def resolve_leave_move(text: str, now: Optional[datetime] = None) -> Optional[list]:
+    """[from, to] ISO dates of a leave being moved ("move Dr Rao's leave from 5 Nov to 7 Nov", "shift her
+    leave tomorrow to Friday"): the last date before the final "to" and the date after it; None otherwise."""
+    parts = list(_MOVE_SPLIT.finditer(text or ""))
+    for m in reversed(parts):
+        old, new = resolve_date(text[:m.start()], now=now), resolve_date(text[m.end():], now=now)
+        if old and new and old != new:
+            return [old.isoformat(), new.isoformat()]
+    return None
+
+
+_NEW_TREATMENT = re.compile(r"\b(?:add|new|create)\s+(?:a\s+)?(?:new\s+)?(?:treatment|procedure|service\s+treatment)\s+"
+                            r"(?:called\s+|named\s+)?([A-Za-z0-9][A-Za-z0-9 &+.'()/-]{1,80}?)"
+                            r"(?=\s*(?:[,.;]|\b(?:for|at|price|priced|costs?|under|in|category|from|with|rs|₹)\b|\d|$))", re.I)
+_TRT_CATEGORY = re.compile(r"\b(?:under|in(?:\s+the)?|category(?:\s+is)?|category:)\s+(?:the\s+)?\"?([A-Za-z][A-Za-z0-9 &+'/-]{1,58}?)\"?"
+                           r"(?:\s+(?:category|section|group))?(?=\s*(?:[,.;]|\b(?:for|at|price|priced|costs?|from|with)\b|\d|$))",
+                           re.I)
+
+
+def resolve_new_treatment(text: str) -> Optional[str]:
+    """The new treatment's name as said: quoted, else the words after "add treatment"; 2..120 chars."""
+    quoted = resolve_quoted(text)
+    if quoted:
+        return quoted if 2 <= len(quoted) <= 120 else None
+    m = _NEW_TREATMENT.search(text or "")
+    name = " ".join(m.group(1).split()) if m else ""
+    return name if 2 <= len(name) <= 120 else None
+
+
+def resolve_treatment_category(text: str) -> Optional[str]:
+    """The category said outright ("under Hair & Scalp", "category is Skin"); None means the form asks."""
+    m = _TRT_CATEGORY.search(without_verbatim(text or "", False))
+    value = " ".join(m.group(1).split()) if m else ""
+    return value if 2 <= len(value) <= 60 else None
+
+
+_CALL_ABOUT = re.compile(r"\b(?:about|regarding|for|interested in|asked about|asking about)\s+(.{2,60}?)\s*[.?!]*$", re.I)
+
+
+def resolve_call_interest(text: str) -> Optional[str]:
+    """What the person asked about, for the AI receptionist's opening line ("... about knee pain")."""
+    t = _PHONE_RUN.sub(" ", text or "")
+    m = _CALL_ABOUT.search(t)
+    value = " ".join(m.group(1).split()) if m else ""
+    return value if 2 <= len(value) <= 60 else None
+
+
+# ── Session 55: money and inpatient tasks by voice ───────────────────────────
+
+_RS = r"(?:rs\.?\s*|₹\s*|inr\s*)?"
+_AMT = r"(\d[\d,]{0,8})"
+# Which IPD charge category a description falls in (ChargeIn.category). First match wins; "other" otherwise.
+_CHARGE_CATEGORY = (
+    ("investigation", r"x[\s-]?ray|xray|scan|ultrasound|usg|\bct\b|mri|ecg|echo|test|cbc|lab|blood\s+work|culture|"
+                      r"biopsy|investigation"),
+    ("pharmacy", r"injection|inj\b|medicine|tablet|drip|\biv\b|drug|syrup|antibiotic|pharmacy|insulin|saline"),
+    ("consumable", r"dressing|gauze|catheter|syringe|cannula|glove|bandage|consumable|kit|mask|diaper"),
+    ("doctor_visit", r"doctor\s+visit|visit|consultation|round"),
+    ("nursing", r"nursing|nurse|attendant"),
+    ("procedure", r"procedure|surgery|physio|physiotherapy|suturing|stitch|nebuli[sz]ation|catheteri[sz]ation|"
+                  r"dialysis|transfusion|ryles|enema|plaster"),
+    ("bed", r"\bbed\s+charge|room\s+rent|bed\s+rent"),
+)
+_CHARGE_PATTERNS = (
+    # "add 2 injections at 150 each for bed 5", "3 dressings @ 200 to bed 5"
+    re.compile(r"\b(\d{1,3})\s*(?:x\s*)?([a-z][a-z \-/]{1,40}?)\s+(?:at|@|of)\s*" + _RS + _AMT
+               + r"\s*(?:rupees?\s*)?(?:each|per\s+\w+|a\s+piece)", re.I),
+    # "a dressing charge of 500", "x-ray charge 800", "physiotherapy charges ₹1200"
+    re.compile(r"(?:\badd\s+|\bpost\s+|\bput\s+)?(?:\b(?:a|an|one)\s+)?([a-z][a-z \-/]{1,40}?)\s+charges?\s+(?:of\s+|for\s+|is\s+)?"
+               + _RS + _AMT, re.I),
+    # "charge bed 5 ₹1200 for physiotherapy", "add 800 for an x-ray to bed 5"
+    re.compile(r"\b" + _RS + _AMT + r"\s*(?:rupees?\s+)?for\s+(?:an?\s+|the\s+)?([a-z][a-z \-/]{1,40}?)"
+               r"(?=\s*(?:[,.]|\bto\b|\bfor\b|\bon\b|\bin\b|$))", re.I),
+)
+_CHARGE_NOISE = {"add", "post", "put", "a", "an", "the", "one", "to", "for", "bed", "of", "please", "charge", "charges"}
+
+
+def charge_category(description: str) -> str:
+    d = (description or "").lower()
+    return next((cat for cat, rx in _CHARGE_CATEGORY if re.search(rx, d)), "other")
+
+
+def resolve_ipd_charge(text: str) -> Optional[dict]:
+    """A charge said for an inpatient: {"description", "category", "quantity", "unit_rupees"}; None when the
+    sentence does not state both what it is for and its price."""
+    t = re.sub(r"\bbed\s*(?:no\.?|number)?\s*[a-z]{0,4}[\s-]?\d{1,4}[a-z]?\b", " ", text or "", flags=re.I)
+    for i, rx in enumerate(_CHARGE_PATTERNS):
+        m = rx.search(t)
+        if not m:
+            continue
+        if i == 0:
+            qty, desc, amt = int(m.group(1)), m.group(2), m.group(3)
+        elif i == 1:
+            qty, desc, amt = 1, m.group(1), m.group(2)
+        else:
+            qty, amt, desc = 1, m.group(1), m.group(2)
+        words = [w for w in desc.split() if w.lower() not in _CHARGE_NOISE]
+        desc = " ".join(words).strip(" -/")
+        rupees = int(amt.replace(",", ""))
+        if 2 <= len(desc) <= 200 and 0 < rupees <= 1_000_000 and 1 <= qty <= 999:
+            if qty > 1 and desc.lower().endswith("s") and not desc.lower().endswith("ss"):
+                desc = desc[:-1]  # "2 injections" -> "injection" x 2
+            return {"description": desc[:1].upper() + desc[1:], "category": charge_category(desc),
+                    "quantity": qty, "unit_rupees": rupees}
+    return None
+
+
+_CHARGE_TERM = re.compile(r"\b(?:void|remove|cancel|delete|reverse|take\s+off|drop)\s+(?:the\s+|that\s+)?"
+                          r"([a-z][a-z \-/]{1,40}?)\s+charges?\b", re.I)
+
+
+def resolve_charge_term(text: str) -> Optional[str]:
+    """Which charge a void names ("remove the dressing charge from bed 5" -> "dressing")."""
+    m = _CHARGE_TERM.search(text or "")
+    words = [w for w in (m.group(1).lower().split() if m else []) if w not in _CHARGE_NOISE]
+    term = " ".join(words)
+    return term if 2 <= len(term) <= 60 else None
+
+
+_WAITING = (
+    re.compile(r"\b(?:give|assign|allot|allocate)\s+bed\s+\S+\s+to\s+(?:the\s+)?(?:patient\s+)?([A-Za-z][A-Za-z ]{1,40}?)"
+               r"(?=\s*(?:[,.]|$|\bwho\b|\bfrom\b|\bin\b))", re.I),
+    re.compile(r"\b(?:put|move|shift|place|admit)\s+(?:the\s+)?(?:patient\s+)?([A-Za-z][A-Za-z ]{1,40}?)\s+(?:in|into|on|to)\s+"
+               r"(?:the\s+)?bed\b", re.I),
+    re.compile(r"\b(?:cancel|withdraw|call\s+off)\s+(?:the\s+)?(?:admission\s+of\s+|admission\s+for\s+)([A-Za-z][A-Za-z ]{1,40}?)"
+               r"(?=\s*(?:[,.]|$|\bbecause\b|\bas\b|\bsince\b))", re.I),
+    re.compile(r"\b(?:cancel|withdraw|call\s+off)\s+([A-Za-z][A-Za-z ]{1,40}?)'s\s+admission\b", re.I),
+)
+
+
+def resolve_waiting_patient(text: str) -> Optional[str]:
+    """A patient on the waiting-for-a-bed list, by name ("give bed 12 to Ravi", "cancel Ravi's admission")."""
+    for rx in _WAITING:
+        m = rx.search(text or "")
+        if m:
+            name = " ".join(w for w in m.group(1).lower().split() if w not in ("the", "patient", "mr", "mrs", "ms"))
+            if 2 <= len(name) <= 40:
+                return name
+    return None
+
+
+_FLOAT = re.compile(r"\b(?:with|float|opening(?:\s+(?:cash|float|balance))?|starting\s+cash)\s+(?:of\s+|is\s+)?" + _RS
+                    + _AMT + r"\b|" + _RS + _AMT + r"\s*(?:rupees?\s+)?(?:as\s+)?(?:opening\s+)?(?:float|change)\b", re.I)
+_DECLARED = re.compile(r"\b(?:counted|count(?:ed)?\s+is|declared?|in\s+(?:the\s+)?drawer|drawer\s+(?:has|is)|cash\s+(?:is|of|in\s+hand)|"
+                       r"handing\s+over|with)\s+(?:of\s+)?" + _RS + _AMT + r"\b|" + _RS + _AMT
+                       + r"\s*(?:rupees?\s+)?(?:in\s+(?:the\s+)?drawer|counted|in\s+hand|cash\s+in\s+hand)\b", re.I)
+
+
+def resolve_shift_float(text: str) -> Optional[str]:
+    """The opening float in rupees ("open my counter with 2000 float"); None = not said (the preview uses 0)."""
+    m = _FLOAT.search(text or "")
+    value = next((g for g in (m.groups() if m else ()) if g), None)
+    return value.replace(",", "") if value else None
+
+
+def resolve_declared_cash(text: str) -> Optional[str]:
+    """The cash counted in the drawer at closing, in rupees ("close my shift, cash counted 15400")."""
+    m = _DECLARED.search(text or "")
+    value = next((g for g in (m.groups() if m else ()) if g), None)
+    return value.replace(",", "") if value else None

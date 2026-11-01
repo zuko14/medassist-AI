@@ -697,3 +697,61 @@ HELDOUT = [
     ("visit.sign", "sign token 5's visit"),
     ("documents.certificate", "issue a sick leave certificate for Kavya"),
 ]
+
+# Session 54: tasks Kriya now does end to end (the owner's "do the task, not a form" request).
+DEV4 = [
+    ("doctor.create", "Register a new doctor. Name is Suresh Varma. His department is dermatologist and also his fees is "
+                      "₹500 and also he serves at the Kukatpally branch and also his morning slot timings 9 to 11 "
+                      "o'clock and evening slot timings 6 o'clock to 7 o'clock."),
+    ("doctor.create", "new doctor joining, name is Farah Khan, gynaecologist, fee 700, mornings 10 to 1"),
+    ("profile.update", "change the hospital address to 12-3, Road No 5, Banjara Hills, Hyderabad"),
+    ("profile.update", "rename the hospital to Aura Multispeciality Hospital"),
+    ("profile.update", "update the hospital emergency number to 98480 12345"),
+    ("profile.update", "set the reception number to 9000012345"),
+    ("profile.update", "turn off patient follow ups"),
+    ("profile.update", "send follow ups after 5 days"),
+    ("profile.update", "turn on health check-ins"),
+    ("profile.update", "our maps link is https://maps.app.goo.gl/abc123"),
+    ("holiday.delete", "remove the holiday on 25 December"),
+    ("holiday.delete", "25 December is not a holiday anymore"),
+    ("holiday.delete", "cancel the holiday on 14 November"),
+    ("doctor_leave.move", "move Dr Anitha's leave from 5 November to 7 November"),
+    ("doctor_leave.move", "shift Dr Kiran's leave tomorrow to Friday"),
+    ("doctor_leave.move", "postpone Dr Meera's leave from 10 Nov to 12 Nov"),
+    ("treatment.create", "add a new treatment Hair PRP under Hair & Scalp for 4000"),
+    ("treatment.create", "add treatment \"Carbon Laser Peel\" for 3500"),
+    ("treatment.create", "create treatment Botox for 9000 in the Anti-ageing category"),
+    ("branch.doctor_unassign", "remove Dr Kiran from the Madhapur branch"),
+    ("branch.doctor_unassign", "unassign Dr Anitha from Kukatpally branch"),
+    ("voice.call_number", "call 9876543210 about knee pain"),
+    ("voice.call_number", "ask kriya to call 98480 12345 regarding cardiology"),
+    ("voice.settings_update", "update the emergency number to 98480 12345"),  # unchanged: the receptionist's
+]
+
+# Session 55: money and inpatient tasks.
+DEV5 = [
+    ("ipd.charge_add", "add a dressing charge of 500 to bed 5"),
+    ("ipd.charge_add", "add 2 injections at 150 each for bed 5"),
+    ("ipd.charge_add", "bed 5 x-ray charge 800"),
+    ("ipd.charge_add", "charge bed 5 ₹1200 for physiotherapy"),
+    ("ipd.charge_add", "add 800 for an ECG to bed 5"),
+    ("ipd.charge_add", "post a doctor visit charge of 600 to Ravi"),
+    ("ipd.charge_void", "remove the dressing charge from bed 5 because it was entered twice"),
+    ("ipd.charge_void", "void the x-ray charge on bed 5, wrong patient"),
+    ("ipd.charges_post", "post the charges for bed 5"),
+    ("ipd.charges_post", "post all proposed charges for Ravi"),
+    ("ipd.final_bill", "make the final bill for bed 5"),
+    ("ipd.final_bill", "final bill for Lakshmi"),
+    ("ipd_finance.deposit_refund", "refund 2000 deposit to bed 5 in cash because the patient is shifting hospitals"),
+    ("ipd_finance.deposit_refund", "return the advance of 5000 to bed 7 by upi UTR 123456789012 as the surgery was "
+                                   "cancelled"),
+    ("ipd.assign_bed", "give bed 12 to Ravi"),
+    ("ipd.assign_bed", "put Ravi Kumar in bed 12"),
+    ("ipd.admission_cancel", "cancel Ravi's admission because he went home"),
+    ("ipd.admission_cancel", "cancel the admission of Lakshmi as she went to another hospital"),
+    ("ipd.package_remove", "take bed 5 off the package because the surgery was not done"),
+    ("opd.shift_open", "open my cash counter with 2000 float"),
+    ("opd.shift_open", "open my shift"),
+    ("opd.shift_close", "close my shift, cash counted 15400"),
+    ("opd.shift_close", "close the counter with 15,400 in the drawer"),
+]

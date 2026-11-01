@@ -415,6 +415,18 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
         return fn(text), ()
     if slot.kind in ("ot_target", "ot_action", "staff_target", "new_branch", "branch_rename"):
         return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind in ("ipd_charge", "charge_term", "waiting_patient", "shift_float", "declared_cash"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind == "profile_change":
+        return resolve.resolve_profile_change(text), ()
+    if slot.kind == "leave_move":
+        return resolve.resolve_leave_move(text, now=now), ()
+    if slot.kind == "new_treatment":
+        return resolve.resolve_new_treatment(text), ()
+    if slot.kind == "treatment_category":
+        return resolve.resolve_treatment_category(text), ()
+    if slot.kind == "call_interest":
+        return resolve.resolve_call_interest(text), ()
     if slot.kind == "doctor":
         found = resolve.resolve_doctor(text, doctors or [])
         if len(found) == 1:
@@ -457,6 +469,8 @@ _SERVICE_WORDS = ("service", "services", "procedure", "procedures", "charge", "c
                   "nursing", "dressing", "injection", "nebulisation", "nebulization", "physiotherapy", "icu",
                   "bed charges")
 _PRICE_DOMAINS = {"lab_test.price": _LAB_WORDS, "treatment.price": _TREATMENT_WORDS, "services.price": _SERVICE_WORDS}
+# Where a stated reason starts; matched on the normalised text. "as" only as "as the / as she / as he / as it / as they".
+_REASON_CLAUSE = re.compile(r"\b(?:because|since|due to|reason|as (?:the|she|he|it|they|we|patient))\b")
 _MESSAGE_CUES = ("whatsapp", "message", "msg", "tell", "text", "sms", "inform", "send", "pampu", "bhejo", "batao",
                  "cheppu", "చెప్పు", "बताओ")
 
@@ -501,6 +515,9 @@ def _match_action(text: str, t: str, actions: dict, ui_page: Optional[str], doct
                   visible: Optional[set]) -> Route:
     scored = []
     unquoted = _norm(resolve.without_verbatim(text, False))  # quoted words are someone's text, not the instruction
+    reason = _REASON_CLAUSE.split(unquoted, maxsplit=1)
+    if len(reason) == 2 and len(reason[0].split()) >= 3:
+        unquoted = reason[0]  # "... because the surgery was not done": a reason is content, never the task asked for
     if resolve.resolve_message(text) is not None and has_any(_norm(resolve.without_verbatim(text, True)), _MESSAGE_CUES):
         unquoted = _norm(resolve.without_verbatim(text, True))  # "tell Ravi on whatsapp: clinic closed tomorrow"
     for spec in actions.values():
@@ -596,6 +613,9 @@ def fill(spec: ActionSpec, text: str, *, doctors=None, now=None, question: bool 
         elif slot.required:
             missing.append(slot.name)
             candidates = candidates or cands
+    if spec.derive:  # what the sentence implies (one specialty said = both fields; the page's default days)
+        params = spec.derive(dict(params), text)
+        missing = [m for m in missing if m not in params]
     if spec.one_of and not any(params.get(n) for n in spec.one_of):
         missing.extend(spec.one_of)  # e.g. a new doctor's morning or evening hours: the form asks both
     if missing:
@@ -613,6 +633,23 @@ FOLLOW_UP_KINDS = frozenset({"date", "amount", "price", "percent", "days", "sess
                              "room", "received", "utr", "tds", "discount_amount", "approved_amount", "approval_ref",
                              "enhancement", "credit_amount", "credit_ref", "preauth_amount", "disallowed",
                              "package_cover"})
+
+
+# A form's ONE open free-text field may be answered by a short reply ("Hair and scalp" for a category): only then,
+# never a question, small talk or a command, and the preview still shows it before anything is saved.
+FREE_REPLY_KINDS = frozenset({"treatment_category", "text_field", "call_interest"})
+_FREE_REPLY = re.compile(r"[A-Za-z][A-Za-z0-9 &+.,'()/-]{1,59}")
+
+
+def free_reply(spec: ActionSpec, missing, text: str) -> dict:
+    open_slots = [s for s in spec.slots if s.name in missing]
+    if len(open_slots) != 1 or open_slots[0].kind not in FREE_REPLY_KINDS:
+        return {}
+    value = " ".join((text or "").split()).strip(" .!")
+    if (not _FREE_REPLY.fullmatch(value) or len(value.split()) > 6 or asks(value) or small_talk(value)
+            or has_any(_norm(value), WRITE_VERBS) or has_any(_norm(value), NEGATION)):
+        return {}
+    return {open_slots[0].name: value[:1].upper() + value[1:]}
 
 
 def follow_up(spec: ActionSpec, missing, text: str, given: dict, *, doctors=None, now=None) -> dict:
