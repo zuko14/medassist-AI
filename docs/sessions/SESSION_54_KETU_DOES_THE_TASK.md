@@ -68,7 +68,7 @@ two open fields are never guessed from one reply (`rules.free_reply`).
 |:-|:-|
 | `tests/test_assistant_autonomy.py` (new, 39) | the screenshot sentence end to end; every new action: preview, nothing before Confirm, exact body, read-back; every refusal writes nothing; neighbours keep their sentences; free reply rules |
 | Accuracy gate | DEV 100 % · DEV2 93.9 % · DEV3 100 % · DEV4 (new actions) 100 % · HELDOUT 96.2 % · **0 wrong on every set** |
-| All assistant tests + AGENTS.md gates + UI tests | running at the first commit; recorded in the follow-up commit |
+| All assistant tests + accuracy gate + AGENTS.md gates (tenant lint, scope matrix, adversarial matrix, clinical firewall, webhook, FSM) + UI tests | **3,842 passed, 0 failed** |
 | Fixture corpus (994) vs the previous commit | **unchanged** (17 misses before and after; nothing broken) |
 | Every sentence in the assistant tests (2,207) vs the previous commit | 33 decisions changed, all reviewed: each is a new action or a doctor profile that now completes; "update the emergency number" kept its old meaning (the receptionist's number) |
 | Existing tests changed on purpose | 4 tests that pinned "ask for the working days / department" (`test_assistant_doctors.py::test_spoken_profile_fills_everything_said_and_asks_only_the_rest`, three in `test_assistant_doctor_intent.py`): they now pin the values sent and that nothing is written before Confirm |
