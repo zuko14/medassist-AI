@@ -587,6 +587,23 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
             if not found:
                 raise ValueError(f"{slot.kind} not understood")
             out[slot.name] = found
+        elif slot.kind == "ipd_charge":  # "dressing 500" / "2 injections at 150 each": the sentence's own reader
+            v = " ".join(str(value).split())[:200]
+            found = resolve.resolve_ipd_charge(v) or resolve.resolve_ipd_charge(f"add {v} charge") or \
+                resolve.resolve_ipd_charge(re.sub(r"^(.*?)\s+(\d[\d,]*)$", r"\1 charge \2", v))
+            if not found:
+                raise ValueError("charge not understood")
+            out[slot.name] = found
+        elif slot.kind in ("charge_term", "waiting_patient"):  # search words: they only pick a row
+            v = " ".join(str(value).lower().split())[:60]
+            if not (2 <= len(v) and re.fullmatch(r"[a-z][a-z \-/]*", v)):
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = v
+        elif slot.kind in ("shift_float", "declared_cash"):  # on the form a bare number is rupees
+            v = str(value).strip().replace(",", "").lstrip("₹").strip()[:12]
+            if not re.fullmatch(r"\d{1,8}", v):
+                raise ValueError("amount not understood")
+            out[slot.name] = v
         elif slot.kind in ("profile_change", "leave_move"):  # the same reader as the sentence, never free text
             v = " ".join(str(value).split())[:400]
             found = (resolve.resolve_profile_change(v) if slot.kind == "profile_change"

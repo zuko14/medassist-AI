@@ -1448,7 +1448,8 @@ def resolve_ot_target(text: str) -> Optional[str]:
     return name if 2 <= len(name) <= 40 else None
 
 
-_WHY_SAID = re.compile(r"\b(?:because(?:\s+of)?|due\s+to|reason(?:\s+is)?|since|as\s+the)\s*[:,-]?\s+(.+?)"
+_WHY_SAID = re.compile(r"\b(?:because(?:\s+of)?|due\s+to|reason(?:\s+is)?|since|as\s+the|as(?=\s+(?:she|he|they|it|we|patient)\b))"
+                       r"\s*[:,-]?\s+(.+?)"
                        r"(?=\s*,\s*(?:refund|pay|paid|by|in|via|through|utr)\b|\s*[.]?$)", re.I)
 
 
@@ -2276,3 +2277,118 @@ def resolve_call_interest(text: str) -> Optional[str]:
     m = _CALL_ABOUT.search(t)
     value = " ".join(m.group(1).split()) if m else ""
     return value if 2 <= len(value) <= 60 else None
+
+
+# ── Session 55: money and inpatient tasks by voice ───────────────────────────
+
+_RS = r"(?:rs\.?\s*|₹\s*|inr\s*)?"
+_AMT = r"(\d[\d,]{0,8})"
+# Which IPD charge category a description falls in (ChargeIn.category). First match wins; "other" otherwise.
+_CHARGE_CATEGORY = (
+    ("investigation", r"x[\s-]?ray|xray|scan|ultrasound|usg|\bct\b|mri|ecg|echo|test|cbc|lab|blood\s+work|culture|"
+                      r"biopsy|investigation"),
+    ("pharmacy", r"injection|inj\b|medicine|tablet|drip|\biv\b|drug|syrup|antibiotic|pharmacy|insulin|saline"),
+    ("consumable", r"dressing|gauze|catheter|syringe|cannula|glove|bandage|consumable|kit|mask|diaper"),
+    ("doctor_visit", r"doctor\s+visit|visit|consultation|round"),
+    ("nursing", r"nursing|nurse|attendant"),
+    ("procedure", r"procedure|surgery|physio|physiotherapy|suturing|stitch|nebuli[sz]ation|catheteri[sz]ation|"
+                  r"dialysis|transfusion|ryles|enema|plaster"),
+    ("bed", r"\bbed\s+charge|room\s+rent|bed\s+rent"),
+)
+_CHARGE_PATTERNS = (
+    # "add 2 injections at 150 each for bed 5", "3 dressings @ 200 to bed 5"
+    re.compile(r"\b(\d{1,3})\s*(?:x\s*)?([a-z][a-z \-/]{1,40}?)\s+(?:at|@|of)\s*" + _RS + _AMT
+               + r"\s*(?:rupees?\s*)?(?:each|per\s+\w+|a\s+piece)", re.I),
+    # "a dressing charge of 500", "x-ray charge 800", "physiotherapy charges ₹1200"
+    re.compile(r"(?:\badd\s+|\bpost\s+|\bput\s+)?(?:\b(?:a|an|one)\s+)?([a-z][a-z \-/]{1,40}?)\s+charges?\s+(?:of\s+|for\s+|is\s+)?"
+               + _RS + _AMT, re.I),
+    # "charge bed 5 ₹1200 for physiotherapy", "add 800 for an x-ray to bed 5"
+    re.compile(r"\b" + _RS + _AMT + r"\s*(?:rupees?\s+)?for\s+(?:an?\s+|the\s+)?([a-z][a-z \-/]{1,40}?)"
+               r"(?=\s*(?:[,.]|\bto\b|\bfor\b|\bon\b|\bin\b|$))", re.I),
+)
+_CHARGE_NOISE = {"add", "post", "put", "a", "an", "the", "one", "to", "for", "bed", "of", "please", "charge", "charges"}
+
+
+def charge_category(description: str) -> str:
+    d = (description or "").lower()
+    return next((cat for cat, rx in _CHARGE_CATEGORY if re.search(rx, d)), "other")
+
+
+def resolve_ipd_charge(text: str) -> Optional[dict]:
+    """A charge said for an inpatient: {"description", "category", "quantity", "unit_rupees"}; None when the
+    sentence does not state both what it is for and its price."""
+    t = re.sub(r"\bbed\s*(?:no\.?|number)?\s*[a-z]{0,4}[\s-]?\d{1,4}[a-z]?\b", " ", text or "", flags=re.I)
+    for i, rx in enumerate(_CHARGE_PATTERNS):
+        m = rx.search(t)
+        if not m:
+            continue
+        if i == 0:
+            qty, desc, amt = int(m.group(1)), m.group(2), m.group(3)
+        elif i == 1:
+            qty, desc, amt = 1, m.group(1), m.group(2)
+        else:
+            qty, amt, desc = 1, m.group(1), m.group(2)
+        words = [w for w in desc.split() if w.lower() not in _CHARGE_NOISE]
+        desc = " ".join(words).strip(" -/")
+        rupees = int(amt.replace(",", ""))
+        if 2 <= len(desc) <= 200 and 0 < rupees <= 1_000_000 and 1 <= qty <= 999:
+            if qty > 1 and desc.lower().endswith("s") and not desc.lower().endswith("ss"):
+                desc = desc[:-1]  # "2 injections" -> "injection" x 2
+            return {"description": desc[:1].upper() + desc[1:], "category": charge_category(desc),
+                    "quantity": qty, "unit_rupees": rupees}
+    return None
+
+
+_CHARGE_TERM = re.compile(r"\b(?:void|remove|cancel|delete|reverse|take\s+off|drop)\s+(?:the\s+|that\s+)?"
+                          r"([a-z][a-z \-/]{1,40}?)\s+charges?\b", re.I)
+
+
+def resolve_charge_term(text: str) -> Optional[str]:
+    """Which charge a void names ("remove the dressing charge from bed 5" -> "dressing")."""
+    m = _CHARGE_TERM.search(text or "")
+    words = [w for w in (m.group(1).lower().split() if m else []) if w not in _CHARGE_NOISE]
+    term = " ".join(words)
+    return term if 2 <= len(term) <= 60 else None
+
+
+_WAITING = (
+    re.compile(r"\b(?:give|assign|allot|allocate)\s+bed\s+\S+\s+to\s+(?:the\s+)?(?:patient\s+)?([A-Za-z][A-Za-z ]{1,40}?)"
+               r"(?=\s*(?:[,.]|$|\bwho\b|\bfrom\b|\bin\b))", re.I),
+    re.compile(r"\b(?:put|move|shift|place|admit)\s+(?:the\s+)?(?:patient\s+)?([A-Za-z][A-Za-z ]{1,40}?)\s+(?:in|into|on|to)\s+"
+               r"(?:the\s+)?bed\b", re.I),
+    re.compile(r"\b(?:cancel|withdraw|call\s+off)\s+(?:the\s+)?(?:admission\s+of\s+|admission\s+for\s+)([A-Za-z][A-Za-z ]{1,40}?)"
+               r"(?=\s*(?:[,.]|$|\bbecause\b|\bas\b|\bsince\b))", re.I),
+    re.compile(r"\b(?:cancel|withdraw|call\s+off)\s+([A-Za-z][A-Za-z ]{1,40}?)'s\s+admission\b", re.I),
+)
+
+
+def resolve_waiting_patient(text: str) -> Optional[str]:
+    """A patient on the waiting-for-a-bed list, by name ("give bed 12 to Ravi", "cancel Ravi's admission")."""
+    for rx in _WAITING:
+        m = rx.search(text or "")
+        if m:
+            name = " ".join(w for w in m.group(1).lower().split() if w not in ("the", "patient", "mr", "mrs", "ms"))
+            if 2 <= len(name) <= 40:
+                return name
+    return None
+
+
+_FLOAT = re.compile(r"\b(?:with|float|opening(?:\s+(?:cash|float|balance))?|starting\s+cash)\s+(?:of\s+|is\s+)?" + _RS
+                    + _AMT + r"\b|" + _RS + _AMT + r"\s*(?:rupees?\s+)?(?:as\s+)?(?:opening\s+)?(?:float|change)\b", re.I)
+_DECLARED = re.compile(r"\b(?:counted|count(?:ed)?\s+is|declared?|in\s+(?:the\s+)?drawer|drawer\s+(?:has|is)|cash\s+(?:is|of|in\s+hand)|"
+                       r"handing\s+over|with)\s+(?:of\s+)?" + _RS + _AMT + r"\b|" + _RS + _AMT
+                       + r"\s*(?:rupees?\s+)?(?:in\s+(?:the\s+)?drawer|counted|in\s+hand|cash\s+in\s+hand)\b", re.I)
+
+
+def resolve_shift_float(text: str) -> Optional[str]:
+    """The opening float in rupees ("open my counter with 2000 float"); None = not said (the preview uses 0)."""
+    m = _FLOAT.search(text or "")
+    value = next((g for g in (m.groups() if m else ()) if g), None)
+    return value.replace(",", "") if value else None
+
+
+def resolve_declared_cash(text: str) -> Optional[str]:
+    """The cash counted in the drawer at closing, in rupees ("close my shift, cash counted 15400")."""
+    m = _DECLARED.search(text or "")
+    value = next((g for g in (m.groups() if m else ()) if g), None)
+    return value.replace(",", "") if value else None

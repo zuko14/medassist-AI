@@ -727,3 +727,31 @@ DEV4 = [
     ("voice.call_number", "ask kriya to call 98480 12345 regarding cardiology"),
     ("voice.settings_update", "update the emergency number to 98480 12345"),  # unchanged: the receptionist's
 ]
+
+# Session 55: money and inpatient tasks.
+DEV5 = [
+    ("ipd.charge_add", "add a dressing charge of 500 to bed 5"),
+    ("ipd.charge_add", "add 2 injections at 150 each for bed 5"),
+    ("ipd.charge_add", "bed 5 x-ray charge 800"),
+    ("ipd.charge_add", "charge bed 5 ₹1200 for physiotherapy"),
+    ("ipd.charge_add", "add 800 for an ECG to bed 5"),
+    ("ipd.charge_add", "post a doctor visit charge of 600 to Ravi"),
+    ("ipd.charge_void", "remove the dressing charge from bed 5 because it was entered twice"),
+    ("ipd.charge_void", "void the x-ray charge on bed 5, wrong patient"),
+    ("ipd.charges_post", "post the charges for bed 5"),
+    ("ipd.charges_post", "post all proposed charges for Ravi"),
+    ("ipd.final_bill", "make the final bill for bed 5"),
+    ("ipd.final_bill", "final bill for Lakshmi"),
+    ("ipd_finance.deposit_refund", "refund 2000 deposit to bed 5 in cash because the patient is shifting hospitals"),
+    ("ipd_finance.deposit_refund", "return the advance of 5000 to bed 7 by upi UTR 123456789012 as the surgery was "
+                                   "cancelled"),
+    ("ipd.assign_bed", "give bed 12 to Ravi"),
+    ("ipd.assign_bed", "put Ravi Kumar in bed 12"),
+    ("ipd.admission_cancel", "cancel Ravi's admission because he went home"),
+    ("ipd.admission_cancel", "cancel the admission of Lakshmi as she went to another hospital"),
+    ("ipd.package_remove", "take bed 5 off the package because the surgery was not done"),
+    ("opd.shift_open", "open my cash counter with 2000 float"),
+    ("opd.shift_open", "open my shift"),
+    ("opd.shift_close", "close my shift, cash counted 15400"),
+    ("opd.shift_close", "close the counter with 15,400 in the drawer"),
+]

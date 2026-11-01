@@ -34,7 +34,7 @@ from app.assistant.registry import PAGES, REGISTRY  # noqa: E402
 from app.voice.dates import IST  # noqa: E402
 
 NOW = datetime(2026, 11, 2, 10, 0, tzinfo=IST)
-SETS = ("DEV", "DEV2", "DEV3", "DEV4", "HELDOUT")
+SETS = ("DEV", "DEV2", "DEV3", "DEV4", "DEV5", "HELDOUT")
 
 
 def outcome(r: rules.Route) -> str:

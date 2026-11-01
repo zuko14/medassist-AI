@@ -1814,6 +1814,93 @@ AUTONOMY = (
           unless=("leads", "token", "next patient", "missed", "who called", "call log", "calls"), **_VOICE_ON),
 )
 
+# ── Session 55: money and inpatient tasks. Money moves are R3 (the rupees are typed to confirm); every one an
+# existing /admin/ipd or /admin/opd endpoint with its own permission, run as the logged-in user. ──
+_STAY_T = SlotSpec("target", "stay_target", label="Patient's bed or name")
+_IPD_BILL = dict(permission="IPD_BILLING", perm_source=_HANDLER, feature=_ipd_on)
+_ADMIT = dict(permission="IPD_ADMISSIONS", perm_source=_HANDLER, feature=_ipd_on)
+_CASH = dict(permission="OPD_BILLING", also=("OPD_ADMIN",), perm_source=_HANDLER, feature=_opd_live)
+_NOT_STAY_MONEY = ("deposit", "advance", "discount", "concession", "package", "token", "opd", "consultation fee",
+                   "doctor fee", "lab test", "price", "tariff", "service charge", "ward charges", "room charges", "credit note")
+MONEY_AND_IPD = (
+    _desk("ipd.charge_add", "Add a charge to an inpatient's bill", "R3", "POST",
+          "/admin/ipd/admissions/{admission_id}/charges", "ipdchart",
+          ("add+charge", "add+charges", "charge+bed", r"re:\bcharges?\s+(?:of\s+|for\s+|is\s+)?(?:rs\s*)?\d",
+           r"re:\b\d{1,3}\s+(?:x\s+)?[a-z][a-z ]*\s+(?:at|of)\s+(?:rs\s*)?\d+\s*(?:rupees\s+)?(?:each|per)\b",
+           r"re:\b(?:rs\s*)?\d+\s+(?:rupees\s+)?for\s+(?:an?\s+|the\s+)?[a-z].*\bbed\b"),
+          playbooks.ipd_charge_add_preview,
+          slots=(_STAY_T, SlotSpec("charge", "ipd_charge", label="What and how much, e.g. dressing 500")),
+          unless=("void", "remove", "cancel", "delete", "reverse", "post the", "post all", "refund", "change", "set",
+                  "increase", "reduce", *_NOT_STAY_MONEY), max_items=playbooks.MAX_RECEIPT_RUPEES, **_IPD_BILL),
+    _desk("ipd.charge_void", "Void a charge on an inpatient's bill", "R3", "POST", "/admin/ipd/charges/{charge_id}/void",
+          "ipdchart", ("void+charge", "remove+charge", "cancel+charge", "delete+charge", "reverse+charge",
+                       "take off+charge", "charge+entered twice", "wrong+charge"),
+          playbooks.ipd_charge_void_preview,
+          slots=(_STAY_T, SlotSpec("charge", "charge_term", label="Which charge, e.g. dressing"),
+                 SlotSpec("reason", "why", label="Reason")),
+          unless=_NOT_STAY_MONEY, max_items=playbooks.MAX_RECEIPT_RUPEES, **_IPD_BILL),
+    _desk("ipd.charges_post", "Post an inpatient's proposed charges", "R3", "POST",
+          "/admin/ipd/admissions/{admission_id}/charges/post", "ipdchart",
+          ("post+charges", "post+the charges", "post+charge", "approve+charges", "confirm+charges", "charges+post"),
+          playbooks.ipd_charges_post_preview, slots=(_STAY_T,),
+          unless=("add", "void", "remove", "cancel", "delete", *_NOT_STAY_MONEY), max_items=playbooks.MAX_RECEIPT_RUPEES,
+          **_IPD_BILL),
+    _desk("ipd.final_bill", "Make an inpatient's final bill", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/final-bill", "ipdfinance",
+          ("final+bill", "discharge+bill", "bill+bed", "ipd+bill", "final+invoice", "final bill+banao",
+           "final bill+cheyyi"),
+          playbooks.ipd_final_bill_preview, slots=(_STAY_T,),
+          unless=("how much", "show", "what is", "token", "opd", "void", "cancel", "refund"), **_IPD_BILL),
+    _desk("ipd_finance.deposit_refund", "Refund an inpatient's deposit", "R3", "POST",
+          "/admin/ipd/admissions/{admission_id}/deposits/refund", "ipdfinance",
+          ("refund+deposit", "deposit+refund", "return+deposit", "refund+advance", "advance+refund", "return+advance",
+           "deposit+wapas", "advance+wapas", "deposit+tirigi"),
+          playbooks.deposit_refund_preview,
+          slots=(_STAY_T, SlotSpec("amount", "money", label="Refund in rupees"),
+                 SlotSpec("mode", "pay_mode", label="Cash, UPI or bank transfer"),
+                 SlotSpec("reason", "why", label="Reason"),
+                 SlotSpec("reference", "pay_ref", False, "UTR (UPI / bank transfer only)")),
+          unless=("take", "collect", "how much", "show", "list", "booking", "online"),
+          permission="IPD_ADMIN", perm_source=_HANDLER, feature=_ipd_on, max_items=playbooks.MAX_RECEIPT_RUPEES),
+    _desk("ipd.assign_bed", "Give a waiting patient a bed", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/assign-bed", "ipdadmit",
+          ("give+bed", "assign+bed", "allot+bed", "allocate+bed", r"re:\b(?:put|place)\s+[a-z ]+?\s+in(?:to)?\s+bed\b"),
+          playbooks.ipd_assign_bed_preview,
+          slots=(SlotSpec("patient", "waiting_patient", label="Patient waiting for a bed"),
+                 SlotSpec("bed", "admit_bed", label="Bed, e.g. 12")),
+          unless=("admit", "transfer", "move", "shift", "clean", "maintenance", "service", "branch", "doctor", "dr",
+                  "how many", "show", "free beds"), **_ADMIT),
+    _desk("ipd.admission_cancel", "Cancel an admission still waiting for a bed", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/cancel", "ipdadmit",
+          ("cancel+admission", "admission+cancel", "withdraw+admission", "call off+admission", "admission+raddu",
+           "admission+radd"),
+          playbooks.ipd_admission_cancel_preview,
+          slots=(SlotSpec("patient", "waiting_patient", label="Patient waiting for a bed"),
+                 SlotSpec("reason", "why", label="Reason")),
+          unless=("discharge", "surgery", "ot", "appointment", "booking"), **_ADMIT),
+    _desk("ipd.package_remove", "Take an inpatient off a package", "R2", "POST",
+          "/admin/ipd/admissions/{admission_id}/package/remove", "ipdchart",
+          ("remove+package", "off+package", "package+remove", "drop+package", "cancel+package", "package+hatao",
+           "package+teeseyi"),
+          playbooks.package_remove_preview, slots=(_STAY_T, SlotSpec("reason", "why", label="Reason")),
+          unless=("create", "new package", "add package", "apply", "put", "list", "show"), **_IPD_BILL),
+    _desk("opd.shift_open", "Open your cash drawer shift", "R2", "POST", "/admin/opd/shifts/open", "opdbilling",
+          ("open+shift", "open+counter", "open+cash counter", "start+shift", "open+drawer", "start+counter",
+           "shift+open", "counter+open", "start+cash"),
+          playbooks.shift_open_preview, slots=(SlotSpec("float", "shift_float", False, "Opening float in rupees"),),
+          # "turn off auto open shift" is the OPD setting (opd.setting), never opening a drawer now
+          unless=("close", "end", "how much", "show", "ot", "theatre", "surgery", "bed", "ward", "auto", "automatic",
+                  "automatically", "turn off", "turn on", "switch off", "switch on", "setting", "after check"), **_CASH),
+    _desk("opd.shift_close", "Close your cash drawer shift", "R3", "POST", "/admin/opd/shifts/{shift_id}/close",
+          "opdbilling",
+          ("close+shift", "close+counter", "close+drawer", "end+shift", "close+cash counter", "shift+close",
+           "counter+close", "close my cash", "end+counter"),
+          playbooks.shift_close_preview,
+          slots=(SlotSpec("declared", "declared_cash", label="Cash counted in the drawer, in rupees"),),
+          unless=("open", "start", "how much", "show", "ot", "theatre", "surgery", "bed", "ward", "day"),
+          max_items=playbooks.MAX_RECEIPT_RUPEES, **_CASH),
+)
+
 REGISTRY: dict[str, ActionSpec] = _build(
     ActionSpec(id="nav.open", module="nav", summary="Open a page", risk="R0"),       # client go(page)
     ActionSpec(id="help.howto", module="help", summary="How do I…", risk="R0"),      # static, app/assistant/help.py
@@ -1845,6 +1932,7 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *VOICE_ENTRY_8,
     *VOICE_ENTRY_9,
     *AUTONOMY,
+    *MONEY_AND_IPD,
 )
 
 
@@ -2052,6 +2140,13 @@ _THIRD: dict[str, dict] = {
 
 # Session 54: the new actions (AUTONOMY) take these sentences from their older neighbours.
 _FOURTH: dict[str, dict] = {
+    # Session 55: the IPD final bill / admission / package / deposit refund take these
+    "opd.invoice_create": {"unless": ("final bill", "bed", "inpatient", "ipd", "discharge bill")},
+    "ipd.admit": {"unless": ("cancel", "withdraw", "give bed", "assign bed", "allot bed")},
+    "ipd.package_create": {"unless": ("off", "drop", "cancel")},
+    "ipd.package_apply": {"unless": ("off", "drop", "cancel")},
+    "ipd.bed_status": {"unless": ("give bed", "assign bed", "allot bed", "allocate bed")},
+    "services.price": {"unless": ("bed", "inpatient", "add a", "add an")},
     # "move ... to ..." about a leave is never a queue move
     "opd.stage": {"unless": ("leave", "leaves", "chutti", "selavu")},
     # the hospital's own emergency number is the profile; the receptionist's transfer number stays here

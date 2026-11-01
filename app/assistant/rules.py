@@ -415,6 +415,8 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
         return fn(text), ()
     if slot.kind in ("ot_target", "ot_action", "staff_target", "new_branch", "branch_rename"):
         return getattr(resolve, f"resolve_{slot.kind}")(text), ()
+    if slot.kind in ("ipd_charge", "charge_term", "waiting_patient", "shift_float", "declared_cash"):
+        return getattr(resolve, f"resolve_{slot.kind}")(text), ()
     if slot.kind == "profile_change":
         return resolve.resolve_profile_change(text), ()
     if slot.kind == "leave_move":
@@ -467,6 +469,8 @@ _SERVICE_WORDS = ("service", "services", "procedure", "procedures", "charge", "c
                   "nursing", "dressing", "injection", "nebulisation", "nebulization", "physiotherapy", "icu",
                   "bed charges")
 _PRICE_DOMAINS = {"lab_test.price": _LAB_WORDS, "treatment.price": _TREATMENT_WORDS, "services.price": _SERVICE_WORDS}
+# Where a stated reason starts; matched on the normalised text. "as" only as "as the / as she / as he / as it / as they".
+_REASON_CLAUSE = re.compile(r"\b(?:because|since|due to|reason|as (?:the|she|he|it|they|we|patient))\b")
 _MESSAGE_CUES = ("whatsapp", "message", "msg", "tell", "text", "sms", "inform", "send", "pampu", "bhejo", "batao",
                  "cheppu", "చెప్పు", "बताओ")
 
@@ -511,6 +515,9 @@ def _match_action(text: str, t: str, actions: dict, ui_page: Optional[str], doct
                   visible: Optional[set]) -> Route:
     scored = []
     unquoted = _norm(resolve.without_verbatim(text, False))  # quoted words are someone's text, not the instruction
+    reason = _REASON_CLAUSE.split(unquoted, maxsplit=1)
+    if len(reason) == 2 and len(reason[0].split()) >= 3:
+        unquoted = reason[0]  # "... because the surgery was not done": a reason is content, never the task asked for
     if resolve.resolve_message(text) is not None and has_any(_norm(resolve.without_verbatim(text, True)), _MESSAGE_CUES):
         unquoted = _norm(resolve.without_verbatim(text, True))  # "tell Ravi on whatsapp: clinic closed tomorrow"
     for spec in actions.values():

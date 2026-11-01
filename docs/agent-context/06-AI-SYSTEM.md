@@ -157,3 +157,11 @@ Beyond patient chat, the LLM is leveraged for several administrative tasks via `
 * `rules.free_reply`: a form's single open free-text field may be answered by a short spoken reply.
 * Panel coverage map and what stays with a person: `docs/sessions/SESSION_54_KETU_DOES_THE_TASK.md` §2.
 
+## Kriya Ketu money and inpatient tasks (session 55)
+
+* `MONEY_AND_IPD` in registry.py: IPD charges (add / void / post), final bill, deposit refund, assign a bed, cancel a
+  waiting admission, remove a package, OPD cash drawer open / close. Money moves are R3 (typed rupees) with keys
+  derived from the stay (`playbooks._stay_key`).
+* `rules._REASON_CLAUSE`: the reason ("because …") is never used to choose the action.
+* Details and what stays with a person: `docs/sessions/SESSION_55_KETU_MONEY_AND_INPATIENT.md`.
+
