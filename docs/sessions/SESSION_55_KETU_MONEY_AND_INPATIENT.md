@@ -70,7 +70,7 @@ revocation and discharge reversal: they need a clinician's or an admin's judgeme
 |:-|:-|
 | `tests/test_assistant_money_ipd.py` (new, 40) | every action end to end (preview, nothing before Confirm, wrong typed amount refused, exact body, read-back) and every refusal above |
 | Accuracy gate | DEV 100 % · DEV2 93.9 % · DEV3 100 % · DEV4 100 % · DEV5 (new) 100 % · HELDOUT 96.2 % · **0 wrong on every set** |
-| All assistant tests + AGENTS.md gates + UI tests | first run: 6 failures, all one cause (below), fixed; final run recorded in the follow-up commit |
+| All assistant tests + AGENTS.md gates + UI tests | first run: 6 failures, all one cause (§4), fixed; **final run on the committed code: 3,897 passed, 0 failed** |
 | Fixture corpus (994) vs the previous commit | unchanged (17 misses before and after) |
 | Every sentence in the assistant tests (2,258) vs the previous commit | 33 changed, all reviewed; 32 correct (several fix old wrong routes: "return the advance … as the surgery was cancelled" used to CANCEL THE SURGERY; "make the final bill for bed 5" made an OPD bill); 1 regression ("turn off auto open shift" opened a drawer) fixed and pinned by a test |
 | flake8 (non-E501) on changed files vs the previous commit | no new issues |
