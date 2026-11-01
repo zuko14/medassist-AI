@@ -414,8 +414,22 @@ def test_a_lab_only_clinic_resolves_the_tie_to_the_lab_test(db, trt):  # noqa: F
 
 
 def test_a_clinic_with_both_is_asked_which(db, trt):  # noqa: F811
+    """Session 53: an item the sentence does not place in one catalogue is still a question at a clinic with both."""
     trt["user"] = _staff("LAB_TESTS_MANAGE", "TREATMENTS_MANAGE")
     both = {"id": CID, "plan": "diagbooking", "features": {"kriya_ketu": True, "specialty_treatments": True}}
     with patch.object(assistant_router, "get_clinic_by_id", AsyncMock(return_value=both)):
-        out = _ask("change PRP price to ₹5000", page="dashboard")
+        out = _ask("change Gold Plan price to ₹5000", page="dashboard")
     assert out["state"] == "NEEDS_CLARIFICATION" and "action" in str(out["cards"]), out
+
+
+@pytest.mark.parametrize("text, action", [("change PRP price to ₹5000", "treatment.price"),
+                                          ("change CBC price to ₹350", "lab_test.price"),
+                                          ("set the lipid profile rate to 900 rupees", "lab_test.price")])
+def test_a_clinic_with_both_reads_the_catalogue_from_the_item(db, trt, text, action):  # noqa: F811
+    """Session 53: PRP is a treatment, CBC / a profile a lab test: the tie is resolved, after the clinic's switched-off
+    modules are dropped (rules.resolve_tie), with the preview still shown before anything changes."""
+    trt["user"] = _staff("LAB_TESTS_MANAGE", "TREATMENTS_MANAGE")
+    both = {"id": CID, "plan": "diagbooking", "features": {"kriya_ketu": True, "specialty_treatments": True}}
+    with patch.object(assistant_router, "get_clinic_by_id", AsyncMock(return_value=both)):
+        out = _ask(text, page="dashboard")
+    assert out["action_id"] == action, out

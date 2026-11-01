@@ -17,7 +17,7 @@ from typing import Optional
 
 from app.assistant import resolve
 from app.assistant.help import HANDOFFS, HELP, HelpEntry
-from app.assistant.registry import PAGE_SYNONYMS, PAGES, REGISTRY, ActionSpec, SlotSpec
+from app.assistant.registry import DOCTOR_EDITS, PAGE_SYNONYMS, PAGES, REGISTRY, ActionSpec, SlotSpec
 from app.services.clinical_firewall import is_sex_determination_request, screen_message
 from app.voice.dates import IST, has_any, last_index
 from app.voice.nlu_rules import W, is_question
@@ -51,7 +51,7 @@ NAV_WORDS = OPEN_VERBS + (
 WRITE_VERBS = ("cancel", "delete", "remove", "add", "create", "change", "update", "edit", "set", "send", "resend",
                "book", "block", "mark", "assign", "confirm", "reject", "refund", "approve", "dismiss", "register",
                "reschedule", "enable", "disable", "turn on", "turn off", "activate", "deactivate", "call next",
-               "reset", "clear", "stop", "pause", "resume", "resolve", "check in", "checkin",
+               "reset", "clear", "stop", "pause", "resume", "resolve", "check in", "checkin", "retry",
                # IPD: imperative forms only, so "discharge list" / "pending discharges" stay reads
                "transfer", "admit the", "discharge all", "discharge the", "discharge karo", "discharge cheyyi",
                "डिस्चार्ज करो",
@@ -82,6 +82,41 @@ _SPOKEN_LEAD = re.compile(r"^\s*(?:(?:hey|ok|okay|hi|hello)\s+)?(?:kriya(?:\s*ke
                           r"|^\s*(?:u+m+|u+h+m*|hm+|er+m*|a+h+|ok(?:ay)?\s+so|so|and|please)\b[\s,.!:-]+", re.I)
 
 
+# A doctor not coming on a stated day is a leave, never a refusal ("kal Dr Kiran nahi aayenge"): the phrase is
+# read as "on leave" before the negation screen. Only with a doctor AND a date in the sentence.
+_ABSENCE = re.compile(r"\b(?:(?:will|would|shall)\s+not|won'?t|wont|can'?t|cannot|not\s+going\s+to)\s+(?:be\s+)?"
+                      r"(?:come|coming|attend|available|in|there|work|working|sit)\b"
+                      r"|\bnot\s+(?:coming|available|attending|working)\b|\bunavailable\b|\bon\s+vacation\b"
+                      r"|\bnahi[n]?\s+(?:aa(?:yenge|yega|yegi|enge|ega|egi|ye|yi|\s+rahe|\s+raha|\s+rahi)|honge|hoga)\b"
+                      r"|\b(?:raru|raaru|radu|raadu|ravatledu|raavatledu)\b|రారు|రాదు|नहीं\s+आएंगे|नहीं\s+आएगा", re.I)
+_DOCTOR_CUE = re.compile(r"\b(?:dr|doctor|doc)\b|డాక్టర్|डॉक्टर", re.I)
+
+
+def absence_as_leave(text: str) -> str:
+    if not (_ABSENCE.search(text or "") and _DOCTOR_CUE.search(text) and resolve.resolve_date(text) is not None):
+        return text
+    return _ABSENCE.sub(" on leave ", text)
+
+
+# "We don't do ESR anymore, stop the test": a discontinuation with its own stop verb, not "don't do it".
+_DISCONTINUED = re.compile(r"\b(?:anymore|any\s+more|no\s+longer)\b", re.I)
+_STOP_VERB = re.compile(r"\b(?:stop|disable|deactivate|remove|hide|switch\s+off|turn\s+off|discontinue)\b", re.I)
+
+
+# "Dr Meera is not on leave tomorrow, remove it": correcting a leave that was entered, with its own verb.
+_NOT_ON_LEAVE_FIX = re.compile(r"\bnot\s+on\s+leave\b.*\b(?:remove|cancel|delete|withdraw|undo)\b"
+                               r"|\b(?:remove|cancel|delete|withdraw|undo)\b.*\bnot\s+on\s+leave\b", re.I)
+
+
+def _negated(t: str, text: str) -> bool:
+    if not has_any(t, NEGATION):
+        return False
+    if _DISCONTINUED.search(text) and _STOP_VERB.search(text):
+        return False
+    rest = _NOT_ON_LEAVE_FIX.sub(" ", t)  # the fix-a-leave phrase is not a refusal; any other "don't" still is
+    return has_any(rest, NEGATION) if rest != t else True
+
+
 def strip_spoken_lead(text: str) -> str:
     """Drop the wake word and leading fillers; the request itself is never touched."""
     prev = None
@@ -98,9 +133,20 @@ def _now() -> datetime:
     return datetime.now(IST)
 
 
+_PATTERN_WEIGHT = 3
+
+
 def _hits(t: str, trigger: str) -> bool:
-    """A trigger matches when present; "a+b" needs every part ("cancel+leave": both words, any order)."""
+    """A trigger matches when present; "a+b" needs every part ("cancel+leave": both words, any order);
+    "re:<pattern>" is a regular expression on the normalised sentence (order and shape matter)."""
+    if trigger.startswith("re:"):
+        return re.search(trigger[3:], t) is not None
     return all(has_any(t, (_norm(part),)) for part in trigger.split("+"))
+
+
+def _weight(trigger: str) -> int:
+    """How much a matched trigger counts: its words ("raddu+selavu" = 2), a pattern as a 3-word phrase."""
+    return _PATTERN_WEIGHT if trigger.startswith("re:") else len(_norm(trigger.replace("+", " ")).split())
 
 
 @dataclass(frozen=True)
@@ -382,31 +428,133 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
 def _names_other(t: str, spec: ActionSpec) -> bool:
     """The sentence is about another object ("register doctor Srinivas" is not a patient registration).
     `unless` holds phrases and compiled patterns (matched on the normalised text)."""
+    if spec.keep and has_any(t, tuple(_norm(k) for k in spec.keep)):
+        return False  # said outright ("start the discharge"): the action stands whatever else the sentence says
     phrases = tuple(_norm(u) for u in spec.unless if isinstance(u, str))
     return (bool(phrases) and has_any(t, phrases)) or any(u.search(t) for u in spec.unless if isinstance(u, re.Pattern))
+
+
+def _writing(t: str, spec: ActionSpec) -> bool:
+    """A change verb is present. A read's own `asks_about` verbs are ignored only in a question ("how many
+    messages did we SEND", "which bookings would the leave CANCEL"); "send messages remaining" stays a change."""
+    verbs = (tuple(v for v in WRITE_VERBS if v not in spec.asks_about)
+             if spec.asks_about and asks(t) else WRITE_VERBS)
+    return has_any(t, verbs)
+
+
+# Price changes: the words that say which catalogue a name belongs to, when the sentence matches several.
+_LAB_WORDS = ("test", "tests", "lab", "cbc", "hb", "hba1c", "hemoglobin", "haemoglobin", "thyroid", "tsh", "t3", "t4",
+              "lipid", "lft", "kft", "rft", "sugar", "glucose", "fbs", "ppbs", "rbs", "vitamin", "urine", "culture",
+              "profile", "panel", "esr", "crp", "creatinine", "urea", "electrolytes", "ferritin", "iron", "calcium",
+              "b12", "d3", "dengue", "malaria", "widal", "typhoid", "covid", "rtpcr", "psa", "beta hcg", "hcg",
+              "blood group", "platelet", "platelets", "stool", "semen", "biopsy", "pap smear", "uric acid")
+_TREATMENT_WORDS = ("treatment", "treatments", "hydrafacial", "facial", "peel", "laser", "botox", "filler", "fillers",
+                    "prp", "hair", "root canal", "rct", "implant", "implants", "braces", "aligners", "whitening",
+                    "scaling", "lasik", "ivf", "iui", "liposuction", "tattoo", "acne", "pigmentation", "microneedling",
+                    "derma", "dermal", "crown", "veneers", "extraction", "cleaning")
+# Not radiology (x-ray, scan, ECG): a diagnostic centre may keep those in its lab catalogue, so they stay a question.
+_SERVICE_WORDS = ("service", "services", "procedure", "procedures", "charge", "charges", "tariff", "ward", "room",
+                  "nursing", "dressing", "injection", "nebulisation", "nebulization", "physiotherapy", "icu",
+                  "bed charges")
+_PRICE_DOMAINS = {"lab_test.price": _LAB_WORDS, "treatment.price": _TREATMENT_WORDS, "services.price": _SERVICE_WORDS}
+_MESSAGE_CUES = ("whatsapp", "message", "msg", "tell", "text", "sms", "inform", "send", "pampu", "bhejo", "batao",
+                 "cheppu", "చెప్పు", "बताओ")
+
+
+def _tie_break(text: str, t: str, top: list, ui_page: Optional[str]) -> list:
+    """Several actions match equally: keep the ones the sentence or the open page points to. Never guesses:
+    when nothing points one way, all candidates stay and the user is asked."""
+    ids = {s.id for s in top}
+    carriers = [s for s in top if _carries_text(s) and any(sl.kind == "message" for sl in s.slots)]
+    if carriers and len(carriers) < len(top) and resolve.resolve_message(text) is not None:
+        return carriers  # 'send whatsapp to Ravi: your report is ready' - there IS a message to send
+    if ids == {"opd.vitals", "ipd.vitals"} and (ui_page or "").startswith("ipd"):
+        return [s for s in top if s.id == "ipd.vitals"]  # on an IPD page; a bed / token already decides elsewhere
+    return top
+
+
+def _carries_text(spec: ActionSpec) -> bool:
+    """The action takes the staff member's own words (a WhatsApp message, a quoted phrase)."""
+    return any(s.kind in _VERBATIM for s in spec.slots)
+
+
+def _scope_text(text: str, spec: ActionSpec) -> str:
+    """What `unless` is checked against: for an action that carries words, the instruction without them
+    (message Ravi "your report is ready" is still a message, not a report resend)."""
+    return _norm(_instruction(text, spec)) if _carries_text(spec) else _norm(text)
+
+
+def resolve_tie(text: str, candidates) -> list:
+    """The router's last step on a "which did you mean?" tie, AFTER it dropped the actions this clinic has
+    switched off (a lab-only clinic never offers treatments). A price change whose sentence names exactly one
+    catalogue's kind of item ("CBC", "botox", "ward charges") is that catalogue; anything else stays a question."""
+    ids = list(candidates)
+    if len(ids) > 1 and set(ids) <= set(_PRICE_DOMAINS):
+        t = _norm(text)
+        named = [a for a in ids if has_any(t, tuple(_norm(w) for w in _PRICE_DOMAINS[a]))]
+        if len(named) == 1:
+            return named
+    return ids
 
 
 def _match_action(text: str, t: str, actions: dict, ui_page: Optional[str], doctors, now,
                   visible: Optional[set]) -> Route:
     scored = []
-    writing = has_any(t, WRITE_VERBS)
+    unquoted = _norm(resolve.without_verbatim(text, False))  # quoted words are someone's text, not the instruction
+    if resolve.resolve_message(text) is not None and has_any(_norm(resolve.without_verbatim(text, True)), _MESSAGE_CUES):
+        unquoted = _norm(resolve.without_verbatim(text, True))  # "tell Ravi on whatsapp: clinic closed tomorrow"
     for spec in actions.values():
-        if (writing and spec.risk == "R0") or _names_other(t, spec):
+        if (spec.risk == "R0" and _writing(t, spec)) or _names_other(_scope_text(text, spec), spec):
             continue
+        said = t if _carries_text(spec) else unquoted
         # Each matched trigger counts its words: "raddu+selavu" (2) outweighs a bare "selavu" (1).
-        hits = sum(len(_norm(trig.replace("+", " ")).split()) for trig in spec.triggers if _hits(t, trig))
+        hits = sum(_weight(trig) for trig in spec.triggers if _hits(said, trig))
         if hits:
             scored.append((hits, spec))
     if not scored:
         return Route("none")
     best = max(h for h, _ in scored)
     top: list[ActionSpec] = [s for h, s in scored if h == best]
+    create = actions.get("doctor.create")
+    if create and not _names_other(t, create) and prefer_new_doctor([s.id for s in top], text, doctors):
+        top = [create]  # a full profile for a name not on the list: add that doctor, never edit a look-alike
+    if len(top) > 1:
+        top = _tie_break(text, t, top, ui_page)
     if len(top) > 1:
         on_page = [s for s in top if ui_page and s.page == ui_page]
         if len(on_page) != 1:
             return Route("clarify", missing=("action",), candidate_actions=tuple(s.id for s in top))
         top = on_page
     return fill(top[0], text, doctors=doctors, now=now, question=asks(_instruction(text, top[0])), visible=visible)
+
+
+# Words that change an existing doctor's details: with any of them, a profile-like sentence stays an edit.
+_EDIT_DOCTOR = ("change", "update", "edit", "correct", "modify", "set", "make", "shift", "move", "increase",
+                "decrease", "reduce", "raise", "is now", "are now", "instead of", "marchu", "marchandi", "badlo",
+                "badal do", "మార్చు", "మార్చండి", "बदलो", "बदलें")
+PROFILE_FACETS = 3
+
+
+def prefer_new_doctor(action_ids, text: str, doctors: Optional[list]) -> bool:
+    """A sentence routed to "change a doctor's ..." that really dictates a NEW doctor's profile: it states three
+    or more of fee / specialty / hours / days / branch, has no change verb, and the doctor list (known) holds
+    nobody it names. Then it is "Add a doctor"; the preview still shows everything before anything is saved."""
+    if not action_ids or not set(action_ids) <= DOCTOR_EDITS or doctors is None:
+        return False
+    if has_any(_norm(text), _EDIT_DOCTOR) or resolve.resolve_doctor(text, doctors):
+        return False
+    return len(resolve.doctor_profile_facets(text)) >= PROFILE_FACETS
+
+
+# "I mean, register a new doctor" / "no, I meant add a doctor" / "it's a new doctor": the request just above was
+# understood as the wrong task (assistant._corrected carries its details over to the right one).
+_CORRECTION = re.compile(r"^\s*(?:(?:no|nope|sorry|oh|wait|actually|ok|okay)\b[\s,.!:-]*)*"
+                         r"(?:i\s+(?:mean|meant|said)\b|not\s+that\b|(?:it|he|she|this)(?:'s|\s+is)\s+(?:a\s+)?new\b)",
+                         re.I)
+
+
+def is_correction(text: str) -> bool:
+    return bool(_CORRECTION.search(strip_spoken_lead((text or "").replace("’", "'"))))
 
 
 _VERBATIM = {"message": True, "quoted": False, "test_name": False}  # slot kind -> a colon also starts it
@@ -430,8 +578,8 @@ def fill(spec: ActionSpec, text: str, *, doctors=None, now=None, question: bool 
     """Resolve one known action's slots from text (rules, the LLM fallback and clarify replies share
     this). `given` holds slots already answered on a clarify form; they are not re-parsed."""
     now = now or _now()
-    text = resolve.spoken_numbers(text)
-    if (spec.risk == "R0" and has_any(_norm(text), WRITE_VERBS)) or (given is None and _names_other(_norm(text), spec)):
+    text = absence_as_leave(resolve.expand_shorthand(resolve.spoken_numbers(text)))
+    if (spec.risk == "R0" and _writing(_norm(text), spec)) or (given is None and _names_other(_scope_text(text, spec), spec)):
         return Route("none")  # also guards the LLM fallback and clarify replies, which come through here
     if spec.risk == "H" and visible is not None and spec.handoff.page not in visible:
         return Route("rejected", page=spec.handoff.page, action_id=spec.id, error_code="not_available")  # T-29
@@ -469,7 +617,7 @@ FOLLOW_UP_KINDS = frozenset({"date", "amount", "price", "percent", "days", "sess
 
 def follow_up(spec: ActionSpec, missing, text: str, given: dict, *, doctors=None, now=None) -> dict:
     """Answers to an open form's `missing` slots read from a typed reply; {} when it answers none."""
-    out, text = {}, resolve.spoken_numbers(text)
+    out, text = {}, resolve.expand_shorthand(resolve.spoken_numbers(text))
     for slot in spec.slots:
         if slot.name not in missing or slot.kind not in FOLLOW_UP_KINDS:
             continue
@@ -490,7 +638,8 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
     `visible_pages` = the sidebar pages the user can see (None = unknown, navigation allowed)."""
     actions = {k: s for k, s in (REGISTRY if actions is None else actions).items() if s.triggers}
     visible = None if visible_pages is None else set(visible_pages)
-    text = resolve.spoken_numbers(text)  # "six hundred" -> "600" before anything reads the numbers
+    text = resolve.expand_shorthand(resolve.spoken_numbers(text))  # "six hundred" -> "600", "tmrw" -> "tomorrow"
+    text = absence_as_leave(text)
     now = now or _now()
     lead = strip_spoken_lead(text)
     if lead.strip() and lead != text:
@@ -500,7 +649,7 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
         return Route("none")
     if screen_message(text)[0] or is_sex_determination_request(text) or has_any(t, CLINICAL):
         return Route("rejected", error_code="clinical")
-    if has_any(t, NEGATION):
+    if _negated(t, text):
         return Route("rejected", error_code="negated")
     if has_any(t, HYPOTHETICAL):
         return Route("rejected", error_code="hypothetical")
@@ -512,7 +661,17 @@ def route(text: str, *, visible_pages: Optional[list] = None, ui_page: Optional[
         return route(rest, visible_pages=visible_pages, ui_page=ui_page, actions=actions, doctors=doctors, now=now)
     if has_any(t, HOW_TO):
         entry = _help(t, visible)
-        return Route("help", page=entry.page, help=entry) if entry else Route("rejected", error_code="unsupported")
+        if entry:
+            return Route("help", page=entry.page, help=entry)
+        # No written answer: "how do I cancel an appointment" is something Kriya itself does. A read just answers;
+        # a change is explained (never prepared from a question).
+        found = _match_action(text, t, actions, ui_page, doctors, now, visible)
+        if found.kind in ("action", "clarify") and found.action_id in REGISTRY:
+            spec = REGISTRY[found.action_id]
+            if spec.risk == "R0":
+                return found
+            return Route("help", page=spec.handoff.page if spec.handoff else spec.page, action_id=spec.id)
+        return found if found.kind == "help" else Route("rejected", error_code="unsupported")
     buttons = [b for trig, b in HANDOFFS if _hits(t, trig)]
     if buttons:  # done on the page by a person (KK-P4-09); the card opens it (the current page's, if several)
         entries = [e for e in HELP if e.button in buttons]

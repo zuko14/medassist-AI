@@ -732,6 +732,45 @@
         .nav-link .ico { font-size: 1.15rem; width: 26px; text-align: center; }
         .nav-link .ico svg { vertical-align: middle; }
 
+        /* ─── Sidebar groups (session 52): OPD OS / IPD OS / Diagnostics fold into one row each ─── */
+        .nav-group { margin: 4px 0 2px; }
+        .nav-group[hidden] { display: none; }
+        .nav-group-head {
+            display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 14px; margin-bottom: 2px;
+            border: 0; border-radius: 10px; background: transparent; color: var(--text2);
+            font: inherit; font-size: 0.88rem; font-weight: 600; text-align: left; cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .nav-group-head .ico { font-size: 1.15rem; width: 26px; text-align: center; flex: none; }
+        .nav-group-head .ico svg { vertical-align: middle; }
+        .nav-group-head:hover { background: var(--surface2); color: var(--text); }
+        .nav-group-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+        .nav-group-title { flex: 1; min-width: 0; letter-spacing: 0.01em; }
+        .nav-group-count {
+            min-width: 22px; padding: 2px 7px; border-radius: 99px; background: var(--surface2); color: var(--text3);
+            font-size: 0.68rem; font-weight: 700; line-height: 1.3; text-align: center; font-variant-numeric: tabular-nums;
+            transition: opacity 0.2s;
+        }
+        .nav-group-chev { width: 16px; height: 16px; flex: none; color: var(--text3); transition: transform 0.25s var(--ease-out); }
+        .nav-group.open .nav-group-chev { transform: rotate(90deg); }
+        .nav-group.open .nav-group-count { opacity: 0; }
+        /* Folded with the open page inside: the head carries the highlight, so you always see where you are. */
+        .nav-group.has-active:not(.open) .nav-group-head { background: var(--accent-glow); color: var(--accent2); }
+        .nav-group.has-active:not(.open) .nav-group-count { background: var(--accent); color: #fff; }
+        .nav-group-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.28s var(--ease-out); }
+        .nav-group.open .nav-group-body, .nav-group.is-flat .nav-group-body { grid-template-rows: 1fr; }
+        .nav-group-inner { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility 0s linear 0.28s; }
+        .nav-group.open .nav-group-inner, .nav-group.is-flat .nav-group-inner { visibility: visible; transition-delay: 0s; }
+        .nav-group:not(.is-flat) .nav-group-inner { margin-left: 26px; padding-left: 8px; border-left: 1px solid var(--border); }
+        .nav-group.open:not(.is-flat) .nav-group-inner { padding-top: 2px; padding-bottom: 6px; }
+        .nav-group:not(.is-flat) .nav-group-inner .nav-link { padding: 9px 12px; font-size: 0.86rem; gap: 10px; }
+        .nav-group:not(.is-flat) .nav-group-inner .nav-link .ico { width: 22px; font-size: 1rem; }
+        .nav-group:not(.is-flat) .nav-group-inner .nav-link .ico svg { width: 18px; height: 18px; }
+        .nav-group.is-flat .nav-group-head { display: none; }
+        @media (prefers-reduced-motion: reduce) {
+            .nav-group-body, .nav-group-inner, .nav-group-chev { transition: none; }
+        }
+
         .nav-bottom {
             padding: 16px;
             border-top: 1px solid var(--border);
@@ -835,16 +874,17 @@
         .card-head h3 { font-size: 1rem; font-weight: 600; color: var(--text-strong); }
 
         /* ═══════ TABLES ═══════ */
-        .tbl-wrap {
+        /* .table-wrap (AI Receptionist) had no rule at all, so its tables ran past the card's border. */
+        .tbl-wrap, .table-wrap {
             overflow-x: auto;
             border-radius: 10px;
             max-width: 100%;
             -webkit-overflow-scrolling: touch;
         }
 
-        .tbl-wrap::-webkit-scrollbar { height: 6px; }
-        .tbl-wrap::-webkit-scrollbar-track { background: var(--surface); }
-        .tbl-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+        .tbl-wrap::-webkit-scrollbar, .table-wrap::-webkit-scrollbar { height: 6px; }
+        .tbl-wrap::-webkit-scrollbar-track, .table-wrap::-webkit-scrollbar-track { background: var(--surface); }
+        .tbl-wrap::-webkit-scrollbar-thumb, .table-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
         table { width: 100%; border-collapse: collapse; }
 
@@ -2131,6 +2171,49 @@
             .vc-msg { max-width: 92%; }
         }
 
+        /* ── AI Receptionist on narrow screens (session 52) ───────────────────
+           Every panel fits inside its card at any width: the analytics grid
+           follows the card's own width (not the viewport, which ignores the
+           sidebar), tables scroll inside the card, and on phones the call and
+           queue tables become stacked rows instead of a 7-column strip. */
+        #pg-voice .card { min-width: 0; }
+        #pg-voice input[type="file"] { max-width: 100%; }
+        .vc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 22px 32px; align-items: start; }
+        .vc-grid > * { min-width: 0; }
+        .vc-grid .lead-card-title { margin-bottom: 10px; }
+        .vc-inline-file { grid-template-columns: auto minmax(0, 1fr); }
+        .vc-phrases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+        .vc-phrases li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 10px;
+            border-radius: 8px; font-size: 0.84rem; color: var(--text2); line-height: 1.45; }
+        .vc-phrases li:nth-child(odd) { background: var(--surface2); }
+        .vc-phrases li span { min-width: 0; overflow-wrap: anywhere; }
+        .vc-phrases li b { flex: none; font-weight: 600; color: var(--text3); font-variant-numeric: tabular-nums; }
+        .vc-stack tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+        #pg-voice .vc-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+            padding: 2px; scroll-padding-inline: 12px;
+            -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+            mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+        #pg-voice .vc-tabs::-webkit-scrollbar { display: none; }
+        #pg-voice .vc-tabs .btn { flex: none; }
+        @media (min-width: 1200px) {
+            #pg-voice .vc-tabs { flex-wrap: wrap; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+        }
+        @media (max-width: 640px) {
+            .vc-inline-file { grid-template-columns: minmax(0, 1fr); }
+            #pg-voice .card { padding: 18px 16px; }
+            .vc-stack thead { display: none; }
+            .vc-stack, .vc-stack tbody { display: block; width: 100%; }
+            .vc-stack tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; padding: 14px;
+                margin-bottom: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface2); }
+            .vc-stack tbody tr:hover td { background: transparent; }
+            .vc-stack td { display: block; padding: 0; border: 0; white-space: normal; overflow-wrap: anywhere; min-width: 0; font-size: 0.86rem; }
+            .vc-stack td[data-label]::before { content: attr(data-label); display: block; font-size: 0.66rem; font-weight: 700;
+                letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); margin-bottom: 2px; }
+            .vc-stack td.vc-stack-head, .vc-stack td.vc-note { grid-column: 1 / -1; }
+            .vc-stack td.vc-stack-head { font-weight: 600; color: var(--text-strong); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+            .vc-stack td[colspan] { grid-column: 1 / -1; }
+        }
+
         .appt-active-filter {
             display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
             padding: 10px 14px; margin-bottom: 16px;
@@ -2994,8 +3077,15 @@
             <div class="nav-link" tabindex="0" data-page="voice" data-voice="nav" style="display:none" onclick="go('voice',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"></path></svg></span> AI Receptionist
             </div>
+            <!-- Sidebar groups (session 52): OPD OS / IPD OS / Diagnostics collapse to one row each. Each link
+                 inside keeps its own data-* gate; navGroupsSync() hides a group with no visible link and shows
+                 a group with a single visible link flat (no dropdown). -->
             <!-- Kriya OPD OS (Phase 1.2) -->
-            <div class="nav-section-label" data-opd="nav" style="display:none; padding:12px 14px 4px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text3);">OPD OS</div>
+            <div class="nav-group" data-nav-group="opd">
+                <button type="button" class="nav-group-head" id="navGrpOpdHead" aria-expanded="false" aria-controls="navGrpOpd" onclick="navGroupToggle('opd')">
+                    <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v6a4 4 0 0 0 8 0V3"></path><path d="M10 13v2a5 5 0 0 0 10 0v-1"></path><circle cx="20" cy="12" r="2"></circle></svg></span><span class="nav-group-title">OPD OS</span><span class="nav-group-count" aria-hidden="true"></span><svg class="nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                </button>
+                <div class="nav-group-body" id="navGrpOpd" role="group" aria-labelledby="navGrpOpdHead"><div class="nav-group-inner">
             <div class="nav-link" tabindex="0" data-page="opdsetup" data-opd="admin" style="display:none" onclick="go('opdsetup',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span> OPD Setup
             </div>
@@ -3025,8 +3115,13 @@
             <div class="nav-link" tabindex="0" data-page="opdanalytics" data-opd="admin" style="display:none" onclick="go('opdanalytics',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg></span> OPD Analytics
             </div>
+            </div></div></div>
             <!-- Kriya IPD OS (migration 111): owner opt-in on an OPD-enabled clinic -->
-            <div class="nav-section-label ipd-nav-label" data-ipd="nav" style="display:none">IPD OS</div>
+            <div class="nav-group" data-nav-group="ipd">
+                <button type="button" class="nav-group-head" id="navGrpIpdHead" aria-expanded="false" aria-controls="navGrpIpd" onclick="navGroupToggle('ipd')">
+                    <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V7l9-4 9 4v14"></path><path d="M9 21v-5h6v5"></path><path d="M12 7v5"></path><path d="M9.5 9.5h5"></path></svg></span><span class="nav-group-title">IPD OS</span><span class="nav-group-count" aria-hidden="true"></span><svg class="nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                </button>
+                <div class="nav-group-body" id="navGrpIpd" role="group" aria-labelledby="navGrpIpdHead"><div class="nav-group-inner">
             <div class="nav-link" tabindex="0" data-page="ipdboard" data-ipd="admin admissions nursing clinical billing" style="display:none" onclick="go('ipdboard',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4v16"></path><path d="M2 8h18a2 2 0 0 1 2 2v10"></path><path d="M2 17h20"></path><path d="M6 8v9"></path></svg></span> Bed Board
             </div>
@@ -3050,6 +3145,13 @@
             <div class="nav-link" tabindex="0" data-page="ipdsetup" data-ipd="admin" style="display:none" onclick="go('ipdsetup',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span> IPD Setup
             </div>
+            </div></div></div>
+            <!-- Diagnostics, shared by OPD and IPD (migrations 115, 118, 123) -->
+            <div class="nav-group" data-nav-group="dx">
+                <button type="button" class="nav-group-head" id="navGrpDxHead" aria-expanded="false" aria-controls="navGrpDx" onclick="navGroupToggle('dx')">
+                    <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18h8"></path><path d="M3 22h18"></path><path d="M14 22a7 7 0 1 0 0-14h-1"></path><path d="M9 14h2"></path><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2z"></path><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"></path></svg></span><span class="nav-group-title">Diagnostics</span><span class="nav-group-count" aria-hidden="true"></span><svg class="nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                </button>
+                <div class="nav-group-body" id="navGrpDx" role="group" aria-labelledby="navGrpDxHead"><div class="nav-group-inner">
             <!-- Investigation & procedure orders (migration 115): sample collection / lab desk, OPD + IPD -->
             <div class="nav-link" tabindex="0" data-page="dxworklist" data-orders="nav" style="display:none" onclick="go('dxworklist',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"></path><path d="M10 3v6.5L5.5 18a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9.5V3"></path><path d="M8 15h8"></path></svg></span> Diagnostic Worklist
@@ -3062,6 +3164,7 @@
             <div class="nav-link" tabindex="0" data-page="radiology" data-rad="nav" style="display:none" onclick="go('radiology',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="12" cy="12" r="4"></circle><path d="M12 8v-2"></path><path d="M12 18v-2"></path></svg></span> Radiology
             </div>
+            </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
             </div>
@@ -13603,6 +13706,7 @@ function go(page, el) {
     document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('on'));
     if (el) el.classList.add('on');
     else document.querySelector(`.nav-link[data-page="${page}"]`)?.classList.add('on');
+    navGroupReveal(page);  // the page's sidebar group opens, so the highlighted link is never hidden
 
     // Close mobile
     document.getElementById('sidebar').classList.remove('mobile-open');
@@ -13629,6 +13733,63 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('mobile-open');
     document.getElementById('overlay').classList.toggle('show');
 }
+
+// ═══════ SIDEBAR GROUPS (session 52) ═══════
+// OPD OS / IPD OS / Diagnostics fold into one row each. Only the wrapper is new: every link keeps its own
+// data-* gate and onclick. A collapsed group hides its links with height + visibility, never display:none,
+// so ketuVisiblePages() (getClientRects) still counts them as pages this user can open.
+const NAV_GROUP_KEY = 'kriya.nav.groups';
+function navGroupState() {
+    try { const v = JSON.parse(localStorage.getItem(NAV_GROUP_KEY) || '{}'); return v && typeof v === 'object' ? v : {}; }
+    catch (e) { return {}; }
+}
+function navGroupSet(group, open, remember) {
+    group.classList.toggle('open', !!open);
+    const head = group.querySelector('.nav-group-head');
+    if (head) head.setAttribute('aria-expanded', String(!!open));
+    if (remember) {
+        const st = navGroupState();
+        st[group.dataset.navGroup] = !!open;
+        try { localStorage.setItem(NAV_GROUP_KEY, JSON.stringify(st)); } catch (e) { /* private mode: not remembered */ }
+    }
+}
+function navGroupToggle(name) {
+    const g = document.querySelector('.nav-group[data-nav-group="' + name + '"]');
+    if (g) navGroupSet(g, !g.classList.contains('open'), true);
+}
+// The group holding `page` opens (not remembered) and carries the "you are here" mark while folded.
+function navGroupReveal(page) {
+    document.querySelectorAll('.nav-group').forEach(g => {
+        const has = !!g.querySelector('.nav-link[data-page="' + page + '"]');
+        g.classList.toggle('has-active', has);
+        if (has && !g.classList.contains('open')) navGroupSet(g, true, false);
+    });
+}
+// Follows the links' own gates: no visible link = no group; one = shown flat (a dropdown of one is noise).
+function navGroupsSync() {
+    const st = navGroupState();
+    document.querySelectorAll('.nav-group').forEach(g => {
+        const shown = Array.from(g.querySelectorAll('.nav-link[data-page]'))
+            .filter(l => l.style.display !== 'none' && getComputedStyle(l).display !== 'none').length;
+        if (g.hidden !== (shown === 0)) g.hidden = shown === 0;
+        g.classList.toggle('is-flat', shown === 1);
+        const count = g.querySelector('.nav-group-count');
+        if (count && count.textContent !== String(shown || '')) count.textContent = shown || '';
+        const active = !!g.querySelector('.nav-link.on');
+        g.classList.toggle('has-active', active);
+        if (shown && !g.dataset.ready) {  // first time it has links: the remembered state, or open on its page
+            g.dataset.ready = '1';
+            navGroupSet(g, active || st[g.dataset.navGroup] === true, false);
+        }
+    });
+}
+(function navGroupsWatch() {
+    // The gates (applyOpdGates, applyIpdGates, applyOrdersGates ...) set each link's style; login sets body classes.
+    const mo = new MutationObserver(navGroupsSync);
+    document.querySelectorAll('.nav-group').forEach(g => mo.observe(g, { subtree: true, attributes: true, attributeFilter: ['style'] }));
+    mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    navGroupsSync();
+})();
 
 document.querySelectorAll('.nav-link[tabindex], .stat-link').forEach(link => {
     link.addEventListener('keydown', (e) => {
@@ -17051,6 +17212,11 @@ function vcTab(tab) {
         const on = b.dataset.vtab === tab;
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', String(on));
+        const strip = b.parentElement;
+        if (on && strip && strip.scrollWidth > strip.clientWidth) {  // sideways only: never scrolls the page
+            const br = b.getBoundingClientRect(), sr = strip.getBoundingClientRect();
+            strip.scrollLeft += (br.left - sr.left) - (sr.width - br.width) / 2;
+        }
     });
     document.getElementById('vcDetail').hidden = true;
     ({ live: vcLive, calls: vcCalls, analytics: vcAnalytics, outbound: vcOutbound, knowledge: vcKnowledge,
@@ -17059,10 +17225,10 @@ function vcTab(tab) {
 
 function vcCallRows(calls, emptyText) {
     if (!calls.length) return emptyState('info', emptyText);
-    return `<div class="table-wrap"><table><thead><tr><th>Call</th><th>Caller</th><th>Language</th><th>Request</th><th>Outcome</th><th>Status</th><th>Started</th></tr></thead><tbody>`
-        + calls.map(c => `<tr style="cursor:pointer" onclick="vcOpen('${esc(c.id)}')"><td>${esc(c.call_ref)}<div class="lead-sub">${esc(c.direction)}</div></td>`
-        + `<td>${esc(c.caller_phone)}</td><td>${esc(c.language)}</td><td>${esc(c.current_workflow || c.primary_intent || '—')}</td>`
-        + `<td>${esc(c.outcome || c.waiting_for || '—')}</td><td>${badge(c.status)}</td><td>${esc(VC_TIME(c.started_at))}</td></tr>`).join('')
+    return `<div class="table-wrap"><table class="vc-stack"><thead><tr><th>Call</th><th>Caller</th><th>Language</th><th>Request</th><th>Outcome</th><th>Status</th><th>Started</th></tr></thead><tbody>`
+        + calls.map(c => `<tr style="cursor:pointer" tabindex="0" onclick="vcOpen('${esc(c.id)}')" onkeydown="if(event.key==='Enter')vcOpen('${esc(c.id)}')"><td class="vc-stack-head">${esc(c.call_ref)}<div class="lead-sub">${esc(c.direction)}</div></td>`
+        + `<td data-label="Caller">${esc(c.caller_phone)}</td><td data-label="Language">${esc(c.language)}</td><td data-label="Request">${esc(c.current_workflow || c.primary_intent || '—')}</td>`
+        + `<td data-label="Outcome">${esc(c.outcome || c.waiting_for || '—')}</td><td data-label="Status">${badge(c.status)}</td><td data-label="Started">${esc(VC_TIME(c.started_at))}</td></tr>`).join('')
         + '</tbody></table></div>';
 }
 
@@ -17091,7 +17257,7 @@ async function vcCalls() {
     } catch (e) { document.getElementById('vcList').innerHTML = emptyState('warning', esc(e.message)); }
 }
 
-function vcJson(o) { return `<pre style="white-space:pre-wrap;font-size:.78rem;margin:0">${esc(JSON.stringify(o ?? {}, null, 2))}</pre>`; }
+function vcJson(o) { return `<pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:.78rem;margin:0">${esc(JSON.stringify(o ?? {}, null, 2))}</pre>`; }
 
 async function vcOpen(id) {
     const el = document.getElementById('vcDetail');
@@ -17107,7 +17273,7 @@ async function vcOpen(id) {
         const proofs = (d.proofs || []).map(p => `<div class="lead-note">${esc(p.name)}: verified=${esc(String((p.data || {}).verified))} — expected ${esc(JSON.stringify((p.data || {}).expected))} · read back ${esc(JSON.stringify((p.data || {}).read_back))}</div>`).join('') || '<p class="lead-note">No transaction in this call.</p>';
         el.innerHTML = `<div class="lead-card-title">${esc(c.call_ref)} · ${badge(c.status)} · ${esc(c.language)} · quality ${esc((c.quality || {}).score ?? '—')}</div>`
             + (live && hasPermission('VOICE_MANAGE') ? `<button type="button" class="btn btn-accent btn-sm" onclick="vcTakeover('${esc(c.id)}')">Take over (transfer to reception)</button> ` : '')
-            + `<div class="lead-grid"><div><div class="lead-card-title">What the patient asked</div><p>${esc((d.patient_request || {}).transcript || '—')}</p>${vcJson((d.patient_request || {}).understood)}`
+            + `<div class="vc-grid"><div><div class="lead-card-title">What the patient asked</div><p>${esc((d.patient_request || {}).transcript || '—')}</p>${vcJson((d.patient_request || {}).understood)}`
             + `<div class="lead-card-title" style="margin-top:12px">Why Kriya responded this way</div>${vcJson(d.why)}`
             + `<div class="lead-card-title" style="margin-top:12px">Proof of action</div>${proofs}`
             + (c.handoff_packet ? `<div class="lead-card-title" style="margin-top:12px">Handoff packet</div>${vcJson(c.handoff_packet)}` : '')
@@ -17128,11 +17294,11 @@ async function vcAnalytics() {
         const a = await api('/admin/voice/analytics?days=30');
         const rows = (o, f) => Object.entries(o || {}).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${f(v)}</td></tr>`).join('') || '<tr><td>—</td></tr>';
         const langs = Object.entries(a.by_language || {}).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.calls}</td><td>${v.calls ? Math.round(100 * v.succeeded / v.calls) : 0}%</td><td>${v.handoffs}</td></tr>`).join('');
-        pane.innerHTML = `<div class="lead-grid"><div><div class="lead-card-title">Automation by workflow (verified outcomes, no human)</div><table><tbody>${rows(a.autonomy_by_workflow, v => v + '%')}</tbody></table>`
-            + `<div class="lead-card-title" style="margin-top:12px">Calls by status</div><table><tbody>${rows(a.by_status, v => v)}</tbody></table></div>`
-            + `<div><div class="lead-card-title">Per language</div><table><thead><tr><th>Language</th><th>Calls</th><th>Succeeded</th><th>Handoffs</th></tr></thead><tbody>${langs || '<tr><td>—</td></tr>'}</tbody></table>`
-            + `<div class="lead-card-title" style="margin-top:12px">Top phrases Kriya did not understand</div>${(a.top_failure_phrases || []).map(p => `<div class="lead-note">${esc(p.phrase)} — ${p.count}×</div>`).join('') || '<p class="lead-note">None.</p>'}`
-            + `<p class="lead-note">Add a phrase under Knowledge to teach Kriya your patients' words.</p></div></div>`;
+        pane.innerHTML = `<div class="vc-grid"><div><div class="lead-card-title">Automation by workflow (verified outcomes, no human)</div><div class="tbl-wrap"><table><tbody>${rows(a.autonomy_by_workflow, v => v + '%')}</tbody></table></div>`
+            + `<div class="lead-card-title" style="margin-top:18px">Calls by status</div><div class="tbl-wrap"><table><tbody>${rows(a.by_status, v => v)}</tbody></table></div></div>`
+            + `<div><div class="lead-card-title">Per language</div><div class="tbl-wrap"><table><thead><tr><th>Language</th><th>Calls</th><th>Succeeded</th><th>Handoffs</th></tr></thead><tbody>${langs || '<tr><td>—</td></tr>'}</tbody></table></div>`
+            + `<div class="lead-card-title" style="margin-top:18px">Top phrases Kriya did not understand</div>${(a.top_failure_phrases || []).length ? '<ul class="vc-phrases">' + a.top_failure_phrases.map(p => `<li><span>${esc(p.phrase)}</span><b>${esc(p.count)}×</b></li>`).join('') + '</ul>' : '<p class="lead-note">None.</p>'}`
+            + `<p class="lead-note" style="margin-top:10px">Add a phrase under Knowledge to teach Kriya your patients' words.</p></div></div>`;
     } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
 }
 
@@ -17148,14 +17314,14 @@ async function vcOutbound() {
             + `<p class="lead-note" style="margin-bottom:18px">Kriya greets them by name, mentions what they asked about, tells them about your services, and books the appointment on the call. If they are not ready, Kriya tells them they can book any time on your WhatsApp. Calls go out one by one, inside your outbound hours.</p>`
             + vcBulkPanel() : '')
             + `<div class="lead-card-title" style="margin-top:18px">Call queue</div>`
-            + `<div class="table-wrap"><table><thead><tr><th>Phone</th><th>Asked about</th><th>Status</th><th>Attempts</th><th>Next try</th><th>Note</th></tr></thead><tbody>`
+            + `<div class="table-wrap"><table class="vc-stack"><thead><tr><th>Phone</th><th>Asked about</th><th>Status</th><th>Attempts</th><th>Next try</th><th>Note</th></tr></thead><tbody>`
             + ((d.jobs || []).map(j => {
                 const ctx = j.context || {};
                 const ap = j.purpose === 'appointment_reminder' ? (ctx.appointment || {}) : null;
                 const src = ap ? '<div class="lead-sub">Appointment reminder</div>' : ctx.consent ? `<div class="lead-sub">Imported · ${esc(ctx.consent.source || '')}</div>` : (j.created_by === 'auto_leads' ? '<div class="lead-sub">WhatsApp lead</div>' : '');
                 const about = ap ? `Dr. ${String(ap.doctor_name || '').replace(/^dr\.?\s*/i, '')} · ${ap.date || ''} ${ap.time || ''}` : (ctx.interest || '—');
-                return `<tr><td>${esc(j.patient_phone)}${src}</td><td>${esc(about)}</td><td>${badge(j.status)}</td><td>${esc(j.attempts)}</td>`
-                    + `<td>${esc(VC_TIME(j.next_attempt_at))}</td><td>${esc(vcJobNote(j))}</td></tr>`;
+                return `<tr><td class="vc-stack-head">${esc(j.patient_phone)}${src}</td><td data-label="Asked about">${esc(about)}</td><td data-label="Status">${badge(j.status)}</td><td data-label="Attempts">${esc(j.attempts)}</td>`
+                    + `<td data-label="Next try">${esc(VC_TIME(j.next_attempt_at))}</td><td data-label="Note" class="vc-note">${esc(vcJobNote(j))}</td></tr>`;
             }).join('') || '<tr><td colspan="6">No outbound calls yet.</td></tr>')
             + '</tbody></table></div>';
     } catch (e) { pane.innerHTML = emptyState('warning', esc(e.message)); }
@@ -17190,7 +17356,7 @@ function vcBulkPanel() {
     return `<details class="vc-section" id="vcBulk" style="margin-top:6px"><summary class="lead-card-title" style="cursor:pointer">Import a list of numbers to call</summary>`
         + `<p class="lead-note">One person per line: <code>phone, what they asked about</code> (the second part is optional). You can also load a CSV file with those two columns. Up to 500 at a time.</p>`
         + `<div class="field"><label for="vcBulkText">Numbers</label><textarea id="vcBulkText" rows="6" placeholder="9876543210, knee pain&#10;+91 91234 56789, full body checkup&#10;9988776655" oninput="vcBulkCount()"></textarea><div class="lead-sub" id="vcBulkCount"></div></div>`
-        + `<div class="vc-inline" style="grid-template-columns:auto minmax(0,1fr)"><div class="field"><label for="vcBulkFile">Or load a CSV</label><input type="file" id="vcBulkFile" accept=".csv,.txt,text/csv,text/plain" onchange="vcBulkLoadFile(this)"></div>`
+        + `<div class="vc-inline vc-inline-file"><div class="field"><label for="vcBulkFile">Or load a CSV</label><input type="file" id="vcBulkFile" accept=".csv,.txt,text/csv,text/plain" onchange="vcBulkLoadFile(this)"></div>`
         + `<div class="field"><label for="vcBulkInterest">Asked about (for lines without one)</label><input id="vcBulkInterest" maxlength="60" autocomplete="off" placeholder="e.g. health checkup"></div></div>`
         + `<div class="field"><label class="check"><input type="checkbox" id="vcBulkConsent" onchange="document.getElementById('vcBulkSourceWrap').hidden = !this.checked"> Everyone on this list asked us to contact them</label>`
         + `<div class="lead-sub">Tick only when true, e.g. walk-in enquiries or health camp sign-ups. Without it, only people who already messaged or booked with you are called. People who opted out are never called.</div></div>`
@@ -26046,6 +26212,7 @@ function ketuRunHtml(run, pageLabel, nowMs) {
     const id = esc(run.run_id), st = run.state;
     const live = st === 'NEEDS_CONFIRMATION' || st === 'NEEDS_CLARIFICATION';
     const word = run.error_code === 'continued' ? 'Answered below.'
+        : run.error_code === 'corrected' ? 'Replaced below.'
         : { CANCELLED: 'Cancelled.', EXPIRED: 'Expired — ask again.', REJECTED: 'Not done.' }[st] || '';
     const left = run.expires_at ? ketuSecondsLeft(run.expires_at, nowMs) : 0;
     const link = p => p ? '<button type="button" class="ketu-link" data-ketu-go="' + esc(p) + '">Open ' + esc(pageLabel(p)) + '</button>' : '';
@@ -26671,9 +26838,11 @@ const ketu = {
         } catch (e) { /* the panel works without history */ }
     },
 
-    // A typed reply can continue an open form (server _follow_up): re-read the forms still shown as open.
+    // A typed reply can continue an open form (server _follow_up), and "I mean ..." can replace an open form or
+    // preview (server _corrected): re-read the runs still shown as open.
     async refreshOpenForms(exceptId) {
-        if (!Object.values(this.runs).some(r => r.run_id !== exceptId && r.state === 'NEEDS_CLARIFICATION')) return;
+        if (!Object.values(this.runs).some(r => r.run_id !== exceptId &&
+            (r.state === 'NEEDS_CLARIFICATION' || r.state === 'NEEDS_CONFIRMATION'))) return;
         try {
             const fresh = await api('/admin/assistant/runs?limit=10');
             ketuChangedRuns(this.runs, fresh, exceptId).forEach(r => this.renderRun(r, true));
