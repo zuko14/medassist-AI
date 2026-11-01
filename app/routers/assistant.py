@@ -353,6 +353,8 @@ async def _follow_up(body: RequestIn, scope: str, user: AdminUser, clinic: dict,
     asks_doctor = any(s.kind == "doctor" and s.name in missing for s in spec.slots)
     doctors = await _doctors(auth, scope, run_id) if asks_doctor else None
     answers = rules.follow_up(spec, missing, body.text, given, doctors=doctors)
+    if not answers:
+        answers = rules.free_reply(spec, missing, body.text)  # "Hair and scalp" to the one open text field
     offered = {c.get("name") for c in card.get("candidates") or []}
     for s in spec.slots:  # a doctor answer must be one the form offered, as on the form itself
         if s.kind == "doctor" and s.name in answers and offered and answers[s.name] not in offered:
@@ -585,6 +587,19 @@ def _answers_to_params(spec, card: dict, answers: dict, params: dict) -> dict:
             if not found:
                 raise ValueError(f"{slot.kind} not understood")
             out[slot.name] = found
+        elif slot.kind in ("profile_change", "leave_move"):  # the same reader as the sentence, never free text
+            v = " ".join(str(value).split())[:400]
+            found = (resolve.resolve_profile_change(v) if slot.kind == "profile_change"
+                     else resolve.resolve_leave_move(v))
+            if not found:
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = found
+        elif slot.kind in ("new_treatment", "treatment_category", "call_interest"):  # stored as typed
+            text = " ".join(str(value).split())
+            limit = 120 if slot.kind == "new_treatment" else 60
+            if not (2 <= len(text) <= limit and re.fullmatch(r"[\w][\w &+.,'()/-]*", text)):
+                raise ValueError(f"{slot.kind} not understood")
+            out[slot.name] = text
         elif slot.kind == "staff_role":  # "cashier" / "front desk": the same words as the sentence
             found = resolve.resolve_staff_role(str(value)[:60])
             if not found:

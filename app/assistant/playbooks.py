@@ -1693,6 +1693,9 @@ async def doctor_create_preview(read, params: dict) -> dict:
     body = {"name": name, "specialization": params["specialization"], "department": params["department"],
             "consultation_fee": fee_rupees, "available_days": params["days"]}
     bullets = [f"{params['specialization']} ({params['department']}), {_inr(fee_rupees)}, {params['days']}."]
+    if "days" in (params.get("assumed") or ()):
+        bullets.append(f"Working days {params['days'].replace(',', ', ')}: you did not say them, so this is the Doctors "
+                       "page's default. Say \"Dr … works Mon to Sat\" afterwards to change them.")
     for s, w in windows.items():
         body[f"{s}_start"], body[f"{s}_end"] = w.split("-")
         bullets.append(f"{s.capitalize()} {w.replace('-', '–')}: "
@@ -4142,3 +4145,184 @@ async def disallowance_preview(read, params: dict) -> dict:
                             verify=_claim_after(cid, lambda x: int((x.get("split") or {}).get("disallowed_paise")
                                                                    or x.get("disallowed_amount_paise") or 0)
                                                 >= before + rupees * 100, lambda x: "Recorded"))]}
+
+
+# ── Session 54: the rest of the panel by voice. Same contract as above: the preview reads what is there, shows
+# exactly what changes (old -> new), refuses when there is nothing to do, and each write has its own read-back. ──
+
+_PROFILE_LABELS = {"name": "Hospital name", "hospital_address": "Address", "hospital_maps_link": "Google Maps link",
+                   "hospital_emergency_number": "Emergency number", "hospital_staff_phone": "Reception number",
+                   "followup_enabled": "Patient follow-ups", "followup_days": "Follow-up after (days)",
+                   "health_checkins_enabled": "Health check-ins"}
+_PROFILE_WARN = {"name": "Patients see the new name on WhatsApp straight away.",
+                 "hospital_address": "The new address is what Kriya sends patients who ask for directions.",
+                 "hospital_emergency_number": "Patients are given this number in an emergency: check every digit.",
+                 "hospital_staff_phone": "Patients who ask to talk to staff are given this number."}
+
+
+def _profile_value(field: str, value) -> str:
+    if isinstance(value, bool):
+        return "On" if value else "Off"
+    return str(value) if value not in (None, "") else "(not set)"
+
+
+async def profile_update_preview(read, params: dict) -> dict:
+    """PUT /admin/profile with only the fields said (the endpoint writes nothing else, D-13)."""
+    changes = {k: v for k, v in (params.get("changes") or {}).items() if k in _PROFILE_LABELS}
+    if not changes:
+        raise EmptyPlan("Say what to change, e.g. \"change the hospital address to …\".")
+    current = await _get(read, "/admin/profile")
+    current = current if isinstance(current, dict) else {}
+    diff = {k: v for k, v in changes.items() if current.get(k) != v}
+    if not diff:
+        raise EmptyPlan("The hospital profile already says that.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/profile"))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the hospital profile back"
+        ok = all(out.data.get(k) == v for k, v in diff.items())
+        return ok, "Saved on the Hospital Profile" if ok else "The profile does not show the change"
+
+    rows = [[_PROFILE_LABELS[k], _profile_value(k, current.get(k)), _profile_value(k, v)] for k, v in diff.items()]
+    return {"title": "Update the hospital profile", "rows": rows,
+            "warnings": [_PROFILE_WARN[k] for k in diff if k in _PROFILE_WARN],
+            "snapshot": {k: current.get(k) for k in diff},
+            "steps": [_step("Save the hospital profile", _call("PUT", "/admin/profile", json=diff), verify=verify)]}
+
+
+async def holiday_delete_preview(read, params: dict) -> dict:
+    day = params["date"]
+    existing = await _get(read, "/admin/holidays")
+    same = next((h for h in existing if isinstance(h, dict) and str(h.get("holiday_date"))[:10] == day), None) \
+        if isinstance(existing, list) else None
+    if not same:
+        raise EmptyPlan(f"{present.fmt(day, 'date')} is not a hospital holiday.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/holidays"))
+        if out.status != "ok" or not isinstance(out.data, list):
+            return None, "Couldn't read the Holidays list"
+        gone = not any(isinstance(h, dict) and str(h.get("holiday_date"))[:10] == day for h in out.data)
+        return gone, "No longer a holiday" if gone else "Still on the Holidays list"
+
+    return {"title": f"Remove the holiday on {present.fmt(day, 'date')}: {same.get('name') or 'Clinic closed'}",
+            "warnings": [f"Patients can book {present.fmt(day, 'date')} again on WhatsApp and the phone line."],
+            "snapshot": {"holiday": str(same.get("holiday_date"))[:10]},
+            "steps": [_step(f"Remove holiday {present.fmt(day, 'date')}", _call("DELETE", f"/admin/holidays/{day}"),
+                            verify=verify)]}
+
+
+async def leave_move_preview(read, params: dict) -> dict:
+    """A leave moved to another day: the new day is ADDED FIRST, then the old one removed, so a failure part-way
+    leaves the doctor on leave twice (shown as partly done), never on no leave at all."""
+    doctor, (old, new) = params["doctor"], params["move"]
+    me = await _get(read, "/admin/me")
+    if not (isinstance(me, dict) and (me.get("role") in ("clinic_admin", "super_admin")
+                                      or "DOCTOR_LEAVES_DELETE" in (me.get("permissions") or []))):
+        raise EmptyPlan("Moving a leave also removes the old day, and your login cannot remove leaves. "
+                        "Ask an admin, or add the new day only.")  # checked first: never half a move
+    old_rows = (await _existing(read, doctor)).get(old, [])
+    if not old_rows:
+        raise EmptyPlan(f"No leave found for {doctor} on {present.fmt(old, 'date')}.")
+    leave_type = old_rows[0].get("leave_type") or "full"
+    add_params = {"doctor": doctor, "date": new, "leave_type": leave_type}
+    added = await leave_create_preview(read, add_params)
+    removed = await leave_delete_preview(read, {"doctor": doctor, "date": old})
+    preview = {**added, "title": f"Move {doctor}'s leave: {present.fmt(old, 'date')} → {present.fmt(new, 'date')}",
+               "bullets": [f"Add {present.fmt(new, 'date')} ({LEAVE_LABEL[leave_type]}), then remove "
+                           f"{present.fmt(old, 'date')}.", *added.get("bullets", [])[1:]],
+               "warnings": [*added.get("warnings", []), *removed.get("warnings", [])],
+               "snapshot": {"add": added.get("snapshot"), "remove": removed.get("snapshot")},
+               "steps": [*leave_create_call(add_params), *removed["steps"]]}
+    preview["affected"] = len(preview["steps"])
+    return preview
+
+
+async def treatment_create_preview(read, params: dict) -> dict:
+    name, category, price = params["name"], params["category"], params["price"]
+    if price[0] != "amount":
+        raise EmptyPlan("Say the price in rupees, e.g. \"for ₹4000\".")
+    rupees = int(Decimal(price[1]))
+    if not 0 < rupees <= MAX_TREATMENT_PRICE:
+        raise EmptyPlan(f"A treatment price of {_inr(rupees)} is outside ₹1 to {_inr(MAX_TREATMENT_PRICE)}.")
+    rows = await _treatments(read)
+    same = next((t for t in rows if _same(t.get("name"), name)), None)
+    if same:
+        raise EmptyPlan(f"{same.get('name')} is already on the Treatments list ({_trt_line(same)}).")
+
+    async def verify(read, data, call):
+        out = await _treatments(read)
+        ok = any(_same(t.get("name"), name) for t in out)
+        return ok, "On the Treatments list" if ok else "Not on the Treatments list"
+
+    return {"title": f"Add treatment {name}", "rows": [[name, category, f"from {_inr(rupees)}"]],
+            "warnings": ["Patients see it in the WhatsApp treatment menu straight away. Add its description and "
+                         "doctors on the Treatments page (or ask me: \"only Dr … does …\")."],
+            "snapshot": {"treatments": len(rows)},
+            "steps": [_step(f"Add {name}", _call("POST", "/admin/treatments", json={
+                "name": name, "category": category, "price_from_rupees": rupees}), verify=verify)]}
+
+
+async def branch_unassign_preview(read, params: dict) -> dict:
+    doc = await _doctor(read, params["doctor"])
+    branches = branch_rows(await _get(read, "/admin/branches"))
+    found = _match_branch(branches, params["branch"])
+    names = ", ".join(str(b.get("name")) for b in branches[:12]) or "none"
+    if len(found) != 1:
+        raise EmptyPlan(f'{"No branch" if not found else f"{len(found)} branches"} match "{params["branch"]}". '
+                        f"Branches: {names}.")
+    branch = found[0]
+    path = f"/admin/branches/{branch['id']}/doctors"
+    current = await _get(read, path)
+    assigned = {str(r.get("doctor_id")) for r in (current.get("doctor_branches") or [] if isinstance(current, dict) else [])
+                if isinstance(r, dict)}
+    if str(doc["id"]) not in assigned:
+        raise EmptyPlan(f"{doc.get('name')} is not assigned to {branch.get('name')}.")
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", path))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the branch's doctors back"
+        gone = not any(isinstance(r, dict) and str(r.get("doctor_id")) == str(doc["id"])
+                       for r in out.data.get("doctor_branches") or [])
+        return gone, f"No longer at {branch.get('name')}" if gone else "Still on the branch's doctors"
+
+    return {"title": f"Take {doc.get('name')} off {branch.get('name')}",
+            "warnings": [f"Patients can no longer book {doc.get('name')} at {branch.get('name')}; bookings already "
+                         "made stay."],
+            "snapshot": {"assigned": sorted(assigned)},
+            "steps": [_step(f"Remove {doc.get('name')} from {branch.get('name')}",
+                            _call("DELETE", f"{path}/{doc['id']}"), verify=verify)]}
+
+
+async def call_number_preview(read, params: dict) -> dict:
+    """POST /admin/voice/outbound: one call by the AI receptionist. The server refuses people who opted out,
+    numbers already queued and calls outside the clinic's settings (409, shown as Kriya's own message)."""
+    phone, interest = params["phone"], params.get("interest")
+    jobs = await _get(read, "/admin/voice/outbound")
+    live = [j for j in (jobs.get("jobs") or [] if isinstance(jobs, dict) else [])
+            if isinstance(j, dict) and str(j.get("patient_phone", ""))[-10:] == phone[-10:]
+            and j.get("status") in ("queued", "dialing")]
+    if live:
+        raise EmptyPlan(f"A call to {phone} is already in the queue.")
+    return {"title": f"Kriya calls {phone}" + (f" about {interest}" if interest else ""),
+            "bullets": ["Kriya greets them, talks about what they asked for and books on the call."],
+            "warnings": ["The call goes out inside your outbound call hours. People who opted out are never called."],
+            "snapshot": {"phone": phone},
+            "steps": [_step(f"Queue a call to {phone}",
+                            _call("POST", "/admin/voice/outbound",
+                                  json={"phone": phone, "purpose": "lead_followup", "interest": interest}),
+                            verify=_one_call_queued(phone))]}
+
+
+def _one_call_queued(phone: str):
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/voice/outbound"))
+        if out.status != "ok" or not isinstance(out.data, dict):
+            return None, "Couldn't read the call queue back"
+        ok = any(isinstance(j, dict) and str(j.get("patient_phone", ""))[-10:] == phone[-10:]
+                 and j.get("status") in ("queued", "dialing", "completed", "in_progress")
+                 for j in out.data.get("jobs") or [])
+        return ok, "In the call queue" if ok else "Not in the call queue"
+    return verify

@@ -21,7 +21,7 @@ from tests import ketu_corpus
 from tests.test_assistant_runs import as_user, db  # noqa: F401  (fixtures)
 
 NOW = datetime(2026, 11, 2, 10, 0, tzinfo=IST)
-FLOORS = {"DEV": 0.99, "DEV2": 0.92, "DEV3": 0.99, "HELDOUT": 0.95}
+FLOORS = {"DEV": 0.99, "DEV2": 0.92, "DEV3": 0.99, "DEV4": 1.0, "HELDOUT": 0.95}
 
 
 def _outcome(text: str) -> str:
@@ -69,8 +69,8 @@ def test_accuracy_floor(name):
 
 def test_corpus_sizes_and_disjoint_heldout():
     sets = {n: [t for _, t in getattr(ketu_corpus, n)] for n in FLOORS}
-    assert {n: len(v) for n, v in sets.items()} == {"DEV": 231, "DEV2": 82, "DEV3": 185, "HELDOUT": 132}
-    tuned = set(sets["DEV"]) | set(sets["DEV2"]) | set(sets["DEV3"])
+    assert {n: len(v) for n, v in sets.items()} == {"DEV": 231, "DEV2": 82, "DEV3": 185, "DEV4": 24, "HELDOUT": 132}
+    tuned = set(sets["DEV"]) | set(sets["DEV2"]) | set(sets["DEV3"]) | set(sets["DEV4"])
     assert not set(sets["HELDOUT"]) & tuned  # the blind set shares no sentence with the tuning sets
 
 

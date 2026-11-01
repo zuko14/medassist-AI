@@ -701,7 +701,8 @@ def resolve_days(text: str) -> Optional[str]:
 # Spoken profiles: "the doctor's name is Ramesh Kumar", "name of the doctor is Dr Priya".
 # Speech often says "was" ("doctor name was Ramesh Kumar"): the same statement.
 _NAMED_DOCTOR = re.compile(r"\b(?:(?:(?:doctor|dr)(?:'?s)?\s+name|name\s+of\s+(?:the\s+)?(?:new\s+)?(?:doctor|dr)|"
-                           r"(?:his|her)\s+name)\s+(?:is|was|will be|should be|:)|(?:doctor|dr)\s+(?:named|called))"
+                           r"(?:his|her|the)\s+name|(?<![\w'])name)\s+(?:is|was|will be|should be|:)|"
+                           r"(?:doctor|dr)\s+(?:named|called))"
                            r"\s+(?:dr\.?\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)", re.I)
 # Last resort for a new doctor's name: "Dr Ramesh Kumar" said with capitals anywhere in the profile.
 _TITLED_DOCTOR = re.compile(r"\b(?i:dr\.?|doctor)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b")
@@ -1643,7 +1644,7 @@ def resolve_company(text: str) -> Optional[str]:
     return name if 2 <= len(name) <= 120 else None
 
 
-_AT_PRICE = re.compile(r"\b(?:at|for|price|priced|costing|cost|of|rate|charges?|rent|tariff)\s+(?:is\s+)?(?:rs\.?\s*|₹\s*|inr\s*)?(\d[\d,]*)\b(?!\s*%)",
+_AT_PRICE = re.compile(r"\b(?:at|for|price|priced|costing|cost|of|rate|charges?|rent|tariff)\s+(?:is\s+)?(?:rs\.?\s*|₹\s*|inr\s*)?(\d[\d,]*)\b(?!\s*(?:%|days?\b|mins?\b|minutes?\b|hours?\b|hrs?\b|sittings?\b|sessions?\b|weeks?\b|months?\b|years?\b|beds?\b|patients?\b))",
                        re.I)
 
 
@@ -2157,3 +2158,121 @@ def resolve_disallowed(text: str) -> Optional[str]:
         return str(int((m.group(1) or m.group(2)).replace(",", "")))
     found = resolve_amount(t)
     return str(int(found[1])) if found and found[0] == "amount" else None
+
+
+# ── Session 54: the rest of the panel by voice ───────────────────────────────
+
+def doctor_department(value: str) -> str:
+    """The department a specialty belongs to, said either way: "Dermatologist" -> "Dermatology",
+    "Paediatrician" -> "Paediatrics", "Orthopaedic surgeon" -> "Orthopaedics"; anything else as said."""
+    v = " ".join((value or "").split())
+    low = v.lower()
+    if low.endswith("ologist"):
+        return v[:-3] + "y"
+    for tail, dept in (("iatrician", "iatrics"), ("iatrist", "iatry")):
+        if low.endswith(tail):
+            return v[: len(v) - len(tail)] + dept
+    if re.fullmatch(r"(?i)orthop(?:a)?edic(?:\s+surgeon)?", v):
+        return "Orthopaedics"
+    if re.fullmatch(r"(?i)(?:general\s+)?physician", v):
+        return "General Medicine"
+    if re.fullmatch(r"(?i)dentist|dental\s+surgeon", v):
+        return "Dental"
+    return v
+
+
+_PROFILE_STOP = r"(?=\s*(?:[.;]|\band\s+(?:the\s+)?(?:address|emergency|reception|front\s*desk|staff|maps?|hospital|clinic)\b|$))"
+_PROFILE_PHONE = r"((?:\+?91[\s-]?)?\d(?:[\s-]?\d){9})"
+_PROFILE = {
+    "name": re.compile(r"\b(?:rename\s+(?:the\s+|our\s+)?(?:hospital|clinic)\s+(?:to|as)\s+|(?:hospital|clinic)(?:'s)?\s+name\s+"
+                       r"(?:to|as|is|should be|will be|:)\s+)(?:\"([^\"]{2,80})\"|([A-Za-z0-9][A-Za-z0-9 &.'()-]{1,79}?))"
+                       + _PROFILE_STOP, re.I),
+    "hospital_address": re.compile(r"\baddress\s+(?:to|as|is|should be|will be|:)\s+(?:\"([^\"]{5,300})\"|(.{5,300}?))"
+                                   r"(?=\s*(?:\band\s+(?:the\s+)?(?:emergency|reception|front\s*desk|staff|maps?)\b|$))", re.I),
+    "hospital_maps_link": re.compile(r"(https?://(?:maps\.app\.goo\.gl|goo\.gl/maps|(?:www\.)?google\.[a-z.]+/maps|"
+                                     r"maps\.google\.[a-z.]+)\S*)", re.I),
+    "hospital_emergency_number": re.compile(r"\bemergency\s+(?:number|phone|no\.?|contact|line)\s+(?:to|as|is|:)?\s*"
+                                            + _PROFILE_PHONE, re.I),
+    "hospital_staff_phone": re.compile(r"\b(?:reception|front\s*desk|staff|talk\s+to\s+staff)\s+(?:number|phone|no\.?|line)\s+"
+                                       r"(?:to|as|is|:)?\s*" + _PROFILE_PHONE, re.I),
+}
+_FOLLOWUP = re.compile(r"\bfollow[\s-]?ups?\b", re.I)
+_CHECKINS = re.compile(r"\b(?:health\s+)?check[\s-]?ins?\b", re.I)
+_FOLLOWUP_DAYS = re.compile(r"\bfollow[\s-]?ups?\b.*?\b(?:after|in)\s+(\d{1,2})\s+days?\b", re.I)
+
+
+def resolve_profile_change(text: str) -> Optional[dict]:
+    """Hospital profile fields said outright, as PUT /admin/profile names them. Never the WhatsApp routing id
+    or the sandbox flag (they move a clinic's messages). None when nothing is stated."""
+    t, out = text or "", {}
+    for field, rx in _PROFILE.items():
+        m = rx.search(t)
+        if not m:
+            continue
+        value = next((g for g in m.groups() if g), "").strip().strip(".,")
+        if field in ("hospital_emergency_number", "hospital_staff_phone"):
+            value = re.sub(r"[\s-]", "", value)
+        if value:
+            out[field] = value
+    if _FOLLOWUP.search(t) and not re.search(r"\bmessage\b", t, re.I):
+        m = _FOLLOWUP_DAYS.search(t)
+        if m and 1 <= int(m.group(1)) <= 30:
+            out["followup_days"] = int(m.group(1))
+        state = resolve_on_off(_FOLLOWUP_DAYS.sub(" ", t))
+        if state and not _CHECKINS.search(t):
+            out["followup_enabled"] = state == "on"
+    if _CHECKINS.search(t) and not re.search(r"\bcheck[\s-]?in\s+(?:the\s+)?(?:patient|token|booking|[A-Z])", t):
+        state = resolve_on_off(t)
+        if state:
+            out["health_checkins_enabled"] = state == "on"
+    return out or None
+
+
+_MOVE_SPLIT = re.compile(r"\b(?:to|till|until|→|->|se|ki\s+jagah)\b", re.I)
+
+
+def resolve_leave_move(text: str, now: Optional[datetime] = None) -> Optional[list]:
+    """[from, to] ISO dates of a leave being moved ("move Dr Rao's leave from 5 Nov to 7 Nov", "shift her
+    leave tomorrow to Friday"): the last date before the final "to" and the date after it; None otherwise."""
+    parts = list(_MOVE_SPLIT.finditer(text or ""))
+    for m in reversed(parts):
+        old, new = resolve_date(text[:m.start()], now=now), resolve_date(text[m.end():], now=now)
+        if old and new and old != new:
+            return [old.isoformat(), new.isoformat()]
+    return None
+
+
+_NEW_TREATMENT = re.compile(r"\b(?:add|new|create)\s+(?:a\s+)?(?:new\s+)?(?:treatment|procedure|service\s+treatment)\s+"
+                            r"(?:called\s+|named\s+)?([A-Za-z0-9][A-Za-z0-9 &+.'()/-]{1,80}?)"
+                            r"(?=\s*(?:[,.;]|\b(?:for|at|price|priced|costs?|under|in|category|from|with|rs|₹)\b|\d|$))", re.I)
+_TRT_CATEGORY = re.compile(r"\b(?:under|in(?:\s+the)?|category(?:\s+is)?|category:)\s+(?:the\s+)?\"?([A-Za-z][A-Za-z0-9 &+'/-]{1,58}?)\"?"
+                           r"(?:\s+(?:category|section|group))?(?=\s*(?:[,.;]|\b(?:for|at|price|priced|costs?|from|with)\b|\d|$))",
+                           re.I)
+
+
+def resolve_new_treatment(text: str) -> Optional[str]:
+    """The new treatment's name as said: quoted, else the words after "add treatment"; 2..120 chars."""
+    quoted = resolve_quoted(text)
+    if quoted:
+        return quoted if 2 <= len(quoted) <= 120 else None
+    m = _NEW_TREATMENT.search(text or "")
+    name = " ".join(m.group(1).split()) if m else ""
+    return name if 2 <= len(name) <= 120 else None
+
+
+def resolve_treatment_category(text: str) -> Optional[str]:
+    """The category said outright ("under Hair & Scalp", "category is Skin"); None means the form asks."""
+    m = _TRT_CATEGORY.search(without_verbatim(text or "", False))
+    value = " ".join(m.group(1).split()) if m else ""
+    return value if 2 <= len(value) <= 60 else None
+
+
+_CALL_ABOUT = re.compile(r"\b(?:about|regarding|for|interested in|asked about|asking about)\s+(.{2,60}?)\s*[.?!]*$", re.I)
+
+
+def resolve_call_interest(text: str) -> Optional[str]:
+    """What the person asked about, for the AI receptionist's opening line ("... about knee pain")."""
+    t = _PHONE_RUN.sub(" ", text or "")
+    m = _CALL_ABOUT.search(t)
+    value = " ".join(m.group(1).split()) if m else ""
+    return value if 2 <= len(value) <= 60 else None

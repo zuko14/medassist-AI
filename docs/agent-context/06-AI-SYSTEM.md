@@ -147,3 +147,13 @@ Beyond patient chat, the LLM is leveraged for several administrative tasks via `
 * Never add a trigger without re-running the eval script and the fixture corpus (`tests/test_assistant_rules.py`):
   a loose any-order trigger is the usual source of a wrong action.
 
+## Kriya Ketu does the task (session 54)
+
+* `ActionSpec.derive(params, text)` fills only what a sentence implies (doctor.create: one specialty -> both fields,
+  unsaid days -> `DOCTOR_DEFAULT_DAYS`, the `DoctorCreate` default); assumed values are listed in `params["assumed"]`
+  and said in the preview. Never overrides a slot that was said.
+* New R2 actions (`AUTONOMY` in registry.py): `profile.update`, `holiday.delete`, `doctor_leave.move` (add first,
+  then remove), `treatment.create`, `branch.doctor_unassign`, `voice.call_number`.
+* `rules.free_reply`: a form's single open free-text field may be answered by a short spoken reply.
+* Panel coverage map and what stays with a person: `docs/sessions/SESSION_54_KETU_DOES_THE_TASK.md` §2.
+
