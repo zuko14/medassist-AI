@@ -167,7 +167,12 @@ def _fields(r: rules.Route, layer: str) -> dict:
         return {"to": "COMPLETED_VERIFIED", "action_id": "help.howto", "route_layer": layer,
                 "params": {"chat": r.error_code}, "result": _text("", "help")}
     if r.kind == "help":
-        answer = r.help.answer if r.help else f"You can do this on the {PAGES.get(r.page, 'right')} page."
+        where = PAGES.get(r.page, "right")
+        answer = (r.help.answer if r.help else
+                  f"{REGISTRY[r.action_id].summary}: I can do this for you. Say it as an instruction with the details "
+                  f"(who, what, when) and I'll show you a preview to confirm. Or do it on the {where} page."
+                  if r.action_id in REGISTRY and REGISTRY[r.action_id].risk != "H" else
+                  f"You can do this on the {where} page.")
         return {"to": "COMPLETED_VERIFIED", "action_id": "help.howto", "route_layer": layer,
                 "params": {"page": r.page}, "result": _text(answer, "help", page=r.page)}
     if r.kind == "clarify":
@@ -263,7 +268,7 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
     r = _variant(rules.route(body.text, visible_pages=visible, ui_page=body.ui_context.page or None,
                              doctors=doctors), clinic)
     if r.kind == "clarify" and r.candidate_actions:  # a tie: an action switched off here is no candidate
-        live = [a for a in r.candidate_actions if _on(REGISTRY[a], clinic)]
+        live = rules.resolve_tie(body.text, [a for a in r.candidate_actions if _on(REGISTRY[a], clinic)])
         if len(live) == 1:
             r = _variant(rules.fill(REGISTRY[live[0]], body.text, doctors=doctors, question=rules.asks(body.text),
                                     visible=None if visible is None else set(visible)), clinic)
@@ -278,7 +283,8 @@ async def _route(body: RequestIn, scope: str, user: AdminUser, clinic: dict, aut
             return continued
 
     out = await llm.classify(body.text, clinic_id=scope, username=user.username,
-                             action_ids=policy.permitted_actions(user, clinic), visible_pages=visible)
+                             action_ids=policy.permitted_actions(user, clinic), visible_pages=visible,
+                             ui_page=body.ui_context.page or None)
     spent = {"llm_tokens": out.tokens, "llm_cost_paise": out.cost_paise}
     if out.status != "ok":
         fields = _fields(r, "rules") if r.kind == "clarify" else _with_chat(_fields(rules.Route("none"), "none"),

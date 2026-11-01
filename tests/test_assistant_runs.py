@@ -436,7 +436,7 @@ def test_rules_hit_never_calls_the_llm(db, as_user):
 
 def test_llm_resolves_a_miss_into_navigation(db, as_user):
     with patch.object(assistant_router.llm, "classify", AsyncMock(return_value=_llm_out(slots={"page": "leads"}))):
-        out = _post("i want to see who messaged us on whatsapp recently").json()
+        out = _post("i want to look at the people who pinged the clinic lately").json()  # a rules miss (session 53: "who messaged us" is now a rule)
     assert (out["state"], out["navigate"], out["route_layer"]) == ("COMPLETED_VERIFIED", "leads", "llm")
     row = db.tables["assistant_runs"][0]
     assert (row["llm_tokens"], row["llm_cost_paise"]) == (150, 2)
@@ -468,5 +468,5 @@ def test_budget_note_only_for_admins(db, as_user, role, noted):
 
 def test_llm_gets_only_the_visible_pages(db, as_user):
     with patch.object(assistant_router.llm, "classify", AsyncMock(return_value=_llm_out(slots={"page": "leads"}))) as c:
-        _post("show me who wrote to us on whatsapp", ui_context={"page": "", "visible_pages": ["leads"]})
+        _post("take me where the patients pinged us lately", ui_context={"page": "", "visible_pages": ["leads"]})
     assert c.await_args.kwargs["visible_pages"] == ["leads"]

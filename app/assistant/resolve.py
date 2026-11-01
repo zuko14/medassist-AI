@@ -1513,6 +1513,28 @@ def _words_value(words: list) -> Optional[str]:
     return str(total + current)
 
 
+# Texting shorthand staff type ("cancel ravi appt tmrw pls"), whole words only.
+_SHORTHAND = {"tmrw": "tomorrow", "tmr": "tomorrow", "tmrow": "tomorrow", "tomo": "tomorrow", "2mrw": "tomorrow",
+              "2moro": "tomorrow", "tommorow": "tomorrow", "tommorrow": "tomorrow", "tomorow": "tomorrow",
+              "tdy": "today", "2day": "today", "tday": "today", "yday": "yesterday", "ystrdy": "yesterday",
+              "appt": "appointment", "appts": "appointments", "apptmt": "appointment", "apt": "appointment",
+              "apmt": "appointment", "bkng": "booking", "bkngs": "bookings", "pls": "please", "plz": "please",
+              "pl": "please", "nxt": "next", "hrs": "hours", "mins": "minutes", "wk": "week", "mnth": "month",
+              "docter": "doctor", "doc": "doctor", "dctr": "doctor", "pnt": "patient", "ptnt": "patient",
+              "recep": "receptionist"}
+_SHORTHAND_RX = re.compile(r"(?<![\w'])(" + "|".join(sorted(map(re.escape, _SHORTHAND), key=len, reverse=True))
+                           + r")(?![\w'])", re.I)
+
+
+def expand_shorthand(text: str) -> str:
+    """Shorthand -> words in the instruction only: a quoted message or the words after the first colon are
+    the staff member's own text for a patient and are never touched."""
+    t = text or ""
+    span = _message_span(t)
+    head, tail = (t[:span[0]], t[span[0]:]) if span else (t, "")
+    return _SHORTHAND_RX.sub(lambda m: _SHORTHAND[m.group(1).lower()], head) + tail
+
+
 def spoken_numbers(text: str) -> str:
     """Number words as digits, so every resolver reads "six hundred" like "600" (English, Hindi, Telugu), and a
     clock said in words as H:MM ("at ten thirty" -> "at 10:30"). Idempotent; only number words change, and a
@@ -1812,7 +1834,7 @@ def resolve_room(text: str) -> Optional[str]:
 def resolve_ipd_change(text: str) -> Optional[dict]:
     """IPD settings said in words: the discharge cut-off hour and how long a bed is held."""
     t, out = (text or "").lower(), {}
-    m = re.search(r"\bdischarge\s+cut[\s-]?off\b.*?\b(\d{1,2})(?::00)?\s*(am|pm|noon)?\b", t)
+    m = re.search(r"\bdischarge\s+(?:cut[\s-]?off(?:\s+time)?|time|timing)\b.*?\b(\d{1,2})(?::00)?\s*(am|pm|noon)?\b", t)
     if m:
         hour = int(m.group(1)) % 12 + (12 if m.group(2) in ("pm", "noon") else 0) if m.group(2) else int(m.group(1))
         if m.group(2) == "noon":

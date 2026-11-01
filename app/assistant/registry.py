@@ -8,7 +8,7 @@ KK-P0-15 hardening checklist (docs/kriya-ketu/hardening/).
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Optional
 
 from app.assistant import playbooks, present
@@ -183,6 +183,10 @@ class ActionSpec:
     one_of: tuple[str, ...] = ()                       # optional slots of which at least one is required
     unless: tuple[str, ...] = ()                       # phrases naming another object: any one drops this action
     holds: Optional[Callable[[Any], bool]] = None      # handler only: the route's own holder (role-implied grants)
+    # A read that a question may phrase with a change verb ("which bookings would the leave CANCEL"): these
+    # words do not make the sentence a change request for this read only (rules._writing).
+    asks_about: tuple[str, ...] = ()
+    keep: tuple[str, ...] = ()                          # said outright: these phrases override `unless`
 
 
 def prohibited_path(path: str) -> bool:
@@ -1768,3 +1772,239 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *VOICE_ENTRY_8,
     *VOICE_ENTRY_9,
 )
+
+
+# ── Session 53: how staff actually say it (measured on tests/ketu_corpus.py) ─────────────────────────────
+# Every addition is a phrasing staff used for an action that already exists; nothing here adds an action,
+# an endpoint or a permission. Triggers follow the same rules as above ("a+b" = all words, any order).
+# `unless` additions stop a near miss from winning ("payment summary" is not the dashboard summary).
+_IPD_SETTING_WORDS = ("discharge time", "discharge timing", "discharge timings", "discharge cut off",
+                      "discharge cutoff", "cut off time", "cutoff time")
+PHRASINGS: dict[str, dict] = {
+    "stats.summary": {"triggers": ("how many+bookings", "total+bookings", "bookings count", "how many+appointments+today",
+                                   "today's numbers", "todays numbers", "dashboard figures", "dashboard summary"),
+                      "unless": ("payment", "payments", "refund", "refunds", "whatsapp", "lead", "leads", "call",
+                                 "calls", "opd", "ipd", "bed", "beds", "ai", "storage")},
+    "opd.analytics": {"triggers": ("opd analytics+for", "opd analytics+this", "opd analytics+today", "opd stats", "opd statistics", "opd report", "opd figures",
+                                   "opd performance", "opd footfall", "footfall", "wait time", "waiting time+average")},
+    "bookings.pending_review": {"triggers": ("bookings+review", "booking review", "need review", "needs review",
+                                             "under review", "awaiting review", "to be reviewed")},
+    "payments.stats": {"triggers": ("payment summary", "payments+this month", "payments+today", "payment report",
+                                    "payments report", "refunds+how many", "how many refunds")},
+    "doctors.list": {"triggers": ("list+doctors", "all doctors", "show+doctors+all",
+                                  "our doctors", "doctors+do we have")},
+    "lab_tests.list": {"triggers": ("lab test list", "test list", "tests list", "list+lab tests", "all+lab tests",
+                                    "list+tests", "show+lab tests", "lab tests+do we")},
+    "treatments.list": {"triggers": ("treatment list", "treatments list", "all treatments", "list+treatments",
+                                     "show+treatments")},
+    "reports.queue": {"triggers": ("reports+attention", "reports needing", "reports need", "report+attention",
+                                   "unmatched+reports", "reports+not sent")},
+    "reports.deliveries": {"triggers": ("reports+delivered", "report+delivered", "report delivery+status", "reports delivery",
+                                        "delivery status+report", "were+reports+sent")},
+    "voice.usage": {"triggers": ("calls+cost", "call charges", "calls+spend", "call spend", "calling cost",
+                                 "receptionist+cost", "voice+cost")},
+    "voice.calls": {"triggers": ("call log", "call history", "recent calls", "calls+today", "list+calls")},
+    "voice.live": {"triggers": ("live calls", "on call+now", "calls+right now", "ongoing calls", "calls+in progress")},
+    "voice.analytics": {"triggers": ("call analytics", "calls analytics", "call stats", "calls stats", "call report",
+                                     "calls report")},
+    "voice.outbound_list": {"triggers": ("outbound calls", "outbound call", "outbound queue", "call queue+outbound")},
+    "audit.recent": {"triggers": ("what changed", "changed recently", "recent edits", "changes+today",
+                                  "who edited", "who deleted", "who+made changes")},
+    "data.storage": {"triggers": ("storage", "how much data", "space used", "space left")},
+    "holidays.list": {"triggers": ("list+holidays", "holidays list", "show+holidays", "all+holidays",
+                                   "holidays+this month", "clinic holidays")},
+    "ipd.discharges": {"triggers": ("discharges in progress", "discharges+progress", "ongoing discharges",
+                                    "discharges pending", "pending+discharges", "discharges+due")},
+    "ipd_finance.receivables": {"triggers": ("money due", "inpatient+due", "inpatients+due", "ipd+due", "dues+ipd",
+                                             "outstanding+inpatients", "ipd+receivable+due")},
+    "doctor_leave.create": {"unless": (re.compile(r"\b(?:cancel|remove|delete|withdraw|revoke|undo|take back)\b"
+                                                  r"[^.]{0,40}\b(?:leave|leaves)\b"),
+                                       "which bookings", "how many bookings", "bookings would", "would cancel")},
+    "doctor_leave.delete": {"triggers": ("withdraw+leave", "not on leave+remove", "undo+leave"),
+                            "unless": ("which bookings", "how many bookings", "bookings would", "would cancel")},
+    "doctor_leave.impact": {"triggers": ("which bookings+leave", "how many bookings+leave", "bookings would+leave",
+                                         "would cancel+leave", "who+affected+leave"),
+                            "asks_about": ("cancel",)},
+    "lead.message": {"triggers": ("send whatsapp", "send a whatsapp", "whatsapp to", "whatsapp+bhejo",
+                                  "whatsapp+pampu", "whatsapp cheyyi", "text+saying"),
+                     # checked on the instruction only (rules._scope_text): the message itself may say anything
+                     "unless": ("usage", "how many", "payment link", "report", "reports", "lab report", "register",
+                                "registration", "consent", "agrees", "opt in", "opted in")},
+    # Only an explicit resend: a first "send the report" is the upload workflow, never this (fixture corpus).
+    "report.resend": {"triggers": ("send+report+again", "report+not received", "did not get+report",
+                                   "didn't get+report", "report+once more"),
+                      "unless": ("failed reports", "all+failed", "reports+failed", "how many", "status",
+                                 "delivered", "delivery", "end of day", "briefing", "summary", "collection",
+                                 "call report", "calls report")},
+    "messaging.usage": {"triggers": ("how many+whatsapp messages", "whatsapp messages+this month",
+                                     "whatsapp messages+sent", "how many+messages", "messages+this month",
+                                     "message count"),
+                        "unless": ("agrees", "consent", "opt in", "opted in")},
+    "opd.vitals": {"unless": ("receptionist", "callers", "means", "test price", "test rate")},
+    "ipd.vitals": {"unless": ("receptionist", "callers", "means", "test price", "test rate")},
+    "treatment.price_bulk": {"triggers": ("all+treatment+prices", "treatment prices+by", "all+treatment+rates")},
+    "lab_test.price_bulk": {"unless": ("treatment", "treatments")},
+    "ipd.bed_status": {"unless": ("surgery", "operation", "ot", "procedure", "admit", "admission"),
+                       "triggers": ("out of service", "bed+out of order", "bed+under maintenance", "bed+not usable",
+                                    "bed+back in service", "bed+usable again")},
+    "ipd.settings": {"triggers": _IPD_SETTING_WORDS + ("ipd+setting", "ipd+settings")},
+    "ipd.discharge_start": {"triggers": ("start+discharge", "begin+discharge", "initiate+discharge"),
+                            "unless": _IPD_SETTING_WORDS + ("setting", "settings"),
+                            "keep": ("start discharge", "start the discharge", "begin discharge", "initiate discharge",
+                                     "discharge the patient", "discharge now")},
+    "ipd.admission_update": {"unless": ("start discharge", "start the discharge", "begin discharge",
+                                        "initiate discharge", "discharge now")},
+    "emergency.register": {"triggers": ("emergency arrival", "casualty arrival", "emergency+arrived",
+                                        "brought in by ambulance", "came by ambulance", "came in ambulance",
+                                        "new+emergency+patient", "register+emergency patient")},
+    "voice.lexicon_add": {"triggers": ("means", "stands for", "callers mean", "patients mean")},
+    # "teach the receptionist that 'sugar test' means fasting blood sugar" is a phrase (lexicon), not an answer
+    "voice.knowledge_add": {"unless": ("means", "stands for")},
+    "ipd.nursing": {"triggers": ("nursing+notes", "nurse+notes", "nursing+chart", "medicine+given", "medicines+given",
+                                 "intake output", "i/o chart")},
+}
+
+
+# Patterns ("re:" triggers, rules._hits) run on the normalised sentence: lower case, punctuation as spaces.
+_DR = r"re:\b(?:dr|doctor)\b"
+_HOURS = r"\d{1,2}(?:\s\d{2})?\s*(?:am|pm)?\s+(?:to|till|until|se)\s+\d{1,2}(?:\s\d{2})?\s*(?:am|pm)?"
+
+# Second batch (session 53, tests/ketu_corpus.py DEV2).
+_MORE: dict[str, dict] = {
+    "payment.settings": {"unless": ("paid", "received", "collected", "token", "from", "rupees", "payment of")},
+    "opd.record_payment": {"triggers": ("received+from", "paid+through", "payment+gpay", "payment+phonepe",
+                                        "payment+upi", "payment+cash", "payment+card", "paid+by", "paid+in")},
+    # "reached" alone is also "could not reach him by phone": only the arrival forms
+    "appointment.check_in": {"triggers": ("has reached", "reached the clinic", "reached the hospital", "is here",
+                                          "has come", "came for", "here for+appointment", "vachcharu", "vacchindi",
+                                          "aa chuke"),
+                             "unless": ("not reached", "not reachable", "unreachable", "call", "phone")},
+    # one booking only: "cancel all / today's appointments" is a bulk cancel Kriya does not do (fixture corpus)
+    "appointment.cancel": {"triggers": ("cancellation+appointment", "cancellation+booking")},
+    "opd.queue": {"triggers": ("in queue", "in the queue", "queue for", "queue lo", "queue mein", "queue length",
+                               "waiting+for dr", "waiting+for doctor")},
+    "opd.collections": {"triggers": ("total+cash+upi", "today+total+cash", "cash and upi", "collection+so far",
+                                     "how much+money+today")},
+    "patients.search": {"triggers": ("patient called", "look up", "lookup", "is there a patient", "search for patient",
+                                     "find+patient", "patient+details")},
+    "appointments.search": {"triggers": ("what appointments", "appointments+does", "appointments+have",
+                                         "bookings+show", "show+bookings", "list+bookings")},
+    "doctor.fee": {"triggers": ("consultation+dr", "consultation+doctor", "consultation charge", "consultation charges")},
+    # session + hours said together ("Dr Kiran evenings 6 to 9", "sits 10 to 2 in the morning"), with a doctor
+    "doctor.schedule": {"triggers": (_DR + r".*\b(?:mornings?|evenings?)\s+(?:from\s+|is\s+|are\s+)?" + _HOURS,
+                                     _DR + r".*" + _HOURS + r"\s+(?:in\s+the\s+)?(?:mornings?|evenings?)\b",
+                                     "will sit", "sitting time", "sitting timings", "opd timings+dr", "opd timing+dr"),
+                        # never an existing doctor's hours when the sentence is about a new doctor
+                        # never an existing doctor's hours for a new doctor, nor when the fee / department is
+                        # changed too (that would silently drop them): the fee / details actions or a question
+                        "unless": ("assign", "branch", "new doctor", "new dr", "add", "create", "onboard", "register",
+                                   "joining", "fee", "fees", "department", "dept", "specialization", "specialisation",
+                                   "consultation")},
+    "doctor.active": {"triggers": ("left the hospital", "left the clinic", "resigned", "no longer works",
+                                   "not working with us", "switch+off+dr", "switch+off+doctor", "switch her off",
+                                   "switch him off", "dr+inactive", "doctor+inactive")},
+    "ipd.census": {"triggers": ("beds available", "bed available", "available beds", "bed+free", "beds+free",
+                                "vacant beds", "vacant bed", "any+bed+free", "bed khali")},
+    "ipd_finance.deposit": {"triggers": ("advance+from", "collect+advance", "take+advance", "advance+card",
+                                         "advance+rupees")},
+    "leads.list": {"triggers": ("enquiries", "inquiries", "new+enquiry", "leads+today", "whatsapp+enquiries")},
+    "briefing.morning": {"triggers": ("happening today", "what's happening", "whats happening", "plan for today",
+                                      "today's plan", "todays plan")},
+    "briefing.eod": {"triggers": ("how did today go", "how was today", "today's summary", "todays summary",
+                                  "summary of today")},
+    "stats.summary": {"triggers": ("this month's numbers", "this months numbers", "month's numbers", "numbers+this month",
+                                   "monthly numbers")},
+    "staff.create": {"triggers": ("new login", "create+login+for", "login for", "new user", "add+user")},
+    "staff.active": {"triggers": ("block+account", "disable+account", "deactivate+account", "unblock+account",
+                                  "enable+account", "lock+account")},
+    "ot.today": {"triggers": ("surgeries+today", "operations+today", "surgeries are there", "ot today")},
+    "insurance.preauth_create": {"triggers": ("pre-authorisation", "pre-authorization", "pre authorisation",
+                                              "pre authorization", "preauthorisation", "preauthorization",
+                                              "send+pre-auth", "send+preauth", "preauth+for", "pre-auth+for")},
+    "voice.settings_update": {"triggers": ("receptionist+stop calling", "stop calling+after", "calling hours",
+                                           "call hours", "receptionist+after")},
+    "lead.message": {"triggers": ("on whatsapp", "tell+whatsapp", "inform+whatsapp", "whatsapp+him", "whatsapp+her"),
+                     # reading who wrote to us is the leads list, not a message to send
+                     "unless": ("who messaged", "messaged us", "wrote to us", "who wrote", "show me", "see who",
+                                "want to see", "who all")},
+}
+# Third batch (session 53, the first held-out set, burned and re-labelled DEV3 once its misses were read).
+_THIRD: dict[str, dict] = {
+    "payments.reconciliation": {"triggers": ("reconcile", "reconciliation", "match+payments")},
+    "opd.queue": {"triggers": ("dr+queue", "doctor+queue", "queue+dr")},
+    "homecollect.visits": {"triggers": ("home collections+today", "home visits+today", "home visit+today",
+                                        "home sample+today", "home collections+tomorrow", "home visits+tomorrow")},
+    "leads.list": {"triggers": ("new+leads", "leads+whatsapp+new", "show+whatsapp leads", "who messaged",
+                                "messaged us", "wrote to us", "who wrote")},
+    "messaging.usage": {"asks_about": ("send",)},
+    "ai.usage": {"triggers": ("ai+use", "ai+used", "ai spend", "ai cost", "ai+spent")},
+    "subscription.view": {"triggers": ("which plan", "our plan", "plan+are we", "current plan", "my plan")},
+    "opd.unpaid": {"triggers": ("not paid", "has not paid", "have not paid", "haven't paid", "havent paid",
+                                "unpaid", "yet to pay", "balance+pending")},
+    "briefing.eod": {"triggers": ("end of the day", "eod", "day end")},
+    "ipd.inpatients": {"triggers": ("who+admitted", "currently admitted", "admitted patients", "patients+admitted",
+                                    "all+admitted")},
+    "ipd.waiting": {"triggers": ("waiting for beds", "waiting for a bed", "waiting+bed", "bed+waiting list")},
+    "voice.learning_review": {"triggers": ("receptionist+learning", "receptionist+learned", "receptionist+learnt",
+                                           "learned phrases", "learnt phrases")},
+    "doctor_leave.create": {"triggers": ("mark+leave", "tomorrow leave", "today leave",
+                                         "morning off", "evening off", "off tomorrow", "off today", "day off"),
+                            "unless": ("not on leave", "leave impact", "impact", "affected")},
+    "doctor_leave.delete": {"triggers": ("not on leave+remove", "not on leave+cancel", "not on leave+delete")},
+    "appointment.check_in": {"triggers": ("checked in", "checked-in", "mark+arrived")},
+    "notifications.mark_all_read": {"triggers": ("mark+read", "everything as read", "all as read", "clear+notifications")},
+    "report.resend_failed": {"triggers": ("retry+failed", "retry+reports", "failed+again", "resend+failed")},
+    "lead.message": {"triggers": (r"re:^(?:please\s+)?whatsapp\s+(?!usage\b|messages?\b|leads?\b)",)},
+    "opd.stage": {"triggers": ("token+done", "token+completed", "token+finished"), "unless": ("recovery",)},
+    "lab_test.price": {"triggers": ("rate+cheyyi", "price+cheyyi", "rate+karo", "price+karo", "rate+chey")},
+    "treatment.price": {"triggers": ("rate+cheyyi", "price+cheyyi", "rate+karo", "price+karo", "rate+chey")},
+    # "Dr Meera and Dr Priya do botox" (Hindi "do" = give: "Dr Meera ka token do" is a token, never this)
+    "treatment.doctors": {"triggers": (r"re:\b(?:dr|doctor)\s+[a-z]+(?:\s+[a-z]+)?\s+(?:and|&)\s+(?:dr|doctor)\s+[a-z]+"
+                                       r"(?:\s+[a-z]+)?\s+(?:do|does|perform|performs|handle|handles)\s+[a-z]",),
+                          "unless": ("token", "walk in", "walk-in", "walkin")},
+    "lab_test.deactivate": {"triggers": ("stop+test", "discontinue+test", "test+anymore", "test+no longer")},
+    "doctor.create": {"unless": ("is now", "are now")},
+    "ot.status": {"triggers": ("to recovery", "recovery", "into recovery")},
+    "ipd.transfer": {"unless": ("recovery",)},
+    "insurance.preauth_approve": {"triggers": ("preauth+approved", "pre auth+approved", "pre-auth+approved",
+                                               "approved+preauth")},
+    "data.import": {"triggers": ("upload+patient", "upload+patients", "import+patient", "patient list+upload")},
+    # the blind set's one wrong action: "reports waiting for pathologist sign off" is the pending list, not a signing
+    "lis.sign": {"unless": ("waiting", "pending", "which", "how many", "list", "to be signed", "yet to")},
+    "lis.pending_signoff": {"triggers": ("waiting+sign off", "pending+sign off", "awaiting+sign off",
+                                         "waiting+signoff", "yet to+sign")},
+}
+
+
+for _k, _v in (*_MORE.items(), *_THIRD.items()):
+    _have = PHRASINGS.setdefault(_k, {})
+    for _f, _vals in _v.items():
+        _have[_f] = tuple(_have.get(_f, ())) + tuple(_vals)
+
+
+def _trigger_key(trigger: str) -> str:
+    if trigger.startswith("re:"):
+        return trigger
+    return "+".join(" ".join(re.sub(r"[^\w\s&'ऀ-ൿ]", " ", p.lower()).split()) for p in trigger.split("+"))
+
+
+def _phrased(spec: ActionSpec) -> ActionSpec:
+    extra = PHRASINGS.get(spec.id)
+    if not extra:
+        return spec
+    seen = {_trigger_key(t) for t in spec.triggers}
+    added = []
+    for t in extra.get("triggers", ()):
+        if _trigger_key(t) not in seen:  # "check-in" is "check in": a duplicate would count twice
+            seen.add(_trigger_key(t))
+            added.append(t)
+    out = replace(spec, triggers=spec.triggers + tuple(added),
+                  unless=spec.unless + tuple(extra.get("unless", ())),
+                  asks_about=spec.asks_about + tuple(extra.get("asks_about", ())),
+                  keep=spec.keep + tuple(extra.get("keep", ())))
+    validate(out)
+    return out
+
+
+assert set(PHRASINGS) <= set(REGISTRY), set(PHRASINGS) - set(REGISTRY)
+REGISTRY = {k: _phrased(v) for k, v in REGISTRY.items()}

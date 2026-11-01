@@ -84,8 +84,17 @@ def build_schema(action_ids: list, pages: list) -> dict:
     }
 
 
+def _examples(action_id: str, n: int = 2) -> str:
+    """A couple of the router's own phrasings for the action ("cancel … appointment"), so the model sees how
+    staff say it. Latin-script phrases only (the model reads the others fine without hints)."""
+    spec = REGISTRY.get(action_id)
+    said = [t.replace("+", " … ") for t in (spec.triggers if spec else ())
+            if t.isascii() and not t.startswith(("=", "re:"))]
+    return " (e.g. " + "; ".join(f'"{x}"' for x in said[:n]) + ")" if said else ""
+
+
 def _system_prompt(action_ids: list, pages: list) -> str:
-    actions = "\n".join(f"- {a}: {REGISTRY[a].summary if a in REGISTRY else a}" for a in action_ids)
+    actions = "\n".join(f"- {a}: {REGISTRY[a].summary if a in REGISTRY else a}{_examples(a)}" for a in action_ids)
     page_list = ", ".join(f"{p} ({PAGES.get(p, p)})" for p in pages)
     return (
         "You classify one instruction from a hospital staff member into exactly one action id from the "
@@ -94,6 +103,12 @@ def _system_prompt(action_ids: list, pages: list) -> str:
         "them; kind=negated if the user says NOT to do something; kind=hypothetical for \"what if\"; "
         "kind=multi if they ask for several different things; kind=unsupported if nothing fits. "
         "You never give medical advice.\n"
+        "The instruction may be dictated or typed in English, Hindi, Telugu or a mix (Hinglish/Tenglish), with "
+        "texting shorthand (tmrw, appt, pls) and speech-to-text slips (\"at the doctor\" for \"add the doctor\"). "
+        "A doctor who will not come / nahi aayenge / raru on a day is a doctor leave. A question about HOW to do "
+        "something is help.howto. If the instruction states a new doctor's profile (name, fee, hours) for a doctor, "
+        "it is doctor.create, not a change to an existing doctor. A message to send (after a colon or in quotes) is "
+        "the staff member's text: classify the instruction around it, not the message content.\n"
         f"Actions:\n{actions}\nPages: {page_list}"
     )
 
@@ -102,7 +117,8 @@ async def _rate_limited(clinic_id: str, username: str) -> bool:
     return await asyncio.to_thread(_limiter.check_and_record, f"assistant-llm:{clinic_id}:{username}")
 
 
-async def classify(text: str, *, clinic_id: str, username: str, action_ids, visible_pages=None) -> LlmOutcome:
+async def classify(text: str, *, clinic_id: str, username: str, action_ids, visible_pages=None,
+                   ui_page: Optional[str] = None) -> LlmOutcome:
     """One classification call, or a status explaining why none was made / used."""
     if not settings.assistant_llm_enabled:
         return LlmOutcome("disabled")
@@ -121,7 +137,8 @@ async def classify(text: str, *, clinic_id: str, username: str, action_ids, visi
     try:
         data = await call_ai_gateway(
             [{"role": "system", "content": _system_prompt(action_ids, pages)},
-             {"role": "user", "content": f"Instruction:\n<<<\n{cleaned}\n>>>"}],
+             {"role": "user", "content": (f"Open page: {ui_page} ({PAGES[ui_page]})\n" if ui_page in PAGES else "")
+              + f"Instruction:\n<<<\n{cleaned}\n>>>"}],
             task_type="assistant_intent",
             clinic_id=clinic_id,
             primary_model=settings.assistant_llm_model,

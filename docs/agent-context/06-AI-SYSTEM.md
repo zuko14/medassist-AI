@@ -136,3 +136,14 @@ Beyond patient chat, the LLM is leveraged for several administrative tasks via `
 - Trace: tool event `KNOWLEDGE_ANSWER` with `source` (qa|ai|template|none), `rejected` reason and the spoken answer.
 - STT sometimes returns short Telugu/Hindi replies in Gurmukhi; `nlu_rules.gurmukhi_to_devanagari` reads them as Devanagari before safety + NLU, and such turns never vote to switch the call language.
 
+## Kriya Ketu intent accuracy (session 53)
+
+* Corpus `tests/ketu_corpus.py` (DEV / DEV2 / DEV3 tuning, HELDOUT blind) and gate `tests/test_assistant_intent_accuracy.py`
+  (0 wrong actions on every set + accuracy floors). Report: `python scripts/assistant_intent_eval.py [--show] [--live]`.
+* New phrasings for existing actions live in one block at the end of `app/assistant/registry.py` (`PHRASINGS`, `_MORE`,
+  `_THIRD`). Triggers: `"a+b"` = all words any order; `"re:<pattern>"` = regex on the normalised sentence (weight 3).
+  `ActionSpec.keep` overrides `unless`; `ActionSpec.asks_about` lets a read contain a change verb in a question.
+* Price ties are resolved by `rules.resolve_tie` in the router **after** switched-off modules are dropped.
+* Never add a trigger without re-running the eval script and the fixture corpus (`tests/test_assistant_rules.py`):
+  a loose any-order trigger is the usual source of a wrong action.
+
