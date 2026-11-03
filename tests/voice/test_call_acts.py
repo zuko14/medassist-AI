@@ -79,9 +79,13 @@ def test_who_is_the_doctor_is_not_who_is_this():
     assert "WHO_IS_THIS" not in acts("aap kaun se doctor ke paas bhejoge", None)
 
 
-def test_late_only_means_late_on_a_reminder():
+def test_late_means_running_late_only_in_its_own_shapes():
+    """Session 57: "I'll be late" counts on any call; a loose "late" ("late evening slot") never does."""
     assert "RUNNING_LATE" in acts("I'll be 15 minutes late", "reminder")
-    assert "RUNNING_LATE" not in acts("I'll be 15 minutes late", None)
+    assert "RUNNING_LATE" in acts("I'll be 15 minutes late", None)
+    assert "RUNNING_LATE" in acts("late", "reminder")                      # on a reminder, the bare word
+    for text in ("do you have a late evening slot", "late", "is the doctor late today"):
+        assert "RUNNING_LATE" not in acts(text, None), text
 
 
 @pytest.mark.parametrize("text, expected", [("yes", ["AFFIRM"]), ("haan book kar do", None), ("ఓకే", ["AFFIRM"]),
@@ -218,3 +222,11 @@ async def test_bulk_import_skips_a_number_that_said_never_again():
         r = await outbound.enqueue_bulk({"id": "c1"}, [{"phone": "9000000001"}, {"phone": "9000000002"}],
                                         {"source": "camp"}, "admin1")
     assert r["queued"] == 1 and r["skipped"] == [{"phone": "+919000000002", "reason": "Opted out — never called"}]
+
+
+def test_reminder_busy_that_day_and_cant_come_is_offered_a_new_time():
+    """Session 57 audit: "busy" must not swallow "can't come" on a reminder (the call used to just end)."""
+    c = reminder()
+    r = c.say("no I'm busy that day, I can't come")
+    assert "move your appointment" in r and c.control == "continue"
+    assert c.state["outcomes"][-1]["outcome"] == "reminder_cant_come"

@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.11.03"
+TEMPLATES_VERSION = "templates-2026.11.04"
 
 T: dict = {
     "greeting": {
@@ -261,9 +261,39 @@ T: dict = {
         "hi": "इस नंबर पर कोई आने वाला अपॉइंटमेंट नहीं दिख रहा।",
     },
     "upcoming_one": {
-        "te": "{date} {time}కి {what} అపాయింట్మెంట్ ఉంది.{pay_note}",
-        "en": "You have an appointment {what} {date} at {time}.{pay_note}",
-        "hi": "{date} {time} बजे {what} आपका अपॉइंटमेंट है।{pay_note}",
+        "te": "{date} {time}కి {what} అపాయింట్మెంట్ ఉంది.{pay_note}{confirm_note}",
+        "en": "You have an appointment {what} {date} at {time}.{pay_note}{confirm_note}",
+        "hi": "{date} {time} बजे {what} आपका अपॉइंटमेंट है।{pay_note}{confirm_note}",
+    },
+    # "Is it confirmed?" answered with what the record says (session 57).
+    "confirm_note": {"te": " అది కన్ఫర్మ్ అయింది.", "en": " It is confirmed.", "hi": " यह कन्फर्म है।"},
+    "review_note": {
+        "te": " మా టీమ్ దాన్ని చెక్ చేస్తున్నారు, కన్ఫర్మ్ అవ్వగానే మీకు మెసేజ్ వస్తుంది.",
+        "en": " Our team is checking it; you'll get a message as soon as it is confirmed.",
+        "hi": " हमारी टीम इसे देख रही है, कन्फर्म होते ही आपको मैसेज आ जाएगा।",
+    },
+    "payment_help": {
+        "te": "పేమెంట్ విషయం మా టీమ్‌కి చెప్పాను. వాళ్ళు చెక్ చేసి, అవసరమైతే కొత్త పేమెంట్ లింక్ పంపి, మీకు కాల్ చేస్తారు.",
+        "en": "I've passed the payment issue to our team. They'll check it, send a fresh payment link if needed, and call you.",
+        "hi": "पेमेंट की बात मैंने हमारी टीम को बता दी है। वे जाँच करके, ज़रूरत हो तो नया पेमेंट लिंक भेजकर आपको कॉल करेंगे।",
+    },
+    "payment_received": {
+        "te": "మీ పేమెంట్ అందింది.", "en": "Your payment has been received.", "hi": "आपका पेमेंट मिल गया है।",
+    },
+    "refund_started": {
+        "te": "{date} {what} అపాయింట్మెంట్ రీఫండ్ ప్రారంభించాము. మీ బ్యాంక్‌ని బట్టి కొన్ని పని దినాల్లో మీ ఖాతాలోకి వస్తుంది.",
+        "en": "The refund for your appointment {what} {date} has been started. It reaches your account in a few working days, depending on your bank.",
+        "hi": "{date} {what} वाले अपॉइंटमेंट का रिफंड शुरू हो चुका है। आपके बैंक के हिसाब से कुछ कामकाजी दिनों में खाते में आ जाएगा।",
+    },
+    "refund_pending_staff": {
+        "te": "{date} {what} అపాయింట్మెంట్ రద్దు అయింది, కానీ రీఫండ్ ఇంకా ప్రాసెస్ కాలేదు. మా టీమ్ చెక్ చేసి మీకు కాల్ చేస్తారు.",
+        "en": "Your appointment {what} {date} was cancelled, but the refund isn't processed yet. Our team will check and call you.",
+        "hi": "{date} {what} वाला अपॉइंटमेंट कैंसिल हुआ है, लेकिन रिफंड अभी प्रोसेस नहीं हुआ। हमारी टीम जाँच करके आपको कॉल करेगी।",
+    },
+    "refund_check_callback": {
+        "te": "ఈ నంబర్ మీద రీఫండ్ వివరాలు నాకు కనిపించడం లేదు. మా టీమ్ చెక్ చేసి మీకు కాల్ చేస్తారు.",
+        "en": "I can't see the refund details on this number. Our team will check and call you.",
+        "hi": "इस नंबर पर रिफंड की जानकारी मुझे नहीं दिख रही। हमारी टीम जाँच करके आपको कॉल करेगी।",
     },
     "pay_note": {
         "te": " పేమెంట్ ఇంకా పెండింగ్‌లో ఉంది.", "en": " The payment is still pending.",
@@ -438,6 +468,12 @@ T: dict = {
         "te": "క్షమించండి, మా దగ్గర ఫోన్‌లో టెస్ట్ బుకింగ్ లేదు.",
         "en": "Sorry, we don't take test bookings here.",
         "hi": "माफ़ कीजिए, हमारे यहाँ टेस्ट की बुकिंग नहीं होती।",
+    },
+    # Neither consultations nor tests on this plan: nothing is claimed about what the hospital does.
+    "not_offered_here": {
+        "te": "క్షమించండి, దీన్ని నేను ఫోన్‌లో బుక్ చేయలేను.",
+        "en": "Sorry, I can't arrange that on this call.",
+        "hi": "माफ़ कीजिए, यह मैं फ़ोन पर नहीं कर सकती।",
     },
     "clinical_refusal_lab": {
         "te": "క్షమించండి, మందులు లేదా వైద్య సలహా నేను చెప్పలేను, అది మీ డాక్టర్ గారే చెప్పాలి. డాక్టర్ గారు రాసిన టెస్ట్ బుక్ చేయమంటారా?",
@@ -645,6 +681,8 @@ def realize(key: str, lang: str, today: date, specialty_labels: Optional[dict] =
         q["date"] = speak_date(str(appt["date"]), lang, today)
         q["time"] = speak_time(str(appt["time"]), lang) if appt.get("time") else ""
         q["pay_note"] = " " + render("pay_note", lang) if appt.get("status") == "pending_payment" else ""
+        q["confirm_note"] = (" " + render("confirm_note", lang) if appt.get("status") == "confirmed"
+                             else " " + render("review_note", lang) if appt.get("status") == "pending_review" else "")
     if p.get("appts"):
         items = []
         for a in p["appts"]:

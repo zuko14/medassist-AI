@@ -187,6 +187,29 @@ class KriyaTools:
         await self._trace("APPOINTMENT_LOOKUP", "ok", t0, {"found": len(rows)})
         return rows
 
+    async def refunds(self):
+        """The caller's own PAID bookings cancelled in the last 30 days (refunded or not yet), newest first.
+        None when the read failed. Same scope as upcoming_appointments: this clinic, the caller's number."""
+        t0 = time.monotonic()
+        since = (today_ist() - timedelta(days=30)).isoformat()
+        try:
+            res = await sb(supabase.table("appointments")
+                           .select("id, booking_ref, status, payment_id, doctor_name, booking_type, lab_test_name, "
+                                   "appointment_date, appointment_time, updated_at")
+                           .eq("clinic_id", self.ctx.clinic_id).eq("patient_phone", self.ctx.caller_phone)
+                           .in_("status", ["refunded", "cancelled"]).gte("updated_at", since)
+                           .order("updated_at", desc=True).limit(5))
+        except Exception as e:
+            await self._trace("REFUND_LOOKUP", "fail", t0, {"error": str(e)[:200]})
+            return None
+        rows = [{"id": r["id"], "status": r["status"], "doctor_name": r.get("doctor_name"),
+                 "booking_type": r.get("booking_type"), "lab_test_name": r.get("lab_test_name"),
+                 "date": str(r["appointment_date"]),
+                 "time": str(r["appointment_time"])[:5] if r.get("appointment_time") else None}
+                for r in res.data or [] if r.get("payment_id")]
+        await self._trace("REFUND_LOOKUP", "ok", t0, {"found": len(rows)})
+        return rows
+
     async def reports(self):
         t0 = time.monotonic()
         since = (today_ist() - timedelta(days=60)).isoformat()

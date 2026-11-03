@@ -180,3 +180,12 @@ Beyond patient chat, the LLM is leveraged for several administrative tasks via `
   `unmapped_entity`; the distiller proposes a lexicon entry for staff approval.
 * **Ketu**: `voice.call_lead` (one lead by name), `voice.reminder_calls` (reminder calls on/off and when), more
   `leads.call` phrasings; corpus set DEV6. Details: `docs/sessions/SESSION_56_RECEPTIONIST_PLAN_SCOPE_AND_KETU_HANDOFF.md`.
+
+## WhatsApp-booked callers, isolation guard, re-audit (session 57)
+
+* The receptionist now answers "is it confirmed?", moves a booking ("change my appointment time", "wrong doctor,
+  change it to cardiology": new first, old cancelled after verification), answers refunds from the caller's own
+  cancelled paid bookings (`tools.refunds`, workflow `REFUND`), helps with payment trouble (callback), and handles
+  "I'll be late", the wait and complaints on any call. Soft reschedule phrases count only on an open floor.
+* `tests/voice/test_tenant_isolation.py`: two hospitals, same patient phone, filters really applied.
+  Details: `docs/sessions/SESSION_57_WHATSAPP_BOOKED_CALLERS_ISOLATION_REAUDIT.md`.

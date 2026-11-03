@@ -2189,10 +2189,11 @@ _FOURTH: dict[str, dict] = {
 # Session 56: leads handed to the AI receptionist. "transfer the leads to the AI receptionist" was a BED transfer
 # and "make the AI receptionist call Ravi" a staff ROLE change; both now go to the receptionist's calls.
 _FIFTH: dict[str, dict] = {
-    "leads.call": {"triggers": ("transfer+leads", "give+leads", "hand+leads", "hand over+leads", "pass+leads",
-                                "send+leads+receptionist", "leads+receptionist", "leads+kriya", "start+lead calls",
-                                "lead calls+start", "follow up+leads", "leads+follow up", "leads+ivvu", "leads+do",
-                                "leads+de do", "లీడ్స్+ఇవ్వు", "लीड्स+दो")},
+    # A hand-off names the receptionist / Kriya ("give me the leads" is a list); a list or report is never a call.
+    "leads.call": {"triggers": ("transfer+leads", "leads+receptionist", "leads+kriya", "start+lead calls",
+                                "lead calls+start", "follow up+leads+phone", "follow up+leads+call",
+                                "లీడ్స్+రిసెప్షనిస్ట్", "लीड्स+रिसेप्शनिस्ट"),
+                   "unless": ("list", "report", "reports", "show me", "export", "download")},
     "ipd.transfer": {"unless": ("lead", "leads", "receptionist", "kriya")},
     "staff.role": {"unless": ("ai receptionist", "call", "calls")},
     "voice.call_number": {"unless": ("reminder", "reminders")},

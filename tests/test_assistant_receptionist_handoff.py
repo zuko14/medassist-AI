@@ -158,3 +158,11 @@ def test_call_lead_off_when_the_receptionist_is_off(db, lc):  # noqa: F811
     with patch.object(assistant_router, "get_clinic_by_id", AsyncMock(return_value=clinic)):
         out = _ask("make the AI receptionist call Ravi")
     assert out["state"] != "NEEDS_CONFIRMATION" and S["writes"] == []
+
+
+@pytest.mark.parametrize("text", ["give me today's leads", "pass me the leads list", "hand me the leads report",
+                                  "follow up leads list", "show me leads to follow up", "what do the leads want"])
+def test_a_list_or_a_report_of_leads_is_never_a_call(text):
+    """Session 57 audit: loose hand-off phrasings ("give+leads", "pass+leads") read these as CALL the leads."""
+    r = rules.route(text)
+    assert r.action_id not in ("leads.call", "voice.call_lead"), (text, r.action_id)

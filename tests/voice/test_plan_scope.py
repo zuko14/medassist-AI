@@ -48,6 +48,9 @@ def conv(scope, lang="en-IN", **kw):
     ("enterprise", [], "diagnostic"),
     ("enterprise", DOCS, "hospital"),
     ("multispecialty", DOCS, "hospital"),
+    ("womenchild", DOCS, "hospital"),
+    # Specialty hospitals (session 57): consultations + treatments; IVF also runs its own tests.
+    ("derma", DOCS, "clinic"), ("eye", DOCS, "clinic"), ("dental", DOCS, "clinic"), ("ivf", DOCS, "hospital"),
 ])
 def test_scope_follows_the_plan(plan, doctors, kind):
     assert scope_for({"id": "c1", "plan": plan}, doctors).kind == kind
@@ -154,7 +157,8 @@ def test_clinic_without_labs_never_books_a_test():
 def test_nothing_offered_goes_to_staff_honestly():
     c = conv(NONE)
     r = c.say("book an appointment tomorrow")
-    assert "doctor consultations" in r and "reception" in r
+    assert "can't arrange that" in r and "reception" in r
+    assert "tests and scans" not in r                       # nothing is claimed that this plan does not do
     out = c.engine.clinical(new_state("en-IN"))
     assert "Shall I book" not in c.text(out)
 
