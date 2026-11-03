@@ -32,7 +32,7 @@ from .phone import mask
 
 logger = logging.getLogger(__name__)
 
-TOOLS_VERSION = "tools-2026.10.06"
+TOOLS_VERSION = "tools-2026.11.03"
 _ACTIVE = ("confirmed", "pending_payment", "pending_review")
 _MAX_DOCTORS = 6
 
@@ -498,6 +498,23 @@ class KriyaTools:
                 return {"ok": False}
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {"outcome": "callback_requested"})
         await self._trace("CALLBACK_CREATE", "ok" if not self._simulated else "skipped", t0, {"reason": reason})
+        return {"ok": True}
+
+    async def note_for_staff(self, text):
+        """A note for this hospital's staff about the call (session 56: do-not-call, wrong number,
+        busy, running late). Simulated on the test console. Never raises."""
+        t0 = time.monotonic()
+        if not self._simulated:
+            try:
+                # unscoped: insert_scoped_by_payload
+                await sb(supabase.table("admin_notifications").insert({
+                    "clinic_id": self.ctx.clinic_id, "admin_id": None,
+                    "title": f"{self.ctx.caller_phone} (AI receptionist)"[:255],
+                    "message": f"Call {self.ctx.call_ref}: {text}"[:1000], "is_read": False}))
+            except Exception as e:
+                await self._trace("STAFF_NOTE", "fail", t0, {"error": str(e)[:200]})
+                return {"ok": False}
+        await self._trace("STAFF_NOTE", "ok" if not self._simulated else "skipped", t0, {"note": text[:200]})
         return {"ok": True}
 
     async def handoff(self, reason):

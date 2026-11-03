@@ -31,18 +31,21 @@ from .nlu_llm import PROMPT_VERSION, understand_llm
 from .nlu_rules import NLU_RULES_VERSION, NluContext, gurmukhi_to_devanagari, to_telugu_script, understand
 from .policy import POLICY_VERSION, asr_confidence, gate, needs_llm
 from .safety import SAFETY_VERSION, screen
+from .scope import FULL, SCOPE_VERSION, needs_doctor_count, scope_for
 from .tools import TOOLS_VERSION, CallContext, KriyaTools
 
 logger = logging.getLogger(__name__)
 
 VERSIONS = {"taxonomy": TAXONOMY_VERSION, "nlu_rules": NLU_RULES_VERSION, "llm_prompt": PROMPT_VERSION,
             "policy": POLICY_VERSION, "dialog": DIALOG_VERSION, "templates": R.TEMPLATES_VERSION,
-            "lexicon": LEXICON_VERSION, "safety": SAFETY_VERSION, "tools": TOOLS_VERSION}
+            "lexicon": LEXICON_VERSION, "safety": SAFETY_VERSION, "tools": TOOLS_VERSION, "scope": SCOPE_VERSION}
 QUALITY_VERSION = "quality-v1"
 _LABELS = {k: v["label"] for k, v in SPECIALTIES.items()}
 _SUCCESS = {"booked", "payment_link_sent", "answered", "report_sent", "cancelled", "refunded", "cancelled_late",
             "rescheduled", "callback_requested", "status_told", "none", "not_ready", "nothing_to_change",
-            "reminder_confirmed", "reminder_cant_come"}
+            "reminder_confirmed", "reminder_cant_come",
+            # session 56: the person's wish about the call itself, honoured
+            "do_not_call", "wrong_number", "call_later", "reminder_running_late", "not_offered"}
 
 
 def _plain_name(raw) -> Optional[str]:
@@ -82,6 +85,24 @@ class CallSession:
         # ("one moment, let me check" while a question is being answered). None elsewhere.
         self.interim = None
         self.failed_verifications = 0
+        self._scope = None
+
+    async def _ensure_scope(self):
+        """What this hospital's plan offers (app/voice/scope.py), decided once per call. Only a plan
+        with both consultations and lab booking needs the doctor list; if that read fails the call
+        keeps everything it had before (FULL): a database hiccup never narrows what a caller gets."""
+        if self._scope is None:
+            doctors = None
+            try:
+                if needs_doctor_count(self.ctx.clinic):
+                    from app.database import get_doctors
+                    doctors = await get_doctors(self.ctx.clinic_id)
+                self._scope = scope_for(self.ctx.clinic, doctors)
+            except Exception as e:
+                logger.warning(f"VOICE_SCOPE_FALLBACK call={self.ctx.call_ref}: {type(e).__name__}")
+                self._scope = FULL
+            self.engine.clinic["scope"] = self._scope
+        return self._scope
 
     # ---- helpers ----
 
@@ -156,7 +177,8 @@ class CallSession:
     async def start(self, outbound: bool = False, interest: Optional[str] = None,
                     reminder: Optional[dict] = None) -> Reply:
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {"versions": VERSIONS})
-        await self._event("system", "CALL_STARTED", status="ok", data={"mode": self.ctx.mode})
+        scope = await self._ensure_scope()
+        await self._event("system", "CALL_STARTED", status="ok", data={"mode": self.ctx.mode, "scope": scope.kind})
         preload = getattr(self.tools, "preload_knowledge", None)
         if preload:
             preload()
@@ -179,6 +201,16 @@ class CallSession:
             name = _plain_name((prof or {}).get("name"))
         except Exception:
             pass
+        if interest and not (self._scope or FULL).doctors:
+            # A diagnostic centre: the lead's interest is a test. Offered only when the catalogue
+            # matches it; the read-back before booking still names the test and price.
+            try:
+                tests = [t for t in (await self.tools.lab_tests(interest) or []) if t.get("price_paise")]
+            except Exception:
+                tests = []
+            if tests:
+                slots["test"] = tests[0]
+            return name, slots
         if interest:
             ctx = await self._context()
             dept = tenant_department_for(interest, ctx.tenant_entries, ctx.departments)
@@ -206,6 +238,7 @@ class CallSession:
             out = await self.engine._handoff(self.state, self.engine_out(), "staff_takeover")
             return await self._emit(out)
 
+        await self._ensure_scope()
         verdict = screen(text, self.state["lang"])
         if verdict:
             await self._event("safety", "EMERGENCY" if verdict == "emergency" else "CLINICAL_BLOCKED", status="ok")
@@ -216,10 +249,14 @@ class CallSession:
         ctx = await self._context()
         self.engine.clinic["departments"] = ctx.departments
         nlu = understand(text, ctx, self.state.get("expect"))
+        rescued = False
         if needs_llm(nlu, text):
             nlu, tokens, cost = await understand_llm(text, ctx, self.ctx.clinic_id, self.state.get("expect"))
             self.llm_tokens += tokens
             self.llm_cost_paise += cost
+            # The rules missed and the model mapped it to one of THIS hospital's departments: a phrase
+            # the rules should learn (reception_learning distils it into a lexicon entry for staff).
+            rescued = bool(nlu.intents and nlu.entities.get("department"))
         nlu = gate(nlu, asr_confidence(text), settings.voice_conf_clarify_below)
         await self._event("nlu", "INTENT_DETECTED" if nlu.intents else "NOT_UNDERSTOOD",
                           status="ok" if nlu.confidence else "fail", data=nlu.to_dict(),
@@ -232,20 +269,24 @@ class CallSession:
                 logger.warning(f"VOICE_INTERIM_FAILED call={self.ctx.call_ref}: {e}")
         before = len(self.state.get("outcomes") or [])
         out = await self.engine.turn(self.state, nlu, text)
-        self._harvest(text, nlu, self.state.get("outcomes", [])[before:])
+        self._harvest(text, nlu, self.state.get("outcomes", [])[before:], rescued=rescued and bool(nlu.intents))
         if switched:
             out.says.insert(0, switched)
         return await self._emit(out)
 
-    def _harvest(self, text: str, nlu, new_outcomes: list) -> None:
+    def _harvest(self, text: str, nlu, new_outcomes: list, rescued: bool = False) -> None:
         """What this turn taught us we do not know (app/services/reception_learning.py).
-        Test-console turns are staff probing, not patients: never harvested."""
+        Test-console turns are staff probing, not patients: never harvested.
+        rescued: the rules missed and the LLM fallback understood it (slower, costs tokens, fails when
+        the model is down); harvested as unmapped_entity so the phrase can become a rule."""
         if self.ctx.mode == "test":
             return
         if any(o.get("wf") == "KNOWLEDGE" and o.get("outcome") == "not_answered" for o in new_outcomes):
             reason = "unanswered_question"
         elif not nlu.intents:
             reason = "low_confidence"
+        elif rescued:
+            reason = "unmapped_entity"
         else:
             return
         from app.services import reception_learning

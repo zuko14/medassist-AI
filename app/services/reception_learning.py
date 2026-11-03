@@ -3,6 +3,9 @@
 1. harvest: a patient turn the receptionist (voice or WhatsApp) did not
    understand, or a hospital question it could not answer, is stored
    PII-scrubbed with a masked phone. Background, never raises, never slows a turn.
+   Also (session 56) a voice turn the rules missed but the LLM fallback mapped to
+   one of this clinic's departments ("unmapped_entity"): the slow, paid layer
+   rescued it once; approved, the phrase becomes a rule and never needs it again.
 2. distill (scheduler, every 6 h): near-identical phrases are grouped; a group
    seen at least MIN_EVIDENCE times becomes a SUGGESTION. The LLM may only pick
    an item from this clinic's own catalogue (departments, doctors, lab tests)
@@ -211,11 +214,14 @@ async def distill_harvested_events(clinic_id: str) -> int:
     for g in groups:
         safe = screen(g["phrase"]) is None
         unanswered = g["reasons"].get("unanswered_question", 0) * 2 >= g["count"]
+        rescued = g["reasons"].get("unmapped_entity", 0) * 2 > g["count"]
         proposal = await _propose(g["phrase"], catalogue, clinic_id) if safe and not unanswered else None
         if proposal:
             category, phrase, canonical = proposal
             if norm(phrase) in known_phrases:
                 continue      # already taught; this miss has another cause
+        elif rescued:
+            continue          # understood on the call (by the model); no catalogue word to learn, nothing to ask
         else:
             # Not the name of anything this clinic has: most likely a question staff answer once.
             category, phrase, canonical = "knowledge_faq", g["phrase"][:200], ""

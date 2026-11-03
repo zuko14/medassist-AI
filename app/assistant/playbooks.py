@@ -4635,3 +4635,99 @@ async def shift_close_preview(read, params: dict) -> dict:
             "steps": [_step("Close the shift", _call("POST", f"{_CASH_SHIFTS}/{shift['id']}/close",
                                                      json={"declared_cash_paise": declared * 100}),
                             verify=_shift_open_now(False))]}
+
+
+# ── Session 56: hand work to the AI receptionist by voice ─────────────────────────────────────────────
+
+def _minutes_label(m: int) -> str:
+    if m % 1440 == 0:
+        return _plural(m // 1440, "day")
+    if m % 60 == 0:
+        return _plural(m // 60, "hour")
+    return f"{m} minutes" if m < 60 else f"{m // 60} h {m % 60} min"
+
+
+async def reminder_calls_preview(read, params: dict) -> dict:
+    """Appointment reminder calls on / off and when (clinics.config.voice.reminders, migration 112). PUT
+    /admin/voice/settings replaces the voice object, so the step sends back exactly what was read with only
+    `reminders` changed; the server's Reminders model checks the bounds again (15 min - 24 h, at most 3)."""
+    switch, minutes = params.get("switch"), params.get("minutes")
+    if switch is None and not minutes:
+        raise EmptyPlan('Say "turn on reminder calls", "turn them off", or when to call, e.g. "1 hour before".')
+    settings = ((await _get(read, "/admin/voice/settings")) or {}).get("settings")
+    if not isinstance(settings, dict):
+        raise RuntimeError("settings read failed")
+    old = settings.get("reminders") or {}
+    old_on, old_min = bool(old.get("enabled")), [m for m in old.get("minutes_before") or [] if isinstance(m, int)]
+    want_on = switch != "off"
+    want_min = sorted(set(minutes or old_min or [60]), reverse=True)
+    if switch == "off":
+        want_min = old_min or [60]
+    if any(not 15 <= m <= 1440 for m in want_min) or len(want_min) > 3:
+        raise EmptyPlan("Reminder calls can be 15 minutes to 1 day before the appointment, at most 3 times.")
+    if want_on == old_on and sorted(want_min, reverse=True) == sorted(old_min, reverse=True):
+        raise EmptyPlan("Reminder calls are already " + ("on, " + ", ".join(_minutes_label(m) for m in want_min)
+                                                         + " before." if want_on else "off."))
+    body = json.loads(json.dumps(settings))
+    body["reminders"] = {"enabled": want_on, "minutes_before": want_min}
+    when = ", ".join(_minutes_label(m) for m in want_min)
+    if want_on:
+        bullets = [f"Reminder calls: {'on' if old_on else 'off → on'}, {when} before each confirmed appointment."]
+        bullets.append("Kriya calls in the patient's language between 09:00 and 21:00, never later than 10 minutes "
+                       "before the visit. A patient who can't come is offered a new time on the same call.")
+    else:
+        bullets = ["Reminder calls: on → off. WhatsApp reminders continue unchanged."]
+
+    async def verify(read, data, call):
+        out = await read(_call("GET", "/admin/voice/settings"))
+        now = out.data.get("settings") if out.status == "ok" and isinstance(out.data, dict) else None
+        if not isinstance(now, dict):
+            return None, "Couldn't read the voice settings back"
+        r = now.get("reminders") or {}
+        saved = sorted(r.get("minutes_before") or [], reverse=True)
+        ok = bool(r.get("enabled")) == want_on and (not want_on or saved == want_min)
+        return ok, (f"Reminder calls are {'on, ' + when + ' before' if want_on else 'off'}" if ok
+                    else "The setting did not change")
+
+    return {"title": f"Turn appointment reminder calls {'on' if want_on else 'off'}", "bullets": bullets,
+            "warnings": ["Only confirmed doctor appointments with a time get a call.",
+                         "The other voice settings are sent back unchanged."],
+            "snapshot": _digest([json.dumps(settings, sort_keys=True)]),
+            "steps": [_step("Save voice settings", _call("PUT", "/admin/voice/settings", json=body), verify=verify)]}
+
+
+async def call_lead_preview(read, params: dict) -> dict:
+    """One WhatsApp lead, named by staff, called by the AI receptionist (POST /admin/voice/outbound). The lead is
+    found by name exactly as lead_message_preview finds it; a do-not-contact lead is refused here and by the
+    server (outbound._eligible), as is anyone who told the receptionist not to call again."""
+    who = params["who"]
+    data = await _get(read, "/admin/leads", {"segment": "all", "days": 0, "q": who[:60], "limit": 100, "offset": 0})
+    rows = [x for x in (data.get("rows") or [] if isinstance(data, dict) else []) if isinstance(x, dict)]
+    found = [x for x in rows if (who in re.sub(r"\D", "", str(x.get("phone") or "")) if who.isdigit()
+                                 else all(w in str(x.get("name") or "").lower() for w in who.split()))]
+    if not found:
+        raise EmptyPlan(f'No WhatsApp lead matches "{who}". Say their phone number instead, e.g. "call 98765 43210".')
+    if len(found) > 1:
+        listed = "; ".join(f"{x.get('name') or 'No name'} (…{str(x.get('phone') or '')[-4:]})" for x in found[:5])
+        raise EmptyPlan(f'{len(found)} leads match "{who}": {listed}. Use more of the name or the last digits.')
+    lead = found[0]
+    phone, name = str(lead.get("phone") or ""), lead.get("name") or "this lead"
+    if "•" in phone:  # the leads RPC masks a do-not-contact number
+        raise EmptyPlan(f"{name} asked not to be contacted. Kriya won't call them.")
+    interest = params.get("interest") or (lead.get("interests") or [None])[0]
+    jobs = await _get(read, "/admin/voice/outbound")
+    live = [j for j in (jobs.get("jobs") or [] if isinstance(jobs, dict) else [])
+            if isinstance(j, dict) and _last10(j.get("patient_phone", "")) == _last10(phone)
+            and j.get("status") in ("queued", "dialing")]
+    if live:
+        raise EmptyPlan(f"A call to {name} is already in the queue.")
+    return {"title": f"Kriya calls {name}" + (f" about {interest}" if interest else ""),
+            "bullets": [f"The AI receptionist calls {name} (…{phone[-4:]}), greets them by name"
+                        + (f", talks about {interest}" if interest else "") + " and books on the call if they want."],
+            "warnings": ["The call goes out inside your lead-call hours. If they say not to call, they are never "
+                         "called again."],
+            "snapshot": {"lead": _digest([phone]), "interest": interest},
+            "steps": [_step(f"Queue a call to {name}",
+                            _call("POST", "/admin/voice/outbound",
+                                  json={"phone": phone, "purpose": "lead_followup", "interest": interest}),
+                            verify=_one_call_queued(phone))]}

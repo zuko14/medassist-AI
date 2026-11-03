@@ -15,10 +15,12 @@ from typing import Optional
 from .dates import first_index, has_any, norm, parse_clock_time, parse_date, parse_time_period
 from .lexicon import find_specialties, match_doctors, resolve_department, tenant_department_for
 
-NLU_RULES_VERSION = "nlu-rules-2026.10.12"
+NLU_RULES_VERSION = "nlu-rules-2026.11.03"
 
 SUPPORTED_LANGS = ("te-IN", "hi-IN", "en-IN")
-DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE")
+DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE",
+               # Call-handling acts (session 56): what a person says about the CALL, not a request.
+               "DO_NOT_CALL", "WRONG_NUMBER", "BUSY", "WHO_IS_THIS", "RUNNING_LATE")
 
 
 @dataclass
@@ -113,6 +115,36 @@ W = {
     "REPEAT": ("repeat", "malli cheppandi", "మళ్ళీ చెప్పండి", "phir se", "dobara", "दोबारा", "फिर से",
                "pardon", "come again"),
 }
+
+# "Don't do it": a do-word with its negation. "mat karo" holds "karo" (AFFIRM) after "mat" (DENY), so the
+# later-act-wins rule read "call mat karo" as YES. A negated do-word is never a yes.
+NEG_DO = ("mat karo", "mat kariye", "mat kijiye", "mat karna", "mat kar", "na karo", "na kare", "na karein",
+          "मत करो", "मत करिए", "मत कीजिए", "मत करना", "मत कर", "न करें", "ना करें",
+          "చేయకండి", "చెయ్యకండి", "చేయొద్దు", "చెయ్యొద్దు", "చేయవద్దు", "cheyyakandi", "cheyakandi", "cheyyoddu",
+          "don't do", "do not do", "don't book", "do not book")
+# Session 56: about the call itself (lead / reminder calls). Deterministic, checked in this order.
+CALL_WORDS = ("call", "calls", "calling", "phone", "కాల్", "కాల్స్", "ఫోన్", "कॉल", "फ़ोन", "फोन")
+DO_NOT_CALL = ("don't call", "dont call", "do not call", "stop calling", "never call", "no more calls",
+               "stop these calls", "remove my number", "call mat", "phone mat", "call na kare", "call nahi chahiye",
+               "कॉल मत", "फ़ोन मत", "फोन मत", "कॉल न करें", "कॉल ना करें", "कॉल नहीं चाहिए",
+               "కాల్ చేయకండి", "కాల్ చెయ్యకండి", "ఫోన్ చేయకండి", "ఫోన్ చెయ్యకండి", "కాల్ చేయొద్దు",
+               "ఫోన్ చేయొద్దు", "కాల్స్ వద్దు", "కాల్ వద్దు", "call cheyyakandi", "phone cheyyakandi")
+# "Don't call me NOW" / "call me later" is busy, never a do-not-call.
+_NOT_NOW = ("now", "right now", "abhi", "अभी", "ippudu", "ఇప్పుడు", "later", "baad", "बाद", "tarvata",
+            "తర్వాత", "busy", "బిజీ", "बिज़ी", "बिजी", "evening", "morning", "tomorrow", "sometime")
+WRONG_NUMBER = ("wrong number", "rong number", "galat number", "गलत नंबर", "ग़लत नंबर", "रॉन्ग नंबर",
+                "రాంగ్ నంబర్", "రాంగ్ నెంబర్", "తప్పు నంబర్", "తప్పు నెంబర్", "no one by that name",
+                "nobody by that name")
+BUSY = ("busy", "driving", "in a meeting", "in meeting", "can't talk", "cannot talk", "can't speak",
+        "call me later", "call later", "call back later", "baad mein", "baad me", "बाद में", "abhi nahi",
+        "अभी नहीं", "बिज़ी", "बिजी", "ड्राइविंग", "मीटिंग में", "బిజీ", "డ్రైవింగ్", "మీటింగ్",
+        "తర్వాత కాల్", "తర్వాత మాట్లాడ", "ఇప్పుడు మాట్లాడలేను", "ఇప్పుడు కుదరదు", "ippudu kudaradu",
+        "tarvata call", "call me in the", "call me tomorrow", "call me after", "call me at", "call me in an hour")
+WHO_IS_THIS = ("who is this", "who's this", "who is calling", "who's calling", "who are you", "who is speaking",
+               "where are you calling from", "where is this call from", "kaun bol", "aap kaun", "kon bol",
+               "कौन बोल", "आप कौन", "कहाँ से बोल", "kahan se bol", "ఎవరు మాట్లాడ", "మీరు ఎవరు",
+               "ఎక్కడి నుండి మాట్లాడ", "ఎక్కడ నుండి మాట్లాడ", "evaru matlad", "meeru evaru")
+RUNNING_LATE = ("late", "లేట్", "ఆలస్యం", "लेट", "देर से", "der se", "der ho", "देर हो")
 
 # Yes only when it is (nearly) the whole reply: "ఆ" is also "that" ("ఆ డాక్టర్"), "హా" a filler.
 SHORT_AFFIRM = frozenset({"ఆ", "ఆఁ", "ఆ ఆ", "హా", "హాఁ", "హాం", "హా అండి", "ఆ అండి", "aa", "haa", "ha",
@@ -392,6 +424,21 @@ def understand(text: str, ctx: NluContext, expect: Optional[str] = None) -> NLUR
             pos.setdefault(act, first_index(t, W[act]))
     if " ".join(re.sub(r"[.,!?।;:'\"-]", " ", t).split()) in SHORT_AFFIRM:  # not \W: it eats Indic vowel signs
         pos.setdefault("AFFIRM", 0)
+    if has_any(t, NEG_DO):
+        pos.pop("AFFIRM", None)
+        pos.setdefault("DENY", first_index(t, NEG_DO))
+    # About the call itself. The dialog decides what each means (it only acts on them on its own calls).
+    if has_any(t, WRONG_NUMBER):
+        pos["WRONG_NUMBER"] = first_index(t, WRONG_NUMBER)
+    elif has_any(t, DO_NOT_CALL) and not has_any(t, _NOT_NOW) and not (d or period or clock):
+        pos["DO_NOT_CALL"] = first_index(t, DO_NOT_CALL)
+        pos.pop("AFFIRM", None)
+    elif has_any(t, BUSY) or has_any(t, DO_NOT_CALL):      # "don't call me NOW" = busy
+        pos["BUSY"] = first_index(t, BUSY) if has_any(t, BUSY) else first_index(t, DO_NOT_CALL)
+    if has_any(t, WHO_IS_THIS) and not has_any(t, W["DOCTOR"]):
+        pos["WHO_IS_THIS"] = first_index(t, WHO_IS_THIS)
+    if expect == "reminder" and has_any(t, RUNNING_LATE):
+        pos["RUNNING_LATE"] = first_index(t, RUNNING_LATE)
     if lang_req:
         pos["LANGUAGE_CHANGE"] = 0
     if expect == "confirm" and "AFFIRM" in pos:

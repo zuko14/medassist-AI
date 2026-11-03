@@ -338,3 +338,74 @@ def test_routes_map_review_errors_and_need_manage():
         with patch.object(rl, "approve", AsyncMock(side_effect=rl.ReviewError(409, "Already approved."))):
             r = client(admin).post(url, json={})
         assert r.status_code == 409 and r.json()["detail"] == "Already approved."
+
+
+# ---- session 56: the LLM fallback teaches the rules ----
+
+@pytest.mark.parametrize("mode,intents,rescued,expected", [
+    ("live", ["BOOK_APPOINTMENT"], True, "unmapped_entity"),
+    ("live", ["BOOK_APPOINTMENT"], False, None),       # the rules understood it: nothing to learn
+    ("test", ["BOOK_APPOINTMENT"], True, None),        # staff probing in the test console
+    ("live", [], True, "low_confidence"),              # gated to nothing: still a miss
+])
+def test_llm_rescued_turn_is_harvested_as_unmapped_entity(mode, intents, rescued, expected):
+    with patch.object(rl, "record") as rec:
+        _session(mode)._harvest("kanti shuklam doctor kavali", SimpleNamespace(intents=intents), [], rescued=rescued)
+    if expected:
+        assert rec.call_args.args[:4] == (CID, "voice", "kanti shuklam doctor kavali", expected)
+    else:
+        rec.assert_not_called()
+
+
+def _rescued_db():
+    events = [{"raw_utterance": "kanti shuklam doctor kavali", "trigger_reason": "unmapped_entity"}] * 3
+
+    def handler(q):
+        if q.table == "ai_reception_harvest_events":
+            return events
+        if q.table in ("ai_learning_suggestions", "voice_lexicon_entries"):
+            return []
+        return [{}]
+    return FakeDB(handler)
+
+
+def test_distill_turns_an_llm_rescued_phrase_into_a_lexicon_suggestion():
+    db = _rescued_db()
+    n, propose = _distilling(db)
+    (ins,) = [q.payload for q in db.log if q.op == "insert"]
+    assert n == 1 and ins["category"] == "specialty_synonym" and ins["proposed_canonical"] == "Ophthalmology"
+    assert ins["evidence_count"] == 3
+    propose.assert_awaited_once()
+    assert_scoped(db)
+
+
+def test_distill_never_asks_staff_an_faq_for_a_phrase_that_was_understood():
+    db = _rescued_db()
+    n, _ = _distilling(db, proposal=None)
+    assert n == 0 and not [q for q in db.log if q.op == "insert"]
+
+
+def test_session_marks_a_rescue_only_when_the_model_found_a_clinic_department():
+    """End to end through CallSession.handle: rules miss -> LLM maps to a department -> harvested."""
+    from unittest.mock import AsyncMock as AM
+
+    from app.voice.nlu_rules import NLUResult
+    from app.voice.session import CallSession
+    from app.voice.tools import CallContext
+    from tests.voice.test_dialog import DOCS, SLOTS, FakeTools
+
+    ctx = CallContext(call_id="c", call_ref="CALL-1", clinic={"id": CID, "name": "X", "plan": "polyclinic"},
+                      branch_id=None, caller_phone="+919876543210")
+    for llm, expected in ((NLUResult(["BOOK_APPOINTMENT"], {"department": "Cardiology"}, 0.8, "llm"), "unmapped_entity"),
+                          (NLUResult(["BOOK_APPOINTMENT"], {}, 0.8, "llm"), None)):
+        s = CallSession(ctx, tools=FakeTools(slots=SLOTS))
+        with patch("app.voice.session.store.update_call", new=AM()), \
+             patch("app.voice.session.store.add_event", new=AM()), \
+             patch("app.voice.session.store.get_call", new=AM(return_value={})), \
+             patch("app.voice.session.store.load_lexicon", new=AM(return_value=[])), \
+             patch("app.database.get_doctors", new=AM(return_value=DOCS)), \
+             patch("app.voice.session.understand_llm", new=AM(return_value=(llm, 10, 1))), \
+             patch.object(rl, "record") as rec:
+            run(s.handle("pedda saaru dagara chupinchukovali"))
+        reasons = [c.args[3] for c in rec.call_args_list]
+        assert reasons == ([expected] if expected else [])

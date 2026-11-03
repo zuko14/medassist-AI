@@ -1901,6 +1901,31 @@ MONEY_AND_IPD = (
           max_items=playbooks.MAX_RECEIPT_RUPEES, **_CASH),
 )
 
+# ── Session 56: hand work to the AI receptionist by voice. Both call endpoints the AI Receptionist page uses
+# (PUT /admin/voice/settings, POST /admin/voice/outbound) as the logged-in user, with VOICE_MANAGE. ──
+_NOT_ONE_LEAD = (re.compile(r"\d{5,}"), "leads", "token", "next patient", "missed", "who called", "call log", "calls",
+                 "reminder", "reminders", "outbound", "how many", "show", "list", "settings", "hours", "limit",
+                 "window", "automatic", "auto", "results", "result", "analytics", "report", "funnel", "conversion",
+                 "stats", "how did", "how many", "go")
+RECEPTIONIST_HANDOFF = (
+    _desk("voice.reminder_calls", "Appointment reminder calls on/off", "R2", "PUT", "/admin/voice/settings", "voice",
+          ("reminder calls", "reminder call", "remind+by call", "remind+by phone", "remind+call", "call+remind",
+           "calls+before+appointment", "call+before+appointment", "reminder+phone call", "reminder+calls+before",
+           "రిమైండర్+కాల్", "రిమైండర్+కాల్స్", "గుర్తు+కాల్", "रिमाइंडर+कॉल", "याद+कॉल", "yaad+call"),
+          playbooks.reminder_calls_preview,
+          slots=(SlotSpec("switch", "on_off", False), SlotSpec("minutes", "reminder_minutes", False)),
+          unless=("whatsapp reminder", "whatsapp reminders", "lead", "leads", "how many", "show", "list"),
+          **_VOICE_ON),
+    _desk("voice.call_lead", "Have the AI receptionist call a lead", "R2", "POST", "/admin/voice/outbound", "voice",
+          ("receptionist+call", "kriya+call", "ai+call", "call+lead", "lead+call", "follow up+lead",
+           "receptionist+pilu", "receptionist se+call", "receptionist tho+call", "రిసెప్షనిస్ట్+కాల్",
+           "रिसेप्शनिस्ट+कॉल"),
+          playbooks.call_lead_preview,
+          slots=(SlotSpec("who", "call_lead", label="Which lead (name or last digits)"),
+                 SlotSpec("interest", "call_interest", False)),
+          unless=_NOT_ONE_LEAD, **_VOICE_ON),
+)
+
 REGISTRY: dict[str, ActionSpec] = _build(
     ActionSpec(id="nav.open", module="nav", summary="Open a page", risk="R0"),       # client go(page)
     ActionSpec(id="help.howto", module="help", summary="How do I…", risk="R0"),      # static, app/assistant/help.py
@@ -1933,6 +1958,7 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *VOICE_ENTRY_9,
     *AUTONOMY,
     *MONEY_AND_IPD,
+    *RECEPTIONIST_HANDOFF,
 )
 
 
@@ -2160,7 +2186,20 @@ _FOURTH: dict[str, dict] = {
 }
 
 
-for _k, _v in (*_MORE.items(), *_THIRD.items(), *_FOURTH.items()):
+# Session 56: leads handed to the AI receptionist. "transfer the leads to the AI receptionist" was a BED transfer
+# and "make the AI receptionist call Ravi" a staff ROLE change; both now go to the receptionist's calls.
+_FIFTH: dict[str, dict] = {
+    "leads.call": {"triggers": ("transfer+leads", "give+leads", "hand+leads", "hand over+leads", "pass+leads",
+                                "send+leads+receptionist", "leads+receptionist", "leads+kriya", "start+lead calls",
+                                "lead calls+start", "follow up+leads", "leads+follow up", "leads+ivvu", "leads+do",
+                                "leads+de do", "లీడ్స్+ఇవ్వు", "लीड्स+दो")},
+    "ipd.transfer": {"unless": ("lead", "leads", "receptionist", "kriya")},
+    "staff.role": {"unless": ("ai receptionist", "call", "calls")},
+    "voice.call_number": {"unless": ("reminder", "reminders")},
+}
+
+
+for _k, _v in (*_MORE.items(), *_THIRD.items(), *_FOURTH.items(), *_FIFTH.items()):
     _have = PHRASINGS.setdefault(_k, {})
     for _f, _vals in _v.items():
         _have[_f] = tuple(_have.get(_f, ())) + tuple(_vals)

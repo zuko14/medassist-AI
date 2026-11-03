@@ -93,6 +93,7 @@ async def test_bulk_import_skips_with_reasons_and_records_consent():
         _res([{"phone": "+919000000002", "opted_in": False}]),                         # patients
         _res([{"patient_phone": "+919000000003", "status": "queued", "created_at": week_old},
               {"patient_phone": "+919000000004", "status": "completed", "created_at": week_old}]),  # jobs
+        _res([]),                                                       # nobody said "don't call" (session 56)
         _res([{"id": "j1"}]),                                                           # insert
     ]
     sb = AsyncMock(side_effect=calls)
@@ -115,7 +116,8 @@ async def test_bulk_import_skips_with_reasons_and_records_consent():
 
 @pytest.mark.asyncio
 async def test_bulk_import_without_consent_queues_only_existing_contacts():
-    sb = AsyncMock(side_effect=[_res([{"phone": "+919000000001", "opted_in": True}]), _res([]), _res([{"id": "j"}])])
+    sb = AsyncMock(side_effect=[_res([{"phone": "+919000000001", "opted_in": True}]), _res([]), _res([]),
+                                _res([{"id": "j"}])])
     with patch.object(outbound, "ai_receptionist_enabled", return_value=True), \
          patch.object(outbound, "sb", new=sb), patch.object(outbound, "supabase", new=MagicMock()):
         r = await outbound.enqueue_bulk(CLINIC, [{"phone": "9000000001"}, {"phone": "9000000009"}], None, "admin1")
@@ -258,7 +260,8 @@ def _bulk_reads():
     week_old = (datetime.now(IST) - timedelta(days=3)).isoformat()
     return [_res([{"phone": "+919000000001", "opted_in": True}, {"phone": "+919000000002", "opted_in": False}]),
             _res([{"patient_phone": "+919000000003", "status": "queued", "created_at": week_old},
-                  {"patient_phone": "+919000000004", "status": "completed", "created_at": week_old}])]
+                  {"patient_phone": "+919000000004", "status": "completed", "created_at": week_old}]),
+            _res([])]                                               # nobody said "don't call" (session 56)
 
 
 @pytest.mark.asyncio

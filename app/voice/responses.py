@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.10.21"
+TEMPLATES_VERSION = "templates-2026.11.03"
 
 T: dict = {
     "greeting": {
@@ -418,6 +418,92 @@ T: dict = {
     "old_cancelled": {
         "te": "పాత అపాయింట్మెంట్ రద్దు చేశాను.", "en": "I've cancelled your old appointment.",
         "hi": "पुराना अपॉइंटमेंट कैंसिल कर दिया है।",
+    },
+    # ---- plan scope (app/voice/scope.py): a diagnostic centre speaks of tests, never of doctors ----
+    "greeting_outbound_lab": {
+        "te": "నమస్కారం{who}, నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను. {interest_sentence}{pitch_sentence}మీకు టెస్ట్ బుక్ చేయడంలో సహాయం చేయమంటారా?",
+        "en": "Namaste{who}, this is {assistant} calling from {hospital}. {interest_sentence}{pitch_sentence}Can I help you book a test?",
+        "hi": "नमस्ते{who}, मैं {hospital} से {assistant} बोल रही हूँ। {interest_sentence}{pitch_sentence}क्या मैं आपका टेस्ट बुक करने में मदद करूँ?",
+    },
+    "offer_test_booking": {
+        "te": "మీకు టెస్ట్ బుక్ చేయమంటారా?", "en": "Shall I book a test for you?",
+        "hi": "क्या मैं आपके लिए टेस्ट बुक कर दूँ?",
+    },
+    "no_doctors_here": {
+        "te": "మా దగ్గర డాక్టర్ కన్సల్టేషన్లు లేవండి, మేము టెస్టులు మరియు స్కాన్లు చేస్తాము.",
+        "en": "We don't have doctor consultations here; we do tests and scans.",
+        "hi": "हमारे यहाँ डॉक्टर कंसल्टेशन नहीं होता, हम टेस्ट और स्कैन करते हैं।",
+    },
+    "no_tests_here": {
+        "te": "క్షమించండి, మా దగ్గర ఫోన్‌లో టెస్ట్ బుకింగ్ లేదు.",
+        "en": "Sorry, we don't take test bookings here.",
+        "hi": "माफ़ कीजिए, हमारे यहाँ टेस्ट की बुकिंग नहीं होती।",
+    },
+    "clinical_refusal_lab": {
+        "te": "క్షమించండి, మందులు లేదా వైద్య సలహా నేను చెప్పలేను, అది మీ డాక్టర్ గారే చెప్పాలి. డాక్టర్ గారు రాసిన టెస్ట్ బుక్ చేయమంటారా?",
+        "en": "I'm sorry, I can't advise on medicines or treatment; please ask your doctor. Shall I book the test your doctor advised?",
+        "hi": "माफ़ कीजिए, दवा या इलाज की सलाह मैं नहीं दे सकती, वह आपके डॉक्टर ही बताएँगे। क्या डॉक्टर का बताया टेस्ट बुक कर दूँ?",
+    },
+    "clinical_refusal_plain": {
+        "te": "క్షమించండి, మందులు లేదా వైద్య సలహా నేను చెప్పలేను, అది డాక్టర్ గారే చెప్పాలి.",
+        "en": "I'm sorry, I can't advise on medicines or treatment. Only a doctor can.",
+        "hi": "माफ़ कीजिए, दवा या इलाज की सलाह मैं नहीं दे सकती, वह डॉक्टर ही देंगे।",
+    },
+    "offer_self_help_lab": {
+        "te": "నేనే మీకు టెస్ట్ బుక్ చేయగలను, టెస్ట్ ధరలు, రిపోర్ట్స్, టైమింగ్స్ కూడా చెప్పగలను. ఏం కావాలో చెప్పండి. లేదా రిసెప్షన్‌కి కనెక్ట్ చేయమంటారా?",
+        "en": "I can book your test myself, and help with test prices, reports and timings. Tell me what you need, or shall I connect you to reception?",
+        "hi": "मैं खुद आपका टेस्ट बुक कर सकती हूँ, और टेस्ट की कीमत, रिपोर्ट, टाइमिंग की जानकारी भी दे सकती हूँ। बताइए क्या चाहिए, या रिसेप्शन से जोड़ दूँ?",
+    },
+    "help_menu_lab": {
+        "te": "క్షమించండి, లైన్ సరిగ్గా వినపడటం లేదు. నేను టెస్ట్ బుక్ చేయగలను, టెస్ట్ ధరలు, టైమింగ్స్, అడ్రస్ చెప్పగలను, మీ రిపోర్ట్ కూడా చూడగలను. ఏం కావాలో ఒక్క మాటలో చెప్పండి.",
+        "en": "Sorry, the line isn't very clear. I can book a test, tell you test prices, timings and our address, or check your report. Just tell me in a few words what you need.",
+        "hi": "माफ़ कीजिए, आवाज़ साफ़ नहीं आ रही। मैं टेस्ट बुक कर सकती हूँ, टेस्ट की कीमत, टाइमिंग और पता बता सकती हूँ, या आपकी रिपोर्ट देख सकती हूँ। बस थोड़े शब्दों में बताइए क्या चाहिए।",
+    },
+    "clarify_lab": {
+        "te": "మీకు సరిగ్గా సహాయం చేయాలని అడుగుతున్నాను. టెస్ట్ బుకింగ్ కావాలా, రిపోర్ట్ గురించా, లేక వేరే సమాచారం కావాలా?",
+        "en": "I want to make sure I understood you correctly. Is this about booking a test, a report, or something else?",
+        "hi": "मैं ठीक से समझना चाहती हूँ। क्या यह टेस्ट बुकिंग के बारे में है, रिपोर्ट के बारे में, या कुछ और?",
+    },
+    "ask_info_topic_lab": {
+        "te": "తప్పకుండా. ఏ సమాచారం కావాలి? మా టెస్టుల గురించా, టైమింగ్స్, అడ్రస్, లేదా ధరలా?",
+        "en": "Sure. What would you like to know: our tests, timings, address, or prices?",
+        "hi": "ज़रूर। क्या जानकारी चाहिए: हमारे टेस्ट, टाइमिंग, पता, या कीमत?",
+    },
+    # ---- about the call itself (session 56) ----
+    "do_not_call_ack": {
+        "te": "క్షమించండి అండి, ఇకపై మీకు కాల్ చేయము. ధన్యవాదాలు.",
+        "en": "I'm sorry for the trouble. We won't call you again. Thank you.",
+        "hi": "माफ़ कीजिए, अब हम आपको कॉल नहीं करेंगे। धन्यवाद।",
+    },
+    "wrong_number_sorry": {
+        "te": "క్షమించండి అండి, పొరపాటున కాల్ చేశాము. ఈ నంబర్‌కి మళ్ళీ కాల్ రాదు. ధన్యవాదాలు.",
+        "en": "I'm so sorry, we must have the wrong number. We won't call this number again. Thank you.",
+        "hi": "माफ़ कीजिए, शायद गलत नंबर लग गया। इस नंबर पर दोबारा कॉल नहीं आएगा। धन्यवाद।",
+    },
+    "busy_ack": {
+        "te": "పర్వాలేదండి, ఇబ్బంది పెట్టినందుకు క్షమించండి. మీకు వీలైనప్పుడు మా టీమ్ మళ్ళీ కాల్ చేస్తారు.",
+        "en": "No problem, sorry to disturb you. Our team will call you back at a better time.",
+        "hi": "कोई बात नहीं, परेशान करने के लिए माफ़ कीजिए। हमारी टीम आपको सही समय पर दोबारा कॉल करेगी।",
+    },
+    "busy_ack_reminder": {
+        "te": "పర్వాలేదండి, మిమ్మల్ని ఆపను. మీ అపాయింట్మెంట్‌కి సమయానికి రండి. ధన్యవాదాలు.",
+        "en": "No problem, I won't keep you. Please come on time for your appointment. Thank you.",
+        "hi": "कोई बात नहीं, मैं आपको नहीं रोकूँगी। कृपया अपॉइंटमेंट पर समय से आइए। धन्यवाद।",
+    },
+    "running_late_ack": {
+        "te": "పర్వాలేదండి, వీలైనంత త్వరగా రండి. మీరు కొంచెం ఆలస్యంగా వస్తున్నారని రిసెప్షన్‌కి చెబుతాను.",
+        "en": "No problem, please come as soon as you can. I'll let our reception know you're running a little late.",
+        "hi": "कोई बात नहीं, जितनी जल्दी हो सके आ जाइए। मैं रिसेप्शन को बता दूँगी कि आपको थोड़ी देर होगी।",
+    },
+    "who_am_i": {
+        "te": "నేను {hospital} నుండి {assistant} మాట్లాడుతున్నాను.",
+        "en": "This is {assistant} from {hospital}.",
+        "hi": "मैं {hospital} से {assistant} बोल रही हूँ।",
+    },
+    "reschedule_staff_handoff": {
+        "te": "ఈ బుకింగ్ తేదీ మార్చడానికి మా రిసెప్షన్ టీమ్ సహాయం చేస్తారు.",
+        "en": "Our reception team will help you change the date of this booking.",
+        "hi": "इस बुकिंग की तारीख बदलने में हमारी रिसेप्शन टीम मदद करेगी।",
     },
     "system_degraded": {
         "te": "క్షమించండి, సిస్టమ్ ఇప్పుడు స్పందించడం లేదు. మా టీమ్ మీకు కాల్ చేస్తారు.",

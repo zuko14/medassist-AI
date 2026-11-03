@@ -43,11 +43,30 @@ def _blocked(p: Optional[dict], attested: bool) -> Optional[str]:
     return None
 
 
+#: Call outcomes that mean "never dial this number again" for this clinic (session 56): the person
+#: said so on one of our calls (dialog._call_acts). Read from voice_calls, kept for analytics anyway.
+NEVER_AGAIN = ("do_not_call", "wrong_number")
+
+
+async def _said_never_again(clinic_id: str, phones: list) -> set:
+    """The phones (of these) that told this clinic's receptionist not to call them again."""
+    out: set = set()
+    for i in range(0, len(phones), 200):
+        res = await sb(supabase.table("voice_calls").select("caller_phone").eq("clinic_id", clinic_id)
+                       .eq("direction", "outbound").in_("outcome", list(NEVER_AGAIN))
+                       .in_("caller_phone", phones[i:i + 200]).limit(1000))
+        out |= {r["caller_phone"] for r in res.data or []}
+    return out
+
+
 async def _eligible(clinic_id: str, phone: str, attested: bool = False) -> Optional[str]:
     """None if this person may be called, else the reason."""
     res = await sb(supabase.table("patients").select("id, opted_in, data_consent_declined_at")
                    .eq("clinic_id", clinic_id).eq("phone", phone).limit(1))
-    return _blocked((res.data or [None])[0], attested)
+    reason = _blocked((res.data or [None])[0], attested)
+    if not reason and await _said_never_again(clinic_id, [phone]):
+        reason = "do_not_contact"     # an attestation never overrides what the person told us
+    return reason
 
 
 def _after(ts, cutoff: datetime) -> bool:
@@ -136,9 +155,10 @@ async def enqueue_bulk(clinic: dict, contacts: list, consent: Optional[dict], cr
                 recent.add((j["patient_phone"], active))
     live = {p for p, active in recent if active}
     called = {p for p, _ in recent}
+    never = await _said_never_again(cid, phones) if phones else set()
     rows = []
     for phone in phones:
-        reason = _blocked(patients.get(phone), bool(consent))
+        reason = _blocked(patients.get(phone), bool(consent)) or ("do_not_contact" if phone in never else None)
         if not reason and phone in live:
             reason = "already_queued"
         elif not reason and phone in called:
