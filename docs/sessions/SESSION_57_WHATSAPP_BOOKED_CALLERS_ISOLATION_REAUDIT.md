@@ -75,6 +75,7 @@ Re-verified unchanged: all 1,671 existing Ketu sentences route exactly as on `ma
 | Voice NLU benchmark (19,120) | 100 % |
 | Ketu accuracy gate | DEV 100 · DEV2 93.9 · DEV3 100 · DEV4 100 · DEV5 100 · DEV6 100 · HELDOUT 96.2 % · **0 wrong** (identical to `main` on the old sets) |
 | All voice + learning tests; Ketu hand-off, lead-call and accuracy tests | 494 + 127 passed, 0 failed |
+| Whole repository `pytest tests` | **7,920 passed, 4 skipped, 0 failed**; 407 errors, every one `No module named 'pgserver'` (real-Postgres tests this environment cannot install; same 407 as before) |
 
 ## 6. Before go-live (in addition to session 56's list)
 
