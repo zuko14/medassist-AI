@@ -109,6 +109,7 @@ times when only "on" is said, refuses times outside 15 min - 1 day or more than 
 | Every existing routed sentence (994 fixture + 677 Ketu corpus) old vs new | **0 decisions changed** |
 | Voice NLU benchmark `scripts/voice_eval.py --check` | 19,120 cases, 100 % (te, hi, en, romanised te / hi) |
 | AGENTS.md gates (tenant lint 4, scope matrix, adversarial matrix, clinical firewall, webhook, FSM) + all assistant + voice + learning tests | **4,341 passed, 0 failed**; tenant lint 4 passed |
+| Whole repository `pytest tests` | **7,856 passed, 4 skipped, 0 failed**; 407 errors, every one `No module named 'pgserver'` (real-Postgres tests that cannot run in this environment; see below) |
 | flake8 (non-E501) on changed files vs the previous commit | no new issues |
 
 Existing tests changed on purpose: three bulk-import tests in `tests/voice/test_lead_calls.py` mock the database
