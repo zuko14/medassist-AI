@@ -427,6 +427,10 @@ def _resolve_slot(slot: SlotSpec, text: str, doctors: Optional[list], now: Optio
         return resolve.resolve_treatment_category(text), ()
     if slot.kind == "call_interest":
         return resolve.resolve_call_interest(text), ()
+    if slot.kind == "reminder_minutes":
+        return resolve.resolve_reminder_minutes(text), ()
+    if slot.kind == "call_lead":
+        return resolve.resolve_call_lead(text), ()
     if slot.kind == "doctor":
         found = resolve.resolve_doctor(text, doctors or [])
         if len(found) == 1:

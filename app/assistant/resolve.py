@@ -2392,3 +2392,59 @@ def resolve_declared_cash(text: str) -> Optional[str]:
     m = _DECLARED.search(text or "")
     value = next((g for g in (m.groups() if m else ()) if g), None)
     return value.replace(",", "") if value else None
+
+
+# ── Session 56: hand work to the AI receptionist ─────────────────────────────
+
+_REMINDER_UNIT = {"minute": 1, "minutes": 1, "min": 1, "mins": 1, "nimishalu": 1, "nimishala": 1, "minat": 1,
+                  "hour": 60, "hours": 60, "hr": 60, "hrs": 60, "ganta": 60, "gantalu": 60, "gantala": 60,
+                  "ghanta": 60, "ghante": 60, "day": 1440, "days": 1440, "roju": 1440, "din": 1440}
+_REMINDER_NUM = {"a": 1, "an": 1, "one": 1, "oka": 1, "ek": 1, "two": 2, "rendu": 2, "do": 2, "three": 3, "moodu": 3,
+                 "teen": 3, "four": 4, "naalugu": 4, "char": 4, "five": 5, "six": 6, "twelve": 12, "fifteen": 15,
+                 "thirty": 30, "forty five": 45, "half": 0.5}
+_REMINDER_SPAN = re.compile(r"\b(half\s+an?|forty five|\d{1,4}(?:\.\d)?|a|an|one|oka|ek|two|rendu|do|three|moodu|teen|"
+                            r"four|naalugu|char|five|six|twelve|fifteen|thirty)\s*-?\s*"
+                            r"(minutes?|mins?|nimishal[ua]|minat|hours?|hrs?|gantal[ua]|ganta|ghanta|ghante|days?|"
+                            r"roju|din)\b", re.I)
+
+
+def resolve_reminder_minutes(text: str) -> Optional[list]:
+    """When reminder calls go out, as minutes before the appointment: "1 hour before" -> [60],
+    "a day before and 2 hours before" -> [1440, 120], "half an hour" -> [30]. At most 3, largest first;
+    None when no time is said. Bounds (15 min - 1 day) are the preview's and the server's to refuse."""
+    out = []
+    for m in _REMINDER_SPAN.finditer(text or ""):
+        raw, unit = m.group(1).lower(), m.group(2).lower()
+        n = 0.5 if raw.startswith("half") else _REMINDER_NUM.get(raw)
+        if n is None:
+            try:
+                n = float(raw)
+            except ValueError:
+                continue
+        mult = next((v for k, v in _REMINDER_UNIT.items() if unit.startswith(k)), None)
+        if mult is None:
+            continue
+        minutes = int(round(n * mult))
+        if minutes > 0 and minutes not in out:
+            out.append(minutes)
+    return sorted(out, reverse=True)[:3] or None
+
+
+_CALL_LEAD_NOISE = {"make", "have", "ask", "tell", "get", "let", "the", "our", "ai", "receptionist", "kriya", "voice",
+                    "assistant", "bot", "call", "calls", "calling", "phone", "ring", "to", "lead", "leads", "contact",
+                    "please", "pls", "now", "today", "back", "follow", "up", "followup", "with", "a", "an", "and",
+                    "chey", "cheyyi", "cheyandi", "cheyinchu", "cheyyinchu", "karo", "karwao", "karao", "karvao",
+                    "se", "ko", "ki", "ni", "tho", "dwara", "through", "via", "using", "by", "patient", "person",
+                    "customer", "enquiry", "him", "her", "them", "mr", "mrs", "ms"}
+
+
+def resolve_call_lead(text: str) -> Optional[str]:
+    """Which lead staff want the AI receptionist to call, by name ("make the AI receptionist call Ravi Kumar
+    about knee pain" -> "ravi kumar"), or the last digits of their phone. None when nothing names one."""
+    t = _CALL_ABOUT.sub(" ", (text or "").replace("’", "'"))
+    digits = re.search(r"\d{4,}", t)
+    if digits:
+        return digits.group(0)
+    words = [w for w in re.findall(r"[a-z]+", re.sub(r"'s\b", "", t.lower())) if w not in _CALL_LEAD_NOISE]
+    name = " ".join(words)
+    return name if 2 <= len(name) <= 40 else None

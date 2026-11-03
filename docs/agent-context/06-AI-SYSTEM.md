@@ -165,3 +165,27 @@ Beyond patient chat, the LLM is leveraged for several administrative tasks via `
 * `rules._REASON_CLAUSE`: the reason ("because …") is never used to choose the action.
 * Details and what stays with a person: `docs/sessions/SESSION_55_KETU_MONEY_AND_INPATIENT.md`.
 
+
+## Receptionist plan scope, call handling, LLM-to-rules learning; Ketu hand-off (session 56)
+
+* **Plan scope** (`app/voice/scope.py`): the voice receptionist offers only what the clinic's plan sells, by the
+  rule WhatsApp uses (`lab_test_booking`; `booking` and not diagnostics-only). A diagnostic centre's
+  "appointment" is a test booking; a clinic without lab booking never takes one. `FULL` (old behaviour) when the
+  plan is unknown or the doctor read fails. Routed in `dialog` via `scope.route()`; `_k()` picks `*_lab` wordings.
+* **Call acts** (`nlu_rules.DIALOG_ACTS`: `DO_NOT_CALL`, `WRONG_NUMBER`, `BUSY`, `WHO_IS_THIS`, `RUNNING_LATE`;
+  handled in `dialog._call_acts`): on calls Kriya placed, do-not-call / wrong number end the call and
+  `outbound._eligible` / `enqueue_bulk` never dial that phone again (from `voice_calls.outcome`). A negated
+  do-word ("call mat karo") is never AFFIRM.
+* **LLM teaches the rules**: a turn the rules missed and the LLM mapped to a clinic department is harvested as
+  `unmapped_entity`; the distiller proposes a lexicon entry for staff approval.
+* **Ketu**: `voice.call_lead` (one lead by name), `voice.reminder_calls` (reminder calls on/off and when), more
+  `leads.call` phrasings; corpus set DEV6. Details: `docs/sessions/SESSION_56_RECEPTIONIST_PLAN_SCOPE_AND_KETU_HANDOFF.md`.
+
+## WhatsApp-booked callers, isolation guard, re-audit (session 57)
+
+* The receptionist now answers "is it confirmed?", moves a booking ("change my appointment time", "wrong doctor,
+  change it to cardiology": new first, old cancelled after verification), answers refunds from the caller's own
+  cancelled paid bookings (`tools.refunds`, workflow `REFUND`), helps with payment trouble (callback), and handles
+  "I'll be late", the wait and complaints on any call. Soft reschedule phrases count only on an open floor.
+* `tests/voice/test_tenant_isolation.py`: two hospitals, same patient phone, filters really applied.
+  Details: `docs/sessions/SESSION_57_WHATSAPP_BOOKED_CALLERS_ISOLATION_REAUDIT.md`.

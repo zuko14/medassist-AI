@@ -6,7 +6,7 @@ executes autonomously today; every other intent is answered honestly
 ("I'll connect you to our staff") and routed to a human — never guessed at.
 """
 
-TAXONOMY_VERSION = "intents-2026.10.08"
+TAXONOMY_VERSION = "intents-2026.11.03"
 
 ALL_INTENTS = (
     "GREETING", "GENERAL_INFORMATION", "HOSPITAL_INFORMATION", "DEPARTMENT_INFORMATION",
@@ -45,6 +45,8 @@ WORKFLOW_OF = {
     # holidays are applied); payment and sample questions read the caller's own records.
     "NEW_PATIENT_REGISTRATION": "BOOKING", "DOCTOR_LEAVE": "BOOKING",
     "PAYMENT_LINK": "STATUS", "PAYMENT_FAILED": "STATUS", "SAMPLE_STATUS": "REPORT",
+    # "Where is my refund?": read from the caller's own cancelled bookings (session 57), never a guess.
+    "REFUND_STATUS": "REFUND",
     "HUMAN_AGENT_REQUEST": "HUMAN", "CALLBACK_REQUEST": "CALLBACK",
     "COMPLAINT": "CALLBACK", "FEEDBACK": "CALLBACK",
 }
@@ -55,6 +57,7 @@ HANDLED = frozenset(WORKFLOW_OF)
 RISK = {
     "BOOKING": "transactional", "LAB_BOOKING": "transactional", "CANCEL": "transactional",
     "RESCHEDULE": "transactional", "REPORT": "sensitive", "STATUS": "sensitive", "QUEUE": "sensitive",
+    "REFUND": "sensitive",
     "FEES": "informational", "LAB_PRICE": "informational", "INFO": "informational",
     "HUMAN": "routing", "CALLBACK": "routing",
 }

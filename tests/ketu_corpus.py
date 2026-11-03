@@ -755,3 +755,33 @@ DEV5 = [
     ("opd.shift_close", "close my shift, cash counted 15400"),
     ("opd.shift_close", "close the counter with 15,400 in the drawer"),
 ]
+
+# Session 56: work handed to the AI receptionist by voice (leads, one lead by name, reminder calls), and the
+# neighbours that must keep their meaning. Two of these were WRONG before ("transfer the leads to the AI
+# receptionist" -> a BED transfer; "make the AI receptionist call Ravi" -> a staff ROLE change).
+DEV6 = [
+    ("leads.call", "transfer the leads to the AI receptionist"),
+    ("leads.call", "give the leads to the AI receptionist and call them"),
+    ("leads.call", "send the leads to kriya for calling"),
+    ("leads.call", "leads ni AI receptionist ki ivvu"),
+    ("leads.call", "receptionist se leads ko call karwao"),
+    ("leads.call", "follow up the leads by phone"),
+    ("leads.call", "start lead calls"),
+    ("leads.call", "hand over this week's leads to the receptionist"),
+    ("voice.call_lead", "make the AI receptionist call Ravi"),
+    ("voice.call_lead", "have kriya call Sita about thyroid test"),
+    ("voice.call_lead", "ask the receptionist to call lead Sita Devi"),
+    ("voice.call_lead", "receptionist tho Ravi ki call cheyinchu"),
+    ("voice.reminder_calls", "turn on reminder calls"),
+    ("voice.reminder_calls", "switch on appointment reminder calls 1 hour before"),
+    ("voice.reminder_calls", "remind patients by call 2 hours before appointment"),
+    ("voice.reminder_calls", "turn off reminder calls"),
+    ("voice.reminder_calls", "set reminder calls 1 day and 2 hours before"),
+    ("voice.reminder_calls", "call patients half an hour before their appointment"),
+    ("voice.reminder_calls", "reminder calls band karo"),
+    ("voice.call_number", "ask kriya to call 9876543210"),
+    ("voice.auto_leads", "turn on automatic lead calls"),
+    ("staff.role", "make Ravi a receptionist"),
+    ("ipd.transfer", "transfer Sita to bed 12"),
+    ("ipd.transfer", "transfer bed 5 patient to bed 9"),
+]

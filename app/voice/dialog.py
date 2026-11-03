@@ -16,8 +16,9 @@ from typing import Optional, Protocol
 from .intents import WORKFLOW_OF
 from .nlu_rules import SUPPORTED_LANGS, NLUResult, is_question, looks_english, script_language
 from .policy import is_noise
+from .scope import FULL, route as scope_route
 
-DIALOG_VERSION = "dialog-2026.10.21"
+DIALOG_VERSION = "dialog-2026.11.04"
 MAX_FAILURES = 3
 MAX_IDLE = 2          # "hello?" / "hmm" turns answered patiently before they count as misses
 
@@ -109,11 +110,18 @@ class DialogEngine:
                 **self._c(), "appt": reminder, "patient": reminder.get("patient_name")})]))
         if outbound:
             # A "yes" goes straight to the department the lead asked about (no re-asking).
-            state["offer"] = {"wf": "BOOKING", "slots": dict(slots or {})}
+            # A diagnostic centre's lead is offered a test, never a doctor it does not have.
+            wf = scope_route("BOOKING", self.scope)
+            if wf == "LAB_BOOKING":
+                state["offer"] = {"wf": wf, "slots": {k: v for k, v in (slots or {}).items() if k == "test"}}
+                key = "greeting_outbound_lab"
+            else:
+                state["offer"] = {"wf": "BOOKING", "slots": {k: v for k, v in (slots or {}).items() if k != "test"}}
+                key = "greeting_outbound"
             state["expect"] = "offer"
             state["outbound"] = True
-            say = Say("greeting_outbound", {**self._c(), "interest": interest, "name": name,
-                                            "pitch": self.clinic.get("pitch") or {}})
+            say = Say(key, {**self._c(), "interest": interest, "name": name,
+                            "pitch": self.clinic.get("pitch") or {}})
             state["last_question"] = asdict(say)
             out = TurnOutput([say])
         else:
@@ -126,9 +134,16 @@ class DialogEngine:
         return self._finish(state, out)
 
     def clinical(self, state: dict) -> TurnOutput:
-        state["offer"] = {"wf": "BOOKING", "slots": {}}
+        # The refusal ends with what THIS hospital can do: a doctor's visit, or a test at a
+        # diagnostic centre; a hospital offering neither only refuses (never "shall I book a doctor?").
+        wf = scope_route("BOOKING", self.scope)
+        if wf == "NOT_OFFERED":
+            out = TurnOutput([Say("clinical_refusal_plain")])
+            self._anything_else(state, out)
+            return self._finish(state, out)
+        state["offer"] = {"wf": wf, "slots": {}}
         state["expect"] = "offer"
-        return self._finish(state, TurnOutput([Say("clinical_refusal")]))
+        return self._finish(state, TurnOutput([Say("clinical_refusal" if wf == "BOOKING" else "clinical_refusal_lab")]))
 
     def observe_language(self, state: dict, text: str) -> Optional[Say]:
         """Implicit switch: two consecutive turns clearly in another supported language.
@@ -184,6 +199,9 @@ class DialogEngine:
             if not biz:
                 out.says.extend(self._reprompt(state))
                 return out
+        handled = await self._call_acts(state, out, intents, biz, expect)
+        if handled:
+            return out
         # "Hello?" / "hmm" / a bare "okay" with nothing asked: the caller is checking the line.
         # Answer patiently instead of counting a misunderstanding (production calls were being
         # transferred within seconds because three "hello"s counted as three misses).
@@ -195,7 +213,7 @@ class DialogEngine:
                 if expect:
                     out.says.extend(self._reprompt(state) or [Say("listening")])
                 else:
-                    out.says.append(Say("listening" if state["idle"] == 1 else "clarify"))
+                    out.says.append(Say("listening" if state["idle"] == 1 else self._k("clarify")))
                 return out
         else:
             state["idle"] = 0
@@ -207,11 +225,12 @@ class DialogEngine:
                     and not state.get("misses_total")):
                 state["human_offered"] = True
                 state["offer"] = {"wf": "HUMAN", "reason": "caller_requested_human"}
-                self._ask(state, out, "offer", Say("offer_self_help"))
+                self._ask(state, out, "offer", Say(self._k("offer_self_help")))
                 return out
             await self._handoff(state, out, "caller_requested_human")
             return out
-        if expect == "reminder" and not biz:
+        # "No, I'm busy that day" also reads as a callback request: on a reminder it is a can't-come.
+        if expect == "reminder" and (not biz or ("DENY" in intents and set(biz) <= {"CALLBACK_REQUEST"})):
             # DENY first: "yes... but I can't come" must be offered a new time, not hung up on.
             if "DENY" in intents:
                 # Cannot come: offer to move this very appointment (no "which one?" question).
@@ -295,10 +314,14 @@ class DialogEngine:
         if biz:
             todo = []  # one (workflow, intent) per workflow, in the order spoken
             for b in biz:
-                wf = WORKFLOW_OF.get(b, "UNSUPPORTED")
+                wf = scope_route(WORKFLOW_OF.get(b, "UNSUPPORTED"), self.scope)
                 if wf not in [w for w, _ in todo]:
                     todo.append((wf, b))
             active = (state.get("task") or {}).get("wf")
+            if active == "LAB_BOOKING" and expect == "lab_test" and [w for w, _ in todo] == ["LAB_PRICE"]:
+                # "Which test?" -> "CBC": the answer names a test (read as a price question), it is not
+                # a new request; restarting would drop the day already given.
+                todo = [("LAB_BOOKING", (state["task"] or {}).get("intent") or "LAB_TEST_BOOKING")]
             if not (active and [w for w, _ in todo] == [active]):
                 first, first_intent = todo[0]
                 if active and first != active:
@@ -312,11 +335,71 @@ class DialogEngine:
             if any(ents.get(k) for k in ("department", "doctor_ids", "specialty", "date", "time_period",
                                          "clock_time")):
                 # "Today" / "tomorrow evening" as an opening line at a hospital means an appointment.
-                state["task"] = {"wf": "BOOKING", "intent": "BOOK_APPOINTMENT", "slots": {}}
+                state["task"] = {"wf": scope_route("BOOKING", self.scope), "intent": "BOOK_APPOINTMENT",
+                                 "slots": {}}
             else:
-                return self._miss(state, out, Say("clarify" if state["failures"] == 0 else "didnt_catch"))
+                return self._miss(state, out, Say(self._k("clarify") if state["failures"] == 0 else "didnt_catch"))
 
         return await self._run(state, out, nlu, text)
+
+    async def _call_acts(self, state: dict, out: TurnOutput, intents: list, biz: list, expect) -> bool:
+        """What a person says about the CALL (session 56). On a call WE placed (lead or reminder):
+        "don't call me" / "wrong number" end it and are never dialled again (outbound._eligible reads
+        these outcomes); "busy / driving / call later" ends it politely and staff call back; "I'll be
+        late" on a reminder is acknowledged and reception told. On any call, "who is this?" is answered
+        and the pending question repeated. None of these is ever counted as a misunderstanding."""
+        ours = bool(state.get("outbound") or state.get("reminder"))
+        if ours and ("DO_NOT_CALL" in intents or "WRONG_NUMBER" in intents):
+            wrong = "WRONG_NUMBER" in intents
+            state["outcomes"].append({"wf": "CALL", "outcome": "wrong_number" if wrong else "do_not_call"})
+            out.says.append(Say("wrong_number_sorry" if wrong else "do_not_call_ack"))
+            await self._note(("Wrong number: " if wrong else "Asked not to be called again: ")
+                             + "the AI receptionist will not call this number again.")
+            state["expect"], state["offer"], state["task"], state["queue"] = None, None, None, []
+            out.control = "end"
+            return True
+        reminder_cant_come = expect == "reminder" and "DENY" in intents
+        if ours and "BUSY" in intents and not (set(biz) - {"CALLBACK_REQUEST"}) and not reminder_cant_come:
+            # On a reminder, "I'm busy that day, I can't come" is a can't-come: offered a new time below.
+            reminder = bool(state.get("reminder"))
+            state["outcomes"].append({"wf": "CALL", "outcome": "call_later"})
+            out.says.append(Say("busy_ack_reminder" if reminder else "busy_ack"))
+            if not reminder:
+                await self._note("Busy when called: please call back at a better time.")
+            state["expect"], state["offer"], state["task"], state["queue"] = None, None, None, []
+            out.control = "end"
+            return True
+        if "RUNNING_LATE" in intents and not biz:
+            # "I'll be late": reassure, tell reception. A reminder call then ends; a caller who rang us may
+            # need something else.
+            reminder = expect == "reminder"
+            state["outcomes"].append({"wf": "REMINDER" if reminder else "CALL",
+                                      "outcome": "reminder_running_late" if reminder else "running_late"})
+            out.says.append(Say("running_late_ack"))
+            await self._note("Running late for the appointment (said on the "
+                             + ("reminder call)." if reminder else "phone)."))
+            if reminder:
+                state["expect"] = None
+                out.control = "end"
+            else:
+                state["failures"], state["idle"] = 0, 0
+                self._anything_else(state, out)
+            return True
+        if "WHO_IS_THIS" in intents and not biz:
+            state["idle"], state["failures"] = 0, 0
+            out.says.append(Say("who_am_i", self._c()))
+            out.says.extend(self._reprompt(state) or [Say("how_can_help")])
+            return True
+        return False
+
+    async def _note(self, text: str) -> None:
+        """A note for the hospital's staff (admin notification). Never fails the call."""
+        note = getattr(self.tools, "note_for_staff", None)
+        if note:
+            try:
+                await note(text)
+            except Exception:
+                pass
 
     # ---- orchestration ----
 
@@ -365,8 +448,14 @@ class DialogEngine:
         if state.get("expect"):
             out.says.extend(self._reprompt(state))      # back to the question that was pending
         elif not state.get("task"):
-            dept = ents.get("department") or focus.get("department")
-            self._offer(state, out, {"wf": "BOOKING", "slots": {"department": dept} if dept else {}})
+            wf = scope_route("BOOKING", self.scope)
+            if wf == "BOOKING":
+                dept = ents.get("department") or focus.get("department")
+                self._offer(state, out, {"wf": "BOOKING", "slots": {"department": dept} if dept else {}})
+            elif wf == "LAB_BOOKING":
+                self._offer(state, out, {"wf": "LAB_BOOKING", "slots": {}})
+            else:
+                self._anything_else(state, out)
 
     def _finish(self, state: dict, out: TurnOutput) -> TurnOutput:
         state["last_says"] = [asdict(s) for s in out.says]
@@ -385,7 +474,7 @@ class DialogEngine:
         state["misses_total"] = state.get("misses_total", 0) + 1
         if state["failures"] >= MAX_FAILURES and not state.get("help_offered"):
             state["help_offered"], state["failures"] = True, 0
-            out.says.append(Say("help_menu"))
+            out.says.append(Say(self._k("help_menu")))
             if state.get("expect"):
                 out.says.append(say)                     # the question still pending
             return out
@@ -417,6 +506,8 @@ class DialogEngine:
 
     @staticmethod
     def _offer_say(offer: dict) -> Say:
+        if offer.get("wf") == "LAB_BOOKING" and not (offer.get("slots") or {}).get("test"):
+            return Say("offer_test_booking")          # no test named yet: "this test" would be wrong
         return Say({"BOOKING": "offer_booking", "LAB_BOOKING": "offer_lab_booking", "HUMAN": "offer_human",
                     "CALLBACK": "offer_callback", "RESCHEDULE": "offer_reschedule"}.get(offer.get("wf"), "offer_booking"))
 
@@ -442,6 +533,18 @@ class DialogEngine:
 
     def _c(self) -> dict:
         return {"hospital": self.clinic.get("hospital", ""), "assistant": self.clinic.get("assistant", "Kriya")}
+
+    @property
+    def scope(self):
+        """What this hospital offers (app/voice/scope.py). FULL when unknown: never narrower than before."""
+        return self.clinic.get("scope") or FULL
+
+    def _k(self, key: str) -> str:
+        """A diagnostic centre's wording of a menu-style sentence (tests, not doctors), when it has one."""
+        from .responses import T
+        if self.scope.kind == "diagnostic" and key + "_lab" in T:
+            return key + "_lab"
+        return key
 
     @staticmethod
     def _merge(slots: dict, ents: dict) -> bool:
@@ -728,12 +831,19 @@ class DialogEngine:
         if appt is None:
             return bool(task.get("done"))
         if appt.get("paid") or not appt.get("doctor_id"):
-            out.says.append(Say("reschedule_paid_handoff"))
+            # A test booking (no doctor) is moved by staff too; it is not "already paid" unless it is.
+            out.says.append(Say("reschedule_paid_handoff" if appt.get("paid") else "reschedule_staff_handoff"))
             await self._handoff(state, out, "reschedule_needs_staff", announce=True)
             return True
-        state["task"] = {"wf": "BOOKING", "intent": "RESCHEDULE_APPOINTMENT",
-                         "slots": {"doctor_ids": [appt["doctor_id"]], "reschedule_of": appt}}
+        # "Change it to cardiology" / another doctor named: the new booking is with them; otherwise the same
+        # doctor. Either way the old booking is cancelled only after the new one is verified.
+        other = {k: v for k, v in nlu.entities.items() if k in ("department", "doctor_ids", "specialty") and v}
+        slots = {"reschedule_of": appt}
+        if not other:
+            slots["doctor_ids"] = [appt["doctor_id"]]
+        state["task"] = {"wf": "BOOKING", "intent": "RESCHEDULE_APPOINTMENT", "slots": slots}
         keep = {k: v for k, v in nlu.entities.items() if k in ("date", "time_period", "clock_time")}
+        keep.update(other)
         return await self._wf_booking(state, out, NLUResult([], keep, 1.0), "")
 
     async def _wf_status(self, state, out, nlu, text) -> bool:
@@ -748,6 +858,38 @@ class DialogEngine:
         for a in appts[:2]:
             out.says.append(Say("upcoming_one", {"appt": a}))
         task["outcome"] = "answered"
+        if task.get("intent") in ("PAYMENT_STATUS", "PAYMENT_LINK", "PAYMENT_FAILED"):
+            # "I paid but got no confirmation" / "the link failed": say what the records show, and where the
+            # payment is still open, ask staff to check it and send the link again (never a promise of money).
+            if any(a.get("status") == "pending_payment" for a in appts[:2]):
+                out.says.append(Say("payment_help"))
+                await self.tools.create_callback("payment_help")
+                task["outcome"] = "callback_requested"
+            elif any(a.get("paid") for a in appts[:2]):
+                out.says.append(Say("payment_received"))
+        return True
+
+    async def _wf_refund(self, state, out, nlu, text) -> bool:
+        """'Where is my refund?': from the caller's own paid bookings cancelled in the last 30 days."""
+        task = state["task"]
+        look = getattr(self.tools, "refunds", None)
+        try:
+            rows = await look() if look else None
+        except Exception:
+            rows = None
+        if rows:
+            r = rows[0]
+            if r.get("status") == "refunded":
+                out.says.append(Say("refund_started", {"appt": r}))
+                task["outcome"] = "status_told"
+                return True
+            out.says.append(Say("refund_pending_staff", {"appt": r}))
+            await self.tools.create_callback("refund_not_processed")
+        else:
+            # Nothing found (or the lookup failed): never "no refund is due"; staff check and call back.
+            out.says.append(Say("refund_check_callback"))
+            await self.tools.create_callback("refund_status")
+        task["outcome"] = "callback_requested"
         return True
 
     async def _wf_report(self, state, out, nlu, text) -> bool:
@@ -806,10 +948,10 @@ class DialogEngine:
                         task["outcome"] = "answered"
                         return True
                     out.says.pop()                       # kb_unknown: re-ask instead
-                self._miss(state, out, Say("ask_info_topic"))
+                self._miss(state, out, Say(self._k("ask_info_topic")))
                 state["expect"] = "info_topic"
                 return False
-            return self._ask(state, out, "info_topic", Say("ask_info_topic"))
+            return self._ask(state, out, "info_topic", Say(self._k("ask_info_topic")))
         state["expect"] = None
         answer = await self.tools.info(topic)
         if answer:
@@ -855,9 +997,15 @@ class DialogEngine:
             return await self._degraded(state, out, task)
         tests = [t for t in tests if t.get("price_paise")]
         if not tests:
+            # "What are your charges?" at a diagnostic centre names no test: ask which, once.
+            if task.get("intent") == "FEES" and not task["slots"].get("asked"):
+                task["slots"]["asked"] = True
+                return self._ask(state, out, "lab_test", Say("ask_lab_test"))
+            state["expect"] = None
             out.says.append(Say("lab_not_found"))
             task["outcome"] = "not_found"
             return True
+        state["expect"] = None
         for t in tests[:2]:
             out.says.append(Say("lab_price", {"test": t["name"], "price": t["price_paise"]}))
         task["outcome"] = "answered"
@@ -932,6 +1080,22 @@ class DialogEngine:
 
     async def _wf_human(self, state, out, nlu, text) -> bool:
         await self._handoff(state, out, "caller_requested_human")
+        return True
+
+    async def _wf_not_offered(self, state, out, nlu, text) -> bool:
+        """Asked for something this hospital's plan does not include: say so, and offer what it does."""
+        task = state["task"]
+        intent = task.get("intent") or ""
+        sc = self.scope
+        wants_test = intent.startswith("LAB_")
+        out.says.append(Say("no_tests_here" if wants_test else "no_doctors_here" if sc.labs else "not_offered_here"))
+        task["outcome"] = "not_offered"
+        if wants_test and sc.doctors:
+            self._offer(state, out, {"wf": "BOOKING", "slots": {}})
+        elif not wants_test and sc.labs:
+            self._offer(state, out, {"wf": "LAB_BOOKING", "slots": {}})
+        else:
+            self._offer(state, out, {"wf": "HUMAN", "reason": f"not_offered:{intent}"})
         return True
 
     async def _wf_unsupported(self, state, out, nlu, text) -> bool:

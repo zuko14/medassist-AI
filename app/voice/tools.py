@@ -32,7 +32,7 @@ from .phone import mask
 
 logger = logging.getLogger(__name__)
 
-TOOLS_VERSION = "tools-2026.10.06"
+TOOLS_VERSION = "tools-2026.11.03"
 _ACTIVE = ("confirmed", "pending_payment", "pending_review")
 _MAX_DOCTORS = 6
 
@@ -185,6 +185,29 @@ class KriyaTools:
                  "time": str(r["appointment_time"])[:5] if r.get("appointment_time") else None}
                 for r in res.data or []]
         await self._trace("APPOINTMENT_LOOKUP", "ok", t0, {"found": len(rows)})
+        return rows
+
+    async def refunds(self):
+        """The caller's own PAID bookings cancelled in the last 30 days (refunded or not yet), newest first.
+        None when the read failed. Same scope as upcoming_appointments: this clinic, the caller's number."""
+        t0 = time.monotonic()
+        since = (today_ist() - timedelta(days=30)).isoformat()
+        try:
+            res = await sb(supabase.table("appointments")
+                           .select("id, booking_ref, status, payment_id, doctor_name, booking_type, lab_test_name, "
+                                   "appointment_date, appointment_time, updated_at")
+                           .eq("clinic_id", self.ctx.clinic_id).eq("patient_phone", self.ctx.caller_phone)
+                           .in_("status", ["refunded", "cancelled"]).gte("updated_at", since)
+                           .order("updated_at", desc=True).limit(5))
+        except Exception as e:
+            await self._trace("REFUND_LOOKUP", "fail", t0, {"error": str(e)[:200]})
+            return None
+        rows = [{"id": r["id"], "status": r["status"], "doctor_name": r.get("doctor_name"),
+                 "booking_type": r.get("booking_type"), "lab_test_name": r.get("lab_test_name"),
+                 "date": str(r["appointment_date"]),
+                 "time": str(r["appointment_time"])[:5] if r.get("appointment_time") else None}
+                for r in res.data or [] if r.get("payment_id")]
+        await self._trace("REFUND_LOOKUP", "ok", t0, {"found": len(rows)})
         return rows
 
     async def reports(self):
@@ -498,6 +521,23 @@ class KriyaTools:
                 return {"ok": False}
         await store.update_call(self.ctx.clinic_id, self.ctx.call_id, {"outcome": "callback_requested"})
         await self._trace("CALLBACK_CREATE", "ok" if not self._simulated else "skipped", t0, {"reason": reason})
+        return {"ok": True}
+
+    async def note_for_staff(self, text):
+        """A note for this hospital's staff about the call (session 56: do-not-call, wrong number,
+        busy, running late). Simulated on the test console. Never raises."""
+        t0 = time.monotonic()
+        if not self._simulated:
+            try:
+                # unscoped: insert_scoped_by_payload
+                await sb(supabase.table("admin_notifications").insert({
+                    "clinic_id": self.ctx.clinic_id, "admin_id": None,
+                    "title": f"{self.ctx.caller_phone} (AI receptionist)"[:255],
+                    "message": f"Call {self.ctx.call_ref}: {text}"[:1000], "is_read": False}))
+            except Exception as e:
+                await self._trace("STAFF_NOTE", "fail", t0, {"error": str(e)[:200]})
+                return {"ok": False}
+        await self._trace("STAFF_NOTE", "ok" if not self._simulated else "skipped", t0, {"note": text[:200]})
         return {"ok": True}
 
     async def handoff(self, reason):

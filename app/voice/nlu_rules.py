@@ -15,10 +15,12 @@ from typing import Optional
 from .dates import first_index, has_any, norm, parse_clock_time, parse_date, parse_time_period
 from .lexicon import find_specialties, match_doctors, resolve_department, tenant_department_for
 
-NLU_RULES_VERSION = "nlu-rules-2026.10.12"
+NLU_RULES_VERSION = "nlu-rules-2026.11.04"
 
 SUPPORTED_LANGS = ("te-IN", "hi-IN", "en-IN")
-DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE")
+DIALOG_ACTS = ("AFFIRM", "DENY", "GOODBYE", "REPEAT", "LANGUAGE_CHANGE",
+               # Call-handling acts (session 56): what a person says about the CALL, not a request.
+               "DO_NOT_CALL", "WRONG_NUMBER", "BUSY", "WHO_IS_THIS", "RUNNING_LATE")
 
 
 @dataclass
@@ -76,14 +78,23 @@ W = {
     "HOURS": ("timing", "timings", "open", "hours", "closing", "టైమింగ్", "సమయాలు",
               "kab tak", "खुला", "समय"),
     "CONTACT": ("phone number", "contact number", "contact", "landline"),
-    "QUEUE": ("token", "queue", "my turn", "waiting", "ఎంత సేపు", "kitni der", "कितनी देर"),
+    "QUEUE": ("token", "queue", "my turn", "waiting", "ఎంత సేపు", "kitni der", "कितनी देर", "have to wait",
+              "wait time", "waiting time", "how long will i wait", "how long do i wait", "how long to wait",
+              "ఎంతసేపు వెయిట్", "ఎంతసేపు ఆగాలి", "कितना इंतज़ार", "कितना इंतजार", "kitna wait"),
     "PAYMENT": ("payment", "paid", "pay", "link", "చెల్లింపు", "పేమెంట్", "पेमेंट", "भुगतान"),
     "REFUND": ("refund", "రీఫండ్", "रिफंड", "paisa wapas", "पैसा वापस"),
     "HUMAN": ("human", "receptionist", "reception", "person", "staff", "operator", "someone", "manishi",
               "మనిషి", "రిసెప్షన్", "इंसान", "किसी से बात", "रिसेप्शन"),
     "CALLBACK": ("call back", "callback", "call me back", "call me later", "తర్వాత కాల్", "baad mein call", "बाद में कॉल",
                  "busy", "బిజీ", "बिज़ी", "बिजी"),
-    "COMPLAINT": ("complaint", "complain", "ఫిర్యాదు", "शिकायत"),
+    "COMPLAINT": ("complaint", "complain", "ఫిర్యాదు", "शिकायत", "rude", "bad experience", "very bad service",
+                  "not happy with", "unhappy with", "misbehaved", "misbehave", "doctor did not come", "doctor didn't come",
+                  "doctor has not come", "doctor hasn't come", "doctor not yet come", "doctor still not come",
+                  "doctor is not here", "nobody is attending",
+                  "no one is attending", "no one is picking", "nobody picks", "బాగా లేదు సర్వీస్",
+                  "बदतमीज़ी", "बदतमीजी", "खराब अनुभव", "డాక్టర్ గారు రాలేదు", "డాక్టర్ రాలేదు", "doctor raledu",
+                  "doctor garu raledu", "डॉक्टर नहीं आए", "डॉक्टर नहीं आये", "डॉक्टर अभी तक नहीं",
+                  "doctor nahi aaye", "doctor abhi tak nahi"),
     "ASK_IF_AI": ("are you a robot", "are you ai", "are you an ai", "are you a bot", "are you human",
                   "are you a machine", "robot aa", "robot ha", "రోబోట్", "रोबोट", "मशीन हो"),
     "AFFIRM": ("yes", "yeah", "yep", "ok", "okay", "sure", "haa", "haan", "han", "avunu", "అవును", "సరే",
@@ -113,6 +124,36 @@ W = {
     "REPEAT": ("repeat", "malli cheppandi", "మళ్ళీ చెప్పండి", "phir se", "dobara", "दोबारा", "फिर से",
                "pardon", "come again"),
 }
+
+# "Don't do it": a do-word with its negation. "mat karo" holds "karo" (AFFIRM) after "mat" (DENY), so the
+# later-act-wins rule read "call mat karo" as YES. A negated do-word is never a yes.
+NEG_DO = ("mat karo", "mat kariye", "mat kijiye", "mat karna", "mat kar", "na karo", "na kare", "na karein",
+          "मत करो", "मत करिए", "मत कीजिए", "मत करना", "मत कर", "न करें", "ना करें",
+          "చేయకండి", "చెయ్యకండి", "చేయొద్దు", "చెయ్యొద్దు", "చేయవద్దు", "cheyyakandi", "cheyakandi", "cheyyoddu",
+          "don't do", "do not do", "don't book", "do not book")
+# Session 56: about the call itself (lead / reminder calls). Deterministic, checked in this order.
+CALL_WORDS = ("call", "calls", "calling", "phone", "కాల్", "కాల్స్", "ఫోన్", "कॉल", "फ़ोन", "फोन")
+DO_NOT_CALL = ("don't call", "dont call", "do not call", "stop calling", "never call", "no more calls",
+               "stop these calls", "remove my number", "call mat", "phone mat", "call na kare", "call nahi chahiye",
+               "कॉल मत", "फ़ोन मत", "फोन मत", "कॉल न करें", "कॉल ना करें", "कॉल नहीं चाहिए",
+               "కాల్ చేయకండి", "కాల్ చెయ్యకండి", "ఫోన్ చేయకండి", "ఫోన్ చెయ్యకండి", "కాల్ చేయొద్దు",
+               "ఫోన్ చేయొద్దు", "కాల్స్ వద్దు", "కాల్ వద్దు", "call cheyyakandi", "phone cheyyakandi")
+# "Don't call me NOW" / "call me later" is busy, never a do-not-call.
+_NOT_NOW = ("now", "right now", "abhi", "अभी", "ippudu", "ఇప్పుడు", "later", "baad", "बाद", "tarvata",
+            "తర్వాత", "busy", "బిజీ", "बिज़ी", "बिजी", "evening", "morning", "tomorrow", "sometime")
+WRONG_NUMBER = ("wrong number", "rong number", "galat number", "गलत नंबर", "ग़लत नंबर", "रॉन्ग नंबर",
+                "రాంగ్ నంబర్", "రాంగ్ నెంబర్", "తప్పు నంబర్", "తప్పు నెంబర్", "no one by that name",
+                "nobody by that name")
+BUSY = ("busy", "driving", "in a meeting", "in meeting", "can't talk", "cannot talk", "can't speak",
+        "call me later", "call later", "call back later", "baad mein", "baad me", "बाद में", "abhi nahi",
+        "अभी नहीं", "बिज़ी", "बिजी", "ड्राइविंग", "मीटिंग में", "బిజీ", "డ్రైవింగ్", "మీటింగ్",
+        "తర్వాత కాల్", "తర్వాత మాట్లాడ", "ఇప్పుడు మాట్లాడలేను", "ఇప్పుడు కుదరదు", "ippudu kudaradu",
+        "tarvata call", "call me in the", "call me tomorrow", "call me after", "call me at", "call me in an hour")
+WHO_IS_THIS = ("who is this", "who's this", "who is calling", "who's calling", "who are you", "who is speaking",
+               "where are you calling from", "where is this call from", "kaun bol", "aap kaun", "kon bol",
+               "कौन बोल", "आप कौन", "कहाँ से बोल", "kahan se bol", "ఎవరు మాట్లాడ", "మీరు ఎవరు",
+               "ఎక్కడి నుండి మాట్లాడ", "ఎక్కడ నుండి మాట్లాడ", "evaru matlad", "meeru evaru")
+RUNNING_LATE = ("late", "లేట్", "ఆలస్యం", "लेट", "देर से", "der se", "der ho", "देर हो")
 
 # Yes only when it is (nearly) the whole reply: "ఆ" is also "that" ("ఆ డాక్టర్"), "హా" a filler.
 SHORT_AFFIRM = frozenset({"ఆ", "ఆఁ", "ఆ ఆ", "హా", "హాఁ", "హాం", "హా అండి", "ఆ అండి", "aa", "haa", "ha",
@@ -155,6 +196,30 @@ ROMAN_INDIC_MARKERS = ("kavali", "kaavali", "cheyyandi", "cheyandi", "naaku", "n
                        "unnara", "chahiye", "hai", "mujhe", "kar", "karo", "dijiye", "nahi", "haan", "ledu",
                        "vaddu", "kaadu", "avunu", "repu", "ellundi", "ivala", "kal", "aaj", "garu", "andi",
                        "ji", "lo", "ki", "ka", "ke", "mein", "chesi", "pampandi")
+
+# "Change my appointment" is a reschedule (it was read as a status question). The soft forms ("another day",
+# "instead") only on an open floor: mid-booking they are an answer, never a new request.
+RESCHEDULE_STRONG = ("change my appointment", "change the appointment", "change appointment", "change my booking",
+                     "change the booking", "move my appointment", "move the appointment", "shift my appointment",
+                     "shift the appointment", "appointment time change", "appointment date change",
+                     "అపాయింట్మెంట్ మార్చ", "అపాయింట్‌మెంట్ మార్చ", "అపాయింట్మెంట్ టైమ్ మార్చ",
+                     "अपॉइंटमेंट बदल", "appointment badal", "appointment marchandi")
+# Mid-booking these are answers ("change the slot", "another doctor"), so only on an open floor.
+RESCHEDULE_SOFT = ("instead", "another time", "different time", "another day", "different day", "change the time",
+                   "change the date", "change time", "change date", "other day", "other time", "change my slot",
+                   "change the slot", "wrong doctor", "wrong department", "change the doctor", "change doctor",
+                   "change my doctor", "బదులుగా", "వేరే రోజు", "వేరే టైమ్", "టైమ్ మార్చ", "తేదీ మార్చ",
+                   "డాక్టర్ మార్చ", "time marchandi", "दूसरे दिन", "दूसरा दिन", "किसी और दिन", "दूसरा टाइम",
+                   "समय बदल", "टाइम बदल", "तारीख बदल", "डॉक्टर बदल", "time badal")
+# Late for a visit (said on any call). Specific shapes only: "late evening slot" is not running late.
+RUNNING_LATE_RX = re.compile(r"\b(?:i\s+will\s+be|i'll\s+be|i\s+am|i'm|we\s+will\s+be|we'll\s+be|will\s+be|running|"
+                             r"coming|reach(?:ing)?|getting)\s+(?:\d+\s*(?:min|mins|minutes)\s+)?(?:a\s+)?"
+                             r"(?:bit\s+|little\s+|few\s+minutes\s+)?late\b", re.I)
+RUNNING_LATE_PHRASES = ("లేట్ అవుతుంది", "లేట్ అవుతాను", "లేట్ గా వస్తా", "లేట్‌గా వస్తా", "ఆలస్యం అవుతుంది",
+                        "ఆలస్యంగా వస్తా", "लेट हो जाएगा", "लेट हो जाएगी", "लेट हो जाऊँगा", "लेट हो जाऊंगा",
+                        "लेट हो जाऊँगी", "लेट हो जाऊंगी", "देर हो जाएगी", "देर हो जाएगा", "देर से आऊँगा",
+                        "देर से आऊंगा", "देर से आऊँगी", "late ho jayega", "late ho jayegi", "late ho jaunga",
+                        "late ho jaungi", "der ho jayegi", "late avutundi", "late avutanu", "late ga vasta")
 
 _BOOKING_REF = re.compile(r"\b([A-Z]{2,8}-?[A-Z0-9]{4,10})\b")
 
@@ -328,7 +393,12 @@ def understand(text: str, ctx: NluContext, expect: Optional[str] = None) -> NLUR
     hit("COMPLAINT", "COMPLAINT")
     hit("CANCEL_APPOINTMENT", "CANCEL")
     hit("RESCHEDULE_APPOINTMENT", "RESCHEDULE")
+    if has_any(t, RESCHEDULE_STRONG) or (expect in (None, "anything_else") and has_any(t, RESCHEDULE_SOFT)):
+        i = first_index(t, RESCHEDULE_STRONG + RESCHEDULE_SOFT)
+        if "RESCHEDULE_APPOINTMENT" not in pos or i < pos["RESCHEDULE_APPOINTMENT"]:
+            pos["RESCHEDULE_APPOINTMENT"] = i
     if has_report:
+        pos.pop("COMPLAINT", None)       # "the report did not come" is a report question
         hit("REPORT_DELIVERY" if has_any(t, W["SEND"]) else "REPORT_STATUS", "REPORT")
     if has_lab and not has_report:
         hit("LAB_TEST_BOOKING" if has_any(t, W["BOOK"]) else "LAB_TEST_SEARCH", "LAB")
@@ -392,6 +462,38 @@ def understand(text: str, ctx: NluContext, expect: Optional[str] = None) -> NLUR
             pos.setdefault(act, first_index(t, W[act]))
     if " ".join(re.sub(r"[.,!?।;:'\"-]", " ", t).split()) in SHORT_AFFIRM:  # not \W: it eats Indic vowel signs
         pos.setdefault("AFFIRM", 0)
+    if has_any(t, NEG_DO):
+        pos.pop("AFFIRM", None)
+        pos.setdefault("DENY", first_index(t, NEG_DO))
+    # About the call itself. The dialog decides what each means (it only acts on them on its own calls).
+    if has_any(t, WRONG_NUMBER):
+        pos["WRONG_NUMBER"] = first_index(t, WRONG_NUMBER)
+    elif has_any(t, DO_NOT_CALL) and not has_any(t, _NOT_NOW) and not (d or period or clock):
+        pos["DO_NOT_CALL"] = first_index(t, DO_NOT_CALL)
+        pos.pop("AFFIRM", None)
+    elif has_any(t, BUSY) or has_any(t, DO_NOT_CALL):      # "don't call me NOW" = busy
+        pos["BUSY"] = first_index(t, BUSY) if has_any(t, BUSY) else first_index(t, DO_NOT_CALL)
+    if has_any(t, WHO_IS_THIS) and not has_any(t, W["DOCTOR"]):
+        pos["WHO_IS_THIS"] = first_index(t, WHO_IS_THIS)
+    if (expect == "reminder" and has_any(t, RUNNING_LATE)) or RUNNING_LATE_RX.search(t) \
+            or has_any(t, RUNNING_LATE_PHRASES):
+        pos["RUNNING_LATE"] = 0
+        # "I'll be late for my appointment" is about the visit they have, not a status or a new booking.
+        for k in ("APPOINTMENT_STATUS", "BOOK_APPOINTMENT"):
+            pos.pop(k, None)
+    if "QUEUE_STATUS" in pos:
+        pos.pop("FEES", None)             # "ఎంతసేపు ఆగాలి" / "कितना इंतज़ार": how long, not how much
+    if "RESCHEDULE_APPOINTMENT" in pos and ents.get("info_topic") == "hours":
+        pos.pop("HOSPITAL_INFORMATION", None)    # "समय बदलना है": the appointment's time, not our timings
+        ents.pop("info_topic")
+    if "CANCEL_APPOINTMENT" in pos:
+        pos.pop("REFUND_STATUS", None)    # cancelling refunds a paid booking and says so
+    if "REFUND_STATUS" in pos:
+        # "where is my refund" asks about money, never the address; nor is it a status read-out.
+        for k in ("LOCATION", "APPOINTMENT_STATUS"):      # "cancel and refund" still cancels
+            pos.pop(k, None)
+        if ents.get("info_topic") == "location":
+            ents.pop("info_topic")
     if lang_req:
         pos["LANGUAGE_CHANGE"] = 0
     if expect == "confirm" and "AFFIRM" in pos:
