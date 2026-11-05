@@ -42,6 +42,7 @@ Detailed, implementation-level intelligence documents are maintained in [`docs/a
 | [14-CURRENT-STATE.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/14-CURRENT-STATE.md) | Documentation drift analysis comparing historical specs to current code. |
 | [15-AGENT-HANDOFF.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/15-AGENT-HANDOFF.md) | Direct answers to the 16 architectural handoff questions and debugging entry points. |
 | [docs/ipd-os/status.md](docs/ipd-os/status.md) | **IPD OS (migration 111)**: execution tracker; start here, then ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU in the same folder. |
+| [docs/diagnostic-os/status.md](docs/diagnostic-os/status.md) | **Diagnostic OS (planned, migrations DX-M1…M9)**: execution tracker and resume pointer; master prompts in AGENT-PROMPT.md; design in ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / REPORT-TEMPLATES / API / UI / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU / GAP-ANALYSIS / COMPETITIVE-ANALYSIS in the same folder. |
 
 ---
 
