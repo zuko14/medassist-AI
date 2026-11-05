@@ -314,23 +314,30 @@ def test_session_cookie_name_matches_the_admin_router():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("password, expected", [("admin", ("ok", 200)), ("wrong", ("failed", 401))])
-async def test_real_app_runs_its_own_auth_for_the_dispatched_request(password, expected):
+@pytest.mark.parametrize("correct_password, expected", [(True, ("ok", 200)), (False, ("failed", 401))])
+async def test_real_app_runs_its_own_auth_for_the_dispatched_request(correct_password, expected):
     import base64
     from unittest.mock import AsyncMock, MagicMock, patch
 
+    from app.config import settings
     from app.routers import admin
 
+    # Use the env super-admin the app was actually configured with. tests/conftest.py
+    # only setdefault()s ADMIN_PASSWORD="admin"; CI exports its own value
+    # (ADMIN_PASSWORD in .github/workflows/test.yml), so a hard-coded "admin" is a
+    # wrong password there and this case failed with 401 in CI while passing locally.
+    username = settings.admin_username
+    password = settings.admin_password if correct_password else settings.admin_password + "-wrong"
     limiter = MagicMock(is_rate_limited=MagicMock(return_value=False))
     clinic = {"id": CID, "plan": "polyclinic", "features": {}}
-    basic = "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()
+    basic = "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
     with patch.object(admin, "sb", AsyncMock(return_value=MagicMock(data=[]))), \
          patch.object(admin, "login_rate_limiter", limiter), \
          patch.object(admin, "get_clinic_by_id", AsyncMock(return_value=clinic)):
         out = await executor.dispatch(Call("GET", "/admin/me"), CallerAuth(None, basic), CID, "r")
     assert (out.status, out.http_status) == expected
     if out.status == "ok":
-        assert out.data["username"] == "admin" and out.data["role"] == "super_admin"
+        assert out.data["username"] == username and out.data["role"] == "super_admin"
         assert out.data["clinic_id"] is None and out.data["plan"] == "polyclinic"  # scoped via ?clinic_id
     else:
-        assert out.error_code == "session_expired" and "admin" not in out.message
+        assert out.error_code == "session_expired" and username not in out.message
