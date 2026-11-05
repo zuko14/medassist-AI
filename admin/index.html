@@ -2895,6 +2895,389 @@
             padding-right: 38px !important; text-overflow: ellipsis;
         }
         select option { background-color: var(--surface-solid); color: var(--text); }
+
+        /* ═══════ DASHBOARD · PREMIUM ═══════════════════════════════════════
+           Every selector is scoped to #clinicDashboardContent, so the shared
+           .stat / .card styles used by other pages are untouched. Colour means
+           status here (completed = green, cancelled = red, …), never position.
+           Theme tokens only, so light and dark both follow the toggle. */
+        #clinicDashboardContent { --dash-gap: 18px; }
+        #clinicDashboardContent .dash-kpis {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-bottom: var(--dash-gap);
+        }
+        #clinicDashboardContent .dash-kpis > .stat { max-width: none; }
+        /* Balanced rows (6 / 3 / 2) from the dashboard's own width, so a lone
+           tile never wraps onto a row of its own. Browsers without container
+           queries keep the auto-fit grid above. */
+        #clinicDashboardContent { container-type: inline-size; container-name: dash; }
+        @container dash (min-width: 1060px) { .dash-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; } }
+        @container dash (min-width: 560px) and (max-width: 1059.98px) { .dash-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
+        @container dash (max-width: 559.98px) { .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+
+        #clinicDashboardContent .dash-kpi { --tone: var(--accent); }
+        #clinicDashboardContent .dash-kpi[data-tone="confirmed"] { --tone: var(--cyan); }
+        #clinicDashboardContent .dash-kpi[data-tone="cancelled"] { --tone: var(--red); }
+        #clinicDashboardContent .dash-kpi[data-tone="completed"] { --tone: var(--green); }
+        #clinicDashboardContent .dash-kpi[data-tone="patients"]  { --tone: var(--pink); }
+        #clinicDashboardContent .dash-kpi[data-tone="new"]       { --tone: var(--amber); }
+
+        #clinicDashboardContent .dash-kpi {
+            justify-content: flex-start;
+            min-height: 150px;
+            padding: 18px 18px 16px;
+            overflow: hidden;
+            isolation: isolate;
+            transition: transform var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out),
+                        box-shadow var(--motion-base) var(--ease-out);
+        }
+        /* soft wash of the tile's own colour from the top-right corner */
+        #clinicDashboardContent .dash-kpi::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            background: radial-gradient(120% 90% at 100% 0%, var(--accent-glow), transparent 62%);
+            background: radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tone) 16%, transparent), transparent 62%);
+        }
+        /* the brand hairline becomes the tile's colour */
+        #clinicDashboardContent .dash-kpi::after {
+            height: 2px;
+            opacity: 0.85;
+            background: linear-gradient(90deg, var(--tone), transparent 85%);
+        }
+        #clinicDashboardContent .dash-kpi:hover {
+            border-color: var(--border2);
+            box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.55);
+            box-shadow: 0 18px 40px -22px color-mix(in srgb, var(--tone) 55%, transparent);
+        }
+        #clinicDashboardContent .dash-kpi-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        #clinicDashboardContent .dash-kpi-top { min-height: 36px; }
+        #clinicDashboardContent .dash-kpi-top .label {
+            margin: 4px 0 0;
+            font-size: 0.7rem;
+            letter-spacing: 0.05em;
+            line-height: 1.35;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        /* The "opens a list" arrow sits beside the number here: after a long
+           label it wrapped to a third line and pushed that tile's number down. */
+        #clinicDashboardContent .dash-kpi .label::after { content: none; }
+        #clinicDashboardContent .dash-kpi .num::after {
+            content: '→';
+            display: inline-block;
+            margin-left: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            vertical-align: middle;
+            color: var(--tone);
+            opacity: 0;
+            transform: translateX(-4px);
+            transition: opacity var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
+        }
+        #clinicDashboardContent .dash-kpi:hover .num::after,
+        #clinicDashboardContent .dash-kpi:focus-visible .num::after { opacity: 1; transform: none; }
+        @media (hover: none) { #clinicDashboardContent .dash-kpi .num::after { opacity: 0.6; transform: none; } }
+        #clinicDashboardContent .dash-kpi-ico {
+            flex: none;
+            display: inline-grid;
+            place-items: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 9px;
+            color: var(--tone);
+            background: var(--surface2);
+            background: color-mix(in srgb, var(--tone) 14%, transparent);
+            border: 1px solid var(--border);
+            border-color: color-mix(in srgb, var(--tone) 28%, transparent);
+        }
+        #clinicDashboardContent .dash-kpi-ico svg { width: 16px; height: 16px; }
+        #clinicDashboardContent .dash-kpi .num {
+            margin-top: 14px;
+            font-size: 2.3rem;
+            font-weight: 650;
+            line-height: 1;
+        }
+        #clinicDashboardContent .dash-kpi-meta {
+            margin-top: 8px;
+            font-size: 0.76rem;
+            color: var(--text3);
+            line-height: 1.35;
+        }
+        #clinicDashboardContent .dash-kpi-bar {
+            margin-top: auto;
+            padding-top: 12px;
+        }
+        #clinicDashboardContent .dash-kpi-bar::before {
+            content: '';
+            display: block;
+            height: 4px;
+            border-radius: 99px;
+            background: var(--surface2);
+        }
+        #clinicDashboardContent .dash-kpi-bar { position: relative; }
+        #clinicDashboardContent .dash-kpi-bar i {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            height: 4px;
+            width: 0;
+            border-radius: 99px;
+            background: var(--tone);
+            transition: width 900ms var(--ease-out);
+        }
+
+        /* Outcomes + departments side by side on wide screens */
+        #clinicDashboardContent .dash-split {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.65fr);
+            gap: var(--dash-gap);
+            margin-bottom: var(--dash-gap);
+            align-items: stretch;
+        }
+        #clinicDashboardContent .dash-split > .card { margin-bottom: 0; }
+        @media (max-width: 1180px) {
+            #clinicDashboardContent .dash-split { grid-template-columns: minmax(0, 1fr); }
+        }
+        #clinicDashboardContent .dash-split .card-head { align-items: flex-start; gap: 12px; }
+        #clinicDashboardContent .dash-sub { margin: 4px 0 0; font-size: 0.8rem; color: var(--text3); }
+        #clinicDashboardContent .dash-chip {
+            flex: none;
+            padding: 5px 11px;
+            border-radius: 99px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            color: var(--accent2);
+            background: var(--accent-glow);
+            border: 1px solid var(--accent-border);
+            white-space: nowrap;
+        }
+        #clinicDashboardContent .dash-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex: none;
+            background: var(--c, var(--text3));
+            box-shadow: 0 0 0 3px var(--surface2);
+        }
+
+        /* — Outcomes — */
+        #clinicDashboardContent .dash-mix [data-k="completed"] { --c: var(--green); }
+        #clinicDashboardContent .dash-mix [data-k="confirmed"] { --c: var(--cyan); }
+        #clinicDashboardContent .dash-mix [data-k="cancelled"] { --c: var(--red); }
+        #clinicDashboardContent .dash-mix [data-k="noshow"]    { --c: var(--amber); }
+        #clinicDashboardContent .dash-mix [data-k="other"]     { --c: var(--text3); }
+        #clinicDashboardContent .dash-mix-bar {
+            display: flex;
+            gap: 3px;
+            height: 14px;
+            padding: 3px;
+            border-radius: 99px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        #clinicDashboardContent .dash-mix-seg {
+            flex-basis: 0;
+            min-width: 6px;
+            border-radius: 99px;
+            background: var(--c);
+            transition: flex-grow 900ms var(--ease-out);
+        }
+        #clinicDashboardContent .dash-mix-legend {
+            list-style: none;
+            margin: 18px 0 0;
+            padding: 0;
+            display: grid;
+            gap: 4px;
+        }
+        #clinicDashboardContent .dash-mix-item {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) 3em 3.2em;
+            align-items: center;
+            gap: 12px;
+            padding: 9px 10px;
+            border-radius: 10px;
+            font-size: 0.86rem;
+            transition: background var(--motion-fast) var(--ease-out);
+        }
+        #clinicDashboardContent .dash-mix-item:hover { background: var(--surface2); }
+        #clinicDashboardContent .dash-mix-item.is-zero { opacity: 0.5; }
+        #clinicDashboardContent .dash-mix-label { color: var(--text); }
+        #clinicDashboardContent .dash-mix-count,
+        #clinicDashboardContent .dash-dept-count {
+            text-align: right;
+            font-weight: 650;
+            color: var(--text-strong);
+            font-variant-numeric: tabular-nums;
+        }
+        #clinicDashboardContent .dash-mix-pct,
+        #clinicDashboardContent .dash-dept-pct {
+            text-align: right;
+            font-size: 0.78rem;
+            color: var(--text3);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* — Departments — */
+        #clinicDashboardContent .dash-dept-grid {
+            display: grid;
+            grid-template-columns: 196px minmax(0, 1fr);
+            gap: 28px;
+            align-items: center;
+        }
+        #clinicDashboardContent .dash-donut { position: relative; width: 196px; height: 196px; }
+        #clinicDashboardContent .dash-donut svg { width: 100%; height: 100%; display: block; overflow: visible; }
+        #clinicDashboardContent .dash-donut-track { fill: none; stroke: var(--surface2); stroke-width: 22; }
+        #clinicDashboardContent .dash-seg {
+            fill: none;
+            stroke-width: 22;
+            transition: stroke-dasharray 1000ms var(--ease-out), opacity var(--motion-fast) var(--ease-out),
+                        stroke-width var(--motion-fast) var(--ease-out);
+            cursor: default;
+        }
+        #clinicDashboardContent .dash-has-focus .dash-seg { opacity: 0.28; }
+        #clinicDashboardContent .dash-has-focus .dash-seg.is-on { opacity: 1; stroke-width: 26; }
+        #clinicDashboardContent .dash-donut-center {
+            position: absolute;
+            inset: 38px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            pointer-events: none;
+        }
+        #clinicDashboardContent .dash-donut-num {
+            font-size: 2.2rem;
+            font-weight: 650;
+            line-height: 1;
+            color: var(--text-strong);
+            letter-spacing: -0.03em;
+            font-variant-numeric: tabular-nums;
+        }
+        #clinicDashboardContent .dash-donut-cap {
+            margin-top: 6px;
+            max-width: 100%;
+            font-size: 0.72rem;
+            color: var(--text3);
+            line-height: 1.3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        #clinicDashboardContent .dash-dept-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+        #clinicDashboardContent .dash-dept-row {
+            display: grid;
+            grid-template-columns: 1.6em minmax(0, 1fr) 3em 3.2em;
+            align-items: center;
+            gap: 12px;
+            padding: 9px 10px;
+            border-radius: 10px;
+            transition: background var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out);
+        }
+        #clinicDashboardContent .dash-dept-row:hover,
+        #clinicDashboardContent .dash-dept-row.is-on { background: var(--surface2); }
+        #clinicDashboardContent .dash-has-focus .dash-dept-row:not(.is-on) { opacity: 0.6; }
+        #clinicDashboardContent .dash-rank {
+            font-size: 0.74rem;
+            font-weight: 600;
+            color: var(--text3);
+            font-variant-numeric: tabular-nums;
+        }
+        #clinicDashboardContent .dash-dept-main { display: grid; gap: 7px; min-width: 0; }
+        #clinicDashboardContent .dash-dept-name {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            font-size: 0.87rem;
+            font-weight: 500;
+            color: var(--text);
+        }
+        #clinicDashboardContent .dash-dept-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #clinicDashboardContent .dash-top {
+            flex: none;
+            font-style: normal;
+            font-size: 0.66rem;
+            font-weight: 650;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            padding: 2px 7px;
+            border-radius: 99px;
+            color: var(--green);
+            background: var(--green-bg);
+        }
+        #clinicDashboardContent .dash-dept-track {
+            position: relative;
+            height: 6px;
+            border-radius: 99px;
+            background: var(--surface2);
+            overflow: hidden;
+        }
+        #clinicDashboardContent .dash-dept-track i {
+            position: absolute;
+            inset: 0 auto 0 0;
+            border-radius: 99px;
+            background: var(--c);
+            transition: width 900ms var(--ease-out);
+        }
+        #clinicDashboardContent .dash-dept-row .dash-dept-track i { box-shadow: 0 0 12px -2px var(--c); }
+        #clinicDashboardContent .dash-insight {
+            margin: 18px 0 0;
+            padding: 11px 14px;
+            border-radius: 10px;
+            font-size: 0.82rem;
+            color: var(--text2);
+            background: var(--surface2);
+            border: 1px solid var(--border);
+        }
+        #clinicDashboardContent .dash-insight strong { color: var(--text-strong); font-weight: 600; }
+
+        /* The department card sizes its own chart: shrink the donut, then stack it. */
+        #clinicDashboardContent #deptBars { container-type: inline-size; container-name: dashdept; }
+        @container dashdept (max-width: 600px) {
+            .dash-dept-grid { grid-template-columns: 150px minmax(0, 1fr) !important; gap: 20px !important; }
+            .dash-donut { width: 150px !important; height: 150px !important; }
+            .dash-donut-center { inset: 30px !important; }
+            .dash-donut-num { font-size: 1.8rem !important; }
+        }
+        @container dashdept (max-width: 440px) {
+            .dash-dept-grid { grid-template-columns: minmax(0, 1fr) !important; justify-items: center; }
+            .dash-dept-list { width: 100%; }
+            .dash-top { display: none; }
+            .dash-donut { width: 176px !important; height: 176px !important; }
+            .dash-donut-center { inset: 34px !important; }
+        }
+        @media (max-width: 640px) {
+            #clinicDashboardContent .dash-dept-grid { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 20px; }
+            #clinicDashboardContent .dash-dept-list { width: 100%; }
+            #clinicDashboardContent .dash-donut { width: 176px; height: 176px; }
+            #clinicDashboardContent .dash-donut-center { inset: 34px; }
+            #clinicDashboardContent .dash-kpi { min-height: 136px; padding: 16px 14px 14px; }
+            #clinicDashboardContent .dash-kpi .num { font-size: 2rem; }
+            #clinicDashboardContent .dash-split .card-head { flex-wrap: wrap; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #clinicDashboardContent .dash-kpi,
+            #clinicDashboardContent .dash-kpi-bar i,
+            #clinicDashboardContent .dash-mix-seg,
+            #clinicDashboardContent .dash-seg,
+            #clinicDashboardContent .dash-dept-track i { transition: none; }
+        }
     </style>
 </head>
 <body>
@@ -3353,21 +3736,65 @@
                     <p>Overview of your hospital's activity • Last 30 days</p>
                 </div>
 
-                <div class="stats stagger-in">
-                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard(null)"><div class="glow"></div><div class="label">Total Appointments</div><div class="num" id="s-total">—</div></div>
-                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('confirmed')"><div class="glow"></div><div class="label">Confirmed</div><div class="num" id="s-confirmed">—</div></div>
-                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('cancelled')"><div class="glow"></div><div class="label">Cancelled</div><div class="num" id="s-cancelled">—</div></div>
-                    <div class="stat stat-link" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('completed')"><div class="glow"></div><div class="label">Completed</div><div class="num" id="s-completed">—</div></div>
-                    <div class="stat stat-link" role="button" tabindex="0" title="View patients" onclick="openPatientsFromDashboard(false)"><div class="glow"></div><div class="label">Total Patients</div><div class="num" id="s-patients">—</div></div>
-                    <div class="stat stat-link" role="button" tabindex="0" title="View new patients" onclick="openPatientsFromDashboard(true)"><div class="glow"></div><div class="label">New Patients</div><div class="num" id="s-new">—</div></div>
+                <!-- Dashboard visuals (scoped styles: "DASHBOARD · PREMIUM" block). Tile ids, onclick
+                     handlers, role/tabindex and the .stat-link class are unchanged: the startup
+                     keyboard handler and openApptsFromDashboard/openPatientsFromDashboard rely on them. -->
+                <div class="stats dash-kpis stagger-in">
+                    <div class="stat stat-link dash-kpi" data-tone="total" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard(null)"><div class="glow"></div>
+                        <div class="dash-kpi-top"><div class="label">Total Appointments</div><span class="dash-kpi-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span></div>
+                        <div class="num" id="s-total">—</div>
+                        <div class="dash-kpi-meta" id="s-total-meta">Last 30 days</div>
+                    </div>
+                    <div class="stat stat-link dash-kpi" data-tone="confirmed" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('confirmed')"><div class="glow"></div>
+                        <div class="dash-kpi-top"><div class="label">Confirmed</div><span class="dash-kpi-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div>
+                        <div class="num" id="s-confirmed">—</div>
+                        <div class="dash-kpi-meta" id="s-confirmed-meta">&nbsp;</div>
+                        <div class="dash-kpi-bar" aria-hidden="true"><i id="s-confirmed-bar"></i></div>
+                    </div>
+                    <div class="stat stat-link dash-kpi" data-tone="cancelled" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('cancelled')"><div class="glow"></div>
+                        <div class="dash-kpi-top"><div class="label">Cancelled</div><span class="dash-kpi-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg></span></div>
+                        <div class="num" id="s-cancelled">—</div>
+                        <div class="dash-kpi-meta" id="s-cancelled-meta">&nbsp;</div>
+                        <div class="dash-kpi-bar" aria-hidden="true"><i id="s-cancelled-bar"></i></div>
+                    </div>
+                    <div class="stat stat-link dash-kpi" data-tone="completed" role="button" tabindex="0" title="View these appointments" onclick="openApptsFromDashboard('completed')"><div class="glow"></div>
+                        <div class="dash-kpi-top"><div class="label">Completed</div><span class="dash-kpi-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/></svg></span></div>
+                        <div class="num" id="s-completed">—</div>
+                        <div class="dash-kpi-meta" id="s-completed-meta">&nbsp;</div>
+                        <div class="dash-kpi-bar" aria-hidden="true"><i id="s-completed-bar"></i></div>
+                    </div>
+                    <div class="stat stat-link dash-kpi" data-tone="patients" role="button" tabindex="0" title="View patients" onclick="openPatientsFromDashboard(false)"><div class="glow"></div>
+                        <div class="dash-kpi-top"><div class="label">Total Patients</div><span class="dash-kpi-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span></div>
+                        <div class="num" id="s-patients">—</div>
+                        <div class="dash-kpi-meta" id="s-patients-meta">All registered patients</div>
+                    </div>
+                    <div class="stat stat-link dash-kpi" data-tone="new" role="button" tabindex="0" title="View new patients" onclick="openPatientsFromDashboard(true)"><div class="glow"></div>
+                        <div class="dash-kpi-top"><div class="label">New Patients</div><span class="dash-kpi-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg></span></div>
+                        <div class="num" id="s-new">—</div>
+                        <div class="dash-kpi-meta" id="s-new-meta">Joined in the last 30 days</div>
+                        <div class="dash-kpi-bar" aria-hidden="true"><i id="s-new-bar"></i></div>
+                    </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-head">
-                        <h3>Department Breakdown</h3>
+                <div class="dash-split">
+                    <div class="card dash-mix">
+                        <div class="card-head">
+                            <div><h3>Appointment Outcomes</h3><p class="dash-sub">Where the last 30 days' bookings stand</p></div>
+                            <span class="dash-chip" id="dashMixChip" hidden></span>
+                        </div>
+                        <div id="dashMix">
+                            <div class="loader"><div class="spin"></div>Loading...</div>
+                        </div>
                     </div>
-                    <div id="deptBars">
-                        <div class="loader"><div class="spin"></div>Loading departments...</div>
+
+                    <div class="card dash-dept">
+                        <div class="card-head">
+                            <div><h3>Department Breakdown</h3><p class="dash-sub">Appointments by department · last 30 days</p></div>
+                            <span class="dash-chip" id="deptSummary" hidden></span>
+                        </div>
+                        <div id="deptBars">
+                            <div class="loader"><div class="spin"></div>Loading departments...</div>
+                        </div>
                     </div>
                 </div>
 
@@ -14028,42 +14455,236 @@ async function loadDashboard() {
 // tile opens the Patients page filtered on this exact value, so they agree.
 let dashPeriodStart = null;
 
-function renderDashboard(d) {
-    dashPeriodStart = d.period_start || null;
-    document.getElementById('s-total').textContent = d.total_appointments ?? 0;
-    document.getElementById('s-confirmed').textContent = d.confirmed ?? 0;
-    document.getElementById('s-cancelled').textContent = d.cancelled ?? 0;
-    document.getElementById('s-completed').textContent = d.completed ?? 0;
-    document.getElementById('s-patients').textContent = d.total_patients ?? 0;
-    document.getElementById('s-new').textContent = d.new_patients ?? 0;
+// Non-negative whole number from an API field (missing / null / junk → 0).
+function dashCount(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
 
-    // Animate numbers
-    document.querySelectorAll('.stat .num').forEach(el => {
-        const val = parseInt(el.textContent) || 0;
-        animateNum(el, val);
+// Whole-number share; 0 when there is nothing to divide by.
+function dashShare(part, whole) {
+    return whole > 0 ? Math.round((part / whole) * 100) : 0;
+}
+
+function renderDashboard(d) {
+    d = d || {};
+    dashPeriodStart = d.period_start || null;
+    const total = dashCount(d.total_appointments);
+    const confirmed = dashCount(d.confirmed);
+    const cancelled = dashCount(d.cancelled);
+    const completed = dashCount(d.completed);
+    const noShow = dashCount(d.no_show);
+    const patients = dashCount(d.total_patients);
+    const fresh = dashCount(d.new_patients);
+
+    const setText = (id, v) => { const x = document.getElementById(id); if (x) x.textContent = v; };
+    setText('s-total', total);
+    setText('s-confirmed', confirmed);
+    setText('s-cancelled', cancelled);
+    setText('s-completed', completed);
+    setText('s-patients', patients);
+    setText('s-new', fresh);
+
+    // Animate the dashboard's own tiles only (other pages' .stat numbers are not ours to rewrite).
+    document.querySelectorAll('#clinicDashboardContent .stat .num').forEach(el => {
+        animateNum(el, parseInt(el.textContent, 10) || 0);
     });
 
-    // Department bars
-    const depts = d.by_department || [];
-    const el = document.getElementById('deptBars');
-    if (!depts.length) { el.innerHTML = emptyState('folder', 'No department data yet'); return; }
-    const max = Math.max(...depts.map(x => x.count));
-    el.innerHTML = depts.map(dept => `
-        <div class="dept-bar">
-            <div class="dept-label"><span>${esc(dept.department)}</span><span>${dept.count}</span></div>
-            <div class="dept-track"><div class="dept-fill" style="width:0%" data-w="${(dept.count / max * 100).toFixed(0)}%"></div></div>
-        </div>
-    `).join('');
-
-    // Animate bars
+    // Tile captions + share bars (bars are relative to total appointments / total patients).
+    const ofAppts = n => total ? `${dashShare(n, total)}% of appointments` : 'No appointments yet';
+    setText('s-total-meta', noShow ? `Last 30 days · ${noShow} no-show${noShow === 1 ? '' : 's'}` : 'Last 30 days');
+    setText('s-confirmed-meta', ofAppts(confirmed));
+    setText('s-cancelled-meta', ofAppts(cancelled));
+    setText('s-completed-meta', ofAppts(completed));
+    setText('s-patients-meta', 'All registered patients');
+    setText('s-new-meta', patients ? `${dashShare(fresh, patients)}% joined in the last 30 days` : 'Joined in the last 30 days');
+    const bars = { 's-confirmed-bar': dashShare(confirmed, total), 's-cancelled-bar': dashShare(cancelled, total),
+                   's-completed-bar': dashShare(completed, total), 's-new-bar': dashShare(fresh, patients) };
     requestAnimationFrame(() => {
-        el.querySelectorAll('.dept-fill').forEach(bar => {
-            bar.style.width = bar.dataset.w;
+        Object.entries(bars).forEach(([id, pct]) => {
+            const b = document.getElementById(id);
+            if (b) b.style.width = `${Math.min(100, pct)}%`;
         });
     });
 
+    renderDashOutcomes({ total, confirmed, cancelled, completed, noShow });
+    renderDashDepartments(d.by_department || []);
+
     // Dash recent appointments
     api('/admin/appointments/recent?limit=5').then(renderDashAppts).catch(() => {});
+}
+
+// ── Appointment outcomes: one segmented bar + legend. "Other" is whatever the
+// four named statuses do not cover (pending payment, pending review, ...), so
+// the segments always add up to the Total Appointments tile.
+function renderDashOutcomes({ total, confirmed, cancelled, completed, noShow }) {
+    const el = document.getElementById('dashMix');
+    const chip = document.getElementById('dashMixChip');
+    if (!el) return;
+    if (!total) {
+        el.innerHTML = emptyState('calendar', 'No appointments in the last 30 days');
+        if (chip) chip.hidden = true;
+        return;
+    }
+    const other = Math.max(0, total - confirmed - cancelled - completed - noShow);
+    const parts = [
+        { key: 'completed', label: 'Completed', n: completed },
+        { key: 'confirmed', label: 'Confirmed', n: confirmed },
+        { key: 'cancelled', label: 'Cancelled', n: cancelled },
+        { key: 'noshow', label: 'No-show', n: noShow },
+        { key: 'other', label: 'Pending / other', n: other },
+    ];
+    const shown = parts.filter(p => p.n > 0);
+    el.innerHTML = `
+        <div class="dash-mix-bar" role="img" aria-label="${esc(shown.map(p => `${p.label} ${p.n}`).join(', '))}">
+            ${shown.map(p => `<span class="dash-mix-seg" data-k="${p.key}" style="flex-grow:0" data-grow="${p.n}" title="${esc(p.label)}: ${p.n} (${dashShare(p.n, total)}%)"></span>`).join('')}
+        </div>
+        <ul class="dash-mix-legend">
+            ${parts.map(p => `<li class="dash-mix-item${p.n ? '' : ' is-zero'}" data-k="${p.key}">
+                <span class="dash-dot" aria-hidden="true"></span>
+                <span class="dash-mix-label">${esc(p.label)}</span>
+                <span class="dash-mix-count">${p.n}</span>
+                <span class="dash-mix-pct">${dashShare(p.n, total)}%</span>
+            </li>`).join('')}
+        </ul>`;
+    if (chip) {
+        chip.textContent = `${dashShare(completed, total)}% completed`;
+        chip.hidden = false;
+    }
+    requestAnimationFrame(() => {
+        el.querySelectorAll('.dash-mix-seg').forEach(s => { s.style.flexGrow = s.dataset.grow; });
+    });
+}
+
+// ── Department breakdown: donut + ranked list.
+// Names are merged case- and space-insensitively ("Cardiology" and "cardiology "
+// are one department on screen; the label shown is the spelling with the most
+// appointments). Beyond six departments the donut folds the tail into "Others";
+// the list still shows every department.
+const DASH_DEPT_COLORS = ['var(--accent)', 'var(--green)', 'var(--cyan)', 'var(--amber)', 'var(--pink)', 'var(--mint)'];
+const DASH_DEPT_OTHER = 'var(--text3)';
+let dashDeptView = null;   // { slices, total } for the hover read-out
+
+function dashDeptGroups(rows) {
+    const groups = new Map();
+    (rows || []).forEach(r => {
+        const n = dashCount(r && r.count);
+        if (!n) return;
+        const raw = String((r && r.department) ?? '').trim().replace(/\s+/g, ' ');
+        const name = raw || 'Unspecified';
+        const key = name.toLowerCase();
+        const g = groups.get(key) || { name, best: 0, count: 0 };
+        g.count += n;
+        if (n > g.best) { g.best = n; g.name = name; }
+        groups.set(key, g);
+    });
+    return [...groups.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+function renderDashDepartments(rows) {
+    const el = document.getElementById('deptBars');
+    const summary = document.getElementById('deptSummary');
+    if (!el) return;
+    const depts = dashDeptGroups(rows);
+    if (!depts.length) {
+        el.innerHTML = emptyState('folder', 'No department data yet');
+        if (summary) summary.hidden = true;
+        dashDeptView = null;
+        return;
+    }
+    const total = depts.reduce((s, x) => s + x.count, 0);
+    const MAX_SLICES = DASH_DEPT_COLORS.length;
+    const folded = depts.length > MAX_SLICES;
+    const head = folded ? depts.slice(0, MAX_SLICES - 1) : depts;
+    const slices = head.map((x, i) => ({ name: x.name, count: x.count, color: DASH_DEPT_COLORS[i] }));
+    if (folded) {
+        const rest = depts.slice(MAX_SLICES - 1);
+        slices.push({ name: `Others (${rest.length})`, count: rest.reduce((s, x) => s + x.count, 0), color: DASH_DEPT_OTHER });
+    }
+    dashDeptView = { slices, total };
+
+    const R = 78, C = 2 * Math.PI * R;
+    const gap = slices.length > 1 ? 3 : 0;
+    let offset = 0;
+    const segs = slices.map((s, i) => {
+        const arc = (s.count / total) * C;
+        const len = Math.max(0.5, arc - gap);
+        const svg = `<circle class="dash-seg" data-i="${i}" cx="100" cy="100" r="${R}" style="stroke:${s.color}"
+            stroke-dasharray="0 ${C.toFixed(2)}" data-dash="${len.toFixed(2)} ${(C - len).toFixed(2)}"
+            stroke-dashoffset="${(-offset).toFixed(2)}"><title>${esc(s.name)}: ${s.count} (${dashShare(s.count, total)}%)</title></circle>`;
+        offset += arc;
+        return svg;
+    }).join('');
+    const top = depts[0];
+    const aria = depts.map(x => `${x.name} ${x.count}`).join(', ');
+
+    el.innerHTML = `
+        <div class="dash-dept-grid">
+            <div class="dash-donut">
+                <svg viewBox="0 0 200 200" role="img" aria-label="Appointments by department: ${esc(aria)}">
+                    <circle class="dash-donut-track" cx="100" cy="100" r="${R}"/>
+                    <g transform="rotate(-90 100 100)">${segs}</g>
+                </svg>
+                <div class="dash-donut-center" aria-hidden="true">
+                    <div class="dash-donut-num" id="deptCenterNum">${total}</div>
+                    <div class="dash-donut-cap" id="deptCenterCap">appointments</div>
+                </div>
+            </div>
+            <ol class="dash-dept-list">
+                ${depts.map((x, i) => {
+                    const si = folded && i >= MAX_SLICES - 1 ? MAX_SLICES - 1 : i;
+                    const color = folded && i >= MAX_SLICES - 1 ? DASH_DEPT_OTHER : DASH_DEPT_COLORS[i];
+                    const pct = dashShare(x.count, total);
+                    const w = Math.max(2, Math.round((x.count / top.count) * 100));
+                    return `<li class="dash-dept-row" data-i="${si}" style="--c:${color}">
+                        <span class="dash-rank">${i + 1}</span>
+                        <span class="dash-dept-main">
+                            <span class="dash-dept-name"><span class="dash-dept-text" title="${esc(x.name)}">${esc(x.name)}</span>${i === 0 && depts.length > 1 ? '<em class="dash-top">Top</em>' : ''}</span>
+                            <span class="dash-dept-track"><i style="width:0" data-w="${w}%"></i></span>
+                        </span>
+                        <span class="dash-dept-count">${x.count}</span>
+                        <span class="dash-dept-pct">${pct}%</span>
+                    </li>`;
+                }).join('')}
+            </ol>
+        </div>
+        ${depts.length > 1 ? `<p class="dash-insight"><strong>${esc(top.name)}</strong> leads with ${dashShare(top.count, total)}% of appointments across ${depts.length} departments.</p>` : ''}`;
+
+    if (summary) {
+        summary.textContent = `${depts.length} department${depts.length === 1 ? '' : 's'}`;
+        summary.hidden = false;
+    }
+
+    // Hover read-out (property handlers, so re-rendering never stacks listeners).
+    el.onmouseover = e => {
+        const t = e.target.closest && e.target.closest('[data-i]');
+        dashDeptFocus(t && el.contains(t) ? Number(t.dataset.i) : null);
+    };
+    el.onmouseleave = () => dashDeptFocus(null);
+
+    requestAnimationFrame(() => {
+        el.querySelectorAll('.dash-seg').forEach(s => { s.style.strokeDasharray = s.dataset.dash; });
+        el.querySelectorAll('.dash-dept-track i').forEach(b => { b.style.width = b.dataset.w; });
+    });
+}
+
+function dashDeptFocus(i) {
+    const root = document.getElementById('deptBars');
+    if (!root || !dashDeptView) return;
+    const on = Number.isInteger(i) && i >= 0 && i < dashDeptView.slices.length;
+    root.classList.toggle('dash-has-focus', on);
+    root.querySelectorAll('[data-i]').forEach(n => n.classList.toggle('is-on', on && Number(n.dataset.i) === i));
+    const num = document.getElementById('deptCenterNum');
+    const cap = document.getElementById('deptCenterCap');
+    if (!num || !cap) return;
+    if (on) {
+        const s = dashDeptView.slices[i];
+        num.textContent = s.count;
+        cap.textContent = `${s.name} · ${dashShare(s.count, dashDeptView.total)}%`;
+    } else {
+        num.textContent = dashDeptView.total;
+        cap.textContent = 'appointments';
+    }
 }
 
 function renderDashAppts(data) {
