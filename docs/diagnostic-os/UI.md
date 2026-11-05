@@ -42,9 +42,9 @@ Served by the same `admin/index.html` with a confined navigation (like the phleb
 PDF when released and the account's delivery rule allows), **Statements** (download, dues). No other page renders;
 the server refuses every other route for this role.
 
-## 4. Phlebotomist portal additions (existing `/admin/home-collection/my-visits`)
+## 4. Phlebotomist portal additions (existing portal: `GET /admin/home-collection/my`, `POST /admin/home-collection/visits/{id}/status`)
 On each visit card: **Samples** panel listing tubes with colour and tests; scan or type barcodes; **Collected**
-calls the new samples route; offline is not supported (shows a clear "no connection — not saved" state).
+calls the new samples route; **Cash collected** records a doorstep amount (the report stays held until the desk cashier accepts the handover, O-DX-12); offline is not supported (shows a clear "no connection — not saved" state).
 
 ## 5. Owner console (`admin/platform.html`)
 Diagnostic OS card in the clinic modal beside OPD/IPD: toggle `toggleDx(cb)`, eligibility message, deactivation

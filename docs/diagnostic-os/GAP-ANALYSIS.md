@@ -54,7 +54,13 @@ disappears when the centre runs its lab in Kriya.**
 | F7 | `lab_results` is one row per test; a patient report is one PDF for the whole visit | P7 adds `dx_report_releases` composing many signed results into one versioned document (ADR-DX-07). |
 | F8 | `docs/hospital-os/status.md` module board still shows G2 as NOT_STARTED although Session 44 built migration 118 | Documentation drift only; the gap analysis §1 row "Kriya has no lab result entry" is stale. Fix in that file when G2's staging run is recorded (out of DX scope). |
 | F9 | Migration 115–124 are not yet applied to Supabase (each module's open item) | DX migrations depend on 115 and 118. **DX cannot go to staging before 115 and 118 are applied there** (ROLLOUT §1). |
-| F10 | `diagstream` lacks `admin_dashboard` in `PLAN_FEATURES` | Check in P0 how diagnostic clients reach the panel today; `dx_enabled` must make the DX pages reachable without granting unrelated dashboard features. |
+| F10 | ~~`diagstream` lacks `admin_dashboard`~~ — **re-audit:** `admin_dashboard` is not enforced as a route gate anywhere in `app/routers` | No action; DX pages are gated by `dx_access` only (AUDIT A16). |
+| F11 | `upload_and_send` dedups on `(clinic_id, external_report_id)` and takes one phone | One delivery row and id per target (AUDIT A3). |
+| F12 | G1 `collect_sample` / `complete_order` have no `source` check; phlebotomists can call collect | Refuse `source='dx'` (AUDIT A4). |
+| F13 | `patients.phone` NOT NULL + unique per clinic; LIS needs a patients row | Holder patient for B2B subjects (AUDIT A6, ADR-DX-21). |
+| F14 | One test per WhatsApp booking; deposit payments; fee folded into amount | Bookings join table, fee items, prepaid per booking (AUDIT A9). |
+| F15 | OPD draft save replaces every invoice line | DX bill-line guard (AUDIT A10). |
+| F16 | TPA routing exists only for connector reports | Payer-routed accounts in DX (AUDIT A2, ADR-DX-20). |
 
 ## 4. Gap matrix by stage of the diagnostic journey
 
@@ -81,7 +87,7 @@ Priority: **P0** = a centre cannot drop MocDoc without it · **P1** = needed wit
 | 17 | Verification level, batch approval, critical-call log | single sign | gate trigger, tables | P0 | P6 |
 | 18 | Visit-level report: department grouping, page x of y, interpretation, signatures, cumulative values, QR verify | per-test PDF | renderer v2 + releases | P0 | P7 |
 | 19 | Templates & white-label cascade | clinic letterhead | `dx_report_templates` | P0 (B2B) | P7 |
-| 20 | Partial release, dues gate, delivery to patient / referrer / B2B desk, print log, secure link | pipeline | release + routing | P0 | P7 |
+| 20 | Partial release, **dues invariant**, **payer-routed (TPA / insurance / corporate) delivery**, delivery to patient / referrer / B2B desk, print log, secure link | pipeline + connector-only TPA routing | release + per-target deliveries + decision function ([DELIVERY-POLICY.md](DELIVERY-POLICY.md)) | P0 | P7 |
 | 21 | Shadow mode alongside MocDoc connector | — | `delivery_owner` per branch | P0 (cutover) | P7 |
 | 22 | B2B accounts, rate cards, credit/prepaid limits, ledger, monthly statements, payments | — | `dx_b2b_*` | P0 for B2B labs | P8 |
 | 23 | Partner portal (hospital registers samples, downloads white-label reports, pays) | — | confined login | P1 | P8 |

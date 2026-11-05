@@ -25,6 +25,15 @@ every job a diagnostic centre does in them, then remove the work Kriya can autom
 | Expanded row: branch tag (`Madhurawada, Visakhapatnam`), one line per test with tube-colour icon (red = serum/plain, lavender = EDTA), test name, parent profile in italics (`(RENAL FUNCTION TESTS ACCUMAX)`), `No: 9452` (order line number), `SampleID: 260100016570`, date, **Track Sample**, sample edit pencil, **TAT: 30 mins** with a % progress bar | (a) A **profile/panel** explodes into member tests that are worked individually. (b) **One sample ID per tube**, shared by every test on that tube: CRP, uric acid, phosphorous, calcium all on `260100016570` (serum) while CBC is on `260700016570` (EDTA). The ID looks like `YY` + container code (`01`, `07`) + running number. (c) Per-test TAT targets and live elapsed %. (d) Sample tracking is a first-class action. |
 | Visit action bar: info · bill · tag · barcode · search · WhatsApp · SMS · e-mail · download · print · edit · close | Per-visit actions the desk uses all day: view bill, print barcode labels, resend report by WhatsApp/SMS/e-mail, download PDF, print, edit registration. |
 
+### 1.1b Second set of screenshots (owner, 2026-11-05)
+| Observed | What it tells us |
+|:-|:-|
+| B2B rows where **Referred By = Provider** (`NAIDU HOSPITAL`, `AGE CARE FOUNDATION HOSPITAL`) and **one mobile (`+919440989440`) on three different patients** of the same hospital | The hospital is both the source and the referrer, and enters its own desk number for its patients, so Kriya cannot treat that number as the patient's (ADR-DX-21). |
+| `URINE ROUTINE` with `SampleID: 261100016459`, white container icon, TAT bar **red** (breached) | Container code `11` = urine; TAT breach is shown per test. |
+| Visit status chip **Sample Taken** (red) before results, **Approved** after | A visit-level stage is shown in the list (derived `visit_stage` in Kriya). |
+| **Print Barcode** dialog: every test with its Sample ID and order date-time (`HBsAg - RAPID / 260100016583`, `ANTI HCV RAPID / 260400016583`, `ANTI HIV I-II - RAPID / 260100016583`, `05/11/2026 08:51`), select-all checkbox, **Print Register Book Label**, Select / Close | Labels are chosen per test; the 8-digit tail is the **visit's** shared sequence and the 2-digit middle is the container (HBsAg/HIV on `01`, HCV on `04` with a yellow icon); a register-book label exists for the paper register. Reproduced in REPORT-TEMPLATES §6. |
+| Small red minus-circle icon beside each test in the expanded row | Per-test action (likely remove/cancel); **not verified** — do not build behaviour on this guess. |
+
 ### 1.2 Kriya's own connector confirms more behaviour
 `connectors/mocdoc/worker.py` (in production) scrapes the **Pending Print** tab and downloads approved reports.
 It already handles: per-test top-up deliveries (`_topup_report_id`, `_plan_delivery` — a visit's tests are

@@ -44,13 +44,17 @@ linter baseline.
 | P3 | `tests/test_migration_dx_m3.py` | `opd_orders` shape: OPD/IPD rules unchanged, `dx` rules; doctor NULL only for dx; explode once (unique); bill line guard (wrong visit, cancelled item, price mismatch → refused); one live bill per visit; append-only items; purge |
 | P3 | `tests/test_dx_visits_e2e.py` (HTTP + real PG) | W1, W2, W3 exactly; package explodes into per-test orders on the right tubes; idempotent register (10 parallel with one key → 1 visit); prepaid booking applied once; cancel before/after issue; G1 worklist excludes dx rows |
 | P3 | `tests/test_dx_data_retention.py` | erasure redacts snapshots and keeps records |
+| P3 | `tests/test_dx_existing_paths.py` | AUDIT A4/A5/A10/A20/A22 guards: G1 collect & complete refuse a dx order (also as a phlebotomist login); G1 worklist excludes dx; OPD Billing draft save on a DX invoice refused with a mapped error; lab-test delete refuses a test ordered in DX and still deletes an unused one; generic Lab Reports resend/resolve refuse `source='dx'`; `get_family_members` hides B2B dependants while OPD/WhatsApp family tests stay green unedited |
+| P3 | `tests/test_dx_bookings.py` | 3 bookings (one test each, one a 20 % deposit) → one visit; each prepaid applied once (replay safe); home-collection fee item; balance = deposit shortfall; a booking cannot join two visits (parallel) |
+| P3 | `tests/test_dx_b2b_subjects.py` | B2B subject without phone / with the desk phone → holder dependant; with own phone → registry patient; holder created once under concurrency |
 | P4 | `tests/test_dx_samples.py` | grouping by container and processing site; barcode format and counter per `YYcc`; 20 parallel collections of the same sample → 1; pre-printed bind uniqueness (parallel); reject → replacement sample/orders; rejection after signing refused; `collect_before_payment` |
 | P4 | `tests/test_dx_labels.py` (pure) | Code128 B/C encoding vs published vectors (check digit); label PDF bytes; ZPL contains `^BC` and the digits |
 | P5 | `tests/test_dx_logistics.py` | routing precedence; batch add refuses wrong destination / second live batch; dispatch → in_transit; receive with missing/damaged/extra; stability timer computation (pure); processing-site user sees no phone |
 | P6 | `tests/test_migration_dx_m6.py` | gate trigger: 3-level requires verification of current `updated_at`; re-entry invalidates; returned after verified invalidates; **gate ignores OPD/IPD orders**; verifications/critical events append-only; attachments only while unsigned |
 | P6 | `tests/test_dx_results_e2e.py` | W8, W9; calculated values server-side (browser-sent values ignored); delta; four-eyes; batch with one stale item → that item refused, others signed; critical-call required blocks approval; LIS routes return `dx_use_dx_route` for dx orders; **signature on a dx order does not call `lis.deliver_report`** |
 | P7 | `tests/test_dx_pdf.py` (pure) | Taiyo fixture renders: department and package headings, methods, multi-line reference text, bold flags, page `n of N`, QR, signature image, "Tested at" on white label, "Performed at" for outsourced; same input → same SHA-256; Indic names |
-| P7 | `tests/test_dx_reports_e2e.py` | release when complete; partial; dues hold → payment → sent; amended supersedes; shadow never calls `upload_and_send`; `dx` delivery owner refused with an active connector; resend idempotent; share link expiry/attempts; verify page fields only |
+| P7 | `tests/test_dx_reports_e2e.py` | release when complete; partial; amended supersedes; shadow never calls `upload_and_send`; `dx` delivery owner refused with an active connector; resend idempotent; share link expiry/attempts; verify page fields only; **every row of DELIVERY-POLICY §7** |
+| P7 | `tests/test_dx_delivery_policy.py` (real PG) | the decision table row by row (each refusal code reachable, order of rules); zero-total visit; draft invoice = unpaid; supplementary bill unpaid holds; void after payment re-holds new targets; field collection pending holds, handover releases; override expiry; payer kinds × `report_delivery` × authorisation; referrer consent; `plan_no_delivery` on `diagbooking`; per-target `external_report_id` (patient + referrer + account all delivered, AUDIT A3); `test_dx_single_sender` AST guard |
 | P7 | `tests/test_dx_templates.py` | schema rejects unknown keys/HTML/foreign asset paths; publish immutability; cascade order |
 | P8 | `tests/test_migration_dx_m8.py` | ledger append-only; one charge per item; statement totals = SQL sums; two parallel statements for one period → 1; overlapping barcode stock refused |
 | P8 | `tests/test_dx_b2b_e2e.py` | W5 both variants, W14; hold by limit/overdue refuses new visits; prepaid insufficient refused; partner confinement (every non-partner route 403; another account's visit 404); white-label delivery to desk |
@@ -70,6 +74,9 @@ linter baseline.
 | 10 parallel B2B registrations at the credit limit | total charges never exceed limit |
 | 2 parallel statements for one account/period | 1 issued |
 | release creation twice for the same results | one release; second returns existing |
+| payment lands while a held delivery is being re-evaluated | exactly one send; never a send without payment |
+| two workers claim the same queued delivery | one `sending`, the other gets `false` |
+| visit `sample_seq` under 20 parallel registrations | unique per year; all ≥ `sample_seq_floor`; tubes of one visit share it |
 
 ## 4. Security matrices
 `tests/test_admin_super_admin_scope_matrix.py` and `tests/test_phase2_route_adversarial_matrix.py` enumerate routes

@@ -63,14 +63,17 @@ Prefix `/admin/dx` unless stated. `NW` = refused in WIND_DOWN.
 | Method | Path | Permission | Notes |
 |:-|:-|:-|:-|
 | GET | `/collection/queue?site&date` | DX_COLLECT | pending collection, STAT first |
-| GET | `/visits/{id}/labels.pdf`, `/visits/{id}/labels.zpl` | DX_COLLECT or DX_REGISTER | |
+| GET | `/visits/{id}/label-options` | DX_COLLECT or DX_REGISTER | rows for the print dialog: test, sample id, tube colour, order time |
+| GET | `/visits/{id}/labels.pdf?sample_ids=…&mode=per_sample|per_test&register=true`, `/visits/{id}/labels.zpl?…` | DX_COLLECT or DX_REGISTER | logs `dx_label_prints` (reprint flagged) |
 | POST | `/samples/{id}/bind` | DX_COLLECT | pre-printed barcode |
 | POST | `/visits/{id}/collect` | DX_COLLECT | idempotent; `dx_awaiting_payment` per settings |
 | POST | `/samples/{id}/reject` | DX_RECEIVE or DX_COLLECT | reason code; `recollect` bool |
 | GET/POST/PATCH | `/rejection-reasons` | DX_ADMIN | |
 | GET | `/samples/track/{barcode}` | DX_READ | location, status, batch, timeline |
 | POST | `/admin/home-collection/prepare-route` (existing router) | HOME_COLLECTION_MANAGE | creates visits for the day's home bookings (idempotent) |
-| POST | `/admin/home-collection/my-visits/{id}/samples` (existing router) | PHLEBOTOMIST (own visit only) | bind + collect; added to the phlebotomist allowlist |
+| POST | `/admin/home-collection/visits/{id}/samples` (existing router) | PHLEBOTOMIST (own visit only) | bind + collect; added to `_PHLEBOTOMIST_ROUTES` (`app/routers/admin.py:476`) next to the existing `GET /admin/home-collection/my` and `POST /admin/home-collection/visits/{id}/status` |
+| POST | `/admin/home-collection/visits/{id}/field-collection` (existing router) | PHLEBOTOMIST (own visit only) | doorstep cash / UPI-to-clinic amount (`dx_field_collections`), idempotency key |
+| GET / POST | `/field-collections?status=pending_handover`, `/field-collections/{id}/handover`, `/field-collections/{id}/dispute` | DX_BILLING | handover creates the receipt on the cashier's open shift |
 
 ## P5 — Logistics and outsourcing
 | Method | Path | Permission | Notes |
@@ -106,10 +109,13 @@ Prefix `/admin/dx` unless stated. `NW` = refused in WIND_DOWN.
 | POST | `/templates/{id}/assets` | DX_ADMIN | header/footer images |
 | POST | `/templates/clone-from-pdf` | DX_ADMIN | rasterise page 1, return image for cropping |
 | GET | `/templates/{id}/preview.pdf` | DX_ADMIN | fixture visit |
-| GET | `/releases?status&site&date` | DX_DISPATCH | tabs To release / Held / Sent / Failed / Printed |
+| GET | `/releases?delivery_status&target&site&date` | DX_DISPATCH | tabs To release / Held (dues) / Payer-routed / Sent / Failed / Printed, from `dx_release_deliveries` |
 | POST | `/visits/{id}/releases` | DX_DISPATCH | `{result_ids?, kind}`; default = all signed not released |
 | GET | `/releases/{id}/pdf` | DX_DISPATCH or DX_READ | audit-logged clinical read |
-| POST | `/releases/{id}/resend` | DX_DISPATCH | idempotent per minute |
+| GET | `/releases/{id}/deliveries` | DX_DISPATCH | per target: status, decision reason, recipient (masked) |
+| POST | `/releases/{id}/resend` | DX_DISPATCH | re-runs the decision per target; idempotent per minute |
+| POST | `/visits/{id}/delivery-override` | DX_ADMIN or clinic_admin | dues rule only; reason ≥ 10 chars; expiry; re-evaluates held deliveries |
+| — | `/admin/lab-reports/{id}/resend`, held-report resolve with `new_phone` (existing) | — | refuse rows with `source='dx'` → 409 "use Reports & Dispatch" (AUDIT A20) |
 | POST | `/releases/{id}/print` | DX_DISPATCH | logs copies/purpose |
 | POST / DELETE | `/releases/{id}/share-link` | DX_DISPATCH | token shown once |
 | GET / PATCH | `/delivery-owner` | DX_ADMIN | per branch `connector|shadow|dx`; `dx` refused with active connector |

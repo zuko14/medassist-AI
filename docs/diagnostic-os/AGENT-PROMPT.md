@@ -19,6 +19,12 @@ READ FIRST, in this order, before touching code:
      paths; no platform WhatsApp fallback; admin/index.html is the live UI and admin/admin.js is dead; IST).
   2. docs/diagnostic-os/status.md  — §1 current pointer, §2 resume protocol, §4 phase board, §6 tasks.
   3. docs/diagnostic-os/AGENT-PROMPT.md (this file) — §2 loop, §4 file ownership, §6 evidence, §7 stop rules.
+  3a. docs/diagnostic-os/AUDIT.md — every claim about existing code, with file:line evidence. Before editing any
+      existing file, re-open the cited lines; if they moved, re-locate by symbol; if the code no longer matches the
+      audit, STOP and record the delta in status.md §7 before writing code.
+  3b. docs/diagnostic-os/DELIVERY-POLICY.md — the only rules for who may receive a report and when. Owner rules:
+      NO PAYMENT, NO REPORT (only an audited admin override) and PAYER-ROUTED (insurance/TPA/corporate) VISITS NEVER
+      GO TO THE PATIENT. Any code path that can hand a DX report to anyone must call dx_delivery_decision.
   4. The design files the current task references (ARCHITECTURE, ADR, DATA-MODEL, WORKFLOWS, REPORT-TEMPLATES, API,
      UI, SECURITY, TEST-PLAN, ROLLOUT, KRIYA-KETU in docs/diagnostic-os/).
   5. The precedent code you are extending: migrations/111_ipd_os_core.sql, 115_investigation_and_procedure_orders.sql,
@@ -37,7 +43,9 @@ THEN:
     affected design file in the same commit.
   - Never: skip/xfail/delete a test to get green; raise a linter baseline; run with KRIYA_TEST_LIVE=1; apply a
     migration to Supabase or deploy without the owner's explicit instruction; edit admin/admin.js; add an LLM call to
-    any DX path; build referral-commission features (ADR-DX-11); put a model identifier in commits or code.
+    any DX path; build referral-commission features (ADR-DX-11); put a model identifier in commits or code;
+    call LabReportService.upload_and_send with source="dx" from anywhere except dx_reports.send_delivery();
+    invent a code fact (file, function, column, route) that you have not opened and read in this session.
   - When you pause (end of session, context limit, blocker): update status.md §1 with the exact next step, the
     branch, last commit and anything half-done, commit, push, and stop.
 
@@ -144,6 +152,8 @@ For live UI checks: what was clicked, with which role, at which widths, and what
 - [ ] Tenancy linter green; new tables in `TENANT_OWNED_TABLES`; matrices cover new routes.
 - [ ] Every write audit-logged; clinical reads audit-logged; errors mapped (no raw DB text).
 - [ ] No AI/voice/assistant import in DX clinical code (`test_dx_no_llm.py` green).
+- [ ] If the task touches delivery, billing or B2B: the DELIVERY-POLICY §7 rows it affects have passing tests.
+- [ ] Every existing file touched is listed in ROLLOUT §0.3 with its regression test; if not, the list is updated.
 - [ ] Migration (if any): verify block, rollback, idempotent re-apply, `verify_supabase_schema.sql` updated.
 - [ ] UI (if any): checked at 1440 px and 390 px with a real login for each role involved.
 - [ ] status.md updated (state, evidence, log, pointer) in the same commit; design docs updated if anything deviated.

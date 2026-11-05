@@ -23,6 +23,9 @@
 | Bridge | spoofed instrument results | per-agent key, HMAC-SHA256 over method+path+timestamp+body, 300 s window, nonce/`message_id` idempotency, results only *prefill* or enter as unsigned (human still verifies/approves) |
 | Assistants | prompt injection writing clinical data | Ketu has no DX write action; LLM never sees result values (ADR-DX-10) |
 | WhatsApp | report sent from another clinic's number | clinic's own credentials only (`_get_credentials`, no platform fallback); release send refused when delivery owner ≠ `dx` |
+| Report released without payment | staff, a bug or a resend path hands an unpaid patient the report | DELIVERY-POLICY rule 7 in SQL, CAS claim before every send, single sender (AST test), overrides append-only with reason, print and share links included |
+| Insurance / TPA / corporate privacy | panel report reaches the employee/patient or the wrong desk | payer-kind CHECK on accounts, decision rule 3, desk phone only from the account row (never from the request), generic resend/resolve refuse DX rows |
+| Shared hospital phone | hospital patients listed to whoever chats from the desk number | B2B dependants hidden from `get_family_members`; no patient delivery to the desk number |
 
 ## 2. Entitlement
 `dx_access(clinic)` is checked on every `/admin/dx/*` route (server-side); the sidebar is cosmetic. Partner accounts
@@ -118,10 +121,15 @@ deleted; retention periods are data (O-DX-10); partner accounts see only their p
 
 ## 10. Invariants (must hold even for a buggy future caller — each has a real-Postgres test)
 1. A DX order belongs to exactly one visit and one item; never billed through `opd_invoice_items.order_id`.
-2. A visit's patient bill total = Σ (price − discount) of its active items; at most one live bill per visit.
+2. Σ over a visit's live invoices = Σ `patient_share_paise` of its active items; each item on at most one live line; DX bill lines are written only by DX functions.
 3. A barcode identifies at most one sample per clinic; a collected sample's barcode never changes.
 4. A sample is in at most one live batch.
 5. A DX result cannot be validated on a 3-level clinic without a verification of its current version.
 6. A validated/amended result never changes (118); a release's content never changes; a published template never changes.
 7. A B2B ledger row is never updated or deleted (except owner purge); one charge per accession item; balance derived.
 8. Every `dx_*` state column changes only inside `dx_*` functions (`kriya.dx_tx` guard).
+9. No `lab_reports` row with `source='dx'` exists for a delivery that the decision function refuses; every DX
+   `upload_and_send` call is preceded by a successful `dx_claim_delivery`.
+10. A visit of an `insurance_tpa` / `corporate` account never has a `patient` delivery unless the account carries a
+    recorded patient-copy authorisation.
+11. DX bill lines are written only by DX functions; Σ live DX invoice totals of a visit = Σ active items' patient shares.

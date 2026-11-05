@@ -15,8 +15,8 @@
 Rules (enforced by `dx_guard_components` and the service):
 - A *test* owns parameters; a *panel* or *package* owns none. Depth ≤ 2 (package → panel → test); no cycles.
 - One work unit (`opd_orders` row) per **test**, whatever was sold. A package's price is on its
-  `dx_accession_items` row; member tests carry `price_source='package_member'` information only through the order's
-  `accession_item_id`.
+  `dx_accession_items` row; member tests carry no price of their own — they link to the package line through the
+  order's `accession_item_id`.
 - `container_id` and `department_id` are required on a *test* before the lab director can approve it.
 - `dx_approved_at` is required before a test can be ordered in DX (WhatsApp booking is unaffected — it uses its own
   existing rules). Editing a band, unit, formula or reference text of an approved test clears approval in the same
@@ -156,11 +156,12 @@ Layout rules:
 
 | Item | Spec |
 |:-|:-|
-| Sample ID | 12 digits: `YY` (IST year) + container code `cc` + 8-digit counter from `opd_next_counter(clinic, 'dx_sample:YYcc')` — e.g. `26` `01` `00016570` |
+| Sample ID | 12 digits: `YY` (IST year) + container code `cc` + the visit's 8-digit **sample sequence** shared by all its tubes (`opd_next_counter(clinic, 'dx_sample_seq:YY')`, raised to `sample_seq_floor`). Observed in the owner's MocDoc tenant and reproduced exactly: one visit → `260100016583` (01 plain/red, HBsAg + HIV) and `260400016583` (04, Anti-HCV); another → `260100016570` (01) and `260700016570` (07 EDTA, CBC); urine → `261100016459` (11). A second tube with a container code already used in the visit (different processing site) and every recollection get a fresh sequence. Seed container codes mirror the tenant's (01 plain, 04 yellow/SST, 07 EDTA, 11 urine; others free) so analysers and staff habits carry over |
 | Symbology | Code128-C for all-numeric even length (12 digits → 101 modules ≈ 25 mm at 0.25 mm/module); Code128-B fallback for pre-printed alphanumeric stock; check digit per Code128 mod-103 (unit-tested against published vectors) |
 | Label | 50 × 25 mm default (38 × 25 configurable): barcode with human-readable digits; patient name (truncated 22 chars), age/sex; visit no.; test short codes (≤ 30 chars, "+3" overflow); tube colour bar using `dx_containers.colour_hex`; site code |
 | Output | PDF sized to the label (browser print, printer driver set to the label size) and **ZPL** (`^XA … ^BCN … ^XZ`) download for Zebra/TSC printers in ZPL emulation; direct USB printing via a local print agent is DEFERRED |
-| Count | one label per sample + `extra_labels` setting (aliquot/ backup) |
+| Count | one label per sample + `extra_labels` setting (aliquot / backup) |
+| Print dialog (intent of MocDoc's *Print Barcode*) | lists every test of the visit with its Sample ID, tube colour and order date-time, all ticked; staff untick what not to print; `label_mode` **per sample** (one label per tube listing its tests, default) or **per test** (one label per ticked test, for labs that run each test on its own card/register); optional **Register Book Label** (visit no., name, age/sex, tests, date — for the paper lab register); **Reprint** is the same dialog and is logged in `dx_label_prints` with `is_reprint=true` |
 
 ## 7. Bill print
 Visit bill (A5 or 80 mm thermal, template setting): lab letterhead, visit no., MRN, patient, referrer, items with

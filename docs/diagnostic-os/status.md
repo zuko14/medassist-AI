@@ -4,7 +4,9 @@
 > [ARCHITECTURE.md](ARCHITECTURE.md) · [ADR.md](ADR.md) · [DATA-MODEL.md](DATA-MODEL.md) · [WORKFLOWS.md](WORKFLOWS.md) ·
 > [REPORT-TEMPLATES.md](REPORT-TEMPLATES.md) · [API.md](API.md) · [UI.md](UI.md) · [SECURITY.md](SECURITY.md) ·
 > [TEST-PLAN.md](TEST-PLAN.md) · [ROLLOUT.md](ROLLOUT.md) · [KRIYA-KETU.md](KRIYA-KETU.md) ·
-> [GAP-ANALYSIS.md](GAP-ANALYSIS.md) · [COMPETITIVE-ANALYSIS.md](COMPETITIVE-ANALYSIS.md).
+> [GAP-ANALYSIS.md](GAP-ANALYSIS.md) · [COMPETITIVE-ANALYSIS.md](COMPETITIVE-ANALYSIS.md) ·
+> **[DELIVERY-POLICY.md](DELIVERY-POLICY.md)** (who may receive a report, when) · **[AUDIT.md](AUDIT.md)** (every design
+> claim checked against code with file:line — read before touching any existing file).
 >
 > States: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` (say why) · `IMPLEMENTED` (code written, evidence incomplete) ·
 > `VERIFIED` (the listed command was run and passed — result pasted in §9) · `DEFERRED` (reason given).
@@ -20,6 +22,11 @@ print delivery → B2B statements — so no external LIMS and no browser-automat
 OPD registry and ledger, G1 orders (mig 115) and the G2 LIS (mig 118). **Existing behaviour (WhatsApp booking, voice,
 home collection, MocDoc connector, CallMedex, OPD, IPD, lab-report delivery) must not change** for any clinic that has
 not enabled DX, and for a DX clinic until a branch's delivery owner is switched to `dx`.
+
+**Two owner rules that override every convenience (DELIVERY-POLICY §1):** (1) no report reaches the patient, the
+referrer, a print for the patient or a share link while the visit's patient-payable amount is unpaid — only an audited
+admin override; (2) insurance / TPA / corporate-panel visits are delivered to the payer's desk, never to the patient,
+unless the account carries a recorded authorisation.
 
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
@@ -51,7 +58,7 @@ not enabled DX, and for a DX clinic until a branch's delivery owner is switched 
 | Python / runner | record (`.venv/Scripts/python.exe` on the owner's Windows machine; Python 3.12 + pytest in Linux sessions). The authoring session had **no pytest installed**, so no baseline was run there |
 | **Baseline full suite** | record `python -m pytest -q -rs` → `<passed>, <skipped>, <failed>` — last recorded in Hospital OS: 7672 passed / 4 skipped / 0 failed (2026-10-30); later sessions 52–57 added tests |
 | Pre-existing failures | record; any failure here is fixed or explicitly accepted by the owner before P1 |
-| Facts F1–F10 (GAP-ANALYSIS §3) still true at HEAD | re-check with the commands in DX-01 and record |
+| Facts F1–F16 (GAP-ANALYSIS §3) and AUDIT A1–A29 evidence still true at HEAD | re-check with the commands in DX-01 and record |
 | Owner decisions O-DX-1…11 | record answers or "default accepted" |
 
 ## 4. Phase board
@@ -96,7 +103,7 @@ green, audit on writes, mapped errors, docs updated in the same commit.
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
 | DX-00 | Read AGENTS.md, this folder, `docs/hospital-os/status.md`, `docs/sessions/SESSION_44_G2_LIS.md`, `SESSION_41`, `SESSION_28`; record §3 (HEAD, latest migration, Supabase state of 115–124, runner, **baseline full suite**, pre-existing failures, owner decisions) | — | §3 complete | full suite | NOT_STARTED |
-| DX-01 | Re-verify F1–F10 at HEAD: `grep -n "def opd_enabled" -A15 app/services/tenant.py`; `grep -n "_lis_scope" -A12 app/routers/lis.py`; `grep -n "opd_orders_source_shape\|doctor_id" migrations/115_*.sql`; `grep -n "spawn_background_task(deliver_report" app/services/lis.py`; `grep -rn "opd_orders" app --include=*.py \| grep -v "^app/services/orders.py\|^app/services/lis.py"` (list every reader for DX-19); record deltas in §7 | DX-00 | F1–F10 confirmed or design updated | — | NOT_STARTED |
+| DX-01 | Re-verify F1–F16 at HEAD: `grep -n "def opd_enabled" -A15 app/services/tenant.py`; `grep -n "_lis_scope" -A12 app/routers/lis.py`; `grep -n "opd_orders_source_shape\|doctor_id" migrations/115_*.sql`; `grep -n "spawn_background_task(deliver_report" app/services/lis.py`; `grep -rn "opd_orders" app --include=*.py \| grep -v "^app/services/orders.py\|^app/services/lis.py"` (list every reader for DX-19); **and every AUDIT.md §1/§2 evidence line** (re-locate by symbol if lines moved: `upload_and_send`, `idx_lab_reports_clinic_external_report`, `collect_sample`, `complete_order`, `_PHLEBOTOMIST_ROUTES`, `get_family_members`, `_apply_prepaid`, `_validate_and_price_items`, `resend_report`, `opd_next_counter`, `patients_clinic_phone_key`); record deltas in §7 | DX-00 | F1–F16 and AUDIT A1–A29 confirmed or design updated | — | NOT_STARTED |
 
 ### P1 — Foundation (DX-M1)
 | ID | Task | Depends | Acceptance | Tests | State |
@@ -132,11 +139,11 @@ booking of the same tests unchanged.
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
 | DX-18 | Migration DX-M3 (referrers, b2b accounts identity, accessions, items, samples table, events, `opd_orders` extension, invoice links, line guard, functions `dx_register_visit` / `dx_add_items` / `dx_cancel_item` / `dx_cancel_visit` / `dx_bill_visit`, purge v2) | P2 | ADR-DX-03 constraints; 115 suite unedited | `test_migration_dx_m3.py`, DG5 | NOT_STARTED |
-| DX-19 | Filter every non-DX reader of `opd_orders` found in DX-01 (at least `orders.get_diagnostic_worklist` → `source IN ('opd','ipd')`) | DX-18 | G1 worklist identical for OPD/IPD | `test_dx_visits_e2e.py::test_g1_worklist_excludes_dx_rows`, DG5 | NOT_STARTED |
+| DX-19 | Guard every existing path against DX rows (AUDIT A4, A10, A20, A22): G1 worklist `source IN ('opd','ipd')`; G1 `collect_sample` / `complete_order` refuse `source='dx'` (409 `dx_use_dx_route`); DX bill-line guard trigger (OPD draft save on a DX bill refused, mapped message in `opd_billing`); generic Lab Reports resend / resolve refuse `source='dx'` rows; lab-test delete refuses a test ordered in DX | DX-18 | OPD/IPD behaviour identical | `test_dx_existing_paths.py`, DG5 | NOT_STARTED |
 | DX-20 | `app/services/dx.py`: price quote, register (pricing in SQL), add/cancel items, visit read model with field filtering, timeline | DX-18 | W1/W2 steps 1–3 | `test_dx_visits_e2e.py` | NOT_STARTED |
-| DX-21 | Routes: patient search/register (registry service under `_dx_scope`), referrers, B2B identity CRUD, visits CRUD (API P3) | DX-20 | | `test_dx_visits_e2e.py` | NOT_STARTED |
-| DX-22 | Billing glue: bill/issue/receipts/refunds/payment link via `opd_billing`; prepaid apply for bookings; bill PDF A5 + 80 mm | DX-20 | bill = Σ items; prepaid once | `test_dx_visits_e2e.py` | NOT_STARTED |
-| DX-23 | Today's bookings list + convert (`source_appointment_id`, unique per booking) | DX-22 | W3 | `test_dx_visits_e2e.py` | NOT_STARTED |
+| DX-21 | Routes: patient search/register (registry service under `_dx_scope`), referrers, B2B identity CRUD incl. payer kinds and the payer-routed CHECK, visits CRUD (API P3); B2B subjects without own phone → holder-patient dependants with `family_members.dx_b2b_account_id`; `get_family_members` hides them (ADR-DX-21) | DX-20 | conversation family tests unedited | `test_dx_visits_e2e.py`, `test_dx_b2b_subjects.py`, `test_dx_existing_paths.py` | NOT_STARTED |
+| DX-22 | Billing glue: bill/issue/receipts/refunds/payment link via `opd_billing`; invoice `appointment_id` NULL; `_apply_prepaid` once per linked booking; `fee` items; supplementary bill for items added after issue; bill PDF A5 + 80 mm | DX-20 | Σ live invoices = Σ patient shares; each prepaid once | `test_dx_visits_e2e.py`, `test_dx_bookings.py` | NOT_STARTED |
+| DX-23 | Today's bookings list + convert (all of a patient's bookings for the day → one visit via `dx_accession_bookings`; prepaid applied per booking) | DX-22 | W3 | `test_dx_visits_e2e.py` | NOT_STARTED |
 | DX-24 | `data_retention.py` DX section | DX-18 | | `test_dx_data_retention.py` | NOT_STARTED |
 | DX-25 | UI **Registration** page (incl. Today's bookings) | DX-21–23 | live UI, keyboard flow | manual | NOT_STARTED |
 
@@ -147,8 +154,8 @@ booking of the same tests unchanged.
 |:-|:-|:-|:-|:-|:-|
 | DX-26 | Migration DX-M4 (rejection reasons, sample guard, collect / bind / reject / receive-same-site / store functions) | P3 | ADR-DX-05 | `test_dx_samples.py` | NOT_STARTED |
 | DX-27 | `app/services/dx_barcode.py` Code128 B/C (Lane PURE = DX-27a) + label PDF + ZPL in `dx_pdf.py` | — | published vectors | `test_dx_labels.py` | NOT_STARTED |
-| DX-28 | Routes: collection queue, labels, bind, collect, reject (+ recollection WhatsApp: in-session or `dx_recollection_required` template), receive same-site, track sample | DX-26, DX-27 | W1 steps 4–6, W7 | `test_dx_samples.py` | NOT_STARTED |
-| DX-29 | Home collection: `prepare-route`, phlebotomist samples route + allowlist, portal Samples panel | DX-28 | W4; phlebotomist still confined | `test_dx_samples.py`, `test_home_collection.py` unedited | NOT_STARTED |
+| DX-28 | Routes: collection queue, label print dialog (per sample / per test / register-book label, reprint log), bind, collect, reject (+ recollection WhatsApp: in-session or `dx_recollection_required` template), receive same-site, track sample | DX-26, DX-27 | W1 steps 4–6, W7; barcode vectors of REPORT-TEMPLATES §6 | `test_dx_samples.py`, `test_dx_labels.py` | NOT_STARTED |
+| DX-29 | Home collection: `prepare-route`, phlebotomist samples + field-collection routes added to `_PHLEBOTOMIST_ROUTES`, portal Samples / Cash collected panel, cashier handover (`dx_field_collections`) | DX-28 | W4; phlebotomist still confined; handover creates exactly one receipt | `test_dx_samples.py`, `test_home_collection.py` unedited | NOT_STARTED |
 | DX-30 | UI **Sample Collection** page | DX-28 | live UI, scanner + camera | manual | NOT_STARTED |
 
 ### P5 — Logistics and outsourcing (DX-M5)
@@ -164,7 +171,7 @@ booking of the same tests unchanged.
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
 | DX-36 | Migration DX-M6 (meta, verifications, critical events, attachments, **gate trigger**, `dx_record_results`, `dx_verify_result`, `dx_approve_results`) | P4 | gate ignores OPD/IPD | `test_migration_dx_m6.py` | NOT_STARTED |
-| DX-37 | LIS: skip `deliver_report` for `source='dx'`; LIS entry/validate routes return `409 dx_use_dx_route` for dx orders | DX-36 | F4 closed; OPD/IPD unchanged | `test_dx_results_e2e.py`, DG5 | NOT_STARTED |
+| DX-37 | LIS: skip `deliver_report` for `source='dx'`; LIS entry/validate routes return `409 dx_use_dx_route` for dx orders; `get_review_queue` excludes DX orders (AUDIT A5) | DX-36 | F4 closed; OPD/IPD unchanged | `test_dx_results_e2e.py`, DG5 | NOT_STARTED |
 | DX-38 | `app/services/dx_results.py`: entry (formulas, delta, meta, critical detection), verify/return, approve single + batch, critical-call records, attachments | DX-36, DX-13, DX-14 | W8, W9 | `test_dx_results_e2e.py` | NOT_STARTED |
 | DX-39 | Stage read model `dx_stage()` + `/worklist` + TAT (two clocks) + `dx_tat_breach_scan` job | DX-38 | ARCHITECTURE §4.2 | `test_dx_results_e2e.py` | NOT_STARTED |
 | DX-40 | UI **Lab Worklist**, **Worksheet** drawer, **Approval** page | DX-38, DX-39 | live UI | manual | NOT_STARTED |
@@ -176,7 +183,7 @@ booking of the same tests unchanged.
 | DX-42 | Migration DX-M7 | P6 | release/template guards | `test_dx_reports_e2e.py` | NOT_STARTED |
 | DX-43 | `dx_pdf.py` visit report renderer (Lane PURE = DX-43a with fixture dicts) + template schema (pydantic) | — | REPORT-TEMPLATES §5; deterministic SHA | `test_dx_pdf.py`, `test_dx_templates.py` | NOT_STARTED |
 | DX-44 | Templates CRUD/assets/publish/retire/preview/clone-from-PDF + 3 starter templates + cascade | DX-42, DX-43 | ADR-DX-08 | `test_dx_templates.py` | NOT_STARTED |
-| DX-45 | Releases: auto policy after approval, render + upload in background (`spawn_background_task`), `upload_and_send(dx-<id>)`, dues hold + payment-link settlement re-queue, routing (patient / referrer / account), resend, print log, delivery owner + shadow + connector guard | DX-44 | W10, W11, ADR-DX-15 | `test_dx_reports_e2e.py` | NOT_STARTED |
+| DX-45 | Releases and deliveries per [DELIVERY-POLICY.md](DELIVERY-POLICY.md): `dx_delivery_decision`, per-target `dx_release_deliveries` with ids `dx-<release>-p\|r\|a`, `dx_claim_delivery` CAS before the single sender, `dx_outbox` triggers + `dx_outbox_dispatch` job, overrides, print log, payment-due link, account targets `ai_summary=False`, delivery owner + shadow + connector guard; render + upload in background (`spawn_background_task`) | DX-44 | W5-C, W10, W11, ADR-DX-15/19/20; every row of DELIVERY-POLICY §7 | `test_dx_reports_e2e.py`, `test_dx_delivery_policy.py` | NOT_STARTED |
 | DX-46 | Public verify + share links (rate limits, attempts, expiry) | DX-45 | SECURITY §6 | `test_dx_reports_e2e.py` | NOT_STARTED |
 | DX-47 | UI **Reports & Dispatch** + **Report Templates** pages | DX-44, DX-45 | live UI | manual | NOT_STARTED |
 
@@ -234,6 +241,8 @@ booking of the same tests unchanged.
 ## 8. Known issues and limitations
 - At authoring, migrations 115–124 (which DX builds on) are not applied to Supabase; DX cannot reach staging first.
 - `admin/index.html` is a very large single file — UI lanes must use the DX markers (UI.md §1) to avoid conflicts.
+- Re-audit 2026-11-05 ([AUDIT.md](AUDIT.md)) corrected the first draft in 29 places (2 critical: dues gating and payer
+  routing were incomplete). Agents must treat AUDIT.md as binding where it differs from memory of the earlier draft.
 - Approval requires doctor-linked logins with registration numbers; centres where non-doctor scientists sign
   reports under state rules need an owner decision (signatory eligibility is data in `dx_signatories`, but the 118
   CHECK requires a registration number).
@@ -246,6 +255,7 @@ booking of the same tests unchanged.
 ## 10. Log
 | Date (IST) | Entry |
 |:-|:-|
+| 2026-11-05 | Forensic re-audit against code (AUDIT.md A1–A29) after a second owner brief (insurance/TPA patients must not receive reports; unpaid bills must never release reports; MocDoc Print Barcode dialog). Added DELIVERY-POLICY.md and ADR-DX-19…22; corrected barcode format (visit-shared sequence), per-target delivery ids, booking linkage (one test per booking, deposits), DX bill-line guard, B2B subjects without phone, G1/LIS/generic-resend guards, phlebotomist route names, voice/WhatsApp facts, plan eligibility table, field collections, label print dialog. Still no code. |
 | 2026-11-05 | Document set authored (no code): competitive research (MocDoc screenshots + public pages for MocDoc/CrelioHealth; direct fetch blocked by network policy), gap analysis against `main` @ `56f719f`, architecture, 18 ADRs, data model DX-M1…M9, workflows W1–W18, report/template/label spec, API, UI, security, test plan, rollout, assistants, agent prompts. Baseline suite not run in the authoring session (no pytest installed). |
 
 ## 11. Next exact action

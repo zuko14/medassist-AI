@@ -5,7 +5,8 @@
 > Routes: [API.md](API.md) · Screens: [UI.md](UI.md) · Security: [SECURITY.md](SECURITY.md) ·
 > Tests: [TEST-PLAN.md](TEST-PLAN.md) · Rollout: [ROLLOUT.md](ROLLOUT.md) · Assistants: [KRIYA-KETU.md](KRIYA-KETU.md) ·
 > Market: [COMPETITIVE-ANALYSIS.md](COMPETITIVE-ANALYSIS.md) · Gaps: [GAP-ANALYSIS.md](GAP-ANALYSIS.md) ·
-> Agent prompts: [AGENT-PROMPT.md](AGENT-PROMPT.md)
+> Agent prompts: [AGENT-PROMPT.md](AGENT-PROMPT.md) · **Delivery rules: [DELIVERY-POLICY.md](DELIVERY-POLICY.md)** ·
+> **Forensic re-audit (code evidence): [AUDIT.md](AUDIT.md)**
 >
 > Anchored to `main` @ `56f719f` (migration 124). Diagnostic OS adds migrations **DX-M1 … DX-M9** (numbers assigned
 > at merge time, recorded in status.md §5; ADR-DX-18).
@@ -59,8 +60,8 @@ flowchart TB
 | Results | `lab_results`, `lab_result_values`, `lis_record_results`, `lis_validate_result` | **Reuse unchanged** (functions); add a DX-only verification gate trigger; skip per-test delivery for DX |
 | Money (patient) | `opd_invoices` / items / receipts / shifts / refunds / payment links / prepaid / GST | **Reuse.** DX bill = `opd_invoices` row with `accession_id`; lines carry `dx_accession_item_id`; issue/receipt/refund via `app/services/opd_billing.py` |
 | Money (B2B) | — | **New** append-only `dx_b2b_ledger` + `dx_b2b_statements` (bill-of-supply series `B2B-YYYY-NNNNN`) |
-| Numbering | `opd_next_counter`, `opd_format_number` | **Reuse** keys `dx_accession:<YYYY>`, `dx_sample:<YY><cc>`, `dx_batch:<YYYY>`, `dx_b2b:<YYYY>` |
-| Delivery | `LabReportService.upload_and_send`, receipts, retries | **Reuse.** One call per release, `external_report_id='dx-<release_id>'`, `source='dx'` |
+| Numbering | `opd_next_counter`, `opd_format_number` | **Reuse** keys `dx_accession:<YYYY>`, `dx_sample_seq:<YY>` (one per visit, shared by its tubes — ADR-DX-05), `dx_batch:<YYYY>`, `dx_b2b:<YYYY>`. `opd_next_counter` row-locks the `clinics` row until commit, so each DX function takes at most two counters, at its end (AUDIT A13) |
+| Delivery | `LabReportService.upload_and_send` (dedup on `(clinic_id, external_report_id)`, one phone per call), receipts, retries | **Reuse, one call per target**: `external_report_id='dx-<release_id>-<p\|r\|a>'`, `source='dx'`, only after [DELIVERY-POLICY.md](DELIVERY-POLICY.md) allows it (dues invariant, payer routing) |
 | PDF | `app/services/opd_pdf.py` (fpdf2 + Noto fonts, Indic scripts) | **New** `app/services/dx_pdf.py` (visit report v2, labels, bill) reusing `_a4`/font helpers |
 | Audit | `log_admin_action` → `admin_audit_logs` | Every write and every clinical read; plus per-visit timeline `dx_events` written inside SQL functions |
 | Tenancy | `TENANT_OWNED_TABLES`, `scoped_query`, AST linter, composite FKs | Same on every `dx_*` table |
@@ -123,9 +124,10 @@ what replaces MocDoc's tabs:
 rejected` (reason code, replacement sample created by `dx_reject_sample`). Transitions only inside functions; a
 trigger refuses direct writes (pattern `kriya.ipd_tx`, here `kriya.dx_tx`).
 
-### 4.4 Report release (`dx_report_releases.status`)
-`rendered → queued → sent | failed (retry) | held_dues`; any → `superseded` when a later release covers an amended
-result. Content columns immutable after insert; only delivery columns move.
+### 4.4 Report release and deliveries
+Release: `rendering → rendered` (or `render_failed` → retry), any → `superseded` when a later release covers an
+amended result; content immutable. Each release has one **delivery** per target (patient / referrer / account) with
+its own state machine and decision — see [DELIVERY-POLICY.md](DELIVERY-POLICY.md) §4.
 
 ## 5. Data flow: walk-in to WhatsApp
 
@@ -150,7 +152,8 @@ sequenceDiagram
   Path->>API: POST /results/approve {items:[{result_id, expected_updated_at}]}
   API->>DB: lis_validate_result per item (gate trigger checks verification)
   API->>DB: dx_create_release (signed results ready + dues rule + template snapshot)
-  API->>Pipe: upload_and_send(external_report_id=dx-<release>) → patient, referrer copy, B2B desk
+  API->>DB: dx_reevaluate_deliveries → per target: allowed / held_dues / payer-routed
+  API->>Pipe: per allowed target: upload_and_send(external_report_id=dx-<release>-p|r|a)
 ```
 
 ## 6. Authorization layers (order of checks)
@@ -180,6 +183,10 @@ existing unique index prevents a double send of the same release.
 | Owner disables DX with open visits | `409` + preview; confirm → `WIND_DOWN`: no new visits; collection, results, releases, billing continue |
 | B2B account over limit / overdue | New visits on that account refused `409 dx_b2b_on_hold` (unless an admin overrides with reason); existing visits continue |
 | AI provider down | No effect on any DX path (zero-LLM); only the optional patient AI summary in the existing pipeline is skipped |
+| Visit not fully paid when results are signed | Patient-side deliveries `held_dues`; payment link sent; released automatically by the `dx_outbox` re-evaluation when the receipt lands (DELIVERY-POLICY §4) |
+| Insurance / TPA / corporate visit | Only the payer's desk receives the report; patient targets `blocked: payer_routed` |
+| Phlebotomist took cash at the doorstep | Held until the cashier accepts the handover (receipt on the cashier's shift) |
+| Two senders race for one delivery | `dx_claim_delivery` CAS `queued → sending`: one wins; the pipeline's per-target `external_report_id` dedup is the second line |
 
 ## 9. Non-functional targets
 | Item | Target |

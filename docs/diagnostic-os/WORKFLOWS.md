@@ -17,7 +17,8 @@ Legend: **Desk** front desk/cashier · **Col** collector/phlebotomist · **Run**
    requirement and prep warnings (from `lab_tests.prep_instructions`, `fasting_required`). Sets priority, fasting
    status/last meal time, clinical notes.
 3. **Save & Bill** → `POST /admin/dx/visits` (idempotency key per click) → `LAB-2026-000123`, items, orders, samples
-   grouped by container: e.g. `260100016570` (01 serum: lipid, HbA1c is EDTA → `260700016571`). Draft invoice built
+   grouped by container, sharing the visit's sample sequence: e.g. `260100016570` (01 plain/serum: lipid) and
+   `260700016570` (07 EDTA: HbA1c, CBC) — the same pattern the centre's MocDoc labels use today (ADR-DX-05). Draft invoice built
    (`dx_bill_visit`), discount within the user's limit, **Issue** → `INV-2026-…` → receipt (cash/UPI/card) on the
    user's open shift. Bill PDF printed / sent on WhatsApp.
 4. **Print labels** → thermal PDF (50×25 mm) per tube: barcode, sample ID, patient name, age/sex, visit no., test
@@ -26,7 +27,9 @@ Legend: **Desk** front desk/cashier · **Col** collector/phlebotomist · **Run**
    `sample_collected`, visit `in_process`, TAT clock starts (if `tat_clock=registration` it started at step 3).
 6. Same-site lab: **Rcv** scans → `received` (W6 for another site). Bench work W8. Approval W8/W9.
 7. All tests signed → release `final` (auto, `when_complete`) → PDF → WhatsApp from the centre's number with the
-   approved `dx_report_ready` template (document header) → delivery receipts on the visit timeline.
+   clinic's already-approved lab-report template (`template_name_for`; summary template when configured) → delivery
+   receipts on the visit timeline. **Only because the bill is fully paid** (DELIVERY-POLICY rule 7); with dues the
+   patient gets a payment link instead and the report follows automatically when the payment lands.
 
 **Failure paths**: double click on Save → same visit (idempotency). Test not approved by lab director → 409 with the
 test name. Network loss after Issue → retry is idempotent (OPD issue). Unpaid & `collect_before_payment` → collection
@@ -42,25 +45,27 @@ template. Report prints "Ref. by: DR N ANURADHA MD DM (NEURO)" from `referrer_sn
 1. Patient books on WhatsApp today (live flow): test, date, centre/home, pays by Razorpay/PhonePe → `appointments`
    row `booking_type='lab_test'`, payment confirmed.
 2. On the day, **Desk** sees *Today's bookings* in DX Registration (filter: branch, date, status confirmed). Taps
-   **Arrived → Register** → `dx_register_visit` with `source='whatsapp_booking'`, `source_appointment_id`; patient
-   and test pre-filled; extra tests may be added.
-3. Bill: draft carries `appointment_id`, so the existing `_apply_prepaid` applies the online payment as a receipt
-   exactly once (`uq_opd_invoices_one_per_visit` + accession unique). Balance due shown only for added tests.
+   **Arrived → Register** → `dx_register_visit` with `source='whatsapp_booking'` and **all of that patient's confirmed
+   bookings for the day** (one test per booking, AUDIT A9) linked through `dx_accession_bookings`; patient and tests
+   pre-filled; extra tests may be added.
+3. Bill: the DX invoice has `appointment_id` NULL; after issue the service calls the existing `_apply_prepaid` once per
+   linked booking (idempotent on the gateway payment id), so each online payment — full or deposit — becomes one
+   `prepaid_online` receipt. Balance due = deposits not covering the test + added tests; the report waits for it.
 4. Continues as W1 step 4. Booking is marked arrived/checked-in through the existing appointment path, so reminders
    and no-show logic stay correct.
 
 ## W4 — Home collection (P4 on top of migration 097)
 1. Booking with `collection_mode='home'` (live). The visit is **not** created inside the payment-confirmation paths
    (four live money paths stay untouched). It is created by the dispatch desk's **Prepare today's route** action
-   (*Home Collections* page, one call per day/branch, idempotent per booking via `uq_dx_accessions_booking`) or lazily
+   (*Home Collections* page, one call per day/branch, idempotent per booking via `dx_accession_bookings` unique `(clinic_id, appointment_id)`) or lazily
    on the phlebotomist's first scan (`source='home_collection'`). Samples are `pending_collection` with
    `barcode_source='preprinted'` when the centre uses sticker rolls, else generated barcodes printed for the route.
-2. Phlebotomist portal (existing `/admin/home-collection/my-visits`) gains a **Samples** panel: scan the sticker on
+2. Phlebotomist portal (existing `GET /admin/home-collection/my`) gains a **Samples** panel: scan the sticker on
    each tube (camera barcode scan via `BarcodeDetector` API where supported, manual entry fallback) →
    `dx_bind_barcode` + `dx_collect_samples(mode='home')`; GPS and time already captured by 097 status `collected`.
 3. Status `delivered` (097) = handed to the lab → creates/joins a batch from the phlebotomist to the processing site
    (W6), or direct receipt if the lab is the destination.
-4. Visit bill: prepaid via the booking; home-collection fee already on the booking (097 fee) appears as a line.
+4. Visit bill: the booking's online payment (full or deposit, `payment.py` `deposit_percent`) is applied as a prepaid receipt; the home-collection fee that was folded into the booking amount appears as a `fee` item. Any balance collected at the doorstep is recorded by the phlebotomist (**Cash collected**, `dx_field_collections`) and becomes a receipt only when the desk cashier accepts the handover on their shift; until then the report is held (DELIVERY-POLICY rule 7, O-DX-12).
 
 ## W5 — B2B hospital (tie-up), white-label report to the hospital (P5, P7, P8)
 Two variants; both carry the hospital as **Provider** (`b2b_account_id`) and optionally the hospital's doctor as referrer.
@@ -80,6 +85,22 @@ Two variants; both carry the hospital as **Provider** (`b2b_account_id`) and opt
 
 *Variant B — the hospital sends paper requisitions:* **Desk** at the lab registers with `source='b2b'`, the account
 and `external_ref`; rest identical.
+
+*Variant C — insurance / TPA / corporate health-check panel* (e.g. MEDIBUDDY, MD INDIA TPA, HEALTH ASSURE TPA):
+1. **Desk** picks the payer account (kind `insurance_tpa` / `corporate`); the cart header shows a red **PAYER-ROUTED —
+   report goes to <account> only** banner. `billing_mode` comes from the account: `b2b_credit` (payer pays all) or
+   `b2b_split` (co-pay: the patient pays their share at the desk; the rest is a B2B ledger charge).
+2. Collection, bench and approval as W1/W8.
+3. Release → only the `account` delivery is created and sent to the payer's desk WhatsApp (`ai_summary=False`). The
+   patient's phone is **never** a target (DELIVERY-POLICY rule 3); print-for-patient and share links are refused
+   unless the account carries a recorded patient-copy authorisation. On `b2b_split`, the account copy goes out at
+   once; nothing goes to the patient side until the co-pay is paid (and only if authorised).
+4. Patient calls or messages "is my report ready?" → status only: "Your report has been sent to <account name>."
+
+*Who is the patient record for B2B samples?* If the hospital gives the patient's own mobile, the patient is a normal
+registry patient. If it gives none, or its own desk number (common: one number for many patients), the subject is
+registered as a dependant of the account's holder patient with `dx_b2b_account_id` set — hidden from the WhatsApp
+"who is this for" picker — and receives no patient-channel delivery (ADR-DX-21).
 
 **Credit control**: an account `on_hold` (manual, over limit, or overdue beyond `credit_days`) cannot register new
 visits (`409 dx_b2b_on_hold`); an IPD-style override with reason by `DX_B2B_MANAGE` is logged. Prepaid accounts are
@@ -128,8 +149,10 @@ in the queue. Never automatic.
 ## W10 — Release, dues hold, delivery, print, resend, share link, verify (P7)
 1. Signature of the last pending test (policy `when_complete`) or **Release now** (partial) by Disp →
    `dx_create_release` → background render (template snapshot) → upload → `upload_and_send`.
-2. Dues pending and `release_requires_payment` → status `held_dues`; patient receives `dx_payment_due` template with a
-   payment link for the balance; the payment webhook (existing OPD payment-link settlement) re-queues the release.
+2. Dues pending → every patient-side delivery `held_dues` (DELIVERY-POLICY rule 7 — an invariant, not a setting);
+   patient receives `dx_payment_due` (template) with a payment link for the balance; the existing OPD payment-link
+   settlement writes the receipt, the `dx_outbox` trigger re-evaluates, and the held deliveries go out — no staff
+   action. Desk print is refused for the patient copy too unless an admin override with reason exists.
 3. Delivery targets from `routing_snapshot`: patient, referrer copy, B2B desk, none (shadow). Receipts update the
    release and `lab_reports.delivery_status`.
 4. *Reports & Dispatch* page: tabs **To release · Held (dues) · Sent · Failed · Printed**; actions Print (logs
