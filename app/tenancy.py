@@ -104,6 +104,8 @@ TENANT_OWNED_TABLES = frozenset({
     "ipd_claim_transactions",
     # Migration 125: Diagnostic OS Foundation
     "dx_sites",
+    # Migration 126: Diagnostic OS catalogue (departments, containers, signatories, panel/package components)
+    "dx_departments", "dx_containers", "dx_signatories", "dx_test_components",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

@@ -151,9 +151,11 @@ def flag_value(p: Optional[dict], numeric_value: Optional[Decimal], text_value: 
             return "critical_low"
         if chi is not None and numeric_value > chi:
             return "critical_high"
-        if lo is not None and numeric_value < lo:
+        # DX-M2 (mig 126): an exclusive bound flags a value equal to it ("desirable < 200").
+        # Both default False, so every 118 parameter flags exactly as before.
+        if lo is not None and (numeric_value < lo or (p.get("low_exclusive") is True and numeric_value == lo)):
             return "low"
-        if hi is not None and numeric_value > hi:
+        if hi is not None and (numeric_value > hi or (p.get("high_exclusive") is True and numeric_value == hi)):
             return "high"
         return "normal"
     expected = (p.get("normal_text_value") or "").strip().casefold()

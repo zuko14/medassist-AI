@@ -188,6 +188,8 @@ def test_rollback_refuses_results_then_reapplies(lab):
         cur.execute("ROLLBACK")
     cur.execute("BEGIN")
     try:
+        from tests.test_migration_dx_m2 import unwind_126
+        unwind_126(cur)   # newest first: 126's component FKs use the lab_tests key 118 created
         # the shared test DB holds other suites' results: the owner purge is the only path that removes them
         cur.execute("SELECT ipd_purge_clinic(clinic_id) FROM (SELECT DISTINCT clinic_id FROM lab_results) x")
         cur.execute(DOWN.read_text(encoding="utf-8"))

@@ -21,6 +21,8 @@ def unwind_125(cur) -> None:
     """Inside an open transaction: purge every DX clinic (the only way the
     rollback allows) and run the 125 rollback. Rollback tests of earlier
     migrations call this first (via unwind_124), since 125 sits on their objects."""
+    from tests.test_migration_dx_m2 import unwind_126
+    unwind_126(cur)   # newest first: 126 redefines dx_purge_clinic and sits on lab_tests
     cur.execute("SELECT to_regclass('public.dx_sites') IS NOT NULL")
     if not cur.fetchone()[0]:
         return
@@ -126,7 +128,7 @@ def test_purge_removes_only_that_clinics_sites(real_pg_conn):
     _site(c, a, _branch(c, a))
     _site(c, b, _branch(c, b))
     _q(c, "UPDATE clinics SET dx_state = 'ACTIVE' WHERE id = %s", a)
-    assert _q(c, "SELECT dx_purge_clinic(%s)", a) == {"sites": 1}
+    assert _q(c, "SELECT dx_purge_clinic(%s)", a)["sites"] == 1
     assert _q(c, "SELECT count(*) FROM dx_sites WHERE clinic_id = %s", a) == 0
     assert _q(c, "SELECT count(*) FROM dx_sites WHERE clinic_id = %s", b) == 1
     assert _q(c, "SELECT dx_state FROM clinics WHERE id = %s", a) == "OFF"

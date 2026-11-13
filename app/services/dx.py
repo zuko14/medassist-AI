@@ -50,29 +50,53 @@ class DxSettings(BaseModel):
 
 DEFAULT_SETTINGS = DxSettings().model_dump()
 
+# dx_* codes raised by migrations 125/126 and the constraint names behind user mistakes.
+# Matched longest-first against the database message; the raw text is never returned.
 _ERRORS = {
     "dx_settings_conflict": (409, "These settings were changed by someone else. Reload and try again."),
     "dx_settings_invalid": (422, "Settings must be an object."),
     "dx_clinic_not_found": (404, "Clinic not found."),
+    "dx_component_self": (422, "A panel or package cannot contain itself."),
+    "dx_component_parent_kind": (422, "Only a panel or a package can hold other tests."),
+    "dx_component_depth": (422, "A panel holds tests; a package holds panels or tests. Nothing deeper."),
+    "dx_kind_locked": (409, "This test is part of a panel or package (or holds members): remove those links first."),
+    "dx_parameters_on_group": (409, "Panels and packages have no parameters of their own; add them to a test."),
+    "dx_test_changed": (409, "The test changed since you reviewed it. Reload, review again and approve."),
+    "dx_test_not_found": (404, "Test not found."),
 }
-
-
-def _code_of(exc: Exception) -> str:
-    m = re.search(r"dx_[a-z_]+", str(getattr(exc, "message", None) or exc))
-    return m.group(0) if m else ""
+_CONSTRAINTS = (
+    ("dx_sites_clinic_code_key", 409, "Another site already uses this code."),
+    ("dx_sites_clinic_branch_key", 409, "This branch already has a site."),
+    ("dx_sites_branch_fk", 404, "Branch not found."),
+    ("dx_departments_clinic_code_key", 409, "Another department already uses this code."),
+    ("dx_containers_clinic_code_key", 409, "Another container already uses this code."),
+    ("uq_dx_signatories_doctor_all", 409, "This doctor is already a signatory for every department."),
+    ("dx_signatories_doctor_dept_key", 409, "This doctor is already a signatory for this department."),
+    ("dx_signatories_doctor_fk", 404, "Doctor not found."),
+    ("dx_signatories_department_fk", 404, "Department not found."),
+    ("dx_test_components_pair_key", 409, "This test is already in the panel or package."),
+    ("dx_test_components_not_self", 422, "A panel or package cannot contain itself."),
+    ("dx_test_components_child_fk", 404, "Test not found."),
+    ("lab_tests_department_fk", 404, "Department not found."),
+    ("lab_tests_container_fk", 404, "Container not found."),
+    ("uq_lab_tests_test_code", 409, "Another test already uses this code."),
+    ("idx_unique_lab_test_name_per_branch", 409, "A test with this name already exists."),
+    ("lab_tests_dx_check", 422, "One of the test fields is out of range."),
+    ("lab_test_parameters_dx_check", 422, "One of the parameter fields is out of range."),
+    ("lab_test_parameters_ranges", 422, "Ranges must be ordered: critical low <= normal low <= normal high <= critical high."),
+)
 
 
 def raise_for(exc: Exception) -> None:
     """Map a dx_* database error; anything else is a fixed 500 (never raw DB text)."""
-    code, msg = _code_of(exc), str(getattr(exc, "message", None) or exc)
-    if code in _ERRORS:
-        status, message = _ERRORS[code]
-        raise HTTPException(status_code=status, detail={"code": code, "message": message})
-    for constraint, status, message in (
-        ("dx_sites_clinic_code_key", 409, "Another site already uses this code."),
-        ("dx_sites_clinic_branch_key", 409, "This branch already has a site."),
-        ("dx_sites_branch_fk", 404, "Branch not found."),
-    ):
+    if isinstance(exc, HTTPException):
+        raise exc
+    msg = str(getattr(exc, "message", None) or exc)
+    for code in sorted(_ERRORS, key=len, reverse=True):
+        if code in msg:
+            status, message = _ERRORS[code]
+            raise HTTPException(status_code=status, detail={"code": code, "message": message})
+    for constraint, status, message in _CONSTRAINTS:
         if constraint in msg:
             raise HTTPException(status_code=status, detail=message)
     logger.error(f"DX_DB_ERROR type={type(exc).__name__}")
@@ -173,16 +197,21 @@ async def provision_defaults(clinic_id: str) -> None:
                                                 "display_name": name if len(name) >= 2 else f"Site {code}"})
 
 
-def setup_checklist(settings: dict, sites: list[dict]) -> list[dict]:
-    """What the lab still has to configure. Departments, containers and signatories
-    arrive with the catalogue (DX-M2); until then they show as not yet available."""
+def setup_checklist(settings: dict, sites: list[dict], counts: Optional[dict] = None) -> list[dict]:
+    """What the lab still has to configure; `counts` = active departments / containers /
+    signatories (catalogue, migration 126)."""
     active = [s for s in sites if s.get("is_active")]
+    counts = counts or {}
+
+    def item(key: str, label: str, todo: str) -> dict:
+        n = int(counts.get(key) or 0)
+        return {"key": key, "label": label, "done": n > 0, "detail": f"{n} active" if n else todo}
     return [
         {"key": "sites", "label": "Sites", "done": bool(active),
          "detail": f"{len(active)} active site(s)" if active else "Add a site for each branch"},
-        {"key": "departments", "label": "Departments", "done": False, "available": False},
-        {"key": "containers", "label": "Containers", "done": False, "available": False},
-        {"key": "signatories", "label": "Signatories", "done": False, "available": False},
+        item("departments", "Departments", "Add departments (or apply the seed library)"),
+        item("containers", "Containers", "Add tube types (or apply the seed library)"),
+        item("signatories", "Signatories", "Add the doctors who approve reports"),
         {"key": "settings", "label": "Settings", "done": int(settings.get("version") or 0) >= 1,
          "detail": "Saved" if int(settings.get("version") or 0) >= 1 else "Review and save the lab settings"},
     ]

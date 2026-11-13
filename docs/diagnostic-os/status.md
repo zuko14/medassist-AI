@@ -31,12 +31,12 @@ unless the account carries a recorded authorisation.
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P2 — Catalogue** (P0 and P1 VERIFIED 2026-11-13) |
-| Next task | **DX-12** (migration DX-M2, next free number 126) |
-| Working branch | `dx/p1-foundation` (from `main` @ `94de8ae`; not pushed, no PR) |
-| Last commit touching DX | `feat(dx): P0 baseline + P1 foundation (DX-00…DX-11)` on `dx/p1-foundation` |
-| Last VERIFIED gate | P1 DG1–DG7 (§9, 2026-11-13) |
-| Open blockers | none for code. Migration 125 is **not applied** to Supabase (owner action, ROLLOUT §0.4: apply before deploying this code) |
+| Active phase | **P3 — Registration, visits, billing** (P0, P1, P2 VERIFIED 2026-11-13) |
+| Next task | **DX-18** (migration DX-M3, next free number 127) |
+| Working branch | `dx/p1-foundation` (from `main` @ `94de8ae`; P1 at `224e902`, P2 on top; not pushed, no PR) |
+| Last commit touching DX | `feat(dx): P2 catalogue (DX-12…DX-17)` on `dx/p1-foundation` |
+| Last VERIFIED gate | P2 DG1–DG7 (§9, 2026-11-13) |
+| Open blockers | none for code. Migrations 125 and 126 are **not applied** to Supabase (owner action, ROLLOUT §0.4: apply before deploying this code) |
 | Lanes running in parallel | none |
 
 ## 2. Resume protocol (after a pause of any length)
@@ -66,7 +66,7 @@ unless the account carries a recorded authorisation.
 |:-|:-|:-|:-|:-|:-|:-|:-|
 | P0 | Discovery & baseline | DX-00–01 | — | — | — | §3 filled | VERIFIED |
 | P1 | Foundation: entitlement, permissions, scope, sites, owner toggle, setup page | DX-02–11 | P0 | Lane PURE (DX-13, DX-27a, DX-43a) | DX-M1 | DG1–DG7 | VERIFIED |
-| P2 | Catalogue: departments, containers, signatories, test master, parameters, formulas, seed, approval | DX-12–17 | P1 | Lane PURE | DX-M2 | DG1–DG7 | NOT_STARTED |
+| P2 | Catalogue: departments, containers, signatories, test master, parameters, formulas, seed, approval | DX-12–17 | P1 | Lane PURE | DX-M2 | DG1–DG7 | VERIFIED |
 | P3 | Registration, visits, orders (`source=dx`), billing, booking conversion | DX-18–25 | P2 | — | DX-M3 | DG1–DG7 | NOT_STARTED |
 | P4 | Samples, labels, collection (desk + home), rejection, same-site receipt | DX-26–30 | P3 | P8a | DX-M4 | DG1–DG7 | NOT_STARTED |
 | P5 | Logistics: routing, batches, hub receipt, outsourcing | DX-31–35 | P4 | P6, P8a | DX-M5 | DG1–DG7 | NOT_STARTED |
@@ -86,7 +86,7 @@ that may be built from P1 onward by a separate agent (AGENT-PROMPT.md §3).
 | DX id | File | Merged in commit | Applied to staging | Applied to production |
 |:-|:-|:-|:-|:-|
 | DX-M1 | `125_dx_os_foundation.sql` (+ `rollback/125_rollback_dx_os_foundation.sql`) | `dx/p1-foundation` (not merged) | no | no |
-| DX-M2 | — | — | — | — |
+| DX-M2 | `126_dx_catalogue.sql` (+ `rollback/126_rollback_dx_catalogue.sql`) | `dx/p1-foundation` (not merged) | no | no |
 | DX-M3 | — | — | — | — |
 | DX-M4 | — | — | — | — |
 | DX-M5 | — | — | — | — |
@@ -125,12 +125,12 @@ wind-down / re-enable DX on a sandbox clinic; DX Setup reachable only when enabl
 ### P2 — Catalogue (DX-M2)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| DX-12 | Migration DX-M2 (departments, containers, signatories, `lab_tests` + `lab_test_parameters` additive columns incl. `low/high_exclusive`, components + guard, approval-clearing trigger) | P1 | existing lab-test admin and WhatsApp catalogue tests pass unedited | `test_migration_dx_m2.py`, `test_lab_tests_*.py` | NOT_STARTED |
-| DX-13 | `app/services/dx_formula.py` (Lane PURE) | — | all REPORT-TEMPLATES §1.1/§3 vectors | `test_dx_formula.py` | NOT_STARTED |
-| DX-14 | `app/services/lis.py`: `flag_value` honours `low/high_exclusive` with False defaults; pure `delta_check`, `auto_verify_eligible` in `dx_results.py` | DX-12 | 118 flag vectors unchanged | `test_dx_flags.py`, DG5 | NOT_STARTED |
-| DX-15 | Catalogue routes (API P2): departments, containers, signatories + signature upload, catalog list/edit, components, approve (digest CAS), formula check; LIS parameter routes accept DX fields and validate formulas | DX-12, DX-13 | | `test_dx_catalogue_api.py` | NOT_STARTED |
-| DX-16 | Seed library `app/assets/dx_seed/tests_v1.json` (~150 tests, indicative bands marked) + seed preview/apply + CSV/XLSX parameter import with dry run | DX-15 | drafts inactive & unapproved; idempotent | `test_dx_catalogue_api.py` | NOT_STARTED |
-| DX-17 | UI **Test Master** page | DX-15 | live UI | manual | NOT_STARTED |
+| DX-12 | Migration DX-M2 (departments, containers, signatories, `lab_tests` + `lab_test_parameters` additive columns incl. `low/high_exclusive`, components + guard, approval-clearing trigger) | P1 | existing lab-test admin and WhatsApp catalogue tests pass unedited | `test_migration_dx_m2.py`, `test_lab_tests_*.py` | VERIFIED |
+| DX-13 | `app/services/dx_formula.py` (Lane PURE) | — | all REPORT-TEMPLATES §1.1/§3 vectors | `test_dx_formula.py` | VERIFIED |
+| DX-14 | `app/services/lis.py`: `flag_value` honours `low/high_exclusive` with False defaults; pure `delta_check`, `auto_verify_eligible` in `dx_results.py` | DX-12 | 118 flag vectors unchanged | `test_dx_flags.py`, DG5 | VERIFIED |
+| DX-15 | Catalogue routes (API P2): departments, containers, signatories + signature upload, catalog list/edit, components, approve (digest CAS), formula check; LIS parameter routes accept DX fields and validate formulas | DX-12, DX-13 | | `test_dx_catalogue_api.py` | VERIFIED |
+| DX-16 | Seed library `app/assets/dx_seed/tests_v1.json` (~150 tests, indicative bands marked) + seed preview/apply + CSV/XLSX parameter import with dry run | DX-15 | drafts inactive & unapproved; idempotent | `test_dx_catalogue_api.py` | VERIFIED |
+| DX-17 | UI **Test Master** page | DX-15 | live UI | manual | VERIFIED |
 
 **P2 DoD:** a lab director can seed/import, edit bands/formulas, preview calculations, and approve tests; WhatsApp
 booking of the same tests unchanged.
@@ -242,6 +242,14 @@ booking of the same tests unchanged.
 | 2026-11-13 | DX-04 | Clinic-conditional presets for existing roles (FRONT_DESK/CASHIER "+DX_* when created on a DX clinic", SECURITY §3.2) **not implemented**; the staff page offers the 14 DX permission checkboxes (`data-dx="perm"`, shown only on DX clinics) but not yet the 5 new roles | `ROLE_PRESETS` is static and has no clinic; DX grants on those roles have no route to use before P3. Clinic admins can grant via the API. Do with DX-25 (desk UI) | — |
 | 2026-11-13 | DX-06 | Owner console reads DX state/eligibility from `GET /platform/clinics/{id}/dx/deactivation-preview` (select `*`); clinic detail select not extended with `dx_state`; purge calls `dx_purge_clinic` only when the clinic row has `dx_state` | an explicit `dx_state` column in shared queries would 500 the owner console / clinic deletion if code deploys before 125 is applied | — |
 | 2026-11-13 | DX-05 | `deactivation_preview` returns zeros (`blocking=false`) | no visits/samples/results exist before DX-M3/M4/M6; each of those must add its counts (marked `shortcut:` in `app/services/dx.py`) | — |
+| 2026-11-13 | DX-12 | Column names follow the owner's P2 brief, not the DATA-MODEL sketch: `approved_at` / `approved_by` (doctor id) / `approval_digest`, `parameter_code`, `decimal_places`, `rounding_mode`, `delta_direction` / `delta_limit_percent` / `delta_limit_abs` / `delta_lookback_days`; `section_heading`, `is_reportable`, `comment` not added | owner brief is newer and explicit | DATA-MODEL §3 "As built" |
+| 2026-11-13 | DX-12 | Approval digest and CAS live in SQL (`dx_test_digest`, `dx_approve_test` locking the test row); band / component triggers lock the test row `FOR NO KEY UPDATE` even when it is not approved | the 10-round race test caught a stale approval when an edit ran on an unapproved test while it was being approved; `NO KEY` avoids deadlocks with FK `KEY SHARE` locks | DATA-MODEL §3 |
+| 2026-11-13 | DX-13 | Formula grammar = REPORT-TEMPLATES §3 (adds `sqrt`, `ln`, `log10`, `pow`, `**` ≤ 4, `iif`, `egfr_ckd_epi_2021`, patient context names), a superset of the brief's whitelist; eGFR pinned at 91.69 (male, Scr 1.0, 50 y) and 89.71 (female, 0.8, 50 y) | the doc's "90 ± 1" for the male vector was an estimate; the published equation (and the NKF calculator) give 92 | — |
+| 2026-11-13 | DX-15 | Routes follow the owner's P2 brief (`/admin/dx/departments`, `/containers`, `/signatories`, `/tests…`, `/formula/check`, `/seed/*`, `/import/*`) instead of API.md's `/catalog/…`; band editing is `POST/PUT /tests/{id}/parameters` with DX fields; the LIS parameter routes are not extended (their updates leave DX columns untouched) | brief is explicit; one band editor with formula validation | API.md P2 rewritten as built |
+| 2026-11-13 | DX-15 | Signature PNGs go to the existing private `lab-reports` bucket under `<clinic>/dx-assets/signatures/<sha256>.png`, not a new `dx-assets` bucket | a new bucket is a Supabase action (owner); same privacy, clinic prefix | API.md P2 |
+| 2026-11-13 | DX-15 | Approval needs a doctor-linked login whose doctor has a registration number (DX_CATALOGUE_APPROVE alone is not enough), plus readiness: test → department, container (parameter mode), ≥ 1 active band, valid formulas; panel/package → ≥ 1 member | SECURITY §3.1 (an administrator cannot sign) and REPORT-TEMPLATES §1 rules | — |
+| 2026-11-13 | DX-16 | Seed has 148 entries (132 tests, 11 panels, 5 packages), 8 departments, 11 containers; LOINC only where certain; every band indicative. `price_list_parser` not reused (it imports the AI engine); own CSV/XLSX reader. Apply is a sequence of bulk inserts, not one transaction: an interrupted apply is completed by re-running it (idempotent by `test_code`) | zero-LLM boundary (ADR-DX-10) | — |
+| 2026-11-13 | DX-17 | Nav gating is `data-dx="nav DX_CATALOGUE DX_CATALOGUE_APPROVE"` (the P1 `applyDxGates` convention) rather than `perm:DX_CATALOGUE`; departments and containers are managed on the Test Master page; signatories have API only (no UI yet; the DX Setup checklist counts them) | keeps one gating rule; signatory UI belongs with report signing (P6/P7) | — |
 | 2026-11-13 | DX-11 | A "Diagnostics" sidebar group already existed (Session 52, LIS / worklist / radiology for OPD+IPD). DX Setup is a `data-dx` link inside it, not a new group gated by `dx_access` | gating the existing group by `dx_access` would hide the lab pages from every OPD/IPD clinic; group visibility already follows its visible links | UI.md §1 unchanged in intent |
 
 ## 8. Known issues and limitations
@@ -256,6 +264,15 @@ booking of the same tests unchanged.
 ## 9. Verification evidence (paste command and summary line; newest first)
 | Date (IST) | Task / gate | Command | Result |
 |:-|:-|:-|:-|
+| 2026-11-13 08:00 | P2 / DG7 | python -m pytest -q -rs | 8655 passed, 5 skipped, 15 warnings in 305.85s (P1 8502 + 153 new; same 5 skips) |
+| 2026-11-13 07:52 | P2 / DG7 first run | python -m pytest -q -rs | 3 failed, 8652 passed: `GET /admin/dx/setup` 500 after the checklist began counting signatories (`list_rows` ordered `dx_signatories` by a non-existent `code`). Fixed in `dx_catalogue.list_rows`, regression assertion added to `test_departments_and_containers`; DX files rerun 67 passed, then the full run above |
+| 2026-11-13 07:35 | P2 / DG5 | python -m pytest tests/test_orders_api_e2e.py tests/test_lis_api_e2e.py -q | 17 passed, 2 warnings in 2.02s |
+| 2026-11-13 07:35 | DX-12…16 | python -m pytest tests/test_migration_dx_m2.py tests/test_dx_formula.py tests/test_dx_flags.py tests/test_dx_catalogue_api.py -q | 78 passed, 2 warnings in 2.06s |
+| 2026-11-13 07:35 | P2 / DG3 | python -m pytest tests/test_clinical_firewall.py tests/test_dx_no_llm.py -q | 36 passed, 1 warning in 0.20s |
+| 2026-11-13 07:35 | P2 / DG2 | python -m pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q | 1215 passed, 2 warnings in 6.54s (32 `/admin/dx` routes) |
+| 2026-11-13 07:35 | P2 / DG1 | python -m pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q | 10 passed, 1 warning in 21.49s |
+| 2026-11-13 07:30 | DX-17 live UI | real app + real Postgres (pgserver + bridge), `diagstream` lab with DX on | **Lab director (PATHOLOGIST, doctor-linked) @1440 px**: Diagnostics group shows DX Setup + Test Master; Seed library preview "148 … 148 new", apply → toast "Added 148 tests (245 bands, 95 panel links)", list shows 148 with Not approved / Inactive chips, container swatches. Lipid Profile editor: details, 8 parameters with printed ranges and formulas; live formula check "✗ Unknown parameter code. (TGX)" then "✓ Valid. Uses HDL, TC, TG."; Approve → "Approved" chip; editing TC's high bound → toast "Band saved. The test needs approval again." and the approval cleared. Import bands: file with one unknown code → "2 row(s): 1 valid, 1 to fix" and Import disabled; clean file → enabled, "Imported 1 band(s)". **@390 px**: page width 390, list and band tables collapse to labelled cards, editor modal fits (382 px). **clinic_admin**: Test Master visible, approval refused 403 "Approval needs a login linked to a doctor with a registration number." **LAB_OPERATOR**: Test Master hidden. Console: no errors |
+| 2026-11-13 07:05 | DX-12 regressions | python -m pytest tests/test_lab_tests_*.py tests/test_lab_test_*.py tests/test_migration_118_lis.py tests/test_lis_api_e2e.py tests/test_orders_api_e2e.py tests/test_migration_103_opd.py tests/test_migration_124_insurance.py -q | 211 passed, 1 skipped (lab-test admin, bulk delete, WhatsApp lab booking unedited; 118 rollback test now unwinds 126 first) |
 | 2026-11-13 06:55 | P1 / DG7 | python -m pytest -q -rs | 8502 passed, 5 skipped, 15 warnings in 295.27s (baseline 8443 + 59 new; same 5 skips) |
 | 2026-11-13 06:35 | P1 / DG5 | python -m pytest tests/test_orders_api_e2e.py tests/test_lis_api_e2e.py -q | 17 passed, 2 warnings in 1.93s |
 | 2026-11-13 06:35 | DX-02…09 | python -m pytest tests/test_dx_feature_gate.py tests/test_migration_dx_m1.py -q | 32 passed, 2 warnings in 1.34s |
@@ -270,15 +287,17 @@ booking of the same tests unchanged.
 ## 10. Log
 | Date (IST) | Entry |
 |:-|:-|
+| 2026-11-13 | **P2 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P2 catalogue (DX-12…DX-17)`). Migration 126: `dx_departments`, `dx_containers` (2-digit codes), `dx_signatories`, `dx_test_components`; DX columns on `lab_tests` / `lab_test_parameters`; component / kind guards; approval digest + CAS (`dx_test_digest`, `dx_approve_test`) with triggers that clear approval on any clinical edit and lock the test row; purge v2; rollback restores purge v1; verify §20. `dx_formula.py` (ast whitelist, Decimal, CKD-EPI 2021, cycles), `lis.flag_value` exclusive bounds (118 vectors unchanged), `dx_results.py` (delta check, auto-verify eligibility), `dx_catalogue.py` + 25 catalogue routes, `dx_seed.py` + `tests_v1.json` (148 entries) + CSV/XLSX band import with dry run, Test Master page. Existing tests edited only for newest-first unwinds (118), sidebar order / Ketu page table (+`dxcatalog`), matrix counts. Deviations in §7. Not applied to Supabase, not pushed. |
 | 2026-11-13 | **P0 + P1 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P0 baseline + P1 foundation (DX-00…DX-11)`, one commit for the whole phase rather than one per task). Baseline 8443/5/0 at `94de8ae`; F1–F16 and AUDIT symbols re-located, no deltas. Migration 125 (`clinics.dx_state`/`dx_settings`, `dx_sites` with composite branch FK and forced RLS, `dx_purging`, `dx_purge_clinic` v1, `dx_update_settings` CAS) + rollback + verify block + `verify_supabase_schema.sql` §19. `tenant.py` `dx_eligible`/`dx_access`; 14 DX permissions, 5 roles, presets, implied grants, `holds_dx_permission`; `app/services/dx.py` + `app/routers/dx.py` (7 routes); platform toggle (400 ineligible, provision, 409 preview, confirm → WIND_DOWN), preview route, purge order; `/admin/me` DX fields; `LOGISTICS_RUNNER` / `B2B_PARTNER` confinement; LIS and G1 worklist scopes widened; `dx_sites` in `TENANT_OWNED_TABLES`; matrix counts; `test_dx_no_llm.py`; DX card in `platform.html`; DX Setup page in `admin/index.html`. Deviations in §7. Existing tests edited only where the change is the point: sidebar page order (+`dxsetup`), Ketu `PAGES` (+`dxsetup`, `app/assistant/registry.py`), the staff-permission regex in `test_held_report_recovery_and_staff_delete.py` widened to `[A-Z0-9_]+` (`DX_B2B_MANAGE` has a digit), `unwind_124` unwinds 125 first. Not applied to Supabase, not pushed. |
 | 2026-11-05 | Forensic re-audit against code (AUDIT.md A1–A29) after a second owner brief (insurance/TPA patients must not receive reports; unpaid bills must never release reports; MocDoc Print Barcode dialog). Added DELIVERY-POLICY.md and ADR-DX-19…22; corrected barcode format (visit-shared sequence), per-target delivery ids, booking linkage (one test per booking, deposits), DX bill-line guard, B2B subjects without phone, G1/LIS/generic-resend guards, phlebotomist route names, voice/WhatsApp facts, plan eligibility table, field collections, label print dialog. Still no code. |
 | 2026-11-05 | Document set authored (no code): competitive research (MocDoc screenshots + public pages for MocDoc/CrelioHealth; direct fetch blocked by network policy), gap analysis against `main` @ `56f719f`, architecture, 18 ADRs, data model DX-M1…M9, workflows W1–W18, report/template/label spec, API, UI, security, test plan, rollout, assistants, agent prompts. Baseline suite not run in the authoring session (no pytest installed). |
 
 ## 11. Next exact action
 Owner: review/merge `dx/p1-foundation`; apply `125_dx_os_foundation.sql` to Supabase **before** deploying it (ROLLOUT §0.4).
-Agent: start **DX-12** (migration DX-M2 as `126_dx_catalogue.sql`, re-check the number first) with the master prompt in
-[AGENT-PROMPT.md](AGENT-PROMPT.md) §1. Lane PURE (DX-13 formula engine) may start in parallel.
+Agent: start **DX-18** (migration DX-M3 as `127_dx_visits_and_billing.sql`, re-check the number first) with the master
+prompt in [AGENT-PROMPT.md](AGENT-PROMPT.md) §1. Lane PURE (DX-27a barcode, DX-43a PDF renderer) may start in parallel.
 
 ## 12. Release decision
-**P1 foundation built, not released.** Only the owner toggle, sites, settings and the setup page exist. The module stays off for every clinic until P11 is VERIFIED and the
+**P1 foundation and P2 catalogue built, not released.** Owner toggle, sites, settings, setup page and the test master
+(with approval) exist; nothing can be registered, collected or reported yet. The module stays off for every clinic until P11 is VERIFIED and the
 owner switches it on per clinic, then per branch delivery owner (ROLLOUT §2).

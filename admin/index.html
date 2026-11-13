@@ -3298,6 +3298,32 @@
             .dx-sites td[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
         }
         /* DX:foundation:END */
+        /* DX:catalogue:START — Test Master (migration 126) */
+        .dx-modal { max-width: 1100px; }
+        .dx-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 14px; }
+        .dx-toolbar .field { margin: 0; min-width: 160px; flex: 1 1 160px; }
+        .dx-chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; border: 1px solid var(--border2); color: var(--text3); white-space: nowrap; }
+        .dx-chip.ok { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+        .dx-chip.off { background: var(--amber-bg); color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
+        .dx-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border2); vertical-align: -2px; margin-right: 6px; }
+        .dx-row-link { cursor: pointer; }
+        .dx-row-link:hover td { background: var(--surface2); }
+        .dx-section { margin-top: 22px; }
+        .dx-section h4 { margin: 0 0 10px; font-size: 0.95rem; }
+        .dx-issues { margin: 8px 0 0; padding-left: 18px; color: var(--amber); }
+        .dx-digest { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: var(--text3); word-break: break-all; }
+        .dx-formula-ok { color: var(--green); font-size: 0.8rem; }
+        .dx-formula-err { color: var(--red, #e5484d); font-size: 0.8rem; }
+        .dx-ref { white-space: pre-line; color: var(--text3); font-size: 0.78rem; }
+        @media (max-width: 640px) {
+            .dx-table thead { display: none; }
+            .dx-table, .dx-table tbody, .dx-table tr, .dx-table td { display: block; width: 100%; }
+            .dx-table tr { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+            .dx-table td { border: 0; padding: 3px 0; }
+            .dx-table td[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
+            .dx-modal { padding: 20px 16px; border-radius: 14px; }
+        }
+        /* DX:catalogue:END */
     </style>
 </head>
 <body>
@@ -3572,6 +3598,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span> DX Setup
             </div>
             <!-- DX:foundation:END -->
+            <!-- DX:catalogue:START — Test Master (migration 126) -->
+            <div class="nav-link" tabindex="0" data-page="dxcatalog" data-dx="nav DX_CATALOGUE DX_CATALOGUE_APPROVE" style="display:none" onclick="go('dxcatalog',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"></path><path d="M10 3v6.5L5.2 18a2 2 0 0 0 1.8 3h10a2 2 0 0 0 1.8-3L14 9.5V3"></path><path d="M7.5 14h9"></path></svg></span> Test Master
+            </div>
+            <!-- DX:catalogue:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -7298,6 +7329,100 @@
             </div>
         </div>
         <!-- DX:foundation:END -->
+        <!-- DX:catalogue:START — Test Master page (docs/diagnostic-os/UI.md, page dxcatalog) -->
+        <div id="pg-dxcatalog" class="sec">
+            <div class="page-head">
+                <div><h2>Test Master</h2><p>Tests, panels and packages with their parameters, reference bands and formulas. A test can be ordered in the Diagnostic OS only after a lab director approves it.</p></div>
+                <div class="dx-actions" data-dxcat-edit style="margin:0">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dxcat.openSeed()">Seed library</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dxcat.openImport()">Import bands</button>
+                    <button type="button" class="btn btn-accent btn-sm" onclick="dxcat.newTest()">New test</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="dx-toolbar">
+                    <div class="field"><label for="dxcatQ">Search</label><input id="dxcatQ" placeholder="Name or code" oninput="dxcat.renderList()"></div>
+                    <div class="field"><label for="dxcatDept">Department</label><select id="dxcatDept" onchange="dxcat.renderList()"></select></div>
+                    <div class="field"><label for="dxcatKind">Kind</label><select id="dxcatKind" onchange="dxcat.renderList()">
+                        <option value="">All</option><option value="test">Tests</option><option value="panel">Panels</option><option value="package">Packages</option></select></div>
+                    <div class="field"><label for="dxcatAppr">Approval</label><select id="dxcatAppr" onchange="dxcat.renderList()">
+                        <option value="">All</option><option value="yes">Approved</option><option value="no">Not approved</option></select></div>
+                </div>
+                <div id="dxcatList"></div>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Departments &amp; containers</h3></div>
+                <p class="muted">The container code is the 2-digit part of the sample barcode (YY + code + sequence). A department or container in use cannot be deleted; deactivate it.</p>
+                <div class="dx-grid" style="gap:18px">
+                    <div><h4 style="margin:0 0 8px">Departments</h4><div id="dxcatDepts"></div>
+                        <div class="dx-grid" data-dxcat-edit style="margin-top:10px">
+                            <div class="field"><label for="dxDeptCode">Code</label><input id="dxDeptCode" maxlength="8" placeholder="BIO"></div>
+                            <div class="field"><label for="dxDeptName">Name</label><input id="dxDeptName" maxlength="80" placeholder="Biochemistry"></div>
+                            <div class="field"><label for="dxDeptHead">Report heading</label><input id="dxDeptHead" maxlength="120" placeholder="CLINICAL BIOCHEMISTRY"></div>
+                        </div>
+                        <div class="dx-actions" data-dxcat-edit style="margin-top:6px"><button type="button" class="btn btn-ghost btn-sm" onclick="dxcat.addDept(this)">Add department</button></div>
+                    </div>
+                    <div><h4 style="margin:0 0 8px">Containers</h4><div id="dxcatConts"></div>
+                        <div class="dx-grid" data-dxcat-edit style="margin-top:10px">
+                            <div class="field"><label for="dxContCode">Code (2 digits)</label><input id="dxContCode" maxlength="2" inputmode="numeric" placeholder="07"></div>
+                            <div class="field"><label for="dxContName">Name</label><input id="dxContName" maxlength="80" placeholder="EDTA / Lavender top"></div>
+                            <div class="field"><label for="dxContColour">Colour</label><input id="dxContColour" type="color" value="#8E44AD"></div>
+                            <div class="field"><label for="dxContType">Sample</label><select id="dxContType">
+                                <option value="serum">Serum</option><option value="whole_blood">Whole blood</option><option value="plasma">Plasma</option>
+                                <option value="urine">Urine</option><option value="stool">Stool</option><option value="swab">Swab</option>
+                                <option value="semen">Semen</option><option value="csf">CSF</option><option value="fluid">Body fluid</option><option value="other">Other</option></select></div>
+                        </div>
+                        <div class="dx-actions" data-dxcat-edit style="margin-top:6px"><button type="button" class="btn btn-ghost btn-sm" onclick="dxcat.addCont(this)">Add container</button></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-overlay" id="dxTestModal" role="dialog" aria-modal="true" aria-labelledby="dxTestTitle">
+            <div class="modal dx-modal">
+                <h3 id="dxTestTitle">Test</h3>
+                <div id="dxTestBody"></div>
+                <div class="modal-actions"><button type="button" class="btn btn-ghost" onclick="dxcat.close('dxTestModal')">Close</button></div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxNewTestModal" role="dialog" aria-modal="true" aria-labelledby="dxNewTestTitle">
+            <div class="modal">
+                <h3 id="dxNewTestTitle">New test</h3>
+                <div class="field"><label for="dxNtName">Name</label><input id="dxNtName" maxlength="200" placeholder="Vitamin D (25-OH)"></div>
+                <div class="field"><label for="dxNtCode">Code</label><input id="dxNtCode" maxlength="20" placeholder="VITD"></div>
+                <div class="field"><label for="dxNtKind">Kind</label><select id="dxNtKind"><option value="test">Test (has parameters)</option><option value="panel">Panel (group of tests)</option><option value="package">Package (tests and panels)</option></select></div>
+                <div class="field"><label for="dxNtPrice">Price (₹)</label><input id="dxNtPrice" type="number" min="1" step="1"></div>
+                <p class="muted">New tests start inactive: WhatsApp booking does not offer them until you activate them.</p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxcat.close('dxNewTestModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxcat.createTest(this)">Create</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxSeedModal" role="dialog" aria-modal="true" aria-labelledby="dxSeedTitle">
+            <div class="modal dx-modal">
+                <h3 id="dxSeedTitle">Seed library</h3>
+                <div id="dxSeedBody"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxcat.close('dxSeedModal')">Close</button>
+                    <button type="button" class="btn btn-accent" id="dxSeedApply" onclick="dxcat.applySeed(this)">Add the new tests as drafts</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxImportModal" role="dialog" aria-modal="true" aria-labelledby="dxImportTitle">
+            <div class="modal dx-modal">
+                <h3 id="dxImportTitle">Import reference bands</h3>
+                <p class="muted">CSV or .xlsx, one row per band. Columns: test_code, name (required); parameter_code, unit, data_type, options (separated by |), sort_order, gender, min_age_days, max_age_days, normal_low, normal_high, critical_low, critical_high, low_exclusive, high_exclusive, normal_text_value, decimal_places, rounding_mode, formula, reference_text, method. Nothing is imported until every row is valid.</p>
+                <div class="field"><label for="dxImportFile">File</label><input id="dxImportFile" type="file" accept=".csv,.xlsx,text/csv"></div>
+                <div id="dxImportReport"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxcat.close('dxImportModal')">Close</button>
+                    <button type="button" class="btn btn-ghost" onclick="dxcat.importFile(this, true)">Check file</button>
+                    <button type="button" class="btn btn-accent" id="dxImportApply" disabled onclick="dxcat.importFile(this, false)">Import</button>
+                </div>
+            </div>
+        </div>
+        <!-- DX:catalogue:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -9031,7 +9156,7 @@ const dxos = {
         const closed = st.access === 'WIND_DOWN';
         document.getElementById('dxChecklist').innerHTML = st.checklist.map(c => `
             <li class="${c.done ? 'done' : ''}"><span class="dx-mark" aria-hidden="true">${c.done ? '✓' : ''}</span>
-                <div><b>${esc(c.label)}</b><small>${c.available === false ? 'Arrives with the Test Master' : esc(c.detail || (c.done ? 'Done' : 'To do'))}</small>
+                <div><b>${esc(c.label)}</b><small>${esc(c.detail || (c.done ? 'Done' : 'To do'))}</small>
                 <span class="sr-only">${c.done ? 'done' : 'not done'}</span></div></li>`).join('');
         const branchName = id => (st.branches.find(b => b.id === id) || {}).name || '—';
         const kinds = { collection: 'Collection', processing: 'Processing', collection_and_processing: 'Collection + processing' };
@@ -9155,6 +9280,353 @@ const dxos = {
     },
 };
 /* DX:foundation:END */
+
+/* DX:catalogue:START — Test Master (migration 126). The server validates and decides everything;
+   formulas are checked by POST /admin/dx/formula/check, approval is a digest CAS. */
+const dxcat = {
+    tests: [], depts: [], conts: [], view: null, editingParam: null, formulaTimer: null,
+    canEdit() { return dxCan('DX_CATALOGUE'); },
+    canApprove() { return dxCan('DX_CATALOGUE_APPROVE'); },
+    open(id) { document.getElementById(id).classList.add('open'); },
+    close(id) { document.getElementById(id).classList.remove('open'); },
+    deptName(id) { return (dxcat.depts.find(d => d.id === id) || {}).name || '—'; },
+    cont(id) { return dxcat.conts.find(c => c.id === id); },
+    async load() {
+        document.getElementById('dxcatList').innerHTML = loading();
+        try {
+            const [t, d, c] = await Promise.all([api('/admin/dx/tests'), api('/admin/dx/departments'), api('/admin/dx/containers')]);
+            dxcat.tests = t.tests; dxcat.depts = d.departments; dxcat.conts = c.containers;
+        } catch (e) {
+            document.getElementById('dxcatList').innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+            return;
+        }
+        const sel = document.getElementById('dxcatDept'), keep = sel.value;
+        sel.innerHTML = '<option value="">All</option>' + dxcat.depts.map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+        sel.value = keep;
+        document.querySelectorAll('[data-dxcat-edit]').forEach(el => { el.hidden = !dxcat.canEdit(); });
+        dxcat.renderList();
+        dxcat.renderMasters();
+    },
+    chip(t) {
+        return (t.approved_at ? '<span class="dx-chip ok">Approved</span>' : '<span class="dx-chip">Not approved</span>')
+            + (t.is_active ? '' : ' <span class="dx-chip off">Inactive</span>');
+    },
+    renderList() {
+        const q = document.getElementById('dxcatQ').value.trim().toLowerCase();
+        const dept = document.getElementById('dxcatDept').value, kind = document.getElementById('dxcatKind').value;
+        const appr = document.getElementById('dxcatAppr').value;
+        const rows = dxcat.tests.filter(t => (!q || (t.name || '').toLowerCase().includes(q) || (t.test_code || '').toLowerCase().includes(q))
+            && (!dept || t.department_id === dept) && (!kind || t.kind === kind) && (!appr || (appr === 'yes') === !!t.approved_at));
+        const kinds = { test: 'Test', panel: 'Panel', package: 'Package' };
+        document.getElementById('dxcatList').innerHTML = rows.length ? `<p class="muted">${rows.length} of ${dxcat.tests.length}</p><div class="tbl-wrap"><table class="dx-table"><thead><tr>
+            <th>Code</th><th>Name</th><th>Kind</th><th>Department</th><th>Container</th><th>Status</th></tr></thead><tbody>
+            ${rows.slice(0, 500).map(t => { const c = dxcat.cont(t.container_id); return `<tr class="dx-row-link" tabindex="0" onclick="dxcat.openTest('${esc(t.id)}')" onkeydown="if(event.key==='Enter')dxcat.openTest('${esc(t.id)}')">
+                <td data-label="Code"><b>${esc(t.test_code || '—')}</b></td><td data-label="Name">${esc(t.name)}</td>
+                <td data-label="Kind">${kinds[t.kind] || esc(t.kind)}</td><td data-label="Department">${esc(dxcat.deptName(t.department_id))}</td>
+                <td data-label="Container">${c ? `<span class="dx-swatch" style="background:${esc(c.colour_hex)}"></span>${esc(c.code)} ${esc(c.name)}` : '—'}</td>
+                <td data-label="Status">${dxcat.chip(t)}</td></tr>`; }).join('')}</tbody></table></div>`
+            : `<p class="muted">${dxcat.tests.length ? 'No test matches these filters.' : 'No tests yet. Start from the seed library or add one.'}</p>`;
+    },
+    renderMasters() {
+        document.getElementById('dxcatDepts').innerHTML = dxcat.depts.length ? `<div class="tbl-wrap"><table class="dx-table"><tbody>${dxcat.depts.map(d => `<tr>
+            <td data-label="Code"><b>${esc(d.code)}</b></td><td data-label="Name">${esc(d.name)}<span class="muted" style="display:block;font-size:0.75rem">${esc(d.report_heading)}</span></td>
+            <td data-label="Status">${d.is_active ? 'Active' : '<span class="dx-chip off">Inactive</span>'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">None yet.</p>';
+        const types = { serum: 'Serum', whole_blood: 'Whole blood', plasma: 'Plasma', urine: 'Urine', stool: 'Stool', swab: 'Swab', semen: 'Semen', csf: 'CSF', fluid: 'Body fluid', other: 'Other' };
+        document.getElementById('dxcatConts').innerHTML = dxcat.conts.length ? `<div class="tbl-wrap"><table class="dx-table"><tbody>${dxcat.conts.map(c => `<tr>
+            <td data-label="Code"><span class="dx-swatch" style="background:${esc(c.colour_hex)}"></span><b>${esc(c.code)}</b></td>
+            <td data-label="Name">${esc(c.name)}</td><td data-label="Sample">${esc(types[c.sample_type] || c.sample_type)}</td>
+            <td data-label="Stability">${c.stability_room_hours ? esc(c.stability_room_hours) + ' h room' : ''}${c.stability_cold_hours ? ' · ' + esc(c.stability_cold_hours) + ' h cold' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">None yet.</p>';
+    },
+    async addDept(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        btn.disabled = true;
+        try {
+            await apiPost('/admin/dx/departments', { code: v('dxDeptCode').toUpperCase(), name: v('dxDeptName'), report_heading: v('dxDeptHead') });
+            ['dxDeptCode', 'dxDeptName', 'dxDeptHead'].forEach(id => { document.getElementById(id).value = ''; });
+            toast('Department added'); await dxcat.load();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async addCont(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        btn.disabled = true;
+        try {
+            await apiPost('/admin/dx/containers', { code: v('dxContCode'), name: v('dxContName'), colour_hex: v('dxContColour').toUpperCase(), sample_type: v('dxContType') });
+            ['dxContCode', 'dxContName'].forEach(id => { document.getElementById(id).value = ''; });
+            toast('Container added'); await dxcat.load();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    newTest() { ['dxNtName', 'dxNtCode', 'dxNtPrice'].forEach(id => { document.getElementById(id).value = ''; }); dxcat.open('dxNewTestModal'); },
+    async createTest(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        const body = { name: v('dxNtName'), kind: v('dxNtKind'), price_paise: Math.round(Number(v('dxNtPrice')) * 100) };
+        if (v('dxNtCode')) body.test_code = v('dxNtCode').toUpperCase();
+        if (!(body.price_paise > 0)) { toast('Enter a price.', true); return; }
+        btn.disabled = true;
+        try {
+            const t = await apiPost('/admin/dx/tests', body);
+            dxcat.close('dxNewTestModal'); toast('Test created as an inactive draft');
+            await dxcat.load(); await dxcat.openTest(t.id);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async openTest(id) {
+        try { dxcat.view = await api(`/admin/dx/tests/${encodeURIComponent(id)}`); } catch (e) { toast(e.message, true); return; }
+        dxcat.editingParam = null;
+        dxcat.renderTest();
+        dxcat.open('dxTestModal');
+    },
+    async reload() { await dxcat.openTest(dxcat.view.test.id); dxcat.load(); },
+    renderTest() {
+        const v = dxcat.view, t = v.test, edit = dxcat.canEdit();
+        document.getElementById('dxTestTitle').innerHTML = `${esc(t.name)} ${t.test_code ? '<span class="dx-chip">' + esc(t.test_code) + '</span>' : ''} ${dxcat.chip(t)}`;
+        const opt = (list, cur, label) => '<option value="">—</option>' + list.filter(x => x.is_active || x.id === cur).map(x => `<option value="${esc(x.id)}" ${x.id === cur ? 'selected' : ''}>${esc(label(x))}</option>`).join('');
+        const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([val, lab]) => `<option value="${val}" ${val === cur ? 'selected' : ''}>${lab}</option>`).join('')}</select>`;
+        const val = x => esc(x == null ? '' : x);
+        let html = `<fieldset id="dxTestForm" style="border:0;padding:0;margin:0" ${edit ? '' : 'disabled'}><div class="dx-grid">
+            <div class="field"><label for="dxTCode">Code</label><input id="dxTCode" maxlength="20" value="${val(t.test_code)}"></div>
+            <div class="field"><label for="dxTDept">Department</label><select id="dxTDept">${opt(dxcat.depts, t.department_id, d => d.name)}</select></div>
+            ${t.kind === 'test' ? `<div class="field"><label for="dxTCont">Container</label><select id="dxTCont">${opt(dxcat.conts, t.container_id, c => c.code + ' · ' + c.name)}</select></div>
+            <div class="field"><label for="dxTMode">Result</label>${sel('dxTMode', [['parameters', 'Parameters'], ['document', 'Document (ECG, imaging)'], ['none', 'None']], t.dx_result_mode)}</div>` : ''}
+            <div class="field"><label for="dxTMethod">Method</label><input id="dxTMethod" maxlength="120" value="${val(t.method)}"></div>
+            <div class="field"><label for="dxTTat">TAT (minutes)</label><input id="dxTTat" type="number" min="5" max="43200" value="${val(t.tat_minutes)}"></div>
+            <div class="field"><label for="dxTStat">STAT TAT (minutes)</label><input id="dxTStat" type="number" min="5" max="43200" value="${val(t.stat_tat_minutes)}"></div>
+            <div class="field"><label for="dxTGender">For</label>${sel('dxTGender', [['all', 'All'], ['male', 'Male only'], ['female', 'Female only']], t.gender_restriction)}</div>
+            <div class="field"><label for="dxTTitle">Title on report</label><input id="dxTTitle" maxlength="200" value="${val(t.print_title)}"></div>
+            <div class="field"><label for="dxTLoinc">LOINC</label><input id="dxTLoinc" maxlength="9" value="${val(t.loinc_code)}" placeholder="2093-3"></div>
+            </div>
+            <div class="field"><label for="dxTInterp">Interpretation (printed)</label><textarea id="dxTInterp" rows="3" maxlength="6000">${val(t.interpretation)}</textarea></div>
+            <div class="field"><label for="dxTNotes">Report notes</label><textarea id="dxTNotes" rows="2" maxlength="2000">${val(t.report_notes)}</textarea></div>
+            <label class="check"><input type="checkbox" id="dxTActive" ${t.is_active ? 'checked' : ''}> Active (offered for booking)</label>
+            <div class="dx-actions"><button type="button" class="btn btn-accent btn-sm" onclick="dxcat.saveDetails(this)">Save details</button></div></fieldset>`;
+        if (t.kind === 'test') html += dxcat.paramsHtml();
+        else html += dxcat.componentsHtml();
+        html += `<div class="dx-section"><h4>Approval</h4>
+            <p class="muted">Approving signs off exactly what is shown above: details, every active band and formula${t.kind === 'test' ? '' : ', and the member list'}. Any later change clears the approval.</p>
+            <div class="dx-digest" title="${esc(v.digest)}">Content digest: ${esc(v.digest.slice(0, 16))}…</div>
+            ${v.issues.length ? `<ul class="dx-issues">${v.issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}
+            ${t.approved_at ? `<p><span class="dx-chip ok">Approved ${esc(new Date(t.approved_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span></p>` : ''}
+            ${dxcat.canApprove() && !t.approved_at ? `<div class="dx-actions"><button type="button" class="btn btn-accent btn-sm" ${v.issues.length ? 'disabled' : ''} onclick="dxcat.approve(this)">Approve test</button></div>` : ''}</div>`;
+        document.getElementById('dxTestBody').innerHTML = html;
+        if (t.kind === 'test') dxcat.fillParamForm(null);
+    },
+    rangeText(p) {
+        if (p.data_type !== 'numeric') return esc(p.normal_text_value || '—');
+        const lo = p.normal_low, hi = p.normal_high;
+        if (lo != null && hi != null) return `${esc(lo)}${p.low_exclusive ? ' (excl.)' : ''} – ${esc(hi)}${p.high_exclusive ? ' (excl.)' : ''}`;
+        if (hi != null) return `${p.high_exclusive ? '<' : '≤'} ${esc(hi)}`;
+        if (lo != null) return `${p.low_exclusive ? '>' : '≥'} ${esc(lo)}`;
+        return '—';
+    },
+    paramsHtml() {
+        const ps = dxcat.view.parameters, edit = dxcat.canEdit();
+        const sex = { all: 'All', male: 'M', female: 'F', other: 'Other' };
+        const age = p => (p.min_age_days === 0 && p.max_age_days >= LIS_MAX_AGE_DAYS) ? 'All ages' : `${lisDaysToYears(p.min_age_days)}–${lisDaysToYears(p.max_age_days)} y`;
+        return `<div class="dx-section"><h4>Parameters &amp; bands</h4>${ps.length ? `<div class="tbl-wrap"><table class="dx-table"><thead><tr>
+            <th>Code</th><th>Name</th><th>Unit</th><th>Band</th><th>Normal</th><th>Critical</th><th>Formula / printed range</th><th></th></tr></thead><tbody>
+            ${ps.map(p => `<tr style="${p.is_active ? '' : 'opacity:0.55'}">
+                <td data-label="Code"><b>${esc(p.parameter_code || '—')}</b></td><td data-label="Name">${esc(p.name)}${p.is_active ? '' : ' <span class="dx-chip off">Inactive</span>'}</td>
+                <td data-label="Unit">${esc(p.unit || '')}</td><td data-label="Band">${sex[p.gender] || esc(p.gender)} · ${age(p)}</td>
+                <td data-label="Normal">${dxcat.rangeText(p)}</td>
+                <td data-label="Critical">${p.critical_low != null ? '&lt; ' + esc(p.critical_low) : ''}${p.critical_low != null && p.critical_high != null ? ' · ' : ''}${p.critical_high != null ? '&gt; ' + esc(p.critical_high) : ''}</td>
+                <td data-label="Formula / printed range">${p.formula ? '<code>= ' + esc(p.formula) + '</code>' : ''}${p.reference_text ? '<div class="dx-ref">' + esc(p.reference_text) + '</div>' : ''}</td>
+                <td>${edit ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxcat.fillParamForm('${esc(p.id)}')">Edit</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No parameters yet.</p>'}
+            ${edit ? `<form id="dxParamForm" onsubmit="event.preventDefault(); dxcat.saveParam(this.querySelector('[type=submit]'));" style="margin-top:14px">
+            <h4 id="dxParamFormTitle" style="margin:6px 0 10px">Add a band</h4>
+            <p class="muted">One row per band. For sex- or age-specific ranges add rows with the same name and code.</p>
+            <div class="dx-grid">
+                <div class="field"><label for="dxPName">Name</label><input id="dxPName" maxlength="120" required></div>
+                <div class="field"><label for="dxPCode">Code</label><input id="dxPCode" maxlength="30" placeholder="TC"></div>
+                <div class="field"><label for="dxPUnit">Unit</label><input id="dxPUnit" maxlength="30"></div>
+                <div class="field"><label for="dxPType">Type</label><select id="dxPType"><option value="numeric">Number</option><option value="options">Choice</option><option value="text">Text</option></select></div>
+                <div class="field"><label for="dxPOptions">Choices (separate with ,)</label><input id="dxPOptions" maxlength="400" placeholder="Negative, Positive"></div>
+                <div class="field"><label for="dxPOrder">Order on report</label><input id="dxPOrder" type="number" min="0" max="999" value="10"></div>
+                <div class="field"><label for="dxPGender">Sex</label><select id="dxPGender"><option value="all">All</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></div>
+                <div class="field"><label for="dxPAgeFrom">Age from (years)</label><input id="dxPAgeFrom" type="number" min="0" max="120" step="0.01" value="0"></div>
+                <div class="field"><label for="dxPAgeTo">Age to (years)</label><input id="dxPAgeTo" type="number" min="0" max="120" step="0.01" value="120"></div>
+                <div class="field"><label for="dxPLow">Normal low</label><input id="dxPLow" type="number" step="any"></div>
+                <div class="field"><label for="dxPHigh">Normal high</label><input id="dxPHigh" type="number" step="any"></div>
+                <div class="field"><label for="dxPCLow">Critical low</label><input id="dxPCLow" type="number" step="any"></div>
+                <div class="field"><label for="dxPCHigh">Critical high</label><input id="dxPCHigh" type="number" step="any"></div>
+                <div class="field"><label for="dxPNormalText">Normal value (choice / text)</label><input id="dxPNormalText" maxlength="120"></div>
+                <div class="field"><label for="dxPDecimals">Decimals</label><input id="dxPDecimals" type="number" min="0" max="4" value="2"></div>
+                <div class="field"><label for="dxPRounding">Rounding</label><select id="dxPRounding"><option value="half_up">Half up</option><option value="half_even">Half even</option><option value="truncate">Truncate</option></select></div>
+                <div class="field"><label for="dxPMethod">Method</label><input id="dxPMethod" maxlength="120"></div>
+                <div class="field"><label for="dxPDeltaDir">Delta check</label><select id="dxPDeltaDir"><option value="">Off</option><option value="both">Either way</option><option value="increase">Rise</option><option value="decrease">Fall</option></select></div>
+                <div class="field"><label for="dxPDeltaPct">Delta limit (%)</label><input id="dxPDeltaPct" type="number" min="0.01" step="any"></div>
+                <div class="field"><label for="dxPDeltaAbs">Delta limit (absolute)</label><input id="dxPDeltaAbs" type="number" min="0.001" step="any"></div>
+                <div class="field"><label for="dxPDeltaDays">Look back (days)</label><input id="dxPDeltaDays" type="number" min="1" max="3650" value="30"></div>
+            </div>
+            <div class="dx-grid">
+                <label class="check"><input type="checkbox" id="dxPLowEx"> The low bound itself is abnormal</label>
+                <label class="check"><input type="checkbox" id="dxPHighEx"> The high bound itself is abnormal (e.g. "Desirable &lt; 200")</label>
+                <label class="check"><input type="checkbox" id="dxPActive" checked> Active</label>
+            </div>
+            <div class="field"><label for="dxPFormula">Formula (calculated value; uses codes of this test, AGE_YEARS, IS_FEMALE)</label>
+                <input id="dxPFormula" maxlength="500" placeholder="TC - HDL - TG / 5" oninput="dxcat.checkFormulaSoon()" autocomplete="off" spellcheck="false">
+                <div id="dxPFormulaMsg" aria-live="polite"></div></div>
+            <div class="field"><label for="dxPRef">Printed reference range (one line per row)</label><textarea id="dxPRef" rows="3" maxlength="2000"></textarea></div>
+            <div class="dx-actions"><button type="submit" class="btn btn-accent btn-sm">Save band</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="dxcat.fillParamForm(null)">Clear</button></div></form>` : ''}</div>`;
+    },
+    fillParamForm(id) {
+        const form = document.getElementById('dxParamForm');
+        if (!form) return;
+        const p = id ? dxcat.view.parameters.find(x => x.id === id) : null;
+        dxcat.editingParam = p ? p.id : null;
+        const set = (el, v) => { document.getElementById(el).value = v == null ? '' : v; };
+        set('dxPName', p && p.name); set('dxPCode', p && p.parameter_code); set('dxPUnit', p && p.unit);
+        set('dxPType', p ? p.data_type : 'numeric'); set('dxPOptions', p && (p.options || []).join(', '));
+        set('dxPOrder', p ? p.sort_order : (dxcat.view.parameters.length + 1) * 10); set('dxPGender', p ? p.gender : 'all');
+        set('dxPAgeFrom', p ? lisDaysToYears(p.min_age_days) : 0); set('dxPAgeTo', p ? lisDaysToYears(p.max_age_days) : 120);
+        set('dxPLow', p && p.normal_low); set('dxPHigh', p && p.normal_high); set('dxPCLow', p && p.critical_low); set('dxPCHigh', p && p.critical_high);
+        set('dxPNormalText', p && p.normal_text_value); set('dxPDecimals', p ? p.decimal_places : 2); set('dxPRounding', p ? p.rounding_mode : 'half_up');
+        set('dxPMethod', p && p.method); set('dxPDeltaDir', p && p.delta_direction); set('dxPDeltaPct', p && p.delta_limit_percent);
+        set('dxPDeltaAbs', p && p.delta_limit_abs); set('dxPDeltaDays', p ? p.delta_lookback_days : 30);
+        set('dxPFormula', p && p.formula); set('dxPRef', p && p.reference_text);
+        document.getElementById('dxPLowEx').checked = !!(p && p.low_exclusive);
+        document.getElementById('dxPHighEx').checked = !!(p && p.high_exclusive);
+        document.getElementById('dxPActive').checked = p ? !!p.is_active : true;
+        document.getElementById('dxParamFormTitle').textContent = p ? `Edit band: ${p.name}` : 'Add a band';
+        document.getElementById('dxPFormulaMsg').innerHTML = '';
+        if (p) { form.scrollIntoView({ block: 'nearest' }); document.getElementById('dxPName').focus(); }
+    },
+    checkFormulaSoon() {
+        clearTimeout(dxcat.formulaTimer);
+        dxcat.formulaTimer = setTimeout(dxcat.checkFormula, 350);
+    },
+    async checkFormula() {
+        const formula = document.getElementById('dxPFormula').value.trim(), out = document.getElementById('dxPFormulaMsg');
+        if (!formula) { out.innerHTML = ''; return; }
+        const own = document.getElementById('dxPCode').value.trim().toUpperCase();
+        const codes = [...new Set(dxcat.view.parameters.filter(p => p.is_active && p.parameter_code).map(p => p.parameter_code).concat(own ? [own] : []))];
+        try {
+            const r = await apiPost('/admin/dx/formula/check', { formula, codes });
+            out.innerHTML = r.valid ? `<span class="dx-formula-ok">✓ Valid. Uses ${r.dependencies.length ? esc(r.dependencies.join(', ')) : 'no parameters'}.</span>`
+                : `<span class="dx-formula-err">✗ ${esc(r.error)}${r.token ? ' (' + esc(r.token) + ')' : ''}</span>`;
+        } catch (e) { out.innerHTML = `<span class="dx-formula-err">${esc(e.message)}</span>`; }
+    },
+    async saveParam(btn) {
+        const v = id => document.getElementById(id).value.trim(), num = id => v(id) === '' ? null : Number(v(id));
+        const body = { name: v('dxPName'), parameter_code: v('dxPCode').toUpperCase() || null, unit: v('dxPUnit') || null,
+            data_type: v('dxPType'), sort_order: num('dxPOrder') ?? 10, gender: v('dxPGender'),
+            min_age_days: lisYearsToDays(v('dxPAgeFrom')), max_age_days: lisYearsToDays(v('dxPAgeTo') || 120),
+            normal_low: num('dxPLow'), normal_high: num('dxPHigh'), critical_low: num('dxPCLow'), critical_high: num('dxPCHigh'),
+            normal_text_value: v('dxPNormalText') || null, decimal_places: num('dxPDecimals') ?? 2, rounding_mode: v('dxPRounding'),
+            method: v('dxPMethod') || null, delta_direction: v('dxPDeltaDir') || null, delta_limit_percent: num('dxPDeltaPct'),
+            delta_limit_abs: num('dxPDeltaAbs'), delta_lookback_days: num('dxPDeltaDays') ?? 30,
+            formula: v('dxPFormula') || null, reference_text: document.getElementById('dxPRef').value.trim() || null,
+            low_exclusive: document.getElementById('dxPLowEx').checked, high_exclusive: document.getElementById('dxPHighEx').checked,
+            is_active: document.getElementById('dxPActive').checked };
+        if (body.data_type === 'options') body.options = v('dxPOptions').split(',').map(o => o.trim()).filter(Boolean);
+        const tid = encodeURIComponent(dxcat.view.test.id);
+        btn.disabled = true;
+        try {
+            if (dxcat.editingParam) await apiPut(`/admin/dx/tests/${tid}/parameters/${encodeURIComponent(dxcat.editingParam)}`, body);
+            else await apiPost(`/admin/dx/tests/${tid}/parameters`, body);
+            toast(dxcat.view.test.approved_at ? 'Band saved. The test needs approval again.' : 'Band saved');
+            await dxcat.reload();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    componentsHtml() {
+        const v = dxcat.view, edit = dxcat.canEdit(), isPkg = v.test.kind === 'package';
+        const inGroup = new Set(v.components.map(c => c.child_test_id));
+        const candidates = dxcat.tests.filter(t => t.id !== v.test.id && !inGroup.has(t.id) && (t.kind === 'test' || (isPkg && t.kind === 'panel')));
+        return `<div class="dx-section"><h4>${isPkg ? 'Package contents (tests and panels)' : 'Panel members (tests)'}</h4>
+            ${v.components.length ? `<div class="tbl-wrap"><table class="dx-table"><tbody>${v.components.map(c => `<tr>
+                <td data-label="Code"><b>${esc((c.child || {}).test_code || '—')}</b></td><td data-label="Test">${esc((c.child || {}).name || c.child_test_id)}</td>
+                <td data-label="Status">${c.child && c.child.approved_at ? '<span class="dx-chip ok">Approved</span>' : '<span class="dx-chip">Not approved</span>'}</td>
+                <td>${edit ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxcat.removeComponent('${esc(c.child_test_id)}', this)">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No members yet.</p>'}
+            ${edit ? `<div class="dx-toolbar" style="margin-top:10px"><div class="field"><label for="dxCompAdd">Add</label><select id="dxCompAdd">
+                ${candidates.map(t => `<option value="${esc(t.id)}">${esc((t.test_code ? t.test_code + ' · ' : '') + t.name)}${t.kind === 'panel' ? ' (panel)' : ''}</option>`).join('')}</select></div>
+                <button type="button" class="btn btn-ghost btn-sm" ${candidates.length ? '' : 'disabled'} onclick="dxcat.addComponent(this)">Add</button></div>` : ''}</div>`;
+    },
+    async addComponent(btn) {
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/tests/${encodeURIComponent(dxcat.view.test.id)}/components`, { child_test_id: document.getElementById('dxCompAdd').value, sort_order: (dxcat.view.components.length + 1) * 10 });
+            await dxcat.reload();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async removeComponent(childId, btn) {
+        btn.disabled = true;
+        try { await apiDel(`/admin/dx/tests/${encodeURIComponent(dxcat.view.test.id)}/components/${encodeURIComponent(childId)}`); await dxcat.reload(); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async saveDetails(btn) {
+        const t = dxcat.view.test, v = id => { const el = document.getElementById(id); return el ? el.value.trim() : undefined; };
+        const num = id => v(id) === '' ? null : Number(v(id));
+        const want = { test_code: v('dxTCode') ? v('dxTCode').toUpperCase() : null, department_id: v('dxTDept') || null,
+            method: v('dxTMethod') || null, tat_minutes: num('dxTTat'), stat_tat_minutes: num('dxTStat'), gender_restriction: v('dxTGender'),
+            print_title: v('dxTTitle') || null, loinc_code: v('dxTLoinc') || null, interpretation: v('dxTInterp') || null,
+            report_notes: v('dxTNotes') || null, is_active: document.getElementById('dxTActive').checked };
+        if (t.kind === 'test') { want.container_id = v('dxTCont') || null; want.dx_result_mode = v('dxTMode'); }
+        const patch = {};
+        Object.keys(want).forEach(k => { if ((want[k] ?? null) !== (t[k] ?? null)) patch[k] = want[k]; });
+        if (!Object.keys(patch).length) { toast('Nothing changed'); return; }
+        btn.disabled = true;
+        try { await apiPut(`/admin/dx/tests/${encodeURIComponent(t.id)}`, patch); toast('Details saved'); await dxcat.reload(); }
+        catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async approve(btn) {
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/tests/${encodeURIComponent(dxcat.view.test.id)}/approve`, { digest: dxcat.view.digest });
+            toast('Test approved'); await dxcat.reload();
+        } catch (e) {
+            toast(e.status === 409 ? e.message + ' The latest version is loaded.' : e.message, true);
+            if (e.status === 409) await dxcat.reload();
+            btn.disabled = false;
+        }
+    },
+    async openSeed() {
+        const body = document.getElementById('dxSeedBody');
+        body.innerHTML = loading(); dxcat.open('dxSeedModal');
+        try {
+            const p = await api('/admin/dx/seed/preview');
+            const st = { new: '<span class="dx-chip ok">New</span>', exists: '<span class="dx-chip">Already added</span>',
+                name_match: '<span class="dx-chip">Matches your test</span>', conflict: '<span class="dx-chip off">Name used by another code</span>' };
+            body.innerHTML = `<p><b>${p.total}</b> tests, panels and packages: <b>${p.new}</b> new, ${p.name_match} match a test you already have (only empty fields are filled), ${p.exists} already added${p.conflict ? `, ${p.conflict} skipped` : ''}.</p>
+                <p class="ipd-winddown" style="margin:0 0 12px">Reference bands are indicative (${esc(p.source)}). Everything is added inactive and unapproved: review each test's bands before approving.</p>
+                <div class="tbl-wrap" style="max-height:45vh;overflow:auto"><table class="dx-table"><thead><tr><th>Code</th><th>Name</th><th>Kind</th><th>Parameters</th><th>Status</th></tr></thead><tbody>
+                ${p.items.map(i => `<tr><td data-label="Code"><b>${esc(i.code)}</b></td><td data-label="Name">${esc(i.name)}</td><td data-label="Kind">${esc(i.kind)}</td>
+                    <td data-label="Parameters">${i.kind === 'test' ? i.parameters : i.components.length + ' members'}</td><td data-label="Status">${st[i.status] || esc(i.status)}</td></tr>`).join('')}</tbody></table></div>`;
+            document.getElementById('dxSeedApply').disabled = !(p.new + p.name_match);
+        } catch (e) { body.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    async applySeed(btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiPost('/admin/dx/seed/apply', {});
+            toast(`Added ${r.created} tests (${r.parameters} bands, ${r.components} panel links); ${r.matched_by_name} matched your tests.`);
+            dxcat.close('dxSeedModal'); await dxcat.load();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    openImport() {
+        document.getElementById('dxImportFile').value = '';
+        document.getElementById('dxImportReport').innerHTML = '';
+        document.getElementById('dxImportApply').disabled = true;
+        dxcat.open('dxImportModal');
+    },
+    async importFile(btn, dryRun) {
+        const f = document.getElementById('dxImportFile').files[0];
+        if (!f) { toast('Choose a CSV or .xlsx file.', true); return; }
+        const fd = new FormData(); fd.append('file', f);
+        btn.disabled = true;
+        try {
+            const res = await apiRaw(dryRun ? '/admin/dx/import/dry-run' : '/admin/dx/import/apply', { method: 'POST', body: fd }, s => s === 422);
+            const data = await res.json();
+            const r = res.ok ? data : (data.detail && data.detail.report ? data.detail : null);
+            if (!r) { toast(detailText(data) || 'The file could not be imported.', true); return; }
+            const bad = r.report.filter(x => x.errors.length);
+            document.getElementById('dxImportReport').innerHTML = res.ok && !dryRun
+                ? `<p class="dx-formula-ok">Imported ${r.written} band(s). Approvals of the affected tests were cleared.</p>`
+                : `<p>${r.rows} row(s): <b>${r.valid}</b> valid, <b>${r.invalid}</b> to fix.</p>${bad.length ? `<div class="tbl-wrap" style="max-height:40vh;overflow:auto"><table class="dx-table"><thead><tr><th>Row</th><th>Test</th><th>Name</th><th>Problems</th></tr></thead><tbody>
+                    ${bad.map(x => `<tr><td data-label="Row">${x.row}</td><td data-label="Test">${esc(x.test_code)}</td><td data-label="Name">${esc(x.name)}</td><td data-label="Problems">${x.errors.map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+            document.getElementById('dxImportApply').disabled = !(dryRun && r.invalid === 0 && r.rows > 0);
+            if (res.ok && !dryRun) dxcat.load();
+        } catch (e) { toast(e.message, true); } finally { if (dryRun || btn.id !== 'dxImportApply') btn.disabled = false; }
+    },
+};
+/* DX:catalogue:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -14461,7 +14933,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ };
     if (loaders[page]) loaders[page]();
 }
 

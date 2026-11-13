@@ -622,6 +622,47 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 20. MIGRATION 126 — Diagnostic OS catalogue (DX-M2)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_cols int;
+    v_trg int;
+    v_funcs int;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_departments', 'dx_containers', 'dx_signatories', 'dx_test_components')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M126', 'Tables: dx_departments, dx_containers, dx_signatories, dx_test_components (RLS forced)',
+            CASE WHEN v_tables = 4 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 4 present with RLS forced');
+
+    SELECT count(*) INTO v_cols FROM information_schema.columns WHERE table_schema = 'public' AND (
+        (table_name = 'lab_tests' AND column_name IN ('test_code', 'kind', 'department_id', 'container_id',
+                                                      'dx_result_mode', 'approved_at', 'approval_digest'))
+     OR (table_name = 'lab_test_parameters' AND column_name IN ('parameter_code', 'formula', 'decimal_places',
+                                                                'rounding_mode', 'low_exclusive', 'high_exclusive')));
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M126', 'Columns: DX fields on lab_tests / lab_test_parameters',
+            CASE WHEN v_cols = 13 THEN 'PASS' ELSE 'FAIL' END, v_cols || ' of 13 present');
+
+    SELECT count(*) INTO v_trg FROM pg_trigger WHERE tgname IN ('trg_dx_test_components_guard',
+        'trg_dx_lab_tests_clear_approval', 'trg_dx_parameters_clear_approval', 'trg_dx_components_clear_approval',
+        'trg_dx_parameters_kind');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M126', 'Triggers: component guard + approval clearing',
+            CASE WHEN v_trg = 5 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 5 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_test_digest(uuid,uuid)',
+                                                   'dx_approve_test(uuid,uuid,text,uuid,text)']) f
+     WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M126', 'Functions: dx_test_digest, dx_approve_test',
+            CASE WHEN v_funcs = 2 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 2 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

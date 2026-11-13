@@ -26,18 +26,24 @@ Prefix `/admin/dx` unless stated. `NW` = refused in WIND_DOWN.
 | GET | `/platform/clinics/{id}/dx/deactivation-preview` | owner | counts: visits in process, samples in transit, unreleased results, B2B balance |
 
 ## P2 — Catalogue
+As built in migration 126 (paths under `/admin/dx`; NW = refused in WIND_DOWN). Masters are clinic-wide (branch-pinned
+logins get 403); tests follow `lab_tests.branch_id` like the existing lab-test admin.
+
 | Method | Path | Permission | Notes |
 |:-|:-|:-|:-|
-| GET/POST/PATCH | `/departments`, `/containers`, `/signatories` | DX_ADMIN (POST NW) | signatory doctor must have `registration_number` |
-| POST | `/signatories/{id}/signature` | DX_ADMIN | PNG ≤ 300 KB, stored under clinic prefix, content-addressed |
-| GET | `/catalog?kind&department&q&approved` | DX_READ | tests, panels, packages with DX fields |
-| PATCH | `/catalog/tests/{id}` | DX_CATALOGUE | DX columns only; clears approval on clinical-field change |
-| GET/POST/DELETE | `/catalog/tests/{id}/components[/{child_id}]` | DX_CATALOGUE | guard trigger enforces kinds/depth/cycles |
-| POST | `/catalog/tests/{id}/approve` | DX_CATALOGUE_APPROVE | lab director; body echoes the band digest the user saw (409 if changed) |
-| POST | `/catalog/formula/check` | DX_CATALOGUE | parse + evaluate against sample inputs, returns tokens / errors |
-| POST | `/catalog/seed/preview`, `/catalog/seed/apply` | DX_CATALOGUE | apply is idempotent by `test_code`; creates inactive, unapproved drafts |
-| POST | `/catalog/import/parameters?dry_run=true` | DX_CATALOGUE | CSV/XLSX ≤ 2 MB, dry-run report then commit |
-| GET/POST/PUT | `/admin/lis/tests/{id}/parameters…` (existing, extended) | LAB_TESTS_MANAGE | new DX fields accepted; formula validated at save |
+| GET | `/departments`, `/containers`, `/signatories` | DX_READ / DX_CATALOGUE / DX_ADMIN / DX_CATALOGUE_APPROVE | |
+| POST / PUT | `/departments[/{id}]`, `/containers[/{id}]` | DX_CATALOGUE or DX_ADMIN (POST NW) | container `code` = 2 digits (barcode `YY cc SSSSSSSS`) |
+| POST / PUT | `/signatories[/{id}]` | DX_CATALOGUE or DX_ADMIN (POST NW) | doctor must have a `registration_number` |
+| POST | `/signatories/{id}/signature` | DX_CATALOGUE or DX_ADMIN | PNG ≤ 300 KB, content-addressed `<clinic>/dx-assets/signatures/<sha256>.png` in the private `lab-reports` bucket |
+| GET | `/tests?kind&department_id&q&approved` | as GET above | tests, panels, packages with DX fields |
+| POST | `/tests` | DX_CATALOGUE (NW) | creates an **inactive** draft |
+| GET / PUT | `/tests/{id}` | read / DX_CATALOGUE | GET returns test, bands, components, `digest`, readiness `issues`; PUT = DX columns + `is_active`; clinical edits clear approval (trigger) |
+| POST / PUT | `/tests/{id}/parameters[/{pid}]` | DX_CATALOGUE | 118 band shape + DX fields; formula validated at save (unknown code, unsafe construct, loop → 422 with `token`) |
+| GET / POST / DELETE | `/tests/{id}/components[/{child_id}]` | read / DX_CATALOGUE | guard trigger enforces kinds / depth / self |
+| POST | `/tests/{id}/approve` | DX_CATALOGUE_APPROVE | doctor-linked login with registration; body `{digest}` = what the approver reviewed (409 `dx_test_changed`); readiness 409 `dx_test_not_ready` |
+| POST | `/formula/check` | DX_CATALOGUE / DX_CATALOGUE_APPROVE | parse + evaluate against sample inputs and patient context; no write |
+| GET / POST | `/seed/preview`, `/seed/apply` | DX_CATALOGUE (apply NW) | idempotent by `test_code`; same-name clinic tests matched (only empty DX fields filled); inactive, unapproved drafts |
+| POST | `/import/dry-run`, `/import/apply` | DX_CATALOGUE (apply NW) | CSV / XLSX ≤ 2 MB, one row per band; apply writes nothing unless every row is valid |
 
 ## P3 — Registration, visits, billing
 | Method | Path | Permission | Notes |

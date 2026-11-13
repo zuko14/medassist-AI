@@ -144,6 +144,19 @@ CREATE TABLE dx_test_components (
 -- trigger dx_guard_components: parent.kind IN ('panel','package'); child.kind = 'test' or (parent package AND child panel);
 -- depth ≤ 2; no cycles; a test's own parameters exist only when kind = 'test'.
 ```
+**As built (migration 126, owner P2 brief — supersedes the sketch above where they differ):** `lab_tests` approval
+columns are `approved_at`, `approved_by` (the approving doctor's `doctors.id`; the name is in the audit log) and
+`approval_digest`; `lab_test_parameters` uses `parameter_code` (`^[A-Z0-9._-]{1,30}$`), `decimal_places` (0–4, default 2),
+`rounding_mode`, `reference_text` (≤ 2000), `delta_direction` (`increase|decrease|both`), `delta_limit_percent`,
+`delta_limit_abs`, `delta_lookback_days` (default 30); `section_heading`, `is_reportable` and `comment` were not added.
+`dx_containers.sample_type` is a CHECK list (serum, whole_blood, plasma, urine, stool, swab, semen, csf, fluid, other).
+Test codes are unique per clinic + branch (`uq_lab_tests_test_code`). Approval is `dx_test_digest(clinic, test)` (sha256
+of clinical fields, active bands, components) + `dx_approve_test(clinic, test, digest, doctor, name)`, which locks the
+test row; band / component triggers take the same lock (`FOR NO KEY UPDATE`) so an edit and an approval can never
+leave a stale approval. Triggers: `trg_dx_test_components_guard`, `trg_dx_parameters_kind`,
+`trg_dx_lab_tests_clear_approval` (clinical lab_tests fields), `trg_dx_parameters_clear_approval` /
+`trg_dx_components_clear_approval` (a `machine_code`-only edit keeps approval).
+
 **Lab-test deletion (AUDIT A22).** The existing admin delete / bulk delete of `lab_tests` must keep working for tests DX
 never used: `dx_test_components`, `dx_rate_card_items` and `dx_routing_rules` reference `lab_tests` with
 `ON DELETE CASCADE`; `lab_tests.department_id` / `container_id` are composite FKs to the DX tables with
