@@ -104,19 +104,18 @@ money without a money grant — and both for a pinned user reaching another bran
 Orders on a visit carry `outsourced_to` (partner name); collection-queue tubes too. Not built: removing a tube from an
 open batch, cancelling a batch, re-batching a tube recorded missing.
 
-## P6 — Bench, verification, approval
+## P6 — Bench, verification, approval (as built, migration 130; under `/admin/dx`)
 | Method | Path | Permission | Notes |
 |:-|:-|:-|:-|
-| GET | `/worklist?stage&department&site&priority&page` | DX_READ + stage permission | stages per ARCHITECTURE §4.2 |
-| GET | `/orders/{id}/worksheet` | LAB_ENTRY or DX_VERIFY or LAB_VALIDATE | LIS worksheet + previous values, delta, calculated preview, instrument prefill |
-| POST | `/orders/{id}/results` | LAB_ENTRY | `dx_record_results`; flags/formulas server-side |
-| POST | `/results/{id}/verify` | DX_VERIFY | `expected_updated_at`, decision, comment |
-| GET | `/approval/queue?normal_only&department` | LAB_VALIDATE | |
-| POST | `/results/approve` | LAB_VALIDATE (doctor-linked) | `{items:[{result_id, expected_updated_at}], batch: bool}` ≤ 50 items; per-item outcomes |
-| POST | `/results/{id}/critical-events` | DX_VERIFY or LAB_VALIDATE | call record |
-| GET | `/critical/open` | DX_READ | |
-| POST / GET | `/results/{id}/attachments`, `/attachments/{id}` | LAB_ENTRY / DX_READ | PNG/JPEG/PDF ≤ 2 MB, only while unsigned |
-| — | `/admin/lis/orders/{id}/results`, `/admin/lis/results/{id}/validate` (existing) | — | for a `source='dx'` order: **409 `dx_use_dx_route`** (prevents bypassing receipt check and verification UI); OPD/IPD unchanged |
+| GET | `/worklist?stage&site_id&department_id&priority&date&open_only` | any DX read grant, DX_RECEIVE, DX_VERIFY, LAB_ENTRY or LAB_VALIDATE | stages per ARCHITECTURE §4.2 (`dx_stage`), counts per stage, TAT (setting clock + both clocks), tube colour, `critical_pending`, `verified` / `returned`, `batch_ok`; `open_only` = open visits of 7 days; pinned: own sites; no phone / money |
+| GET | `/orders/{id}/worksheet` | LAB_ENTRY, LAB_VALIDATE or DX_VERIFY | LIS worksheet + calculated flag, previous value per line, open result with meta, verifications, critical events, attachments |
+| POST | `/orders/{id}/results` | LAB_ENTRY | `values [{parameter_id, value, remarks}]`, `amendment_reason`, `preview` (evaluate only — live calculated values, flags, deltas); `dx_record_results`; tube must be received |
+| GET | `/results/{id}` | LAB_ENTRY, LAB_VALIDATE or DX_VERIFY | result + values + meta + verifications + critical events (+ `critical_pending`) + attachments |
+| POST | `/results/{id}/verify` | DX_VERIFY | `expected_updated_at`, `decision` verified / returned (comment ≥ 3 chars), `dx_self_verification` at three levels |
+| POST | `/results/approve` | LAB_VALIDATE, doctor-linked login with a registration number | `{items:[{result_id, expected_updated_at}] ≤ 50, batch}`; per-item `{ok, status}` or `{code, message}` (`dx_batch_not_normal`, `dx_critical_not_notified`, `dx_verification_required`, `lis_result_changed`) |
+| POST | `/critical-events/{id}/call` | DX_VERIFY, LAB_VALIDATE or LAB_ENTRY | `notified_to`, `notified_role`, `channel`, `read_back_confirmed`, `notes`; only a call with read-back clears approval |
+| POST / GET | `/results/{id}/attachments?kind&caption`, `/results/{id}/attachments/{att}` | LAB_ENTRY / bench read | PDF, PNG, JPEG ≤ 5 MB (sniffed), only while the result is open |
+| — | `/admin/lis/orders/{id}/results`, `/admin/lis/results/{id}/validate` (existing) | — | for a `source='dx'` order: **409 `dx_use_dx_route`**; the LIS sign-off queue omits DX results; `validate_and_sign_report` never delivers a DX result; OPD/IPD unchanged |
 
 ## P7 — Reports, templates, delivery
 | Method | Path | Permission | Notes |

@@ -3410,6 +3410,37 @@
             .dxl-tube > :nth-child(3), .dxl-tube > :nth-child(4) { grid-column: 2 / -1; }
         }
         /* DX:logistics:END */
+        /* DX:bench:START — Lab worklist, worksheet drawer, approvals (migration 130) */
+        .dxb-tabs { margin: 0 0 12px; flex-wrap: wrap; max-width: 100%; }
+        .dxb-tabs .toggle-btn b { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--border); font-size: 0.72rem; }
+        .dxb-row { display: grid; grid-template-columns: 16px minmax(110px, auto) minmax(140px, 1.4fr) minmax(130px, auto) minmax(120px, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+        .dxb-tat { height: 6px; border-radius: 4px; background: var(--border); overflow: hidden; }
+        .dxb-tat i { display: block; height: 100%; background: var(--green, #1e8449); }
+        .dxb-tat.amber i { background: var(--amber, #d68910); }
+        .dxb-tat.red i { background: var(--red, #c0392b); }
+        .dxb-tat-l { font-size: 0.75rem; color: var(--text2); }
+        .dxb-drawer { position: fixed; inset: 0 0 0 auto; width: min(620px, 100vw); background: var(--bg); border-left: 1px solid var(--border); box-shadow: -12px 0 32px rgba(0,0,0,.35); z-index: 450; transform: translateX(100%); transition: transform .2s ease; display: flex; flex-direction: column; }
+        .dxb-drawer.open { transform: none; }
+        .dxb-drawer header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-start; }
+        .dxb-drawer header h3 { margin: 0; font-size: 1.05rem; flex: 1; }
+        .dxb-drawer .dxb-body { padding: 12px 16px; overflow-y: auto; flex: 1; }
+        .dxb-drawer footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; }
+        .dxb-banner { border: 1px solid var(--red, #c0392b); background: rgba(192, 57, 43, .12); color: var(--text); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+        .dxb-param { display: grid; grid-template-columns: minmax(120px, 1.3fr) minmax(110px, 1fr) minmax(90px, auto); gap: 4px 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+        .dxb-param input, .dxb-param select { width: 100%; }
+        .dxb-param .meta { grid-column: 1 / -1; font-size: 0.78rem; color: var(--text2); display: flex; flex-wrap: wrap; gap: 6px 12px; }
+        .dxb-flag { white-space: nowrap; padding: 1px 8px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; border: 1px solid var(--border2); color: var(--text2); }
+        .dxb-flag.low, .dxb-flag.high, .dxb-flag.abnormal { border-color: var(--amber, #d68910); color: var(--amber, #d68910); }
+        .dxb-flag.critical_low, .dxb-flag.critical_high { background: var(--red, #c0392b); border-color: var(--red, #c0392b); color: #fff; }
+        .dxb-flag.delta { border-color: var(--accent); color: var(--accent2); }
+        .dxb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .dxb-ok { border-color: var(--green, #1e8449) !important; color: var(--green, #1e8449) !important; }
+        @media (max-width: 760px) {
+            .dxb-row { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+            .dxb-row > :nth-child(3), .dxb-row > :nth-child(5) { flex: 1 1 100%; }
+            .dxb-param { grid-template-columns: 1fr 1fr; }
+        }
+        /* DX:bench:END */
     </style>
 </head>
 <body>
@@ -3704,6 +3735,14 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"></path><path d="M14 10h4l3 3v3h-7"></path><circle cx="7" cy="18" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg></span> Logistics
             </div>
             <!-- DX:logistics:END -->
+            <!-- DX:bench:START — Lab worklist and approvals (migration 130) -->
+            <div class="nav-link" tabindex="0" data-page="dxbench" data-dx="nav DX_READ DX_RECEIVE DX_VERIFY" style="display:none" onclick="go('dxbench',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg></span> Lab Worklist
+            </div>
+            <div class="nav-link" tabindex="0" data-page="dxapprove" data-dx="nav DX_VERIFY" style="display:none" onclick="go('dxapprove',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg></span> Result Approval
+            </div>
+            <!-- DX:bench:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -7772,6 +7811,69 @@
             </div>
         </div>
         <!-- DX:logistics:END -->
+        <!-- DX:bench:START — Lab worklist (dxbench), worksheet drawer (dxworksheet), approvals (dxapprove) -->
+        <div id="pg-dxbench" class="sec">
+            <div class="page-head"><div><h2>Lab Worklist</h2><p>Every test by stage: receive tubes, enter results, verify and approve. STAT first; the bar is the turnaround clock.</p></div></div>
+            <div class="toggle-group dxb-tabs" role="tablist" aria-label="Work stages" id="dxbTabs"></div>
+            <div class="card">
+                <div class="dxc-bar">
+                    <div class="field"><label for="dxbSite">Site</label><select id="dxbSite" onchange="dxbench.load()"></select></div>
+                    <div class="field"><label for="dxbDept">Department</label><select id="dxbDept" onchange="dxbench.load()"></select></div>
+                    <div class="field"><label for="dxbPri">Priority</label><select id="dxbPri" onchange="dxbench.load()"><option value="">All</option><option value="stat">STAT</option><option value="urgent">Urgent</option><option value="routine">Routine</option></select></div>
+                    <div class="field"><label for="dxbDate">Date</label><input id="dxbDate" type="date" onchange="dxbench.load()"></div>
+                    <label class="check"><input type="checkbox" id="dxbOpen" onchange="dxbench.load()" checked> All open (7 days)</label>
+                </div>
+            </div>
+            <div id="dxbList" aria-live="polite"></div>
+        </div>
+        <div id="pg-dxapprove" class="sec">
+            <div class="page-head"><div><h2>Result Approval</h2><p>Review and sign results. Critical values come first and need a phoned read-back before signing. Batch signing takes only all-normal results, never automatically.</p></div></div>
+            <div class="toggle-group dxb-tabs" role="tablist" aria-label="Approval queues">
+                <button type="button" class="toggle-btn on" role="tab" data-dxa-tab="all" onclick="dxapprove.setTab('all')">Pending approval</button>
+                <button type="button" class="toggle-btn" role="tab" data-dxa-tab="normal" onclick="dxapprove.setTab('normal')">Normal results</button>
+            </div>
+            <div class="card" id="dxaBatchBar" hidden>
+                <div class="dxc-actions">
+                    <label class="check"><input type="checkbox" id="dxaAll" onchange="dxapprove.selectAll(this.checked)"> Select all on this page (max 50)</label>
+                    <button type="button" class="btn btn-accent btn-sm" onclick="dxapprove.signSelected(this)">Sign selected</button>
+                </div>
+                <div class="dxb-chips" id="dxaOutcome" aria-live="polite"></div>
+            </div>
+            <div id="dxaList" aria-live="polite"></div>
+        </div>
+        <aside class="dxb-drawer" id="dxwsDrawer" role="dialog" aria-modal="true" aria-labelledby="dxwsTitle">
+            <header><h3 id="dxwsTitle">Worksheet</h3><button type="button" class="btn btn-ghost btn-sm" onclick="dxws.close()" aria-label="Close worksheet">Close</button></header>
+            <div class="dxb-body" id="dxwsBody"></div>
+            <footer id="dxwsActions"></footer>
+        </aside>
+        <div class="modal-overlay" id="dxwsCallModal" role="dialog" aria-modal="true" aria-labelledby="dxwsCallTitle">
+            <div class="modal">
+                <h3 id="dxwsCallTitle">Log critical value call</h3>
+                <p class="muted" id="dxwsCallFor"></p>
+                <div class="field"><label for="dxwsCallTo">Told to (name)</label><input id="dxwsCallTo" maxlength="120" autocomplete="off"></div>
+                <div class="dx-grid">
+                    <div class="field"><label for="dxwsCallRole">Role</label><select id="dxwsCallRole"><option value="referrer">Referring doctor</option><option value="patient">Patient</option><option value="ward">Ward</option><option value="account">B2B account desk</option><option value="other">Other</option></select></div>
+                    <div class="field"><label for="dxwsCallCh">Channel</label><select id="dxwsCallCh"><option value="phone">Phone</option><option value="in_person">In person</option><option value="whatsapp">WhatsApp</option></select></div>
+                </div>
+                <div class="field"><label for="dxwsCallNotes">Notes</label><input id="dxwsCallNotes" maxlength="500" autocomplete="off"></div>
+                <label class="check"><input type="checkbox" id="dxwsCallRB" onchange="document.getElementById('dxwsCallSave').disabled=!this.checked"> The listener read the value back correctly</label>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxws.closeModal('dxwsCallModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" id="dxwsCallSave" disabled onclick="dxws.saveCall(this)">Record call</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxwsReturnModal" role="dialog" aria-modal="true" aria-labelledby="dxwsReturnTitle">
+            <div class="modal">
+                <h3 id="dxwsReturnTitle">Return for re-check</h3>
+                <div class="field"><label for="dxwsReturnWhy">Why (the technician sees this)</label><textarea id="dxwsReturnWhy" rows="2" maxlength="500"></textarea></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxws.closeModal('dxwsReturnModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxws.decide('returned', this)">Return</button>
+                </div>
+            </div>
+        </div>
+        <!-- DX:bench:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -10715,6 +10817,276 @@ const dxlog = {
     },
 };
 /* DX:logistics:END */
+/* DX:bench:START — Lab worklist, worksheet drawer, approvals (migration 130). Stages, flags, calculated
+   values, deltas, verification and signing are all decided by the server; this page shows them and posts
+   what the technician / verifier / pathologist does. Nothing is approved automatically. */
+// LAB_ENTRY / LAB_VALIDATE on a DX clinic, mirroring app/services/permissions.py (lisCan needs OPD or IPD)
+const DX_LAB_ROLES = { LAB_ENTRY: ['LAB_OPERATOR', 'DIAGNOSTIC_OPERATOR', 'PATHOLOGIST', 'LAB_SUPERVISOR', 'PROCESSING_ADMIN'],
+                       LAB_VALIDATE: ['PATHOLOGIST', 'DOCTOR'] };
+function dxLab(perm) {
+    if (!myDx) return false;
+    if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
+    return (myPermissions || []).includes(perm) || (DX_LAB_ROLES[perm] || []).includes(myStaffRole);
+}
+const DXB_TABS = [['pending_receipt', 'Receipt'], ['pending_entry', 'Entry'], ['pending_verification', 'Verification'],
+                  ['pending_approval', 'Approval'], ['pending_release', 'Release'], ['released', 'Done'], ['', 'All']];
+const DXB_STAGE = { awaiting_payment: 'Awaiting payment', pending_collection: 'To collect', pending_receipt: 'To receive',
+                    pending_entry: 'To enter', pending_verification: 'To verify', pending_approval: 'To approve',
+                    pending_release: 'Approved', released: 'Released', cancelled: 'Cancelled' };
+function dxbTat(t) {
+    if (!t || t.status === 'none' || !t.target_minutes) return '<span class="dxb-tat-l">no TAT set</span>';
+    const pct = Math.min(100, Math.round(100 * t.elapsed_minutes / t.target_minutes));
+    const h = m => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+    return `<div><div class="dxb-tat ${esc(t.status)}" role="img" aria-label="TAT ${pct}%"><i style="width:${pct}%"></i></div>
+        <span class="dxb-tat-l">${h(t.elapsed_minutes)} of ${h(t.target_minutes)}</span></div>`;
+}
+function dxbAgeSex(p) { return [p.age_years != null ? p.age_years + ' y' : '', ({ male: 'M', female: 'F', other: 'O' })[p.gender] || ''].filter(Boolean).join(' / '); }
+const dxbench = {
+    stage: 'pending_entry', data: null,
+    params() {
+        const p = new URLSearchParams();
+        [['site_id', 'dxbSite'], ['department_id', 'dxbDept'], ['priority', 'dxbPri'], ['date', 'dxbDate']]
+            .forEach(([k, id]) => { const v = document.getElementById(id).value; if (v) p.set(k, v); });
+        if (document.getElementById('dxbOpen').checked) { p.set('open_only', 'true'); p.delete('date'); }
+        return p;
+    },
+    async load() {
+        const p = dxbench.params();
+        if (dxbench.stage) p.set('stage', dxbench.stage);
+        const seq = dxbench.seq = (dxbench.seq || 0) + 1;      // a quick tab switch: only the latest answer renders
+        let data;
+        try { data = await api('/admin/dx/worklist?' + p); } catch (e) { if (seq === dxbench.seq) toast(e.message, true); return; }
+        if (seq !== dxbench.seq) return;
+        dxbench.data = data;
+        const d = dxbench.data, site = document.getElementById('dxbSite'), dept = document.getElementById('dxbDept');
+        if (!site.options.length) {
+            site.innerHTML = '<option value="">All my sites</option>' + d.sites.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.display_name)}</option>`).join('');
+            dept.innerHTML = '<option value="">All departments</option>' + d.departments.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+        }
+        document.getElementById('dxbTabs').innerHTML = DXB_TABS.filter(([s]) => s !== 'pending_verification' || d.approval_levels === 3).map(([s, label]) => {
+            const n = s ? d.counts[s] : Object.entries(d.counts).filter(([k]) => k !== 'cancelled').reduce((a, [, v]) => a + v, 0);
+            return `<button type="button" class="toggle-btn${dxbench.stage === s ? ' on' : ''}" role="tab" aria-selected="${dxbench.stage === s}" onclick="dxbench.stage='${s}';dxbench.load()">${label}<b>${n}</b></button>`;
+        }).join('');
+        dxbench.render();
+    },
+    render() {
+        const el = document.getElementById('dxbList'), d = dxbench.data;
+        if (!d.visits.length) { el.innerHTML = '<div class="card"><p class="muted">Nothing at this stage.</p></div>'; return; }
+        el.innerHTML = d.visits.map(v => `<div class="dxc-visit${v.priority === 'stat' ? ' stat' : ''}">
+            <div class="dxc-head"><h4>${esc(v.patient.name || '')}</h4><span>${esc(dxbAgeSex(v.patient))}</span><span class="dxc-num">${esc(v.accession_number)}</span>
+                ${v.priority !== 'routine' ? `<span class="dxc-chip ${esc(v.priority)}">${v.priority === 'stat' ? 'STAT' : 'Urgent'}</span>` : ''}
+                ${v.has_critical ? '<span class="dxc-chip stat">Critical value</span>' : ''}</div>
+            ${v.orders.map(o => {
+                const s = o.sample || {}, r = o.result || {};
+                const chips = [r.critical_pending ? '<span class="dxb-flag critical_high">Call pending</span>' : '',
+                               r.returned ? '<span class="dxb-flag high">Returned</span>' : '',
+                               o.outsourced_to ? `<span class="dxc-chip">Outsourced to ${esc(o.outsourced_to)}</span>` : ''].join(' ');
+                const act = o.stage === 'pending_receipt' && s.barcode && dxCan('DX_RECEIVE')
+                    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxbench.receive('${esc(s.barcode)}','${esc(s.processing_site_id || '')}')">Receive</button>`
+                    : ['pending_entry', 'pending_verification', 'pending_approval', 'pending_release', 'released'].includes(o.stage)
+                    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxws.open('${esc(o.id)}')">Worksheet</button>` : '';
+                return `<div class="dxb-row"><span class="dxc-dot" style="background:${esc(s.colour_hex || 'transparent')}" title="${esc(s.container_name || '')}"></span>
+                    <span class="dxc-code">${esc(s.barcode || '—')}</span><span>${esc(o.item_name)} ${chips}</span>
+                    <span><span class="dxc-chip">${esc(DXB_STAGE[o.stage] || o.stage)}</span></span>${dxbTat(o.tat)}<span>${act}</span></div>`;
+            }).join('')}</div>`).join('');
+    },
+    async receive(code, site) {
+        try { await apiPost('/admin/dx/samples/receive-direct', { barcode: code, site_id: site }); toast(`${code} received`); await dxbench.load(); }
+        catch (e) { toast(e.message, true); }
+    },
+};
+
+const dxws = {
+    order: null, ws: null, timer: null, values: {},
+    async open(orderId) {
+        try { dxws.ws = await api(`/admin/dx/orders/${encodeURIComponent(orderId)}/worksheet`); } catch (e) { toast(e.message, true); return; }
+        dxws.order = orderId; dxws.values = {};
+        (dxws.ws.parameters || []).forEach(p => { if (p.entered) dxws.values[p.parameter_id] = p.entered.value; });
+        dxws.render(null);
+        document.getElementById('dxwsDrawer').classList.add('open');
+        const first = document.querySelector('#dxwsBody input:not([readonly]), #dxwsBody select');
+        if (first) first.focus();
+    },
+    close() { document.getElementById('dxwsDrawer').classList.remove('open'); if (document.getElementById('pg-dxbench').classList.contains('on')) dxbench.load(); else if (document.getElementById('pg-dxapprove').classList.contains('on')) dxapprove.load(); },
+    openModal(id) { document.getElementById(id).classList.add('open'); },
+    closeModal(id) { document.getElementById(id).classList.remove('open'); },
+    editable() { const r = dxws.ws.result; return dxLab('LAB_ENTRY') && (!r || ['draft', 'entered'].includes(r.status) || dxws.ws.needs_amendment_reason); },
+    render(evaluated) {
+        const ws = dxws.ws, r = ws.result, p = ws.patient || {}, o = ws.order;
+        const ev = {}; (evaluated || (r && r.values) || []).forEach(x => { ev[x.parameter_id] = x; });
+        const meta = {}; ((r && r.meta) || []).forEach(m => { meta[m.parameter_id] = m; });
+        document.getElementById('dxwsTitle').textContent = `${o.item_name} · ${p.name || ''}`;
+        const edit = dxws.editable();
+        const rows = ws.parameters.map(ln => {
+            const e = ev[ln.parameter_id] || {}, m = meta[ln.parameter_id] || {};
+            const val = e.numeric_value != null ? String(Number(e.numeric_value)) : (e.text_value ?? dxws.values[ln.parameter_id] ?? '');
+            const input = ln.is_calculated || !edit
+                ? `<input aria-label="${esc(ln.name)}" value="${esc(ln.is_calculated ? (e.numeric_value != null ? Number(e.numeric_value) : '') : val)}" readonly title="${ln.is_calculated ? 'Calculated: ' + esc(ln.formula) : ''}">`
+                : ln.data_type === 'options'
+                ? `<select aria-label="${esc(ln.name)}" onchange="dxws.set('${esc(ln.parameter_id)}', this.value)"><option value=""></option>${(ln.options || []).map(x => `<option${x === dxws.values[ln.parameter_id] ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>`
+                : `<input aria-label="${esc(ln.name)}" ${ln.data_type === 'numeric' ? 'inputmode="decimal"' : ''} value="${esc(dxws.values[ln.parameter_id] ?? '')}" oninput="dxws.set('${esc(ln.parameter_id)}', this.value)">`;
+            const prev = e.previous_value != null ? e : (ln.previous ? { previous_value: ln.previous.value, previous_at: ln.previous.at } : m);
+            const failed = e.delta_failed || m.delta_failed;
+            return `<div class="dxb-param"><span><strong>${esc(ln.name)}</strong>${ln.is_calculated ? ' <span class="dxc-chip">calc</span>' : ''}</span>${input}
+                <span>${e.flag ? `<span class="dxb-flag ${esc(e.flag)}">${esc(e.flag.replace('_', ' '))}</span>` : ''}</span>
+                <span class="meta"><span>${esc(ln.unit || '')}</span><span>${esc(ln.reference_range_display || 'no range for this patient')}</span>
+                ${prev && prev.previous_value != null ? `<span>Previous ${esc(String(prev.previous_value))} · ${esc(new Date(prev.previous_at).toLocaleDateString('en-IN'))}</span>` : ''}
+                ${failed ? `<span class="dxb-flag delta">Delta ${esc(e.delta_pct || m.delta_pct || '')}%</span>` : ''}</span></div>`;
+        }).join('');
+        const crit = r && r.critical_pending, ver = (r && r.verifications) || [];
+        const last = ver[ver.length - 1];
+        document.getElementById('dxwsBody').innerHTML = `
+            <p class="muted">${esc(o.specimen_barcode || '')} · ${esc(dxbAgeSex(p))} · MRN ${esc(p.mrn || '—')}${r ? ` · ${esc(r.status)} v${esc(r.version)}` : ''}</p>
+            ${crit ? '<div class="dxb-banner" role="alert"><strong>Critical value.</strong> Phone it through (with read-back) before approval.</div>' : ''}
+            ${(evaluated || []).some(x => x.flag && x.flag.startsWith('critical')) && !crit ? '<div class="dxb-banner" role="alert"><strong>Critical value</strong> in these values. Saving records it for a call.</div>' : ''}
+            ${last && last.decision === 'returned' ? `<div class="dxb-banner">Returned: ${esc(last.comment || '')} — ${esc(last.verifier_name)}</div>` : ''}
+            ${ws.needs_amendment_reason ? '<div class="field"><label for="dxwsAmend">Amendment reason (this report is signed)</label><input id="dxwsAmend" maxlength="500"></div>' : ''}
+            ${rows}
+            ${r ? `<h4 style="margin-top:14px">Attachments</h4><ul class="dxl-rows">${(r.attachments || []).map(a => `<li><span><a href="#" onclick="dxws.download('${esc(a.id)}');return false">${esc(a.file_name)}</a> <span class="muted">${esc(a.kind)}${a.caption ? ' · ' + esc(a.caption) : ''}</span></span></li>`).join('') || '<li class="muted">None.</li>'}</ul>
+              ${['draft', 'entered'].includes(r.status) && dxLab('LAB_ENTRY') ? `<div class="dxc-bar"><div class="field"><label for="dxwsAttKind">Kind</label><select id="dxwsAttKind"><option value="graph">Graph</option><option value="image">Image</option><option value="pdf">PDF (e.g. partner report)</option></select></div>
+                <div class="field"><label for="dxwsAttFile">File (PDF, PNG, JPEG ≤ 5 MB)</label><input id="dxwsAttFile" type="file" accept="application/pdf,image/png,image/jpeg" onchange="dxws.upload(this)"></div></div>` : ''}` : ''}`;
+        const can = { save: dxws.editable(), verify: r && r.status === 'entered' && dxCan('DX_VERIFY'),
+                      call: crit && (dxCan('DX_VERIFY') || dxLab('LAB_VALIDATE')), approve: r && r.status === 'entered' && dxLab('LAB_VALIDATE') };
+        document.getElementById('dxwsActions').innerHTML = [
+            can.save ? '<button type="button" class="btn btn-accent" onclick="dxws.save(this)">Save results</button>' : '',
+            can.verify ? '<button type="button" class="btn btn-ghost" onclick="dxws.decide(\'verified\', this)">Verify</button><button type="button" class="btn btn-ghost" onclick="dxws.openModal(\'dxwsReturnModal\')">Return for re-check</button>' : '',
+            can.call ? '<button type="button" class="btn btn-ghost" onclick="dxws.openCall()">Log critical call</button>' : '',
+            can.approve ? '<button type="button" class="btn btn-accent" onclick="dxws.approve(this)">Approve &amp; sign</button>' : ''].join('')
+            || '<span class="muted">Nothing to do here with your login.</span>';
+    },
+    set(pid, v) {
+        dxws.values[pid] = v;
+        clearTimeout(dxws.timer);
+        dxws.timer = setTimeout(dxws.preview, 400);
+    },
+    payload(preview) {
+        const body = { values: Object.entries(dxws.values).map(([parameter_id, value]) => ({ parameter_id, value: value === '' ? null : String(value) })), preview };
+        const a = document.getElementById('dxwsAmend');
+        if (a && a.value.trim()) body.amendment_reason = a.value.trim();
+        return body;
+    },
+    async preview() {
+        if (!Object.values(dxws.values).some(v => v !== '' && v != null)) return;
+        try {
+            const r = await apiPost(`/admin/dx/orders/${encodeURIComponent(dxws.order)}/results`, dxws.payload(true));
+            const f = document.activeElement, label = f && f.closest('#dxwsBody') ? f.getAttribute('aria-label') : null;
+            dxws.render(r.values);
+            const back = label && document.querySelector(`#dxwsBody [aria-label="${CSS.escape(label)}"]`);
+            if (back) { back.focus(); if (back.setSelectionRange && back.value != null) back.setSelectionRange(back.value.length, back.value.length); }
+        }
+        catch (e) { /* invalid while typing: shown on save */ }
+    },
+    async save(btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/dx/orders/${encodeURIComponent(dxws.order)}/results`, dxws.payload(false));
+            toast(r.has_critical_value ? 'Saved. Critical value: log the call before approval.' : 'Results saved');
+            await dxws.open(dxws.order);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async decide(decision, btn) {
+        const r = dxws.ws.result, comment = decision === 'returned' ? document.getElementById('dxwsReturnWhy').value.trim() : null;
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/results/${encodeURIComponent(r.id)}/verify`, { expected_updated_at: r.updated_at, decision, comment });
+            toast(decision === 'verified' ? 'Verified' : 'Returned to the technician');
+            dxws.closeModal('dxwsReturnModal');
+            await dxws.open(dxws.order);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    openCall() {
+        const r = dxws.ws.result, ev = (r.critical_events || []).filter(e => !e.notified_at).pop();
+        dxws.callEvent = ev && ev.id;
+        document.getElementById('dxwsCallFor').textContent = (ev ? ev.parameters : []).map(x => `${x.name} ${x.value} ${x.unit || ''} (${(x.flag || '').replace('_', ' ')})`).join(' · ');
+        ['dxwsCallTo', 'dxwsCallNotes'].forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('dxwsCallRB').checked = false;
+        document.getElementById('dxwsCallSave').disabled = true;
+        dxws.openModal('dxwsCallModal');
+    },
+    async saveCall(btn) {
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/critical-events/${encodeURIComponent(dxws.callEvent)}/call`, {
+                notified_to: document.getElementById('dxwsCallTo').value.trim(), notified_role: document.getElementById('dxwsCallRole').value,
+                channel: document.getElementById('dxwsCallCh').value, read_back_confirmed: document.getElementById('dxwsCallRB').checked,
+                notes: document.getElementById('dxwsCallNotes').value.trim() || null });
+            toast('Call recorded');
+            dxws.closeModal('dxwsCallModal');
+            await dxws.open(dxws.order);
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async approve(btn) {
+        const r = dxws.ws.result;
+        btn.disabled = true;
+        try {
+            const out = await apiPost('/admin/dx/results/approve', { items: [{ result_id: r.id, expected_updated_at: r.updated_at }] });
+            const it = out.items[0];
+            if (it.ok) { toast('Approved and signed'); await dxws.open(dxws.order); } else toast(it.message, true);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async upload(input) {
+        const f = input.files[0];
+        if (!f) return;
+        const fd = new FormData(); fd.append('file', f);
+        const kind = document.getElementById('dxwsAttKind').value;
+        try {
+            await apiRaw(`/admin/dx/results/${encodeURIComponent(dxws.ws.result.id)}/attachments?kind=${kind}`, { method: 'POST', headers: authHeaders(), body: fd });
+            toast('Attached'); await dxws.open(dxws.order);
+        } catch (e) { toast(e.message, true); }
+    },
+    async download(id) {
+        try {
+            const r = await apiRaw(`/admin/dx/results/${encodeURIComponent(dxws.ws.result.id)}/attachments/${encodeURIComponent(id)}`);
+            window.open(URL.createObjectURL(await r.blob()), '_blank');
+        } catch (e) { toast(e.message, true); }
+    },
+};
+
+const dxapprove = {
+    tab: 'all', rows: [],
+    setTab(t) {
+        dxapprove.tab = t;
+        document.querySelectorAll('[data-dxa-tab]').forEach(b => { const on = b.dataset.dxaTab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+        document.getElementById('dxaBatchBar').hidden = t !== 'normal';
+        document.getElementById('dxaOutcome').innerHTML = '';
+        dxapprove.render();
+    },
+    async load() {
+        try {
+            const d = await api('/admin/dx/worklist?stage=pending_approval&open_only=true');
+            dxapprove.rows = d.visits.flatMap(v => v.orders.map(o => ({ v, o })))
+                .sort((a, b) => (b.o.result.has_critical_value - a.o.result.has_critical_value) || (a.v.created_at > b.v.created_at ? 1 : -1));
+        } catch (e) { toast(e.message, true); dxapprove.rows = []; }
+        dxapprove.render();
+    },
+    render() {
+        const normal = dxapprove.tab === 'normal';
+        const rows = dxapprove.rows.filter(x => !normal || x.o.result.batch_ok).slice(0, normal ? 50 : 500);
+        document.getElementById('dxaList').innerHTML = rows.length ? `<div class="card">${rows.map(({ v, o }) => `<div class="dxb-row">
+            ${normal ? `<input type="checkbox" data-dxa-pick="${esc(o.result.id)}" data-upd="${esc(o.result.updated_at)}" aria-label="Select ${esc(o.item_name)} for ${esc(v.patient.name || '')}">` : `<span class="dxc-dot" style="background:${esc((o.sample || {}).colour_hex || 'transparent')}"></span>`}
+            <span class="dxc-num">${esc(v.accession_number)}</span><span><strong>${esc(v.patient.name || '')}</strong> · ${esc(o.item_name)}</span>
+            <span>${o.result.has_critical_value ? '<span class="dxb-flag critical_high">Critical</span>' : o.result.batch_ok ? '<span class="dxb-flag dxb-ok">All normal</span>' : '<span class="dxb-flag high">Review</span>'}</span>
+            ${dxbTat(o.tat)}<span id="dxa-res-${esc(o.result.id)}"><button type="button" class="btn btn-ghost btn-sm" onclick="dxws.open('${esc(o.id)}')">Review</button></span></div>`).join('')}</div>`
+            : `<div class="card"><p class="muted">${normal ? 'No all-normal results waiting.' : 'Nothing waiting for approval.'}</p></div>`;
+    },
+    selectAll(on) { document.querySelectorAll('[data-dxa-pick]').forEach(cb => { cb.checked = on; }); },
+    async signSelected(btn) {
+        const picked = [...document.querySelectorAll('[data-dxa-pick]:checked')].slice(0, 50).map(cb => ({ result_id: cb.dataset.dxaPick, expected_updated_at: cb.dataset.upd }));
+        if (!picked.length) { toast('Select at least one result.', true); return; }
+        btn.disabled = true;
+        try {
+            const out = await apiPost('/admin/dx/results/approve', { items: picked, batch: true });
+            const name = id => { const x = dxapprove.rows.find(r => r.o.result.id === id); return x ? `${x.v.patient.name || ''} · ${x.o.item_name}` : id; };
+            document.getElementById('dxaOutcome').innerHTML = out.items.map(i => `<span class="dxb-flag ${i.ok ? 'dxb-ok' : 'high'}" title="${esc(i.message || '')}">${i.ok ? '✓' : '✗'} ${esc(name(i.result_id))}${i.ok ? '' : ' — ' + esc(i.message)}</span>`).join('');
+            toast(`${out.signed} signed${out.refused ? `, ${out.refused} refused` : ''}`, !!out.refused && !out.signed);
+            const outcome = document.getElementById('dxaOutcome').innerHTML;
+            await dxapprove.load();
+            document.getElementById('dxaOutcome').innerHTML = outcome;
+            document.getElementById('dxaAll').checked = false;
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+};
+/* DX:bench:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -16027,7 +16399,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ };
     if (loaders[page]) loaders[page]();
 }
 

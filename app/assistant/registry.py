@@ -71,6 +71,8 @@ PAGES: dict[str, str] = {
     "dxdesk": "DX Registration",   # Diagnostic OS visits (migration 127); page hand-off only
     "dxcollect": "Sample Collection",   # Diagnostic OS tubes (migration 128); page hand-off only
     "dxlogistics": "Logistics",   # Diagnostic OS transit batches (migration 129); page hand-off only
+    "dxbench": "Lab Worklist",   # Diagnostic OS bench (migration 130); page hand-off only
+    "dxapprove": "Result Approval",   # Diagnostic OS sign-off (migration 130); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
     "casualty": "Casualty / ER",
@@ -123,6 +125,8 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "dxdesk": ("dx registration", "lab registration", "register lab visit", "lab desk", "todays lab bookings"),
     "dxcollect": ("sample collection", "collect samples", "tube labels", "print barcode", "reject sample"),
     "dxlogistics": ("logistics", "transit batch", "sample transport", "receive batch", "track sample", "routing rules"),
+    "dxbench": ("lab worklist", "result entry", "enter results", "worksheet", "verify results", "tat"),
+    "dxapprove": ("result approval", "approve results", "batch approval", "critical call", "sign results"),
     "dxcatalog": ("test master", "lab test master", "reference ranges", "test parameters", "lab catalogue"),
     "lisqueue": ("lab sign-off", "sign lab report", "pathologist queue", "pending validation", "validate results"),
     "radiology": ("radiology", "imaging", "x-ray reports", "scan reports", "radiology worklist", "form f",

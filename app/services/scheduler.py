@@ -229,6 +229,16 @@ class SchedulerService:
         )
 
         self.scheduler.add_job(
+            self.dx_tat_breach_scan,
+            "interval",
+            minutes=5,
+            id="dx_tat_breach_scan",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+        self.scheduler.add_job(
             self.assign_home_collections,
             "interval",
             minutes=5,
@@ -578,6 +588,19 @@ class SchedulerService:
                         logger.info(f"DX stability scan flagged {n} tube(s)")
                 except Exception as e:
                     logger.error(f"DX stability scan failed: {type(e).__name__}")
+
+    async def dx_tat_breach_scan(self):
+        from app.services import dx
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("dx_tat_breach_scan", lease_seconds=270) as acquired:
+            if acquired:
+                try:
+                    n = await dx.tat_breach_scan()
+                    if n:
+                        logger.info(f"DX TAT scan: {n} test(s) past target")
+                except Exception as e:
+                    logger.error(f"DX TAT scan failed: {type(e).__name__}")
 
     async def assign_home_collections(self):
         from app.services import home_collection

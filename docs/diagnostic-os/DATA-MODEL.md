@@ -472,6 +472,18 @@ CREATE TABLE dx_result_attachments (id, clinic_id, result_id UUID NOT NULL, kind
 | `dx_verify_result(…, p_result_id, p_expected_updated_at, p_decision, p_comment)` | lock order then result (118 order); `entered` and `updated_at` matches; verifier ≠ technician when levels = 3 | `dx_self_verification`, `lis_result_changed`, `lis_not_pending` |
 | `dx_approve_results(…, p_items JSONB [{result_id, expected_updated_at}], p_snapshots JSONB, p_batch BOOLEAN)` | per item, inside `BEGIN … EXCEPTION` (sub-transaction): when `p_batch`, require all flags `normal`, no critical, no `delta_failed`; call `lis_validate_result`; collect per-item outcome; if `critical_call_required` and the result has an un-notified critical event → refuse that item | per item: `dx_batch_not_normal`, `dx_critical_not_notified`, `dx_verification_required`, `lis_*` |
 
+**As built (migration 130):** composite `(clinic_id, result_id)` FKs to `lab_results` (cascade); `parameter_id` in
+`dx_result_value_meta` is a reference only, like `lab_result_values.parameter_id` (118). Meta, verifications and critical
+events are written only inside `dx_*` functions (`dx_guard_tx`); verifications and critical events are also append-only
+(`dx_guard_append_only`); a returned verification needs a comment; `is_auto` is CHECKed false (human verification only).
+`dx_critical_events`: a detection row (notified_at NULL) per critical save, then one row per call
+(`dx_log_critical_call`); `dx_critical_pending(clinic, result)` = the open result has a critical value and its latest
+detection has no later call with read-back. Gate `trg_dx_lab_results_gate` (function `dx_lab_results_gate`) returns at
+once unless entered → validated on a `source='dx'` order. `dx_record_results` also refuses a cancelled order
+(`dx_order_cancelled`) and a tube not yet received (`dx_sample_awaiting_receipt`); a test without a tube needs no
+receipt. `dx_approve_results(p_clinic_id, p_items, p_actor_id, p_actor_name, p_batch)`: snapshots travel inside each
+item; ≤ 50 items; per-item sub-transaction. Purge v6.
+
 ## 8. DX-M7 — Reports, templates, delivery
 ```sql
 CREATE TABLE dx_report_templates (id, clinic_id, owner_kind TEXT CHECK (owner_kind IN ('clinic', 'branch', 'b2b_account')),

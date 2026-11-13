@@ -23,6 +23,8 @@ UP, DOWN = MIG / "129_dx_logistics.sql", MIG / "rollback" / "129_rollback_dx_log
 def unwind_129(cur) -> None:
     """Inside an open transaction: purge every clinic with DX-M5 rows, run the 129
     rollback. Called first by unwind_128 (newest first)."""
+    from tests.test_migration_dx_m6 import unwind_130
+    unwind_130(cur)   # newest first: 130's result rows sit on 129-era orders
     cur.execute("SELECT to_regclass('public.dx_batches') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

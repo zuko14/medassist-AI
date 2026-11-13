@@ -387,7 +387,8 @@ async def validate_and_sign_report(clinic_id: str, result_id: str, expected_upda
         "p_letterhead_snapshot": await letterhead_snapshot(clinic_id, result.get("branch_id")),
         "p_patient_snapshot": patient_snapshot,
     })
-    if not signed.get("replayed"):
+    # a DX report is delivered through its release (P7), never per test (AUDIT F4)
+    if not signed.get("replayed") and order.get("source") != "dx":
         spawn_background_task(deliver_report(clinic_id, result_id), name=f"lis_deliver_{result_id}")
     return signed
 
@@ -452,6 +453,11 @@ async def get_review_queue(clinic_id: str, branch_id: Optional[str] = None, stat
         return restrict_to_branch(q, branch_id).order("entered_at").order("id")
 
     rows = await fetch_all(build, label="lis:queue")
+    # DX results are verified and approved on the DX bench, never here (AUDIT A5)
+    order_rows = {o["id"]: o for o in await orders._rows_in("opd_orders", clinic_id,
+                                                            "id, urgency, specimen_barcode, source", "id",
+                                                            [r["order_id"] for r in rows])}
+    rows = [r for r in rows if order_rows.get(r["order_id"], {}).get("source") != "dx"]
     if status == "entered":
         rows.sort(key=lambda r: (not r["has_critical_value"], r.get("entered_at") or "", r["id"]))
     else:
@@ -461,9 +467,6 @@ async def get_review_queue(clinic_id: str, branch_id: Optional[str] = None, stat
                                                           [r["patient_id"] for r in page])}
     members = {m["id"]: m for m in await orders._rows_in("family_members", clinic_id, "id, full_name, mrn", "id",
                                                          [r.get("family_member_id") for r in page])}
-    order_rows = {o["id"]: o for o in await orders._rows_in("opd_orders", clinic_id,
-                                                            "id, urgency, specimen_barcode, source", "id",
-                                                            [r["order_id"] for r in page])}
     out = []
     for r in page:
         who = members.get(r.get("family_member_id")) or {}

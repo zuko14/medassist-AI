@@ -10,8 +10,9 @@ Zero-LLM: imports nothing from the AI, voice or assistant packages
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
+from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -136,6 +137,19 @@ _ERRORS = {
     "dx_batch_wrong_destination": (409, "This tube is routed to a different lab than this batch"),
     "dx_batch_wrong_origin": (409, "This tube was not drawn at this batch's site"),
     "dx_sample_in_live_batch": (409, "This tube is already in another batch that has not been received"),
+    # migration 130: bench, verification, approval
+    "dx_not_dx_order": (409, "This is not a Diagnostic OS order."),
+    "dx_order_cancelled": (409, "This test is cancelled."),
+    "dx_sample_awaiting_receipt": (409, "Receive the tube at the lab before entering results."),
+    "dx_decision_invalid": (422, "Choose verify or return."),
+    "dx_self_verification": (403, "Results must be verified by someone other than the technician who entered them."),
+    "dx_verification_required": (409, "This lab uses three-level approval: the result must be verified first."),
+    "dx_critical_event_not_found": (404, "Critical value record not found."),
+    "dx_critical_call_incomplete": (422, "Record who was told about the critical value."),
+    "dx_critical_not_notified": (409, "A critical value must be phoned through (with read-back) before approval."),
+    "dx_approve_items_invalid": (422, "Approve between 1 and 50 results at a time."),
+    "dx_batch_not_normal": (409, "Not every value is normal (or a delta check failed): approve this result on its own."),
+    "dx_attachment_locked": (409, "Attachments can be added only before the result is approved."),
 }
 _CONSTRAINTS = (
     ("dx_sites_clinic_code_key", 409, "Another site already uses this code."),
@@ -163,6 +177,8 @@ _CONSTRAINTS = (
     ("dx_referrers_account_fk", 404, "B2B account not found."),
     ("uq_dx_samples_barcode", 409, "This barcode is already on another tube."),
     ("dx_field_collections_upi_ref", 422, "A UPI payment needs its reference (UTR)."),
+    ("dx_result_verifications_returned_comment", 422, "Say why the result is returned (3+ characters)."),
+    ("dx_critical_events_call_shape", 422, "Record who was told, their role, the channel and the read-back."),
     ("uq_dx_routing_rules_tie", 409, "Another active rule already matches the same tests from the same site at this "
                                     "priority. Give one of them a different priority."),
     ("dx_routing_rules_match_shape", 422, "A rule matches one test, one department, or neither (site default)."),
@@ -955,3 +971,204 @@ async def stability_scan(now: Optional[datetime] = None) -> int:
                 logger.warning(f"DX_SAMPLE_STABILITY clinic={cid} barcode={s.get('barcode')} status={st['status']} "
                                f"elapsed_h={st['elapsed_hours']}")
     return flagged
+
+
+# ── bench: stages, TAT, worklist (migration 130, DX-39) ─────────────────────
+# Stages are derived on read (ARCHITECTURE §4.2); nothing stores them.
+
+STAGES = ("awaiting_payment", "pending_collection", "pending_receipt", "pending_entry", "pending_verification",
+          "pending_approval", "pending_release", "released", "cancelled")
+
+
+def dx_stage(order: dict, sample: Optional[dict], result: Optional[dict], visit: dict,
+             ctx: Optional[dict] = None) -> str:
+    """The work stage of one DX test. ctx: approval_levels, collect_before_payment, due_paise
+    (the visit's outstanding amount), verified (a valid verification of the open result),
+    released (the result is in a report release — P7)."""
+    ctx = ctx or {}
+    if order.get("status") == "cancelled" or (sample or {}).get("status") == "rejected":
+        return "cancelled"
+    if result and result.get("status") in ("validated", "amended"):
+        return "released" if ctx.get("released") else "pending_release"
+    if result and result.get("status") == "entered":
+        return "pending_verification" if ctx.get("approval_levels", 2) == 3 and not ctx.get("verified") \
+            else "pending_approval"
+    status = (sample or {}).get("status")
+    if status == "pending_collection":
+        if visit.get("billing_mode") == "patient" and ctx.get("collect_before_payment") and ctx.get("due_paise", 0) > 0:
+            return "awaiting_payment"
+        return "pending_collection"
+    if status in ("collected", "in_transit"):
+        return "pending_receipt"
+    return "pending_entry"        # received / stored, or a test without a tube
+
+
+def tat_status(started_at, target_minutes: Optional[int], ended_at=None, now: Optional[datetime] = None) -> dict:
+    """Minutes elapsed on a TAT clock; amber from 75 % of the target, red at 100 %."""
+    def ts(v):
+        return v if isinstance(v, datetime) or v is None else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    start, end = ts(started_at), ts(ended_at) or now or datetime.now(timezone.utc)
+    if start is None:
+        return {"elapsed_minutes": None, "target_minutes": target_minutes, "status": "none"}
+    elapsed = max(0, int((end - start).total_seconds() // 60))
+    if not target_minutes:
+        return {"elapsed_minutes": elapsed, "target_minutes": None, "status": "none"}
+    ratio = elapsed / target_minutes
+    return {"elapsed_minutes": elapsed, "target_minutes": target_minutes,
+            "status": "red" if ratio >= 1 else "amber" if ratio >= 0.75 else "green"}
+
+
+def _ms(v) -> Optional[datetime]:
+    if not v:
+        return None
+    d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    return d.replace(microsecond=d.microsecond // 1000 * 1000)
+
+
+def _verification_state(result: dict, rows: list[dict]) -> tuple[bool, bool]:
+    """(verified, returned) for the open result as it stands now (ADR-DX-06 gate rule)."""
+    mine = [v for v in rows if v["result_id"] == result["id"] and _ms(v["result_updated_at"]) == _ms(result["updated_at"])]
+    returned_at = max((v["created_at"] for v in rows if v["result_id"] == result["id"] and v["decision"] == "returned"),
+                      default=None)
+    verified = any(v["decision"] == "verified" and (returned_at is None or v["created_at"] > returned_at) for v in mine)
+    return verified, any(v["decision"] == "returned" for v in mine)
+
+
+async def worklist(clinic_id: str, visits: list[dict], site_ids: Optional[list[str]] = None,
+                   department_id: Optional[str] = None, priority: Optional[str] = None,
+                   stage: Optional[str] = None, now: Optional[datetime] = None) -> dict:
+    """W8 step 1: DX tests of the given visits with stage, TAT, tube and critical badges,
+    grouped by visit (STAT, urgent, oldest first). Data-minimised: no phone, no money."""
+    from app.services.tenant import get_clinic_by_id
+    clinic = await get_clinic_by_id(clinic_id) or {}
+    settings = get_dx_settings(clinic)
+    levels, cbp = int(settings.get("approval_levels", 2)), bool(settings.get("collect_before_payment"))
+    clock = settings.get("tat_clock", "registration")
+    visits = [v for v in visits if v.get("status") != "cancelled" and (not priority or v.get("priority") == priority)]
+    counts = {s: 0 for s in STAGES}
+    if not visits:
+        return {"visits": [], "counts": counts}
+    vids = [v["id"] for v in visits]
+    orders_ = await _rows(scoped_query("opd_orders", clinic_id, "id, accession_id, dx_sample_id, catalog_reference_id, "
+                                       "item_name, status, urgency, outsource_partner_id, created_at")
+                          .in_("accession_id", vids).eq("source", "dx"))
+    if not orders_:
+        return {"visits": [], "counts": counts}
+    sample_ids = list({o["dx_sample_id"] for o in orders_ if o.get("dx_sample_id")})
+    samples = {s["id"]: s for s in await _rows(scoped_query(
+        "dx_samples", clinic_id, "id, barcode, status, container_id, processing_site_id, received_site_id, "
+        "collection_site_id, collected_at, received_at").in_("id", sample_ids or [str(uuid4())]))}
+    containers = {c["id"]: c for c in await _rows(scoped_query("dx_containers", clinic_id, "id, code, name, colour_hex"))}
+    tests = {t["id"]: t for t in await _rows(scoped_query("lab_tests", clinic_id, "id, department_id, tat_minutes, "
+                                                          "stat_tat_minutes").in_("id", list({o["catalog_reference_id"]
+                                                                                              for o in orders_})))}
+    results: dict[str, dict] = {}
+    for r in await _rows(scoped_query("lab_results", clinic_id, "id, order_id, version, status, has_critical_value, "
+                                      "updated_at, entered_at, validated_at, technician_name")
+                         .in_("order_id", [o["id"] for o in orders_])):
+        if r["order_id"] not in results or r["version"] > results[r["order_id"]]["version"]:
+            results[r["order_id"]] = r
+    open_ids = [r["id"] for r in results.values() if r["status"] == "entered"]
+    verifs, crit, flags, deltas = [], [], {}, set()
+    if open_ids:
+        verifs = await _rows(scoped_query("dx_result_verifications", clinic_id, "result_id, result_updated_at, decision, "
+                                          "created_at").in_("result_id", open_ids))
+        crit = await _rows(scoped_query("dx_critical_events", clinic_id, "id, result_id, notified_at, "
+                                        "read_back_confirmed, created_at").in_("result_id", open_ids))
+        for v in await _rows(scoped_query("lab_result_values", clinic_id, "result_id, flag").in_("result_id", open_ids)):
+            flags.setdefault(v["result_id"], set()).add(v["flag"])
+        deltas = {m["result_id"] for m in await _rows(scoped_query("dx_result_value_meta", clinic_id, "result_id")
+                                                      .in_("result_id", open_ids).eq("delta_failed", True))}
+    partners = {p["id"]: p["name"] for p in await list_partners(clinic_id)} \
+        if any(o.get("outsource_partner_id") for o in orders_) else {}
+    dues: dict[str, int] = {}
+    if cbp:
+        for v in visits:
+            if v.get("billing_mode") == "patient" and any(o["accession_id"] == v["id"] and samples.get(
+                    o.get("dx_sample_id"), {}).get("status") == "pending_collection" for o in orders_):
+                dues[v["id"]] = int(await rpc("dx_visit_due", {"p_clinic_id": clinic_id, "p_accession_id": v["id"]}) or 0)
+    now = now or datetime.now(timezone.utc)
+    by_visit: dict[str, list] = {}
+    for o in orders_:
+        s, r, t = samples.get(o.get("dx_sample_id")), results.get(o["id"]), tests.get(o["catalog_reference_id"], {})
+        v = next(x for x in visits if x["id"] == o["accession_id"])
+        if site_ids is not None and not (s and {s.get("processing_site_id"), s.get("received_site_id"),
+                                                s.get("collection_site_id")} & set(site_ids)):
+            continue
+        if department_id and t.get("department_id") != department_id:
+            continue
+        verified = returned = False
+        critical_pending = False
+        if r and r["status"] == "entered":
+            verified, returned = _verification_state(r, verifs)
+            mine = [e for e in crit if e["result_id"] == r["id"]]
+            last = max((e["created_at"] for e in mine if not e.get("notified_at")), default=None)
+            critical_pending = bool(r["has_critical_value"] and last and not any(
+                e.get("notified_at") and e.get("read_back_confirmed") and e["created_at"] > last for e in mine))
+        st = dx_stage(o, s, r, v, {"approval_levels": levels, "collect_before_payment": cbp,
+                                   "due_paise": dues.get(v["id"], 0), "verified": verified})
+        counts[st] += 1
+        if stage and st != stage:
+            continue
+        urgent = v.get("priority") in ("stat", "urgent")
+        target = (t.get("stat_tat_minutes") if urgent else None) or t.get("tat_minutes")
+        start = (s or {}).get("received_at") if clock == "receipt" else v.get("created_at")
+        end = r.get("validated_at") if r and r.get("status") in ("validated", "amended") else None
+        c = containers.get((s or {}).get("container_id"), {})
+        by_visit.setdefault(v["id"], []).append({
+            "id": o["id"], "item_name": o["item_name"], "lab_test_id": o["catalog_reference_id"], "status": o["status"],
+            "stage": st, "department_id": t.get("department_id"),
+            "outsourced_to": partners.get(o.get("outsource_partner_id")),
+            "tat": tat_status(start, target, end, now),
+            "tat_registration": tat_status(v.get("created_at"), target, end, now),
+            "tat_receipt": tat_status((s or {}).get("received_at"), target, end, now),
+            "sample": None if not s else {"id": s["id"], "barcode": s["barcode"], "status": s["status"],
+                                          "container_name": c.get("name"), "colour_hex": c.get("colour_hex"),
+                                          "processing_site_id": s.get("processing_site_id")},
+            "result": None if not r else {
+                **{k: r[k] for k in ("id", "status", "version", "updated_at", "has_critical_value", "technician_name")},
+                "verified": verified, "returned": returned, "critical_pending": critical_pending,
+                "batch_ok": bool(r["status"] == "entered" and not r["has_critical_value"]
+                                 and flags.get(r["id"], set()) == {"normal"} and r["id"] not in deltas)}})
+    out = []
+    for v in sorted((v for v in visits if v["id"] in by_visit),
+                    key=lambda v: (PRIORITY_RANK.get(v.get("priority"), 3), v.get("created_at") or "")):
+        snap = v.get("patient_snapshot") or {}
+        out.append({"id": v["id"], "accession_number": v.get("accession_number"), "priority": v.get("priority"),
+                    "branch_id": v.get("branch_id"), "created_at": v.get("created_at"),
+                    "fasting_status": v.get("fasting_status"),
+                    "patient": {k: snap.get(k) for k in ("name", "mrn", "gender", "age_years")},
+                    "has_critical": any((x["result"] or {}).get("has_critical_value") for x in by_visit[v["id"]]),
+                    "orders": by_visit[v["id"]]})
+    return {"visits": out, "counts": counts}
+
+
+OPEN_VISIT_STATUSES = ["registered", "in_process", "partially_reported"]
+
+
+async def open_visits(clinic_id: str, days: int = 7) -> list[dict]:
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return await _rows(scoped_query("dx_accessions", clinic_id, VISIT_LIST_COLUMNS).in_("status", OPEN_VISIT_STATUSES)
+                       .gte("created_at", since).order("created_at").limit(1000))
+
+
+async def tat_breach_scan(now: Optional[datetime] = None) -> int:
+    """dx_tat_breach_scan (ADR-DX-16): open DX tests past their TAT target are logged per
+    clinic (no state change; the worklist shows the same red bar). Returns the count."""
+    # unscoped: platform_sweep
+    clinics = await _rows(supabase.table("clinics").select("id").in_("dx_state", ["ACTIVE", "WIND_DOWN"]))
+    breached = 0
+    for c in clinics:
+        cid = str(c["id"])
+        try:
+            wl = await worklist(cid, await open_visits(cid), now=now)
+        except Exception as e:  # noqa: BLE001 - one clinic must not stop the sweep
+            logger.error(f"DX_TAT_SCAN_FAILED clinic={cid} type={type(e).__name__}")
+            continue
+        for v in wl["visits"]:
+            for o in v["orders"]:
+                if o["stage"] not in ("released", "cancelled", "pending_release") and o["tat"]["status"] == "red":
+                    breached += 1
+                    logger.warning(f"DX_TAT_BREACH clinic={cid} order={o['id']} stage={o['stage']} "
+                                   f"elapsed_min={o['tat']['elapsed_minutes']} target_min={o['tat']['target_minutes']}")
+    return breached

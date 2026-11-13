@@ -121,6 +121,12 @@ async def _audit(user: AdminUser, request: Request, action: str, rtype: str, rid
                            details=details or {}, ip_address=request.client.host if request.client else None)
 
 
+def _refuse_dx(order: dict) -> None:
+    """Diagnostic OS results are entered, verified and approved on the DX bench (AUDIT A5)."""
+    if order.get("source") == "dx":
+        raise HTTPException(status_code=409, detail="dx_use_dx_route")
+
+
 # ── worksheet & entry ───────────────────────────────────────────────────────
 
 @router.get("/orders/{order_id}/worksheet")
@@ -137,6 +143,7 @@ async def save_results(order_id: str, body: ResultsIn, request: Request, clinic_
     scope = await _lis_scope(user, clinic_id, "LAB_ENTRY")
     order = await orders.get_order(scope, order_id)
     enforce_branch_scope(user, order.get("branch_id"))
+    _refuse_dx(order)
     result = await lis.record_test_results(scope, order_id, [v.model_dump() for v in body.values], user,
                                            body.amendment_reason)
     await _audit(user, request, "LIS_RESULTS_ENTER" if result["version"] == 1 else "LIS_RESULTS_AMEND",
@@ -171,6 +178,7 @@ async def validate_result(result_id: str, body: ValidateIn, request: Request, cl
     scope = await _lis_scope(user, clinic_id, "LAB_VALIDATE")
     result = await lis.get_result(scope, result_id)
     enforce_branch_scope(user, result.get("branch_id"))
+    _refuse_dx(await orders.get_order(scope, result["order_id"]))
     signed = await lis.validate_and_sign_report(scope, result_id, body.expected_updated_at, user)
     if not signed.get("replayed"):
         await _audit(user, request, "LIS_REPORT_SIGN", "lab_result", result_id,

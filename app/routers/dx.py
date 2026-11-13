@@ -21,7 +21,7 @@ from app.routers.admin import (
 )
 from app.routers.lis import ParameterIn
 from app.routers.opd import PatientRegisterIn
-from app.services import dx, dx_billing, dx_catalogue, dx_seed
+from app.services import dx, dx_billing, dx_catalogue, dx_results, dx_seed
 from app.services.permissions import holds_dx_permission, resolve_owned_branch
 from app.services.tenant import dx_access, get_clinic_by_id, invalidate_tenant_cache
 
@@ -1581,3 +1581,193 @@ async def receive_batch(batch_id: str, body: ReceiveBatchIn, request: Request, c
         await _audit(user, request, "dx_batch_receive", "dx_batch", batch_id,
                      {"temp_c": body.temp_c, "status": out["status"], **(out.get("discrepancy") or {})})
     return out
+
+
+# ═══ Bench: worklist, entry, verification, approval (migration 130, DX-38/39) ═
+
+BENCH_READ = (*VISIT_READ, "DX_RECEIVE", "DX_VERIFY")
+Stage = Literal["awaiting_payment", "pending_collection", "pending_receipt", "pending_entry", "pending_verification",
+                "pending_approval", "pending_release", "released", "cancelled"]
+
+
+def _lab_perm(user: AdminUser, *perms: str) -> None:
+    from app.services.permissions import holds_lab_permission
+    if not any(holds_lab_permission(user, p) if p.startswith("LAB_") else holds_dx_permission(user, p) for p in perms):
+        raise HTTPException(status_code=403, detail=f"Missing permission: {' or '.join(perms)}")
+
+
+async def _dx_order(user: AdminUser, scope: str, order_id: str) -> dict:
+    """A DX order inside the caller's site scope (404 / 409 otherwise)."""
+    from app.services import orders as orders_svc
+    order = await orders_svc.get_order(scope, order_id)
+    if order.get("source") != "dx" or not order.get("accession_id"):
+        raise HTTPException(status_code=409, detail={"code": "dx_not_dx_order",
+                                                     "message": "This is not a Diagnostic OS order."})
+    await _visit(user, scope, order["accession_id"])
+    return order
+
+
+async def _dx_result(user: AdminUser, scope: str, result_id: str) -> dict:
+    from app.services import lis
+    result = await lis.get_result(scope, result_id)
+    await _dx_order(user, scope, result["order_id"])
+    return result
+
+
+class ValueIn(_In):
+    parameter_id: str = Field(..., pattern=UUID_RX)
+    value: Optional[str] = Field(None, max_length=500)
+    remarks: Optional[str] = Field(None, max_length=500)
+
+
+class WorksheetIn(_In):
+    values: list[ValueIn] = Field(..., min_length=1, max_length=100)
+    amendment_reason: Optional[str] = Field(None, max_length=500)
+    preview: bool = False
+
+
+class VerifyIn(_In):
+    expected_updated_at: str = Field(..., min_length=10, max_length=40)
+    decision: Literal["verified", "returned"]
+    comment: Optional[str] = Field(None, max_length=500)
+
+
+class ApproveItemIn(_In):
+    result_id: str = Field(..., pattern=UUID_RX)
+    expected_updated_at: str = Field(..., min_length=10, max_length=40)
+
+
+class ApproveIn(_In):
+    items: list[ApproveItemIn] = Field(..., min_length=1, max_length=50)
+    batch: bool = False
+
+
+class CriticalCallIn(_In):
+    notified_to: str = Field(..., min_length=2, max_length=120)
+    notified_role: Literal["referrer", "patient", "ward", "account", "other"]
+    channel: Literal["phone", "whatsapp", "in_person"]
+    read_back_confirmed: bool
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+@router.get("/worklist")
+async def bench_worklist(clinic_id: str = "default", stage: Optional[Stage] = None,
+                         site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                         department_id: Optional[str] = Query(None, pattern=UUID_RX),
+                         priority: Optional[Literal["stat", "urgent", "routine"]] = None,
+                         date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+                         open_only: bool = False, user: AdminUser = Depends(verify_credentials)):
+    """Tests by stage. `open_only` = every open visit of the last 7 days (else the day's visits)."""
+    scope, clinic = await _dx_scope(user, clinic_id)
+    _lab_perm(user, *BENCH_READ, "LAB_ENTRY", "LAB_VALIDATE")
+    sites = await _user_site_ids(user, scope, site_id)
+    visits = await dx.open_visits(scope) if open_only else await dx.list_visits(scope, None, date, None, None, 500)
+    out = await dx.worklist(scope, visits, sites, department_id, priority, stage)
+    out["sites"] = [{k: s.get(k) for k in ("id", "code", "display_name", "kind")}
+                    for s in await dx.list_sites(scope, _pinned_branch(user)) if s.get("is_active")]
+    out["departments"] = [{"id": d["id"], "name": d["name"]}
+                          for d in await dx_catalogue.list_rows("dx_departments", scope)]
+    out["approval_levels"] = int(dx.get_dx_settings(clinic).get("approval_levels", 2))
+    return out
+
+
+@router.get("/orders/{order_id}/worksheet")
+async def bench_worksheet(order_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id)
+    _lab_perm(user, "LAB_ENTRY", "LAB_VALIDATE", "DX_VERIFY")
+    await _dx_order(user, scope, order_id)
+    return await dx_results.worksheet(scope, order_id)
+
+
+@router.post("/orders/{order_id}/results")
+async def bench_save_results(order_id: str, body: WorksheetIn, request: Request, clinic_id: str = "default",
+                             user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id)
+    _lab_perm(user, "LAB_ENTRY")
+    await _dx_order(user, scope, order_id)
+    out = await dx_results.enter_worksheet_results(scope, order_id, [v.model_dump() for v in body.values], user,
+                                                   body.amendment_reason, body.preview)
+    if out.get("saved"):
+        await _audit(user, request, "dx_results_enter", "lab_result", out["id"],
+                     {"order_id": order_id, "version": out["version"], "critical": out["has_critical_value"],
+                      "values": len(out["values"])})
+    return out
+
+
+@router.get("/results/{result_id}")
+async def bench_result(result_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id)
+    _lab_perm(user, "LAB_ENTRY", "LAB_VALIDATE", "DX_VERIFY")
+    await _dx_result(user, scope, result_id)
+    return await dx_results.result_detail(scope, result_id)
+
+
+@router.post("/results/approve")
+async def bench_approve(body: ApproveIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    """Approve & sign: one result or a batch of normal ones (W9). Human, doctor-linked only."""
+    scope, _ = await _dx_scope(user, clinic_id)
+    _lab_perm(user, "LAB_VALIDATE")
+    for it in body.items:
+        await _dx_result(user, scope, it.result_id)
+    out = await dx_results.approve_results(scope, [i.model_dump() for i in body.items], user, body.batch)
+    await _audit(user, request, "dx_results_approve", "lab_result", None,
+                 {"batch": body.batch, "signed": out["signed"], "refused": out["refused"],
+                  "items": [{"result_id": i["result_id"], "ok": i["ok"], "code": i.get("code")} for i in out["items"]]})
+    return out
+
+
+@router.post("/results/{result_id}/verify")
+async def bench_verify(result_id: str, body: VerifyIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_VERIFY")
+    await _dx_result(user, scope, result_id)
+    out = await dx_results.verify_result(scope, result_id, body.expected_updated_at, body.decision, body.comment, user)
+    await _audit(user, request, f"dx_result_{body.decision}", "lab_result", result_id, {"comment": body.comment})
+    return out
+
+
+@router.post("/critical-events/{event_id}/call", status_code=status.HTTP_201_CREATED)
+async def bench_critical_call(event_id: str, body: CriticalCallIn, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    """W8 step 6 / AUDIT A26: who was told about a critical value, how, and the read-back."""
+    scope, _ = await _dx_scope(user, clinic_id)
+    _lab_perm(user, "DX_VERIFY", "LAB_VALIDATE", "LAB_ENTRY")
+    rows = await dx._rows(scoped_query("dx_critical_events", scope, "result_id").eq("id", event_id).limit(1))
+    if not rows:
+        raise HTTPException(status_code=404, detail="Critical value record not found.")
+    await _dx_result(user, scope, rows[0]["result_id"])
+    out = await dx_results.log_critical_call(scope, event_id, body.notified_to, body.notified_role, body.channel,
+                                             body.read_back_confirmed, body.notes, user)
+    await _audit(user, request, "dx_critical_call", "dx_critical_event", out["id"],
+                 {"result_id": rows[0]["result_id"], "role": body.notified_role, "channel": body.channel,
+                  "read_back": body.read_back_confirmed})
+    return out
+
+
+@router.post("/results/{result_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def bench_attach(result_id: str, request: Request, file: UploadFile = File(...),
+                       kind: Literal["graph", "image", "pdf"] = Query("pdf"),
+                       caption: Optional[str] = Query(None, max_length=200), clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id)
+    _lab_perm(user, "LAB_ENTRY")
+    await _dx_result(user, scope, result_id)
+    raw = await file.read(dx_results.ATTACHMENT_MAX_BYTES + 1)
+    out = await dx_results.store_attachment(scope, result_id, raw, file.filename or "attachment", kind, caption, user)
+    await _audit(user, request, "dx_result_attach", "lab_result", result_id, {"attachment_id": out["id"], "kind": kind})
+    return out
+
+
+@router.get("/results/{result_id}/attachments/{attachment_id}")
+async def bench_attachment(result_id: str, attachment_id: str, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    from fastapi.responses import Response
+    scope, _ = await _dx_scope(user, clinic_id)
+    _lab_perm(user, "LAB_ENTRY", "LAB_VALIDATE", "DX_VERIFY")
+    await _dx_result(user, scope, result_id)
+    data, row = await dx_results.attachment_file(scope, result_id, attachment_id)
+    media = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}.get(row["storage_path"].rsplit(".", 1)[-1],
+                                                                                 "application/octet-stream")
+    return Response(data, media_type=media, headers={"Content-Disposition": f'inline; filename="{row["sha256"][:12]}"',
+                                                     "Cache-Control": "no-store"})

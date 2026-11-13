@@ -784,6 +784,38 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 24. MIGRATION 130 — Diagnostic OS result workflow (DX-M6)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_trg int;
+    v_funcs int;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_result_value_meta', 'dx_result_verifications', 'dx_critical_events', 'dx_result_attachments')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M130', 'Tables: dx result value meta, verifications, critical events, attachments (RLS forced)',
+            CASE WHEN v_tables = 4 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 4 present with RLS forced');
+
+    SELECT count(*) INTO v_trg FROM pg_trigger
+     WHERE tgname IN ('trg_dx_lab_results_gate', 'trg_dx_result_attachments_guard', 'trg_dx_result_value_meta_guard',
+                      'trg_dx_result_verifications_guard', 'trg_dx_critical_events_guard');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M130', 'Triggers: verification gate on lab_results, attachment / meta / verification / critical guards',
+            CASE WHEN v_trg = 5 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 5 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_record_results(uuid,uuid,jsonb,jsonb,boolean,text,uuid,text)',
+        'dx_verify_result(uuid,uuid,timestamptz,text,text,uuid,text)', 'dx_approve_results(uuid,jsonb,uuid,text,boolean)',
+        'dx_log_critical_call(uuid,uuid,text,text,text,boolean,text,uuid,text)', 'dx_critical_pending(uuid,uuid)']) f
+     WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M130', 'Functions: record results, verify, approve, critical call, critical pending',
+            CASE WHEN v_funcs = 5 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 5 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================
