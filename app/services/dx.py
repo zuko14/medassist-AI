@@ -44,6 +44,7 @@ class DxSettings(BaseModel):
     critical_call_required: bool = True
     share_link_ttl_hours: int = Field(72, ge=1, le=720)
     instrument_auto_enter: bool = False
+    max_staff_discount_percent: int = Field(10, ge=0, le=100)   # desk discount ceiling; DX_ADMIN / admins: 100
     went_live_at: Optional[str] = None
     version: int = Field(0, ge=0)
 
@@ -63,6 +64,37 @@ _ERRORS = {
     "dx_parameters_on_group": (409, "Panels and packages have no parameters of their own; add them to a test."),
     "dx_test_changed": (409, "The test changed since you reviewed it. Reload, review again and approve."),
     "dx_test_not_found": (404, "Test not found."),
+    # migration 127: registration, billing, cancellation
+    "dx_test_not_approved": (409, "This test is not approved by the lab director yet"),
+    "dx_test_inactive": (409, "This test is inactive"),
+    "dx_gender_restricted": (409, "This test is not offered for the patient's sex"),
+    "dx_group_empty": (409, "This panel or package has no member tests"),
+    "dx_booking_invalid": (409, "A booking is not a confirmed lab-test booking of this patient."),
+    "dx_booking_linked": (409, "A booking is already part of another visit."),
+    "dx_b2b_on_hold": (409, "This B2B account is on hold or closed."),
+    "dx_b2b_not_enabled": (409, "B2B credit billing is not available yet; bill the patient for now."),
+    "dx_no_collection_site": (409, "This branch has no active Diagnostic OS site. Add one in DX Setup."),
+    "dx_no_processing_site": (409, "No processing site can take these samples. Check the sites in DX Setup."),
+    "dx_discount_over_limit": (403, "The discount is above your limit."),
+    "dx_discount_invalid": (422, "The discount must be between 0 and the price."),
+    "dx_fee_invalid": (422, "A fee needs a non-negative amount."),
+    "dx_no_items": (422, "Add at least one test."),
+    "dx_idempotency_required": (422, "An idempotency key is required."),
+    "dx_patient_not_found": (404, "Patient not found."),
+    "dx_referrer_not_found": (404, "Referrer not found."),
+    "dx_account_not_found": (404, "B2B account not found."),
+    "dx_visit_not_found": (404, "Visit not found."),
+    "dx_item_not_found": (404, "Item not found."),
+    "dx_visit_closed": (409, "This visit is cancelled or fully reported."),
+    "dx_item_in_progress": (409, "This test is already being processed and cannot be cancelled."),
+    "dx_refund_first": (409, "This test is on an issued bill. Refund and void the bill first."),
+    "dx_visit_has_samples": (409, "A sample of this visit has been collected; cancel tests individually."),
+    "dx_not_patient_billing": (409, "This visit is billed to its B2B account, not the patient."),
+    "dx_bill_lines_managed": (409, "This is a Diagnostic OS bill. Change its tests from DX Registration."),
+    "dx_bill_line_invalid": (409, "That bill line does not match the visit's items."),
+    "dx_item_already_billed": (409, "This test is already on a bill."),
+    "dx_managed": (409, "Diagnostic OS records change only through Diagnostic OS actions."),
+    "dx_test_ordered": (409, "This test has been ordered in Diagnostic OS — deactivate it instead."),
 }
 _CONSTRAINTS = (
     ("dx_sites_clinic_code_key", 409, "Another site already uses this code."),
@@ -83,6 +115,11 @@ _CONSTRAINTS = (
     ("idx_unique_lab_test_name_per_branch", 409, "A test with this name already exists."),
     ("lab_tests_dx_check", 422, "One of the test fields is out of range."),
     ("lab_test_parameters_dx_check", 422, "One of the parameter fields is out of range."),
+    ("dx_b2b_payer_routed", 422, "Insurance / TPA and corporate accounts deliver reports to the payer. A patient copy "
+                                 "needs a recorded authorisation (reason)."),
+    ("dx_b2b_authorisation_shape", 422, "A patient-copy authorisation needs a reason."),
+    ("dx_b2b_accounts_clinic_code_key", 409, "Another B2B account already uses this code."),
+    ("dx_referrers_account_fk", 404, "B2B account not found."),
     ("lab_test_parameters_ranges", 422, "Ranges must be ordered: critical low <= normal low <= normal high <= critical high."),
 )
 
@@ -95,7 +132,11 @@ def raise_for(exc: Exception) -> None:
     for code in sorted(_ERRORS, key=len, reverse=True):
         if code in msg:
             status, message = _ERRORS[code]
-            raise HTTPException(status_code=status, detail={"code": code, "message": message})
+            # 'dx_test_not_approved:CBC' carries the test name the desk needs to see
+            m = re.search(re.escape(code) + r":([^\n'\"}]+)", msg)
+            reason = m.group(1).strip() if m else None
+            raise HTTPException(status_code=status, detail={"code": code, "reason": reason,
+                                                            "message": f"{message}: {reason}." if reason else message})
     for constraint, status, message in _CONSTRAINTS:
         if constraint in msg:
             raise HTTPException(status_code=status, detail=message)
@@ -234,3 +275,201 @@ async def deactivation_preview(clinic_id: str) -> dict:
     shortcut: always zero until visits/samples/results exist (DX-M3/M4/M6); each of
     those migrations must count its open rows here and set blocking."""
     return {"visits_in_process": 0, "samples_in_transit": 0, "unreleased_results": 0, "blocking": False}
+
+
+# ── visits (migration 127, DX-20/21/23) ─────────────────────────────────────
+# Pricing, shares, explosion, tubes and numbering happen in SQL (dx_register_visit,
+# dx_price_items); this layer resolves who is acting and what they may do.
+
+def _actor(user) -> tuple[Optional[str], str]:
+    from app.utils.helpers import actor_uuid
+    return actor_uuid(user), str(getattr(user, "username", None) or "system")[:100]
+
+
+def discount_limit_percent(user, clinic: dict) -> int:
+    """Admins and DX_ADMIN may discount fully; everyone else up to the lab's desk ceiling."""
+    from app.services.permissions import holds_dx_permission
+    if holds_dx_permission(user, "DX_ADMIN"):      # admins hold every DX grant
+        return 100
+    return int(get_dx_settings(clinic).get("max_staff_discount_percent", 10))
+
+
+async def rpc(name: str, params: dict):
+    try:
+        res = await sb(supabase.rpc(name, params))
+    except Exception as e:
+        raise_for(e)
+    return res.data
+
+
+async def quote(clinic_id: str, clinic: dict, payload: dict, user) -> list[dict]:
+    return await rpc("dx_quote", {"p_clinic_id": clinic_id, "p_payload": {
+        **payload, "discount_limit_percent": discount_limit_percent(user, clinic)}})
+
+
+async def register_visit(clinic_id: str, clinic: dict, payload: dict, user) -> dict:
+    aid, name = _actor(user)
+    return await rpc("dx_register_visit", {"p_clinic_id": clinic_id, "p_actor_id": aid, "p_actor_name": name,
+                                           "p_payload": {**payload,
+                                                         "discount_limit_percent": discount_limit_percent(user, clinic)}})
+
+
+async def add_items(clinic_id: str, clinic: dict, accession_id: str, items: list[dict], key: str, user) -> dict:
+    aid, name = _actor(user)
+    return await rpc("dx_add_items", {"p_clinic_id": clinic_id, "p_accession_id": accession_id, "p_items": items,
+                                      "p_idempotency_key": key,
+                                      "p_discount_limit_percent": discount_limit_percent(user, clinic),
+                                      "p_actor_id": aid, "p_actor_name": name})
+
+
+async def cancel_item(clinic_id: str, item_id: str, reason: str, user) -> dict:
+    aid, name = _actor(user)
+    return await rpc("dx_cancel_item", {"p_clinic_id": clinic_id, "p_item_id": item_id, "p_reason": reason,
+                                        "p_actor_id": aid, "p_actor_name": name})
+
+
+async def cancel_visit(clinic_id: str, accession_id: str, reason: str, user) -> dict:
+    aid, name = _actor(user)
+    return await rpc("dx_cancel_visit", {"p_clinic_id": clinic_id, "p_accession_id": accession_id,
+                                         "p_reason": reason, "p_actor_id": aid, "p_actor_name": name})
+
+
+async def get_visit(clinic_id: str, accession_id: str) -> dict:
+    out = await rpc("dx_visit_json", {"p_clinic_id": clinic_id, "p_accession_id": accession_id})
+    if not out:
+        raise HTTPException(status_code=404, detail="Visit not found.")
+    out["timeline"] = await _rows(scoped_query("dx_events", clinic_id, "id, kind, actor_name, details, created_at")
+                                  .eq("accession_id", accession_id).order("id"))
+    return out
+
+
+async def item_of(clinic_id: str, accession_id: str, item_id: str) -> dict:
+    rows = await _rows(scoped_query("dx_accession_items", clinic_id, "id, accession_id").eq("id", item_id)
+                       .eq("accession_id", accession_id).limit(1))
+    if not rows:
+        raise HTTPException(status_code=404, detail="Item not found.")
+    return rows[0]
+
+
+VISIT_LIST_COLUMNS = ("id, accession_number, branch_id, patient_id, family_member_id, source, status, priority, "
+                      "billing_mode, b2b_account_id, referrer_id, patient_snapshot, created_at")
+
+
+async def site_branch_ids(clinic_id: str, accession_ids: list[str]) -> dict[str, set]:
+    """Branches of the sites a visit's tubes are collected / processed at (site scope, SECURITY §4)."""
+    if not accession_ids:
+        return {}
+    samples = await _rows(scoped_query("dx_samples", clinic_id, "accession_id, collection_site_id, processing_site_id")
+                          .in_("accession_id", accession_ids))
+    sites = {s["id"]: s["branch_id"] for s in await _rows(scoped_query("dx_sites", clinic_id, "id, branch_id"))}
+    out: dict[str, set] = {}
+    for s in samples:
+        for col in ("collection_site_id", "processing_site_id"):
+            if s.get(col) in sites:
+                out.setdefault(s["accession_id"], set()).add(sites[s[col]])
+    return out
+
+
+async def list_visits(clinic_id: str, pinned_branch: Optional[str], day: Optional[str] = None,
+                      status: Optional[str] = None, q: Optional[str] = None, limit: int = 200) -> list[dict]:
+    from datetime import date as _date, datetime as _dt, time as _time, timedelta
+    from app.utils.helpers import IST, today_ist
+    d = _date.fromisoformat(day) if day else today_ist()
+    start = _dt.combine(d, _time.min, tzinfo=IST).astimezone(timezone.utc)
+    query = scoped_query("dx_accessions", clinic_id, VISIT_LIST_COLUMNS).gte("created_at", start.isoformat()) \
+        .lt("created_at", (start + timedelta(days=1)).isoformat())
+    if status:
+        query = query.eq("status", status)
+    rows = await _rows(query.order("created_at", desc=True).limit(limit))
+    if pinned_branch:
+        reach = await site_branch_ids(clinic_id, [r["id"] for r in rows if str(r["branch_id"]) != pinned_branch])
+        rows = [r for r in rows if str(r["branch_id"]) == pinned_branch or pinned_branch in
+                {str(b) for b in reach.get(r["id"], set())}]
+    if q:
+        needle = q.strip().casefold()
+        rows = [r for r in rows if needle in (r.get("accession_number") or "").casefold()
+                or needle in str((r.get("patient_snapshot") or {}).get("name") or "").casefold()
+                or needle in str((r.get("patient_snapshot") or {}).get("mrn") or "").casefold()]
+    return rows
+
+
+# ── B2B subjects without their own phone (ADR-DX-21) ────────────────────────
+
+async def ensure_b2b_subject(clinic_id: str, account_id: str, body: dict) -> dict:
+    """A subject with their own distinct phone is a normal registry patient (the caller
+    registers them). Otherwise: a dependant of the account's holder patient, flagged
+    dx_b2b_account_id so the desk phone's WhatsApp chat never lists them."""
+    acc_rows = await _rows(scoped_query("dx_b2b_accounts", clinic_id).eq("id", account_id).limit(1))
+    if not acc_rows:
+        raise HTTPException(status_code=404, detail="B2B account not found.")
+    acc = acc_rows[0]
+    holder_phone = acc.get("desk_whatsapp") or acc.get("contact_phone")
+    if not holder_phone:
+        raise HTTPException(status_code=422, detail="Give the account a contact or desk phone first.")
+    phone = (body.get("phone") or "").strip()
+    if phone and phone != holder_phone:
+        raise HTTPException(status_code=422, detail="This patient has their own phone: register them as a patient.")
+    holder_id = acc.get("holder_patient_id")
+    if not holder_id:
+        found = await _rows(scoped_query("patients", clinic_id, "id").eq("phone", holder_phone).limit(1))
+        if found:
+            holder_id = found[0]["id"]
+        else:
+            # unscoped: insert_scoped_by_payload
+            ins = await sb(supabase.table("patients").insert({"clinic_id": clinic_id, "phone": holder_phone,
+                                                              "name": acc["name"][:100]}))
+            holder_id = ins.data[0]["id"]
+        await sb(supabase.table("dx_b2b_accounts").update({"holder_patient_id": holder_id})
+                 .eq("clinic_id", clinic_id).eq("id", account_id))
+    row = {"clinic_id": clinic_id, "primary_phone": holder_phone, "full_name": body["name"].strip()[:100],
+           "relationship": "b2b_subject", "gender": body.get("gender"), "dx_b2b_account_id": account_id}
+    if body.get("age_years") is not None:
+        row.update({"age_years": body["age_years"], "age_recorded_on": datetime.now(timezone.utc).date().isoformat()})
+    try:
+        # unscoped: insert_scoped_by_payload
+        fm = (await sb(supabase.table("family_members").insert(row))).data[0]
+    except Exception as e:
+        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+            # same name under the same desk phone: one subject, reused
+            fm = (await _rows(scoped_query("family_members", clinic_id).eq("primary_phone", holder_phone)
+                              .eq("full_name", row["full_name"]).limit(1)))[0]
+        else:
+            raise_for(e)
+    from app.services.opd import assign_mrn
+    mrn = fm.get("mrn") or await assign_mrn(clinic_id, holder_id, fm["id"])
+    return {"patient_id": holder_id, "family_member_id": fm["id"], "mrn": mrn, "name": fm["full_name"]}
+
+
+# ── today's bookings (W3) ───────────────────────────────────────────────────
+
+async def bookings_today(clinic_id: str, branch_id: Optional[str], day: Optional[str] = None) -> list[dict]:
+    from app.utils.helpers import today_ist
+    d = day or today_ist().isoformat()
+    q = scoped_query("appointments", clinic_id, "id, patient_id, family_member_id, patient_name, patient_phone, "
+                     "lab_test_id, lab_test_name, appointment_date, collection_mode, booking_channel, amount_paise, "
+                     "payment_id, home_collection_fee_paise, branch_id, booking_ref, status") \
+        .eq("booking_type", "lab_test").eq("status", "confirmed").eq("appointment_date", d)
+    if branch_id:
+        q = q.eq("branch_id", branch_id)
+    rows = await _rows(q.order("created_at"))
+    if rows:
+        linked = {r["appointment_id"] for r in await _rows(scoped_query("dx_accession_bookings", clinic_id,
+                                                                        "appointment_id")
+                                                           .in_("appointment_id", [r["id"] for r in rows]))}
+        rows = [r for r in rows if r["id"] not in linked]
+    return rows
+
+
+async def booking_patient(clinic_id: str, appointments: list[dict]) -> tuple[str, Optional[str]]:
+    """All bookings must belong to one person (patient + family member)."""
+    people = {(a.get("patient_id"), a.get("family_member_id"), a.get("patient_phone")) for a in appointments}
+    if len(people) != 1:
+        raise HTTPException(status_code=422, detail="Convert one patient's bookings at a time.")
+    pid, fmid, phone = people.pop()
+    if not pid:
+        found = await _rows(scoped_query("patients", clinic_id, "id").eq("phone", phone).limit(1))
+        if not found:
+            raise HTTPException(status_code=409, detail="Register this patient first (no registry record for the "
+                                                        "booking's phone).")
+        pid = found[0]["id"]
+    return pid, fmid

@@ -663,6 +663,55 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 21. MIGRATION 127 — Diagnostic OS visits, items, samples, billing (DX-M3)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_cols int;
+    v_trg int;
+    v_funcs int;
+    v_shape text;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_referrers', 'dx_b2b_accounts', 'dx_accessions', 'dx_accession_bookings',
+                       'dx_accession_items', 'dx_samples', 'dx_events')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M127', 'Tables: dx visits, items, samples, events, referrers, B2B accounts (RLS forced)',
+            CASE WHEN v_tables = 7 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 7 present with RLS forced');
+
+    SELECT count(*) INTO v_cols FROM information_schema.columns WHERE table_schema = 'public' AND (
+        (table_name = 'opd_orders' AND column_name IN ('accession_id', 'accession_item_id', 'dx_sample_id', 'replaces_order_id'))
+     OR (table_name = 'opd_invoices' AND column_name = 'accession_id')
+     OR (table_name = 'opd_invoice_items' AND column_name = 'dx_accession_item_id')
+     OR (table_name = 'family_members' AND column_name = 'dx_b2b_account_id'));
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M127', 'Columns: DX links on opd_orders / opd_invoices / opd_invoice_items / family_members',
+            CASE WHEN v_cols = 7 THEN 'PASS' ELSE 'FAIL' END, v_cols || ' of 7 present');
+
+    SELECT pg_get_constraintdef(oid) INTO v_shape FROM pg_constraint WHERE conname = 'opd_orders_source_check';
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M127', 'Constraint: opd_orders.source allows dx',
+            CASE WHEN v_shape LIKE '%dx%' THEN 'PASS' ELSE 'FAIL' END, coalesce(v_shape, 'MISSING'));
+
+    SELECT count(*) INTO v_trg FROM pg_trigger WHERE tgname IN ('trg_dx_guard_invoice_item', 'trg_dx_accessions_guard',
+        'trg_dx_accession_items_guard', 'trg_dx_samples_guard', 'trg_dx_events_guard', 'trg_dx_accession_bookings_guard',
+        'trg_dx_lab_test_delete', 'trg_dx_invoice_accession');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M127', 'Triggers: DX write guards, DX bill-line guard, lab-test delete guard',
+            CASE WHEN v_trg = 8 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 8 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_register_visit(uuid,jsonb,uuid,text)', 'dx_quote(uuid,jsonb)',
+        'dx_add_items(uuid,uuid,jsonb,text,numeric,uuid,text)', 'dx_cancel_item(uuid,uuid,text,uuid,text)',
+        'dx_cancel_visit(uuid,uuid,text,uuid,text)', 'dx_bill_visit(uuid,uuid,uuid,text)',
+        'dx_redact_patient(uuid,uuid)']) f WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M127', 'Functions: register, quote, add/cancel items, cancel visit, bill, redact',
+            CASE WHEN v_funcs = 7 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 7 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

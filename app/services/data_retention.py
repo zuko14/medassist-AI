@@ -451,6 +451,16 @@ class DataRetentionService:
                 logger.error(f"Family members erasure error: {e}")
                 results["errors"].append(f"family_members: {e}")
 
+        # 4a. Diagnostic OS visits (migration 127): redacted in place. The visit, its tests,
+        # tubes and bill lines are the clinical + financial record (NMC 7 years, GST);
+        # the name, DOB, external reference and delivery preferences in its snapshot go.
+        try:
+            res = await sb(supabase.rpc("dx_redact_patient", {"p_clinic_id": clinic_id, "p_patient_id": patient["id"]}))
+            results["dx_visits_redacted"] = res.data if isinstance(res.data, int) else 0
+        except Exception as e:
+            logger.error(f"DX visit redaction error: {e}")
+            results["errors"].append(f"dx_accessions: {e}")
+
         # 4b. Delete imported legacy records for this phone (migration 088).
         # They are a convenience copy of the clinic's OLD software's list — the
         # clinic's system of record still holds the originals — and their

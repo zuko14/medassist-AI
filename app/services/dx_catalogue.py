@@ -72,7 +72,7 @@ async def _update(table: str, clinic_id: str, row_id: str, data: dict, label: st
 
 async def list_rows(table: str, clinic_id: str) -> list[dict]:
     order = {"dx_departments": ("sort_order", "code"), "dx_containers": ("code",),
-             "dx_signatories": ("created_at",)}[table]
+             "dx_signatories": ("created_at",), "dx_referrers": ("name",), "dx_b2b_accounts": ("name",)}[table]
     q = scoped_query(table, clinic_id)
     for col in order:
         q = q.order(col)

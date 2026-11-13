@@ -110,6 +110,10 @@ class ReportDispatchDeferred(Exception):
     """
 
 
+class DxReportResendRefused(ValueError):
+    """A Diagnostic OS report resent through a generic path (AUDIT A20)."""
+
+
 class LabReportService:
     """Service for uploading and sending lab reports to patients via WhatsApp."""
 
@@ -812,6 +816,10 @@ class LabReportService:
         if not report.data:
             raise ValueError("Report not found")
         report = report.data[0]
+        if report.get("source") == "dx":
+            # AUDIT A20: a DX report goes out only through Reports & Dispatch, which re-applies
+            # the delivery policy (dues hold, payer routing) — never to a typed-in phone.
+            raise DxReportResendRefused("Use Diagnostic Reports & Dispatch to resend this report.")
         if new_phone:
             report["patient_phone"] = new_phone
             update_query = (

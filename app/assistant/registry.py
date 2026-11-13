@@ -68,6 +68,7 @@ PAGES: dict[str, str] = {
     "radiology": "Radiology",
     "dxsetup": "DX Setup",   # Diagnostic OS (migration 125); a page hand-off only, no DX data
     "dxcatalog": "Test Master",   # Diagnostic OS catalogue (migration 126); page hand-off only
+    "dxdesk": "DX Registration",   # Diagnostic OS visits (migration 127); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
     "casualty": "Casualty / ER",
@@ -117,6 +118,7 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
            "ఆపరేషన్ థియేటర్", "ऑपरेशन थिएटर"),
     "tariffs": ("service catalogue", "tariff", "price list", "service prices", "rate card"),
     "dxsetup": ("dx setup", "diagnostic os setup", "diagnostic setup", "lab sites", "collection centres"),
+    "dxdesk": ("dx registration", "lab registration", "register lab visit", "lab desk", "todays lab bookings"),
     "dxcatalog": ("test master", "lab test master", "reference ranges", "test parameters", "lab catalogue"),
     "lisqueue": ("lab sign-off", "sign lab report", "pathologist queue", "pending validation", "validate results"),
     "radiology": ("radiology", "imaging", "x-ray reports", "scan reports", "radiology worklist", "form f",

@@ -198,6 +198,8 @@ def test_rollback_refuses_open_orders_then_reapplies(world):
         cur.execute("ROLLBACK")
     cur.execute("BEGIN")
     try:
+        from tests.test_migration_dx_m3 import unwind_127
+        unwind_127(cur)   # newest first: 127's DX orders live in opd_orders
         # the shared test DB holds other suites' orders: the owner purge is the only path that removes them
         cur.execute("SELECT ipd_purge_clinic(clinic_id) FROM (SELECT DISTINCT clinic_id FROM opd_orders) x")
         cur.execute(DOWN.read_text(encoding="utf-8"))

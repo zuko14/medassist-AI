@@ -368,6 +368,9 @@ async def save_invoice_draft(
             raise HTTPException(status_code=409, detail="This invoice is no longer a draft. Reload it.")
         if "opd_not_found" in msg:
             raise HTTPException(status_code=404, detail="Invoice not found")
+        if "dx_bill_lines_managed" in msg:   # AUDIT A10
+            raise HTTPException(status_code=409,
+                                detail="This is a Diagnostic OS bill. Change its tests from DX Registration.")
         if "ipd_bill_lines_locked" in msg:
             raise HTTPException(status_code=409,
                                 detail="Inpatient bill lines come from posted charges and cannot be edited here.")

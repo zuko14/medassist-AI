@@ -1750,7 +1750,9 @@ async def get_family_members(clinic_id: str, primary_phone: str) -> list:
             .eq("primary_phone", primary_phone)
             .order("created_at"))
         )
-        return result.data or []
+        # ADR-DX-21: a hospital's patients (DX B2B dependants) never show in its desk phone's chat.
+        # Filtered here, not in the query, so the picker keeps working before migration 127 is applied.
+        return [m for m in (result.data or []) if not m.get("dx_b2b_account_id")]
     except Exception as e:
         logger.error(f"Error getting family members: {e}")
         return []

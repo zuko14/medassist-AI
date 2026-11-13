@@ -3324,6 +3324,33 @@
             .dx-modal { padding: 20px 16px; border-radius: 14px; }
         }
         /* DX:catalogue:END */
+        /* DX:desk:START — Registration desk (migration 127) */
+        .dxd-grid { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.6fr) minmax(250px, 1fr); gap: 16px; align-items: start; }
+        .dxd-grid .card { margin: 0; }
+        .dxd-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+        .dxd-tabs button[aria-selected="true"] { background: var(--accent-glow); color: var(--accent2); border-color: var(--accent); }
+        .dxd-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+        .dxd-list:empty { display: none; }
+        .dxd-list li button { width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 9px 12px; color: var(--text); cursor: pointer; font: inherit; }
+        .dxd-list li button:hover, .dxd-list li button:focus-visible { background: var(--surface2); outline: none; }
+        .dxd-list small { display: block; color: var(--text3); font-size: 0.76rem; }
+        .dxd-picked { padding: 10px 12px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); margin-top: 8px; }
+        .dxd-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--border2); margin-right: 3px; vertical-align: -1px; }
+        .dxd-total { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.92rem; }
+        .dxd-total.big { font-size: 1.15rem; font-weight: 700; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; }
+        .dxd-cart td input { width: 90px; }
+        .dxd-result { border: 1px solid var(--green-border); background: var(--green-bg); border-radius: 12px; padding: 12px 14px; margin-top: 12px; }
+        .dxd-tube { display: inline-flex; gap: 6px; align-items: center; font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem; margin: 4px 12px 0 0; }
+        @media (max-width: 1100px) { .dxd-grid { grid-template-columns: 1fr 1fr; } .dxd-grid > .dxd-right { grid-column: 1 / -1; } }
+        @media (max-width: 760px) {
+            .dxd-grid { grid-template-columns: 1fr; }
+            .dxd-cart thead { display: none; }
+            .dxd-cart, .dxd-cart tbody, .dxd-cart tr, .dxd-cart td { display: block; width: 100%; }
+            .dxd-cart tr { border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; margin-bottom: 8px; }
+            .dxd-cart td { border: 0; padding: 3px 0; }
+        }
+        @media print { body.dxd-printing > *:not(#dxdPrint) { display: none !important; } #dxdPrint { display: block !important; } }
+        /* DX:desk:END */
     </style>
 </head>
 <body>
@@ -3603,6 +3630,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"></path><path d="M10 3v6.5L5.2 18a2 2 0 0 0 1.8 3h10a2 2 0 0 0 1.8-3L14 9.5V3"></path><path d="M7.5 14h9"></path></svg></span> Test Master
             </div>
             <!-- DX:catalogue:END -->
+            <!-- DX:desk:START — Registration desk (migration 127) -->
+            <div class="nav-link" tabindex="0" data-page="dxdesk" data-dx="nav DX_REGISTER" style="display:none" onclick="go('dxdesk',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9h6"></path><path d="M7 13h10"></path><path d="M7 17h4"></path></svg></span> DX Registration
+            </div>
+            <!-- DX:desk:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -7423,6 +7455,69 @@
             </div>
         </div>
         <!-- DX:catalogue:END -->
+        <!-- DX:desk:START — Registration desk (docs/diagnostic-os/UI.md, page dxdesk) -->
+        <div id="pg-dxdesk" class="sec">
+            <div class="page-head"><div><h2>DX Registration</h2><p>Register the patient, add tests, bill and take payment. Tubes and labels follow from the tests.</p></div></div>
+            <div class="ipd-winddown" data-dx-winddown hidden>The Diagnostic OS is being switched off for this clinic: new visits are closed.</div>
+            <div class="dxd-tabs" role="tablist">
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" id="dxdTabNew" aria-selected="true" onclick="dxdesk.tab('new')">New visit</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" id="dxdTabBook" aria-selected="false" onclick="dxdesk.tab('book')">Today's bookings</button>
+            </div>
+            <div id="dxdNew">
+                <div class="dxd-grid">
+                    <div class="card">
+                        <div class="card-head"><h3>Patient</h3></div>
+                        <div class="field"><label for="dxdPatQ">Search phone, name or MRN</label><input id="dxdPatQ" autocomplete="off" oninput="dxdesk.searchPatientsSoon()"></div>
+                        <ul class="dxd-list" id="dxdPatList" aria-label="Patients found"></ul>
+                        <div id="dxdPatPicked"></div>
+                        <details id="dxdNewPat" style="margin-top:10px"><summary>New patient</summary>
+                            <div class="field"><label for="dxdNpName">Name</label><input id="dxdNpName" maxlength="100"></div>
+                            <div class="field"><label for="dxdNpPhone">Phone</label><input id="dxdNpPhone" inputmode="tel" maxlength="15" placeholder="+91…"></div>
+                            <div class="dx-grid">
+                                <div class="field"><label for="dxdNpSex">Sex</label><select id="dxdNpSex"><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></div>
+                                <div class="field"><label for="dxdNpAge">Age (years)</label><input id="dxdNpAge" type="number" min="0" max="130"></div>
+                            </div>
+                            <label class="check"><input type="checkbox" id="dxdNpConsent"> Patient consents to data processing (DPDP)</label>
+                            <div class="dx-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="dxdesk.registerPatient(this)">Register patient</button></div>
+                        </details>
+                        <div class="field" style="margin-top:12px"><label for="dxdRefQ">Referred by</label><input id="dxdRefQ" autocomplete="off" placeholder="Self" oninput="dxdesk.searchRefSoon()"></div>
+                        <ul class="dxd-list" id="dxdRefList" aria-label="Referrers found"></ul>
+                        <div id="dxdRefPicked"></div>
+                        <div class="field"><label for="dxdAcct">B2B account</label><select id="dxdAcct"><option value="">None (walk-in)</option></select></div>
+                        <div class="dx-grid">
+                            <div class="field"><label for="dxdPriority">Priority</label><select id="dxdPriority"><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="stat">STAT</option></select></div>
+                            <div class="field"><label for="dxdFasting">Fasting</label><select id="dxdFasting"><option value="unknown">Not asked</option><option value="fasting">Fasting</option><option value="non_fasting">Not fasting</option></select></div>
+                        </div>
+                        <div class="field"><label for="dxdExtRef">External ref (hospital OP/IP no.)</label><input id="dxdExtRef" maxlength="40"></div>
+                        <div class="field"><label for="dxdNotes">Clinical notes</label><textarea id="dxdNotes" rows="2" maxlength="1000"></textarea></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-head"><h3>Tests</h3></div>
+                        <div class="field"><label for="dxdTestQ">Add a test, panel or package</label><input id="dxdTestQ" autocomplete="off" placeholder="Code or name, e.g. CBC" oninput="dxdesk.searchTests()" onkeydown="if(event.key==='Enter'){event.preventDefault();dxdesk.addFirst();}"></div>
+                        <ul class="dxd-list" id="dxdTestList" aria-label="Tests found"></ul>
+                        <div id="dxdCart" style="margin-top:12px"></div>
+                    </div>
+                    <div class="card dxd-right">
+                        <div class="card-head"><h3>Bill</h3></div>
+                        <div id="dxdTotals"></div>
+                        <div class="dx-actions">
+                            <button type="button" class="btn btn-accent" id="dxdSaveBill" data-dxd-bill onclick="dxdesk.save(this, true)">Save &amp; Bill</button>
+                            <button type="button" class="btn btn-ghost" id="dxdSave" onclick="dxdesk.save(this, false)">Save only</button>
+                        </div>
+                        <div id="dxdResult"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="dxdBook" hidden>
+                <div class="card"><div class="card-head"><h3>Today's bookings</h3></div>
+                    <p class="muted">Confirmed WhatsApp, voice and home-collection bookings not registered yet. Registering links all of a patient's bookings to one visit; online payments are applied to the bill once.</p>
+                    <div id="dxdBookList"></div>
+                    <div id="dxdBookResult"></div>
+                </div>
+            </div>
+            <div id="dxdPrint" hidden></div>
+        </div>
+        <!-- DX:desk:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -9627,6 +9722,257 @@ const dxcat = {
     },
 };
 /* DX:catalogue:END */
+
+/* DX:desk:START — Registration desk (migration 127). Prices, tubes and numbers come from the server:
+   the cart re-prices through POST /admin/dx/visits/quote, the same resolver registration uses. */
+const dxdesk = {
+    patient: null, referrer: null, cart: [], quote: null, tests: [], conts: {}, visit: null, timers: {}, saveKey: null,
+    async load() {
+        try {
+            const [t, c, a] = await Promise.all([api('/admin/dx/tests?approved=true'), api('/admin/dx/containers'),
+                                                 api('/admin/dx/b2b-accounts').catch(() => ({ accounts: [] }))]);
+            dxdesk.tests = t.tests.filter(x => x.is_active);
+            dxdesk.conts = Object.fromEntries(c.containers.map(x => [x.code, x]));
+            const sel = document.getElementById('dxdAcct'), keep = sel.value;
+            sel.innerHTML = '<option value="">None (walk-in)</option>' + a.accounts.filter(x => x.status === 'active')
+                .map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+            sel.value = keep;
+        } catch (e) { toast(e.message, true); }
+        document.querySelectorAll('#pg-dxdesk [data-dxd-bill]').forEach(el => { el.hidden = !dxCan('DX_BILLING'); });
+        dxdesk.render();
+        if (!document.getElementById('dxdBook').hidden) dxdesk.loadBookings();
+    },
+    tab(which) {
+        document.getElementById('dxdNew').hidden = which !== 'new';
+        document.getElementById('dxdBook').hidden = which !== 'book';
+        document.getElementById('dxdTabNew').setAttribute('aria-selected', String(which === 'new'));
+        document.getElementById('dxdTabBook').setAttribute('aria-selected', String(which === 'book'));
+        if (which === 'book') dxdesk.loadBookings();
+    },
+    soon(name, fn, ms) { clearTimeout(dxdesk.timers[name]); dxdesk.timers[name] = setTimeout(fn, ms || 300); },
+    searchPatientsSoon() { dxdesk.soon('pat', dxdesk.searchPatients); },
+    async searchPatients() {
+        const q = document.getElementById('dxdPatQ').value.trim(), ul = document.getElementById('dxdPatList');
+        if (q.length < 2) { ul.innerHTML = ''; return; }
+        try {
+            const r = await api('/admin/dx/patients/search?q=' + encodeURIComponent(q));
+            ul.innerHTML = r.patients.slice(0, 12).map((p, i) => `<li><button type="button" onclick="dxdesk.pickPatient(${i})">${esc(p.name || p.full_name || '')}
+                <small>${esc(p.mrn || '')} · ${esc(p.phone || p.primary_phone || '')}${p.age_years != null ? ' · ' + esc(p.age_years) + ' y' : ''}${p.gender ? ' · ' + esc(p.gender) : ''}${p.relationship ? ' · ' + esc(p.relationship) : ''}</small></button></li>`).join('')
+                || '<li><button type="button" disabled>No patient found. Register below.</button></li>';
+            dxdesk._hits = r.patients;
+        } catch (e) { toast(e.message, true); }
+    },
+    pickPatient(i) {
+        const p = dxdesk._hits[i];
+        dxdesk.patient = { patient_id: p.patient_id || p.id, family_member_id: p.family_member_id || null,
+                           name: p.name || p.full_name, mrn: p.mrn, phone: p.phone || p.primary_phone, gender: p.gender, age: p.age_years };
+        document.getElementById('dxdPatList').innerHTML = '';
+        document.getElementById('dxdPatQ').value = '';
+        dxdesk.render();
+    },
+    async registerPatient(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        if (!document.getElementById('dxdNpConsent').checked) { toast('Record the patient’s consent first.', true); return; }
+        btn.disabled = true;
+        try {
+            const body = { name: v('dxdNpName'), phone: v('dxdNpPhone'), gender: v('dxdNpSex'), data_consent: true };
+            if (v('dxdNpAge')) body.age_years = Number(v('dxdNpAge'));
+            const r = await apiPost('/admin/dx/patients', body);
+            dxdesk.patient = { patient_id: r.patient_id, family_member_id: r.family_member_id, name: body.name, mrn: r.mrn,
+                               phone: body.phone, gender: body.gender, age: body.age_years };
+            document.getElementById('dxdNewPat').open = false;
+            toast('Patient registered'); dxdesk.render();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    searchRefSoon() { dxdesk.soon('ref', dxdesk.searchRef); },
+    async searchRef() {
+        const q = document.getElementById('dxdRefQ').value.trim(), ul = document.getElementById('dxdRefList');
+        if (q.length < 2) { ul.innerHTML = ''; return; }
+        try {
+            const r = await api('/admin/dx/referrers?q=' + encodeURIComponent(q));
+            dxdesk._refs = r.referrers;
+            ul.innerHTML = r.referrers.slice(0, 8).map((x, i) => `<li><button type="button" onclick="dxdesk.pickRef(${i})">${esc(x.name)}<small>${esc(x.qualification || x.kind)}</small></button></li>`).join('')
+                + `<li><button type="button" onclick="dxdesk.addRef()">+ Add “${esc(q)}” as a new referrer</button></li>`;
+        } catch (e) { toast(e.message, true); }
+    },
+    pickRef(i) { dxdesk.referrer = dxdesk._refs[i]; document.getElementById('dxdRefList').innerHTML = ''; document.getElementById('dxdRefQ').value = ''; dxdesk.render(); },
+    async addRef() {
+        const name = document.getElementById('dxdRefQ').value.trim();
+        const qual = prompt(`Qualification for ${name} (optional)`, '') || null;
+        try {
+            dxdesk.referrer = await apiPost('/admin/dx/referrers', { name, qualification: qual });
+        } catch (e) {
+            if (e.status !== 409) { toast(e.message, true); return; }
+            if (!confirm('A referrer with this name already exists. Add a separate one anyway?')) return;
+            dxdesk.referrer = await apiPost('/admin/dx/referrers', { name, qualification: qual, force: true });
+        }
+        document.getElementById('dxdRefList').innerHTML = ''; document.getElementById('dxdRefQ').value = '';
+        dxdesk.render();
+    },
+    searchTests() {
+        const q = document.getElementById('dxdTestQ').value.trim().toLowerCase(), ul = document.getElementById('dxdTestList');
+        if (!q) { ul.innerHTML = ''; return; }
+        const hits = dxdesk.tests.filter(t => (t.test_code || '').toLowerCase().startsWith(q) || (t.name || '').toLowerCase().includes(q)).slice(0, 10);
+        dxdesk._testHits = hits;
+        ul.innerHTML = hits.map((t, i) => `<li><button type="button" onclick="dxdesk.addTest(${i})"><b>${esc(t.test_code || '')}</b> ${esc(t.name)}
+            <small>${t.kind === 'test' ? '' : esc(t.kind) + ' · '}₹${(t.price_paise / 100).toLocaleString('en-IN')}</small></button></li>`).join('')
+            || '<li><button type="button" disabled>No approved test matches</button></li>';
+    },
+    addFirst() { if (dxdesk._testHits && dxdesk._testHits.length) dxdesk.addTest(0); },
+    addTest(i) {
+        const t = dxdesk._testHits[i];
+        if (dxdesk.cart.some(x => x.lab_test_id === t.id)) { toast(`${t.name} is already in the cart`, true); return; }
+        dxdesk.cart.push({ lab_test_id: t.id, discount_paise: 0 });
+        document.getElementById('dxdTestQ').value = ''; document.getElementById('dxdTestList').innerHTML = '';
+        document.getElementById('dxdTestQ').focus();
+        dxdesk.saveKey = null; dxdesk.requote();
+    },
+    remove(i) { dxdesk.cart.splice(i, 1); dxdesk.saveKey = null; dxdesk.requote(); },
+    setDiscount(i, rupees) { dxdesk.cart[i].discount_paise = Math.max(0, Math.round(Number(rupees || 0) * 100)); dxdesk.saveKey = null; dxdesk.soon('q', dxdesk.requote, 400); },
+    async requote() {
+        if (!dxdesk.cart.length) { dxdesk.quote = null; dxdesk.render(); return; }
+        try {
+            dxdesk.quote = await apiPost('/admin/dx/visits/quote', { items: dxdesk.cart,
+                patient_id: dxdesk.patient ? dxdesk.patient.patient_id : null,
+                family_member_id: dxdesk.patient ? dxdesk.patient.family_member_id : null });
+            dxdesk.quoteError = null;
+        } catch (e) { dxdesk.quote = null; dxdesk.quoteError = e.message; }
+        dxdesk.render();
+    },
+    dots(line) {
+        const seen = new Set();
+        return (line.tests || []).filter(t => t.container_code && !seen.has(t.container_code) && seen.add(t.container_code))
+            .map(t => { const c = dxdesk.conts[t.container_code] || {}; return `<span class="dxd-dot" title="${esc(t.container_code + ' ' + (c.name || ''))}" style="background:${esc(c.colour_hex || '#888')}"></span>`; }).join('');
+    },
+    render() {
+        const p = dxdesk.patient;
+        document.getElementById('dxdPatPicked').innerHTML = p ? `<div class="dxd-picked"><b>${esc(p.name)}</b><br><small class="muted">${esc(p.mrn || '')} · ${esc(p.phone || '')}${p.age != null ? ' · ' + esc(p.age) + ' y' : ''}${p.gender ? ' · ' + esc(p.gender) : ''}</small>
+            <button type="button" class="btn btn-ghost btn-sm" style="float:right" onclick="dxdesk.patient=null;dxdesk.render()">Change</button></div>` : '';
+        const r = dxdesk.referrer;
+        document.getElementById('dxdRefPicked').innerHTML = r ? `<div class="dxd-picked">Ref. by <b>${esc(r.name)}</b> ${esc(r.qualification || '')}
+            <button type="button" class="btn btn-ghost btn-sm" style="float:right" onclick="dxdesk.referrer=null;dxdesk.render()">Remove</button></div>` : '';
+        const lines = (dxdesk.quote || {}).lines || [];
+        document.getElementById('dxdCart').innerHTML = dxdesk.cart.length ? `<div class="tbl-wrap"><table class="dxd-cart"><thead><tr><th>Test</th><th>Tubes</th><th>Price</th><th>Discount (₹)</th><th></th></tr></thead><tbody>
+            ${dxdesk.cart.map((c, i) => { const l = lines[i] || {}; const t = dxdesk.tests.find(x => x.id === c.lab_test_id) || {};
+                return `<tr><td><b>${esc(t.test_code || '')}</b> ${esc(t.name || '')}${l.tests && l.tests.length > 1 ? `<small class="muted" style="display:block">${l.tests.length} tests: ${esc(l.tests.map(x => x.test_code || x.name).join(', '))}</small>` : ''}</td>
+                <td>${dxdesk.dots(l)}</td><td>₹${((l.price_paise ?? t.price_paise) / 100).toLocaleString('en-IN')}</td>
+                <td><input type="number" min="0" step="1" value="${c.discount_paise / 100}" aria-label="Discount for ${esc(t.name || '')}" onchange="dxdesk.setDiscount(${i}, this.value)"></td>
+                <td><button type="button" class="btn btn-ghost btn-sm" aria-label="Remove ${esc(t.name || '')}" onclick="dxdesk.remove(${i})">✕</button></td></tr>`; }).join('')}</tbody></table></div>`
+            : '<p class="muted">No tests yet. Type a code like CBC and press Enter.</p>';
+        const mrp = lines.reduce((a, l) => a + l.price_paise, 0), disc = lines.reduce((a, l) => a + l.discount_paise, 0);
+        const pay = lines.reduce((a, l) => a + l.patient_share_paise, 0), rs = x => '₹' + (x / 100).toLocaleString('en-IN');
+        document.getElementById('dxdTotals').innerHTML = dxdesk.quoteError ? `<p class="dx-formula-err">${esc(dxdesk.quoteError)}</p>` :
+            `<div class="dxd-total"><span>Price</span><span>${rs(mrp)}</span></div><div class="dxd-total"><span>Discount</span><span>− ${rs(disc)}</span></div>
+             <div class="dxd-total big"><span>Patient pays</span><span>${rs(pay)}</span></div>`;
+        const ready = !!p && dxdesk.cart.length > 0 && !dxdesk.quoteError && myDx === 'ACTIVE';
+        document.getElementById('dxdSaveBill').disabled = !ready;
+        document.getElementById('dxdSave').disabled = !ready;
+    },
+    async save(btn, bill) {
+        // one key per cart: a retry after a network error returns the same visit, never a second one
+        dxdesk.saveKey = dxdesk.saveKey || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+        const v = id => document.getElementById(id).value.trim();
+        const body = { patient_id: dxdesk.patient.patient_id, items: dxdesk.cart, idempotency_key: dxdesk.saveKey,
+                       priority: v('dxdPriority'), fasting_status: v('dxdFasting') };
+        if (dxdesk.patient.family_member_id) body.family_member_id = dxdesk.patient.family_member_id;
+        if (dxdesk.referrer) body.referrer_id = dxdesk.referrer.id;
+        if (v('dxdAcct')) { body.b2b_account_id = v('dxdAcct'); body.source = 'b2b'; body.patient_type = 'b2b'; }
+        if (v('dxdExtRef')) body.external_ref = v('dxdExtRef');
+        if (v('dxdNotes')) body.clinical_notes = v('dxdNotes');
+        btn.disabled = true;
+        try {
+            dxdesk.visit = await apiPost('/admin/dx/visits', body);
+            if (bill) await apiPost(`/admin/dx/visits/${encodeURIComponent(dxdesk.visit.visit.id)}/bill`, { issue: true });
+            dxdesk.visit = await api(`/admin/dx/visits/${encodeURIComponent(dxdesk.visit.visit.id)}`);
+            toast(`Visit ${dxdesk.visit.visit.accession_number} registered`);
+            // the next visit starts clean: never inherit the last patient, priority or fasting status
+            dxdesk.cart = []; dxdesk.quote = null; dxdesk.saveKey = null; dxdesk.referrer = null; dxdesk.patient = null;
+            ['dxdExtRef', 'dxdNotes', 'dxdAcct'].forEach(id => { document.getElementById(id).value = ''; });
+            document.getElementById('dxdPriority').value = 'routine'; document.getElementById('dxdFasting').value = 'unknown';
+            dxdesk.render(); dxdesk.showResult('dxdResult', dxdesk.visit);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; dxdesk.render(); }
+    },
+    showResult(target, v) {
+        const inv = (v.invoices || []).find(i => ['issued', 'partially_paid'].includes(i.status));
+        const due = inv ? (inv.total_paise - (inv.credited_paise || 0) - inv.paid_paise) : 0;
+        const canBill = dxCan('DX_BILLING');
+        document.getElementById(target).innerHTML = `<div class="dxd-result"><b>${esc(v.visit.accession_number)}</b> · ${esc(v.visit.patient_snapshot.name)}
+            <div>${v.samples.map(sm => `<span class="dxd-tube"><span class="dxd-dot" style="background:${esc(sm.colour_hex)}"></span>${esc(sm.barcode || '—')}</span>`).join('') || '<span class="muted">No tubes (no specimen tests)</span>'}</div>
+            ${(v.invoices || []).map(i => `<div class="dxd-total"><span>${esc(i.invoice_number || 'Draft bill')} · ${esc(i.status.replace('_', ' '))}</span><span>₹${((i.total_paise || 0) / 100).toLocaleString('en-IN')}</span></div>`).join('')}
+            ${canBill && inv && due > 0 ? `<div class="dx-grid" style="margin-top:8px">
+                <div class="field"><label for="${target}Mode">Payment</label><select id="${target}Mode"><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="link">Payment link</option></select></div>
+                <div class="field"><label for="${target}Amt">Amount (₹)</label><input id="${target}Amt" type="number" min="1" step="1" value="${due / 100}"></div>
+                <div class="field"><label for="${target}Ref">Reference (UPI / card)</label><input id="${target}Ref" maxlength="80"></div></div>
+                <div class="dx-actions"><button type="button" class="btn btn-accent btn-sm" onclick="dxdesk.pay(this, '${target}')">Take payment</button></div>` : ''}
+            ${canBill && !(v.invoices || []).length && v.visit.billing_mode === 'patient' ? `<div class="dx-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="dxdesk.billNow(this, '${target}')">Bill now</button></div>` : ''}
+            <div class="dx-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="dxdesk.print()">Print bill</button></div></div>`;
+        dxdesk.lastResult = v;
+    },
+    async billNow(btn, target) {
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/visits/${encodeURIComponent(dxdesk.lastResult.visit.id)}/bill`, { issue: true });
+            dxdesk.showResult(target, await api(`/admin/dx/visits/${encodeURIComponent(dxdesk.lastResult.visit.id)}`));
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async pay(btn, target) {
+        const vid = encodeURIComponent(dxdesk.lastResult.visit.id), mode = document.getElementById(target + 'Mode').value;
+        btn.disabled = true;
+        try {
+            if (mode === 'link') {
+                const r = await apiPost(`/admin/dx/visits/${vid}/payment-link`, {});
+                toast('Payment link created' + (r.url ? ': ' + r.url : ''));
+            } else {
+                await apiPost(`/admin/dx/visits/${vid}/receipts`, { mode, amount_paise: Math.round(Number(document.getElementById(target + 'Amt').value) * 100),
+                    reference: document.getElementById(target + 'Ref').value.trim() || null,
+                    idempotency_key: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random() });
+                toast('Payment recorded');
+            }
+            dxdesk.showResult(target, await api(`/admin/dx/visits/${vid}`));
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    print() {
+        const v = dxdesk.lastResult; if (!v) return;
+        const el = document.getElementById('dxdPrint'), rs = x => '₹' + ((x || 0) / 100).toLocaleString('en-IN');
+        el.innerHTML = `<h2>${esc(v.visit.accession_number)}</h2><p>${esc(v.visit.patient_snapshot.name)} · ${esc(v.visit.patient_snapshot.mrn || '')} · ${new Date(v.visit.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</p>
+            <table style="width:100%;border-collapse:collapse"><tr><th align="left">Test</th><th align="right">Price</th><th align="right">Discount</th><th align="right">Amount</th></tr>
+            ${v.items.filter(i => i.status === 'active').map(i => `<tr><td>${esc(i.item_name)}</td><td align="right">${rs(i.price_paise)}</td><td align="right">${rs(i.discount_paise)}</td><td align="right">${rs(i.patient_share_paise)}</td></tr>`).join('')}</table>
+            ${(v.invoices || []).map(i => `<p>${esc(i.invoice_number || 'Draft')} — total ${rs(i.total_paise)}, paid ${rs(i.paid_paise)}</p>`).join('')}`;
+        document.body.classList.add('dxd-printing'); el.hidden = false;
+        window.print();
+        document.body.classList.remove('dxd-printing'); el.hidden = true;
+    },
+    async loadBookings() {
+        const box = document.getElementById('dxdBookList');
+        box.innerHTML = loading();
+        try {
+            const r = await api('/admin/dx/bookings/today');
+            const groups = {};
+            r.bookings.forEach(b => { const k = (b.patient_id || b.patient_phone) + ':' + (b.family_member_id || ''); (groups[k] = groups[k] || []).push(b); });
+            dxdesk._groups = Object.values(groups);
+            box.innerHTML = dxdesk._groups.length ? `<div class="tbl-wrap"><table class="dx-table"><thead><tr><th>Patient</th><th>Tests</th><th>Paid online</th><th>Where</th><th></th></tr></thead><tbody>
+                ${dxdesk._groups.map((g, i) => `<tr><td data-label="Patient"><b>${esc(g[0].patient_name || '')}</b><small class="muted" style="display:block">${esc(g[0].booking_ref || '')}</small></td>
+                    <td data-label="Tests">${g.map(b => esc(b.lab_test_name || '')).join(', ')}</td>
+                    <td data-label="Paid online">₹${(g.reduce((a, b) => a + (b.payment_id ? (b.amount_paise || 0) : 0), 0) / 100).toLocaleString('en-IN')}</td>
+                    <td data-label="Where">${g.some(b => b.collection_mode === 'home') ? 'Home collection' : 'Centre'}</td>
+                    <td><button type="button" class="btn btn-accent btn-sm" ${myDx === 'ACTIVE' ? '' : 'disabled'} onclick="dxdesk.convert(${i}, this)">Arrived → Register</button></td></tr>`).join('')}</tbody></table></div>`
+                : '<p class="muted">No bookings waiting for today.</p>';
+        } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    async convert(i, btn) {
+        const g = dxdesk._groups[i];
+        btn.disabled = true;
+        try {
+            const v = await apiPost('/admin/dx/bookings/convert', { appointment_ids: g.map(b => b.id),
+                idempotency_key: 'convert-' + g.map(b => b.id).sort().join('').slice(0, 60) });
+            toast(`Visit ${v.visit.accession_number} registered from ${g.length} booking(s)`);
+            if (dxCan('DX_BILLING')) await apiPost(`/admin/dx/visits/${encodeURIComponent(v.visit.id)}/bill`, { issue: true });
+            dxdesk.showResult('dxdBookResult', await api(`/admin/dx/visits/${encodeURIComponent(v.visit.id)}`));
+            dxdesk.loadBookings();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+};
+/* DX:desk:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -14933,7 +15279,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ };
     if (loaders[page]) loaders[page]();
 }
 

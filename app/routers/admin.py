@@ -75,7 +75,7 @@ from app.services.specialty_catalog import (
 from app.services.analytics import analytics_service, appointment_search_filter
 from app.services.broadcast import broadcast_service
 from app.services import client_data
-from app.services.lab_reports import LabReportService
+from app.services.lab_reports import DxReportResendRefused, LabReportService
 from app.services.permissions import (
     CORPORATE_VIEWER,
     PHLEBOTOMIST,
@@ -3227,6 +3227,13 @@ async def update_lab_test(
         )
 
 
+def _refuse_dx_ordered(e: Exception) -> None:
+    """AUDIT A22: trg_dx_lab_test_delete (migration 127) keeps a test that a DX visit ordered."""
+    if "dx_test_ordered" in str(getattr(e, "message", None) or e):
+        raise HTTPException(status_code=409, detail="This test has been ordered in Diagnostic OS — deactivate it "
+                                                    "instead.")
+
+
 @router.delete("/lab-tests/{test_id}")
 async def delete_lab_test(
     test_id: str,
@@ -3258,6 +3265,7 @@ async def delete_lab_test(
     except HTTPException:
         raise
     except Exception as e:
+        _refuse_dx_ordered(e)
         logger.error(f"Error deleting lab test {test_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=_friendly_db_error(e, "Failed to delete lab test")
@@ -4735,6 +4743,7 @@ async def bulk_delete_lab_tests(
     except HTTPException:
         raise
     except Exception as e:
+        _refuse_dx_ordered(e)
         logger.error(f"Bulk delete failed for clinic_id={effective_clinic_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=_friendly_db_error(e, "Failed to delete the selected tests")
@@ -5931,6 +5940,8 @@ async def resend_lab_report(
             ip_address=request.client.host if request and request.client else "unknown",
         )
         return {"success": True, "message": "Report resent successfully"}
+    except DxReportResendRefused as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         logger.warning(f"Lab report resend validation: {e}")
         raise HTTPException(
@@ -7521,6 +7532,8 @@ async def resolve_report_match(
     if not existing.data:
         raise HTTPException(status_code=404, detail="Report not found")
     report = existing.data[0]
+    if report.get("source") == "dx":   # AUDIT A20: never re-route a DX report to a typed-in phone
+        raise HTTPException(status_code=409, detail="Use Diagnostic Reports & Dispatch to resend this report.")
 
     norm_phone = normalize_phone(body.patient_phone)
     if not validate_phone(norm_phone):

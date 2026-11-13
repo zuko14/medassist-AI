@@ -208,7 +208,8 @@ async def get_diagnostic_worklist(clinic_id: str, branch_id: Optional[str] = Non
         since = datetime.combine(today_ist(), time.min, tzinfo=IST).astimezone(timezone.utc).isoformat()
 
     def build():
-        q = scoped_query("opd_orders", clinic_id).in_("status", statuses)
+        # AUDIT A4: Diagnostic OS orders (source 'dx') are worked on the DX bench, never here
+        q = scoped_query("opd_orders", clinic_id).in_("status", statuses).in_("source", ["opd", "ipd"])
         if since:
             q = q.gte("updated_at", since)
         return restrict_to_branch(q, branch_id).order("created_at").order("id")
@@ -259,9 +260,18 @@ async def get_diagnostic_worklist(clinic_id: str, branch_id: Optional[str] = Non
     return {"orders": out, "total": len(rows), "limit": limit, "offset": offset}
 
 
+def _refuse_dx(order: dict) -> None:
+    """AUDIT A4: a DX order is collected in its tube and closed only by a pathologist's sign-off."""
+    if order.get("source") == "dx":
+        raise HTTPException(status_code=409, detail={"code": "dx_use_dx_route",
+                                                     "message": "This is a Diagnostic OS order. Use the DX sample "
+                                                                "collection and lab worklist."})
+
+
 async def collect_sample(clinic_id: str, order_id: str, barcode: str, user: Any) -> dict:
     """ordered|billed -> sample_collected, once (compare-and-set)."""
     order = await get_order(clinic_id, order_id)
+    _refuse_dx(order)
     if not order.get("sample_type"):
         raise HTTPException(status_code=409, detail="This order needs no specimen. Mark it complete instead.")
     aid, name = _actor(user)
@@ -284,6 +294,7 @@ async def complete_order(clinic_id: str, order_id: str, result_summary: str, use
     sample collected first (the database refuses otherwise). 'resulted' rows
     belong to the LIS (G2), which completes them itself."""
     order = await get_order(clinic_id, order_id)
+    _refuse_dx(order)
     if order["catalog_type"] == "lab_test":
         # entered LIS values are released only by a pathologist's signature, never by a text note
         lis = await sb(scoped_query("lab_results", clinic_id, "id").eq("order_id", order_id).limit(1))

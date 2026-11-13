@@ -23,6 +23,8 @@ UP, DOWN = MIG / "126_dx_catalogue.sql", MIG / "rollback" / "126_rollback_dx_cat
 def unwind_126(cur) -> None:
     """Inside an open transaction: purge every clinic with DX catalogue rows, clear
     approvals, run the 126 rollback. Called first by unwind_125 (newest first)."""
+    from tests.test_migration_dx_m3 import unwind_127
+    unwind_127(cur)   # newest first: 127's tubes reference 126's containers
     cur.execute("SELECT to_regclass('public.dx_test_components') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

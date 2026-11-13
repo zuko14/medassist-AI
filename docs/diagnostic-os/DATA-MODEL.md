@@ -333,6 +333,17 @@ CREATE INDEX idx_family_members_dx_b2b ON family_members (clinic_id, dx_b2b_acco
 | `dx_cancel_visit(…)` | only when no sample collected | `dx_visit_has_samples` |
 | `dx_bill_visit(…, p_accession_id, p_create BOOLEAN)` | builds/refreshes the visit's draft `opd_invoices` (`accession_id` set, **`appointment_id` NULL** so OPD's one-bill-per-appointment index is never involved) with one line per active item whose `patient_share_paise > 0`; no invoice when the patient share total is 0 and billing is B2B; after the service issues it, `app/services/dx.py` calls `opd_billing._apply_prepaid(clinic, invoice, appt)` once per linked booking (idempotent on the gateway payment id) and stamps `prepaid_applied_at` | `dx_not_patient_billing`, `dx_bill_issued` (refresh refused once issued: add-ons go on a supplementary DX bill) |
 
+**As built (migration 127):** `opd_invoices.accession_id` and `opd_invoice_items.dx_accession_item_id` are plain
+references (no FK) so the clinic purge stays one-directional (`dx_purge_clinic` first, then the OPD/IPD purge); the
+bill-line guard is `trg_dx_guard_invoice_item` (`dx_bill_lines_managed`, `dx_bill_line_invalid`, `dx_item_already_billed`)
+and `trg_dx_invoice_accession` keeps a bill's visit link immutable. Visit tables (`dx_accessions`, `dx_accession_items`,
+`dx_accession_bookings`, `dx_samples`, `dx_events`) accept writes only inside `dx_*` functions (`kriya.dx_tx`;
+`dx_managed:<table>`), deletes only on purge; the one exception is stamping `dx_accession_bookings.prepaid_applied_at`.
+Pricing / explosion is one resolver, `dx_price_items`, shared by `dx_register_visit`, `dx_add_items` and `dx_quote`
+(no write). `b2b_*` billing modes raise `dx_b2b_not_enabled` until DX-M8. A test ordered in DX cannot be deleted
+(`trg_dx_lab_test_delete` → `dx_test_ordered`, mapped to 409 by both admin delete routes). `dx_redact_patient` serves
+DPDP erasure. Items and tubes default `created_at` to `clock_timestamp()` so a visit's lines keep their entry order.
+
 ## 5. DX-M4 — Collection and rejection
 ```sql
 CREATE TABLE dx_rejection_reasons (id, clinic_id, code TEXT CHECK (code ~ '^[A-Z_]{3,30}$'), label TEXT,
