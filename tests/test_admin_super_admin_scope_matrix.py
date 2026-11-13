@@ -128,6 +128,12 @@ def test_all_ipd_routes_covered_by_scope_matrix():
     assert len(ipd_routes) >= 38, f"Expected all /admin/ipd routes in matrix, found only {len(ipd_routes)}"
 
 
+def test_all_dx_routes_covered_by_scope_matrix():
+    """Every /admin/dx route (migration 125) is in ROUTES, so the leak half runs on each."""
+    dx_routes = [r for r in ROUTES if r[1].startswith("/admin/dx")]
+    assert len(dx_routes) >= 7, f"Expected all /admin/dx routes in matrix, found only {len(dx_routes)}"
+
+
 @pytest.mark.parametrize("method,path", ROUTES)
 def test_unscoped_super_admin_never_succeeds(client, method, path):
     """LEAK HALF: no clinic named -> never 200/201."""

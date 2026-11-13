@@ -179,7 +179,7 @@ def test_every_registered_permission_is_offered():
 
     html = _html()
     for cls in ("staff-perm-cb", "edit-staff-perm-cb"):
-        ui = set(re.findall(r'class="' + cls + r'" value="([A-Z_]+)"', html))
+        ui = set(re.findall(r'class="' + cls + r'" value="([A-Z0-9_]+)"', html))
         missing = PERMISSIONS - ui
         assert not missing, f"{cls} omits {sorted(missing)}"
 

@@ -102,6 +102,8 @@ TENANT_OWNED_TABLES = frozenset({
     # Migration 124: insurance / TPA (payers, policies, pre-authorisations, claims and their payer ledger)
     "insurance_payers", "patient_insurance_policies", "ipd_pre_authorizations", "ipd_insurance_claims",
     "ipd_claim_transactions",
+    # Migration 125: Diagnostic OS Foundation
+    "dx_sites",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

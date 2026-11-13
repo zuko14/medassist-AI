@@ -59,6 +59,7 @@ from app.services.tenant import (
     invalidate_tenant_cache,
     kriya_ketu_enabled,
     ipd_access,
+    dx_access,
     opd_enabled,
     require_feature,
     specialty_enabled,
@@ -500,6 +501,27 @@ def _enforce_phlebotomist_scope(request: Request, user: AdminUser) -> AdminUser:
     )
 
 
+#: Diagnostic OS confined logins (SECURITY.md §3.2, §5): a logistics runner works
+#: the Logistics page only; a B2B client's login only its partner portal. Both
+#: also reach /admin/me and their own password/username changes.
+_DX_CONFINED_ROUTES = {
+    "LOGISTICS_RUNNER": re.compile(r"^/admin/dx/logistics(/.*)?$"),
+    "B2B_PARTNER": re.compile(r"^/admin/dx/partner(/.*)?$"),
+}
+_DX_CONFINED_COMMON = _PHLEBOTOMIST_ROUTES[:3]   # /me, change-password, change-username
+
+
+def _enforce_dx_confined_scope(request: Request, user: AdminUser) -> AdminUser:
+    allowed = _DX_CONFINED_ROUTES.get(getattr(user, "staff_role", None) or "")
+    if allowed is None:
+        return user
+    path = request.url.path.rstrip("/") or "/"
+    if allowed.match(path) or any(request.method == m and rx.match(path) for m, rx in _DX_CONFINED_COMMON):
+        return user
+    logger.warning(f"DX_CONFINED_DENIED role='{user.staff_role}' user='{user.username}' {request.method} {path}")
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This login is limited to its own pages.")
+
+
 def _enforce_corporate_viewer_scope(request: Request, user: AdminUser) -> AdminUser:
     from app.services.permissions import CORPORATE_VIEWER
 
@@ -572,11 +594,12 @@ async def verify_credentials(
     067 has not been applied still authenticates.
 
     Company-viewer logins are then confined to _CORPORATE_VIEWER_ROUTES, and
-    phlebotomist logins to _PHLEBOTOMIST_ROUTES, and DOCTOR/CASHIER logins
-    kept off _OPD_ROLE_DENIED_ROUTES.
+    phlebotomist logins to _PHLEBOTOMIST_ROUTES, DX logistics / B2B partner
+    logins to _DX_CONFINED_ROUTES, and DOCTOR/CASHIER logins kept off
+    _OPD_ROLE_DENIED_ROUTES.
     """
     user = await _authenticate_request(request, credentials)
-    user = _enforce_opd_role_scope(request, user)
+    user = _enforce_dx_confined_scope(request, _enforce_opd_role_scope(request, user))
     return _enforce_phlebotomist_scope(request, _enforce_corporate_viewer_scope(request, user))
 
 
@@ -896,6 +919,9 @@ async def get_current_admin(
             "opd_state": None,
             "opd_doctor_id": user.doctor_id,
             "ipd_access": None,
+            "dx_access": None,
+            "dx_state": None,
+            "dx_site_ids": None,
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -904,8 +930,14 @@ async def get_current_admin(
     assistant_on = (
         settings.assistant_enabled
         and kriya_ketu_enabled(clinic)
-        and user.staff_role not in (CORPORATE_VIEWER, PHLEBOTOMIST)
+        and user.staff_role not in (CORPORATE_VIEWER, PHLEBOTOMIST, "LOGISTICS_RUNNER", "B2B_PARTNER")
     )
+    # Diagnostic OS (migration 125): a branch-pinned login works at its branch's site(s); None = every site.
+    dx = dx_access(clinic)
+    dx_site_ids = None
+    if dx and user.branch_id:
+        res = await sb(scoped_query("dx_sites", scoped_clinic_id, "id").eq("branch_id", user.branch_id))
+        dx_site_ids = [r["id"] for r in (res.data or [])]
     features = (
         list(ALL_FEATURES)
         if plan == "enterprise"
@@ -937,6 +969,10 @@ async def get_current_admin(
         "opd_doctor_id": user.doctor_id,
         # IPD OS (migration 111): 'ACTIVE', 'WIND_DOWN' (no new admissions) or None
         "ipd_access": ipd_access(clinic),
+        # Diagnostic OS (migration 125): 'ACTIVE', 'WIND_DOWN' (no new visits) or None
+        "dx_access": dx,
+        "dx_state": clinic.get("dx_state"),
+        "dx_site_ids": dx_site_ids,
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.

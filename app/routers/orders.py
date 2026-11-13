@@ -25,7 +25,7 @@ from app.routers.opd import _doctor_only, _opd_scope, _read_branch, _visit_in_br
 from app.services import orders
 from app.services.opd_billing import get_catalog
 from app.services.permissions import holds_order_permission
-from app.services.tenant import get_clinic_by_id, ipd_access, opd_enabled
+from app.services.tenant import get_clinic_by_id, dx_access, ipd_access, opd_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +89,12 @@ def _require(user: AdminUser, perm: str) -> None:
 
 
 async def _dx_scope(user: AdminUser, clinic_id: str, perm: str) -> str:
-    """Worklist routes: permission, tenant, and OPD or IPD entitlement."""
+    """Worklist routes: permission, tenant, and OPD, IPD or DX entitlement."""
     _require(user, perm)
     scope = enforce_clinic_access(user, clinic_id)
     clinic = await get_clinic_by_id(scope)
-    if not clinic or not (opd_enabled(clinic) or ipd_access(clinic)):
-        raise HTTPException(status_code=403, detail="Diagnostic orders need the OPD or IPD module.")
+    if not clinic or not (opd_enabled(clinic) or ipd_access(clinic) or dx_access(clinic)):
+        raise HTTPException(status_code=403, detail="Diagnostic orders need the OPD, IPD or Diagnostic OS module.")
     return scope
 
 

@@ -3278,6 +3278,26 @@
             #clinicDashboardContent .dash-seg,
             #clinicDashboardContent .dash-dept-track i { transition: none; }
         }
+        /* DX:foundation:START — Diagnostic OS setup (migration 125) */
+        .dx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 4px 18px; }
+        .dx-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+        .dx-checklist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 10px; }
+        .dx-checklist li { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface2); }
+        .dx-checklist .dx-mark { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 0.75rem; font-weight: 700; border: 1px solid var(--border2); color: var(--text3); }
+        .dx-checklist li.done .dx-mark { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+        .dx-checklist b { display: block; font-size: 0.9rem; }
+        .dx-checklist small { color: var(--text3); font-size: 0.78rem; }
+        .dx-live[hidden] { display: none; }
+        .dx-live { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+        .dx-sites td .muted { display: block; font-size: 0.78rem; }
+        @media (max-width: 640px) {
+            .dx-sites thead { display: none; }
+            .dx-sites, .dx-sites tbody, .dx-sites tr, .dx-sites td { display: block; width: 100%; }
+            .dx-sites tr { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+            .dx-sites td { border: 0; padding: 4px 0; }
+            .dx-sites td[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
+        }
+        /* DX:foundation:END */
     </style>
 </head>
 <body>
@@ -3547,6 +3567,11 @@
             <div class="nav-link" tabindex="0" data-page="radiology" data-rad="nav" style="display:none" onclick="go('radiology',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="12" cy="12" r="4"></circle><path d="M12 8v-2"></path><path d="M12 18v-2"></path></svg></span> Radiology
             </div>
+            <!-- DX:foundation:START — Diagnostic OS (migration 125): owner opt-in, no OPD needed -->
+            <div class="nav-link" tabindex="0" data-page="dxsetup" data-dx="nav DX_ADMIN DX_READ" style="display:none" onclick="go('dxsetup',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span> DX Setup
+            </div>
+            <!-- DX:foundation:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -5671,6 +5696,22 @@
                         <label class="check" data-orders="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RADIOLOGY_WRITE"> Radiology: write reports, PCPNDT Form F, sign (doctors)</label>
                         <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="INSURANCE_READ"> Insurance / TPA: view pre-auths, claims, ageing</label>
                         <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="INSURANCE_MANAGE"> Insurance / TPA: pre-auth decisions, claims, settlements</label>
+                        <!-- DX:foundation:START -->
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_READ"> Diagnostic OS: see visits, stages and setup</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_REGISTER"> Diagnostic OS: register patients and visits</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_BILLING"> Diagnostic OS: bills, receipts, refunds</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_COLLECT"> Diagnostic OS: sample collection and labels</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_LOGISTICS"> Diagnostic OS: transfer batches</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_RECEIVE"> Diagnostic OS: receive samples at the lab</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_VERIFY"> Diagnostic OS: technical verification, critical calls</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_DISPATCH"> Diagnostic OS: release, print and resend reports</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_CATALOGUE"> Diagnostic OS: edit the test master</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_CATALOGUE_APPROVE"> Diagnostic OS: approve test definitions</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_B2B_MANAGE"> Diagnostic OS: B2B accounts and ledger</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_REPORTS_MIS"> Diagnostic OS: MIS and exports</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_QC"> Diagnostic OS: quality control</label>
+                        <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_ADMIN"> Diagnostic OS: sites, settings, templates</label>
+                        <!-- DX:foundation:END -->
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -7185,6 +7226,78 @@
             </div>
             <div id="ipdSetupWards"></div>
         </div>
+        <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
+        <div id="pg-dxsetup" class="sec">
+            <div class="page-head">
+                <div><h2>DX Setup</h2><p>Sites, lab settings and go-live for the Diagnostic OS.</p></div>
+                <span id="dxLiveBadge" class="dx-live" hidden></span>
+            </div>
+            <div class="ipd-winddown" data-dx-winddown hidden>The Diagnostic OS is being switched off for this clinic: new visits and configuration are closed. Visits already registered continue to release.</div>
+            <div class="card">
+                <div class="card-head"><h3>Checklist</h3></div>
+                <ul class="dx-checklist" id="dxChecklist"></ul>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Sites</h3></div>
+                <p class="muted">One site per branch. The code is printed on tube labels and transfer manifests. Legal name, registration and NABL certificate appear on the report's "Tested at" line.</p>
+                <div id="dxSites"></div>
+                <div data-dx-edit id="dxSiteForm">
+                    <h4 id="dxSiteFormTitle" style="margin:18px 0 8px;">Add a site</h4>
+                    <div class="dx-grid">
+                        <div class="field" id="dxSiteBranchWrap"><label for="dxSiteBranch">Branch</label><select id="dxSiteBranch"></select></div>
+                        <div class="field"><label for="dxSiteKind">Kind</label><select id="dxSiteKind">
+                            <option value="collection_and_processing">Collection and processing</option>
+                            <option value="collection">Collection only</option>
+                            <option value="processing">Processing only</option></select></div>
+                        <div class="field"><label for="dxSiteCode">Code (2–6 letters/digits)</label><input id="dxSiteCode" maxlength="6" autocapitalize="characters" placeholder="BANJ"></div>
+                        <div class="field"><label for="dxSiteName">Display name</label><input id="dxSiteName" maxlength="120" placeholder="Banjara Hills lab"></div>
+                        <div class="field"><label for="dxSiteLegal">Legal name</label><input id="dxSiteLegal" maxlength="200"></div>
+                        <div class="field"><label for="dxSiteReg">Registration no.</label><input id="dxSiteReg" maxlength="80"></div>
+                        <div class="field"><label for="dxSiteNabl">NABL certificate no.</label><input id="dxSiteNabl" maxlength="80"></div>
+                    </div>
+                    <div class="dx-actions">
+                        <button type="button" class="btn btn-accent btn-sm" id="dxSiteSave" onclick="dxos.saveSite(this)">Add site</button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="dxSiteCancel" hidden onclick="dxos.resetSiteForm()">Cancel edit</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Lab settings</h3></div>
+                <fieldset id="dxSettingsForm" style="border:0; padding:0; margin:0;">
+                    <div class="dx-grid">
+                        <div class="field"><label for="dxApproval">Approval levels</label><select id="dxApproval">
+                            <option value="2">2 — entry, then pathologist approval</option>
+                            <option value="3">3 — entry, technical verification, approval</option></select></div>
+                        <div class="field"><label for="dxRelease">Report release</label><select id="dxRelease">
+                            <option value="when_complete">When every test of the visit is approved</option>
+                            <option value="per_department">Per department as it completes</option>
+                            <option value="off">Manual release only</option></select></div>
+                        <div class="field"><label for="dxTatClock">TAT clock starts at</label><select id="dxTatClock">
+                            <option value="registration">Registration</option><option value="receipt">Sample receipt</option></select></div>
+                        <div class="field"><label for="dxLabelMode">Tube labels</label><select id="dxLabelMode">
+                            <option value="per_sample">One per tube</option><option value="per_test">One per test</option></select></div>
+                        <div class="field"><label for="dxExtraLabels">Extra labels per tube (0–3)</label><input id="dxExtraLabels" type="number" min="0" max="3"></div>
+                        <div class="field"><label for="dxSeqFloor">First sample number</label><input id="dxSeqFloor" type="number" min="1" max="99999999"></div>
+                        <div class="field"><label for="dxAccPrefix">Visit number prefix</label><input id="dxAccPrefix" maxlength="8"></div>
+                        <div class="field"><label for="dxBatchPrefix">Transfer batch prefix</label><input id="dxBatchPrefix" maxlength="8"></div>
+                        <div class="field"><label for="dxB2bPrefix">B2B prefix</label><input id="dxB2bPrefix" maxlength="8"></div>
+                        <div class="field"><label for="dxShareTtl">Share link validity (hours)</label><input id="dxShareTtl" type="number" min="1" max="720"></div>
+                    </div>
+                    <div class="dx-grid" style="margin-top:8px;">
+                        <label class="check"><input type="checkbox" id="dxCollectFirst"> Collect samples before payment</label>
+                        <label class="check"><input type="checkbox" id="dxRegisterLabel"> Print a register-book label</label>
+                        <label class="check"><input type="checkbox" id="dxCriticalCall"> Critical results need a recorded phone call</label>
+                        <label class="check"><input type="checkbox" id="dxReferrerCopy"> Send the referring doctor a copy by default</label>
+                    </div>
+                    <p class="muted">Reports are never released to the patient while the bill is unpaid, and insurance / TPA visits go to the payer, whatever these settings say. After go-live the first sample number can only be raised.</p>
+                    <div class="dx-actions" data-dx-edit>
+                        <button type="button" class="btn btn-accent btn-sm" onclick="dxos.saveSettings(this)">Save settings</button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="dxGoLive" onclick="dxos.goLive(this)">Go live</button>
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+        <!-- DX:foundation:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -7978,6 +8091,22 @@
                 <label class="check" data-orders="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RADIOLOGY_WRITE"> Radiology: report &amp; Form F (doctors)</label>
                 <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="INSURANCE_READ"> Insurance: view</label>
                 <label class="check" data-ipd="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="INSURANCE_MANAGE"> Insurance: manage claims</label>
+                <!-- DX:foundation:START -->
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_READ"> Diagnostic OS: see visits, stages and setup</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_REGISTER"> Diagnostic OS: register patients and visits</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_BILLING"> Diagnostic OS: bills, receipts, refunds</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_COLLECT"> Diagnostic OS: sample collection and labels</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_LOGISTICS"> Diagnostic OS: transfer batches</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_RECEIVE"> Diagnostic OS: receive samples at the lab</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_VERIFY"> Diagnostic OS: technical verification, critical calls</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_DISPATCH"> Diagnostic OS: release, print and resend reports</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_CATALOGUE"> Diagnostic OS: edit the test master</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_CATALOGUE_APPROVE"> Diagnostic OS: approve test definitions</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_B2B_MANAGE"> Diagnostic OS: B2B accounts and ledger</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_REPORTS_MIS"> Diagnostic OS: MIS and exports</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_QC"> Diagnostic OS: quality control</label>
+                <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_ADMIN"> Diagnostic OS: sites, settings, templates</label>
+                <!-- DX:foundation:END -->
             </div>
         </div>
         <div class="modal-actions">
@@ -8565,6 +8694,10 @@ let myPlanServiceLines = [];
 let myOpd = false;
 let myOpdState = null;
 let myIpd = null;  // /admin/me.ipd_access: 'ACTIVE' | 'WIND_DOWN' | null
+/* DX:foundation:START */
+let myDx = null;         // /admin/me.dx_access: 'ACTIVE' | 'WIND_DOWN' | null
+let myDxSiteIds = null;  // /admin/me.dx_site_ids: a branch-pinned login's sites; null = every site
+/* DX:foundation:END */
 let myDoctorId = null;
 
 function hasPermission(perm) {
@@ -8685,6 +8818,7 @@ function applyFeatureVisibility() {
 
     applyOpdGates();
     applyIpdGates();
+    /* DX:foundation:START */ applyDxGates(); /* DX:foundation:END */
     applyOrdersGates();
     applyPermissionVisibility();
     applyOpdRoleNav();
@@ -8848,6 +8982,179 @@ function applyIpdGates() {
     const admitCard = document.getElementById('ipdAdmitCard');
     if (admitCard) admitCard.style.display = myIpd === 'ACTIVE' ? '' : 'none';
 }
+
+/* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
+   holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
+const DX_GRANTS_IMPLIED_BY_ROLE = {
+    DX_READ: ['DIAGNOSTIC_OPERATOR', 'LAB_OPERATOR', 'PATHOLOGIST', 'LAB_SUPERVISOR', 'LOGISTICS_RUNNER', 'PROCESSING_ADMIN', 'B2B_MANAGER'],
+    DX_RECEIVE: ['LAB_OPERATOR', 'LAB_SUPERVISOR', 'PROCESSING_ADMIN'],
+    DX_VERIFY: ['PATHOLOGIST', 'LAB_SUPERVISOR', 'PROCESSING_ADMIN'],
+    DX_LOGISTICS: ['LOGISTICS_RUNNER'],
+    DX_DISPATCH: ['PROCESSING_ADMIN'],
+    DX_ADMIN: ['PROCESSING_ADMIN'],
+    DX_B2B_MANAGE: ['B2B_MANAGER'],
+};
+function dxCan(perm) {
+    if (!myDx) return false;
+    if (myRole === 'super_admin' || myRole === 'clinic_admin') return true;
+    return (myPermissions || []).includes(perm) || (DX_GRANTS_IMPLIED_BY_ROLE[perm] || []).includes(myStaffRole);
+}
+// data-dx="nav PERM PERM…": shown when DX is on and the user holds any listed permission.
+function applyDxGates() {
+    document.querySelectorAll('[data-dx]').forEach(el => {
+        const perms = (el.dataset.dx || '').split(' ').filter(t => t.startsWith('DX_'));
+        el.style.display = myDx && (!perms.length || perms.some(dxCan)) ? '' : 'none';
+        const cb = el.querySelector && el.querySelector('input[type="checkbox"]');
+        if (!myDx && cb) cb.checked = false;
+    });
+    document.querySelectorAll('[data-dx-winddown]').forEach(el => { el.hidden = myDx !== 'WIND_DOWN'; });
+}
+
+const dxos = {
+    setup: null,
+    editingSite: null,
+    canEdit() { return dxCan('DX_ADMIN'); },
+    clinicWide() { return !myBranchId; },
+    async loadSetup() {
+        const list = document.getElementById('dxSites');
+        list.innerHTML = loading();
+        try {
+            dxos.setup = await api('/admin/dx/setup');
+        } catch (e) {
+            list.innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+            return;
+        }
+        dxos.render();
+    },
+    render() {
+        const st = dxos.setup, s = st.settings, edit = dxos.canEdit();
+        const closed = st.access === 'WIND_DOWN';
+        document.getElementById('dxChecklist').innerHTML = st.checklist.map(c => `
+            <li class="${c.done ? 'done' : ''}"><span class="dx-mark" aria-hidden="true">${c.done ? '✓' : ''}</span>
+                <div><b>${esc(c.label)}</b><small>${c.available === false ? 'Arrives with the Test Master' : esc(c.detail || (c.done ? 'Done' : 'To do'))}</small>
+                <span class="sr-only">${c.done ? 'done' : 'not done'}</span></div></li>`).join('');
+        const branchName = id => (st.branches.find(b => b.id === id) || {}).name || '—';
+        const kinds = { collection: 'Collection', processing: 'Processing', collection_and_processing: 'Collection + processing' };
+        document.getElementById('dxSites').innerHTML = st.sites.length ? `<div class="tbl-wrap"><table class="dx-sites"><thead><tr>
+            <th>Branch</th><th>Kind</th><th>Code</th><th>Name</th><th>Legal / NABL</th><th>Status</th><th></th></tr></thead><tbody>
+            ${st.sites.map(x => `<tr>
+                <td data-label="Branch">${esc(branchName(x.branch_id))}</td>
+                <td data-label="Kind">${esc(kinds[x.kind] || x.kind)}</td>
+                <td data-label="Code"><b>${esc(x.code)}</b></td>
+                <td data-label="Name">${esc(x.display_name)}</td>
+                <td data-label="Legal / NABL">${esc(x.legal_name || '—')}<span class="muted">${[x.registration_no && 'Reg. ' + esc(x.registration_no), x.nabl_certificate_no && 'NABL ' + esc(x.nabl_certificate_no)].filter(Boolean).join(' · ')}</span></td>
+                <td data-label="Status">${x.is_active ? 'Active' : 'Inactive'}</td>
+                <td>${edit ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxos.editSite('${esc(x.id)}')">Edit</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dxos.toggleSite('${esc(x.id)}', ${!x.is_active}, this)">${x.is_active ? 'Deactivate' : 'Activate'}</button>` : ''}</td>
+            </tr>`).join('')}</tbody></table></div>` : '<p class="muted">No sites yet. Add one for each branch that collects or processes samples.</p>';
+        const free = dxos.freeBranches = st.branches.filter(b => b.is_active !== false && !st.sites.some(x => x.branch_id === b.id));
+        document.getElementById('dxSiteBranch').innerHTML = free.length
+            ? free.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')
+            : '<option value="">Every branch has a site</option>';
+        document.querySelectorAll('#pg-dxsetup [data-dx-edit]').forEach(el => { el.hidden = !edit; });
+        const f = id => document.getElementById(id);
+        f('dxApproval').value = String(s.approval_levels); f('dxRelease').value = s.auto_release;
+        f('dxTatClock').value = s.tat_clock; f('dxLabelMode').value = s.label_mode;
+        f('dxExtraLabels').value = s.extra_labels; f('dxSeqFloor').value = s.sample_seq_floor;
+        f('dxAccPrefix').value = s.accession_prefix; f('dxBatchPrefix').value = s.batch_prefix;
+        f('dxB2bPrefix').value = s.b2b_prefix; f('dxShareTtl').value = s.share_link_ttl_hours;
+        f('dxCollectFirst').checked = !!s.collect_before_payment; f('dxRegisterLabel').checked = !!s.register_label;
+        f('dxCriticalCall').checked = !!s.critical_call_required; f('dxReferrerCopy').checked = !!s.referrer_copy_default;
+        f('dxSettingsForm').disabled = !edit || !dxos.clinicWide();
+        f('dxSettingsForm').querySelector('[data-dx-edit]').hidden = !edit || !dxos.clinicWide();
+        const live = f('dxLiveBadge');
+        live.hidden = !s.went_live_at;
+        if (s.went_live_at) live.textContent = 'Live since ' + new Date(s.went_live_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+        f('dxGoLive').hidden = !!s.went_live_at || closed;
+        dxos.resetSiteForm();
+        applyDxGates();
+    },
+    resetSiteForm() {
+        dxos.editingSite = null;
+        document.getElementById('dxSiteForm').hidden = !dxos.canEdit() || !(dxos.freeBranches || []).length;
+        ['dxSiteCode', 'dxSiteName', 'dxSiteLegal', 'dxSiteReg', 'dxSiteNabl'].forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('dxSiteKind').value = 'collection_and_processing';
+        document.getElementById('dxSiteBranchWrap').hidden = false;
+        document.getElementById('dxSiteFormTitle').textContent = 'Add a site';
+        document.getElementById('dxSiteSave').textContent = 'Add site';
+        document.getElementById('dxSiteCancel').hidden = true;
+    },
+    editSite(id) {
+        const x = dxos.setup.sites.find(v => v.id === id);
+        if (!x) return;
+        dxos.editingSite = id;
+        const f = el => document.getElementById(el);
+        f('dxSiteForm').hidden = false;
+        f('dxSiteKind').value = x.kind; f('dxSiteCode').value = x.code; f('dxSiteName').value = x.display_name;
+        f('dxSiteLegal').value = x.legal_name || ''; f('dxSiteReg').value = x.registration_no || ''; f('dxSiteNabl').value = x.nabl_certificate_no || '';
+        f('dxSiteBranchWrap').hidden = true;
+        f('dxSiteFormTitle').textContent = 'Edit site ' + x.code;
+        f('dxSiteSave').textContent = 'Save site';
+        f('dxSiteCancel').hidden = false;
+        f('dxSiteCode').focus();
+    },
+    async saveSite(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        const body = { kind: v('dxSiteKind'), code: v('dxSiteCode').toUpperCase(), display_name: v('dxSiteName'),
+                       legal_name: v('dxSiteLegal') || null, registration_no: v('dxSiteReg') || null, nabl_certificate_no: v('dxSiteNabl') || null };
+        if (!/^[A-Z0-9]{2,6}$/.test(body.code)) { toast('Site code: 2 to 6 letters or digits.', true); return; }
+        if (body.display_name.length < 2) { toast('Enter a display name.', true); return; }
+        btn.disabled = true;
+        try {
+            if (dxos.editingSite) {
+                await apiPut(`/admin/dx/sites/${encodeURIComponent(dxos.editingSite)}`, body);
+            } else {
+                body.branch_id = v('dxSiteBranch');
+                if (!body.branch_id) { toast('Every branch already has a site.', true); return; }
+                Object.keys(body).forEach(k => { if (body[k] === null) delete body[k]; });
+                await apiPost('/admin/dx/sites', body);
+            }
+            toast('Site saved');
+            await dxos.loadSetup();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async toggleSite(id, active, btn) {
+        btn.disabled = true;
+        try {
+            await apiPut(`/admin/dx/sites/${encodeURIComponent(id)}`, { is_active: active });
+            await dxos.loadSetup();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async saveSettings(btn) {
+        const f = id => document.getElementById(id), n = id => parseInt(f(id).value, 10);
+        const body = { version: dxos.setup.settings.version, approval_levels: n('dxApproval'), auto_release: f('dxRelease').value,
+                       tat_clock: f('dxTatClock').value, label_mode: f('dxLabelMode').value, extra_labels: n('dxExtraLabels'),
+                       sample_seq_floor: n('dxSeqFloor'), accession_prefix: f('dxAccPrefix').value.trim().toUpperCase(),
+                       batch_prefix: f('dxBatchPrefix').value.trim().toUpperCase(), b2b_prefix: f('dxB2bPrefix').value.trim().toUpperCase(),
+                       share_link_ttl_hours: n('dxShareTtl'), collect_before_payment: f('dxCollectFirst').checked,
+                       register_label: f('dxRegisterLabel').checked, critical_call_required: f('dxCriticalCall').checked,
+                       referrer_copy_default: f('dxReferrerCopy').checked };
+        btn.disabled = true;
+        try {
+            const r = await apiPatch('/admin/dx/settings', body);
+            dxos.setup.settings = r.settings;
+            toast('Lab settings saved');
+            await dxos.loadSetup();
+        } catch (e) {
+            // CAS: someone else saved first. Show their version rather than overwrite it.
+            toast(e.status === 409 ? 'Someone else changed these settings. The latest values are loaded; re-apply your change.' : e.message, true);
+            if (e.status === 409) await dxos.loadSetup();
+        } finally { btn.disabled = false; }
+    },
+    async goLive(btn) {
+        if (!confirm('Go live with the Diagnostic OS? The first sample number is fixed from now on and can only be raised.')) return;
+        btn.disabled = true;
+        try {
+            await apiPost('/admin/dx/go-live', { version: dxos.setup.settings.version });
+            toast('The lab is live');
+            await dxos.loadSetup();
+        } catch (e) {
+            toast(e.message, true);
+            if (e.status === 409) await dxos.loadSetup();
+        } finally { btn.disabled = false; }
+    },
+};
+/* DX:foundation:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -12591,6 +12898,7 @@ async function login() {
     myOpdState = me.opd_state || null;
     myDoctorId = me.opd_doctor_id || null;
     myIpd = me.ipd_access || null;
+    /* DX:foundation:START */ myDx = me.dx_access || null; myDxSiteIds = me.dx_site_ids || null; /* DX:foundation:END */
     myServiceLines = Array.isArray(me.service_lines) ? me.service_lines : [];
     myPlanServiceLines = Array.isArray(me.plan_service_lines) ? me.plan_service_lines : [];
     myUsername = me.username || '';
@@ -12766,6 +13074,7 @@ async function adoptClinicPlan() {
             myOpdState = scoped.opd_state || null;
             myDoctorId = scoped.opd_doctor_id || null;
             myIpd = scoped.ipd_access || null;
+            /* DX:foundation:START */ myDx = scoped.dx_access || null; myDxSiteIds = scoped.dx_site_ids || null; /* DX:foundation:END */
             myServiceLines = Array.isArray(scoped.service_lines) ? scoped.service_lines : [];
             myPlanServiceLines = Array.isArray(scoped.plan_service_lines) ? scoped.plan_service_lines : [];
         }
@@ -14152,7 +14461,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage() };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ };
     if (loaders[page]) loaders[page]();
 }
 

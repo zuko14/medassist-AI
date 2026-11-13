@@ -83,6 +83,8 @@ CREATE TABLE dx_sites (
 `tat_clock` (`registration|receipt`), `accession_prefix` ("LAB-"), `batch_prefix` ("TRN-"), `b2b_prefix` ("B2B-"),
 `referrer_copy_default` (bool), `critical_call_required` (bool), `share_link_ttl_hours` (72),
 `instrument_auto_enter` (bool), `went_live_at` (timestamp), `version` (int, CAS on PATCH).
+The CAS is `dx_update_settings(p_clinic_id, p_settings, p_expected_version)` (migration 125): one `UPDATE … WHERE
+version = expected` that bumps `version`; a stale editor gets `dx_settings_conflict` (409).
 
 ## 3. DX-M2 — Catalogue
 

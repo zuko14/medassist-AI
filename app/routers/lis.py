@@ -27,7 +27,7 @@ from app.routers.admin import (
 from app.routers.opd import _read_branch
 from app.services import lis, orders
 from app.services.permissions import holds_lab_permission, holds_order_permission
-from app.services.tenant import get_clinic_by_id, ipd_access, opd_enabled
+from app.services.tenant import get_clinic_by_id, dx_access, ipd_access, opd_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -98,15 +98,15 @@ class ParameterIn(_In):
 # ── guards ──────────────────────────────────────────────────────────────────
 
 async def _lis_scope(user: AdminUser, clinic_id: str, *perms: str) -> str:
-    """Any one of `perms` (LAB_* or ORDERS_READ), tenant, and OPD or IPD entitlement."""
+    """Any one of `perms` (LAB_* or ORDERS_READ), tenant, and OPD, IPD or DX entitlement."""
     allowed = any(holds_order_permission(user, p) if p.startswith("ORDERS_") else holds_lab_permission(user, p)
                   for p in perms)
     if not allowed:
         raise HTTPException(status_code=403, detail=f"Missing permission: {' or '.join(perms)}")
     scope = enforce_clinic_access(user, clinic_id)
     clinic = await get_clinic_by_id(scope)
-    if not clinic or not (opd_enabled(clinic) or ipd_access(clinic)):
-        raise HTTPException(status_code=403, detail="The lab module needs the OPD or IPD module.")
+    if not clinic or not (opd_enabled(clinic) or ipd_access(clinic) or dx_access(clinic)):
+        raise HTTPException(status_code=403, detail="The lab module needs the OPD, IPD or Diagnostic OS module.")
     return scope
 
 

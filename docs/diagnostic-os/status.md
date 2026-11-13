@@ -31,12 +31,12 @@ unless the account carries a recorded authorisation.
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P0 — Discovery & baseline** |
-| Next task | **DX-00** |
-| Working branch | (record the branch you use; one branch per phase or lane, from `main`) |
-| Last commit touching DX | `docs(diagnostic-os): …` (this document set) |
-| Last VERIFIED gate | none |
-| Open blockers | none |
+| Active phase | **P2 — Catalogue** (P0 and P1 VERIFIED 2026-11-13) |
+| Next task | **DX-12** (migration DX-M2, next free number 126) |
+| Working branch | `dx/p1-foundation` (from `main` @ `94de8ae`; not pushed, no PR) |
+| Last commit touching DX | `feat(dx): P0 baseline + P1 foundation (DX-00…DX-11)` on `dx/p1-foundation` |
+| Last VERIFIED gate | P1 DG1–DG7 (§9, 2026-11-13) |
+| Open blockers | none for code. Migration 125 is **not applied** to Supabase (owner action, ROLLOUT §0.4: apply before deploying this code) |
 | Lanes running in parallel | none |
 
 ## 2. Resume protocol (after a pause of any length)
@@ -52,20 +52,20 @@ unless the account carries a recorded authorisation.
 ## 3. Discovery and baseline (P0) — fill before any code
 | Item | Result |
 |:-|:-|
-| Repo / branch / HEAD | docs authored at `main` @ `56f719f` (2026-11-05) — implementer records the HEAD they start from |
-| Latest migration on disk | `124_insurance_tpa_and_cashless.sql` (at authoring) |
-| Migrations 115–124 applied to Supabase? | **Not at authoring** (Hospital OS open items G1-1, G5-1, G8-1, G13-1, G6-1). Record current state. DX staging needs 115 and 118 applied first |
-| Python / runner | record (`.venv/Scripts/python.exe` on the owner's Windows machine; Python 3.12 + pytest in Linux sessions). The authoring session had **no pytest installed**, so no baseline was run there |
-| **Baseline full suite** | record `python -m pytest -q -rs` → `<passed>, <skipped>, <failed>` — last recorded in Hospital OS: 7672 passed / 4 skipped / 0 failed (2026-10-30); later sessions 52–57 added tests |
-| Pre-existing failures | record; any failure here is fixed or explicitly accepted by the owner before P1 |
-| Facts F1–F16 (GAP-ANALYSIS §3) and AUDIT A1–A29 evidence still true at HEAD | re-check with the commands in DX-01 and record |
-| Owner decisions O-DX-1…11 | record answers or "default accepted" |
+| Repo / branch / HEAD | P0 started at `main` @ `94de8ae` (2026-11-13, "Merge pull request #8"); untracked `docs/PROJECT_DOCUMENTATION.md`, `.DS_Store` left alone |
+| Latest migration on disk | `124_insurance_tpa_and_cashless.sql` at start → DX-M1 took **125** (`125_dx_os_foundation.sql`) |
+| Migrations 115–124 applied to Supabase? | **Not verified** this session (no Supabase access). Still assumed not applied; DX staging needs 115, 118 and 125 applied first |
+| Python / runner | macOS, `.venv/bin/python` = Python 3.12.15, pytest 8.0.0; real-Postgres tests use `pgserver` (`tmp_pg_pytest_data`) |
+| **Baseline full suite** | `python -m pytest -q -rs` at `94de8ae` (clean worktree) → **8443 passed, 5 skipped, 0 failed** in 293.84 s. Skips: 4 × `KRIYA_TEST_LIVE` production reads, 1 × MocDoc live sandbox |
+| Pre-existing failures | **none** |
+| Facts F1–F16 (GAP-ANALYSIS §3) and AUDIT A1–A29 evidence still true at HEAD | **Confirmed, no deltas.** `opd_enabled` still requires `booking` (F1; `diagstream` has none); `_lis_scope` `app/routers/lis.py:100` and orders `_dx_scope` `app/routers/orders.py:91` required `opd_enabled or ipd_access` (F2); `opd_orders.source IN ('opd','ipd')`, `doctor_id NOT NULL`, `opd_orders_source_shape` at `115_…:41/48/79` (F3); `spawn_background_task(deliver_report` at `app/services/lis.py:389` (F4); `collect_sample` / `complete_order` `app/services/orders.py:262/282` have no `source` check (F12/A4); `upload_and_send` `lab_reports.py:230`, `template_name_for` `:24`, `_PHLEBOTOMIST_ROUTES` `admin.py:476`, `get_family_members` `database.py:1745`, `_apply_prepaid` `opd_billing.py:447`, `_validate_and_price_items` `opd_billing.py:1545`, `get_review_queue` `lis.py:438`, `route_recipient_for_provider` `report_routing.py:83`, `report_dispatch_allowed` `subscription.py:355`, `opd_next_counter` `103_…:195`, `patients_clinic_phone_key` `035_…:112`, `idx_lab_reports_clinic_external_report` mig 026. Other `opd_orders` readers (for DX-19): `clinical_documents.py`, `masters.py`, `opd_billing.py`, `radiology.py` (3) — as AUDIT §2 |
+| Owner decisions O-DX-1…11 | not re-asked; **defaults in force** (ADR.md "Open owner decisions") |
 
 ## 4. Phase board
 | Phase | Scope | Tasks | Depends on | Can run in parallel with | Migration | Gate to close | State |
 |:-|:-|:-|:-|:-|:-|:-|:-|
-| P0 | Discovery & baseline | DX-00–01 | — | — | — | §3 filled | NOT_STARTED |
-| P1 | Foundation: entitlement, permissions, scope, sites, owner toggle, setup page | DX-02–11 | P0 | Lane PURE (DX-13, DX-27a, DX-43a) | DX-M1 | DG1–DG7 | NOT_STARTED |
+| P0 | Discovery & baseline | DX-00–01 | — | — | — | §3 filled | VERIFIED |
+| P1 | Foundation: entitlement, permissions, scope, sites, owner toggle, setup page | DX-02–11 | P0 | Lane PURE (DX-13, DX-27a, DX-43a) | DX-M1 | DG1–DG7 | VERIFIED |
 | P2 | Catalogue: departments, containers, signatories, test master, parameters, formulas, seed, approval | DX-12–17 | P1 | Lane PURE | DX-M2 | DG1–DG7 | NOT_STARTED |
 | P3 | Registration, visits, orders (`source=dx`), billing, booking conversion | DX-18–25 | P2 | — | DX-M3 | DG1–DG7 | NOT_STARTED |
 | P4 | Samples, labels, collection (desk + home), rejection, same-site receipt | DX-26–30 | P3 | P8a | DX-M4 | DG1–DG7 | NOT_STARTED |
@@ -85,7 +85,7 @@ that may be built from P1 onward by a separate agent (AGENT-PROMPT.md §3).
 ## 5. Migration register (numbers assigned at merge time — ADR-DX-18)
 | DX id | File | Merged in commit | Applied to staging | Applied to production |
 |:-|:-|:-|:-|:-|
-| DX-M1 | — | — | — | — |
+| DX-M1 | `125_dx_os_foundation.sql` (+ `rollback/125_rollback_dx_os_foundation.sql`) | `dx/p1-foundation` (not merged) | no | no |
 | DX-M2 | — | — | — | — |
 | DX-M3 | — | — | — | — |
 | DX-M4 | — | — | — | — |
@@ -102,22 +102,22 @@ green, audit on writes, mapped errors, docs updated in the same commit.
 ### P0 — Discovery & baseline
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| DX-00 | Read AGENTS.md, this folder, `docs/hospital-os/status.md`, `docs/sessions/SESSION_44_G2_LIS.md`, `SESSION_41`, `SESSION_28`; record §3 (HEAD, latest migration, Supabase state of 115–124, runner, **baseline full suite**, pre-existing failures, owner decisions) | — | §3 complete | full suite | NOT_STARTED |
-| DX-01 | Re-verify F1–F16 at HEAD: `grep -n "def opd_enabled" -A15 app/services/tenant.py`; `grep -n "_lis_scope" -A12 app/routers/lis.py`; `grep -n "opd_orders_source_shape\|doctor_id" migrations/115_*.sql`; `grep -n "spawn_background_task(deliver_report" app/services/lis.py`; `grep -rn "opd_orders" app --include=*.py \| grep -v "^app/services/orders.py\|^app/services/lis.py"` (list every reader for DX-19); **and every AUDIT.md §1/§2 evidence line** (re-locate by symbol if lines moved: `upload_and_send`, `idx_lab_reports_clinic_external_report`, `collect_sample`, `complete_order`, `_PHLEBOTOMIST_ROUTES`, `get_family_members`, `_apply_prepaid`, `_validate_and_price_items`, `resend_report`, `opd_next_counter`, `patients_clinic_phone_key`); record deltas in §7 | DX-00 | F1–F16 and AUDIT A1–A29 confirmed or design updated | — | NOT_STARTED |
+| DX-00 | Read AGENTS.md, this folder, `docs/hospital-os/status.md`, `docs/sessions/SESSION_44_G2_LIS.md`, `SESSION_41`, `SESSION_28`; record §3 (HEAD, latest migration, Supabase state of 115–124, runner, **baseline full suite**, pre-existing failures, owner decisions) | — | §3 complete | full suite | VERIFIED |
+| DX-01 | Re-verify F1–F16 at HEAD: `grep -n "def opd_enabled" -A15 app/services/tenant.py`; `grep -n "_lis_scope" -A12 app/routers/lis.py`; `grep -n "opd_orders_source_shape\|doctor_id" migrations/115_*.sql`; `grep -n "spawn_background_task(deliver_report" app/services/lis.py`; `grep -rn "opd_orders" app --include=*.py \| grep -v "^app/services/orders.py\|^app/services/lis.py"` (list every reader for DX-19); **and every AUDIT.md §1/§2 evidence line** (re-locate by symbol if lines moved: `upload_and_send`, `idx_lab_reports_clinic_external_report`, `collect_sample`, `complete_order`, `_PHLEBOTOMIST_ROUTES`, `get_family_members`, `_apply_prepaid`, `_validate_and_price_items`, `resend_report`, `opd_next_counter`, `patients_clinic_phone_key`); record deltas in §7 | DX-00 | F1–F16 and AUDIT A1–A29 confirmed or design updated | — | VERIFIED |
 
 ### P1 — Foundation (DX-M1)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| DX-02 | Migration DX-M1 + rollback + verify block (`clinics.dx_state`, `dx_settings`, `dx_sites`, `dx_purging`, `dx_purge_clinic` v1); add to `verify_supabase_schema.sql` | DX-01 | applies on latest; idempotent; rollback + re-apply | `test_migration_dx_m1.py` | NOT_STARTED |
-| DX-03 | `app/services/tenant.py`: `OPT_IN_FEATURES["dx_enabled"]`, `dx_eligible`, `dx_access` (ADR-DX-02) | DX-02 | off by default; wildcard alone never enables; partner refused; no OPD needed | `test_dx_feature_gate.py` | NOT_STARTED |
-| DX-04 | `app/services/permissions.py`: DX permissions, new roles, presets, role-implied grants (SECURITY §3), `holds_dx_permission`; staff grant cap respected | — | existing logins gain nothing except listed implied grants | `test_dx_feature_gate.py`, existing permission tests | NOT_STARTED |
-| DX-05 | `app/routers/dx.py` + `app/services/dx.py`: `_dx_scope`, site-scope helper `_visit_for` skeleton, `provision_defaults` (sites from branches, departments, containers, rejection reasons later), `deactivation_preview`, routes `/setup`, `/settings` (CAS), `/sites`, `/go-live`; include router in `app/main.py` | DX-03, DX-04 | every route checks permission → tenant → entitlement → wind-down | `test_dx_feature_gate.py` | NOT_STARTED |
-| DX-06 | `app/routers/platform.py`: `dx_enabled` branch (eligibility 400, provision, 409 preview, confirm → WIND_DOWN, re-enable), `GET …/dx/deactivation-preview`, purge order (`dx_purge_clinic` first); `admin/platform.html` DX card `toggleDx` | DX-05 | ADR-DX-14 table holds | `test_dx_feature_gate.py` | NOT_STARTED |
-| DX-07 | `app/routers/admin.py`: `/admin/me` → `dx_access`, `dx_state`, `dx_site_ids`; `verify_credentials` confinement for `LOGISTICS_RUNNER` nav | DX-04 | | `test_dx_feature_gate.py` | NOT_STARTED |
-| DX-08 | Widen `_lis_scope` (`app/routers/lis.py`) and the orders scope (`app/routers/orders.py`) with `or dx_access(clinic)` | DX-03 | OPD/IPD clinics unchanged; DX clinic reaches LIS; clinic with none refused | `test_dx_feature_gate.py`; DG5 unedited | NOT_STARTED |
-| DX-09 | `app/tenancy.py` registration of DX-M1 tables; matrices assert `/admin/dx` route count | DX-05 | DG1, DG2 green | DG1, DG2 | NOT_STARTED |
-| DX-10 | `tests/test_dx_no_llm.py` (AST guard, ADR-DX-10) | DX-05 | | itself | NOT_STARTED |
-| DX-11 | `admin/index.html`: `data-dx` gating, `applyDxGates()`, sidebar group, **DX Setup** page (checklist, sites, settings) | DX-05–07 | live UI check 1440/390 px | manual (record §9) | NOT_STARTED |
+| DX-02 | Migration DX-M1 + rollback + verify block (`clinics.dx_state`, `dx_settings`, `dx_sites`, `dx_purging`, `dx_purge_clinic` v1); add to `verify_supabase_schema.sql` | DX-01 | applies on latest; idempotent; rollback + re-apply | `test_migration_dx_m1.py` | VERIFIED |
+| DX-03 | `app/services/tenant.py`: `OPT_IN_FEATURES["dx_enabled"]`, `dx_eligible`, `dx_access` (ADR-DX-02) | DX-02 | off by default; wildcard alone never enables; partner refused; no OPD needed | `test_dx_feature_gate.py` | VERIFIED |
+| DX-04 | `app/services/permissions.py`: DX permissions, new roles, presets, role-implied grants (SECURITY §3), `holds_dx_permission`; staff grant cap respected | — | existing logins gain nothing except listed implied grants | `test_dx_feature_gate.py`, existing permission tests | VERIFIED |
+| DX-05 | `app/routers/dx.py` + `app/services/dx.py`: `_dx_scope`, site-scope helper `_visit_for` skeleton, `provision_defaults` (sites from branches, departments, containers, rejection reasons later), `deactivation_preview`, routes `/setup`, `/settings` (CAS), `/sites`, `/go-live`; include router in `app/main.py` | DX-03, DX-04 | every route checks permission → tenant → entitlement → wind-down | `test_dx_feature_gate.py` | VERIFIED |
+| DX-06 | `app/routers/platform.py`: `dx_enabled` branch (eligibility 400, provision, 409 preview, confirm → WIND_DOWN, re-enable), `GET …/dx/deactivation-preview`, purge order (`dx_purge_clinic` first); `admin/platform.html` DX card `toggleDx` | DX-05 | ADR-DX-14 table holds | `test_dx_feature_gate.py` | VERIFIED |
+| DX-07 | `app/routers/admin.py`: `/admin/me` → `dx_access`, `dx_state`, `dx_site_ids`; `verify_credentials` confinement for `LOGISTICS_RUNNER` nav | DX-04 | | `test_dx_feature_gate.py` | VERIFIED |
+| DX-08 | Widen `_lis_scope` (`app/routers/lis.py`) and the orders scope (`app/routers/orders.py`) with `or dx_access(clinic)` | DX-03 | OPD/IPD clinics unchanged; DX clinic reaches LIS; clinic with none refused | `test_dx_feature_gate.py`; DG5 unedited | VERIFIED |
+| DX-09 | `app/tenancy.py` registration of DX-M1 tables; matrices assert `/admin/dx` route count | DX-05 | DG1, DG2 green | DG1, DG2 | VERIFIED |
+| DX-10 | `tests/test_dx_no_llm.py` (AST guard, ADR-DX-10) | DX-05 | | itself | VERIFIED |
+| DX-11 | `admin/index.html`: `data-dx` gating, `applyDxGates()`, sidebar group, **DX Setup** page (checklist, sites, settings) | DX-05–07 | live UI check 1440/390 px | manual (record §9) | VERIFIED |
 
 **P1 Definition of Done:** no existing clinic's behaviour changed (no clinic has `dx_enabled`); owner can enable /
 wind-down / re-enable DX on a sandbox clinic; DX Setup reachable only when enabled; DG1–DG7 green, counts pasted.
@@ -236,7 +236,13 @@ booking of the same tests unchanged.
 ## 7. Deviation log (design changes made during implementation)
 | Date | Task | Change | Why | Docs updated |
 |:-|:-|:-|:-|:-|
-| — | — | — | — | — |
+| 2026-11-13 | DX-02 | Added `dx_update_settings(uuid, jsonb, integer)`: the settings PATCH is a compare-and-swap on `dx_settings.version` in one SQL statement (409 `dx_settings_conflict`) | DATA-MODEL §2 asked for "CAS on PATCH" without a mechanism; a read-then-write in Python would lose updates | DATA-MODEL §2 |
+| 2026-11-13 | DX-02 | `dx_purging` / `dx_purge_clinic` are `SECURITY DEFINER` with `search_path` pinned; rollback file named `125_rollback_dx_os_foundation.sql` | owner brief for this phase (house convention elsewhere: plain functions, `NNN_down.sql`); EXECUTE revoked from PUBLIC/anon/authenticated | — |
+| 2026-11-13 | DX-04 | `role_grants_beyond_authority` ignores the DX grants implied by the pre-DX lab roles (`DIAGNOSTIC_OPERATOR`, `LAB_OPERATOR`, `PATHOLOGIST`); the new DX roles stay capped | otherwise a staff granter without `DX_READ` would newly be refused creating a lab technician on a clinic that never enabled DX (Session 51 cap) | — |
+| 2026-11-13 | DX-04 | Clinic-conditional presets for existing roles (FRONT_DESK/CASHIER "+DX_* when created on a DX clinic", SECURITY §3.2) **not implemented**; the staff page offers the 14 DX permission checkboxes (`data-dx="perm"`, shown only on DX clinics) but not yet the 5 new roles | `ROLE_PRESETS` is static and has no clinic; DX grants on those roles have no route to use before P3. Clinic admins can grant via the API. Do with DX-25 (desk UI) | — |
+| 2026-11-13 | DX-06 | Owner console reads DX state/eligibility from `GET /platform/clinics/{id}/dx/deactivation-preview` (select `*`); clinic detail select not extended with `dx_state`; purge calls `dx_purge_clinic` only when the clinic row has `dx_state` | an explicit `dx_state` column in shared queries would 500 the owner console / clinic deletion if code deploys before 125 is applied | — |
+| 2026-11-13 | DX-05 | `deactivation_preview` returns zeros (`blocking=false`) | no visits/samples/results exist before DX-M3/M4/M6; each of those must add its counts (marked `shortcut:` in `app/services/dx.py`) | — |
+| 2026-11-13 | DX-11 | A "Diagnostics" sidebar group already existed (Session 52, LIS / worklist / radiology for OPD+IPD). DX Setup is a `data-dx` link inside it, not a new group gated by `dx_access` | gating the existing group by `dx_access` would hide the lab pages from every OPD/IPD clinic; group visibility already follows its visible links | UI.md §1 unchanged in intent |
 
 ## 8. Known issues and limitations
 - At authoring, migrations 115–124 (which DX builds on) are not applied to Supabase; DX cannot reach staging first.
@@ -250,17 +256,29 @@ booking of the same tests unchanged.
 ## 9. Verification evidence (paste command and summary line; newest first)
 | Date (IST) | Task / gate | Command | Result |
 |:-|:-|:-|:-|
-| — | — | — | — |
+| 2026-11-13 06:55 | P1 / DG7 | python -m pytest -q -rs | 8502 passed, 5 skipped, 15 warnings in 295.27s (baseline 8443 + 59 new; same 5 skips) |
+| 2026-11-13 06:35 | P1 / DG5 | python -m pytest tests/test_orders_api_e2e.py tests/test_lis_api_e2e.py -q | 17 passed, 2 warnings in 1.93s |
+| 2026-11-13 06:35 | DX-02…09 | python -m pytest tests/test_dx_feature_gate.py tests/test_migration_dx_m1.py -q | 32 passed, 2 warnings in 1.34s |
+| 2026-11-13 06:35 | DX-10 / DG3 | python -m pytest tests/test_clinical_firewall.py tests/test_dx_no_llm.py -q | 36 passed, 1 warning in 0.18s |
+| 2026-11-13 06:35 | DX-09 / DG2 | python -m pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q | 1140 passed, 2 warnings in 3.12s |
+| 2026-11-13 06:35 | DX-09 / DG1 | python -m pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q | 10 passed, 1 warning in 20.37s |
+| 2026-11-13 06:30 | DX-11 live UI | real app + real Postgres (pgserver + `tests/ipd_pg_bridge.py`), seeded `diagstream` lab, 3 branches | **clinic_admin @1440 px**: Diagnostics group shows "DX Setup"; checklist (Sites ✓, Departments/Containers/Signatories "Arrives with the Test Master", Settings); added site KPHB (processing, NABL MC-5521) → toast, table updated, add form hides when every branch has a site; settings approval 3 + prefix `bh-` → saved as `BH-`, version 1; stale-version save → 409 toast "Someone else changed these settings…", form reloads server values; Go live → "Live since 13 Nov 2026", button hidden, version 2. **@390 px**: page width 390 (no horizontal scroll), sites table collapses to labelled cards. **LAB_OPERATOR**: nav visible (implied DX_READ), settings fieldset disabled, no edit buttons. **FRONT_DESK**: DX nav hidden. **PROCESSING_ADMIN pinned to Kukatpally**: sees only KPHB, can edit it, settings read-only. **Owner console** (`/platform-panel`): Diagnostic OS card "State: ACTIVE"; toggle off → "State: OFF"; on → "State: ACTIVE". Console: no DX errors (only the deliberate 409 and existing dashboard 403s for staff logins) |
+| 2026-11-13 06:05 | DX-02 rollback chain | python -m pytest tests/test_migration_124_insurance.py tests/test_migration_103_opd.py tests/test_migration_111_ipd.py -q -k "rollback or down or reapply" | 4 passed, 57 deselected in 5.63s (`unwind_124` now unwinds 125 first) |
+| 2026-11-13 06:05 | DX-04 | python -m pytest tests/test_permissions.py tests/test_staff_branch_delegation_and_profile.py tests/test_specialty_plans.py tests/test_diagnostic_feature_gating.py tests/test_lab_tests_admin.py -q | 113 passed, 1 skipped in 0.77s |
+| 2026-11-13 05:40 | DX-00 baseline | python -m pytest -q -rs (clean worktree at `94de8ae`) | 8443 passed, 5 skipped, 15 warnings in 293.84s |
 
 ## 10. Log
 | Date (IST) | Entry |
 |:-|:-|
+| 2026-11-13 | **P0 + P1 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P0 baseline + P1 foundation (DX-00…DX-11)`, one commit for the whole phase rather than one per task). Baseline 8443/5/0 at `94de8ae`; F1–F16 and AUDIT symbols re-located, no deltas. Migration 125 (`clinics.dx_state`/`dx_settings`, `dx_sites` with composite branch FK and forced RLS, `dx_purging`, `dx_purge_clinic` v1, `dx_update_settings` CAS) + rollback + verify block + `verify_supabase_schema.sql` §19. `tenant.py` `dx_eligible`/`dx_access`; 14 DX permissions, 5 roles, presets, implied grants, `holds_dx_permission`; `app/services/dx.py` + `app/routers/dx.py` (7 routes); platform toggle (400 ineligible, provision, 409 preview, confirm → WIND_DOWN), preview route, purge order; `/admin/me` DX fields; `LOGISTICS_RUNNER` / `B2B_PARTNER` confinement; LIS and G1 worklist scopes widened; `dx_sites` in `TENANT_OWNED_TABLES`; matrix counts; `test_dx_no_llm.py`; DX card in `platform.html`; DX Setup page in `admin/index.html`. Deviations in §7. Existing tests edited only where the change is the point: sidebar page order (+`dxsetup`), Ketu `PAGES` (+`dxsetup`, `app/assistant/registry.py`), the staff-permission regex in `test_held_report_recovery_and_staff_delete.py` widened to `[A-Z0-9_]+` (`DX_B2B_MANAGE` has a digit), `unwind_124` unwinds 125 first. Not applied to Supabase, not pushed. |
 | 2026-11-05 | Forensic re-audit against code (AUDIT.md A1–A29) after a second owner brief (insurance/TPA patients must not receive reports; unpaid bills must never release reports; MocDoc Print Barcode dialog). Added DELIVERY-POLICY.md and ADR-DX-19…22; corrected barcode format (visit-shared sequence), per-target delivery ids, booking linkage (one test per booking, deposits), DX bill-line guard, B2B subjects without phone, G1/LIS/generic-resend guards, phlebotomist route names, voice/WhatsApp facts, plan eligibility table, field collections, label print dialog. Still no code. |
 | 2026-11-05 | Document set authored (no code): competitive research (MocDoc screenshots + public pages for MocDoc/CrelioHealth; direct fetch blocked by network policy), gap analysis against `main` @ `56f719f`, architecture, 18 ADRs, data model DX-M1…M9, workflows W1–W18, report/template/label spec, API, UI, security, test plan, rollout, assistants, agent prompts. Baseline suite not run in the authoring session (no pytest installed). |
 
 ## 11. Next exact action
-Start **DX-00** with the master prompt in [AGENT-PROMPT.md](AGENT-PROMPT.md) §1.
+Owner: review/merge `dx/p1-foundation`; apply `125_dx_os_foundation.sql` to Supabase **before** deploying it (ROLLOUT §0.4).
+Agent: start **DX-12** (migration DX-M2 as `126_dx_catalogue.sql`, re-check the number first) with the master prompt in
+[AGENT-PROMPT.md](AGENT-PROMPT.md) §1. Lane PURE (DX-13 formula engine) may start in parallel.
 
 ## 12. Release decision
-**NOT STARTED.** Nothing is implemented. The module stays off for every clinic until P11 is VERIFIED and the
+**P1 foundation built, not released.** Only the owner toggle, sites, settings and the setup page exist. The module stays off for every clinic until P11 is VERIFIED and the
 owner switches it on per clinic, then per branch delivery owner (ROLLOUT §2).

@@ -115,6 +115,23 @@ PERMISSIONS = frozenset({
     # Writing off a disallowance also needs BILLING_CREDIT_NOTE (a GST credit note).
     "INSURANCE_READ",
     "INSURANCE_MANAGE",
+    # ── Diagnostic OS (migration 125) ── routes also require dx_access(clinic).
+    # docs/diagnostic-os/SECURITY.md §3.1. Approval still needs LAB_VALIDATE +
+    # a doctor-linked login; result entry stays LAB_ENTRY.
+    "DX_READ",
+    "DX_REGISTER",
+    "DX_COLLECT",
+    "DX_BILLING",
+    "DX_RECEIVE",
+    "DX_VERIFY",
+    "DX_DISPATCH",
+    "DX_LOGISTICS",
+    "DX_CATALOGUE",
+    "DX_CATALOGUE_APPROVE",
+    "DX_B2B_MANAGE",
+    "DX_REPORTS_MIS",
+    "DX_QC",
+    "DX_ADMIN",
 })
 
 #: A login for a lab's CORPORATE client: sees that one company's aggregate
@@ -146,6 +163,12 @@ STAFF_ROLES = frozenset({
     "TPA_DESK",
     CORPORATE_VIEWER,
     PHLEBOTOMIST,
+    # ── Diagnostic OS ── (SECURITY.md §3.2)
+    "LAB_SUPERVISOR",
+    "LOGISTICS_RUNNER",    # confined to the Logistics routes in verify_credentials
+    "PROCESSING_ADMIN",    # a processing site's admin: must be branch-pinned
+    "B2B_MANAGER",
+    "B2B_PARTNER",         # a B2B client's login: confined to /admin/dx/partner/*
 })
 
 _DOCTOR_SCHEDULE_GRANTS = [
@@ -192,6 +215,12 @@ ROLE_PRESETS: dict[str, list[str]] = {
     "TPA_DESK": ["INSURANCE_READ", "INSURANCE_MANAGE", "ORDERS_READ"],
     CORPORATE_VIEWER: [],
     PHLEBOTOMIST: [],
+    # ── Diagnostic OS ──
+    "LAB_SUPERVISOR": ["LAB_ENTRY", "DX_RECEIVE", "DX_VERIFY", "DX_READ"],
+    "LOGISTICS_RUNNER": ["DX_LOGISTICS", "DX_READ"],
+    "PROCESSING_ADMIN": ["DX_ADMIN", "DX_RECEIVE", "LAB_ENTRY", "DX_VERIFY", "DX_DISPATCH", "DX_READ"],
+    "B2B_MANAGER": ["DX_B2B_MANAGE", "DX_READ"],
+    "B2B_PARTNER": [],
 }
 
 #: Logins created before migration 115 hold only their module grants. Each
@@ -224,7 +253,7 @@ def holds_order_permission(user: "AdminUser", perm: str) -> bool:
 #: Lab and doctor logins saved before migration 118 lack the LAB_* grants;
 #: their role implies the one they need, so no account has to be re-saved.
 _LAB_GRANTS_IMPLIED_BY_ROLE: dict[str, tuple[str, ...]] = {
-    "LAB_ENTRY": ("LAB_OPERATOR", "DIAGNOSTIC_OPERATOR", "PATHOLOGIST"),
+    "LAB_ENTRY": ("LAB_OPERATOR", "DIAGNOSTIC_OPERATOR", "PATHOLOGIST", "LAB_SUPERVISOR", "PROCESSING_ADMIN"),
     "LAB_VALIDATE": ("PATHOLOGIST", "DOCTOR"),
 }
 
@@ -344,6 +373,34 @@ def holds_insurance_permission(user: "AdminUser", perm: str) -> bool:
     return getattr(user, "staff_role", None) in _INSURANCE_GRANTS_IMPLIED_BY_ROLE.get(perm, ())
 
 
+# ── Diagnostic OS ──────────────────────────────────────────────────────────
+#: What a role confers by itself (SECURITY.md §3.2 "implied by role"), so DX lab
+#: logins saved before migration 125 work without being re-saved. Nothing else
+#: is implied: front desk and cashier logins gain DX grants only when granted.
+_DX_GRANTS_IMPLIED_BY_ROLE: dict[str, tuple[str, ...]] = {
+    "DX_READ": ("DIAGNOSTIC_OPERATOR", "LAB_OPERATOR", "PATHOLOGIST", "LAB_SUPERVISOR", "LOGISTICS_RUNNER",
+                "PROCESSING_ADMIN", "B2B_MANAGER"),
+    "DX_RECEIVE": ("LAB_OPERATOR", "LAB_SUPERVISOR", "PROCESSING_ADMIN"),
+    "DX_VERIFY": ("PATHOLOGIST", "LAB_SUPERVISOR", "PROCESSING_ADMIN"),
+    "DX_LOGISTICS": ("LOGISTICS_RUNNER",),
+    "DX_DISPATCH": ("PROCESSING_ADMIN",),
+    "DX_ADMIN": ("PROCESSING_ADMIN",),
+    "DX_B2B_MANAGE": ("B2B_MANAGER",),
+}
+
+
+_PRE_DX_LAB_ROLES = frozenset({"DIAGNOSTIC_OPERATOR", "LAB_OPERATOR", "PATHOLOGIST"})
+
+
+def holds_dx_permission(user: "AdminUser", perm: str) -> bool:
+    """True if `user` may perform the Diagnostic OS action `perm` (a DX_* grant)."""
+    if user.role in ("super_admin", "clinic_admin"):
+        return True
+    if perm in (user.permissions or []):
+        return True
+    return getattr(user, "staff_role", None) in _DX_GRANTS_IMPLIED_BY_ROLE.get(perm, ())
+
+
 def holds_services_permission(user: "AdminUser") -> bool:
     """True if `user` may change the service / tariff master."""
     if user.role in ("super_admin", "clinic_admin"):
@@ -364,7 +421,8 @@ def role_implied_grants(staff_role: Optional[str]) -> set[str]:
     """What `staff_role` confers by itself (the *_BY_ROLE tables above), whatever grants are stored.
     A phlebotomist's worklist access is left out: that login is confined to two routes."""
     out = {perm for table in (_LAB_GRANTS_IMPLIED_BY_ROLE, _OT_GRANTS_IMPLIED_BY_ROLE,
-                              _RADIOLOGY_GRANTS_IMPLIED_BY_ROLE, _INSURANCE_GRANTS_IMPLIED_BY_ROLE)
+                              _RADIOLOGY_GRANTS_IMPLIED_BY_ROLE, _INSURANCE_GRANTS_IMPLIED_BY_ROLE,
+                              _DX_GRANTS_IMPLIED_BY_ROLE)
            for perm, roles in table.items() if staff_role in roles}
     return out | ({"BILLING_CREDIT_NOTE"} if staff_role == "CASHIER" else set())
 
@@ -376,7 +434,8 @@ def role_grants_beyond_authority(staff_role: Optional[str], granter: "AdminUser"
     if granter.role in ("super_admin", "clinic_admin"):
         return []
     holders = (("LAB_", holds_lab_permission), ("OT_", holds_ot_permission),
-               ("RADIOLOGY_", holds_radiology_permission), ("INSURANCE_", holds_insurance_permission))
+               ("RADIOLOGY_", holds_radiology_permission), ("INSURANCE_", holds_insurance_permission),
+               ("DX_", holds_dx_permission))
 
     def held(perm: str) -> bool:
         if perm == "BILLING_CREDIT_NOTE":
@@ -384,7 +443,11 @@ def role_grants_beyond_authority(staff_role: Optional[str], granter: "AdminUser"
         fn = next((f for prefix, f in holders if perm.startswith(prefix)), None)
         return fn(granter, perm) if fn else perm in (granter.permissions or [])
 
-    return sorted(p for p in role_implied_grants(staff_role) if not held(p))
+    # Lab roles that predate DX imply only DX_READ/RECEIVE/VERIFY (inert without dx_access);
+    # capping those would newly refuse granters on clinics that never enabled DX.
+    pre_dx = staff_role in _PRE_DX_LAB_ROLES
+    return sorted(p for p in role_implied_grants(staff_role)
+                  if not (pre_dx and p.startswith("DX_")) and not held(p))
 
 
 def validate_staff_role(staff_role: str) -> str:

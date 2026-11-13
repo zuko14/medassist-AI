@@ -2021,6 +2021,18 @@
                 </label>
                 <div id="modalIpdState" style="font-size:0.8rem; color:var(--text3); margin-top:10px;"></div>
             </div>
+
+            <!-- DX:foundation:START — Migration 125: Diagnostic OS. Own opt-in (no OPD needed); disabling with work in process winds down. -->
+            <div id="modalDxCard" style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">Diagnostic OS</h4>
+                <p style="color:var(--text3); font-size:0.78rem; margin-bottom:12px;">Registration, samples, lab bench, reports and B2B for diagnostic centres. Needs a plan with lab test booking or lab reports. Turning it off never deletes records; visits already in process run to release.</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalDxToggle" onchange="toggleDx(this)">
+                    Diagnostic OS enabled
+                </label>
+                <div id="modalDxState" style="font-size:0.8rem; color:var(--text3); margin-top:10px;"></div>
+            </div>
+            <!-- DX:foundation:END -->
         </div>
     </div>
 
@@ -3119,6 +3131,13 @@
                             ? 'State: WIND_DOWN (no new admissions; admitted patients continue to discharge)'
                             : `State: ${st}${overrides.opd_enabled === true ? '' : ' (enable OPD OS first)'}`;
                     }
+                    /* DX:foundation:START */
+                    const dxCard = document.getElementById('modalDxCard');
+                    if (dxCard) dxCard.style.display = (c.account_type || 'tenant') === 'tenant' ? '' : 'none';
+                    const dxToggle = document.getElementById('modalDxToggle');
+                    if (dxToggle) dxToggle.checked = overrides.dx_enabled === true;
+                    loadDxState(c.id || _modalClinicId);
+                    /* DX:foundation:END */
                     document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
                     document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
                     document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;
@@ -3207,6 +3226,57 @@
                 openModal(clinicId);
             }
         }
+
+        /* DX:foundation:START */
+        // Diagnostic OS (migration 125). State and eligibility come from the preview route, so the
+        // clinic detail query does not depend on the migration. The server decides: with work in
+        // process it answers 409 + preview, and only a confirmed disable enters WIND_DOWN.
+        async function loadDxState(clinicId) {
+            const el = document.getElementById('modalDxState');
+            if (!el || !clinicId) return;
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/dx/deactivation-preview`, { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) { el.textContent = ''; return; }
+                const p = await res.json();
+                el.textContent = p.state === 'WIND_DOWN'
+                    ? 'State: WIND_DOWN (no new visits; visits in process continue to release)'
+                    : `State: ${p.state}${p.eligible ? '' : ' (this plan has no lab booking or lab reports)'}`;
+            } catch (e) { el.textContent = ''; }
+        }
+
+        async function toggleDx(cb) {
+            const clinicId = _modalClinicId;
+            const send = async (enabled, confirmDisable) => fetch(`/platform/clinics/${clinicId}/features`, {
+                method: 'PATCH',
+                headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ feature: 'dx_enabled', enabled, confirm_disable: confirmDisable })
+            });
+            cb.disabled = true;
+            try {
+                let res = await send(cb.checked, false);
+                if (res.status === 409 && !cb.checked) {
+                    const p = ((await res.json().catch(() => ({}))).detail || {}).preview || {};
+                    const ok = confirm(`${p.visits_in_process || 0} visit(s) in process, ${p.samples_in_transit || 0} sample(s) in transit, `
+                        + `${p.unreleased_results || 0} result(s) not yet released.`
+                        + '\n\nTurning the Diagnostic OS off now stops NEW visits only. Visits already registered run to release. '
+                        + 'No record is deleted.\n\nWind down the Diagnostic OS?');
+                    if (!ok) { cb.checked = true; return; }
+                    res = await send(false, true);
+                }
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error((err.detail && (err.detail.message || err.detail)) || 'Failed to update the Diagnostic OS');
+                }
+                openModal(clinicId);
+                fetchPlatformData();
+            } catch (e) {
+                alert(e.message || 'Failed to update the Diagnostic OS');
+                openModal(clinicId);
+            } finally {
+                cb.disabled = false;
+            }
+        }
+        /* DX:foundation:END */
 
         let opdDeact = { clinicId: null, checkbox: null };
         async function toggleOpd(cb) {

@@ -583,6 +583,45 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 19. MIGRATION 125 — Diagnostic OS foundation (DX-M1)
+-- ============================================================================
+DO $$
+DECLARE
+    v_cols int;
+    v_rls boolean;
+    v_cons int;
+    v_funcs int;
+BEGIN
+    SELECT count(*) INTO v_cols FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'clinics' AND column_name IN ('dx_state', 'dx_settings');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M125', 'Columns: clinics.dx_state, clinics.dx_settings',
+            CASE WHEN v_cols = 2 THEN 'PASS' ELSE 'FAIL' END, v_cols || ' of 2 present');
+
+    SELECT c.relrowsecurity AND c.relforcerowsecurity INTO v_rls FROM pg_class c
+     WHERE c.oid = to_regclass('public.dx_sites');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M125', 'Table: dx_sites (RLS enabled + forced)',
+            CASE WHEN v_rls THEN 'PASS' ELSE 'FAIL' END,
+            CASE WHEN v_rls IS NULL THEN 'MISSING: dx_sites' WHEN v_rls THEN 'Exists, RLS forced'
+                 ELSE 'RLS not enabled + forced' END);
+
+    SELECT count(*) INTO v_cons FROM pg_constraint WHERE conname IN (
+        'clinics_dx_state_check', 'dx_sites_clinic_id_id_key', 'dx_sites_clinic_branch_key',
+        'dx_sites_clinic_code_key', 'dx_sites_branch_fk');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M125', 'Constraints: dx_state CHECK + dx_sites keys / branch FK',
+            CASE WHEN v_cons = 5 THEN 'PASS' ELSE 'FAIL' END, v_cons || ' of 5 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_purging(uuid)', 'dx_purge_clinic(uuid)',
+                                                   'dx_update_settings(uuid,jsonb,integer)']) f
+     WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M125', 'Functions: dx_purging, dx_purge_clinic, dx_update_settings',
+            CASE WHEN v_funcs = 3 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 3 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

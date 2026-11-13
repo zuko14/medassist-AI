@@ -669,6 +669,7 @@ OPT_IN_FEATURES: dict[str, str] = {
     "opd_enabled": "OPD OS (Front Desk, Queue, Consultation, Billing)",
     "ipd_enabled": "IPD OS (Admissions, Beds, Nursing, Discharge)",
     "kriya_ketu": "Kriya Ketu assistant",
+    "dx_enabled": "Diagnostic OS (Registration, Samples, Lab, Reports, B2B)",
 }
 
 
@@ -692,6 +693,35 @@ def ipd_access(clinic: Optional[dict]) -> Optional[str]:
     if isinstance(overrides, dict) and overrides.get("ipd_enabled") is True and opd_enabled(clinic):
         return "ACTIVE"
     if clinic.get("ipd_state") == "WIND_DOWN":
+        return "WIND_DOWN"
+    return None
+
+
+def dx_eligible(clinic: Optional[dict]) -> bool:
+    """Whether this clinic may enable the Diagnostic OS (ADR-DX-02): a regular
+    tenant whose plan's OWN feature set has lab booking or lab reports.
+    Enterprise qualifies too, but only through the owner's explicit toggle (the
+    toggle is the opt-in): its "*" wildcard is never read as lab features.
+    Independent of OPD: a lab need not buy consultations to run its lab."""
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return False
+    plan = clinic.get("plan") or "soloclinic"
+    return plan == "enterprise" or bool(PLAN_FEATURES.get(plan, set()) & {"lab_test_booking", "lab_reports"})
+
+
+def dx_access(clinic: Optional[dict]) -> Optional[str]:
+    """'ACTIVE', 'WIND_DOWN' or None (module unavailable).
+
+    ACTIVE needs the owner's explicit opt-in (features.dx_enabled is True, never
+    has_feature()) on an eligible tenant. WIND_DOWN is what an owner disable
+    leaves while visits are still in process (ADR-DX-14). Does not need OPD.
+    """
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return None
+    overrides = clinic.get("features") or {}
+    if isinstance(overrides, dict) and overrides.get("dx_enabled") is True and dx_eligible(clinic):
+        return "ACTIVE"
+    if clinic.get("dx_state") == "WIND_DOWN":
         return "WIND_DOWN"
     return None
 

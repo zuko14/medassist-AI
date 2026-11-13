@@ -991,6 +991,26 @@ async def update_clinic_feature(
                     "preview": preview})
             clinic_update_fields["ipd_state"] = "WIND_DOWN" if preview["blocking"] else "OFF"
 
+    if body.feature == "dx_enabled":
+        # ADR-DX-14: disabling never deletes. With visits in process it needs
+        # confirmation and enters WIND_DOWN (nothing new; existing visits finish).
+        from app.services import dx
+        from app.services.tenant import dx_eligible
+        if body.enabled:
+            if not dx_eligible(clinic_res.data[0]):
+                raise HTTPException(status_code=400, detail="The Diagnostic OS needs a clinic/hospital tenant whose "
+                                                            "plan includes lab test booking or lab reports.")
+            await dx.provision_defaults(clinic_id)
+            clinic_update_fields["dx_state"] = "ACTIVE"
+        else:
+            preview = await dx.deactivation_preview(clinic_id)
+            if preview["blocking"] and not body.confirm_disable:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Lab work is still in process. Confirm to stop new visits while existing visits "
+                               "run to release (wind-down). Nothing is deleted.",
+                    "preview": preview})
+            clinic_update_fields["dx_state"] = "WIND_DOWN" if preview["blocking"] else "OFF"
+
     result = (
         # unscoped: platform super-admin updating feature flags for specified clinic_id
         await sb(supabase.table("clinics")
@@ -1027,6 +1047,23 @@ async def get_opd_deactivation_preview(
         raise HTTPException(status_code=404, detail="Clinic not found")
     from app.services import opd
     return await opd.deactivation_preview(clinic_id)
+
+
+@router.get("/clinics/{clinic_id}/dx/deactivation-preview")
+async def get_dx_deactivation_preview(
+    clinic_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Owner inspection of in-flight Diagnostic OS work before disabling the module."""
+    from app.services import dx
+    from app.services.tenant import dx_access, dx_eligible
+    # unscoped: platform super-admin reading one clinic's DX state by primary key
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic = res.data[0]
+    return {**await dx.deactivation_preview(clinic_id), "state": clinic.get("dx_state") or "OFF",
+            "access": dx_access(clinic), "eligible": dx_eligible(clinic)}
 
 
 class PlatformAIBudgetRequest(BaseModel):
@@ -2586,6 +2623,11 @@ async def delete_clinic(
                 status_code=409,
                 detail="Clinic has signed OPD/IPD clinical or billing records. Confirm purge before deletion.",
             )
+        # DX first (from DX-M3 its rows reference OPD orders and invoices); only once migration 125 is applied
+        # unscoped: platform super-admin reading the clinic being deleted (select * works before and after 125)
+        full = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+        if full.data and "dx_state" in full.data[0]:
+            await sb(supabase.rpc("dx_purge_clinic", {"p_clinic_id": clinic_id}))
         # ipd_purge_clinic purges OPD too (IPD charges reference OPD invoices)
         await sb(supabase.rpc("ipd_purge_clinic" if has_ipd_rows else "opd_purge_clinic", {"p_clinic_id": clinic_id}))
 

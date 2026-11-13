@@ -26,6 +26,8 @@ def unwind_124(cur) -> None:
     """Inside an open transaction: clear insurance data the only way the guards
     allow (owner purge) and run 124_down. Rollback tests of earlier migrations
     call this first (via unwind_123, or directly), since 124 sits on their tables."""
+    from tests.test_migration_dx_m1 import unwind_125
+    unwind_125(cur)   # newest first: 125's dx_sites FK sits on 103's branches index
     cur.execute("SELECT to_regclass('public.ipd_insurance_claims') IS NOT NULL")
     if not cur.fetchone()[0]:
         return
