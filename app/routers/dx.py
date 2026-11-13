@@ -1051,3 +1051,275 @@ async def convert_bookings(body: ConvertIn, request: Request, clinic_id: str = "
         await _audit(user, request, "dx_bookings_convert", "dx_accession", out["visit"]["id"],
                      {"bookings": body.appointment_ids, "number": out["visit"]["accession_number"]})
     return _filter_visit(user, out)
+
+
+# ═══ Collection, labels, rejection, receipt (migration 128, DX-28) ═══════════
+
+COLLECT = ("DX_COLLECT",)
+LABELS = ("DX_COLLECT", "DX_REGISTER")
+REJECT = ("DX_RECEIVE", "DX_COLLECT")
+BARCODE = r"^[A-Za-z0-9._/-]{3,64}$"
+
+
+class CollectSampleIn(_In):
+    id: str
+    barcode: Optional[str] = Field(None, pattern=BARCODE)
+    volume_ml: Optional[float] = Field(None, gt=0, le=999)
+
+
+class CollectIn(_In):
+    samples: list[CollectSampleIn] = Field(..., min_length=1, max_length=30)
+    collection_mode: Literal["centre", "home", "ward", "partner"] = "centre"
+    idempotency_key: str = IDEM
+
+
+class BindIn(_In):
+    barcode: str = Field(..., pattern=BARCODE)
+
+
+class RejectIn(_In):
+    reason_code: str = Field(..., pattern=r"^[A-Za-z_]{3,30}$")
+    notes: Optional[str] = Field(None, max_length=500)
+    recollect: bool = True
+
+
+class ReceiveIn(_In):
+    barcode: str = Field(..., pattern=BARCODE)
+    site_id: str
+
+
+class LabelPrintIn(_In):
+    sample_ids: list[str] = Field(default_factory=list, max_length=30)    # empty = every labellable tube
+    mode: Literal["per_sample", "per_test", "register"] = "per_sample"
+    format: Literal["pdf", "zpl"] = "pdf"
+    copies: Optional[int] = Field(None, ge=1, le=10)                     # default 1 + extra_labels setting
+    register_label: bool = False                                         # also the register-book label
+
+
+async def _sample_visit(user: AdminUser, scope: str, sample_id: Optional[str] = None,
+                        barcode: Optional[str] = None) -> tuple[dict, dict]:
+    """The tube and its visit, inside the caller's site scope (404 otherwise)."""
+    s = await dx.sample_of(scope, sample_id=sample_id, barcode=barcode)
+    return s, await _visit(user, scope, s["accession_id"])
+
+
+async def _user_site_ids(user: AdminUser, scope: str, site_id: Optional[str]) -> Optional[list[str]]:
+    sites = await dx.list_sites(scope, _pinned_branch(user))
+    if site_id:
+        if site_id not in {s["id"] for s in sites}:
+            raise HTTPException(status_code=404, detail="Site not found.")
+        return [site_id]
+    return [s["id"] for s in sites] if _pinned_branch(user) else None
+
+
+@router.get("/collection/queue")
+async def collection_queue(clinic_id: str = "default", site_id: Optional[str] = None,
+                           priority: Optional[Literal["routine", "urgent", "stat"]] = None,
+                           q: Optional[str] = Query(None, max_length=80),
+                           date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *COLLECT)
+    site_ids = await _user_site_ids(user, scope, site_id)
+    mine = [{k: s.get(k) for k in ("id", "code", "display_name", "kind")}
+            for s in await dx.list_sites(scope, _pinned_branch(user)) if s.get("is_active")]
+    return {"visits": await dx.collection_queue(scope, site_ids, date, priority, q), "sites": mine}
+
+
+@router.post("/visits/{accession_id}/labels/print")
+async def print_labels(accession_id: str, body: LabelPrintIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    from fastapi.responses import Response
+    from app.services import dx_barcode
+    scope, clinic = await _dx_scope(user, clinic_id, *LABELS)
+    v = await _visit(user, scope, accession_id)
+    labels, register = await dx.label_data(scope, v, body.sample_ids, body.mode)
+    copies = body.copies or 1 + int(dx.get_dx_settings(clinic).get("extra_labels") or 0)
+    with_register = body.mode == "register" or body.register_label
+    printed = {x["barcode"] for x in labels}
+    sample_ids = sorted(s["id"] for s in v["samples"] if s.get("barcode") in printed)
+    log = await dx.log_label_print(scope, accession_id, sample_ids, body.mode, copies, user)
+    await _audit(user, request, "dx_labels_print", "dx_accession", accession_id,
+                 {"mode": body.mode, "format": body.format, "labels": len(labels), "copies": copies,
+                  "reprint": log["is_reprint"]})
+    reg = register if with_register else None
+    headers = {"X-Label-Print-Id": str(log["id"]), "X-Reprint": "true" if log["is_reprint"] else "false"}
+    name = v["visit"]["accession_number"]
+    if body.format == "zpl":
+        return Response(dx_barcode.render_labels_zpl(labels, reg, copies), media_type="text/plain",
+                        headers={**headers, "Content-Disposition": f'attachment; filename="{name}.zpl"'})
+    return Response(dx_barcode.render_labels_pdf(labels, reg, copies), media_type="application/pdf",
+                    headers={**headers, "Content-Disposition": f'inline; filename="{name}-labels.pdf"'})
+
+
+@router.post("/samples/receive-direct")
+async def receive_direct(body: ReceiveIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_RECEIVE")
+    site = await dx.get_site(scope, body.site_id)
+    enforce_branch_scope(user, site.get("branch_id"))
+    await _sample_visit(user, scope, barcode=body.barcode)
+    out = await dx.receive_direct(scope, body.barcode, body.site_id, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_sample_receive", "dx_sample", out["id"], {"site_id": body.site_id})
+    return out
+
+
+@router.post("/samples/{sample_id}/bind")
+async def bind_barcode(sample_id: str, body: BindIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *COLLECT)
+    await _sample_visit(user, scope, sample_id=sample_id)
+    out = await dx.bind_barcode(scope, sample_id, body.barcode, user)
+    await _audit(user, request, "dx_sample_bind", "dx_sample", sample_id, {"barcode": body.barcode})
+    return out
+
+
+@router.post("/visits/{accession_id}/collect")
+async def collect_samples(accession_id: str, body: CollectIn, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *COLLECT)
+    await _visit(user, scope, accession_id)
+    out = await dx.collect_samples(scope, accession_id, [s.model_dump(exclude_none=True) for s in body.samples],
+                                   body.collection_mode, body.idempotency_key, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_samples_collect", "dx_accession", accession_id,
+                     {"samples": [s.id for s in body.samples], "mode": body.collection_mode})
+    return _filter_visit(user, out)
+
+
+@router.post("/samples/{sample_id}/reject")
+async def reject_sample(sample_id: str, body: RejectIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    from app.utils.async_tasks import spawn_background_task
+    scope, clinic = await _dx_scope(user, clinic_id, *REJECT)
+    await _sample_visit(user, scope, sample_id=sample_id)
+    out = await dx.reject_sample(scope, sample_id, body.reason_code, body.notes, body.recollect, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_sample_reject", "dx_sample", sample_id,
+                     {"reason_code": body.reason_code.upper(), "recollect": body.recollect,
+                      "replacement_sample_id": out.get("replacement_sample_id")})
+        if out.get("replacement_sample_id"):     # W7 step 3, off the request path
+            spawn_background_task(dx.notify_recollection(clinic, out, out.get("reason_label") or body.reason_code),
+                                  name="dx_recollection_notice")
+    return _filter_visit(user, out)
+
+
+@router.get("/samples/{barcode}/track")
+async def track_sample(barcode: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *VISIT_READ, "DX_RECEIVE")
+    await _sample_visit(user, scope, barcode=barcode)
+    return await dx.track_sample(scope, barcode)
+
+
+@router.get("/rejection-reasons")
+async def list_rejection_reasons(clinic_id: str = "default", include_inactive: bool = False,
+                                 user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *REJECT, "DX_ADMIN", "DX_READ")
+    return {"reasons": await dx.rejection_reasons(scope, not include_inactive)}
+
+
+# ═══ Home collection: doorstep money and the cashier handover (DX-29, AUDIT A14) ═
+
+class FieldCollectionIn(_In):
+    amount_paise: int = Field(..., gt=0, le=100_000_000)
+    mode: Literal["cash", "upi_to_clinic"]
+    reference: Optional[str] = Field(None, max_length=80)
+    idempotency_key: str = IDEM
+
+
+class HomeSamplesIn(_In):
+    samples: list[CollectSampleIn] = Field(..., min_length=1, max_length=30)
+    idempotency_key: str = IDEM
+
+
+class HandoverIn(_In):
+    shift_id: Optional[str] = None
+
+
+async def _home_visit(user: AdminUser, clinic_id: str, appointment_id: str) -> tuple[str, str]:
+    """A phlebotomist reaches only the home visits assigned to them (someone else's = 404);
+    other staff need DX_COLLECT and the booking's branch."""
+    from app.services import home_collection as hc
+    from app.services.permissions import PHLEBOTOMIST
+    from app.database import is_uuid
+    if getattr(user, "staff_role", None) == PHLEBOTOMIST:
+        scope, _ = await _dx_scope(user, clinic_id)
+    else:
+        scope, _ = await _dx_scope(user, clinic_id, *COLLECT)
+    visit = await hc.get_visit(scope, appointment_id) if is_uuid(appointment_id) else None
+    if not visit:
+        raise HTTPException(status_code=404, detail="Visit not found.")
+    if getattr(user, "staff_role", None) == PHLEBOTOMIST:
+        if str(visit.get("phlebotomist_id") or "") != str(user.user_id):
+            raise HTTPException(status_code=404, detail="Visit not found.")
+    else:
+        enforce_branch_scope(user, visit.get("branch_id"))
+    return scope, await dx.home_visit_accession(scope, appointment_id)
+
+
+@router.get("/home-collection/visits/{appointment_id}/samples")
+async def home_visit_samples(appointment_id: str, clinic_id: str = "default",
+                             user: AdminUser = Depends(verify_credentials)):
+    scope, accession_id = await _home_visit(user, clinic_id, appointment_id)
+    v = await dx.get_visit(scope, accession_id)
+    return {"visit": {k: v["visit"].get(k) for k in ("id", "accession_number", "status", "priority", "fasting_status")},
+            "samples": [{k: s.get(k) for k in ("id", "barcode", "barcode_source", "status", "container_code",
+                                               "container_name", "colour_hex", "sample_type")} for s in v["samples"]],
+            "due_paise": await dx.rpc("dx_visit_due", {"p_clinic_id": scope, "p_accession_id": accession_id}),
+            "field_collections": await dx.field_collections(scope, None, [accession_id])}
+
+
+@router.post("/home-collection/visits/{appointment_id}/samples")
+async def home_visit_collect(appointment_id: str, body: HomeSamplesIn, request: Request, clinic_id: str = "default",
+                             user: AdminUser = Depends(verify_credentials)):
+    scope, accession_id = await _home_visit(user, clinic_id, appointment_id)
+    out = await dx.collect_samples(scope, accession_id, [s.model_dump(exclude_none=True) for s in body.samples],
+                                   "home", body.idempotency_key, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_samples_collect", "dx_accession", accession_id,
+                     {"samples": [s.id for s in body.samples], "mode": "home", "appointment_id": appointment_id})
+    return {"visit": {k: out["visit"].get(k) for k in ("id", "accession_number", "status")},
+            "samples": [{k: s.get(k) for k in ("id", "barcode", "status", "container_name")} for s in out["samples"]],
+            "replayed": out.get("replayed", False)}
+
+
+@router.post("/home-collection/visits/{appointment_id}/doorstep-cash", status_code=status.HTTP_201_CREATED)
+async def doorstep_cash(appointment_id: str, body: FieldCollectionIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    if body.mode == "upi_to_clinic" and not (body.reference or "").strip():
+        raise HTTPException(status_code=422, detail="A UPI payment needs its reference (UTR).")
+    scope, accession_id = await _home_visit(user, clinic_id, appointment_id)
+    out = await dx.record_field_collection(scope, accession_id, body.model_dump(), user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_field_collection", "dx_accession", accession_id,
+                     {"amount_paise": body.amount_paise, "mode": body.mode, "appointment_id": appointment_id})
+    return out
+
+
+@router.get("/home-collection/field-collections")
+async def list_field_collections(clinic_id: str = "default",
+                                 status_: Optional[Literal["pending_handover", "handed_over", "disputed"]] =
+                                 Query("pending_handover", alias="status"),
+                                 user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_BILLING")
+    rows = await dx.field_collections(scope, status_)
+    if _pinned_branch(user) and rows:
+        visits = {v["id"]: v for v in await dx._rows(scoped_query("dx_accessions", scope, "id, branch_id")
+                                                     .in_("id", list({r["accession_id"] for r in rows})))}
+        rows = [r for r in rows if str(visits.get(r["accession_id"], {}).get("branch_id")) == _pinned_branch(user)]
+    return {"field_collections": rows}
+
+
+@router.post("/home-collection/field-collections/{fc_id}/handover")
+async def handover_field_collection(fc_id: str, body: HandoverIn, request: Request, clinic_id: str = "default",
+                                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_BILLING")
+    rows = await dx._rows(scoped_query("dx_field_collections", scope, "accession_id").eq("id", fc_id).limit(1))
+    if not rows:
+        raise HTTPException(status_code=404, detail="Field collection not found.")
+    await _visit(user, scope, rows[0]["accession_id"])
+    out = await dx_billing.handover_field_collection(scope, fc_id, user, body.shift_id)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_field_collection_handover", "dx_field_collection", fc_id,
+                     {"receipt_id": out.get("receipt_id"), "amount_paise": out.get("amount_paise")})
+    return out

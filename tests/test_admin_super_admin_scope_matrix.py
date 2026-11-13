@@ -129,9 +129,9 @@ def test_all_ipd_routes_covered_by_scope_matrix():
 
 
 def test_all_dx_routes_covered_by_scope_matrix():
-    """Every /admin/dx route (migrations 125–127) is in ROUTES, so the leak half runs on each."""
+    """Every /admin/dx route (migrations 125–128) is in ROUTES, so the leak half runs on each."""
     dx_routes = [r for r in ROUTES if r[1].startswith("/admin/dx")]
-    assert len(dx_routes) >= 53, f"Expected all /admin/dx routes in matrix, found only {len(dx_routes)}"
+    assert len(dx_routes) >= 66, f"Expected all /admin/dx routes in matrix, found only {len(dx_routes)}"
 
 
 @pytest.mark.parametrize("method,path", ROUTES)

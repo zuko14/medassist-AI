@@ -712,6 +712,40 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 22. MIGRATION 128 — Diagnostic OS collection and rejection (DX-M4)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_trg int;
+    v_funcs int;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_rejection_reasons', 'dx_field_collections', 'dx_label_prints')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M128', 'Tables: dx rejection reasons, field collections, label prints (RLS forced)',
+            CASE WHEN v_tables = 3 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 3 present with RLS forced');
+
+    SELECT count(*) INTO v_trg FROM pg_trigger
+     WHERE tgname IN ('trg_dx_guard_sample', 'trg_dx_field_collections_guard', 'trg_dx_label_prints_guard');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M128', 'Triggers: sample guard, field-collection guard, label-print append-only',
+            CASE WHEN v_trg = 3 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 3 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_bind_barcode(uuid,uuid,text,uuid,text)',
+        'dx_collect_samples(uuid,uuid,jsonb,text,uuid,text,text)',
+        'dx_reject_sample(uuid,uuid,text,text,boolean,uuid,text)', 'dx_receive_sample(uuid,text,uuid,uuid,text)',
+        'dx_mark_sample_stored(uuid,uuid,text,uuid,text)',
+        'dx_record_field_collection(uuid,uuid,integer,text,text,uuid,text,text)',
+        'dx_handover_field_collection(uuid,uuid,uuid,uuid,text)', 'dx_seed_rejection_reasons(uuid)']) f
+     WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M128', 'Functions: bind, collect, reject, receive, store, field collection, handover, seed reasons',
+            CASE WHEN v_funcs = 8 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 8 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

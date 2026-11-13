@@ -378,6 +378,21 @@ Trigger `dx_guard_sample`: status and collection/receipt/rejection columns chang
 | `dx_receive_sample(…, p_barcode, p_site_id)` | direct receipt when collection and processing are the same site: `collected → received` at that site (lets P6 run before P5 logistics exists) | `dx_sample_wrong_site`, `dx_sample_not_collected` |
 | `dx_mark_sample_stored(…, p_sample_id, p_location)` | received → stored | — |
 
+**As built (migration 128):** `dx_field_collections` adds a UPI-reference CHECK and a handover-shape CHECK; writes go
+only through `dx_record_field_collection` (amount ≤ `dx_visit_due`, idempotent per key) and
+`dx_handover_field_collection` (checks the receipt is on the visit's bill, same amount, key `fc:<id>`).
+`dx_label_prints` is append-only (`dx_guard_append_only`). `trg_dx_guard_sample` (function `dx_guard_sample`) sits beside
+the 127 whole-row guard. `dx_visit_due(clinic, visit)` = unbilled patient shares + issued-bill balances − doorstep money
+awaiting handover; the collect gate (`collect_before_payment`) and doorstep cash use it. `dx_collect_samples` treats a
+barcode sent for a labelled tube as a scan check (`dx_barcode_mismatch`) and binds it for an unbound pre-printed tube;
+`dx_reject_sample` replays a second rejection, refuses a resulted/completed order or a validated/amended LIS result,
+gives a generated tube a fresh sequence and leaves a pre-printed / external replacement unbound; `dx_receive_sample`
+replays a receipt at the same site. `dx_seed_rejection_reasons(clinic)` provisions the 11 defaults (migration: every
+`ACTIVE`/`WIND_DOWN` clinic; later enables: `provision_defaults`). Purge v4 removes label prints, field collections and
+reasons. Errors added: `dx_sample_not_found`, `dx_barcode_invalid`, `dx_barcode_already_set`, `dx_barcode_immutable`,
+`dx_barcode_mismatch`, `dx_barcode_required`, `dx_no_samples`, `dx_sample_not_rejectable`, `dx_rejection_reason_unknown`,
+`dx_rejection_notes_required`, `dx_sample_not_received`, `dx_field_amount_over_due`, `dx_handover_receipt_invalid`.
+
 ## 6. DX-M5 — Logistics and outsourcing
 ```sql
 CREATE TABLE dx_outsource_partners (id, clinic_id, name, legal_name, address, registration_no, nabl_certificate_no,

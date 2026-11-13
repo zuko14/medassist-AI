@@ -483,6 +483,10 @@ _PHLEBOTOMIST_ROUTES = (
     # migration 115: the sample-collection desk (branch-scoped in app.routers.orders)
     ("GET", re.compile(r"^/admin/diagnostic/worklist$")),
     ("POST", re.compile(r"^/admin/diagnostic/orders/[^/]+/collect$")),
+    # migration 128: Diagnostic OS home visits — tubes (bind + collect) and doorstep money, own visits only
+    ("GET", re.compile(r"^/admin/dx/home-collection/visits/[^/]+/samples$")),
+    ("POST", re.compile(r"^/admin/dx/home-collection/visits/[^/]+/samples$")),
+    ("POST", re.compile(r"^/admin/dx/home-collection/visits/[^/]+/doorstep-cash$")),
 )
 
 

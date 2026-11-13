@@ -65,21 +65,23 @@ logins get 403); tests follow `lab_tests.branch_id` like the existing lab-test a
 | POST | `/visits/{id}/bill/issue`, `/visits/{id}/receipts`, `/visits/{id}/refunds`, `/visits/{id}/payment-link` | DX_BILLING | delegate to `opd_billing` (same idempotency, shift rules) |
 | GET | `/visits/{id}/bill.pdf?format=a5|thermal` | DX_BILLING or DX_REGISTER | |
 
-## P4 — Collection and samples
+## P4 — Collection and samples (as built, migration 128; under `/admin/dx`)
 | Method | Path | Permission | Notes |
 |:-|:-|:-|:-|
-| GET | `/collection/queue?site&date` | DX_COLLECT | pending collection, STAT first |
-| GET | `/visits/{id}/label-options` | DX_COLLECT or DX_REGISTER | rows for the print dialog: test, sample id, tube colour, order time |
-| GET | `/visits/{id}/labels.pdf?sample_ids=…&mode=per_sample|per_test&register=true`, `/visits/{id}/labels.zpl?…` | DX_COLLECT or DX_REGISTER | logs `dx_label_prints` (reprint flagged) |
-| POST | `/samples/{id}/bind` | DX_COLLECT | pre-printed barcode |
-| POST | `/visits/{id}/collect` | DX_COLLECT | idempotent; `dx_awaiting_payment` per settings |
-| POST | `/samples/{id}/reject` | DX_RECEIVE or DX_COLLECT | reason code; `recollect` bool |
-| GET/POST/PATCH | `/rejection-reasons` | DX_ADMIN | |
-| GET | `/samples/track/{barcode}` | DX_READ | location, status, batch, timeline |
-| POST | `/admin/home-collection/prepare-route` (existing router) | HOME_COLLECTION_MANAGE | creates visits for the day's home bookings (idempotent) |
-| POST | `/admin/home-collection/visits/{id}/samples` (existing router) | PHLEBOTOMIST (own visit only) | bind + collect; added to `_PHLEBOTOMIST_ROUTES` (`app/routers/admin.py:476`) next to the existing `GET /admin/home-collection/my` and `POST /admin/home-collection/visits/{id}/status` |
-| POST | `/admin/home-collection/visits/{id}/field-collection` (existing router) | PHLEBOTOMIST (own visit only) | doorstep cash / UPI-to-clinic amount (`dx_field_collections`), idempotency key |
-| GET / POST | `/field-collections?status=pending_handover`, `/field-collections/{id}/handover`, `/field-collections/{id}/dispute` | DX_BILLING | handover creates the receipt on the cashier's open shift |
+| GET | `/collection/queue?site_id&priority&q&date` | DX_COLLECT | visits of the day with a tube to draw, STAT → urgent → routine, oldest first; a branch-pinned login sees its own site; also returns the caller's sites |
+| POST | `/visits/{id}/labels/print` | DX_COLLECT or DX_REGISTER | body `sample_ids[]` (empty = every labellable tube), `mode` `per_sample`/`per_test`/`register`, `format` `pdf`/`zpl`, `copies` (default 1 + `extra_labels`), `register_label`; returns PDF or ZPL; every print logged in `dx_label_prints`, `X-Reprint` header |
+| POST | `/samples/{id}/bind` | DX_COLLECT | pre-printed / external label → pending tube (`dx_barcode_in_use`, `dx_barcode_already_set`) |
+| POST | `/visits/{id}/collect` | DX_COLLECT | `samples [{id, barcode?, volume_ml?}]`, `collection_mode`, `idempotency_key`; a scanned barcode must match the tube; `dx_awaiting_payment` per settings |
+| POST | `/samples/{id}/reject` | DX_RECEIVE or DX_COLLECT | `reason_code`, `notes`, `recollect`; replacement tube + orders; recollection WhatsApp (in-session text or `dx_recollection_required`) sent off the request path; `dx_sample_results_signed` |
+| POST | `/samples/receive-direct` | DX_RECEIVE | `barcode`, `site_id`: tube drawn and processed at that site (`dx_sample_wrong_site`, `dx_sample_not_collected`) |
+| GET | `/samples/{barcode}/track` | DX_READ (or any visit reader, DX_RECEIVE) | tube, visit, replacement, timeline (`dx_events` of the tube + visit-level events) |
+| GET | `/rejection-reasons?include_inactive` | DX_RECEIVE, DX_COLLECT, DX_ADMIN or DX_READ | editing reasons: not built yet |
+| GET / POST | `/home-collection/visits/{appointment_id}/samples` | PHLEBOTOMIST (own booking only, else 404) or DX_COLLECT | tubes of the booking's visit + amount due; POST = bind + collect, mode `home`; in `_PHLEBOTOMIST_ROUTES` |
+| POST | `/home-collection/visits/{appointment_id}/doorstep-cash` | same | `amount_paise` (≤ due), `mode` `cash`/`upi_to_clinic` (UTR required), `idempotency_key` → `dx_field_collections` `pending_handover`; in `_PHLEBOTOMIST_ROUTES` |
+| GET | `/home-collection/field-collections?status=pending_handover` | DX_BILLING | cashier's handover list (branch-pinned: own branch) |
+| POST | `/home-collection/field-collections/{id}/handover` | DX_BILLING | receipt on the cashier's open shift (key `fc:<id>`) then `handed_over`; retry-safe |
+
+Not built yet: `prepare-route`, rejection-reason editing, the field-collection dispute, a route for `dx_mark_sample_stored` (P6).
 
 ## P5 — Logistics and outsourcing
 | Method | Path | Permission | Notes |

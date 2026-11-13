@@ -23,6 +23,8 @@ UP, DOWN = MIG / "127_dx_visits_and_billing.sql", MIG / "rollback" / "127_rollba
 def unwind_127(cur) -> None:
     """Inside an open transaction: purge every clinic with DX visit rows, run the 127
     rollback. Called first by unwind_126 (newest first)."""
+    from tests.test_migration_dx_m4 import unwind_128
+    unwind_128(cur)   # newest first: 128's field collections reference 127's visits
     cur.execute("SELECT to_regclass('public.dx_accessions') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

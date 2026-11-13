@@ -3351,6 +3351,35 @@
         }
         @media print { body.dxd-printing > *:not(#dxdPrint) { display: none !important; } #dxdPrint { display: block !important; } }
         /* DX:desk:END */
+        /* DX:samples:START — Sample collection (migration 128) */
+        .dxc-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+        .dxc-bar .field { margin: 0; min-width: 150px; flex: 1 1 150px; }
+        .dxc-bar .dxc-scan { flex: 2 1 260px; }
+        .dxc-scan input { font-family: ui-monospace, Menlo, monospace; font-size: 1.05rem; }
+        .dxc-visit { border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-top: 12px; background: var(--surface); }
+        .dxc-visit.stat { border-color: var(--red, #c0392b); box-shadow: inset 4px 0 0 var(--red, #c0392b); }
+        .dxc-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+        .dxc-head h4 { margin: 0; font-size: 1rem; }
+        .dxc-num { font-family: ui-monospace, Menlo, monospace; color: var(--text2); }
+        .dxc-chip { display: inline-block; white-space: nowrap; padding: 1px 8px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; border: 1px solid var(--border2); color: var(--text2); }
+        .dxc-chip.stat { background: var(--red, #c0392b); border-color: var(--red, #c0392b); color: #fff; }
+        .dxc-chip.urgent { border-color: var(--amber, #d68910); color: var(--amber, #d68910); }
+        .dxc-chip.fast { border-color: var(--accent); color: var(--accent2); }
+        .dxc-tubes { list-style: none; margin: 10px 0 0; padding: 0; }
+        .dxc-tube { display: grid; grid-template-columns: 22px 16px minmax(110px, 1fr) minmax(150px, auto) minmax(140px, 2fr) auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--border); }
+        .dxc-tube.scanned { background: var(--green-bg); }
+        .dxc-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border2); }
+        .dxc-code { font-family: ui-monospace, Menlo, monospace; font-size: 0.9rem; }
+        .dxc-code input { width: 150px; font-family: inherit; }
+        .dxc-tests { color: var(--text2); font-size: 0.85rem; }
+        .dxc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .dxc-pick { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; margin: 6px 0 10px; }
+        .dxc-cam video { width: 100%; max-height: 50vh; background: #000; border-radius: 10px; }
+        @media (max-width: 760px) {
+            .dxc-tube { grid-template-columns: 22px 16px 1fr auto; }
+            .dxc-tube .dxc-code, .dxc-tube .dxc-tests, .dxc-tube > span:last-child { grid-column: 3 / -1; }
+        }
+        /* DX:samples:END */
     </style>
 </head>
 <body>
@@ -3635,6 +3664,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9h6"></path><path d="M7 13h10"></path><path d="M7 17h4"></path></svg></span> DX Registration
             </div>
             <!-- DX:desk:END -->
+            <!-- DX:samples:START — Sample collection (migration 128) -->
+            <div class="nav-link" tabindex="0" data-page="dxcollect" data-dx="nav DX_COLLECT" style="display:none" onclick="go('dxcollect',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2h6"></path><path d="M10 2v14a2 2 0 0 0 4 0V2"></path><path d="M10 10h4"></path><path d="M5 22h14"></path></svg></span> Sample Collection
+            </div>
+            <!-- DX:samples:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -7518,6 +7552,59 @@
             <div id="dxdPrint" hidden></div>
         </div>
         <!-- DX:desk:END -->
+        <!-- DX:samples:START — Sample collection page (docs/diagnostic-os/UI.md, page dxcollect) -->
+        <div id="pg-dxcollect" class="sec">
+            <div class="page-head"><div><h2>Sample Collection</h2><p>Draw, label and scan tubes. STAT visits come first. A scanner that types and presses Enter works in the scan box.</p></div></div>
+            <div class="card">
+                <div class="dxc-bar">
+                    <div class="field"><label for="dxcSite">Site</label><select id="dxcSite" onchange="dxcollect.load()"></select></div>
+                    <div class="field"><label for="dxcPri">Priority</label><select id="dxcPri" onchange="dxcollect.load()"><option value="">All</option><option value="stat">STAT</option><option value="urgent">Urgent</option><option value="routine">Routine</option></select></div>
+                    <div class="field"><label for="dxcQ">Search name or LAB- number</label><input id="dxcQ" autocomplete="off" oninput="dxcollect.searchSoon()"></div>
+                    <div class="field dxc-scan"><label for="dxcScan">Scan a tube label</label><input id="dxcScan" autocomplete="off" inputmode="numeric" placeholder="Scan or type, then Enter" onkeydown="if(event.key==='Enter'){event.preventDefault();dxcollect.scan(this.value);this.value='';}"></div>
+                    <button type="button" class="btn btn-ghost" id="dxcCamBtn" hidden onclick="dxcollect.camera()">Camera scan</button>
+                </div>
+            </div>
+            <div id="dxcList" aria-live="polite"></div>
+        </div>
+        <div class="modal-overlay" id="dxcLabelModal" role="dialog" aria-modal="true" aria-labelledby="dxcLabelTitle">
+            <div class="modal">
+                <h3 id="dxcLabelTitle">Print labels</h3>
+                <p class="muted" id="dxcLabelFor"></p>
+                <fieldset><legend>Tubes</legend><div class="dxc-pick" id="dxcLabelTubes"></div></fieldset>
+                <div class="field"><label for="dxcLabelMode">Labels</label><select id="dxcLabelMode"><option value="per_sample">One per tube (its tests listed)</option><option value="per_test">One per test</option><option value="register">Register book label only</option></select></div>
+                <label class="check"><input type="checkbox" id="dxcLabelReg"> Add the register book label</label>
+                <div class="dx-grid">
+                    <div class="field"><label for="dxcLabelCopies">Copies</label><input id="dxcLabelCopies" type="number" min="1" max="10" placeholder="Lab default"></div>
+                    <div class="field"><label for="dxcLabelFmt">Printer</label><select id="dxcLabelFmt"><option value="pdf">PDF (any printer)</option><option value="zpl">ZPL (Zebra / TSC)</option></select></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxcollect.close('dxcLabelModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxcollect.print(this)">Print</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxcRejectModal" role="dialog" aria-modal="true" aria-labelledby="dxcRejectTitle">
+            <div class="modal">
+                <h3 id="dxcRejectTitle">Reject sample</h3>
+                <p class="muted" id="dxcRejectFor"></p>
+                <div class="field"><label for="dxcRejReason">Reason</label><select id="dxcRejReason"></select></div>
+                <div class="field"><label for="dxcRejNotes">Notes</label><textarea id="dxcRejNotes" rows="2" maxlength="500"></textarea></div>
+                <label class="check"><input type="checkbox" id="dxcRejRecollect" checked> Recollect (adds a new tube and tells the patient)</label>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxcollect.close('dxcRejectModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxcollect.reject(this)">Reject</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxcCamModal" role="dialog" aria-modal="true" aria-labelledby="dxcCamTitle">
+            <div class="modal dxc-cam">
+                <h3 id="dxcCamTitle">Camera scan</h3>
+                <video id="dxcVideo" playsinline muted></video>
+                <p class="muted">Hold the label flat, about a hand away from the camera.</p>
+                <div class="modal-actions"><button type="button" class="btn btn-ghost" onclick="dxcollect.stopCamera()">Close</button></div>
+            </div>
+        </div>
+        <!-- DX:samples:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -9973,6 +10060,195 @@ const dxdesk = {
     },
 };
 /* DX:desk:END */
+/* DX:samples:START — Sample collection (migration 128). Tube state moves only through the server
+   (dx_collect_samples / dx_reject_sample); this page selects tubes, checks scans and prints labels. */
+const dxcollect = {
+    visits: [], sites: [], reasons: null, scanned: {}, typed: {}, keys: {}, labelVisit: null, rejectTube: null, timer: null, stream: null,
+    async load() {
+        const site = document.getElementById('dxcSite').value, pri = document.getElementById('dxcPri').value;
+        const q = document.getElementById('dxcQ').value.trim();
+        const params = new URLSearchParams();
+        if (site) params.set('site_id', site);
+        if (pri) params.set('priority', pri);
+        if (q.length >= 2) params.set('q', q);
+        document.getElementById('dxcCamBtn').hidden = !('BarcodeDetector' in window && navigator.mediaDevices);
+        try {
+            const r = await api('/admin/dx/collection/queue' + (params.toString() ? '?' + params : ''));
+            dxcollect.visits = r.visits;
+            if (!dxcollect.sites.length || dxcollect.sites.length !== r.sites.length) {
+                dxcollect.sites = r.sites;
+                const sel = document.getElementById('dxcSite');
+                sel.innerHTML = (r.sites.length > 1 ? '<option value="">All my sites</option>' : '') +
+                    r.sites.map(x => `<option value="${esc(x.id)}">${esc(x.code)} · ${esc(x.display_name)}</option>`).join('');
+                sel.value = site && r.sites.some(x => x.id === site) ? site : sel.value;
+            }
+        } catch (e) { toast(e.message, true); dxcollect.visits = []; }
+        dxcollect.render();
+        document.getElementById('dxcScan').focus();
+    },
+    searchSoon() { clearTimeout(dxcollect.timer); dxcollect.timer = setTimeout(dxcollect.load, 350); },
+    ageSex(p) { return [p.age_years != null ? p.age_years + ' y' : '', ({ male: 'M', female: 'F', other: 'O' })[p.gender] || ''].filter(Boolean).join(' / '); },
+    render() {
+        const el = document.getElementById('dxcList');
+        if (!dxcollect.visits.length) { el.innerHTML = '<div class="card"><p class="muted">No tubes waiting to be collected.</p></div>'; return; }
+        const canReject = dxCan('DX_COLLECT') || dxCan('DX_RECEIVE');
+        el.innerHTML = dxcollect.visits.map(v => {
+            const p = v.patient_snapshot || {};
+            const fasting = { fasting: 'Fasting', non_fasting: 'Not fasting' }[v.fasting_status];
+            const tubes = v.samples.map(t => {
+                const pending = t.status === 'pending_collection', scanned = dxcollect.scanned[t.id];
+                const code = t.barcode ? esc(t.barcode)
+                    : `<input aria-label="Label for ${esc(t.container_name || 'tube')}" placeholder="Scan sticker" value="${esc(dxcollect.typed[t.id] || '')}" oninput="dxcollect.typed['${esc(t.id)}']=this.value.trim()">`;
+                return `<li class="dxc-tube${scanned ? ' scanned' : ''}">
+                    ${pending ? `<input type="checkbox" data-dxc-tube="${esc(t.id)}" aria-label="Collect ${esc(t.container_name || 'tube')}" checked>` : '<span></span>'}
+                    <span class="dxc-dot" style="background:${esc(t.colour_hex || '#fff')}" title="${esc(t.container_name || '')}"></span>
+                    <span>${esc(t.container_name || t.sample_type || '')}${t.recollect_of ? ' <span class="dxc-chip">Recollection</span>' : ''}</span>
+                    <span class="dxc-code">${code}${scanned ? ' ✓' : ''}</span>
+                    <span class="dxc-tests">${esc((t.tests || []).join(', '))}</span>
+                    <span>${pending ? '<span class="dxc-chip">To collect</span>'
+                        : (t.status === 'rejected' ? `<span class="dxc-chip">Rejected</span>`
+                        : `<span class="dxc-chip">${esc(t.status.replace('_', ' '))}</span>${canReject && ['collected', 'received'].includes(t.status) ? ` <button type="button" class="btn btn-ghost btn-sm" onclick="dxcollect.openReject('${esc(v.id)}','${esc(t.id)}')">Reject</button>` : ''}`)}</span>
+                </li>`;
+            }).join('');
+            return `<div class="dxc-visit${v.priority === 'stat' ? ' stat' : ''}" data-dxc-visit="${esc(v.id)}">
+                <div class="dxc-head"><h4>${esc(p.name || '')}</h4><span>${esc(dxcollect.ageSex(p))}</span>
+                    <span class="dxc-num">${esc(v.accession_number)}</span>
+                    ${v.priority !== 'routine' ? `<span class="dxc-chip ${esc(v.priority)}">${v.priority === 'stat' ? 'STAT' : 'Urgent'}</span>` : ''}
+                    ${fasting ? `<span class="dxc-chip fast">${fasting}</span>` : ''}</div>
+                <ul class="dxc-tubes">${tubes}</ul>
+                <div class="dxc-actions">
+                    <button type="button" class="btn btn-accent btn-sm" onclick="dxcollect.collect('${esc(v.id)}', this)">Collect sample(s)</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dxcollect.openLabels('${esc(v.id)}')">Print labels</button>
+                </div></div>`;
+        }).join('');
+    },
+    findTube(code) {
+        for (const v of dxcollect.visits) for (const t of v.samples) if (t.barcode && t.barcode === code) return [v, t];
+        return [null, null];
+    },
+    async scan(raw) {
+        const code = String(raw || '').trim();
+        if (!code) return;
+        const [v, t] = dxcollect.findTube(code);
+        if (!t) {   // not waiting here: a drawn tube can still be looked up and rejected
+            try {
+                const r = await api('/admin/dx/samples/' + encodeURIComponent(code) + '/track');
+                const label = `${code} · ${r.visit.accession_number} · ${r.visit.patient_name || ''} · ${r.sample.status.replace('_', ' ')}`;
+                if (['collected', 'received'].includes(r.sample.status) && (dxCan('DX_COLLECT') || dxCan('DX_RECEIVE'))) dxcollect.rejectFor(r.sample, label);
+                else toast(label);
+            } catch (e) { toast(e.status === 404 ? `${code} is not a tube of this lab.` : e.message, true); }
+            return;
+        }
+        dxcollect.scanned[t.id] = code;
+        dxcollect.render();
+        const box = document.querySelector(`[data-dxc-visit="${CSS.escape(v.id)}"]`);
+        if (box) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        toast(`${t.container_name || 'Tube'} for ${(v.patient_snapshot || {}).name || v.accession_number}: label matched`);
+    },
+    async collect(visitId, btn) {
+        const v = dxcollect.visits.find(x => x.id === visitId);
+        const ids = [...document.querySelectorAll(`[data-dxc-visit="${CSS.escape(visitId)}"] [data-dxc-tube]`)].filter(cb => cb.checked).map(cb => cb.dataset.dxcTube);
+        if (!ids.length) { toast('Tick at least one tube.', true); return; }
+        const samples = ids.map(id => {
+            const t = v.samples.find(x => x.id === id), code = t.barcode ? dxcollect.scanned[id] : dxcollect.typed[id];
+            return code ? { id, barcode: code } : { id };
+        });
+        const missing = samples.find(s => !v.samples.find(x => x.id === s.id).barcode && !s.barcode);
+        if (missing) { toast('Scan the sticker on each unlabelled tube first.', true); return; }
+        dxcollect.keys[visitId] = dxcollect.keys[visitId] || crypto.randomUUID();       // one key per attempt: retries replay
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/visits/${encodeURIComponent(visitId)}/collect`, { samples, collection_mode: 'centre', idempotency_key: dxcollect.keys[visitId] });
+            delete dxcollect.keys[visitId];
+            ids.forEach(id => { delete dxcollect.scanned[id]; delete dxcollect.typed[id]; });
+            toast(`${ids.length} tube(s) collected · ${v.accession_number}`);
+            await dxcollect.load();
+        } catch (e) { toast(e.message, true); if (e.status && e.status < 500) delete dxcollect.keys[visitId]; } finally { btn.disabled = false; }
+    },
+    open(id) { document.getElementById(id).classList.add('open'); },
+    close(id) { document.getElementById(id).classList.remove('open'); },
+    openLabels(visitId) {
+        const v = dxcollect.visits.find(x => x.id === visitId);
+        dxcollect.labelVisit = v;
+        document.getElementById('dxcLabelFor').textContent = `${(v.patient_snapshot || {}).name || ''} · ${v.accession_number}`;
+        document.getElementById('dxcLabelTubes').innerHTML = v.samples.filter(t => t.barcode && !['rejected', 'discarded'].includes(t.status)).map(t =>
+            `<label class="check"><input type="checkbox" value="${esc(t.id)}" checked> <span class="dxc-dot" style="display:inline-block;vertical-align:-2px;background:${esc(t.colour_hex || '#fff')}"></span> <span class="dxc-code">${esc(t.barcode)}</span> — ${esc((t.tests || []).join(', '))}</label>`).join('')
+            || '<p class="muted">No labelled tubes yet.</p>';
+        dxcollect.open('dxcLabelModal');
+    },
+    async print(btn) {
+        const v = dxcollect.labelVisit, fmt = document.getElementById('dxcLabelFmt').value;
+        const body = { sample_ids: [...document.querySelectorAll('#dxcLabelTubes input:checked')].map(x => x.value),
+                       mode: document.getElementById('dxcLabelMode').value, format: fmt,
+                       register_label: document.getElementById('dxcLabelReg').checked };
+        const copies = Number(document.getElementById('dxcLabelCopies').value);
+        if (copies) body.copies = copies;
+        if (body.mode !== 'register' && !body.sample_ids.length) { toast('Tick at least one tube.', true); return; }
+        btn.disabled = true;
+        try {
+            const r = await apiRaw(`/admin/dx/visits/${encodeURIComponent(v.id)}/labels/print`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+            const url = URL.createObjectURL(await r.blob());
+            if (fmt === 'pdf') window.open(url, '_blank');
+            else { const a = document.createElement('a'); a.href = url; a.download = v.accession_number + '.zpl'; a.click(); }
+            toast(r.headers.get('X-Reprint') === 'true' ? 'Reprint logged' : 'Labels ready');
+            dxcollect.close('dxcLabelModal');
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    openReject(visitId, tubeId) {
+        const v = dxcollect.visits.find(x => x.id === visitId), t = v.samples.find(x => x.id === tubeId);
+        dxcollect.rejectFor(t, `${t.container_name || 'Tube'} ${t.barcode || ''} · ${v.accession_number}`);
+    },
+    async rejectFor(t, label) {
+        dxcollect.rejectTube = t;
+        try {
+            if (!dxcollect.reasons) dxcollect.reasons = (await api('/admin/dx/rejection-reasons')).reasons;
+        } catch (e) { toast(e.message, true); return; }
+        document.getElementById('dxcRejReason').innerHTML = dxcollect.reasons.map(r => `<option value="${esc(r.code)}">${esc(r.label)}</option>`).join('');
+        document.getElementById('dxcRejectFor').textContent = label;
+        document.getElementById('dxcRejNotes').value = '';
+        document.getElementById('dxcRejRecollect').checked = true;
+        dxcollect.open('dxcRejectModal');
+    },
+    async reject(btn) {
+        const t = dxcollect.rejectTube;
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/dx/samples/${encodeURIComponent(t.id)}/reject`, {
+                reason_code: document.getElementById('dxcRejReason').value,
+                notes: document.getElementById('dxcRejNotes').value.trim() || null,
+                recollect: document.getElementById('dxcRejRecollect').checked });
+            const fresh = (r.samples || []).find(s => s.id === r.replacement_sample_id);
+            toast(fresh ? `Rejected. New tube ${fresh.barcode || '(needs a sticker)'} added; the patient is being told.` : 'Sample rejected.');
+            dxcollect.close('dxcRejectModal');
+            await dxcollect.load();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async camera() {
+        try {
+            const detector = new BarcodeDetector({ formats: ['code_128'] });
+            dxcollect.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            const video = document.getElementById('dxcVideo');
+            video.srcObject = dxcollect.stream;
+            await video.play();
+            dxcollect.open('dxcCamModal');
+            const tick = async () => {
+                if (!dxcollect.stream) return;
+                try {
+                    const hits = await detector.detect(video);
+                    if (hits.length) { dxcollect.stopCamera(); dxcollect.scan(hits[0].rawValue); return; }
+                } catch (_) { /* frame not ready */ }
+                setTimeout(tick, 250);
+            };
+            tick();
+        } catch (e) { dxcollect.stopCamera(); toast('Camera not available: type or use the scanner instead.', true); }
+    },
+    stopCamera() {
+        if (dxcollect.stream) dxcollect.stream.getTracks().forEach(t => t.stop());
+        dxcollect.stream = null;
+        dxcollect.close('dxcCamModal');
+    },
+};
+/* DX:samples:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -15279,7 +15555,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ };
     if (loaders[page]) loaders[page]();
 }
 

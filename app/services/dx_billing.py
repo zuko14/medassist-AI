@@ -90,3 +90,23 @@ async def payment_link(clinic_id: str, clinic: dict, accession_id: str) -> dict:
     pat = await sb(scoped_query("patients", clinic_id).eq("id", inv["patient_id"]).limit(1))
     link = await payment_service.create_opd_payment_link(clinic, inv, (pat.data or [{}])[0], _balance(inv))
     return {**link, "invoice_id": inv["id"], "amount_paise": _balance(inv)}
+
+
+async def handover_field_collection(clinic_id: str, fc_id: str, user, shift_id: Optional[str] = None) -> dict:
+    """AUDIT A14: the cashier accepts a phlebotomist's doorstep money. The receipt is created
+    first on the cashier's open shift (key 'fc:<id>', so a retry finds it), then the field
+    collection is stamped with it; a crash in between is healed by calling again."""
+    rows = await sb(scoped_query("dx_field_collections", clinic_id).eq("id", fc_id).limit(1))
+    if not rows.data:
+        raise HTTPException(status_code=404, detail="Field collection not found.")
+    fc = rows.data[0]
+    if fc["status"] == "handed_over":
+        return {**fc, "replayed": True}
+    receipt = await take_receipt(clinic_id, fc["accession_id"], {
+        "idempotency_key": f"fc:{fc['id']}", "mode": "cash" if fc["mode"] == "cash" else "upi",
+        "amount_paise": fc["amount_paise"], "reference": fc.get("reference"), "shift_id": shift_id}, user)
+    aid, name = dx._actor(user)
+    out = await dx.rpc("dx_handover_field_collection", {"p_clinic_id": clinic_id, "p_id": fc["id"],
+                                                        "p_receipt_id": receipt["id"], "p_actor_id": aid,
+                                                        "p_actor_name": name})
+    return {**out, "receipt": receipt}
