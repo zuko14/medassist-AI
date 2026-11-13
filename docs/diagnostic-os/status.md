@@ -31,12 +31,12 @@ unless the account carries a recorded authorisation.
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P5 — Logistics and outsourcing** (P0–P4 VERIFIED 2026-11-13) |
-| Next task | **DX-31** (migration DX-M5, next free number 129) |
-| Working branch | `dx/p1-foundation` (from `main` @ `94de8ae`; P1 `224e902`, P2 `2fec764`, P3 `ee6a219`, P4 on top; not pushed, no PR) |
-| Last commit touching DX | `feat(dx): P4 samples and collection (DX-26…DX-30)` on `dx/p1-foundation` |
-| Last VERIFIED gate | P4 DG1–DG7 (§9, 2026-11-13) |
-| Open blockers | none for code. Migrations 125–128 are **not applied** to Supabase (owner action, ROLLOUT §0.4: apply before deploying this code — `get_family_members` reads the 127 column) |
+| Active phase | **P6 — Bench, verification, approval** (P0–P4 VERIFIED 2026-11-13, P5 VERIFIED 2026-11-14) |
+| Next task | **DX-36** (migration DX-M6, next free number 130) |
+| Working branch | `dx/p1-foundation` (from `main` @ `94de8ae`; P1 `224e902`, P2 `2fec764`, P3 `ee6a219`, P4 `9c3cd66`, P5 on top; not pushed, no PR) |
+| Last commit touching DX | `feat(dx): P5 logistics and outsourcing (DX-31…DX-35)` on `dx/p1-foundation` |
+| Last VERIFIED gate | P5 DG1–DG7 (§9, 2026-11-14) |
+| Open blockers | none for code. Migrations 125–129 are **not applied** to Supabase (owner action, ROLLOUT §0.4: apply before deploying this code — `get_family_members` reads the 127 column) |
 | Lanes running in parallel | none |
 
 ## 2. Resume protocol (after a pause of any length)
@@ -69,7 +69,7 @@ unless the account carries a recorded authorisation.
 | P2 | Catalogue: departments, containers, signatories, test master, parameters, formulas, seed, approval | DX-12–17 | P1 | Lane PURE | DX-M2 | DG1–DG7 | VERIFIED |
 | P3 | Registration, visits, orders (`source=dx`), billing, booking conversion | DX-18–25 | P2 | — | DX-M3 | DG1–DG7 | VERIFIED |
 | P4 | Samples, labels, collection (desk + home), rejection, same-site receipt | DX-26–30 | P3 | P8a | DX-M4 | DG1–DG7 | VERIFIED |
-| P5 | Logistics: routing, batches, hub receipt, outsourcing | DX-31–35 | P4 | P6, P8a | DX-M5 | DG1–DG7 | NOT_STARTED |
+| P5 | Logistics: routing, batches, hub receipt, outsourcing | DX-31–35 | P4 | P6, P8a | DX-M5 | DG1–DG7 | VERIFIED |
 | P6 | Bench: stage worklists, entry with formulas/delta, verification, approval (single/batch), critical calls | DX-36–40 | P4 | P5, P8a | DX-M6 | DG1–DG7 | NOT_STARTED |
 | P6b | OPD/IPD lab orders through the DX bench | DX-41 | P6 | P7 | (in DX-M6 or own) | DG1–DG7 | NOT_STARTED |
 | P7 | Reports: renderer, templates, releases, dues hold, delivery, shadow mode, public verify/share | DX-42–47 | P6 (P5 for outsourced line) | P8a | DX-M7 | DG1–DG7 | NOT_STARTED |
@@ -89,7 +89,7 @@ that may be built from P1 onward by a separate agent (AGENT-PROMPT.md §3).
 | DX-M2 | `126_dx_catalogue.sql` (+ `rollback/126_rollback_dx_catalogue.sql`) | `dx/p1-foundation` (not merged) | no | no |
 | DX-M3 | `127_dx_visits_and_billing.sql` (+ `rollback/127_rollback_dx_visits_and_billing.sql`) | `dx/p1-foundation` (not merged) | no | no |
 | DX-M4 | `128_dx_collection.sql` (+ `rollback/128_rollback_dx_collection.sql`) | `dx/p1-foundation` (not merged) | no | no |
-| DX-M5 | — | — | — | — |
+| DX-M5 | `129_dx_logistics.sql` (+ `rollback/129_rollback_dx_logistics.sql`) | `dx/p1-foundation` (not merged) | no | no |
 | DX-M6 | — | — | — | — |
 | DX-M7 | — | — | — | — |
 | DX-M8 | — | — | — | — |
@@ -161,11 +161,11 @@ booking of the same tests unchanged.
 ### P5 — Logistics and outsourcing (DX-M5)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| DX-31 | Migration DX-M5 | P4 | | `test_dx_logistics.py` | NOT_STARTED |
-| DX-32 | Routing rules CRUD + resolution inside `dx_register_visit` (`CREATE OR REPLACE`) + preview route | DX-31 | precedence; tubes split by destination | `test_dx_logistics.py` | NOT_STARTED |
-| DX-33 | Batches (create/add/dispatch/receive), stability timers (pure), `LOGISTICS_RUNNER` nav, `dx_sample_stability_scan` job | DX-31 | W6 | `test_dx_logistics.py` | NOT_STARTED |
-| DX-34 | Outsource partners + orders `outsource_partner_id` + "performed at" data for P7 | DX-32 | W13 (data part) | `test_dx_logistics.py` | NOT_STARTED |
-| DX-35 | UI **Logistics** page | DX-33 | live UI | manual | NOT_STARTED |
+| DX-31 | Migration DX-M5 | P4 | one live batch per tube; tie refused; guarded rollback | `test_migration_dx_m5.py` | VERIFIED |
+| DX-32 | Routing rules CRUD + resolution inside `dx_register_visit` (`CREATE OR REPLACE`) + preview route | DX-31 | precedence; tubes split by destination | `test_dx_logistics.py`, `test_migration_dx_m5.py` | VERIFIED |
+| DX-33 | Batches (create/add/dispatch/receive), stability timers (pure), `LOGISTICS_RUNNER` nav, `dx_sample_stability_scan` job | DX-31 | W6 | `test_dx_logistics.py` | VERIFIED |
+| DX-34 | Outsource partners + orders `outsource_partner_id` + "performed at" data for P7 | DX-32 | W13 (data part) | `test_dx_logistics.py` | VERIFIED |
+| DX-35 | UI **Logistics** page | DX-33 | live UI | manual | VERIFIED |
 
 ### P6 — Bench, verification, approval (DX-M6)
 | ID | Task | Depends | Acceptance | Tests | State |
@@ -269,6 +269,11 @@ booking of the same tests unchanged.
 | 2026-11-13 | DX-28 | Routes follow the owner's P4 brief: `POST /visits/{id}/labels/print` (body: `sample_ids`, `mode`, `format`, `copies`, `register_label`) instead of `GET labels.pdf/zpl` + `label-options`; `POST /samples/receive-direct`; `GET /samples/{barcode}/track`; `GET /rejection-reasons` (no POST/PATCH yet). `dx_mark_sample_stored` has no route yet (bench, P6). The queue also returns the caller's sites (a DX_COLLECT login cannot read `/sites`). The recollection notice is sent off the request path: in-session text, else the `dx_recollection_required` template (must be approved in Meta); B2B visits go to the account desk | brief is explicit; the notice must never fail or slow a rejection | API.md P4 as built |
 | 2026-11-13 | DX-29 | Doorstep cash and home tubes are `/admin/dx/home-collection/visits/{appointment_id}/doorstep-cash` and `…/samples` (GET + POST) keyed by the **booking** (the phlebotomist's own assignment), resolved to its visit via `dx_accession_bookings`; cashier list `GET /home-collection/field-collections`, handover `POST /home-collection/field-collections/{id}/handover`. **Not built**: `prepare-route` (visits are created by *Today's bookings → Register*), the phlebotomist portal's Samples / Cash panel UI (API only), and the dispute action | owner P4 brief scoped DX-29 to the doorstep cash + handover routes and the confinement | API.md P4 |
 | 2026-11-13 | DX-30 | Nav gating `data-dx="nav DX_COLLECT"` (P1 convention, as DX-17) instead of `perm:DX_COLLECT`. Scanning a code that is not waiting in the queue looks it up (`/track`) and opens Reject when the tube is collected / received — otherwise a fully collected visit leaves the queue and its tubes could not be rejected from this page (found in the live check) | one gating rule; Reject reachable after collection | — |
+| 2026-11-14 | DX-31 | `dx_samples.outsource_partner_id` added (CHECK: at most one of processing site / partner); all new FKs are composite `(clinic_id, …)`; `dx_insert_lines` and `dx_reject_sample` replaced (rollback restores the 127 / 128 bodies). A tube not drawn at the batch's site is `dx_batch_wrong_origin`; a tube rejected while in a batch is receipted `damaged`; a partner batch is "received" (handed over) by its sending site with `received_site_id` NULL; manifest `created_at` is `clock_timestamp()` (scan order) | a tube must carry its destination for grouping, the batch check and recollection; the brief's `damaged` count had no other source | DATA-MODEL §6 "As built" |
+| 2026-11-14 | DX-32 | Precedence lives only in SQL (`dx_resolve_routing`); `dx.resolve_routing` and the preview route call it. Within a level a rule naming the sending site beats an any-site rule, then priority. Ties = a partial unique index. Rule / partner writes are clinic-wide (a pinned DX_ADMIN gets 403); DELETE removes the rule (audited) | one resolver for registration, preview and service; the brief's "lowest priority breaks ties" left site-specific vs any-site open | API.md P5 |
+| 2026-11-14 | DX-33 | Routes follow the owner's P5 brief (`GET /batches?from_site&to_site&status`, `POST /batches/{id}/samples`, no `routing/resolve`, no sample removal); `LOGISTICS_RUNNER` confinement widened to `/batches…`, `GET /outsource-partners`, `GET /samples/{barcode}/track`; `GET /batches` also returns sites and partners (a runner cannot read `/sites`). Stability: cold window when the batch's dispatch temperature ≤ 8 °C, else room hours; the scan job logs (`DX_SAMPLE_STABILITY`) — no dashboard notice yet. Visit reads strip `external_ref` / `delivery_prefs` without a desk grant and both contact and money for a pinned user reaching another branch's visit through a sample site | brief is explicit; SECURITY §4 table | API.md P5 |
+| 2026-11-14 | DX-34 | "Outsourced to <partner>" is on visit orders (`outsourced_to`) and collection-queue tubes; the DX bench worklist arrives with P6 | no DX test worklist exists before P6 | — |
+| 2026-11-14 | DX-35 | Receipt warns inline ("N not scanned will be recorded as missing") instead of a `confirm()`; a runner login lands on Logistics; nav gating `data-dx="nav DX_LOGISTICS DX_RECEIVE DX_ADMIN"` | found in the live check | — |
 
 ## 8. Known issues and limitations
 - At authoring, migrations 115–124 (which DX builds on) are not applied to Supabase; DX cannot reach staging first.
@@ -278,8 +283,11 @@ booking of the same tests unchanged.
 - Approval requires doctor-linked logins with registration numbers; centres where non-doctor scientists sign
   reports under state rules need an owner decision (signatory eligibility is data in `dx_signatories`, but the 118
   CHECK requires a registration number).
-- `deactivation_preview` still returns zeros (P3 and P4 did not add their counts: visits in process, collected tubes);
-  the owner's switch-off is not blocked by open visits yet. Do with P5 (samples in transit).
+- `deactivation_preview` still returns zeros (P3–P5 did not add their counts: visits in process, collected tubes,
+  tubes in transit); the owner's switch-off is not blocked by open visits yet.
+- P5 not built: removing a tube from an open batch, cancelling a batch, re-batching or late-receiving a tube recorded
+  missing, the discrepancy notice to the source site's dashboard (W6 step 3 — recorded on the batch and timeline only),
+  stability alerts beyond the scheduler log.
 - DX-29 remainder: `prepare-route`, the phlebotomist portal Samples / Cash panel UI and the field-collection dispute
   action (API and DB status exist). Home visits are registered from the desk's *Today's bookings* meanwhile.
 - The `dx_recollection_required` WhatsApp template must be submitted to Meta by the owner; until approved, patients
@@ -288,6 +296,14 @@ booking of the same tests unchanged.
 ## 9. Verification evidence (paste command and summary line; newest first)
 | Date (IST) | Task / gate | Command | Result |
 |:-|:-|:-|:-|
+| 2026-11-14 | P5 / DG7 | python -m pytest -q -rs | 8898 passed, 5 skipped, 15 warnings in 304.12s (P4 8837 + 61 new: 19 P5 tests + 42 matrix cases for the 14 new routes). Skips: 3 × `KRIYA_TEST_LIVE`, 1 × MocDoc sandbox, 1 × missing `issues/ACCUMAX CHATBOT.csv` fixture (`test_lab_tests_admin.py:369`) |
+| 2026-11-14 | P5 / DG5 | python -m pytest tests/test_migration_115_orders.py tests/test_orders_api_e2e.py tests/test_migration_118_lis.py tests/test_lis_api_e2e.py -q | 33 passed |
+| 2026-11-14 | DX-31…34 | python -m pytest tests/test_migration_dx_m5.py tests/test_dx_logistics.py -q | 19 passed (11 migration: precedence, tie, split by destination, batch lifecycle with missing / damaged / unexpected, refusals, one-live-batch index + guard, recollection keeps partner, purge v5, guarded rollback + reapply twice; 8 e2e: partners / rules / preview, desk split + "Outsourced to", runner → hub receipt with discrepancy, batch site scope, processing-site user sees no phone / money, runner confinement, stability calculator, scan job) |
+| 2026-11-14 | DX-31 rollback chain | python -m pytest tests/test_migration_dx_m1.py … test_migration_dx_m4.py tests/test_migration_115_orders.py tests/test_migration_118_lis.py tests/test_migration_103_opd.py tests/test_migration_111_ipd.py tests/test_migration_124_insurance.py tests/test_migration_121_emergency.py tests/test_home_collection.py tests/test_dx_visits_e2e.py tests/test_dx_samples.py -q | 248 passed (`unwind_128` now unwinds 129 first) |
+| 2026-11-14 | P5 / DG3 | python -m pytest tests/test_clinical_firewall.py tests/test_dx_no_llm.py -q | 36 passed |
+| 2026-11-14 | P5 / DG2 | python -m pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q | 1359 passed (80 `/admin/dx` routes) |
+| 2026-11-14 | P5 / DG1 | python -m pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q | 10 passed |
+| 2026-11-14 | DX-35 live UI | real app + fresh pgserver (migrations 001→129 applied clean) + bridge; seeded Kukatpally (collection) → Central Hub (processing), rule "every test → hub", "Vitamin D → Metro Reference Lab"; 3 collected visits | Meena's Lipid + Vitamin D (same serum container) registered as **two tubes**. **Runner @1440 px**: lands on Logistics (Routing tab hidden); New batch → TRN-2026-00001 to Central Hub, carrier + 22 °C; scanned 4 tubes — the Vitamin D tube refused "routed to a different lab than this batch: 260100000004"; stability dots: EDTA 3.99 h left (green), Ravi's EDTA 0.65 h left (amber); dispatch at 6 °C → serum switched to the 72 h cold window. **Hub tech**: Incoming shows the batch; Receive scanning 2 of 4 + a stray → "Received · discrepancy": 2 received, 2 missing (barcodes listed), 0 damaged, 1 not on manifest. Track 260700000001 → Registered → Collected → Dispatched in batch TRN-2026-00001 → Central Hub · 6 °C → Received at Central Hub. **Admin**: Routing & Partners lists partner (NABL MC-2210) and rules; added a department rule; a tying rule → toast "Another active rule … same priority"; preview "Vitamin D → Outsourced to Metro Reference Lab (a rule for this test)". **@390 px**: page width 390, no overflow, tube rows stack. Fixed in this check: receive list overflowing the modal, native `confirm()` for missing tubes. Console: no errors |
 | 2026-11-13 | P4 / DG7 | python -m pytest -q -rs | 8837 passed, 5 skipped, 15 warnings in 966.59s (P3 8755 + 82 new; same 5 skips; slower run: a second pytest shared the pgserver part of the time) |
 | 2026-11-13 | DX-26 rollback chain | python -m pytest tests/test_migration_dx_m1.py tests/test_migration_dx_m2.py tests/test_migration_dx_m3.py tests/test_migration_103_opd.py tests/test_migration_111_ipd.py tests/test_migration_124_insurance.py tests/test_migration_121_emergency.py tests/test_home_collection.py tests/test_dx_visits_e2e.py tests/test_dx_bookings.py tests/test_dx_feature_gate.py -q | 230 passed (`unwind_127` now unwinds 128 first; `test_home_collection.py` unedited) |
 | 2026-11-13 | P4 / DG5 | python -m pytest tests/test_migration_115_orders.py tests/test_orders_api_e2e.py tests/test_migration_118_lis.py tests/test_lis_api_e2e.py -q | 33 passed |
@@ -328,6 +344,7 @@ booking of the same tests unchanged.
 ## 10. Log
 | Date (IST) | Entry |
 |:-|:-|
+| 2026-11-14 | **P5 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P5 logistics and outsourcing (DX-31…DX-35)`). Migration 129: `dx_outsource_partners`, `dx_routing_rules` (tie index), `dx_batches` (`TRN-`), `dx_batch_samples` (one live batch per tube), `opd_orders` / `dx_samples.outsource_partner_id`; `dx_resolve_routing`, `dx_insert_lines` + `dx_reject_sample` replaced (split by destination, partner kept), `dx_create_batch`, `dx_batch_add`, `dx_dispatch_batch`, `dx_receive_batch`, `dx_batch_json`; purge v5; rollback; verify §23. Service: routing preview, partners / rules CRUD, batches, pure stability calculator, `dx_sample_stability_scan` (10 min, `scheduler_locks`); 14 routes; runner confinement widened; visit read model minimised for processing-site logins; Logistics page (DX:logistics markers). Existing tests edited only for newest-first unwind (`unwind_128` → `unwind_129`) and sidebar order (+`dxlogistics`). Deviations in §7. Not applied to Supabase, not pushed. |
 | 2026-11-13 | **P4 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P4 samples and collection (DX-26…DX-30)`). Migration 128: `dx_rejection_reasons` (11 defaults, seeded on enable), `dx_field_collections` (pending_handover → handed_over with the receipt), `dx_label_prints` (append-only), `dx_guard_sample` (barcode immutable, columns only in functions), `dx_bind_barcode`, `dx_collect_samples`, `dx_reject_sample` (cancel + replacement tube/orders, refused once signed), `dx_receive_sample` (same site), `dx_mark_sample_stored`, `dx_record_field_collection`, `dx_handover_field_collection`, `dx_visit_due`; purge v4; rollback; verify §22. `dx_barcode.py` (Code128 B/C, 50×25 mm PDF, ZPL, register label), 13 routes (queue, labels, bind, collect, reject + recollection notice, receive-direct, track, reasons, home tubes, doorstep cash, field-collection list, handover), phlebotomist confinement widened by 3 routes, Sample Collection page (DX:samples markers). Existing tests edited only for newest-first unwind (`unwind_127` → `unwind_128`), sidebar order (+`dxcollect`), matrix floors (66). Deviations in §7. Not applied to Supabase, not pushed. |
 | 2026-11-13 | **P3 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P3 registration, visits, billing (DX-18…DX-25)`). Migration 127: referrers, B2B account identity (payer-routed CHECK), visits, bookings link, items (shares CHECK), tubes, timeline; `opd_orders` `source='dx'` (doctor optional only for dx, shape branch, explode-once index); DX bill link + line guard; write guards; lab-test delete guard; `dx_price_items`, `dx_register_visit`, `dx_quote`, `dx_add_items`, `dx_cancel_item`, `dx_cancel_visit`, `dx_bill_visit`, `dx_redact_patient`; purge v3; rollback; verify §21. G1 worklist / collect / complete, OPD draft save, generic resend / resolve and lab-test delete guarded; `get_family_members` hides B2B dependants. `dx.py` visit service, `dx_billing.py` (issue, prepaid once per booking, receipts with replay, payment link), 21 new routes, data-retention step, DX Registration page with Today's bookings. Existing tests edited only for newest-first unwinds (115, 118), sidebar order and Ketu page table (+`dxdesk`), matrix counts. Deviations in §7. Not applied to Supabase, not pushed. |
 | 2026-11-13 | **P2 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P2 catalogue (DX-12…DX-17)`). Migration 126: `dx_departments`, `dx_containers` (2-digit codes), `dx_signatories`, `dx_test_components`; DX columns on `lab_tests` / `lab_test_parameters`; component / kind guards; approval digest + CAS (`dx_test_digest`, `dx_approve_test`) with triggers that clear approval on any clinical edit and lock the test row; purge v2; rollback restores purge v1; verify §20. `dx_formula.py` (ast whitelist, Decimal, CKD-EPI 2021, cycles), `lis.flag_value` exclusive bounds (118 vectors unchanged), `dx_results.py` (delta check, auto-verify eligibility), `dx_catalogue.py` + 25 catalogue routes, `dx_seed.py` + `tests_v1.json` (148 entries) + CSV/XLSX band import with dry run, Test Master page. Existing tests edited only for newest-first unwinds (118), sidebar order / Ketu page table (+`dxcatalog`), matrix counts. Deviations in §7. Not applied to Supabase, not pushed. |
@@ -336,14 +353,15 @@ booking of the same tests unchanged.
 | 2026-11-05 | Document set authored (no code): competitive research (MocDoc screenshots + public pages for MocDoc/CrelioHealth; direct fetch blocked by network policy), gap analysis against `main` @ `56f719f`, architecture, 18 ADRs, data model DX-M1…M9, workflows W1–W18, report/template/label spec, API, UI, security, test plan, rollout, assistants, agent prompts. Baseline suite not run in the authoring session (no pytest installed). |
 
 ## 11. Next exact action
-Owner: review/merge `dx/p1-foundation`; apply migrations 125–128 to Supabase **before** deploying it (ROLLOUT §0.4);
+Owner: review/merge `dx/p1-foundation`; apply migrations 125–129 to Supabase **before** deploying it (ROLLOUT §0.4);
 submit the `dx_recollection_required` WhatsApp template.
-Agent: start **DX-31** (migration DX-M5 as `129_dx_logistics.sql`, re-check the number first) with the master prompt
+Agent: start **DX-36** (migration DX-M6 as `130_…`, re-check the number first) with the master prompt
 in [AGENT-PROMPT.md](AGENT-PROMPT.md) §1. Lane PURE (DX-43a PDF renderer — also needed for the A5 / 80 mm bill) may start
 in parallel; DX-27a (barcode) is done.
 
 ## 12. Release decision
-**P1–P4 built, not released.** Owner toggle, setup, test master with approval, registration, billing, booking
-conversion, tube labels, collection (desk and home), rejection with recollection and same-site receipt exist;
+**P1–P5 built, not released.** Owner toggle, setup, test master with approval, registration, billing, booking
+conversion, tube labels, collection (desk and home), rejection with recollection, same-site receipt, routing,
+hub-and-spoke batches and outsourcing exist;
 nothing can be resulted or reported yet. The module stays off for every clinic until P11 is VERIFIED and the
 owner switches it on per clinic, then per branch delivery owner (ROLLOUT §2).

@@ -3380,6 +3380,36 @@
             .dxc-tube .dxc-code, .dxc-tube .dxc-tests, .dxc-tube > span:last-child { grid-column: 3 / -1; }
         }
         /* DX:samples:END */
+        /* DX:logistics:START — Logistics: batches, receipt, tracking, routing (migration 129) */
+        .dxl-tabs { margin: 0 0 12px; flex-wrap: wrap; max-width: 100%; }
+        .dxl-batch { border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-top: 10px; background: var(--surface); }
+        .dxl-batch.sel { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+        .dxl-tube { display: grid; grid-template-columns: 16px minmax(120px, auto) minmax(140px, 1fr) minmax(120px, 2fr) auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--border); }
+        .dxl-tube.ok { background: var(--green-bg); }
+        .dxl-stab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 0.82rem; color: var(--text2); }
+        .dxl-stab i { width: 10px; height: 10px; border-radius: 50%; background: var(--green, #1e8449); }
+        .dxl-stab.amber i { background: var(--amber, #d68910); }
+        .dxl-stab.expired i { background: var(--red, #c0392b); }
+        .dxl-stab.expired { color: var(--red, #c0392b); font-weight: 600; }
+        .dxl-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+        .dxl-sum div { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+        .dxl-sum b { display: block; font-size: 1.2rem; }
+        .dxl-sum .bad { border-color: var(--red, #c0392b); }
+        .dxl-tl { list-style: none; margin: 10px 0 0; padding: 0; border-left: 2px solid var(--border2); }
+        .dxl-tl li { position: relative; padding: 4px 0 10px 16px; }
+        .dxl-tl li::before { content: ''; position: absolute; left: -6px; top: 9px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+        .dxl-tl small { color: var(--text2); display: block; }
+        .dxl-rows { list-style: none; margin: 8px 0 0; padding: 0; }
+        .dxl-rows li { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+        .dxl-rows li > span:first-child { flex: 1 1 220px; }
+        .dxl-modal-list { max-height: 40vh; overflow-y: auto; }
+        .dxl-modal-list .dxl-tube { grid-template-columns: 16px auto minmax(0, 1fr) auto; }
+        .dxl-modal-list .dxl-tube > :nth-child(4) { display: none; }
+        @media (max-width: 760px) {
+            .dxl-tube { grid-template-columns: 16px 1fr auto; }
+            .dxl-tube > :nth-child(3), .dxl-tube > :nth-child(4) { grid-column: 2 / -1; }
+        }
+        /* DX:logistics:END */
     </style>
 </head>
 <body>
@@ -3669,6 +3699,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2h6"></path><path d="M10 2v14a2 2 0 0 0 4 0V2"></path><path d="M10 10h4"></path><path d="M5 22h14"></path></svg></span> Sample Collection
             </div>
             <!-- DX:samples:END -->
+            <!-- DX:logistics:START — Logistics (migration 129) -->
+            <div class="nav-link" tabindex="0" data-page="dxlogistics" data-dx="nav DX_LOGISTICS DX_RECEIVE DX_ADMIN" style="display:none" onclick="go('dxlogistics',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"></path><path d="M14 10h4l3 3v3h-7"></path><circle cx="7" cy="18" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg></span> Logistics
+            </div>
+            <!-- DX:logistics:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -7605,6 +7640,138 @@
             </div>
         </div>
         <!-- DX:samples:END -->
+        <!-- DX:logistics:START — Logistics page (docs/diagnostic-os/UI.md, page dxlogistics) -->
+        <div id="pg-dxlogistics" class="sec">
+            <div class="page-head"><div><h2>Logistics</h2><p>Move tubes between sites in batches, receive them at the lab, and see where any tube is.</p></div></div>
+            <div class="toggle-group dxl-tabs" role="tablist" aria-label="Logistics sections">
+                <button type="button" class="toggle-btn on" role="tab" data-dxl-tab="out" onclick="dxlog.setTab('out')">Outgoing Batches</button>
+                <button type="button" class="toggle-btn" role="tab" data-dxl-tab="in" onclick="dxlog.setTab('in')">Incoming Batches</button>
+                <button type="button" class="toggle-btn" role="tab" data-dxl-tab="track" onclick="dxlog.setTab('track')">Track Sample</button>
+                <button type="button" class="toggle-btn" role="tab" data-dxl-tab="routing" data-dx="DX_ADMIN" onclick="dxlog.setTab('routing')">Routing &amp; Partners</button>
+            </div>
+            <div class="card" id="dxlSiteBar">
+                <div class="dxc-bar">
+                    <div class="field"><label for="dxlSite">Working at</label><select id="dxlSite" onchange="dxlog.render()"></select></div>
+                </div>
+            </div>
+            <div data-dxl-panel="out">
+                <div class="card">
+                    <div class="dxc-head"><h4>Batches leaving this site</h4>
+                        <button type="button" class="btn btn-accent btn-sm" data-dx="DX_LOGISTICS" onclick="dxlog.openCreate()">New batch</button></div>
+                    <div id="dxlOut" aria-live="polite"></div>
+                </div>
+                <div id="dxlBatch" aria-live="polite"></div>
+            </div>
+            <div data-dxl-panel="in" hidden>
+                <div class="card"><div class="dxc-head"><h4>Batches coming to this site</h4></div><div id="dxlIn" aria-live="polite"></div></div>
+            </div>
+            <div data-dxl-panel="track" hidden>
+                <div class="card">
+                    <div class="dxc-bar"><div class="field dxc-scan"><label for="dxlTrackCode">Tube barcode</label><input id="dxlTrackCode" autocomplete="off" placeholder="Scan or type, then Enter" onkeydown="if(event.key==='Enter'){event.preventDefault();dxlog.track(this.value);}"></div></div>
+                    <div id="dxlTrack" aria-live="polite"></div>
+                </div>
+            </div>
+            <div data-dxl-panel="routing" hidden>
+                <div class="card">
+                    <div class="dxc-head"><h4>Outsource partners</h4><button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.openPartner()">Add partner</button></div>
+                    <ul class="dxl-rows" id="dxlPartners"></ul>
+                </div>
+                <div class="card">
+                    <div class="dxc-head"><h4>Routing rules</h4><button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.openRule()">Add rule</button></div>
+                    <p class="muted">A rule for a test beats a department rule, which beats a site default. Then a rule for the sending site beats an any-site rule, then the lower priority number. Without a rule a test runs where it is drawn (or at the only processing site).</p>
+                    <ul class="dxl-rows" id="dxlRules"></ul>
+                    <div class="dxc-bar" style="margin-top:12px">
+                        <div class="field"><label for="dxlPvSite">Drawn at</label><select id="dxlPvSite"></select></div>
+                        <div class="field"><label for="dxlPvTest">Test</label><select id="dxlPvTest"></select></div>
+                        <button type="button" class="btn btn-ghost" onclick="dxlog.preview()">Where does it go?</button>
+                    </div>
+                    <p id="dxlPvOut" class="muted" aria-live="polite"></p>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxlCreateModal" role="dialog" aria-modal="true" aria-labelledby="dxlCreateTitle">
+            <div class="modal">
+                <h3 id="dxlCreateTitle">New batch</h3>
+                <p class="muted" id="dxlCreateFrom"></p>
+                <div class="field"><label for="dxlDest">Destination</label><select id="dxlDest"></select></div>
+                <div class="dx-grid">
+                    <div class="field"><label for="dxlCarrier">Carrier / runner</label><input id="dxlCarrier" maxlength="100" autocomplete="off"></div>
+                    <div class="field"><label for="dxlTemp">Box temperature (°C)</label><input id="dxlTemp" type="number" step="0.1" min="-90" max="60"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxlog.close('dxlCreateModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxlog.create(this)">Create batch</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxlDispatchModal" role="dialog" aria-modal="true" aria-labelledby="dxlDispatchTitle">
+            <div class="modal">
+                <h3 id="dxlDispatchTitle">Dispatch batch</h3>
+                <p class="muted" id="dxlDispatchFor"></p>
+                <div class="field"><label for="dxlDispTemp">Box temperature at dispatch (°C)</label><input id="dxlDispTemp" type="number" step="0.1" min="-90" max="60"></div>
+                <div class="field"><label for="dxlDispNotes">Notes</label><textarea id="dxlDispNotes" rows="2" maxlength="500"></textarea></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxlog.close('dxlDispatchModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxlog.dispatch(this)">Dispatch</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxlRecvModal" role="dialog" aria-modal="true" aria-labelledby="dxlRecvTitle">
+            <div class="modal">
+                <h3 id="dxlRecvTitle">Receive batch</h3>
+                <p class="muted" id="dxlRecvFor"></p>
+                <div id="dxlRecvBody">
+                    <div class="field dxc-scan"><label for="dxlRecvScan">Scan each tube</label><input id="dxlRecvScan" autocomplete="off" placeholder="Scan or type, then Enter" onkeydown="if(event.key==='Enter'){event.preventDefault();dxlog.recvScan(this.value);this.value='';}"></div>
+                    <div class="dxl-modal-list"><ul class="dxc-tubes" id="dxlRecvList"></ul></div>
+                    <p id="dxlRecvExtra" class="muted"></p>
+                    <div class="dx-grid">
+                        <div class="field"><label for="dxlRecvTemp">Box temperature on arrival (°C)</label><input id="dxlRecvTemp" type="number" step="0.1" min="-90" max="60"></div>
+                        <div class="field"><label for="dxlRecvNotes">Discrepancy notes</label><input id="dxlRecvNotes" maxlength="500" autocomplete="off"></div>
+                    </div>
+                </div>
+                <div class="modal-actions" id="dxlRecvActions">
+                    <button type="button" class="btn btn-ghost" onclick="dxlog.close('dxlRecvModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxlog.receive(this)">Confirm receipt</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxlPartnerModal" role="dialog" aria-modal="true" aria-labelledby="dxlPartnerTitle">
+            <div class="modal">
+                <h3 id="dxlPartnerTitle">Outsource partner</h3>
+                <div class="field"><label for="dxlPName">Name</label><input id="dxlPName" maxlength="120" autocomplete="off"></div>
+                <div class="field"><label for="dxlPLegal">Legal name (printed as "Performed at")</label><input id="dxlPLegal" maxlength="200" autocomplete="off"></div>
+                <div class="field"><label for="dxlPAddr">Address</label><input id="dxlPAddr" maxlength="500" autocomplete="off"></div>
+                <div class="dx-grid">
+                    <div class="field"><label for="dxlPNabl">NABL certificate no.</label><input id="dxlPNabl" maxlength="80" autocomplete="off"></div>
+                    <div class="field"><label for="dxlPReg">Registration no.</label><input id="dxlPReg" maxlength="80" autocomplete="off"></div>
+                    <div class="field"><label for="dxlPPhone">Contact phone</label><input id="dxlPPhone" type="tel" maxlength="16" autocomplete="off"></div>
+                </div>
+                <label class="check" id="dxlPActiveRow"><input type="checkbox" id="dxlPActive" checked> Active</label>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxlog.close('dxlPartnerModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxlog.savePartner(this)">Save</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxlRuleModal" role="dialog" aria-modal="true" aria-labelledby="dxlRuleTitle">
+            <div class="modal">
+                <h3 id="dxlRuleTitle">Routing rule</h3>
+                <div class="field"><label for="dxlRFrom">Tubes drawn at</label><select id="dxlRFrom"></select></div>
+                <div class="field"><label for="dxlRMatch">Applies to</label><select id="dxlRMatch" onchange="dxlog.ruleMatch()"><option value="site">Every test (site default)</option><option value="department">One department</option><option value="test">One test</option></select></div>
+                <div class="field" id="dxlRDeptRow" hidden><label for="dxlRDept">Department</label><select id="dxlRDept"></select></div>
+                <div class="field" id="dxlRTestRow" hidden><label for="dxlRTest">Test</label><select id="dxlRTest"></select></div>
+                <div class="field"><label for="dxlRTo">Processed at</label><select id="dxlRTo"></select></div>
+                <div class="dx-grid">
+                    <div class="field"><label for="dxlRPri">Priority (lower wins)</label><input id="dxlRPri" type="number" min="1" max="999" value="100"></div>
+                </div>
+                <label class="check"><input type="checkbox" id="dxlRActive" checked> Active</label>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxlog.close('dxlRuleModal')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxlog.saveRule(this)">Save</button>
+                </div>
+            </div>
+        </div>
+        <!-- DX:logistics:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -10102,7 +10269,7 @@ const dxcollect = {
                 return `<li class="dxc-tube${scanned ? ' scanned' : ''}">
                     ${pending ? `<input type="checkbox" data-dxc-tube="${esc(t.id)}" aria-label="Collect ${esc(t.container_name || 'tube')}" checked>` : '<span></span>'}
                     <span class="dxc-dot" style="background:${esc(t.colour_hex || '#fff')}" title="${esc(t.container_name || '')}"></span>
-                    <span>${esc(t.container_name || t.sample_type || '')}${t.recollect_of ? ' <span class="dxc-chip">Recollection</span>' : ''}</span>
+                    <span>${esc(t.container_name || t.sample_type || '')}${t.recollect_of ? ' <span class="dxc-chip">Recollection</span>' : ''}${t.outsourced_to ? ` <span class="dxc-chip">Outsourced to ${esc(t.outsourced_to)}</span>` : ''}</span>
                     <span class="dxc-code">${code}${scanned ? ' ✓' : ''}</span>
                     <span class="dxc-tests">${esc((t.tests || []).join(', '))}</span>
                     <span>${pending ? '<span class="dxc-chip">To collect</span>'
@@ -10249,6 +10416,305 @@ const dxcollect = {
     },
 };
 /* DX:samples:END */
+/* DX:logistics:START — Logistics (migration 129). Manifests, dispatch, receipt and routing are decided
+   by the server (dx_batch_add / dx_dispatch_batch / dx_receive_batch / dx_resolve_routing); this page
+   scans, shows the stability timers the server computes, and edits routing for clinic-wide admins. */
+const dxlog = {
+    tab: 'out', data: { batches: [], sites: [], partners: [], my_site_ids: null }, batch: null, recv: null,
+    scanned: [], partners: [], rules: [], tests: null, depts: null, editPartner: null, editRule: null,
+    async load() {
+        if (dxlog.tab === 'routing' && !dxCan('DX_ADMIN')) dxlog.tab = 'out';
+        dxlog.setTab(dxlog.tab);
+        await dxlog.refresh();
+    },
+    async refresh() {
+        try { dxlog.data = await api('/admin/dx/batches'); } catch (e) { toast(e.message, true); return; }
+        const sel = document.getElementById('dxlSite'), cur = sel.value;
+        const mine = dxlog.data.sites.filter(s => !dxlog.data.my_site_ids || dxlog.data.my_site_ids.includes(s.id));
+        sel.innerHTML = mine.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.display_name)}</option>`).join('');
+        if (mine.some(s => s.id === cur)) sel.value = cur;
+        document.getElementById('dxlSiteBar').hidden = mine.length < 2 || dxlog.tab === 'track' || dxlog.tab === 'routing';
+        dxlog.render();
+        if (dxlog.batch) await dxlog.openBatch(dxlog.batch.id);
+    },
+    setTab(t) {
+        dxlog.tab = t;
+        document.querySelectorAll('[data-dxl-tab]').forEach(b => { const on = b.dataset.dxlTab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+        document.querySelectorAll('[data-dxl-panel]').forEach(p => { p.hidden = p.dataset.dxlPanel !== t; });
+        const mine = dxlog.data.sites.filter(s => !dxlog.data.my_site_ids || dxlog.data.my_site_ids.includes(s.id));
+        document.getElementById('dxlSiteBar').hidden = mine.length < 2 || t === 'track' || t === 'routing';
+        if (t === 'routing') dxlog.loadRouting();
+        if (t === 'track') document.getElementById('dxlTrackCode').focus();
+    },
+    site() { return document.getElementById('dxlSite').value; },
+    siteName(id) { const s = dxlog.data.sites.find(x => x.id === id); return s ? s.display_name : 'another site'; },
+    dest(b) { return b.outsource_partner_id ? (b.partner_name || (dxlog.data.partners.find(p => p.id === b.outsource_partner_id) || {}).name || 'Outsource partner') : (b.to_site_name || dxlog.siteName(b.to_site_id)); },
+    when(t) { return t ? new Date(t).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''; },
+    status(s) { return ({ open: 'Open', dispatched: 'In transit', received: 'Received', received_with_discrepancy: 'Received · discrepancy', cancelled: 'Cancelled' })[s] || s; },
+    stab(st) {
+        if (!st) return '';
+        const left = st.remaining_hours == null ? `${st.elapsed_hours} h since draw` : (st.status === 'expired' ? `expired · ${st.elapsed_hours} h` : `${st.remaining_hours} h left`);
+        return `<span class="dxl-stab ${esc(st.status)}" title="Stability: ${esc(st.status)}"><i aria-hidden="true"></i>${esc(left)}</span>`;
+    },
+    render() {
+        const site = dxlog.site(), b = dxlog.data.batches;
+        const row = (x, action) => `<div class="dxl-batch${dxlog.batch && dxlog.batch.id === x.id ? ' sel' : ''}"><div class="dxc-head">
+            <h4 class="dxc-num">${esc(x.batch_number)}</h4><span>→ ${esc(dxlog.dest(x))}</span>
+            <span class="dxc-chip${x.status === 'received_with_discrepancy' ? ' stat' : ''}">${esc(dxlog.status(x.status))}</span>
+            <span class="muted">${esc(x.sample_count)} tube(s) · ${esc(dxlog.when(x.dispatched_at || x.created_at))}${x.carrier_name ? ' · ' + esc(x.carrier_name) : ''}</span>
+            ${action}</div></div>`;
+        const out = b.filter(x => x.from_site_id === site);
+        document.getElementById('dxlOut').innerHTML = out.length ? out.map(x => row(x,
+            `<button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.openBatch('${esc(x.id)}')">${x.status === 'open' ? 'Scan tubes' : 'View'}</button>`)).join('')
+            : '<p class="muted">No batches from this site yet.</p>';
+        const inc = b.filter(x => x.to_site_id === site || (x.outsource_partner_id && x.from_site_id === site && x.status === 'dispatched'));
+        const canRecv = dxCan('DX_RECEIVE') || dxCan('DX_LOGISTICS');
+        document.getElementById('dxlIn').innerHTML = inc.length ? inc.map(x => row(x, x.status === 'dispatched' && canRecv
+            ? `<button type="button" class="btn btn-accent btn-sm" onclick="dxlog.openRecv('${esc(x.id)}')">${x.outsource_partner_id ? 'Confirm handover' : 'Receive'}</button>`
+            : `<button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.setTab('out');dxlog.openBatch('${esc(x.id)}')">View</button>`)).join('')
+            : '<p class="muted">Nothing on its way to this site.</p>';
+    },
+    async openBatch(id) {
+        try { dxlog.batch = await api('/admin/dx/batches/' + encodeURIComponent(id)); } catch (e) { toast(e.message, true); return; }
+        const b = dxlog.batch, open = b.status === 'open', canLog = dxCan('DX_LOGISTICS');
+        const tubes = b.samples.map(s => `<li class="dxl-tube${s.receipt === 'received' ? ' ok' : ''}">
+            <span class="dxc-dot" style="background:${esc(s.colour_hex || '#fff')}" title="${esc(s.container_name || '')}"></span>
+            <span class="dxc-code">${esc(s.barcode)}</span>
+            <span>${esc(s.patient_name || '')} <span class="muted">${esc(s.accession_number)}</span></span>
+            <span class="dxc-tests">${esc((s.tests || []).join(', '))}</span>
+            <span>${s.receipt ? `<span class="dxc-chip${s.receipt !== 'received' ? ' stat' : ''}">${esc(s.receipt)}</span>` : dxlog.stab(s.stability)}</span></li>`).join('');
+        document.getElementById('dxlBatch').innerHTML = `<div class="card"><div class="dxc-head">
+            <h4 class="dxc-num">${esc(b.batch_number)}</h4><span>${esc(b.from_site_name)} → ${esc(dxlog.dest(b))}</span>
+            <span class="dxc-chip">${esc(dxlog.status(b.status))}</span>
+            ${b.dispatch_temp_c != null ? `<span class="muted">Dispatch ${esc(b.dispatch_temp_c)} °C</span>` : ''}
+            ${b.receipt_temp_c != null ? `<span class="muted">Arrival ${esc(b.receipt_temp_c)} °C</span>` : ''}</div>
+            ${open && canLog ? `<div class="dxc-bar" style="margin-top:10px"><div class="field dxc-scan"><label for="dxlAddScan">Scan a tube into this batch</label>
+                <input id="dxlAddScan" autocomplete="off" placeholder="Scan or type, then Enter" onkeydown="if(event.key==='Enter'){event.preventDefault();dxlog.add(this.value);this.value='';}"></div></div>` : ''}
+            <ul class="dxc-tubes">${tubes || '<li class="muted">No tubes yet.</li>'}</ul>
+            ${b.notes ? `<p class="muted">${esc(b.notes)}</p>` : ''}
+            <div class="dxc-actions">${open && canLog ? `<button type="button" class="btn btn-accent btn-sm" onclick="dxlog.open('dxlDispatchModal')"${b.samples.length ? '' : ' disabled'}>Dispatch</button>` : ''}
+                <button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.batch=null;document.getElementById('dxlBatch').innerHTML='';dxlog.render()">Close</button></div></div>`;
+        document.getElementById('dxlDispatchFor').textContent = `${b.batch_number} · ${b.samples.length} tube(s) → ${dxlog.dest(b)}`;
+        document.getElementById('dxlDispTemp').value = b.dispatch_temp_c ?? '';
+        dxlog.render();
+        const box = document.getElementById('dxlAddScan');
+        if (box) box.focus();
+    },
+    async add(raw) {
+        const code = String(raw || '').trim();
+        if (!code || !dxlog.batch) return;
+        try {
+            const r = await apiPost(`/admin/dx/batches/${encodeURIComponent(dxlog.batch.id)}/samples`, { barcodes: [code] });
+            toast(r.added ? `${code} added` : `${code} is already in this batch`);
+            await dxlog.refresh();
+        } catch (e) { toast(e.message, true); }
+    },
+    open(id) { document.getElementById(id).classList.add('open'); },
+    close(id) { document.getElementById(id).classList.remove('open'); },
+    openCreate() {
+        const site = dxlog.site();
+        if (!site) { toast('No site to send from.', true); return; }
+        document.getElementById('dxlCreateFrom').textContent = 'From ' + dxlog.siteName(site);
+        const labs = dxlog.data.sites.filter(s => s.id !== site && s.kind !== 'collection');
+        document.getElementById('dxlDest').innerHTML =
+            (labs.length ? `<optgroup label="Processing sites">${labs.map(s => `<option value="site:${esc(s.id)}">${esc(s.code)} · ${esc(s.display_name)}</option>`).join('')}</optgroup>` : '') +
+            (dxlog.data.partners.length ? `<optgroup label="Outsource partners">${dxlog.data.partners.map(p => `<option value="partner:${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` : '');
+        dxlog.open('dxlCreateModal');
+    },
+    async create(btn) {
+        const [kind, id] = document.getElementById('dxlDest').value.split(':');
+        if (!id) { toast('Add a processing site or an outsource partner first.', true); return; }
+        const t = document.getElementById('dxlTemp').value;
+        btn.disabled = true;
+        try {
+            const b = await apiPost('/admin/dx/batches', { from_site_id: dxlog.site(), [kind === 'site' ? 'to_site_id' : 'outsource_partner_id']: id,
+                carrier_name: document.getElementById('dxlCarrier').value.trim() || null, temp_c: t === '' ? null : Number(t) });
+            dxlog.close('dxlCreateModal');
+            toast(`Batch ${b.batch_number} opened: scan its tubes`);
+            dxlog.batch = b;
+            await dxlog.refresh();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async dispatch(btn) {
+        const t = document.getElementById('dxlDispTemp').value;
+        btn.disabled = true;
+        try {
+            const b = await apiPost(`/admin/dx/batches/${encodeURIComponent(dxlog.batch.id)}/dispatch`,
+                { temp_c: t === '' ? null : Number(t), notes: document.getElementById('dxlDispNotes').value.trim() || null });
+            dxlog.close('dxlDispatchModal');
+            toast(`${b.batch_number} dispatched · ${b.samples.length} tube(s) in transit`);
+            await dxlog.refresh();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async openRecv(id) {
+        try { dxlog.recv = await api('/admin/dx/batches/' + encodeURIComponent(id)); } catch (e) { toast(e.message, true); return; }
+        dxlog.scanned = [];
+        document.getElementById('dxlRecvTitle').textContent = dxlog.recv.outsource_partner_id ? 'Confirm handover to partner' : 'Receive batch';
+        document.getElementById('dxlRecvFor').textContent = `${dxlog.recv.batch_number} from ${dxlog.recv.from_site_name} · ${dxlog.recv.samples.length} tube(s) on the manifest`;
+        document.getElementById('dxlRecvBody').hidden = false;
+        document.getElementById('dxlRecvActions').innerHTML = `<button type="button" class="btn btn-ghost" onclick="dxlog.close('dxlRecvModal')">Cancel</button>
+            <button type="button" class="btn btn-accent" onclick="dxlog.receive(this)">Confirm receipt</button>`;
+        document.getElementById('dxlRecvTemp').value = '';
+        document.getElementById('dxlRecvNotes').value = '';
+        dxlog.recvRender();
+        dxlog.open('dxlRecvModal');
+        document.getElementById('dxlRecvScan').focus();
+    },
+    recvScan(raw) {
+        const code = String(raw || '').trim();
+        if (!code || dxlog.scanned.includes(code)) return;
+        dxlog.scanned.push(code);
+        dxlog.recvRender();
+    },
+    recvRender() {
+        const r = dxlog.recv, codes = new Set(r.samples.map(s => s.barcode));
+        document.getElementById('dxlRecvList').innerHTML = r.samples.map(s => `<li class="dxl-tube${dxlog.scanned.includes(s.barcode) ? ' ok' : ''}">
+            <span class="dxc-dot" style="background:${esc(s.colour_hex || '#fff')}"></span><span class="dxc-code">${esc(s.barcode)}${dxlog.scanned.includes(s.barcode) ? ' ✓' : ''}</span>
+            <span>${esc(s.patient_name || '')}</span><span class="dxc-tests">${esc((s.tests || []).join(', '))}</span>
+            <span>${s.status === 'rejected' ? '<span class="dxc-chip stat">rejected</span>' : dxlog.stab(s.stability)}</span></li>`).join('');
+        const extra = dxlog.scanned.filter(c => !codes.has(c)), seen = dxlog.scanned.length - extra.length;
+        document.getElementById('dxlRecvExtra').textContent = `${seen} of ${r.samples.length} scanned` +
+            (seen < r.samples.length ? ` · ${r.samples.length - seen} not scanned will be recorded as missing` : '') +
+            (extra.length ? ` · not on the manifest (reported, not received): ${extra.join(', ')}` : '');
+    },
+    async receive(btn) {
+        const r = dxlog.recv, t = document.getElementById('dxlRecvTemp').value;
+        btn.disabled = true;
+        try {
+            const out = await apiPost(`/admin/dx/batches/${encodeURIComponent(r.id)}/receive`, { barcodes: dxlog.scanned,
+                temp_c: t === '' ? null : Number(t), discrepancy_notes: document.getElementById('dxlRecvNotes').value.trim() || null });
+            const d = out.discrepancy || { received: [], missing: [], damaged: [], unexpected: [] };
+            const box = (label, list, bad) => `<div class="${bad && list.length ? 'bad' : ''}"><b>${list.length}</b>${label}${list.length && bad ? `<small class="dxc-code"> ${esc(list.join(', '))}</small>` : ''}</div>`;
+            document.getElementById('dxlRecvBody').hidden = true;
+            document.getElementById('dxlRecvFor').innerHTML = `${esc(out.batch_number)} · <strong>${esc(dxlog.status(out.status))}</strong>
+                <div class="dxl-sum">${box('Received', d.received)}${box('Missing', d.missing, true)}${box('Damaged / rejected', d.damaged, true)}${box('Not on manifest', d.unexpected, true)}</div>`;
+            document.getElementById('dxlRecvActions').innerHTML = `<button type="button" class="btn btn-accent" onclick="dxlog.close('dxlRecvModal')">Done</button>`;
+            await dxlog.refresh();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async track(raw) {
+        const code = String(raw || '').trim(), el = document.getElementById('dxlTrack');
+        if (!code) return;
+        const label = { registered: 'Registered', collected: 'Collected', dispatched: 'Dispatched', received: 'Received', missing_in_transit: 'Missing on arrival',
+                        rejected: 'Rejected', stored: 'Stored', barcode_bound: 'Label attached' };
+        try {
+            const r = await api('/admin/dx/samples/' + encodeURIComponent(code) + '/track');
+            const where = e => { const d = e.details || {};
+                if (e.kind === 'dispatched') return `in batch ${d.batch_number || ''} → ${d.outsource_partner_id ? 'outsource partner' : dxlog.siteName(d.to_site_id)}${d.temp_c != null ? ' · ' + d.temp_c + ' °C' : ''}`;
+                if (e.kind === 'received') return d.batch_number ? `from batch ${d.batch_number} at ${d.outsource_partner_id ? 'outsource partner' : dxlog.siteName(d.site_id)}` : `at ${dxlog.siteName(d.site_id)}`;
+                if (e.kind === 'missing_in_transit') return `batch ${d.batch_number || ''}`;
+                if (e.kind === 'rejected') return d.reason || d.reason_code || '';
+                return ''; };
+            el.innerHTML = `<div class="dxc-head" style="margin-top:12px"><h4 class="dxc-num">${esc(r.sample.barcode)}</h4><span>${esc(r.visit.patient_name || '')}</span>
+                <span class="dxc-num">${esc(r.visit.accession_number)}</span><span class="dxc-chip">${esc(r.sample.status.replace('_', ' '))}</span></div>
+                <ul class="dxl-tl">${r.timeline.map(e => `<li><strong>${esc(label[e.kind] || e.kind.replace(/_/g, ' '))}</strong> ${esc(where(e))}
+                    <small>${esc(dxlog.when(e.created_at))}${e.actor_name ? ' · ' + esc(e.actor_name) : ''}</small></li>`).join('')}</ul>
+                ${r.replaced_by ? `<p class="muted">Replaced by tube ${esc(r.replaced_by.barcode || '(awaiting label)')}</p>` : ''}`;
+        } catch (e) { el.innerHTML = `<p class="muted">${esc(e.status === 404 ? code + ' is not a tube of this lab.' : e.message)}</p>`; }
+    },
+    async loadRouting() {
+        try {
+            const [p, r] = await Promise.all([api('/admin/dx/outsource-partners'), api('/admin/dx/routing-rules')]);
+            dxlog.partners = p.partners; dxlog.rules = r.rules;
+            if (!dxlog.tests) dxlog.tests = (await api('/admin/dx/tests?kind=test')).tests;
+            if (!dxlog.depts) dxlog.depts = (await api('/admin/dx/departments')).departments;
+        } catch (e) { toast(e.message, true); return; }
+        const pname = id => (dxlog.partners.find(x => x.id === id) || {}).name || 'partner';
+        document.getElementById('dxlPartners').innerHTML = dxlog.partners.map(p => `<li><span><strong>${esc(p.name)}</strong>
+            <span class="muted">${esc([p.legal_name, p.nabl_certificate_no ? 'NABL ' + p.nabl_certificate_no : ''].filter(Boolean).join(' · '))}</span></span>
+            ${p.is_active ? '' : '<span class="dxc-chip">Inactive</span>'}
+            <button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.openPartner('${esc(p.id)}')">Edit</button></li>`).join('') || '<li class="muted">No partners yet.</li>';
+        const test = id => (dxlog.tests.find(t => t.id === id) || {}).name || 'a test', dept = id => (dxlog.depts.find(d => d.id === id) || {}).name || 'a department';
+        document.getElementById('dxlRules').innerHTML = dxlog.rules.map(r => `<li><span>${r.lab_test_id ? esc(test(r.lab_test_id)) : r.department_id ? esc(dept(r.department_id)) + ' (department)' : 'Every test'}
+            from ${r.from_site_id ? esc(dxlog.siteName(r.from_site_id)) : 'any site'} → <strong>${r.outsource_partner_id ? 'Outsourced to ' + esc(pname(r.outsource_partner_id)) : esc(dxlog.siteName(r.to_site_id))}</strong></span>
+            <span class="dxc-chip">priority ${esc(r.priority)}</span>${r.is_active ? '' : '<span class="dxc-chip">Inactive</span>'}
+            <button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.openRule('${esc(r.id)}')">Edit</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="dxlog.deleteRule('${esc(r.id)}')">Delete</button></li>`).join('') || '<li class="muted">No rules: every test runs where it is drawn.</li>';
+        const opt = (list, f) => list.map(x => `<option value="${esc(x.id)}">${esc(f(x))}</option>`).join('');
+        document.getElementById('dxlPvSite').innerHTML = opt(dxlog.data.sites, s => s.display_name);
+        document.getElementById('dxlPvTest').innerHTML = opt(dxlog.tests, t => t.name);
+    },
+    openPartner(id) {
+        const p = dxlog.partners.find(x => x.id === id) || {};
+        dxlog.editPartner = id || null;
+        [['dxlPName', 'name'], ['dxlPLegal', 'legal_name'], ['dxlPAddr', 'address'], ['dxlPNabl', 'nabl_certificate_no'], ['dxlPReg', 'registration_no'], ['dxlPPhone', 'contact_phone']]
+            .forEach(([el, k]) => { document.getElementById(el).value = p[k] || ''; });
+        document.getElementById('dxlPActive').checked = p.is_active !== false;
+        document.getElementById('dxlPActiveRow').hidden = !id;
+        dxlog.open('dxlPartnerModal');
+    },
+    async savePartner(btn) {
+        const v = el => document.getElementById(el).value.trim() || null;
+        const body = { name: v('dxlPName'), legal_name: v('dxlPLegal'), address: v('dxlPAddr'), nabl_certificate_no: v('dxlPNabl'),
+                       registration_no: v('dxlPReg'), contact_phone: v('dxlPPhone') };
+        if (!body.name) { toast('Give the partner a name.', true); return; }
+        btn.disabled = true;
+        try {
+            if (dxlog.editPartner) await apiPut('/admin/dx/outsource-partners/' + encodeURIComponent(dxlog.editPartner), { ...body, is_active: document.getElementById('dxlPActive').checked });
+            else await apiPost('/admin/dx/outsource-partners', body);
+            dxlog.close('dxlPartnerModal');
+            toast('Partner saved');
+            await dxlog.loadRouting();
+            await dxlog.refresh();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    ruleMatch() {
+        const m = document.getElementById('dxlRMatch').value;
+        document.getElementById('dxlRDeptRow').hidden = m !== 'department';
+        document.getElementById('dxlRTestRow').hidden = m !== 'test';
+    },
+    openRule(id) {
+        const r = dxlog.rules.find(x => x.id === id) || {};
+        dxlog.editRule = id || null;
+        const opt = (list, f) => list.map(x => `<option value="${esc(x.id)}">${esc(f(x))}</option>`).join('');
+        document.getElementById('dxlRFrom').innerHTML = '<option value="">Any site</option>' + opt(dxlog.data.sites, s => s.display_name);
+        document.getElementById('dxlRDept').innerHTML = opt(dxlog.depts, d => d.name);
+        document.getElementById('dxlRTest').innerHTML = opt(dxlog.tests, t => t.name);
+        const labs = dxlog.data.sites.filter(s => s.kind !== 'collection');
+        document.getElementById('dxlRTo').innerHTML = `<optgroup label="Processing sites">${labs.map(s => `<option value="site:${esc(s.id)}">${esc(s.display_name)}</option>`).join('')}</optgroup>` +
+            (dxlog.partners.length ? `<optgroup label="Outsource partners">${dxlog.partners.filter(p => p.is_active).map(p => `<option value="partner:${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` : '');
+        document.getElementById('dxlRFrom').value = r.from_site_id || '';
+        document.getElementById('dxlRMatch').value = r.lab_test_id ? 'test' : r.department_id ? 'department' : 'site';
+        if (r.department_id) document.getElementById('dxlRDept').value = r.department_id;
+        if (r.lab_test_id) document.getElementById('dxlRTest').value = r.lab_test_id;
+        if (r.id) document.getElementById('dxlRTo').value = r.outsource_partner_id ? 'partner:' + r.outsource_partner_id : 'site:' + r.to_site_id;
+        document.getElementById('dxlRPri').value = r.priority || 100;
+        document.getElementById('dxlRActive').checked = r.is_active !== false;
+        dxlog.ruleMatch();
+        dxlog.open('dxlRuleModal');
+    },
+    async saveRule(btn) {
+        const m = document.getElementById('dxlRMatch').value, [kind, to] = document.getElementById('dxlRTo').value.split(':');
+        const body = { from_site_id: document.getElementById('dxlRFrom').value || null,
+                       lab_test_id: m === 'test' ? document.getElementById('dxlRTest').value : null,
+                       department_id: m === 'department' ? document.getElementById('dxlRDept').value : null,
+                       to_site_id: kind === 'site' ? to : null, outsource_partner_id: kind === 'partner' ? to : null,
+                       priority: Number(document.getElementById('dxlRPri').value) || 100, is_active: document.getElementById('dxlRActive').checked };
+        btn.disabled = true;
+        try {
+            if (dxlog.editRule) await apiPut('/admin/dx/routing-rules/' + encodeURIComponent(dxlog.editRule), body);
+            else await apiPost('/admin/dx/routing-rules', body);
+            dxlog.close('dxlRuleModal');
+            toast('Rule saved. It applies to visits registered from now on.');
+            await dxlog.loadRouting();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async deleteRule(id) {
+        if (!confirm('Delete this routing rule? Visits already registered keep their tubes.')) return;
+        try { await apiDel('/admin/dx/routing-rules/' + encodeURIComponent(id)); toast('Rule deleted'); await dxlog.loadRouting(); }
+        catch (e) { toast(e.message, true); }
+    },
+    async preview() {
+        const el = document.getElementById('dxlPvOut');
+        try {
+            const r = (await apiPost('/admin/dx/routing-rules/preview', { from_site_id: document.getElementById('dxlPvSite').value,
+                lab_test_ids: [document.getElementById('dxlPvTest').value] })).routes[0];
+            const why = { test: 'a rule for this test', department: 'its department rule', site: 'the site default', fallback: 'no rule (default lab)', none: 'no rule and no single processing site' }[r.matched];
+            el.textContent = r.destination ? `${r.name} → ${r.outsource_partner_id ? 'Outsourced to ' : ''}${r.destination} (${why})` : `${r.name}: no processing site — add a rule (${why}).`;
+        } catch (e) { el.textContent = e.message; }
+    },
+};
+/* DX:logistics:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -14028,6 +14494,12 @@ async function login() {
         go(!myHomeCollection && (myOpd || myIpd) ? 'dxworklist' : 'homecollect');
         return;
     }
+    // DX:logistics:START — a logistics runner (migration 129) works the Logistics page only
+    if (myStaffRole === 'LOGISTICS_RUNNER') {
+        go('dxlogistics');
+        return;
+    }
+    // DX:logistics:END
     // DOCTOR / CASHIER: no dashboard (its endpoints refuse them); open their
     // first OPD page, or the waiting page until the clinic goes live.
     if (isOpdRole()) {
@@ -15555,7 +16027,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ };
     if (loaders[page]) loaders[page]();
 }
 

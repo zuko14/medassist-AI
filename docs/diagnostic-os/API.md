@@ -83,17 +83,26 @@ logins get 403); tests follow `lab_tests.branch_id` like the existing lab-test a
 
 Not built yet: `prepare-route`, rejection-reason editing, the field-collection dispute, a route for `dx_mark_sample_stored` (P6).
 
-## P5 — Logistics and outsourcing
+## P5 — Logistics and outsourcing (as built, migration 129; under `/admin/dx`)
 | Method | Path | Permission | Notes |
 |:-|:-|:-|:-|
-| GET/POST/PATCH | `/outsource-partners`, `/routing-rules` | DX_ADMIN (POST NW) | rule conflict 409 |
-| GET | `/routing/resolve?lab_test_id&site_id` | DX_ADMIN | preview |
-| POST | `/batches` | DX_LOGISTICS (NW) | from user's site (pinned) |
-| POST / DELETE | `/batches/{id}/samples`, `/batches/{id}/samples/{sample_id}` | DX_LOGISTICS | scan add/remove while open |
-| POST | `/batches/{id}/dispatch` | DX_LOGISTICS | carrier, temperature |
-| GET | `/batches?direction=incoming|outgoing&status` | DX_LOGISTICS or DX_RECEIVE | |
-| POST | `/batches/{id}/receive` | DX_RECEIVE | scanned list, receipt temperature; discrepancy report |
-| POST | `/samples/receive` | DX_RECEIVE | direct scan at same site |
+| GET | `/outsource-partners` | DX_ADMIN or DX_LOGISTICS | |
+| POST / PUT | `/outsource-partners`, `/outsource-partners/{id}` | DX_ADMIN, clinic-wide (POST NW) | name unique per clinic (409) |
+| GET | `/routing-rules` | DX_ADMIN | |
+| POST / PUT / DELETE | `/routing-rules`, `/routing-rules/{id}` | DX_ADMIN, clinic-wide (POST NW) | one target (site or partner); a collection-only site 422; tie 409; PUT replaces the rule |
+| POST | `/routing-rules/preview` | DX_ADMIN | `from_site_id`, `lab_test_ids[]` → destination and which rule matched (same SQL resolver as registration) |
+| GET | `/batches?from_site&to_site&status` | DX_LOGISTICS or DX_RECEIVE | pinned: batches leaving or arriving at the caller's site; also returns `my_site_ids`, active sites and partners (destination pickers) |
+| POST | `/batches` | DX_LOGISTICS (NW) | `from_site_id` (default: the pinned user's only site), `to_site_id` or `outsource_partner_id`, `carrier_name`, `temp_c` |
+| GET | `/batches/{id}` | DX_LOGISTICS or DX_RECEIVE | manifest with per-tube stability (`normal`/`amber`/`expired`; cold window when the box was ≤ 8 °C) |
+| POST | `/batches/{id}/samples` | DX_LOGISTICS | `barcodes[]`; error `reason` names the barcode |
+| POST | `/batches/{id}/dispatch` | DX_LOGISTICS | `temp_c`, `notes`; tubes → `in_transit`; replay-safe |
+| POST | `/batches/{id}/receive` | DX_RECEIVE at the destination site (a partner batch: its sending site, DX_LOGISTICS allowed) | `barcodes[]`, `temp_c`, `discrepancy_notes` → `discrepancy {received, missing, damaged, unexpected}`; replay-safe |
+
+`LOGISTICS_RUNNER` is confined to `/admin/dx/logistics…`, `/admin/dx/batches…`, `GET /outsource-partners`, `GET
+/samples/{barcode}/track`. Visit reads (`/visits/{id}`) drop `external_ref` / `delivery_prefs` without a desk grant and
+money without a money grant — and both for a pinned user reaching another branch's visit through a sample site.
+Orders on a visit carry `outsourced_to` (partner name); collection-queue tubes too. Not built: removing a tube from an
+open batch, cancelling a batch, re-batching a tube recorded missing.
 
 ## P6 — Bench, verification, approval
 | Method | Path | Permission | Notes |

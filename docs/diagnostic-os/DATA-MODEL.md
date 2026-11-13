@@ -417,6 +417,23 @@ partner = batch destination), `dx_dispatch_batch` (samples → `in_transit`), `d
 barcodes[], temp)` (scanned → `received` at the batch's site; unscanned → `missing`; extra scanned barcodes reported,
 not received). Direct same-site receipt (`dx_receive_sample`) already exists from DX-M4.
 
+**As built (migration 129):** composite `(clinic_id, …)` FKs everywhere; `dx_samples.outsource_partner_id` added beside
+`processing_site_id` (CHECK at most one) so a tube carries its destination — grouping at registration, the batch
+destination check and the recollection replacement all read it. Precedence lives in one SQL resolver,
+`dx_resolve_routing(clinic, from_site, test, department) → {to_site_id, outsource_partner_id, rule_id, matched}`:
+test > department > site default, then a rule naming the sending site before an any-site rule, then the lower
+`priority` (1–999); rules whose target is inactive (or a collection-only site) are skipped; with no rule the pre-129
+fallback (registration site if it processes, else the clinic's only processing site). Ties are refused by the partial
+unique index `uq_dx_routing_rules_tie (clinic, from_site|0, test|0, department|0, priority) WHERE is_active`.
+`dx_insert_lines` (127) and `dx_reject_sample` (128) are replaced: tubes group by container **and** destination,
+orders get `outsource_partner_id`, a replacement tube and its orders keep the partner. Batches and manifests are
+function-only (127 `dx_guard_tx`); partners and rules are configuration. `dx_batch_add` refuses a tube not drawn at the
+batch's site (`dx_batch_wrong_origin`), routed elsewhere (`dx_batch_wrong_destination`), not `collected`, or in another
+live batch (`dx_sample_in_live_batch`); a repeat scan is ignored. `dx_receive_batch` also records a tube rejected in
+transit as `damaged`; a partner batch is "received" by its sending site (handover, `received_site_id` NULL). Batch
+counter key `dx_batch:<IST year>`. `dx_batch_json` is the data-minimised read model (name, age, sex, MRN, tests; no
+phone, address or money). Purge v5 removes manifests, batches, rules and partners.
+
 ## 7. DX-M6 — Result workflow
 ```sql
 CREATE TABLE dx_result_value_meta (id, clinic_id, result_id UUID NOT NULL, parameter_id UUID NOT NULL,

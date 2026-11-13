@@ -509,7 +509,9 @@ def _enforce_phlebotomist_scope(request: Request, user: AdminUser) -> AdminUser:
 #: the Logistics page only; a B2B client's login only its partner portal. Both
 #: also reach /admin/me and their own password/username changes.
 _DX_CONFINED_ROUTES = {
-    "LOGISTICS_RUNNER": re.compile(r"^/admin/dx/logistics(/.*)?$"),
+    # migration 129: the Logistics page's batches, partner list and tube tracking
+    "LOGISTICS_RUNNER": re.compile(r"^/admin/dx/(logistics|batches)(/.*)?$|^/admin/dx/outsource-partners$"
+                                   r"|^/admin/dx/samples/[^/]+/track$"),
     "B2B_PARTNER": re.compile(r"^/admin/dx/partner(/.*)?$"),
 }
 _DX_CONFINED_COMMON = _PHLEBOTOMIST_ROUTES[:3]   # /me, change-password, change-username

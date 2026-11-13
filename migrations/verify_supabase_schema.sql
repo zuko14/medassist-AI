@@ -746,6 +746,44 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 23. MIGRATION 129 — Diagnostic OS logistics and outsourcing (DX-M5)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_idx int;
+    v_cols int;
+    v_funcs int;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_outsource_partners', 'dx_routing_rules', 'dx_batches', 'dx_batch_samples')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M129', 'Tables: dx outsource partners, routing rules, batches, batch samples (RLS forced)',
+            CASE WHEN v_tables = 4 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 4 present with RLS forced');
+
+    SELECT count(*) INTO v_idx FROM pg_class WHERE relname IN ('uq_dx_sample_one_live_batch', 'uq_dx_routing_rules_tie');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M129', 'Indexes: one live batch per sample, routing tie refusal',
+            CASE WHEN v_idx = 2 THEN 'PASS' ELSE 'FAIL' END, v_idx || ' of 2 present');
+
+    SELECT count(*) INTO v_cols FROM information_schema.columns
+     WHERE column_name = 'outsource_partner_id' AND table_name IN ('opd_orders', 'dx_samples');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M129', 'Columns: opd_orders / dx_samples outsource_partner_id',
+            CASE WHEN v_cols = 2 THEN 'PASS' ELSE 'FAIL' END, v_cols || ' of 2 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_resolve_routing(uuid,uuid,uuid,uuid)',
+        'dx_create_batch(uuid,uuid,uuid,uuid,text,numeric,uuid,text)', 'dx_batch_add(uuid,uuid,text[],uuid,text)',
+        'dx_dispatch_batch(uuid,uuid,numeric,text,uuid,text)',
+        'dx_receive_batch(uuid,uuid,text[],numeric,text,uuid,text)', 'dx_batch_json(uuid,uuid)']) f
+     WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M129', 'Functions: resolve routing, create / add / dispatch / receive batch, batch read model',
+            CASE WHEN v_funcs = 6 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 6 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

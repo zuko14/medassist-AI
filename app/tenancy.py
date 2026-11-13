@@ -111,6 +111,8 @@ TENANT_OWNED_TABLES = frozenset({
     "dx_samples", "dx_events",
     # Migration 128: Diagnostic OS collection (rejection reasons, doorstep money, label print log)
     "dx_rejection_reasons", "dx_field_collections", "dx_label_prints",
+    # Migration 129: Diagnostic OS logistics (partners, routing rules, transit batches and manifests)
+    "dx_outsource_partners", "dx_routing_rules", "dx_batches", "dx_batch_samples",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

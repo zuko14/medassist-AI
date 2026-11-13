@@ -755,13 +755,32 @@ def _can_money(user: AdminUser) -> bool:
     return any(holds_dx_permission(user, p) for p in MONEY)
 
 
+CONTACT = ("DX_REGISTER", "DX_BILLING", "DX_DISPATCH", "DX_COLLECT", "DX_B2B_MANAGE")
+
+
 def _filter_visit(user: AdminUser, v: dict) -> dict:
-    """SECURITY §4: a processing-site technician sees no prices, bills or dues."""
-    if _can_money(user):
+    """SECURITY §4 data minimisation: no prices, bills or dues without a money grant; no
+    contact details (external ref, delivery address / phone / e-mail) without a desk grant.
+    A pinned user reaching another branch's visit through a sample site (processing
+    site, runner) gets neither, whatever their grants."""
+    pinned = _pinned_branch(user)
+    other_site = bool(pinned) and str((v.get("visit") or {}).get("branch_id")) != pinned
+    money_ok = _can_money(user) and not other_site
+    contact_ok = any(holds_dx_permission(user, p) for p in CONTACT) and not other_site
+    if money_ok and contact_ok:
         return v
-    money = ("mrp_paise", "price_paise", "discount_paise", "patient_share_paise", "payer_share_paise", "price_source")
-    return {**v, "items": [{k: x for k, x in i.items() if k not in money} for i in v.get("items", [])],
-            "invoices": []}
+    out = dict(v)
+    if not money_ok:
+        money = ("mrp_paise", "price_paise", "discount_paise", "patient_share_paise", "payer_share_paise",
+                 "price_source")
+        out["items"] = [{k: x for k, x in i.items() if k not in money} for i in v.get("items", [])]
+        out["invoices"] = []
+        if "timeline" in v:
+            out["timeline"] = [{**e, "details": {k: x for k, x in (e.get("details") or {}).items()
+                                                 if not k.endswith("_paise")}} for e in v["timeline"]]
+    if not contact_ok and out.get("visit"):
+        out["visit"] = {k: x for k, x in out["visit"].items() if k not in ("external_ref", "delivery_prefs")}
+    return out
 
 
 async def _visit(user: AdminUser, scope: str, accession_id: str) -> dict:
@@ -1322,4 +1341,243 @@ async def handover_field_collection(fc_id: str, body: HandoverIn, request: Reque
     if not out.get("replayed"):
         await _audit(user, request, "dx_field_collection_handover", "dx_field_collection", fc_id,
                      {"receipt_id": out.get("receipt_id"), "amount_paise": out.get("amount_paise")})
+    return out
+
+
+# ═══ Logistics and outsourcing (migration 129, DX-32…34) ═════════════════════
+
+UUID_RX = r"^[0-9a-fA-F-]{36}$"
+LOGISTICS = ("DX_LOGISTICS",)
+BATCH_READ = ("DX_LOGISTICS", "DX_RECEIVE")
+BatchStatus = Literal["open", "dispatched", "received", "received_with_discrepancy", "cancelled"]
+
+
+class PartnerIn(_In):
+    name: str = Field(..., min_length=2, max_length=120)
+    legal_name: Optional[str] = Field(None, max_length=200)
+    address: Optional[str] = Field(None, max_length=500)
+    registration_no: Optional[str] = Field(None, max_length=80)
+    nabl_certificate_no: Optional[str] = Field(None, max_length=80)
+    contact_phone: Optional[str] = Field(None, pattern=PHONE)
+
+
+class PartnerPatch(PartnerIn):
+    name: Optional[str] = Field(None, min_length=2, max_length=120)
+    is_active: Optional[bool] = None
+
+
+class RuleIn(_In):
+    from_site_id: Optional[str] = Field(None, pattern=UUID_RX)
+    lab_test_id: Optional[str] = Field(None, pattern=UUID_RX)
+    department_id: Optional[str] = Field(None, pattern=UUID_RX)
+    to_site_id: Optional[str] = Field(None, pattern=UUID_RX)
+    outsource_partner_id: Optional[str] = Field(None, pattern=UUID_RX)
+    priority: int = Field(100, ge=1, le=999)
+    is_active: bool = True
+
+
+class RulePreviewIn(_In):
+    from_site_id: str = Field(..., pattern=UUID_RX)
+    lab_test_ids: list[str] = Field(..., min_length=1, max_length=50)
+
+
+class BatchIn(_In):
+    from_site_id: Optional[str] = Field(None, pattern=UUID_RX)
+    to_site_id: Optional[str] = Field(None, pattern=UUID_RX)
+    outsource_partner_id: Optional[str] = Field(None, pattern=UUID_RX)
+    carrier_name: Optional[str] = Field(None, max_length=100)
+    temp_c: Optional[float] = Field(None, ge=-90, le=60)
+
+
+class BatchScanIn(_In):
+    barcodes: list[str] = Field(..., min_length=1, max_length=200)
+
+
+class DispatchIn(_In):
+    temp_c: Optional[float] = Field(None, ge=-90, le=60)
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+class ReceiveBatchIn(_In):
+    barcodes: list[str] = Field(default_factory=list, max_length=500)
+    temp_c: Optional[float] = Field(None, ge=-90, le=60)
+    discrepancy_notes: Optional[str] = Field(None, max_length=500)
+
+
+def _one_target(body: BaseModel) -> None:
+    if (body.to_site_id is None) == (body.outsource_partner_id is None):
+        raise HTTPException(status_code=422, detail="Choose one processing site or one outsource partner.")
+
+
+# ── outsource partners (DX-34) ──────────────────────────────────────────────
+
+@router.get("/outsource-partners")
+async def list_outsource_partners(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN", *LOGISTICS)
+    return {"partners": await dx.list_partners(scope)}
+
+
+@router.post("/outsource-partners", status_code=status.HTTP_201_CREATED)
+async def create_outsource_partner(body: PartnerIn, request: Request, clinic_id: str = "default",
+                                   user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN", new_work=True)
+    _clinic_wide(user)
+    out = await dx.save_config_row("dx_outsource_partners", scope, body.model_dump(exclude_none=True))
+    await _audit(user, request, "dx_partner_create", "dx_outsource_partner", out["id"], {"name": out["name"]})
+    return out
+
+
+@router.put("/outsource-partners/{partner_id}")
+async def update_outsource_partner(partner_id: str, body: PartnerPatch, request: Request, clinic_id: str = "default",
+                                   user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN")
+    _clinic_wide(user)
+    changes = body.model_dump(exclude_unset=True)
+    if not changes or changes.get("name", "") is None:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    out = await dx.save_config_row("dx_outsource_partners", scope, changes, partner_id)
+    await _audit(user, request, "dx_partner_update", "dx_outsource_partner", partner_id, {"fields": sorted(changes)})
+    return out
+
+
+# ── routing rules (DX-32) ───────────────────────────────────────────────────
+
+@router.get("/routing-rules")
+async def list_routing_rules(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN")
+    return {"rules": await dx.list_routing_rules(scope)}
+
+
+@router.post("/routing-rules", status_code=status.HTTP_201_CREATED)
+async def create_routing_rule(body: RuleIn, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN", new_work=True)
+    _clinic_wide(user)
+    _one_target(body)
+    data = body.model_dump()
+    await dx.check_rule_target(scope, data)
+    out = await dx.save_config_row("dx_routing_rules", scope, data)
+    await _audit(user, request, "dx_routing_rule_create", "dx_routing_rule", out["id"], data)
+    return out
+
+
+@router.put("/routing-rules/{rule_id}")
+async def update_routing_rule(rule_id: str, body: RuleIn, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN")
+    _clinic_wide(user)
+    _one_target(body)
+    data = body.model_dump()          # a rule is replaced whole: the match and the target belong together
+    await dx.check_rule_target(scope, data)
+    out = await dx.save_config_row("dx_routing_rules", scope, data, rule_id)
+    await _audit(user, request, "dx_routing_rule_update", "dx_routing_rule", rule_id, data)
+    return out
+
+
+@router.delete("/routing-rules/{rule_id}")
+async def delete_routing_rule(rule_id: str, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN")
+    _clinic_wide(user)
+    await dx.delete_routing_rule(scope, rule_id)
+    await _audit(user, request, "dx_routing_rule_delete", "dx_routing_rule", rule_id)
+    return {"deleted": True}
+
+
+@router.post("/routing-rules/preview")
+async def preview_routing(body: RulePreviewIn, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN")
+    await dx.get_site(scope, body.from_site_id)
+    return {"routes": await dx.preview_routing(scope, body.from_site_id, body.lab_test_ids)}
+
+
+# ── batches (DX-33, W6) ─────────────────────────────────────────────────────
+
+async def _batch_for(user: AdminUser, scope: str, batch_id: str) -> dict:
+    """Site scope: a pinned user reaches batches leaving or arriving at their site (404 otherwise)."""
+    b = await dx.get_batch(scope, batch_id)
+    mine = await _user_site_ids(user, scope, None)
+    if mine is not None and b["from_site_id"] not in mine and b.get("to_site_id") not in mine:
+        raise HTTPException(status_code=404, detail="Batch not found.")
+    return b
+
+
+@router.get("/batches")
+async def list_batches(clinic_id: str = "default", from_site: Optional[str] = Query(None, pattern=UUID_RX),
+                       to_site: Optional[str] = Query(None, pattern=UUID_RX), status_: Optional[BatchStatus] =
+                       Query(None, alias="status"), user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *BATCH_READ)
+    mine = await _user_site_ids(user, scope, None)
+    sites = [{k: s.get(k) for k in ("id", "code", "display_name", "kind", "branch_id")}
+             for s in await dx.list_sites(scope) if s.get("is_active")]
+    return {"batches": await dx.list_batches(scope, mine, from_site, to_site, status_),
+            "my_site_ids": mine, "sites": sites,
+            "partners": [{"id": p["id"], "name": p["name"]} for p in await dx.list_partners(scope, active_only=True)]}
+
+
+@router.post("/batches", status_code=status.HTTP_201_CREATED)
+async def create_batch(body: BatchIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *LOGISTICS, new_work=True)
+    _one_target(body)
+    mine = await _user_site_ids(user, scope, None)
+    from_site = body.from_site_id or (mine[0] if mine and len(mine) == 1 else None)
+    if not from_site:
+        raise HTTPException(status_code=422, detail="Choose the site this batch leaves from.")
+    if mine is not None and from_site not in mine:
+        raise HTTPException(status_code=404, detail="Site not found.")
+    out = await dx.create_batch(scope, {**body.model_dump(), "from_site_id": from_site}, user)
+    await _audit(user, request, "dx_batch_create", "dx_batch", out["id"],
+                 {"number": out["batch_number"], "to_site_id": body.to_site_id,
+                  "outsource_partner_id": body.outsource_partner_id})
+    return out
+
+
+@router.get("/batches/{batch_id}")
+async def get_batch(batch_id: str, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *BATCH_READ)
+    return await _batch_for(user, scope, batch_id)
+
+
+@router.post("/batches/{batch_id}/samples")
+async def add_batch_samples(batch_id: str, body: BatchScanIn, request: Request, clinic_id: str = "default",
+                            user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *LOGISTICS)
+    await _batch_for(user, scope, batch_id)
+    out = await dx.batch_add(scope, batch_id, body.barcodes, user)
+    if out.get("added"):
+        await _audit(user, request, "dx_batch_add", "dx_batch", batch_id, {"barcodes": body.barcodes,
+                                                                           "added": out["added"]})
+    return out
+
+
+@router.post("/batches/{batch_id}/dispatch")
+async def dispatch_batch(batch_id: str, body: DispatchIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *LOGISTICS)
+    await _batch_for(user, scope, batch_id)
+    out = await dx.dispatch_batch(scope, batch_id, body.temp_c, body.notes, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_batch_dispatch", "dx_batch", batch_id,
+                     {"temp_c": body.temp_c, "samples": len(out.get("samples", []))})
+    return out
+
+
+@router.post("/batches/{batch_id}/receive")
+async def receive_batch(batch_id: str, body: ReceiveBatchIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    """At the destination site (DX_RECEIVE); a partner batch is handed over by its sending site."""
+    scope, _ = await _dx_scope(user, clinic_id, "DX_RECEIVE", *LOGISTICS)
+    b = await _batch_for(user, scope, batch_id)
+    at = b.get("to_site_id") or b["from_site_id"]
+    mine = await _user_site_ids(user, scope, None)
+    if mine is not None and at not in mine:
+        raise HTTPException(status_code=403, detail="Only the receiving site can receive this batch.")
+    if b.get("to_site_id") and not holds_dx_permission(user, "DX_RECEIVE"):
+        raise HTTPException(status_code=403, detail="Missing permission: DX_RECEIVE")
+    out = await dx.receive_batch(scope, batch_id, body.barcodes, body.temp_c, body.discrepancy_notes, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_batch_receive", "dx_batch", batch_id,
+                     {"temp_c": body.temp_c, "status": out["status"], **(out.get("discrepancy") or {})})
     return out

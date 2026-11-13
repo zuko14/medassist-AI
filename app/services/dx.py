@@ -125,6 +125,17 @@ _ERRORS = {
     "dx_field_collection_disputed": (409, "This collection is disputed; resolve it before the handover."),
     "dx_handover_receipt_invalid": (409, "The receipt does not match this field collection."),
     "dx_append_only": (409, "Print records cannot be changed."),
+    # migration 129: logistics and outsourcing
+    "dx_site_not_found": (404, "Site not found."),
+    "dx_batch_not_found": (404, "Batch not found."),
+    "dx_batch_not_open": (409, "This batch is already dispatched; start a new batch."),
+    "dx_batch_empty": (409, "Scan at least one collected tube into the batch before dispatch."),
+    "dx_batch_not_dispatched": (409, "Only a dispatched batch can be received."),
+    "dx_batch_same_site": (422, "A batch goes to another site."),
+    "dx_batch_destination_invalid": (422, "Choose one active processing site or one active outsource partner."),
+    "dx_batch_wrong_destination": (409, "This tube is routed to a different lab than this batch"),
+    "dx_batch_wrong_origin": (409, "This tube was not drawn at this batch's site"),
+    "dx_sample_in_live_batch": (409, "This tube is already in another batch that has not been received"),
 }
 _CONSTRAINTS = (
     ("dx_sites_clinic_code_key", 409, "Another site already uses this code."),
@@ -152,6 +163,16 @@ _CONSTRAINTS = (
     ("dx_referrers_account_fk", 404, "B2B account not found."),
     ("uq_dx_samples_barcode", 409, "This barcode is already on another tube."),
     ("dx_field_collections_upi_ref", 422, "A UPI payment needs its reference (UTR)."),
+    ("uq_dx_routing_rules_tie", 409, "Another active rule already matches the same tests from the same site at this "
+                                    "priority. Give one of them a different priority."),
+    ("dx_routing_rules_match_shape", 422, "A rule matches one test, one department, or neither (site default)."),
+    ("dx_routing_rules_target_shape", 422, "A rule sends tests to one site or one outsource partner."),
+    ("dx_routing_rules_test_fk", 404, "Test not found."),
+    ("dx_routing_rules_department_fk", 404, "Department not found."),
+    ("dx_routing_rules_from_fk", 404, "Site not found."),
+    ("dx_routing_rules_to_fk", 404, "Site not found."),
+    ("dx_routing_rules_partner_fk", 404, "Outsource partner not found."),
+    ("uq_dx_outsource_partners_name", 409, "Another outsource partner already has this name."),
     ("lab_test_parameters_ranges", 422, "Ranges must be ordered: critical low <= normal low <= normal high <= critical high."),
 )
 
@@ -373,6 +394,9 @@ async def get_visit(clinic_id: str, accession_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Visit not found.")
     out["timeline"] = await _rows(scoped_query("dx_events", clinic_id, "id, kind, actor_name, details, created_at")
                                   .eq("accession_id", accession_id).order("id"))
+    partner_of = await outsourced_orders(clinic_id, accession_id)
+    for o in out.get("orders", []):
+        o["outsourced_to"] = partner_of.get(o["id"])     # NABL "performed at" (W13, P7)
     return out
 
 
@@ -534,7 +558,8 @@ async def collection_queue(clinic_id: str, site_ids: Optional[list[str]], day: O
         return []
     ids = [v["id"] for v in visits]
     sq = scoped_query("dx_samples", clinic_id, "id, accession_id, container_id, sample_type, barcode, barcode_source, "
-                      "status, collection_site_id, processing_site_id, recollect_of, created_at").in_("accession_id", ids)
+                      "status, collection_site_id, processing_site_id, outsource_partner_id, recollect_of, created_at"
+                      ).in_("accession_id", ids)
     samples = await _rows(sq.order("created_at"))
     pending = {s["accession_id"] for s in samples if s["status"] == "pending_collection"
                and (not site_ids or s["collection_site_id"] in site_ids)}
@@ -544,6 +569,8 @@ async def collection_queue(clinic_id: str, site_ids: Optional[list[str]], day: O
                                                                "id, code, name, colour_hex"))}
     orders = await _rows(scoped_query("opd_orders", clinic_id, "id, accession_id, dx_sample_id, item_name, status")
                          .in_("accession_id", list(pending)).neq("status", "cancelled"))
+    partners = ({p["id"]: p["name"] for p in await list_partners(clinic_id)}
+                if any(s.get("outsource_partner_id") for s in samples) else {})
     out = []
     for v in sorted((v for v in visits if v["id"] in pending),
                     key=lambda v: (PRIORITY_RANK.get(v["priority"], 3), v["created_at"])):
@@ -551,7 +578,7 @@ async def collection_queue(clinic_id: str, site_ids: Optional[list[str]], day: O
         for s in (s for s in samples if s["accession_id"] == v["id"] and s["status"] not in ("discarded",)):
             c = containers.get(s["container_id"], {})
             tubes.append({**s, "container_code": c.get("code"), "container_name": c.get("name"),
-                          "colour_hex": c.get("colour_hex"),
+                          "colour_hex": c.get("colour_hex"), "outsourced_to": partners.get(s.get("outsource_partner_id")),
                           "tests": [o["item_name"] for o in orders if o["dx_sample_id"] == s["id"]]})
         out.append({**v, "samples": tubes})
     return out
@@ -724,3 +751,207 @@ async def field_collections(clinic_id: str, status: Optional[str], accession_ids
     if accession_ids is not None:
         q = q.in_("accession_id", accession_ids or ["00000000-0000-0000-0000-000000000000"])
     return await _rows(q.order("collected_at").limit(500))
+
+
+# ── logistics and outsourcing (migration 129, DX-32…34) ─────────────────────
+# Routing, manifests, dispatch and receipt happen in SQL (dx_resolve_routing,
+# dx_*_batch); this layer adds configuration CRUD, the read models and the pure
+# stability timer. Zero-LLM.
+
+async def save_config_row(table: str, clinic_id: str, body: dict, row_id: Optional[str] = None) -> dict:
+    """Insert / update a clinic's partner or routing rule (configuration, not guarded)."""
+    try:
+        if row_id:
+            res = await sb(supabase.table(table).update(body).eq("clinic_id", clinic_id).eq("id", row_id))
+        else:
+            # unscoped: insert_scoped_by_payload
+            res = await sb(supabase.table(table).insert({**body, "clinic_id": clinic_id}))
+    except Exception as e:
+        raise_for(e)
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return res.data[0]
+
+
+async def list_partners(clinic_id: str, active_only: bool = False) -> list[dict]:
+    q = scoped_query("dx_outsource_partners", clinic_id).order("name")
+    return await _rows(q.eq("is_active", True) if active_only else q)
+
+
+async def list_routing_rules(clinic_id: str) -> list[dict]:
+    return await _rows(scoped_query("dx_routing_rules", clinic_id).order("priority").order("created_at"))
+
+
+async def check_rule_target(clinic_id: str, body: dict) -> None:
+    """A rule sends tests to a processing site (never a collection-only one) or a partner."""
+    if body.get("to_site_id"):
+        site = await get_site(clinic_id, body["to_site_id"])
+        if site.get("kind") == "collection":
+            raise HTTPException(status_code=422, detail="A collection-only site cannot process tests.")
+
+
+async def delete_routing_rule(clinic_id: str, rule_id: str) -> None:
+    res = await sb(supabase.table("dx_routing_rules").delete().eq("clinic_id", clinic_id).eq("id", rule_id))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Routing rule not found.")
+
+
+async def resolve_routing(clinic_id: str, from_site_id: str, test_id: Optional[str],
+                          department_id: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
+    """(processing_site_id, outsource_partner_id) for one test sent from a site. The SQL
+    resolver registration uses (test > department > site default > clinic fallback)."""
+    r = await rpc("dx_resolve_routing", {"p_clinic_id": clinic_id, "p_from_site_id": from_site_id,
+                                         "p_test_id": test_id, "p_department_id": department_id})
+    return r.get("to_site_id"), r.get("outsource_partner_id")
+
+
+async def preview_routing(clinic_id: str, from_site_id: str, test_ids: list[str]) -> list[dict]:
+    tests = {t["id"]: t for t in await _rows(scoped_query("lab_tests", clinic_id, "id, name, test_code, department_id")
+                                             .in_("id", test_ids))}
+    sites = {s["id"]: s["display_name"] for s in await list_sites(clinic_id)}
+    partners = {p["id"]: p["name"] for p in await list_partners(clinic_id)}
+    out = []
+    for tid in test_ids:
+        if tid not in tests:
+            raise HTTPException(status_code=404, detail="Test not found.")
+        r = await rpc("dx_resolve_routing", {"p_clinic_id": clinic_id, "p_from_site_id": from_site_id,
+                                             "p_test_id": tid, "p_department_id": None})
+        out.append({"lab_test_id": tid, "name": tests[tid]["name"], "test_code": tests[tid].get("test_code"), **r,
+                    "destination": partners.get(r.get("outsource_partner_id")) or sites.get(r.get("to_site_id"))})
+    return out
+
+
+def calculate_sample_stability(sample_collected_at, stability_room_hours: Optional[float],
+                               stability_cold_hours: Optional[float], is_cold_storage: bool,
+                               now: Optional[datetime] = None) -> dict:
+    """Pure stability timer (W6 step 2): amber from 75 % of the window, expired at 100 %.
+    A container without a stability window for the storage used is always 'normal'."""
+    collected = (datetime.fromisoformat(str(sample_collected_at).replace("Z", "+00:00"))
+                 if not isinstance(sample_collected_at, datetime) else sample_collected_at)
+    elapsed = max(0.0, ((now or datetime.now(timezone.utc)) - collected).total_seconds() / 3600)
+    window = (stability_cold_hours if is_cold_storage and stability_cold_hours else stability_room_hours)
+    if not window:
+        return {"elapsed_hours": round(elapsed, 2), "remaining_hours": None, "status": "normal"}
+    ratio = elapsed / float(window)
+    return {"elapsed_hours": round(elapsed, 2), "remaining_hours": round(max(0.0, float(window) - elapsed), 2),
+            "status": "expired" if ratio >= 1 else "amber" if ratio >= 0.75 else "normal"}
+
+
+COLD_MAX_C = 8.0     # a box at or below 8 °C counts as cold storage
+
+
+def _with_stability(batch: dict, now: Optional[datetime] = None) -> dict:
+    temp = batch.get("dispatch_temp_c")
+    cold = temp is not None and float(temp) <= COLD_MAX_C
+    for s in batch.get("samples", []):
+        s["stability"] = (calculate_sample_stability(s["collected_at"], s.get("stability_room_hours"),
+                                                     s.get("stability_cold_hours"), cold, now)
+                          if s.get("collected_at") and s.get("status") in ("collected", "in_transit") else None)
+    return batch
+
+
+async def get_batch(clinic_id: str, batch_id: str) -> dict:
+    out = await rpc("dx_batch_json", {"p_clinic_id": clinic_id, "p_batch_id": batch_id})
+    if not out:
+        raise HTTPException(status_code=404, detail="Batch not found.")
+    return _with_stability(out)
+
+
+BATCH_COLUMNS = ("id, batch_number, from_site_id, to_site_id, outsource_partner_id, status, carrier_name, "
+                 "dispatch_temp_c, receipt_temp_c, dispatched_at, received_at, created_by_name, created_at")
+
+
+async def list_batches(clinic_id: str, site_ids: Optional[list[str]], from_site: Optional[str] = None,
+                       to_site: Optional[str] = None, status: Optional[str] = None) -> list[dict]:
+    """Newest first; `site_ids` (a pinned user's sites) keeps batches leaving or arriving there."""
+    q = scoped_query("dx_batches", clinic_id, BATCH_COLUMNS)
+    if from_site:
+        q = q.eq("from_site_id", from_site)
+    if to_site:
+        q = q.eq("to_site_id", to_site)
+    if status:
+        q = q.eq("status", status)
+    rows = await _rows(q.order("created_at", desc=True).limit(200))
+    if site_ids is not None:
+        rows = [b for b in rows if b["from_site_id"] in site_ids or b.get("to_site_id") in site_ids]
+    if rows:
+        counts: dict[str, int] = {}
+        for r in await _rows(scoped_query("dx_batch_samples", clinic_id, "batch_id")
+                             .in_("batch_id", [b["id"] for b in rows])):
+            counts[r["batch_id"]] = counts.get(r["batch_id"], 0) + 1
+        for b in rows:
+            b["sample_count"] = counts.get(b["id"], 0)
+    return rows
+
+
+async def create_batch(clinic_id: str, body: dict, user) -> dict:
+    aid, name = _actor(user)
+    return _with_stability(await rpc("dx_create_batch", {
+        "p_clinic_id": clinic_id, "p_from_site_id": body["from_site_id"], "p_to_site_id": body.get("to_site_id"),
+        "p_outsource_partner_id": body.get("outsource_partner_id"), "p_carrier_name": body.get("carrier_name"),
+        "p_temp_c": body.get("temp_c"), "p_actor_id": aid, "p_actor_name": name}))
+
+
+async def batch_add(clinic_id: str, batch_id: str, barcodes: list[str], user) -> dict:
+    aid, name = _actor(user)
+    return _with_stability(await rpc("dx_batch_add", {"p_clinic_id": clinic_id, "p_batch_id": batch_id,
+                                                      "p_barcodes": barcodes, "p_actor_id": aid, "p_actor_name": name}))
+
+
+async def dispatch_batch(clinic_id: str, batch_id: str, temp_c: Optional[float], notes: Optional[str], user) -> dict:
+    aid, name = _actor(user)
+    return _with_stability(await rpc("dx_dispatch_batch", {"p_clinic_id": clinic_id, "p_batch_id": batch_id,
+                                                           "p_temp_c": temp_c, "p_notes": notes, "p_actor_id": aid,
+                                                           "p_actor_name": name}))
+
+
+async def receive_batch(clinic_id: str, batch_id: str, barcodes: list[str], temp_c: Optional[float],
+                        notes: Optional[str], user) -> dict:
+    aid, name = _actor(user)
+    return _with_stability(await rpc("dx_receive_batch", {
+        "p_clinic_id": clinic_id, "p_batch_id": batch_id, "p_scanned_barcodes": barcodes, "p_temp_c": temp_c,
+        "p_discrepancy_notes": notes, "p_actor_id": aid, "p_actor_name": name}))
+
+
+async def outsourced_orders(clinic_id: str, accession_id: str) -> dict[str, str]:
+    """order id -> partner name, for "Outsourced to <partner>" on worklists (W13)."""
+    rows = await _rows(scoped_query("opd_orders", clinic_id, "id, outsource_partner_id").eq("accession_id", accession_id)
+                       .not_.is_("outsource_partner_id", "null"))
+    if not rows:
+        return {}
+    names = {p["id"]: p["name"] for p in await list_partners(clinic_id)}
+    return {r["id"]: names.get(r["outsource_partner_id"], "") for r in rows}
+
+
+async def stability_scan(now: Optional[datetime] = None) -> int:
+    """dx_sample_stability_scan (ADR-DX-16): tubes drawn but not yet received past 75 % / 100 %
+    of their container's window are logged per clinic. No state change. Returns the count."""
+    # unscoped: platform_sweep
+    clinics = await _rows(supabase.table("clinics").select("id").in_("dx_state", ["ACTIVE", "WIND_DOWN"]))
+    flagged = 0
+    for c in clinics:
+        cid = str(c["id"])
+        samples = await _rows(scoped_query("dx_samples", cid, "id, barcode, status, collected_at, container_id")
+                              .in_("status", ["collected", "in_transit"]).limit(2000))
+        if not samples:
+            continue
+        conts = {x["id"]: x for x in await _rows(scoped_query("dx_containers", cid, "id, stability_room_hours, "
+                                                               "stability_cold_hours"))}
+        live = await _rows(scoped_query("dx_batch_samples", cid, "sample_id, batch_id").is_("receipt", "null")
+                           .in_("sample_id", [s["id"] for s in samples]))
+        temps = {b["id"]: b.get("dispatch_temp_c") for b in await _rows(
+            scoped_query("dx_batches", cid, "id, dispatch_temp_c").in_("id", list({x["batch_id"] for x in live})))} \
+            if live else {}
+        cold = {x["sample_id"] for x in live if temps.get(x["batch_id"]) is not None
+                and float(temps[x["batch_id"]]) <= COLD_MAX_C}
+        for s in samples:
+            k = conts.get(s["container_id"], {})
+            if not s.get("collected_at"):
+                continue
+            st = calculate_sample_stability(s["collected_at"], k.get("stability_room_hours"),
+                                            k.get("stability_cold_hours"), s["id"] in cold, now)
+            if st["status"] != "normal":
+                flagged += 1
+                logger.warning(f"DX_SAMPLE_STABILITY clinic={cid} barcode={s.get('barcode')} status={st['status']} "
+                               f"elapsed_h={st['elapsed_hours']}")
+    return flagged

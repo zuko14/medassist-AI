@@ -216,6 +216,18 @@ class SchedulerService:
         # that still have no phlebotomist. Confirmation assigns immediately;
         # this catches the rest (no phlebotomist active yet, a failed attempt,
         # a phlebotomist deleted). No-op for every clinic without home visits.
+        # Diagnostic OS (migration 129, ADR-DX-16): tubes near or past their stability
+        # window while in transit. Logs only; no-op for every clinic without DX.
+        self.scheduler.add_job(
+            self.dx_sample_stability_scan,
+            "interval",
+            minutes=10,
+            id="dx_sample_stability_scan",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         self.scheduler.add_job(
             self.assign_home_collections,
             "interval",
@@ -553,6 +565,19 @@ class SchedulerService:
                         logger.info(f"Reception learning: {n} suggestion(s) created or refreshed")
                 except Exception as e:
                     logger.error(f"Reception learning distill failed: {e}")
+
+    async def dx_sample_stability_scan(self):
+        from app.services import dx
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("dx_sample_stability_scan", lease_seconds=540) as acquired:
+            if acquired:
+                try:
+                    n = await dx.stability_scan()
+                    if n:
+                        logger.info(f"DX stability scan flagged {n} tube(s)")
+                except Exception as e:
+                    logger.error(f"DX stability scan failed: {type(e).__name__}")
 
     async def assign_home_collections(self):
         from app.services import home_collection
