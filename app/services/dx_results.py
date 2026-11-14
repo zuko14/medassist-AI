@@ -92,7 +92,7 @@ async def _context(clinic_id: str, order_id: str) -> tuple[dict, dict, list[dict
     """The DX order, the person tested, and the worksheet lines (band chosen for this patient)."""
     from app.services import lis
     order = await lis.get_lab_order(clinic_id, order_id)
-    if order.get("source") != "dx":
+    if not order.get("accession_id"):            # source 'dx', or an OPD / IPD order adopted onto the bench (P6b)
         raise HTTPException(status_code=409, detail={"code": "dx_not_dx_order",
                                                      "message": "This is not a Diagnostic OS order."})
     subject = await lis.subject_of(clinic_id, order)

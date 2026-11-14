@@ -3441,6 +3441,27 @@
             .dxb-param { grid-template-columns: 1fr 1fr; }
         }
         /* DX:bench:END */
+        /* DX:reports:START — Reports & Dispatch, Report Templates (migration 131) */
+        .dxr-row { display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(110px, auto) minmax(90px, auto) minmax(140px, 1.4fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+        .dxr-row .dxr-why { font-size: 0.82rem; color: var(--text2); }
+        .dxr-due { font-weight: 600; color: var(--amber, #d68910); }
+        .dxr-st { white-space: nowrap; padding: 1px 8px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; border: 1px solid var(--border2); color: var(--text2); }
+        .dxr-st.sent { border-color: var(--green, #1e8449); color: var(--green, #1e8449); }
+        .dxr-st.held_dues, .dxr-st.held_shadow, .dxr-st.deferred { border-color: var(--amber, #d68910); color: var(--amber, #d68910); }
+        .dxr-st.failed, .dxr-st.blocked { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
+        .dxr-tests { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+        .dxr-viewer .modal { width: min(980px, 96vw); max-width: 96vw; height: min(88vh, 1100px); display: flex; flex-direction: column; }
+        .dxr-viewer iframe { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; min-height: 300px; }
+        .dxt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; }
+        .dxt-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+        .dxt-item > :first-child { flex: 1 1 200px; }
+        #pg-dxtemplates input[type="color"].dxt-swatch { width: 72px; height: 40px; padding: 3px; cursor: pointer; }
+        @media (max-width: 760px) {
+            .dxr-row { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+            .dxr-row > :first-child, .dxr-row .dxr-why { flex: 1 1 100%; }
+            .dxr-viewer .modal { height: 92vh; padding: 12px; }
+        }
+        /* DX:reports:END */
     </style>
 </head>
 <body>
@@ -3743,6 +3764,14 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg></span> Result Approval
             </div>
             <!-- DX:bench:END -->
+            <!-- DX:reports:START — Reports & Dispatch, Report Templates (migration 131) -->
+            <div class="nav-link" tabindex="0" data-page="dxreports" data-dx="nav DX_DISPATCH DX_READ" style="display:none" onclick="go('dxreports',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13"></path><path d="M22 2l-7 20-4-9-9-4 20-7z"></path></svg></span> Reports &amp; Dispatch
+            </div>
+            <div class="nav-link" tabindex="0" data-page="dxtemplates" data-dx="nav DX_ADMIN" style="display:none" onclick="go('dxtemplates',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg></span> Report Templates
+            </div>
+            <!-- DX:reports:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -7874,6 +7903,94 @@
             </div>
         </div>
         <!-- DX:bench:END -->
+        <!-- DX:reports:START — Reports & Dispatch (dxreports), Report Templates (dxtemplates); DELIVERY-POLICY.md decides who receives what -->
+        <div id="pg-dxreports" class="sec">
+            <div class="page-head"><div><h2>Reports &amp; Dispatch</h2><p>Release signed results as one visit report and see where each copy went. Reports never go out while the visit has unpaid dues, and insurance / corporate visits go to the payer only.</p></div></div>
+            <div class="toggle-group dxb-tabs" role="tablist" aria-label="Report queues" id="dxrTabs">
+                <button type="button" class="toggle-btn on" role="tab" aria-selected="true" data-dxr-tab="release" onclick="dxrep.setTab('release')">To Release</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxr-tab="held" onclick="dxrep.setTab('held')">Held (Dues)</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxr-tab="sent" onclick="dxrep.setTab('sent')">Sent</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxr-tab="failed" onclick="dxrep.setTab('failed')">Failed</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxr-tab="printed" onclick="dxrep.setTab('printed')">Printed</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxr-tab="shadow" onclick="dxrep.setTab('shadow')">Shadow</button>
+            </div>
+            <div class="card"><div class="dxc-bar">
+                <div class="field"><label for="dxrDate">From date</label><input id="dxrDate" type="date" onchange="dxrep.load()"></div>
+                <div class="field"><label for="dxrTarget">Recipient</label><select id="dxrTarget" onchange="dxrep.load()"><option value="">All</option><option value="patient">Patient</option><option value="referrer">Referrer</option><option value="account">B2B / payer desk</option></select></div>
+            </div></div>
+            <div id="dxrList" aria-live="polite"></div>
+        </div>
+        <div class="modal-overlay dxr-viewer" id="dxrViewer" role="dialog" aria-modal="true" aria-labelledby="dxrViewerTitle">
+            <div class="modal">
+                <h3 id="dxrViewerTitle">Report</h3>
+                <p class="muted" id="dxrViewerNote"></p>
+                <iframe id="dxrFrame" title="Report PDF"></iframe>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxrep.closeViewer()">Close</button>
+                    <a class="btn btn-ghost" id="dxrDownload" download="report.pdf" href="#">Download</a>
+                    <button type="button" class="btn btn-accent" onclick="dxrep.printFrame()">Print</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxrOverride" role="dialog" aria-modal="true" aria-labelledby="dxrOverrideTitle">
+            <div class="modal">
+                <h3 id="dxrOverrideTitle">Release despite unpaid dues</h3>
+                <p class="muted" id="dxrOverrideFor"></p>
+                <p>This override lifts only the dues hold, for this visit, for 7 days. It is recorded with your name and printed on the visit timeline.</p>
+                <div class="field"><label for="dxrOverrideWhy">Reason (at least 10 characters)</label><textarea id="dxrOverrideWhy" rows="2" maxlength="300" oninput="document.getElementById('dxrOverrideSave').disabled = this.value.trim().length < 10"></textarea></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxrep.closeModal('dxrOverride')">Cancel</button>
+                    <button type="button" class="btn btn-accent" id="dxrOverrideSave" disabled onclick="dxrep.saveOverride(this)">Record override</button>
+                </div>
+            </div>
+        </div>
+        <div id="pg-dxtemplates" class="sec">
+            <div class="page-head"><div><h2>Report Templates</h2><p>The letterhead and layout of visit reports. A published template never changes; edit by creating the next version. White-label reports always carry the "Tested at" line of your lab.</p></div>
+                <button type="button" class="btn btn-accent" onclick="dxtpl.edit(null)">New template</button></div>
+            <div class="toggle-group dxb-tabs" role="tablist" aria-label="Template scope">
+                <button type="button" class="toggle-btn on" role="tab" aria-selected="true" data-dxt-scope="clinic" onclick="dxtpl.setScope('clinic')">Clinic</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxt-scope="branch" onclick="dxtpl.setScope('branch')">Branch</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxt-scope="b2b_account" onclick="dxtpl.setScope('b2b_account')">Account</button>
+            </div>
+            <div class="card" id="dxtList" aria-live="polite"></div>
+            <div class="card" id="dxtEditor" hidden>
+                <h3 id="dxtEditTitle">New template</h3>
+                <div class="dxt-grid">
+                    <div class="field"><label for="dxtName">Name</label><input id="dxtName" maxlength="80" autocomplete="off"></div>
+                    <div class="field"><label for="dxtOwnerKind">For</label><select id="dxtOwnerKind" onchange="dxtpl.owners()"><option value="clinic">Whole clinic (default)</option><option value="branch">A branch</option><option value="b2b_account">A B2B account (white-label)</option></select></div>
+                    <div class="field"><label for="dxtOwner">Branch / account</label><select id="dxtOwner"></select></div>
+                    <div class="field"><label for="dxtStarter">Start from</label><select id="dxtStarter" onchange="dxtpl.applyStarter()"><option value="classic_band">Classic band</option><option value="minimal">Minimal</option><option value="hospital_white_label">Hospital white-label</option></select></div>
+                </div>
+                <h4>Header</h4>
+                <div class="dxt-grid">
+                    <div class="field"><label for="dxtMode">Header</label><select id="dxtMode"><option value="composed">Composed (logo + text)</option><option value="image">Uploaded header image</option></select></div>
+                    <div class="field"><label for="dxtLhName">Letterhead name</label><input id="dxtLhName" maxlength="120" placeholder="Your lab's name"></div>
+                    <div class="field"><label for="dxtTitle">Title</label><input id="dxtTitle" maxlength="120"></div>
+                    <div class="field"><label for="dxtAccent">Accent colour</label><input id="dxtAccent" type="color" class="dxt-swatch" value="#F28C28"></div>
+                    <div class="field"><label for="dxtLines">Address lines (one per line, up to 4)</label><textarea id="dxtLines" rows="3" maxlength="900"></textarea></div>
+                    <label class="check"><input type="checkbox" id="dxtBand" checked> Coloured band</label>
+                    <div class="field"><label for="dxtLogo">Logo (PNG / JPEG ≤ 1 MB)</label><input id="dxtLogo" type="file" accept="image/png,image/jpeg" onchange="dxtpl.upload(this, 'logo')"><small class="muted" id="dxtLogoPath"></small></div>
+                    <div class="field"><label for="dxtImage">Header image (PNG / JPEG ≤ 1 MB)</label><input id="dxtImage" type="file" accept="image/png,image/jpeg" onchange="dxtpl.upload(this, 'image')"><small class="muted" id="dxtImagePath"></small></div>
+                </div>
+                <h4>Body and footer</h4>
+                <div class="dxt-grid">
+                    <div class="field"><label for="dxtFont">Font</label><select id="dxtFont"><option value="noto_sans">Noto Sans (all Indian scripts)</option><option value="helvetica">Helvetica</option><option value="times">Times</option></select></div>
+                    <div class="field"><label for="dxtSize">Text size (pt)</label><input id="dxtSize" type="number" min="7" max="12" step="0.5" value="9"></div>
+                    <div class="field"><label for="dxtSign">Signatures</label><select id="dxtSign"><option value="per_department">After each department</option><option value="end">At the end</option></select></div>
+                    <div class="field"><label for="dxtQr">Verification QR</label><select id="dxtQr"><option value="footer_right">Footer, right</option><option value="footer_left">Footer, left</option><option value="none">No QR</option></select></div>
+                    <label class="check"><input type="checkbox" id="dxtMethod" checked> Show method under each test</label>
+                    <label class="check"><input type="checkbox" id="dxtPrev" checked> Show the previous value</label>
+                    <div class="field"><label for="dxtFooter">Footer lines (up to 3)</label><textarea id="dxtFooter" rows="2" maxlength="900"></textarea></div>
+                    <div class="field"><label for="dxtDisclaimer">Disclaimer</label><input id="dxtDisclaimer" maxlength="300"></div>
+                </div>
+                <div class="dxc-actions" style="margin-top:12px">
+                    <button type="button" class="btn btn-ghost" onclick="dxtpl.close()">Cancel</button>
+                    <button type="button" class="btn btn-ghost" onclick="dxtpl.preview(this)">Test with Sample Visit</button>
+                    <button type="button" class="btn btn-accent" onclick="dxtpl.save(this)">Save draft</button>
+                </div>
+            </div>
+        </div>
+        <!-- DX:reports:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -11087,6 +11204,306 @@ const dxapprove = {
     },
 };
 /* DX:bench:END */
+/* DX:reports:START — Reports & Dispatch and Report Templates (migration 131). Who may receive a report, and when,
+   is decided by the server (dx_delivery_decision: no payment, no report; payer-routed visits never to the patient).
+   This page shows each decision with its reason and offers only the actions the server allows. */
+const DXR_STATUS = { held: 'held_dues', sent: 'sent', failed: 'failed,deferred,blocked', shadow: 'held_shadow' };
+const DXR_TARGET = { patient: 'Patient', referrer: 'Referrer copy', account: 'B2B / payer desk' };
+const DXR_LABEL = { pending: 'Pending', held_dues: 'Held: dues', held_shadow: 'Shadow', blocked: 'Blocked', queued: 'Queued',
+                    sending: 'Sending', sent: 'Sent', failed: 'Failed', deferred: 'Deferred' };
+const dxrRs = p => '₹' + ((p || 0) / 100).toLocaleString('en-IN');
+const dxrep = {
+    tab: 'release', url: null, overrideVisit: null,
+    setTab(t) {
+        dxrep.tab = t;
+        document.querySelectorAll('[data-dxr-tab]').forEach(b => { const on = b.dataset.dxrTab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+        dxrep.load();
+    },
+    async load() {
+        const el = document.getElementById('dxrList'), seq = dxrep.seq = (dxrep.seq || 0) + 1;
+        const date = document.getElementById('dxrDate').value, target = document.getElementById('dxrTarget').value;
+        document.getElementById('dxrTarget').disabled = ['release', 'printed'].includes(dxrep.tab);
+        el.innerHTML = loading();
+        try {
+            let html;
+            if (dxrep.tab === 'release') html = dxrep.renderRelease(await api('/admin/dx/worklist?open_only=true'));
+            else if (dxrep.tab === 'printed') html = dxrep.renderPrints((await api('/admin/dx/prints' + (date ? '?date=' + date : ''))).prints);
+            else {
+                const p = new URLSearchParams({ status: DXR_STATUS[dxrep.tab] });
+                if (date) p.set('date', date);
+                if (target) p.set('target', target);
+                html = dxrep.renderDeliveries((await api('/admin/dx/deliveries?' + p)).deliveries);
+            }
+            if (seq === dxrep.seq) el.innerHTML = html;
+        } catch (e) { if (seq === dxrep.seq) el.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; }
+    },
+    renderRelease(d) {
+        const visits = d.visits.filter(v => v.orders.some(o => o.stage === 'pending_release'));
+        if (!visits.length) return '<div class="card"><p class="muted">No signed results are waiting to be released.</p></div>';
+        const can = dxCan('DX_DISPATCH');
+        return visits.map(v => {
+            const ready = v.orders.filter(o => o.stage === 'pending_release').length, all = v.orders.filter(o => o.stage !== 'cancelled').length;
+            return `<div class="dxc-visit"><div class="dxc-head"><h4>${esc(v.patient.name || '')}</h4><span>${esc(dxbAgeSex(v.patient))}</span>
+                <span class="dxc-num">${esc(v.accession_number)}</span><span class="dxc-chip">${ready} of ${all} signed</span></div>
+                <div class="dxr-tests">${v.orders.map(o => `<span class="dxc-chip">${esc(o.item_name)} · ${esc(DXB_STAGE[o.stage] || o.stage)}</span>`).join('')}</div>
+                <div class="dxc-actions">${can ? `<button type="button" class="btn btn-accent btn-sm" onclick="dxrep.create('${esc(v.id)}', this)">Create Release${ready < all ? ' (partial)' : ''}</button>` : ''}
+                <button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.releases('${esc(v.id)}', this)">Earlier releases</button></div>
+                <div id="dxrRel-${esc(v.id)}"></div></div>`;
+        }).join('');
+    },
+    renderDeliveries(rows) {
+        if (!rows.length) return '<div class="card"><p class="muted">Nothing here.</p></div>';
+        const byVisit = {};
+        rows.forEach(r => { (byVisit[r.accession_id] = byVisit[r.accession_id] || []).push(r); });
+        const can = dxCan('DX_DISPATCH');
+        return Object.values(byVisit).map(list => {
+            const v = list[0], dues = list.find(r => r.status === 'held_dues');
+            return `<div class="dxc-visit"><div class="dxc-head"><h4>${esc(v.patient_name || '')}</h4><span class="dxc-num">${esc(v.accession_number || '')}</span>
+                ${dues ? `<span class="dxr-due">Unpaid dues: ${dxrDue(dues.dues_paise)} pending</span>` : ''}</div>
+                ${dues ? `<div class="dxc-actions">${dxCan('DX_BILLING') ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.recordPayment('${esc(v.accession_id)}')">Record Payment</button>` : ''}
+                    ${dxCan('DX_ADMIN') ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.openOverride('${esc(v.accession_id)}', '${esc(v.accession_number || '')}')">Admin Override</button>` : ''}</div>` : ''}
+                ${list.map(r => `<div class="dxr-row"><span>R${esc(r.release_no ?? '')} · ${esc(DXR_TARGET[r.target] || r.target)}${r.release_status === 'superseded' ? ' <span class="dxc-chip">superseded</span>' : ''}</span>
+                    <span><span class="dxr-st ${esc(r.status)}">${esc(DXR_LABEL[r.status] || r.status)}</span></span>
+                    <span class="muted">${r.sent_at ? esc(new Date(r.sent_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })) : ''}</span>
+                    <span class="dxr-why">${esc(r.reason_text || r.reason || '')}${r.override_id ? ' · released on override' : ''}</span>
+                    <span class="dxc-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.view('${esc(r.release_id)}', 'R${esc(r.release_no ?? '')} · ${esc(v.accession_number || '')}')">View</button>
+                    ${can && r.target === 'patient' && r.release_status === 'rendered' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.printPatient('${esc(r.release_id)}', this)">Print for patient</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.share('${esc(r.release_id)}', this)">Share link</button>` : ''}
+                    ${can && !['sent', 'sending'].includes(r.status) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.resend('${esc(r.id)}', this)">${r.status === 'held_shadow' ? 'Send now' : 'Resend'}</button>` : ''}</span></div>`).join('')}</div>`;
+        }).join('');
+    },
+    renderPrints(rows) {
+        if (!rows.length) return '<div class="card"><p class="muted">No desk prints.</p></div>';
+        return `<div class="card">${rows.map(r => `<div class="dxr-row"><span><b>${esc(r.patient_name || '')}</b> · ${esc(r.accession_number || '')}</span><span>R${esc(r.release_no ?? '')}</span>
+            <span class="muted">${esc(new Date(r.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))}</span>
+            <span class="dxr-why">by ${esc(r.printed_by_name)}${r.override_id ? ' · on override' : ''}${r.watermark ? ' · ' + esc(r.watermark) : ''}</span>
+            <span><button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.view('${esc(r.release_id)}', 'R${esc(r.release_no ?? '')}')">View</button></span></div>`).join('')}</div>`;
+    },
+    async releases(vid, btn) {
+        const box = document.getElementById('dxrRel-' + vid);
+        if (box.innerHTML) { box.innerHTML = ''; return; }
+        btn.disabled = true;
+        try {
+            const d = await api(`/admin/dx/visits/${encodeURIComponent(vid)}/releases`);
+            box.innerHTML = d.releases.map(r => `<div class="dxr-row"><span>R${esc(r.release_no)} · ${esc(r.kind)}</span><span><span class="dxr-st ${r.status === 'rendered' ? 'sent' : 'failed'}">${esc(r.status)}</span></span>
+                <span class="muted">${esc(new Date(r.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))}</span>
+                <span class="dxr-why">${r.deliveries.map(x => `${esc(DXR_TARGET[x.target])}: ${esc(DXR_LABEL[x.status] || x.status)}`).join(' · ') || 'No recipients'}</span>
+                <span class="dxc-actions">${r.status !== 'rendering' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.view('${esc(r.id)}', 'R${esc(r.release_no)}')">View</button>` : ''}
+                ${dxCan('DX_DISPATCH') && r.status === 'rendered' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.printPatient('${esc(r.id)}', this)">Print for patient</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="dxrep.share('${esc(r.id)}', this)">Share link</button>` : ''}</span></div>`).join('') || '<p class="muted">No releases yet.</p>';
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async create(vid, btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/dx/visits/${encodeURIComponent(vid)}/releases`, {});
+            const held = r.deliveries.filter(d => d.status !== 'queued').map(d => `${DXR_TARGET[d.target]} ${DXR_LABEL[d.status] || d.status}`);
+            toast(`R${r.release_no} released (${r.kind})` + (held.length ? ' · ' + held.join(', ') : ''));
+            await dxrep.load();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async resend(id, btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/dx/deliveries/${encodeURIComponent(id)}/resend`, {});
+            toast(r.status === 'queued' ? 'Sending…' : `Still held: ${DXR_LABEL[r.status] || r.status}`, r.status !== 'queued');
+            await dxrep.load();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async view(releaseId, title) {
+        try {
+            const r = await apiRaw(`/admin/dx/releases/${encodeURIComponent(releaseId)}/pdf`);
+            dxrep.show(await r.blob(), title, 'Staff view. A watermark shows when the patient may not receive this copy yet.');
+        } catch (e) { toast(e.message, true); }
+    },
+    async printPatient(releaseId, btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiRaw(`/admin/dx/releases/${encodeURIComponent(releaseId)}/print`, { method: 'POST', headers: authHeaders() });
+            dxrep.show(await r.blob(), 'Print for patient', 'This print is logged.');
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async share(releaseId, btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/dx/releases/${encodeURIComponent(releaseId)}/share-link`, {});
+            try { await navigator.clipboard.writeText(r.url); } catch (_) { /* the toast shows it */ }
+            toast(`Share link copied (expires ${new Date(r.expires_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}): ${r.url}`);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    show(blob, title, note) {
+        if (dxrep.url) URL.revokeObjectURL(dxrep.url);
+        dxrep.url = URL.createObjectURL(blob);
+        document.getElementById('dxrViewerTitle').textContent = title;
+        document.getElementById('dxrViewerNote').textContent = note || '';
+        document.getElementById('dxrFrame').src = dxrep.url;
+        const a = document.getElementById('dxrDownload'); a.href = dxrep.url; a.download = (title || 'report').replace(/[^\w.-]+/g, '_') + '.pdf';
+        document.getElementById('dxrViewer').classList.add('open');
+    },
+    printFrame() { try { document.getElementById('dxrFrame').contentWindow.print(); } catch (_) { window.open(dxrep.url, '_blank'); } },
+    closeViewer() { document.getElementById('dxrViewer').classList.remove('open'); document.getElementById('dxrFrame').src = 'about:blank'; },
+    closeModal(id) { document.getElementById(id).classList.remove('open'); },
+    async recordPayment(vid) {
+        go('dxdesk');
+        try {
+            const v = await api(`/admin/dx/visits/${encodeURIComponent(vid)}`);
+            dxdesk.tab('new'); dxdesk.showResult('dxdResult', v);
+            document.getElementById('dxdResult').scrollIntoView({ block: 'center' });
+        } catch (e) { toast(e.message, true); }
+    },
+    openOverride(vid, label) {
+        dxrep.overrideVisit = vid;
+        document.getElementById('dxrOverrideFor').textContent = label;
+        const why = document.getElementById('dxrOverrideWhy'); why.value = '';
+        document.getElementById('dxrOverrideSave').disabled = true;
+        document.getElementById('dxrOverride').classList.add('open'); why.focus();
+    },
+    async saveOverride(btn) {
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/visits/${encodeURIComponent(dxrep.overrideVisit)}/delivery-overrides`, { reason: document.getElementById('dxrOverrideWhy').value.trim() });
+            toast('Override recorded; held reports are being sent'); dxrep.closeModal('dxrOverride'); await dxrep.load();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+};
+function dxrDue(p) { return p > 0 ? dxrRs(p) : 'bill not settled'; }
+
+const DXT_STARTER = { classic_band: { title: 'DIAGNOSTIC REPORT', accent: '#F28C28', band: true, sign: 'per_department', prev: true },
+                      minimal: { title: 'LABORATORY REPORT', accent: '#333333', band: false, sign: 'end', prev: false },
+                      hospital_white_label: { title: 'LABORATORY REPORT', accent: '#1F6FB2', band: true, sign: 'per_department', prev: true } };
+const dxtpl = {
+    scope: 'clinic', rows: [], editing: null, assets: { logo: null, image: null }, branches: [], accounts: [],
+    setScope(s) {
+        dxtpl.scope = s;
+        document.querySelectorAll('[data-dxt-scope]').forEach(b => { const on = b.dataset.dxtScope === s; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+        dxtpl.load();
+    },
+    async load() {
+        const el = document.getElementById('dxtList');
+        el.innerHTML = loading();
+        try {
+            if (!dxtpl.loaded) {
+                const [st, ac] = await Promise.all([api('/admin/dx/setup'), api('/admin/dx/b2b-accounts').catch(() => ({ accounts: [] }))]);
+                dxtpl.branches = st.branches || []; dxtpl.accounts = ac.accounts || []; dxtpl.loaded = true;
+            }
+            dxtpl.rows = (await api('/admin/dx/templates?owner_kind=' + dxtpl.scope)).templates;
+        } catch (e) { el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        const owner = t => t.owner_kind === 'branch' ? (dxtpl.branches.find(b => b.id === t.owner_id) || {}).name
+                         : t.owner_kind === 'b2b_account' ? (dxtpl.accounts.find(a => a.id === t.owner_id) || {}).name : 'Whole clinic';
+        el.innerHTML = dxtpl.rows.map(t => `<div class="dxt-item"><span><b>${esc(t.name)}</b> v${esc(t.version)} <span class="muted">· ${esc(owner(t) || '')}</span></span>
+            <span class="dxr-st ${t.status === 'published' ? 'sent' : t.status === 'retired' ? 'blocked' : 'held_dues'}">${esc(t.status)}</span>
+            <span class="dxc-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="dxtpl.previewId('${esc(t.id)}', this)">Preview</button>
+            ${t.status === 'draft' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxtpl.edit('${esc(t.id)}')">Edit</button><button type="button" class="btn btn-accent btn-sm" onclick="dxtpl.publish('${esc(t.id)}', this)">Publish</button>` : ''}
+            ${t.status !== 'draft' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxtpl.edit('${esc(t.id)}', true)">New version</button>` : ''}
+            ${t.status === 'published' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxtpl.retire('${esc(t.id)}', this)">Retire</button>` : ''}</span></div>`).join('')
+            || '<p class="muted">No templates here yet. Reports use the built-in Classic layout until one is published.</p>';
+    },
+    owners() {
+        const kind = document.getElementById('dxtOwnerKind').value, sel = document.getElementById('dxtOwner');
+        const list = kind === 'branch' ? dxtpl.branches : kind === 'b2b_account' ? dxtpl.accounts : [];
+        sel.innerHTML = list.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+        sel.disabled = kind === 'clinic';
+    },
+    val(id) { return document.getElementById(id).value; },
+    set(id, v) { const el = document.getElementById(id); if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? ''; },
+    applyStarter() {
+        const s = DXT_STARTER[dxtpl.val('dxtStarter')];
+        dxtpl.set('dxtTitle', s.title); dxtpl.set('dxtAccent', s.accent); dxtpl.set('dxtBand', s.band); dxtpl.set('dxtSign', s.sign); dxtpl.set('dxtPrev', s.prev);
+    },
+    async edit(id, copy) {
+        const t = id ? await api('/admin/dx/templates/' + encodeURIComponent(id)).catch(e => { toast(e.message, true); return null; }) : null;
+        if (id && !t) return;
+        dxtpl.editing = t && !copy ? t : null;
+        const L = (t && t.layout) || {}, h = L.header || {}, c = h.composed || {}, b = L.body || {}, ver = L.verification || {};
+        document.getElementById('dxtEditTitle').textContent = dxtpl.editing ? `Edit ${t.name} v${t.version} (draft)` : t ? `New version of ${t.name}` : 'New template';
+        dxtpl.set('dxtName', t ? t.name : ''); dxtpl.set('dxtOwnerKind', t ? t.owner_kind : dxtpl.scope); dxtpl.owners();
+        if (t && t.owner_id) dxtpl.set('dxtOwner', t.owner_id);
+        ['dxtName', 'dxtOwnerKind', 'dxtOwner', 'dxtStarter'].forEach(x => { document.getElementById(x).disabled = !!t || (x === 'dxtOwner' && dxtpl.val('dxtOwnerKind') === 'clinic'); });
+        if (!t) { dxtpl.set('dxtStarter', dxtpl.scope === 'b2b_account' ? 'hospital_white_label' : 'classic_band'); dxtpl.applyStarter(); }
+        else {
+            dxtpl.set('dxtTitle', c.title); dxtpl.set('dxtAccent', c.accent_hex || '#F28C28'); dxtpl.set('dxtBand', c.band !== false);
+            dxtpl.set('dxtSign', (L.signatures || {}).placement || 'per_department'); dxtpl.set('dxtPrev', b.show_previous_value !== false);
+        }
+        dxtpl.set('dxtMode', h.mode || 'composed'); dxtpl.set('dxtLhName', c.name); dxtpl.set('dxtLines', (c.lines || []).join('\n'));
+        dxtpl.set('dxtFont', b.font_family || 'noto_sans'); dxtpl.set('dxtSize', b.font_pt || 9); dxtpl.set('dxtMethod', b.show_method !== false);
+        dxtpl.set('dxtQr', ver.qr === false ? 'none' : ver.position || 'footer_right');
+        dxtpl.set('dxtFooter', ((L.footer || {}).lines || []).join('\n')); dxtpl.set('dxtDisclaimer', L.disclaimer || '');
+        dxtpl.assets = { logo: c.logo_asset || null, image: h.image_asset || null };
+        document.getElementById('dxtLogoPath').textContent = dxtpl.assets.logo ? 'Logo uploaded' : '';
+        document.getElementById('dxtImagePath').textContent = dxtpl.assets.image ? 'Header image uploaded' : '';
+        document.getElementById('dxtEditor').hidden = false;
+        document.getElementById('dxtEditor').scrollIntoView({ block: 'start' });
+        document.getElementById(t ? 'dxtLhName' : 'dxtName').focus();
+    },
+    close() { document.getElementById('dxtEditor').hidden = true; dxtpl.editing = null; },
+    layout() {
+        const lines = id => dxtpl.val(id).split('\n').map(s => s.trim()).filter(Boolean);
+        const qr = dxtpl.val('dxtQr'), mode = dxtpl.val('dxtMode');
+        const out = {
+            header: { mode, image_asset: dxtpl.assets.image, composed: { name: dxtpl.val('dxtLhName').trim() || null, title: dxtpl.val('dxtTitle').trim(),
+                      lines: lines('dxtLines').slice(0, 4), accent_hex: dxtpl.val('dxtAccent').toUpperCase(), band: document.getElementById('dxtBand').checked,
+                      logo_asset: dxtpl.assets.logo } },
+            footer: { lines: lines('dxtFooter').slice(0, 3) },
+            body: { font_family: dxtpl.val('dxtFont'), font_pt: Number(dxtpl.val('dxtSize')) || 9,
+                    show_method: document.getElementById('dxtMethod').checked, show_previous_value: document.getElementById('dxtPrev').checked },
+            signatures: { placement: dxtpl.val('dxtSign') },
+            verification: { qr: qr !== 'none', position: qr === 'none' ? 'footer_right' : qr },
+        };
+        if (dxtpl.val('dxtDisclaimer').trim()) out.disclaimer = dxtpl.val('dxtDisclaimer').trim();
+        return out;
+    },
+    async save(btn) {
+        btn.disabled = true;
+        try {
+            if (dxtpl.editing) dxtpl.editing = await apiPut('/admin/dx/templates/' + encodeURIComponent(dxtpl.editing.id), { layout: dxtpl.layout() });
+            else {
+                const kind = dxtpl.val('dxtOwnerKind');
+                dxtpl.editing = await apiPost('/admin/dx/templates', { name: dxtpl.val('dxtName').trim(), owner_kind: kind,
+                    owner_id: kind === 'clinic' ? null : dxtpl.val('dxtOwner') || null, starter: dxtpl.val('dxtStarter'), layout: dxtpl.layout() });
+                ['dxtName', 'dxtOwnerKind', 'dxtOwner', 'dxtStarter'].forEach(x => { document.getElementById(x).disabled = true; });
+            }
+            document.getElementById('dxtEditTitle').textContent = `Edit ${dxtpl.editing.name} v${dxtpl.editing.version} (draft)`;
+            toast('Draft saved'); await dxtpl.load();
+            return true;
+        } catch (e) { toast(e.message, true); return false; } finally { btn.disabled = false; }
+    },
+    async preview(btn) {
+        if (!dxtpl.editing && !(await dxtpl.save(btn))) return;
+        await dxtpl.previewId(dxtpl.editing.id, btn, dxtpl.layout());
+    },
+    async previewId(id, btn, layout) {
+        btn.disabled = true;
+        try {
+            const r = await apiRaw(`/admin/dx/templates/${encodeURIComponent(id)}/preview`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                                                                                              body: JSON.stringify(layout ? { layout } : {}) });
+            dxrep.show(await r.blob(), 'Template preview', 'Sample visit (HbA1c + lipid profile). Not a patient report.');
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async publish(id, btn) {
+        if (!confirm('Publish this template? Published templates cannot be edited; new reports will use it.')) return;
+        btn.disabled = true;
+        try { await apiPost(`/admin/dx/templates/${encodeURIComponent(id)}/publish`, {}); toast('Published'); dxtpl.close(); await dxtpl.load(); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async retire(id, btn) {
+        if (!confirm('Retire this template? New reports fall back to the next template in line; old reports are unchanged.')) return;
+        btn.disabled = true;
+        try { await apiPost(`/admin/dx/templates/${encodeURIComponent(id)}/retire`, {}); toast('Retired'); await dxtpl.load(); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async upload(input, kind) {
+        const f = input.files[0];
+        if (!f) return;
+        const fd = new FormData(); fd.append('file', f);
+        try {
+            const r = await (await apiRaw('/admin/dx/templates/assets', { method: 'POST', headers: authHeaders(), body: fd })).json();
+            dxtpl.assets[kind] = r.path;
+            document.getElementById(kind === 'logo' ? 'dxtLogoPath' : 'dxtImagePath').textContent = kind === 'logo' ? 'Logo uploaded' : 'Header image uploaded';
+            if (kind === 'image') dxtpl.set('dxtMode', 'image');
+        } catch (e) { toast(e.message, true); input.value = ''; }
+    },
+};
+/* DX:reports:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -16399,7 +16816,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ };
     if (loaders[page]) loaders[page]();
 }
 

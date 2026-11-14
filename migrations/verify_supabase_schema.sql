@@ -816,6 +816,43 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 25. MIGRATION 131 — Diagnostic OS reports, templates, delivery (DX-M7) + P6b adoption
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_trg int;
+    v_funcs int;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_report_templates', 'dx_report_releases', 'dx_release_results', 'dx_release_deliveries',
+                       'dx_delivery_overrides', 'dx_outbox', 'dx_print_log', 'dx_share_links')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M131', 'Tables: dx report templates, releases, release results, deliveries, overrides, outbox, print log, share links (RLS forced)',
+            CASE WHEN v_tables = 8 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 8 present with RLS forced');
+
+    SELECT count(*) INTO v_trg FROM pg_trigger
+     WHERE tgname IN ('trg_dx_report_templates_guard', 'trg_dx_report_releases_immutable', 'trg_dx_report_releases_guard',
+                      'trg_dx_release_deliveries_guard', 'trg_dx_outbox_receipt', 'trg_dx_outbox_invoice',
+                      'trg_dx_internal_items');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M131', 'Triggers: template / release guards, delivery guard, outbox on receipts + invoice status, internal visit lines',
+            CASE WHEN v_trg = 7 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 7 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_delivery_decision(uuid,uuid,text)',
+        'dx_create_release(uuid,uuid,uuid[],text,uuid,text)', 'dx_claim_delivery(uuid,uuid)',
+        'dx_mark_delivery_result(uuid,uuid,boolean,uuid,text)', 'dx_reevaluate_deliveries(uuid,uuid)',
+        'dx_create_delivery_override(uuid,uuid,text,timestamptz,uuid,text)', 'dx_log_print(uuid,uuid,uuid,text)',
+        'dx_create_share_link(uuid,uuid,text,integer,uuid)', 'dx_share_take_attempt(text)', 'dx_outbox_claim(integer)',
+        'dx_adopt_orders(uuid,uuid[],uuid,text)']) f
+     WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M131', 'Functions: decision, release, claim, mark, re-evaluate, override, print, share link, outbox, adoption',
+            CASE WHEN v_funcs = 11 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 11 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

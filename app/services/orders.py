@@ -209,7 +209,8 @@ async def get_diagnostic_worklist(clinic_id: str, branch_id: Optional[str] = Non
 
     def build():
         # AUDIT A4: Diagnostic OS orders (source 'dx') are worked on the DX bench, never here
-        q = scoped_query("opd_orders", clinic_id).in_("status", statuses).in_("source", ["opd", "ipd"])
+        q = (scoped_query("opd_orders", clinic_id).in_("status", statuses).in_("source", ["opd", "ipd"])
+             .is_("accession_id", "null"))       # P6b: an adopted order is on the DX bench
         if since:
             q = q.gte("updated_at", since)
         return restrict_to_branch(q, branch_id).order("created_at").order("id")
@@ -262,7 +263,7 @@ async def get_diagnostic_worklist(clinic_id: str, branch_id: Optional[str] = Non
 
 def _refuse_dx(order: dict) -> None:
     """AUDIT A4: a DX order is collected in its tube and closed only by a pathologist's sign-off."""
-    if order.get("source") == "dx":
+    if order.get("source") == "dx" or order.get("accession_id"):     # P6b: adopted OPD / IPD orders too
         raise HTTPException(status_code=409, detail={"code": "dx_use_dx_route",
                                                      "message": "This is a Diagnostic OS order. Use the DX sample "
                                                                 "collection and lab worklist."})

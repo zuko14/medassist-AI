@@ -188,7 +188,11 @@ Daily `dx_b2b_hold_evaluation` applies/clears automatic holds.
 A doctor orders CBC in an OPD consult (G1). For a clinic with DX ACTIVE the order also appears in DX *Collection*
 (as an internal visit, `billing_mode='internal'`, created by `dx_adopt_orders` — the money is already on the OPD bill
 or IPD charges). Samples, logistics, verification and releases are DX; the OPD/IPD record shows the result as today.
-Until DX-41 is VERIFIED, OPD/IPD lab orders keep using the G1 worklist unchanged.
+As built (migration 131): `POST /admin/dx/orders/adopt` moves chosen uncollected orders; the order row **keeps** its
+source, encounter / admission and bill line and gains `accession_id` / `accession_item_id` / `dx_sample_id` (one
+guarded exemption in `opd_guard_order`), so its `lab_results` row is the OPD / IPD record's result. Adopted orders
+leave the G1 worklist and the LIS entry / sign-off routes (409 `dx_use_dx_route`). An internal visit's lines cannot be
+added, priced or cancelled from DX (`dx_internal_visit`). Orders not adopted keep using the G1 worklist unchanged.
 
 ## W16 — Analyser result (P10)
 Tube loaded → analyser host-queries the bridge with the barcode → bridge `GET /internal/dx/bridge/orders?barcode=` →

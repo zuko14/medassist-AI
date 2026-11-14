@@ -93,8 +93,8 @@ compute and pin the exact values in the test from the published formula at imple
   "schema": 1,
   "page": {"size": "A4", "margin_mm": {"top": 10, "bottom": 12, "left": 12, "right": 12}},
   "header": {"mode": "image", "image_asset": "dx-assets/<clinic>/templates/<id>/header.png", "height_mm": 34,
-             "composed": {"logo_asset": null, "title": "DIAGNOSTIC REPORT", "lines": ["Address…", "Phone…"],
-                          "accent_hex": "#F28C28"}},
+             "composed": {"logo_asset": null, "name": null, "title": "DIAGNOSTIC REPORT", "lines": ["Address…", "Phone…"],
+                          "accent_hex": "#F28C28", "band": true}},
   "footer": {"lines": ["24x7 Home collection: 9xxxx xxxxx"], "height_mm": 16, "page_numbers": true},
   "patient_block": {"fields": ["name", "age_sex", "referrer", "visit_no", "mrn", "bill_no", "external_ref",
                                "provider", "collected", "received", "reported", "sample_ids"],
@@ -151,6 +151,12 @@ Layout rules:
    on amended; `SUPERSEDED` banner when an old release is re-rendered for viewing.
 7. Fonts: existing Noto Sans / Devanagari / Telugu assets (patient names in Indic scripts render, as OPD Rx).
 8. Determinism: PDF metadata dates = release `created_at`; no random object ids; same input → same SHA-256 (tested).
+
+*As built (DX-43):* `Page n of N` uses fpdf2's total-pages alias (exact, resolved at close; no second render).
+The method line is 7 pt Helvetica-Oblique (there is no italic Noto face in the repo). The verify QR comes from
+`app/services/dx_qr.py`, a small in-repo encoder (byte mode, level M, versions 1–6), unit-tested against the ISO
+worked example and decoded by a browser's native QR detector. `composed.name` (letterhead name, default the lab's
+name) lets a white-label template print the hospital's name; `body.font_family` is `noto_sans` | `helvetica` | `times`.
 
 ## 6. Barcode labels (`app/services/dx_barcode.py` + `dx_pdf.render_labels`)
 

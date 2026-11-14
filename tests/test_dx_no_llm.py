@@ -57,3 +57,50 @@ def test_guard_catches_a_banned_import(tmp_path):
     bad = tmp_path / "dx_bad.py"
     bad.write_text("from app.services.ai_engine import x\nimport app.voice.tools\n", encoding="utf-8")
     assert {"app.services.ai_engine", "app.voice.tools"} <= _imports(bad)
+
+
+# ── DELIVERY-POLICY §4: one sender for DX reports ───────────────────────────
+
+def _dx_sends(path: pathlib.Path) -> list[tuple[str, int]]:
+    """(enclosing function, line) of every upload_and_send(...) call passing source='dx'."""
+    out = []
+
+    class Visit(ast.NodeVisitor):
+        stack = ["<module>"]
+
+        def visit_FunctionDef(self, node):
+            self.stack.append(node.name)
+            self.generic_visit(node)
+            self.stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+            src = next((k.value for k in node.keywords if k.arg == "source"), None)
+            if name == "upload_and_send" and isinstance(src, ast.Constant) and src.value == "dx":
+                out.append((self.stack[-1], node.lineno))
+            self.generic_visit(node)
+
+    Visit().visit(ast.parse(path.read_text(encoding="utf-8")))
+    return out
+
+
+def test_dx_single_sender():
+    """Only dx_reports.send_delivery() hands a DX report to the pipeline (source='dx')."""
+    files = [*pathlib.Path("app").rglob("*.py"), *pathlib.Path("connectors").rglob("*.py")]
+    found = {(p.as_posix(), fn) for p in files for fn, _ in _dx_sends(p)}
+    assert found == {("app/services/dx_reports.py", "send_delivery")}, found
+    # ... and it claims the row (CAS + policy re-check in SQL) before it sends
+    body = ast.get_source_segment(pathlib.Path("app/services/dx_reports.py").read_text(encoding="utf-8"),
+                                  next(n for n in ast.walk(ast.parse(pathlib.Path("app/services/dx_reports.py")
+                                                                     .read_text(encoding="utf-8")))
+                                       if isinstance(n, ast.AsyncFunctionDef) and n.name == "send_delivery"))
+    assert 0 < body.index('"dx_claim_delivery"') < body.index("upload_and_send(")
+    assert "if not claimed" in body
+
+
+def test_single_sender_guard_catches_another_caller(tmp_path):
+    bad = tmp_path / "other.py"
+    bad.write_text("async def f(s):\n    await s.upload_and_send(clinic_id='c', source='dx')\n", encoding="utf-8")
+    assert _dx_sends(bad) == [("f", 2)]

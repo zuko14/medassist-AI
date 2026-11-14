@@ -150,6 +150,30 @@ _ERRORS = {
     "dx_approve_items_invalid": (422, "Approve between 1 and 50 results at a time."),
     "dx_batch_not_normal": (409, "Not every value is normal (or a delta check failed): approve this result on its own."),
     "dx_attachment_locked": (409, "Attachments can be added only before the result is approved."),
+    # migration 131: OPD / IPD adoption (P6b), templates, releases, delivery
+    "dx_not_active": (409, "The Diagnostic OS is not active for this clinic."),
+    "dx_adopt_orders_invalid": (422, "Choose between 1 and 100 lab orders."),
+    "dx_order_not_adoptable": (409, "Only an uncollected OPD / IPD lab-test order can move to the lab bench"),
+    "lis_order_not_found": (404, "Order not found."),
+    "dx_internal_visit": (409, "This visit holds OPD / IPD orders: its tests and money are managed on the OPD bill "
+                               "or IPD charges, not here."),
+    "dx_template_not_found": (404, "Template not found."),
+    "dx_template_published": (409, "A published template cannot be changed. Create a new version instead."),
+    "dx_template_not_published": (409, "Only a published template can be retired."),
+    "dx_template_publish_via_function": (409, "Publish a template with the Publish action."),
+    "dx_visit_cancelled": (409, "This visit is cancelled."),
+    "dx_release_empty": (409, "No signed result is ready to release on this visit."),
+    "dx_release_nothing_new": (409, "Every signed result of this visit is already in its current report."),
+    "dx_release_result_invalid": (409, "Only current signed results of this visit can be released."),
+    "dx_release_kind_invalid": (422, "Unknown report kind."),
+    "dx_release_kind_mismatch": (409, "This report would be"),
+    "dx_release_not_found": (404, "Report release not found."),
+    "dx_release_immutable": (409, "A released report never changes; create an amended release instead."),
+    "dx_delivery_not_found": (404, "Delivery not found."),
+    "dx_delivery_not_sending": (409, "This delivery is not being sent."),
+    "dx_delivery_already_sent": (409, "This report was already delivered to this recipient."),
+    "dx_override_reason": (422, "Give a reason of at least 10 characters for the override."),
+    "dx_target_invalid": (422, "Unknown delivery target."),
 }
 _CONSTRAINTS = (
     ("dx_sites_clinic_code_key", 409, "Another site already uses this code."),
@@ -189,6 +213,9 @@ _CONSTRAINTS = (
     ("dx_routing_rules_to_fk", 404, "Site not found."),
     ("dx_routing_rules_partner_fk", 404, "Outsource partner not found."),
     ("uq_dx_outsource_partners_name", 409, "Another outsource partner already has this name."),
+    ("dx_report_templates_version_key", 409, "A template with this name and version already exists."),
+    ("dx_report_templates_name_check", 422, "A template name is 2–80 characters."),
+    ("dx_delivery_overrides_expiry", 422, "An override expires within 31 days."),
     ("lab_test_parameters_ranges", 422, "Ranges must be ordered: critical low <= normal low <= normal high <= critical high."),
 )
 
@@ -402,6 +429,15 @@ async def cancel_visit(clinic_id: str, accession_id: str, reason: str, user) -> 
     aid, name = _actor(user)
     return await rpc("dx_cancel_visit", {"p_clinic_id": clinic_id, "p_accession_id": accession_id,
                                          "p_reason": reason, "p_actor_id": aid, "p_actor_name": name})
+
+
+async def adopt_orders(clinic_id: str, order_ids: list[str], user) -> dict:
+    """W15 / DX-41: uncollected OPD / IPD lab orders become an internal DX visit per patient
+    (billing_mode 'internal', shares 0): tubes, bench and releases are DX; the OPD bill or
+    IPD charge that already carries the money is untouched."""
+    aid, name = _actor(user)
+    return await rpc("dx_adopt_orders", {"p_clinic_id": clinic_id, "p_order_ids": order_ids, "p_actor_id": aid,
+                                         "p_actor_name": name})
 
 
 async def get_visit(clinic_id: str, accession_id: str) -> dict:
@@ -1051,7 +1087,7 @@ async def worklist(clinic_id: str, visits: list[dict], site_ids: Optional[list[s
     vids = [v["id"] for v in visits]
     orders_ = await _rows(scoped_query("opd_orders", clinic_id, "id, accession_id, dx_sample_id, catalog_reference_id, "
                                        "item_name, status, urgency, outsource_partner_id, created_at")
-                          .in_("accession_id", vids).eq("source", "dx"))
+                          .in_("accession_id", vids))
     if not orders_:
         return {"visits": [], "counts": counts}
     sample_ids = list({o["dx_sample_id"] for o in orders_ if o.get("dx_sample_id")})
@@ -1069,6 +1105,9 @@ async def worklist(clinic_id: str, visits: list[dict], site_ids: Optional[list[s
         if r["order_id"] not in results or r["version"] > results[r["order_id"]]["version"]:
             results[r["order_id"]] = r
     open_ids = [r["id"] for r in results.values() if r["status"] == "entered"]
+    signed_ids = [r["id"] for r in results.values() if r["status"] in ("validated", "amended")]
+    released = {x["result_id"] for x in await _rows(scoped_query("dx_release_results", clinic_id, "result_id")
+                                                     .in_("result_id", signed_ids))} if signed_ids else set()
     verifs, crit, flags, deltas = [], [], {}, set()
     if open_ids:
         verifs = await _rows(scoped_query("dx_result_verifications", clinic_id, "result_id, result_updated_at, decision, "
@@ -1106,7 +1145,8 @@ async def worklist(clinic_id: str, visits: list[dict], site_ids: Optional[list[s
             critical_pending = bool(r["has_critical_value"] and last and not any(
                 e.get("notified_at") and e.get("read_back_confirmed") and e["created_at"] > last for e in mine))
         st = dx_stage(o, s, r, v, {"approval_levels": levels, "collect_before_payment": cbp,
-                                   "due_paise": dues.get(v["id"], 0), "verified": verified})
+                                   "due_paise": dues.get(v["id"], 0), "verified": verified,
+                                   "released": bool(r and r["id"] in released)})
         counts[st] += 1
         if stage and st != stage:
             continue

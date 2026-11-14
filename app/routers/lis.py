@@ -123,7 +123,7 @@ async def _audit(user: AdminUser, request: Request, action: str, rtype: str, rid
 
 def _refuse_dx(order: dict) -> None:
     """Diagnostic OS results are entered, verified and approved on the DX bench (AUDIT A5)."""
-    if order.get("source") == "dx":
+    if order.get("source") == "dx" or order.get("accession_id"):     # P6b: adopted OPD / IPD orders too
         raise HTTPException(status_code=409, detail="dx_use_dx_route")
 
 

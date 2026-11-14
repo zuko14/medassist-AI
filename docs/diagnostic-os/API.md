@@ -117,26 +117,35 @@ open batch, cancelling a batch, re-batching a tube recorded missing.
 | POST / GET | `/results/{id}/attachments?kind&caption`, `/results/{id}/attachments/{att}` | LAB_ENTRY / bench read | PDF, PNG, JPEG ≤ 5 MB (sniffed), only while the result is open |
 | — | `/admin/lis/orders/{id}/results`, `/admin/lis/results/{id}/validate` (existing) | — | for a `source='dx'` order: **409 `dx_use_dx_route`**; the LIS sign-off queue omits DX results; `validate_and_sign_report` never delivers a DX result; OPD/IPD unchanged |
 
-## P7 — Reports, templates, delivery
+## P6b — OPD / IPD orders on the DX bench (as built, migration 131)
 | Method | Path | Permission | Notes |
 |:-|:-|:-|:-|
-| GET/POST/PATCH | `/templates`, `/templates/{id}` | DX_ADMIN (POST NW) | draft edits only |
-| POST | `/templates/{id}/publish`, `/templates/{id}/retire` | DX_ADMIN | |
-| POST | `/templates/{id}/assets` | DX_ADMIN | header/footer images |
-| POST | `/templates/clone-from-pdf` | DX_ADMIN | rasterise page 1, return image for cropping |
-| GET | `/templates/{id}/preview.pdf` | DX_ADMIN | fixture visit |
-| GET | `/releases?delivery_status&target&site&date` | DX_DISPATCH | tabs To release / Held (dues) / Payer-routed / Sent / Failed / Printed, from `dx_release_deliveries` |
-| POST | `/visits/{id}/releases` | DX_DISPATCH | `{result_ids?, kind}`; default = all signed not released |
-| GET | `/releases/{id}/pdf` | DX_DISPATCH or DX_READ | audit-logged clinical read |
-| GET | `/releases/{id}/deliveries` | DX_DISPATCH | per target: status, decision reason, recipient (masked) |
-| POST | `/releases/{id}/resend` | DX_DISPATCH | re-runs the decision per target; idempotent per minute |
-| POST | `/visits/{id}/delivery-override` | DX_ADMIN or clinic_admin | dues rule only; reason ≥ 10 chars; expiry; re-evaluates held deliveries |
+| POST | `/orders/adopt` | DX_REGISTER or DX_COLLECT (NW) | `{order_ids: [uuid, 1..100]}`; uncollected OPD / IPD lab-test orders → one internal visit per patient (`billing_mode='internal'`, shares 0); the order keeps its source, encounter / admission and bill; already-adopted ids come back in `skipped`. LIS / G1 routes answer 409 `dx_use_dx_route` for an adopted order |
+
+## P7 — Reports, templates, delivery (as built, migration 131)
+| Method | Path | Permission | Notes |
+|:-|:-|:-|:-|
+| GET | `/templates?owner_kind` | DX_ADMIN or DX_DISPATCH | `{templates, starters}`; a branch-pinned admin sees the clinic default and its own branch |
+| POST | `/templates` | DX_ADMIN (NW) | `{owner_kind, owner_id?, name, starter, layout}` → draft, version = next for owner + name; layout validated (422 `dx_template_invalid`) |
+| GET / PUT | `/templates/{id}` | read: DX_ADMIN or DX_DISPATCH; PUT: DX_ADMIN (NW) | PUT edits a **draft** only (409 `dx_template_published`) |
+| POST | `/templates/{id}/publish`, `/templates/{id}/retire` | DX_ADMIN | publish stamps `published_at` in SQL; retire only from published |
+| POST | `/templates/{id}/preview` | DX_ADMIN or DX_DISPATCH | `{layout?}` → PDF of the sample visit (Taiyo HbA1c + lipid), "INTERNAL VIEW" |
+| POST | `/templates/assets` | DX_ADMIN (NW) | multipart PNG / JPEG ≤ 1 MB, ≤ 3000 px → `{path}` = `<clinic>/dx-assets/templates/<sha256>.<ext>` |
+| GET | `/visits/{id}/releases` | DX_DISPATCH, DX_READ or DX_ADMIN | releases with their deliveries + the visit's `dues_paise` |
+| POST | `/visits/{id}/releases` | DX_DISPATCH | `{result_ids?, kind?}`; default = every current signed result; kind derived (409 `dx_release_kind_mismatch` if given and wrong); render + store + send in the background |
+| POST | `/releases/{id}/render` | DX_DISPATCH | retry a `render_failed` release |
+| GET | `/releases/{id}/pdf` | DX_DISPATCH, DX_READ, DX_ADMIN or DX_VERIFY | audit-logged staff view; watermark INTERNAL VIEW / SHADOW / SUPERSEDED when a patient copy would be refused |
+| POST | `/releases/{id}/print` | DX_DISPATCH | decision `print_patient`: 409 `held_dues` / `payer_routed` / …; else the stored PDF (SHADOW watermark in shadow mode) + `dx_print_log` row |
+| POST | `/releases/{id}/share-link` | DX_DISPATCH | decision `share_link`; 128-bit token shown once, stored as SHA-256, TTL `share_link_ttl_hours` |
+| GET | `/deliveries?status&target&date` | DX_DISPATCH, DX_READ or DX_ADMIN | Reports & Dispatch tabs; rows carry visit no., patient, release no., `reason_text`, `dues_paise` when held |
+| POST | `/deliveries/{id}/resend` | DX_DISPATCH | re-runs the decision; queued → sent in the background; 409 `dx_delivery_already_sent`, 409 `dx_delivery_in_pipeline` (the pipeline's retry queue owns it) |
+| GET | `/prints?date` | DX_DISPATCH, DX_READ or DX_ADMIN | desk print log (Printed tab) |
+| POST | `/visits/{id}/delivery-overrides` | DX_ADMIN (clinic_admin holds it) | `{reason 10..300, expires_at?}` (default 7 days, max 31); rule 7 only; re-evaluates and sends |
 | — | `/admin/lab-reports/{id}/resend`, held-report resolve with `new_phone` (existing) | — | refuse rows with `source='dx'` → 409 "use Reports & Dispatch" (AUDIT A20) |
-| POST | `/releases/{id}/print` | DX_DISPATCH | logs copies/purpose |
-| POST / DELETE | `/releases/{id}/share-link` | DX_DISPATCH | token shown once |
-| GET / PATCH | `/delivery-owner` | DX_ADMIN | per branch `connector|shadow|dx`; `dx` refused with active connector |
-| GET | `/public/dx/verify/{code}` | public, rate-limited | minimal fields (SECURITY §6) |
-| GET / POST | `/public/dx/r/{token}`, `/public/dx/r/{token}/unlock` | public, rate-limited | last-4 phone check, attempts, expiry |
+| PATCH | `/settings` (P1) | DX_ADMIN | `delivery_owner` per branch `connector|shadow|dx` (no separate `/delivery-owner` route) |
+| GET | `/public/dx/verify/{code}` | public, 30/min/IP | lab, released at, release no., tests, current / superseded, SHA-256, initials + age/sex (SECURITY §6) |
+| GET / POST | `/public/dx/r/{token}`, `/public/dx/r/{token}/unlock` | public, 10/min/IP | HTML prompt; unlock `{phone_last4}` (JSON or form): 5 attempts consumed before the compare, decision re-checked, PDF `no-store` |
+Not built in P7: `templates/clone-from-pdf`, `DELETE /releases/{id}/share-link` (links expire), `GET /releases/{id}/deliveries` (the visit's releases carry them).
 
 ## P8 — B2B
 | Method | Path | Permission | Notes |

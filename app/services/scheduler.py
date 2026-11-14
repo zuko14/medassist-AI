@@ -238,6 +238,17 @@ class SchedulerService:
             coalesce=True,
         )
 
+        # DX-45: payments / bill status changes re-decide held report deliveries (dx_outbox)
+        self.scheduler.add_job(
+            self.dx_outbox_dispatch,
+            "interval",
+            minutes=1,
+            id="dx_outbox_dispatch",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         self.scheduler.add_job(
             self.assign_home_collections,
             "interval",
@@ -601,6 +612,19 @@ class SchedulerService:
                         logger.info(f"DX TAT scan: {n} test(s) past target")
                 except Exception as e:
                     logger.error(f"DX TAT scan failed: {type(e).__name__}")
+
+    async def dx_outbox_dispatch(self):
+        from app.services import dx_reports
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("dx_outbox_dispatch", lease_seconds=55) as acquired:
+            if acquired:
+                try:
+                    n = await dx_reports.outbox_dispatch()
+                    if n:
+                        logger.info(f"DX outbox: {n} visit(s) re-evaluated")
+                except Exception as e:
+                    logger.error(f"DX outbox dispatch failed: {type(e).__name__}")
 
     async def assign_home_collections(self):
         from app.services import home_collection

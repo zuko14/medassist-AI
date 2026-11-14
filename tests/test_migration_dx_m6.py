@@ -27,6 +27,8 @@ SIGNER = {"name": "Dr. Rao", "registration_number": "R/1", "registration_council
 def unwind_130(cur) -> None:
     """Inside an open transaction: purge every clinic with DX-M6 rows, run the 130
     rollback. Called first by unwind_129 (newest first)."""
+    from tests.test_migration_dx_m7 import unwind_131
+    unwind_131(cur)   # newest first: 131's releases reference 130-era results
     cur.execute("SELECT to_regclass('public.dx_result_value_meta') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

@@ -320,3 +320,56 @@ def test_tat_breach_scan(bench, caplog):
     with caplog.at_level("WARNING"):
         n = asyncio.run(dx.tat_breach_scan())
     assert n >= 1 and any(f"order={_order(v, 'CBC')}" in r.message for r in caplog.records)
+
+
+# ── P6b: OPD / IPD lab orders on the DX bench (W15, DX-41) ──────────────────
+
+def _opd_order(w, test="cbc"):
+    """A consultation's CBC order placed through the unchanged G1 function."""
+    c, clinic = w["c"], w["clinic"]
+    appt = str(_q(c, """INSERT INTO appointments (clinic_id, patient_id, patient_phone, patient_name, doctor_id,
+                        doctor_name, department, appointment_date, appointment_time, status, is_walk_in, booking_type)
+                        VALUES (%s, %s, '+919000000009', 'Asha', %s, 'Dr. Rao', 'Lab', CURRENT_DATE, %s, 'completed',
+                                false, 'consultation') RETURNING id""",
+                  clinic, w["patient"], w["doctor"], f"{8 + uuid.uuid4().int % 10:02d}:{uuid.uuid4().int % 60:02d}:00"))
+    enc = str(_q(c, "INSERT INTO opd_encounters (clinic_id, appointment_id, patient_id, doctor_id) VALUES "
+                    "(%s, %s, %s, %s) RETURNING id", clinic, appt, w["patient"], w["doctor"]))
+    import json
+    placed = _q(c, "SELECT opd_place_orders(%s, %s, %s::jsonb, %s, NULL, 'drrao')", clinic, enc,
+                json.dumps([{"order_type": "investigation", "catalog_type": "lab_test",
+                             "catalog_reference_id": w["T"][test]}]), uuid.uuid4().hex)
+    return placed["orders"][0]["id"]
+
+
+def test_opd_order_adopted_onto_the_dx_bench(bench):
+    c, conn = bench["clinic"], bench["c"]
+    order = _opd_order(bench)
+    bills_before = _q(conn, "SELECT count(*) FROM opd_invoice_items WHERE order_id = %s", order)
+    assert _as(bench, "tech").call("POST", "/admin/dx/orders/adopt", c, {"order_ids": [order]}).status_code == 403
+    bad = _as(bench, "desk").call("POST", "/admin/dx/orders/adopt", c, {"order_ids": ["not-a-uuid"]})
+    assert bad.status_code == 422
+    r = _as(bench, "desk").call("POST", "/admin/dx/orders/adopt", c, {"order_ids": [order]})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    v = out["visits"][0]
+    assert out["adopted"] == 1 and v["visit"]["billing_mode"] == "internal" and v["visit"]["source"] == "opd"
+    assert [o["id"] for o in v["orders"]] == [order] and len(v["samples"]) == 1
+    # trackable on the DX worklist, grouped into a tube, worked and signed on the DX bench
+    st, _ = _stages(bench, v)
+    assert st["CBC"]["stage"] == "pending_collection"
+    _collect_receive(bench, v)
+    saved = _save(bench, order, {"CBC": "14"})
+    assert saved.status_code == 200, saved.text
+    res = saved.json()
+    signed = _approve(bench, [res])
+    assert signed.status_code == 200 and signed.json()["signed"] == 1, signed.text
+    o = _q(conn, "SELECT to_jsonb(o) FROM opd_orders o WHERE id = %s", order)
+    assert o["source"] == "opd" and o["encounter_id"] and o["accession_id"] == v["visit"]["id"]
+    assert _q(conn, "SELECT status FROM lab_results WHERE order_id = %s", order) == "validated"   # the OPD record's result
+    assert _q(conn, "SELECT count(*) FROM opd_invoice_items WHERE order_id = %s", order) == bills_before
+    assert _q(conn, "SELECT count(*) FROM opd_invoices WHERE accession_id = %s", v["visit"]["id"]) == 0
+    # adopting again is a no-op; the internal visit cannot be cancelled or added to from DX
+    again = _as(bench, "desk").call("POST", "/admin/dx/orders/adopt", c, {"order_ids": [order]})
+    assert again.status_code == 200 and again.json()["adopted"] == 0 and again.json()["skipped"] == [order]
+    cancel = _as(bench, "desk").call("POST", f"/admin/dx/visits/{v['visit']['id']}/cancel", c, {"reason": "not needed"})
+    assert cancel.status_code == 409 and cancel.json()["detail"]["code"] in ("dx_internal_visit", "dx_visit_has_samples")

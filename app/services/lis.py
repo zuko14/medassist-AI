@@ -388,7 +388,7 @@ async def validate_and_sign_report(clinic_id: str, result_id: str, expected_upda
         "p_patient_snapshot": patient_snapshot,
     })
     # a DX report is delivered through its release (P7), never per test (AUDIT F4)
-    if not signed.get("replayed") and order.get("source") != "dx":
+    if not signed.get("replayed") and order.get("source") != "dx" and not order.get("accession_id"):
         spawn_background_task(deliver_report(clinic_id, result_id), name=f"lis_deliver_{result_id}")
     return signed
 
@@ -455,9 +455,10 @@ async def get_review_queue(clinic_id: str, branch_id: Optional[str] = None, stat
     rows = await fetch_all(build, label="lis:queue")
     # DX results are verified and approved on the DX bench, never here (AUDIT A5)
     order_rows = {o["id"]: o for o in await orders._rows_in("opd_orders", clinic_id,
-                                                            "id, urgency, specimen_barcode, source", "id",
-                                                            [r["order_id"] for r in rows])}
-    rows = [r for r in rows if order_rows.get(r["order_id"], {}).get("source") != "dx"]
+                                                            "id, urgency, specimen_barcode, source, accession_id",
+                                                            "id", [r["order_id"] for r in rows])}
+    rows = [r for r in rows if order_rows.get(r["order_id"], {}).get("source") != "dx"
+            and not order_rows.get(r["order_id"], {}).get("accession_id")]
     if status == "entered":
         rows.sort(key=lambda r: (not r["has_critical_value"], r.get("entered_at") or "", r["id"]))
     else:

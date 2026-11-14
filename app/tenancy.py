@@ -115,6 +115,9 @@ TENANT_OWNED_TABLES = frozenset({
     "dx_outsource_partners", "dx_routing_rules", "dx_batches", "dx_batch_samples",
     # Migration 130: Diagnostic OS result workflow (value meta, verifications, critical events, attachments)
     "dx_result_value_meta", "dx_result_verifications", "dx_critical_events", "dx_result_attachments",
+    # Migration 131: Diagnostic OS reports (templates, releases, deliveries, overrides, outbox, print log, share links)
+    "dx_report_templates", "dx_report_releases", "dx_release_results", "dx_release_deliveries",
+    "dx_delivery_overrides", "dx_outbox", "dx_print_log", "dx_share_links",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

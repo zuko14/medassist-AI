@@ -7,6 +7,7 @@ Every route: permission -> enforce_clinic_access -> dx_access(clinic) ->
 
 from datetime import datetime, timezone
 from typing import Literal, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -1600,11 +1601,16 @@ async def _dx_order(user: AdminUser, scope: str, order_id: str) -> dict:
     """A DX order inside the caller's site scope (404 / 409 otherwise)."""
     from app.services import orders as orders_svc
     order = await orders_svc.get_order(scope, order_id)
-    if order.get("source") != "dx" or not order.get("accession_id"):
+    if not order.get("accession_id"):            # source 'dx', or an adopted OPD / IPD order (P6b)
         raise HTTPException(status_code=409, detail={"code": "dx_not_dx_order",
                                                      "message": "This is not a Diagnostic OS order."})
     await _visit(user, scope, order["accession_id"])
     return order
+
+
+async def orders_svc_get(scope: str, order_id: str) -> dict:
+    from app.services import orders as orders_svc
+    return await orders_svc.get_order(scope, order_id)
 
 
 async def _dx_result(user: AdminUser, scope: str, result_id: str) -> dict:
@@ -1706,7 +1712,7 @@ async def bench_result(result_id: str, clinic_id: str = "default", user: AdminUs
 async def bench_approve(body: ApproveIn, request: Request, clinic_id: str = "default",
                         user: AdminUser = Depends(verify_credentials)):
     """Approve & sign: one result or a batch of normal ones (W9). Human, doctor-linked only."""
-    scope, _ = await _dx_scope(user, clinic_id)
+    scope, clinic = await _dx_scope(user, clinic_id)
     _lab_perm(user, "LAB_VALIDATE")
     for it in body.items:
         await _dx_result(user, scope, it.result_id)
@@ -1714,6 +1720,14 @@ async def bench_approve(body: ApproveIn, request: Request, clinic_id: str = "def
     await _audit(user, request, "dx_results_approve", "lab_result", None,
                  {"batch": body.batch, "signed": out["signed"], "refused": out["refused"],
                   "items": [{"result_id": i["result_id"], "ok": i["ok"], "code": i.get("code")} for i in out["items"]]})
+    signed = [i["result_id"] for i in out["items"] if i["ok"] and not i.get("replayed")]
+    if signed:      # W10 step 1: auto release per settings.auto_release (never while the connector delivers)
+        from app.services import dx_reports, lis
+        visits = [(await orders_svc_get(scope, (await lis.get_result(scope, rid))["order_id"])).get("accession_id")
+                  for rid in signed]
+        rels = await dx_reports.auto_release(scope, clinic, [v for v in visits if v], user)
+        out["releases"] = [{"id": r["id"], "accession_id": r["accession_id"], "release_no": r["release_no"],
+                            "kind": r["kind"]} for r in rels]
     return out
 
 
@@ -1771,3 +1785,360 @@ async def bench_attachment(result_id: str, attachment_id: str, clinic_id: str = 
                                                                                  "application/octet-stream")
     return Response(data, media_type=media, headers={"Content-Disposition": f'inline; filename="{row["sha256"][:12]}"',
                                                      "Cache-Control": "no-store"})
+
+
+# ── P6b: OPD / IPD lab orders on the DX bench (W15, DX-41) ─────────────────
+
+class AdoptIn(_In):
+    order_ids: list[UUID] = Field(..., min_length=1, max_length=100)
+
+
+@router.post("/orders/adopt")
+async def adopt_orders(body: AdoptIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    """Move uncollected OPD / IPD lab orders onto the DX bench as internal visits (bills untouched)."""
+    from app.services import orders as orders_svc
+    scope, _ = await _dx_scope(user, clinic_id, "DX_REGISTER", "DX_COLLECT", new_work=True)
+    ids = list(dict.fromkeys(str(x) for x in body.order_ids))
+    for oid in ids:
+        enforce_branch_scope(user, (await orders_svc.get_order(scope, oid)).get("branch_id"))
+    out = await dx.adopt_orders(scope, ids, user)
+    await _audit(user, request, "dx_orders_adopt", "dx_accession", None,
+                 {"orders": ids, "visits": [v["visit"]["id"] for v in out["visits"]],
+                  "adopted": out["adopted"]})
+    return out
+
+
+
+# ── P7: report templates (DX-44) ────────────────────────────────────────────
+
+TEMPLATE_READ = ("DX_ADMIN", "DX_DISPATCH")
+OwnerKind = Literal["clinic", "branch", "b2b_account"]
+
+
+class TemplateIn(_In):
+    owner_kind: OwnerKind = "clinic"
+    owner_id: Optional[UUID] = None
+    name: str = Field(..., min_length=2, max_length=80)
+    starter: Literal["classic_band", "minimal", "hospital_white_label"] = "classic_band"
+    layout: dict = Field(default_factory=dict)
+
+
+class TemplatePatch(_In):
+    layout: dict
+
+
+class PreviewIn(_In):
+    layout: Optional[dict] = None
+
+
+def _template_reach(user: AdminUser, owner_kind: str, owner_id: Optional[str], write: bool) -> None:
+    """A branch-pinned admin manages its own branch's templates; reads the clinic default too."""
+    pinned = _pinned_branch(user)
+    if not pinned:
+        return
+    if owner_kind == "branch" and str(owner_id) == pinned:
+        return
+    if not write and owner_kind == "clinic":
+        return
+    raise HTTPException(status_code=404 if not write else 403, detail="Template not found." if not write else
+                        "A branch administrator manages only their own branch's templates.")
+
+
+async def _letterhead(scope: str, clinic: dict, user: AdminUser, white_label: bool) -> dict:
+    sites = await dx.list_sites(scope, _pinned_branch(user))
+    site = sites[0] if sites else {}
+    return {"clinic": {"name": clinic.get("name"), "address": clinic.get("address"), "phone": clinic.get("phone")},
+            "site": {k: site.get(k) for k in ("display_name", "legal_name", "registration_no", "nabl_certificate_no")},
+            "white_label": white_label}
+
+
+@router.get("/templates")
+async def list_templates(clinic_id: str = "default", owner_kind: Optional[OwnerKind] = None,
+                         user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_templates
+    scope, _ = await _dx_scope(user, clinic_id, *TEMPLATE_READ)
+    return {"templates": await dx_templates.list_templates(scope, owner_kind, _pinned_branch(user)),
+            "starters": list(dx_templates.STARTERS)}
+
+
+@router.post("/templates", status_code=status.HTTP_201_CREATED)
+async def create_template(body: TemplateIn, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_templates
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN", new_work=True)
+    owner = str(body.owner_id) if body.owner_id else None
+    _template_reach(user, body.owner_kind, owner, write=True)
+    out = await dx_templates.create_template(scope, {**body.model_dump(), "owner_id": owner}, dx._actor(user)[0])
+    await _audit(user, request, "dx_template_create", "dx_report_template", out["id"],
+                 {"owner_kind": body.owner_kind, "owner_id": owner, "name": out["name"], "version": out["version"]})
+    return out
+
+
+async def _template(user: AdminUser, scope: str, template_id: str, write: bool) -> dict:
+    from app.services import dx_templates
+    t = await dx_templates.get_template(scope, template_id)
+    _template_reach(user, t["owner_kind"], t.get("owner_id"), write)
+    return t
+
+
+@router.get("/templates/{template_id}")
+async def get_template(template_id: UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *TEMPLATE_READ)
+    return await _template(user, scope, str(template_id), write=False)
+
+
+@router.put("/templates/{template_id}")
+async def update_template(template_id: UUID, body: TemplatePatch, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_templates
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN", new_work=True)
+    await _template(user, scope, str(template_id), write=True)
+    out = await dx_templates.update_draft(scope, str(template_id), body.layout)
+    await _audit(user, request, "dx_template_update", "dx_report_template", str(template_id), {})
+    return out
+
+
+@router.post("/templates/{template_id}/publish")
+async def publish_template(template_id: UUID, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_templates
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN", new_work=True)
+    await _template(user, scope, str(template_id), write=True)
+    out = await dx_templates.publish(scope, str(template_id), dx._actor(user)[0])
+    await _audit(user, request, "dx_template_publish", "dx_report_template", str(template_id),
+                 {"name": out["name"], "version": out["version"]})
+    return out
+
+
+@router.post("/templates/{template_id}/retire")
+async def retire_template(template_id: UUID, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_templates
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN")
+    await _template(user, scope, str(template_id), write=True)
+    out = await dx_templates.retire(scope, str(template_id))
+    await _audit(user, request, "dx_template_retire", "dx_report_template", str(template_id), {})
+    return out
+
+
+@router.post("/templates/{template_id}/preview")
+async def preview_template(template_id: UUID, body: Optional[PreviewIn] = None, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    """"Test with Sample Visit": the sample HbA1c + lipid visit rendered with this (or the edited) layout."""
+    from fastapi.responses import Response
+    from app.services import dx_templates
+    scope, clinic = await _dx_scope(user, clinic_id, *TEMPLATE_READ)
+    t = await _template(user, scope, str(template_id), write=False)
+    layout = (body.layout if body and body.layout is not None else t["layout"])
+    pdf = await dx_templates.preview(scope, layout, await _letterhead(scope, clinic, user,
+                                                                      t["owner_kind"] == "b2b_account"))
+    return Response(pdf, media_type="application/pdf", headers={"Cache-Control": "no-store",
+                                                                "Content-Disposition": 'inline; filename="preview.pdf"'})
+
+
+@router.post("/templates/assets", status_code=status.HTTP_201_CREATED)
+async def upload_template_asset(request: Request, file: UploadFile = File(...), clinic_id: str = "default",
+                                user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_templates
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN", new_work=True)
+    out = await dx_templates.store_asset(scope, await file.read(dx_templates.ASSET_MAX_BYTES + 1))
+    await _audit(user, request, "dx_template_asset", "dx_report_template", None, {"path": out["path"]})
+    return out
+
+
+# ── P7: releases, deliveries, overrides, print, share links (DX-45) ─────────
+
+DISPATCH = ("DX_DISPATCH",)
+DISPATCH_READ = ("DX_DISPATCH", "DX_READ", "DX_ADMIN")
+DeliveryStatus = r"^(pending|held_dues|held_shadow|blocked|queued|sending|sent|failed|deferred)(,(pending|held_dues|" \
+                 r"held_shadow|blocked|queued|sending|sent|failed|deferred))*$"
+
+
+class ReleaseIn(_In):
+    result_ids: Optional[list[UUID]] = Field(None, min_length=1, max_length=100)
+    kind: Optional[Literal["partial", "final", "amended"]] = None
+
+
+class OverrideIn(_In):
+    reason: str = Field(..., min_length=10, max_length=300)
+    expires_at: Optional[datetime] = None
+
+
+async def _release(user: AdminUser, scope: str, release_id: str) -> dict:
+    from app.services import dx_reports
+    rel = await dx_reports.get_release(scope, release_id)
+    await _visit(user, scope, rel["accession_id"])          # site scope
+    return rel
+
+
+@router.get("/visits/{accession_id}/releases")
+async def visit_releases(accession_id: UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_reports
+    scope, _ = await _dx_scope(user, clinic_id, *DISPATCH_READ)
+    await _visit(user, scope, str(accession_id))
+    return {"releases": await dx_reports.list_releases(scope, str(accession_id)),
+            "dues_paise": await dx_reports.visit_dues_paise(scope, str(accession_id))}
+
+
+@router.post("/visits/{accession_id}/releases", status_code=status.HTTP_201_CREATED)
+async def create_release(accession_id: UUID, request: Request, body: Optional[ReleaseIn] = None,
+                         clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """Release now (W10): signed results into a visit report; render, store and send per policy."""
+    from app.services import dx_reports
+    scope, _ = await _dx_scope(user, clinic_id, *DISPATCH)
+    await _visit(user, scope, str(accession_id))
+    body = body or ReleaseIn()
+    out = await dx_reports.create_release(scope, str(accession_id),
+                                          [str(x) for x in body.result_ids] if body.result_ids else None, body.kind, user)
+    await _audit(user, request, "dx_release_create", "dx_report_release", out["id"],
+                 {"accession_id": str(accession_id), "release_no": out["release_no"], "kind": out["kind"],
+                  "deliveries": [{"target": d["target"], "status": d["status"], "reason": d["reason"]}
+                                 for d in out["deliveries"]]})
+    return out
+
+
+@router.post("/releases/{release_id}/render")
+async def rerender_release(release_id: UUID, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    """Retry a failed render (the release content is fixed; same input, same PDF)."""
+    from app.services import dx_reports
+    from app.utils.async_tasks import spawn_background_task
+    scope, _ = await _dx_scope(user, clinic_id, *DISPATCH)
+    rel = await _release(user, scope, str(release_id))
+    if rel["status"] != "render_failed":
+        raise HTTPException(status_code=409, detail="Only a failed render can be retried.")
+    spawn_background_task(dx_reports.finish_release(scope, rel["id"]), name=f"dx_release_{rel['id']}")
+    await _audit(user, request, "dx_release_rerender", "dx_report_release", rel["id"], {})
+    return {"status": "rendering"}
+
+
+@router.get("/releases/{release_id}/pdf")
+async def release_pdf(release_id: UUID, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    """Staff clinical viewing (audit-logged; "INTERNAL VIEW" when a patient copy would be refused)."""
+    from fastapi.responses import Response
+    from app.services import dx_reports
+    scope, clinic = await _dx_scope(user, clinic_id, *DISPATCH_READ, "DX_VERIFY")
+    rel = await _release(user, scope, str(release_id))
+    pdf, mark = await dx_reports.staff_pdf(scope, clinic, rel)
+    await _audit(user, request, "dx_release_view", "dx_report_release", rel["id"], {"watermark": mark})
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store", "Content-Disposition": f'inline; filename="R{rel["release_no"]}.pdf"'})
+
+
+@router.post("/releases/{release_id}/print")
+async def print_release(release_id: UUID, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    """Desk print for the patient: refused (409 held_dues) while dues exist unless an override."""
+    from fastapi.responses import Response
+    from app.services import dx_reports
+    scope, _ = await _dx_scope(user, clinic_id, *DISPATCH)
+    rel = await _release(user, scope, str(release_id))
+    pdf, out = await dx_reports.print_release(scope, rel, user)
+    await _audit(user, request, "dx_release_print", "dx_report_release", rel["id"],
+                 {"print_id": out.get("print_id"), "override_id": out.get("override_id"),
+                  "watermark": out.get("watermark")})
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store", "Content-Disposition": f'inline; filename="R{rel["release_no"]}.pdf"'})
+
+
+@router.post("/releases/{release_id}/share-link", status_code=status.HTTP_201_CREATED)
+async def share_release(release_id: UUID, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_reports
+    scope, clinic = await _dx_scope(user, clinic_id, *DISPATCH)
+    rel = await _release(user, scope, str(release_id))
+    out = await dx_reports.create_share_link(scope, clinic, rel, user)
+    await _audit(user, request, "dx_share_link_create", "dx_report_release", rel["id"],
+                 {"link_id": out["id"], "expires_at": out["expires_at"]})
+    return out
+
+
+@router.get("/deliveries")
+async def list_deliveries(clinic_id: str = "default", status_: Optional[str] = Query(None, alias="status",
+                                                                                     pattern=DeliveryStatus),
+                          target: Optional[Literal["patient", "referrer", "account"]] = None,
+                          date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+                          user: AdminUser = Depends(verify_credentials)):
+    """Reports & Dispatch tabs. Rows carry the visit number, patient and, when held for dues, the amount."""
+    from app.services import dx_reports
+    from app.utils.helpers import IST
+    scope, _ = await _dx_scope(user, clinic_id, *DISPATCH_READ)
+    since = None
+    if date:
+        since = datetime.fromisoformat(date).replace(tzinfo=IST).astimezone(timezone.utc).isoformat()
+    visits = None
+    if _pinned_branch(user):
+        visits = [v["id"] for v in await dx.list_visits(scope, _pinned_branch(user), None, None, None, 500)]
+    rows = await dx_reports.list_deliveries(scope, status_, target, since, visits)
+    vids = list({r["accession_id"] for r in rows})
+    info = {v["id"]: v for v in await dx_reports._in("dx_accessions", scope, "id, accession_number, patient_snapshot, "
+                                                     "billing_mode", "id", vids)}
+    rels = {r["id"]: r for r in await dx_reports._in("dx_report_releases", scope, "id, release_no, kind, status",
+                                                     "id", [r["release_id"] for r in rows])}
+    dues = {vid: await dx_reports.visit_dues_paise(scope, vid)
+            for vid in {r["accession_id"] for r in rows if r["status"] == "held_dues"}}
+    for r in rows:
+        v = info.get(r["accession_id"], {})
+        r["accession_number"] = v.get("accession_number")
+        r["patient_name"] = (v.get("patient_snapshot") or {}).get("name")
+        r["release_no"] = (rels.get(r["release_id"]) or {}).get("release_no")
+        r["release_status"] = (rels.get(r["release_id"]) or {}).get("status")
+        r["reason_text"] = dx_reports.HELD_TEXT.get(r.get("reason") or "", r.get("reason"))
+        if r["status"] == "held_dues":
+            r["dues_paise"] = dues.get(r["accession_id"], 0)
+    return {"deliveries": rows}
+
+
+@router.get("/prints")
+async def list_prints(clinic_id: str = "default", date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+                      user: AdminUser = Depends(verify_credentials)):
+    """The desk print log (Reports & Dispatch, Printed tab)."""
+    from app.services import dx_reports
+    from app.utils.helpers import IST
+    scope, _ = await _dx_scope(user, clinic_id, *DISPATCH_READ)
+    q = scoped_query("dx_print_log", scope, "id, release_id, accession_id, printed_by_name, watermark, override_id, "
+                                            "created_at")
+    if date:
+        q = q.gte("created_at", datetime.fromisoformat(date).replace(tzinfo=IST).astimezone(timezone.utc).isoformat())
+    if _pinned_branch(user):
+        q = q.in_("accession_id", [v["id"] for v in await dx.list_visits(scope, _pinned_branch(user), None, None, None,
+                                                                         500)] or [str(UUID(int=0))])
+    rows = (await sb(q.order("created_at", desc=True).limit(200))).data or []
+    info = {v["id"]: v for v in await dx_reports._in("dx_accessions", scope, "id, accession_number, patient_snapshot",
+                                                     "id", [r["accession_id"] for r in rows])}
+    rels = {r["id"]: r for r in await dx_reports._in("dx_report_releases", scope, "id, release_no", "id",
+                                                     [r["release_id"] for r in rows])}
+    for r in rows:
+        r["accession_number"] = info.get(r["accession_id"], {}).get("accession_number")
+        r["patient_name"] = (info.get(r["accession_id"], {}).get("patient_snapshot") or {}).get("name")
+        r["release_no"] = rels.get(r["release_id"], {}).get("release_no")
+    return {"prints": rows}
+
+
+@router.post("/deliveries/{delivery_id}/resend")
+async def resend_delivery(delivery_id: UUID, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_reports
+    scope, _ = await _dx_scope(user, clinic_id, *DISPATCH)
+    d = await dx_reports.get_delivery(scope, str(delivery_id))
+    await _visit(user, scope, d["accession_id"])
+    out = await dx_reports.resend(scope, str(delivery_id))
+    await _audit(user, request, "dx_delivery_resend", "dx_release_delivery", str(delivery_id),
+                 {"target": d["target"], "status": out["status"], "reason": out.get("reason")})
+    return out
+
+
+@router.post("/visits/{accession_id}/delivery-overrides", status_code=status.HTTP_201_CREATED)
+async def create_delivery_override(accession_id: UUID, body: OverrideIn, request: Request, clinic_id: str = "default",
+                                   user: AdminUser = Depends(verify_credentials)):
+    """DELIVERY-POLICY §6: DX_ADMIN / clinic admin only, reason >= 10 characters, rule 7 only."""
+    from app.services import dx_reports
+    scope, _ = await _dx_scope(user, clinic_id, "DX_ADMIN")
+    await _visit(user, scope, str(accession_id))
+    out = await dx_reports.create_override(scope, str(accession_id), body.reason.strip(), user,
+                                           body.expires_at.isoformat() if body.expires_at else None)
+    await _audit(user, request, "dx_delivery_override", "dx_accession", str(accession_id),
+                 {"override_id": out["id"], "reason": out["reason"], "expires_at": out["expires_at"]})
+    return out
