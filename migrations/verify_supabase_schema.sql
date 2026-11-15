@@ -853,6 +853,57 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 26. MIGRATION 132 — Diagnostic OS B2B money (DX-M8)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_idx int;
+    v_trg int;
+    v_funcs int;
+    v_cols int;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_rate_cards', 'dx_rate_card_items', 'dx_b2b_ledger', 'dx_b2b_statements', 'dx_barcode_stock')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M132', 'Tables: dx rate cards, rate card items, B2B ledger, statements, barcode stock (RLS forced)',
+            CASE WHEN v_tables = 5 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 5 present with RLS forced');
+
+    SELECT count(*) INTO v_idx FROM pg_indexes
+     WHERE indexname IN ('uq_dx_ledger_charge', 'uq_dx_ledger_idem', 'uq_dx_b2b_statement_period');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M132', 'Indexes: one charge per item, ledger idempotency, one live statement per period',
+            CASE WHEN v_idx = 3 THEN 'PASS' ELSE 'FAIL' END, v_idx || ' of 3 present');
+
+    SELECT count(*) INTO v_trg FROM pg_trigger
+     WHERE tgname IN ('trg_dx_b2b_ledger_guard', 'trg_dx_b2b_statements_guard', 'trg_dx_barcode_stock_guard');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M132', 'Triggers: append-only ledger, immutable statements, non-overlapping barcode stock',
+            CASE WHEN v_trg = 3 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 3 present');
+
+    SELECT count(*) INTO v_funcs FROM unnest(ARRAY['dx_b2b_balance(uuid,uuid)', 'dx_b2b_ageing(uuid)',
+        'dx_b2b_post_charge(uuid,uuid,uuid,uuid,bigint,uuid,text)', 'dx_b2b_reverse_charge(uuid,uuid,text,uuid,text)',
+        'dx_b2b_record_payment(uuid,uuid,bigint,text,text,text,uuid,text)',
+        'dx_b2b_issue_statement(uuid,uuid,date,date,uuid,text)', 'dx_b2b_void_statement(uuid,uuid,text,uuid,text)',
+        'dx_b2b_set_hold(uuid,uuid,text,text,text,uuid,text)', 'dx_b2b_evaluate_holds(uuid)',
+        'dx_check_barcode_stock(uuid,uuid,uuid,text)']) f
+     WHERE to_regprocedure(f) IS NOT NULL;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M132', 'Functions: balance, ageing, charge, reversal, payment, statement issue / void, holds, stock check',
+            CASE WHEN v_funcs = 10 THEN 'PASS' ELSE 'FAIL' END, v_funcs || ' of 10 present');
+
+    SELECT count(*) INTO v_cols FROM information_schema.columns
+     WHERE (table_name = 'dx_b2b_accounts' AND column_name IN ('rate_card_id', 'credit_limit_paise', 'credit_days',
+                                                              'gstin', 'billing_address', 'statement_cycle', 'auto_hold',
+                                                              'hold_kind', 'copay_mode', 'copay_value'))
+        OR (table_name = 'clinic_admins' AND column_name = 'dx_b2b_account_id');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M132', 'Columns: B2B account money terms (10) + clinic_admins.dx_b2b_account_id',
+            CASE WHEN v_cols = 11 THEN 'PASS' ELSE 'FAIL' END, v_cols || ' of 11 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

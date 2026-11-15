@@ -75,6 +75,9 @@ PAGES: dict[str, str] = {
     "dxapprove": "Result Approval",   # Diagnostic OS sign-off (migration 130); page hand-off only
     "dxreports": "Reports & Dispatch",   # Diagnostic OS releases / delivery (migration 131); page hand-off only
     "dxtemplates": "Report Templates",   # Diagnostic OS report letterheads (migration 131); page hand-off only
+    "dxb2b": "B2B Accounts",   # Diagnostic OS B2B money (migration 132); page hand-off only
+    "dxreferrers": "Referrers",   # Diagnostic OS referral volume, counts only (migration 132); page hand-off only
+    "dxpartner": "Partner Portal",   # B2B partner logins only (migration 132); Ketu is off for partners
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
     "casualty": "Casualty / ER",
@@ -131,6 +134,9 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "dxapprove": ("result approval", "approve results", "batch approval", "critical call", "sign results"),
     "dxreports": ("reports and dispatch", "release report", "held reports", "unpaid dues report", "resend report"),
     "dxtemplates": ("report templates", "report letterhead", "white label report", "lab report layout"),
+    "dxb2b": ("b2b accounts", "hospital accounts", "b2b ledger", "b2b statement", "receivables ageing", "rate card"),
+    "dxreferrers": ("referrers", "referring doctors", "referral volume"),
+    "dxpartner": ("partner portal", "new requisition"),
     "dxcatalog": ("test master", "lab test master", "reference ranges", "test parameters", "lab catalogue"),
     "lisqueue": ("lab sign-off", "sign lab report", "pathologist queue", "pending validation", "validate results"),
     "radiology": ("radiology", "imaging", "x-ray reports", "scan reports", "radiology worklist", "form f",

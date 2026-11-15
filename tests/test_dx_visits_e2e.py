@@ -136,7 +136,7 @@ def test_errors_are_mapped_with_the_test_name(dxw):
     assert r.status_code == 201                                       # an administrator may discount further
     assert visit(dxw, ["lipid"], user="nobody").status_code == 403
     r = visit(dxw, ["lipid"], billing_mode="b2b_credit")
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "dx_b2b_not_enabled"
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "dx_b2b_account_required"
 
 
 def test_technician_sees_no_money_and_cancel_rules(dxw):

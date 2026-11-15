@@ -33,7 +33,7 @@ def _group(name: str) -> str:
 
 
 def _pages(block: str) -> list:
-    return re.findall(r'<div class="nav-link[^"]*"[^>]*data-page="([a-z]+)"', block)
+    return re.findall(r'<div class="nav-link[^"]*"[^>]*data-page="([a-z0-9]+)"', block)   # dxb2b has a digit
 
 
 # ── sidebar groups ───────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ def test_groups_hold_the_expected_pages_in_order():
     assert _pages(_group("ipd").split('<div class="nav-group" data-nav-group="dx"')[0]) == [
         "ipdboard", "ipdadmit", "ipdchart", "ot", "ipdfinance", "insurance", "ipdsetup"]
     dx = _group("dx")
-    assert _pages(dx[:dx.index('data-page="leads"')]) == ["dxworklist", "lisqueue", "radiology", "dxsetup", "dxcatalog", "dxdesk", "dxcollect", "dxlogistics", "dxbench", "dxapprove", "dxreports", "dxtemplates"]
+    assert _pages(dx[:dx.index('data-page="leads"')]) == ["dxworklist", "lisqueue", "radiology", "dxsetup", "dxcatalog", "dxdesk", "dxcollect", "dxlogistics", "dxbench", "dxapprove", "dxreports", "dxtemplates", "dxb2b", "dxreferrers", "dxpartner"]
 
 
 def test_no_sidebar_page_was_lost_or_duplicated():

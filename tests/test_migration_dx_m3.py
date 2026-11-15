@@ -167,9 +167,9 @@ def test_refusals(lab):
     assert _register(s, [{"lab_test_id": s["T"]["lipid"], "discount_paise": 5500}])["items"][0]["patient_share_paise"] == 49500
     acc = str(_q(c, "INSERT INTO dx_b2b_accounts (clinic_id, name, kind) VALUES (%s, 'City Hospital', 'hospital') "
                     "RETURNING id", s["clinic"]))
-    with pytest.raises(psycopg2.Error) as e:
-        _register(s, ["lipid"], b2b_account_id=acc, billing_mode="b2b_credit")
-    assert "dx_b2b_not_enabled" in str(e.value)
+    with pytest.raises(psycopg2.Error) as e:          # B2B billing needs an account (DX-M8 prices it)
+        _register(s, ["lipid"], billing_mode="b2b_credit")
+    assert "dx_b2b_account_required" in str(e.value)
     _q(c, "UPDATE dx_b2b_accounts SET status = 'on_hold' WHERE id = %s", acc)
     with pytest.raises(psycopg2.Error) as e:
         _register(s, ["lipid"], b2b_account_id=acc)

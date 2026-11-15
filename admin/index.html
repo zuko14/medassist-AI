@@ -3462,6 +3462,45 @@
             .dxr-viewer .modal { height: 92vh; padding: 12px; }
         }
         /* DX:reports:END */
+        /* DX:b2b:START — B2B accounts, ledger, statements, rate cards, stock, referrers, partner portal (migration 132) */
+        .dxm-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .dxm-table th, .dxm-table td { text-align: left; padding: 8px 10px; border-top: 1px solid var(--border); vertical-align: middle; }
+        .dxm-table th { font-size: 0.76rem; text-transform: uppercase; letter-spacing: .03em; color: var(--text2); border-top: 0; }
+        .dxm-table td { white-space: normal; overflow-wrap: anywhere; }
+        .dxm-table td.nw { white-space: nowrap; overflow-wrap: normal; }
+        .dxm-table td.num, .dxm-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .dxm-table tr.dxm-click { cursor: pointer; }
+        .dxm-table tr.dxm-click:hover td, .dxm-table tr.dxm-click:focus-visible td { background: var(--surface2, rgba(127,127,127,.08)); }
+        .dxm-badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; border: 1px solid var(--green, #1e8449); color: var(--green, #1e8449); white-space: nowrap; }
+        .dxm-badge.hold { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
+        .dxm-badge.closed { border-color: var(--border2); color: var(--text2); }
+        .dxm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 14px; }
+        .dxm-kv { display: grid; grid-template-columns: minmax(120px, 40%) 1fr; gap: 6px 12px; font-size: 0.9rem; }
+        .dxm-kv dt { color: var(--text2); }
+        .dxm-kv dd { margin: 0; }
+        .dxm-debit { color: var(--red, #c0392b); }
+        .dxm-credit { color: var(--green, #1e8449); }
+        .dxm-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+        .modal.ot-drawer .dxb-tabs { margin-top: 8px; }
+        .dxm-tests { max-height: 300px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px 10px; }
+        .dxm-tests label { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); font-size: 0.9rem; }
+        .dxm-tests label:first-child { border-top: 0; }
+        .dxm-tests label span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; }
+        .dxm-note { font-size: 0.82rem; color: var(--text2); }
+        body.dx-partner .nav-links .nav-link:not([data-page="dxpartner"]),
+        body.dx-partner #notifBellBtn,
+        body.dx-partner #notifBadgeMobile { display: none !important; }
+        @media (max-width: 760px) {
+            .dxm-table thead { display: none; }
+            .dxm-table, .dxm-table tbody, .dxm-table tr, .dxm-table td { display: block; width: 100%; }
+            .dxm-table tr { border-top: 1px solid var(--border); padding: 6px 0; }
+            .dxm-table td { border: 0; padding: 3px 4px; display: flex; justify-content: space-between; gap: 12px; text-align: right; }
+            .dxm-table td::before { content: attr(data-l); color: var(--text2); font-size: 0.8rem; text-align: left; flex: none; white-space: nowrap; overflow-wrap: normal; }
+            .dxm-table td.num { text-align: right; }
+            .dxm-kv { grid-template-columns: 1fr; }
+            .dxm-kv dd { margin-bottom: 6px; }
+        }
+        /* DX:b2b:END */
     </style>
 </head>
 <body>
@@ -3772,6 +3811,17 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg></span> Report Templates
             </div>
             <!-- DX:reports:END -->
+            <!-- DX:b2b:START — B2B accounts, referrers, partner portal (migration 132) -->
+            <div class="nav-link" tabindex="0" data-page="dxb2b" data-dx="nav DX_B2B_MANAGE DX_REPORTS_MIS" style="display:none" onclick="go('dxb2b',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18"></path><path d="M5 21V7l7-4 7 4v14"></path><path d="M9 9h1"></path><path d="M14 9h1"></path><path d="M9 13h1"></path><path d="M14 13h1"></path><path d="M10 21v-4h4v4"></path></svg></span> B2B Accounts
+            </div>
+            <div class="nav-link" tabindex="0" data-page="dxreferrers" data-dx="nav DX_READ DX_REGISTER DX_ADMIN DX_B2B_MANAGE DX_REPORTS_MIS" style="display:none" onclick="go('dxreferrers',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> Referrers
+            </div>
+            <div class="nav-link" tabindex="0" data-page="dxpartner" data-dx-partner style="display:none" onclick="go('dxpartner',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-6 9 6v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"></path><path d="M9 21V12h6v9"></path></svg></span> Partner Portal
+            </div>
+            <!-- DX:b2b:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -7991,6 +8041,104 @@
             </div>
         </div>
         <!-- DX:reports:END -->
+        <!-- DX:b2b:START — B2B Accounts (dxb2b), Referrers (dxreferrers), Partner Portal (dxpartner); migration 132, W5 / W14 -->
+        <div id="pg-dxb2b" class="sec">
+            <div class="page-head"><div><h2>B2B Accounts</h2><p>Hospitals, clinics, corporates and insurers you bill on account. Charges post automatically at the contract rate when a sample is registered; the ledger never changes, corrections are new entries.</p></div>
+                <button type="button" class="btn btn-accent" data-dx="DX_B2B_MANAGE" onclick="dxb2b.editAccount(null)">New account</button></div>
+            <div class="toggle-group dxb-tabs" role="tablist" aria-label="B2B views">
+                <button type="button" class="toggle-btn on" role="tab" aria-selected="true" data-dxm-tab="accounts" onclick="dxb2b.setTab('accounts')">Accounts</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxm-tab="ageing" onclick="dxb2b.setTab('ageing')">Receivables ageing</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxm-tab="cards" onclick="dxb2b.setTab('cards')">Rate cards</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxm-tab="stock" onclick="dxb2b.setTab('stock')">Barcode stock</button>
+            </div>
+            <div class="card" id="dxmBody" aria-live="polite"></div>
+        </div>
+        <div class="modal-overlay ot-side" id="dxmDrawer" role="dialog" aria-modal="true" aria-labelledby="dxmDrawerTitle">
+            <div class="modal ot-drawer">
+                <div class="page-head"><div><h3 id="dxmDrawerTitle">Account</h3><p class="muted" id="dxmDrawerSub"></p></div>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dxb2b.close('dxmDrawer')" aria-label="Close">Close</button></div>
+                <div class="dxm-actions" id="dxmDrawerActions"></div>
+                <div class="toggle-group dxb-tabs" role="tablist" aria-label="Account sections">
+                    <button type="button" class="toggle-btn on" role="tab" aria-selected="true" data-dxm-dtab="overview" onclick="dxb2b.setDrawerTab('overview')">Overview</button>
+                    <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxm-dtab="ledger" onclick="dxb2b.setDrawerTab('ledger')">Ledger</button>
+                    <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxm-dtab="statements" onclick="dxb2b.setDrawerTab('statements')">Statements</button>
+                </div>
+                <div id="dxmDrawerBody" aria-live="polite"></div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxmAccount" role="dialog" aria-modal="true" aria-labelledby="dxmAccountTitle">
+            <div class="modal">
+                <h3 id="dxmAccountTitle">New B2B account</h3>
+                <div class="dxm-grid">
+                    <div class="field"><label for="dxmName">Name</label><input id="dxmName" maxlength="120" autocomplete="off"></div>
+                    <div class="field"><label for="dxmCode">Code</label><input id="dxmCode" maxlength="12" autocomplete="off" placeholder="CITYH" oninput="this.value = this.value.toUpperCase()"></div>
+                    <div class="field"><label for="dxmKind">Kind</label><select id="dxmKind"><option value="hospital">Hospital</option><option value="clinic">Clinic</option><option value="franchise">Franchise / collection point</option><option value="corporate">Corporate</option><option value="insurance_tpa">Insurance / TPA</option><option value="camp">Camp</option><option value="other">Other</option></select></div>
+                    <div class="field"><label for="dxmDesk">Desk WhatsApp</label><input id="dxmDesk" inputmode="tel" maxlength="16" placeholder="+91…"></div>
+                    <div class="field"><label for="dxmMode">Billing</label><select id="dxmMode"><option value="b2b_credit">On credit (monthly statement)</option><option value="b2b_prepaid">Prepaid (top-ups)</option><option value="b2b_split">Co-pay (patient pays a share)</option><option value="patient">Patient pays the lab</option></select></div>
+                    <div class="field"><label for="dxmCard">Rate card</label><select id="dxmCard"><option value="">Clinic MRP</option></select></div>
+                    <div class="field"><label for="dxmLimit">Credit limit (₹)</label><input id="dxmLimit" type="number" min="0" step="1" inputmode="numeric"></div>
+                    <div class="field"><label for="dxmDays">Credit days</label><input id="dxmDays" type="number" min="0" max="365" step="1" inputmode="numeric"></div>
+                    <div class="field"><label for="dxmCopayMode">Co-pay</label><select id="dxmCopayMode"><option value="none">None</option><option value="percent">Percent of each test</option><option value="fixed">Fixed ₹ per visit</option></select></div>
+                    <div class="field"><label for="dxmCopayValue">Co-pay value (% or ₹)</label><input id="dxmCopayValue" type="number" min="0" step="0.01" inputmode="decimal"></div>
+                    <div class="field"><label for="dxmDelivery">Reports go to</label><select id="dxmDelivery"><option value="">Default for the kind</option><option value="patient">Patient</option><option value="account">Account desk</option><option value="both">Both</option><option value="none">Nobody (collect in person)</option></select></div>
+                    <div class="field"><label for="dxmCycle">Statement cycle</label><select id="dxmCycle"><option value="monthly">Monthly</option><option value="fortnightly">Fortnightly</option><option value="weekly">Weekly</option></select></div>
+                    <div class="field"><label for="dxmGstin">GSTIN</label><input id="dxmGstin" maxlength="15" autocomplete="off" oninput="this.value = this.value.toUpperCase()"></div>
+                    <div class="field"><label class="checkbox"><input type="checkbox" id="dxmAutoHold" checked> Put on hold automatically (over limit / overdue)</label></div>
+                </div>
+                <div class="field"><label for="dxmAddress">Billing address</label><textarea id="dxmAddress" rows="2" maxlength="500"></textarea></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxb2b.close('dxmAccount')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxb2b.saveAccount(this)">Save</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxmPay" role="dialog" aria-modal="true" aria-labelledby="dxmPayTitle">
+            <div class="modal">
+                <h3 id="dxmPayTitle">Record payment</h3>
+                <p class="muted" id="dxmPayFor"></p>
+                <div class="dxm-grid">
+                    <div class="field"><label for="dxmPayAmt">Amount (₹)</label><input id="dxmPayAmt" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
+                    <div class="field"><label for="dxmPayMode">Mode</label><select id="dxmPayMode"><option value="neft">NEFT / RTGS</option><option value="upi">UPI</option><option value="cheque">Cheque</option><option value="cash">Cash</option><option value="card">Card</option></select></div>
+                    <div class="field"><label for="dxmPayRef">Reference (UTR / cheque no.)</label><input id="dxmPayRef" maxlength="80" autocomplete="off"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxb2b.close('dxmPay')">Cancel</button>
+                    <button type="button" class="btn btn-accent" onclick="dxb2b.savePayment(this)">Record</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-overlay" id="dxmUsers" role="dialog" aria-modal="true" aria-labelledby="dxmUsersTitle">
+            <div class="modal">
+                <h3 id="dxmUsersTitle">Partner logins</h3>
+                <p class="dxm-note">A partner login sees only this account's portal: its own patients and samples, its reports (when the account receives them) and its statements.</p>
+                <div id="dxmUsersList"></div>
+                <div class="dxm-grid">
+                    <div class="field"><label for="dxmUserName">Username</label><input id="dxmUserName" maxlength="60" autocomplete="off"></div>
+                    <div class="field"><label for="dxmUserPass">Password (8+ characters)</label><input id="dxmUserPass" type="password" maxlength="200" autocomplete="new-password"></div>
+                    <div class="field"><label for="dxmUserFull">Full name</label><input id="dxmUserFull" maxlength="100" autocomplete="off"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="dxb2b.close('dxmUsers')">Close</button>
+                    <button type="button" class="btn btn-accent" onclick="dxb2b.saveUser(this)">Create login</button>
+                </div>
+            </div>
+        </div>
+        <div id="pg-dxreferrers" class="sec">
+            <div class="page-head"><div><h2>Referrers</h2><p>Doctors and institutions who refer patients, where their report copies go, and how many tests they refer. Kriya does not compute or record any referral fee, incentive or commission.</p></div></div>
+            <div class="card"><div class="dxc-bar"><div class="field"><label for="dxfMonths">Volume for</label><select id="dxfMonths" onchange="dxref.load()"><option value="3">Last 3 months</option><option value="6" selected>Last 6 months</option><option value="12">Last 12 months</option></select></div>
+                <div class="field"><label for="dxfQ">Search</label><input id="dxfQ" type="search" maxlength="80" oninput="dxref.render()" placeholder="Name or phone"></div></div></div>
+            <div class="card" id="dxfBody" aria-live="polite"></div>
+        </div>
+        <div id="pg-dxpartner" class="sec">
+            <div class="page-head"><div><h2 id="dxpTitle">Partner Portal</h2><p id="dxpSub">Send samples to the lab, follow them and download reports and statements.</p></div></div>
+            <div class="toggle-group dxb-tabs" role="tablist" aria-label="Partner portal">
+                <button type="button" class="toggle-btn on" role="tab" aria-selected="true" data-dxp-tab="new" onclick="dxpartner.setTab('new')">New Requisition</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxp-tab="visits" onclick="dxpartner.setTab('visits')">My Patients / Samples</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxp-tab="statements" onclick="dxpartner.setTab('statements')">Invoices &amp; Statements</button>
+            </div>
+            <div class="card" id="dxpBody" aria-live="polite"></div>
+        </div>
+        <!-- DX:b2b:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -9701,6 +9849,11 @@ function applyDxGates() {
         if (!myDx && cb) cb.checked = false;
     });
     document.querySelectorAll('[data-dx-winddown]').forEach(el => { el.hidden = myDx !== 'WIND_DOWN'; });
+    /* DX:b2b:START */
+    const partner = !!myDx && myStaffRole === 'B2B_PARTNER';
+    document.body.classList.toggle('dx-partner', partner);
+    document.querySelectorAll('[data-dx-partner]').forEach(el => { el.style.display = partner ? '' : 'none'; });
+    /* DX:b2b:END */
 }
 
 const dxos = {
@@ -11504,6 +11657,444 @@ const dxtpl = {
     },
 };
 /* DX:reports:END */
+/* DX:b2b:START — B2B Accounts, Referrers and the Partner Portal (migration 132). Every amount, balance, hold,
+   statement total and price comes from the server (SQL ledger, dx_b2b_*); this page only shows and asks.
+   No referral fee or commission exists anywhere (ADR-DX-11). */
+const dxmRs = p => (Number(p) < 0 ? '−' : '') + '₹' + (Math.abs(Number(p) || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const dxmPaise = v => { const n = parseFloat(String(v || '').replace(/,/g, '')); return Number.isFinite(n) ? Math.round(n * 100) : null; };
+const dxmDate = d => d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '';
+const dxmToday = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+const DXM_KIND = { hospital: 'Hospital', clinic: 'Clinic', franchise: 'Franchise', corporate: 'Corporate', insurance_tpa: 'Insurance / TPA', camp: 'Camp', other: 'Other' };
+const DXM_MODE = { b2b_credit: 'On credit', b2b_prepaid: 'Prepaid', b2b_split: 'Co-pay', patient: 'Patient pays' };
+const DXM_ENTRY = { opening_balance: 'Opening balance', charge: 'Charge', charge_reversal: 'Reversal', payment: 'Payment', prepaid_topup: 'Top-up', credit_note: 'Credit note', write_off: 'Write-off' };
+const DXM_DELIVERY = { patient: 'Patient', account: 'Account desk', both: 'Patient and account desk', none: 'Nobody (collected in person)' };
+function dxmStatus(a) {
+    if (a.status === 'on_hold') return `<span class="dxm-badge hold">On hold${a.hold_kind ? ' · ' + esc(a.hold_kind) : ''}</span>`;
+    return a.status === 'closed' ? '<span class="dxm-badge closed">Closed</span>' : '<span class="dxm-badge">Active</span>';
+}
+function dxmTabs(attr, value) {
+    document.querySelectorAll(`[${attr}]`).forEach(b => { const on = b.getAttribute(attr) === value; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+}
+async function dxmPdf(path, title) {
+    try { const r = await apiRaw(path); dxrep.show(await r.blob(), title, ''); } catch (e) { toast(e.message, true); }
+}
+
+const dxb2b = {
+    tab: 'accounts', accounts: [], current: null, dtab: 'overview', editing: null, card: null,
+    manage() { return dxCan('DX_B2B_MANAGE'); },
+    close(id) { document.getElementById(id).classList.remove('open'); },
+    setTab(t) { dxb2b.tab = t; dxmTabs('data-dxm-tab', t); dxb2b.load(); },
+    async load() {
+        const el = document.getElementById('dxmBody'), seq = dxb2b.seq = (dxb2b.seq || 0) + 1;
+        el.innerHTML = loading();
+        try {
+            let html;
+            if (dxb2b.tab === 'accounts') { dxb2b.accounts = (await api('/admin/dx/b2b-accounts')).accounts; html = dxb2b.renderAccounts(); }
+            else if (dxb2b.tab === 'ageing') html = dxb2b.renderAgeing(await api('/admin/dx/b2b-accounts/ageing'));
+            else if (dxb2b.tab === 'cards') html = dxb2b.renderCards((await api('/admin/dx/rate-cards')).rate_cards);
+            else html = await dxb2b.renderStock();
+            if (seq === dxb2b.seq) el.innerHTML = html;
+        } catch (e) { if (seq === dxb2b.seq) el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    renderAccounts() {
+        if (!dxb2b.accounts.length) return '<p class="muted">No B2B accounts yet.</p>';
+        return `<div class="table-wrap"><table class="dxm-table"><thead><tr><th>Code</th><th>Name</th><th>Kind</th><th>Billing</th><th class="num">Balance</th><th class="num">Credit limit</th><th>Status</th></tr></thead><tbody>
+            ${dxb2b.accounts.map(a => `<tr class="dxm-click" tabindex="0" onclick="dxb2b.open('${esc(a.id)}')" onkeydown="if(event.key==='Enter')dxb2b.open('${esc(a.id)}')">
+                <td data-l="Code">${esc(a.code || '—')}</td><td data-l="Name"><b>${esc(a.name)}</b></td><td data-l="Kind">${esc(DXM_KIND[a.kind] || a.kind)}</td>
+                <td data-l="Billing">${esc(DXM_MODE[a.default_billing_mode] || a.default_billing_mode)}</td>
+                <td data-l="Balance" class="num">${a.balance_paise === undefined ? '—' : dxmRs(a.balance_paise)}</td>
+                <td data-l="Credit limit" class="num">${a.credit_limit_paise == null ? '—' : dxmRs(a.credit_limit_paise)}</td>
+                <td data-l="Status">${dxmStatus(a)}</td></tr>`).join('')}</tbody></table></div>`;
+    },
+    renderAgeing(d) {
+        if (!d.accounts.length) return '<p class="muted">No B2B accounts yet.</p>';
+        const cols = [['current_paise', 'Not due'], ['d1_30_paise', '1–30 days'], ['d31_60_paise', '31–60'], ['d61_90_paise', '61–90'], ['d90_plus_paise', '90+'], ['balance_paise', 'Balance']];
+        return `<p class="dxm-note">Unpaid amounts by days past their due date (entry date + credit days). Payments settle the oldest entries first.</p>
+            <div class="table-wrap"><table class="dxm-table"><thead><tr><th>Account</th>${cols.map(c => `<th class="num">${c[1]}</th>`).join('')}<th>Status</th></tr></thead><tbody>
+            ${d.accounts.map(a => `<tr class="dxm-click" tabindex="0" onclick="dxb2b.open('${esc(a.account_id)}')"><td data-l="Account"><b>${esc(a.name)}</b></td>
+                ${cols.map(c => `<td data-l="${c[1]}" class="num">${dxmRs(a[c[0]])}</td>`).join('')}<td data-l="Status">${dxmStatus(a)}</td></tr>`).join('')}
+            <tr><td data-l="Total"><b>Total</b></td>${cols.map(c => `<td data-l="${c[1]}" class="num"><b>${dxmRs(d.totals[c[0]])}</b></td>`).join('')}<td></td></tr></tbody></table></div>`;
+    },
+
+    // ── account drawer ──
+    async open(id) {
+        try { dxb2b.current = await api(`/admin/dx/b2b-accounts/${encodeURIComponent(id)}`); } catch (e) { toast(e.message, true); return; }
+        const a = dxb2b.current.account, m = dxb2b.manage(), held = a.status === 'on_hold';
+        document.getElementById('dxmDrawerTitle').textContent = a.name;
+        document.getElementById('dxmDrawerSub').innerHTML = `${esc(DXM_KIND[a.kind] || a.kind)}${a.code ? ' · ' + esc(a.code) : ''} · ${dxmStatus(a)} · Balance <b>${dxmRs(dxb2b.current.balance.balance_paise)}</b>`;
+        document.getElementById('dxmDrawerActions').innerHTML = m ? `
+            <button type="button" class="btn btn-accent btn-sm" onclick="dxb2b.openPay()">${a.default_billing_mode === 'b2b_prepaid' ? 'Record top-up' : 'Record payment'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="dxb2b.openUsers()">Partner logins (${dxb2b.current.partner_users.length})</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="dxb2b.hold(this)">${held ? 'Lift hold' : 'Put on hold'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="dxb2b.editAccount(dxb2b.current.account)">Edit</button>` : '';
+        document.getElementById('dxmDrawer').classList.add('open');
+        dxb2b.setDrawerTab(dxb2b.dtab);
+    },
+    async setDrawerTab(t) {
+        dxb2b.dtab = t; dxmTabs('data-dxm-dtab', t);
+        const el = document.getElementById('dxmDrawerBody'), cur = dxb2b.current, a = cur.account, b = cur.balance;
+        if (t === 'overview') {
+            const copay = a.copay_mode === 'percent' ? `${(a.copay_value / 100).toFixed(2)} % of each test` : a.copay_mode === 'fixed' ? `${dxmRs(a.copay_value)} per visit` : 'None';
+            const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+            el.innerHTML = `<dl class="dxm-kv">${row('Billing', esc(DXM_MODE[a.default_billing_mode] || a.default_billing_mode))}${row('Co-pay', esc(copay))}
+                ${row('Rate card', cur.rate_card ? esc(cur.rate_card.name) + (cur.rate_card.is_active ? '' : ' (inactive)') : 'Clinic MRP')}
+                ${row('Credit limit', a.credit_limit_paise == null ? 'None' : dxmRs(a.credit_limit_paise))}${row('Credit days', a.credit_days == null ? '—' : esc(a.credit_days))}
+                ${row('Automatic hold', a.auto_hold ? 'Yes' : 'No')}${row('Statement cycle', esc(a.statement_cycle))}
+                ${row('Reports go to', esc(DXM_DELIVERY[a.report_delivery] || a.report_delivery))}${row('Desk WhatsApp', esc(a.desk_whatsapp || '—'))}
+                ${row('GSTIN', esc(a.gstin || '—'))}${row('Billing address', esc(a.billing_address || '—'))}
+                ${a.hold_reason ? row('Hold reason', esc(a.hold_reason)) : ''}
+                ${row('Charges', dxmRs(b.charges_paise))}${row('Payments & credits', dxmRs(b.credits_paise))}${row('Overdue', dxmRs(b.overdue_amount_paise))}
+                ${row('Oldest unpaid', b.oldest_unpaid_date ? dxmDate(b.oldest_unpaid_date) : '—')}</dl>`;
+            return;
+        }
+        el.innerHTML = loading();
+        const seq = dxb2b.dseq = (dxb2b.dseq || 0) + 1, put = html => { if (seq === dxb2b.dseq) el.innerHTML = html; };
+        try {
+            if (t === 'ledger') {
+                const d = await api(`/admin/dx/b2b-accounts/${encodeURIComponent(a.id)}/ledger`);
+                put(d.entries.length ? `<p class="dxm-note">Append-only: a correction is a new entry (reversal, credit note, write-off).</p>
+                    <div class="table-wrap"><table class="dxm-table"><thead><tr><th>Date</th><th>Entry</th><th>Details</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead><tbody>
+                    ${d.entries.slice().reverse().map(e => { const dr = ['opening_balance', 'charge'].includes(e.entry_type);
+                        return `<tr><td data-l="Date" class="nw">${dxmDate(e.created_at)}</td><td data-l="Entry">${esc(DXM_ENTRY[e.entry_type] || e.entry_type)}${e.statement_id ? ' <span class="dxc-chip">billed</span>' : ''}</td>
+                        <td data-l="Details">${esc([e.accession_number, e.patient_name, e.item_name, e.payment_mode && e.payment_mode.toUpperCase(), e.reference, e.reason].filter(Boolean).join(' · '))}</td>
+                        <td data-l="Debit" class="num dxm-debit">${dr ? dxmRs(e.amount_paise) : ''}</td><td data-l="Credit" class="num dxm-credit">${dr ? '' : dxmRs(e.amount_paise)}</td>
+                        <td data-l="Balance" class="num">${dxmRs(e.running_balance_paise)}</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="muted">No entries yet.</p>');
+            } else {
+                const d = await api(`/admin/dx/b2b-accounts/${encodeURIComponent(a.id)}/statements`);
+                const first = dxmToday().slice(0, 8) + '01';
+                put((dxb2b.manage() ? `<div class="dxc-bar"><div class="field"><label for="dxmFrom">From</label><input id="dxmFrom" type="date" value="${first}"></div>
+                    <div class="field"><label for="dxmTo">To</label><input id="dxmTo" type="date" value="${dxmToday()}" max="${dxmToday()}"></div>
+                    <button type="button" class="btn btn-accent" onclick="dxb2b.issue(this)">Generate statement</button></div>
+                    <p class="dxm-note">A statement takes every unbilled entry up to the end date. Its opening is the previous statement's closing.</p>` : '')
+                    + (d.statements.length ? `<div class="table-wrap"><table class="dxm-table"><thead><tr><th>Number</th><th>Period</th><th class="num">Charges</th><th class="num">Credits</th><th class="num">Closing</th><th></th></tr></thead><tbody>
+                    ${d.statements.map(s => `<tr><td data-l="Number" class="nw"><b>${esc(s.statement_number)}</b>${s.status === 'void' ? ' <span class="dxm-badge closed">void</span>' : ''}</td>
+                        <td data-l="Period">${dxmDate(s.period_from)} – ${dxmDate(s.period_to)}</td><td data-l="Charges" class="num">${dxmRs(s.total_charges_paise)}</td>
+                        <td data-l="Credits" class="num">${dxmRs(s.total_credits_paise)}</td><td data-l="Closing" class="num">${dxmRs(s.closing_paise)}</td>
+                        <td data-l=""><span class="dxc-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="dxmPdf('/admin/dx/b2b-accounts/statements/${esc(s.id)}/pdf', '${esc(s.statement_number)}')">PDF</button>
+                        ${dxb2b.manage() && s.status === 'issued' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxb2b.send('${esc(s.id)}', this)">WhatsApp</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="dxb2b.voidSt('${esc(s.id)}', this)">Void</button>` : ''}</span></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No statements yet.</p>'));
+            }
+        } catch (e) { put(`<p class="muted">${esc(e.message)}</p>`); }
+    },
+    async issue(btn) {
+        btn.disabled = true;
+        try {
+            const s = await apiPost(`/admin/dx/b2b-accounts/${encodeURIComponent(dxb2b.current.account.id)}/statements`,
+                                    { period_from: document.getElementById('dxmFrom').value, period_to: document.getElementById('dxmTo').value });
+            toast(`${s.statement_number} issued · closing ${dxmRs(s.closing_paise)}`);
+            await dxb2b.setDrawerTab('statements');
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async send(id, btn) {
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/dx/b2b-accounts/statements/${encodeURIComponent(id)}/send`, {});
+            toast(r.sent ? 'Sent to the account desk' : 'Not sent: ' + (r.reason === 'whatsapp_send_failed' ? 'the desk has not messaged in 24 h; share the PDF instead' : r.reason), !r.sent);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async voidSt(id, btn) {
+        const reason = (prompt('Why is this statement void? (it keeps its number; the entries return to unbilled)') || '').trim();
+        if (reason.length < 3) return;
+        btn.disabled = true;
+        try { await apiPost(`/admin/dx/b2b-accounts/statements/${encodeURIComponent(id)}/void`, { reason }); toast('Statement voided'); await dxb2b.setDrawerTab('statements'); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async hold(btn) {
+        const a = dxb2b.current.account, lift = a.status === 'on_hold';
+        const reason = lift ? null : (prompt('Why is this account put on hold? New samples will be refused.') || '').trim();
+        if (!lift && !reason) return;
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/dx/b2b-accounts/${encodeURIComponent(a.id)}/hold`, { status: lift ? 'active' : 'on_hold', reason });
+            toast(lift ? 'Hold lifted' : 'Account on hold'); await dxb2b.open(a.id); dxb2b.load();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    openPay() {
+        const a = dxb2b.current.account;
+        document.getElementById('dxmPayTitle').textContent = a.default_billing_mode === 'b2b_prepaid' ? 'Record top-up' : 'Record payment';
+        document.getElementById('dxmPayFor').textContent = `${a.name} · balance ${dxmRs(dxb2b.current.balance.balance_paise)}`;
+        ['dxmPayAmt', 'dxmPayRef'].forEach(id => { document.getElementById(id).value = ''; });
+        dxb2b.payKey = 'b2bpay-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random());
+        document.getElementById('dxmPay').classList.add('open'); document.getElementById('dxmPayAmt').focus();
+    },
+    async savePayment(btn) {
+        const amount = dxmPaise(document.getElementById('dxmPayAmt').value);
+        if (!amount || amount <= 0) { toast('Enter the amount', true); return; }
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/dx/b2b-accounts/${encodeURIComponent(dxb2b.current.account.id)}/payments`, {
+                amount_paise: amount, mode: document.getElementById('dxmPayMode').value,
+                reference: document.getElementById('dxmPayRef').value.trim() || null, idempotency_key: dxb2b.payKey });
+            toast(`${DXM_ENTRY[r.entry_type]} of ${dxmRs(r.amount_paise)} recorded`);
+            dxb2b.close('dxmPay'); await dxb2b.open(dxb2b.current.account.id); dxb2b.load();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    openUsers() {
+        const list = dxb2b.current.partner_users;
+        document.getElementById('dxmUsersList').innerHTML = list.length ? `<ul>${list.map(u => `<li>${esc(u.username)}${u.full_name ? ' · ' + esc(u.full_name) : ''}${u.is_active ? '' : ' (inactive)'}</li>`).join('')}</ul>` : '<p class="muted">No partner logins yet.</p>';
+        ['dxmUserName', 'dxmUserPass', 'dxmUserFull'].forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('dxmUsers').classList.add('open');
+    },
+    async saveUser(btn) {
+        btn.disabled = true;
+        try {
+            const u = await apiPost(`/admin/dx/b2b-accounts/${encodeURIComponent(dxb2b.current.account.id)}/users`, {
+                username: document.getElementById('dxmUserName').value.trim(), password: document.getElementById('dxmUserPass').value,
+                full_name: document.getElementById('dxmUserFull').value.trim() || null });
+            toast(`Login ${u.username} created`);
+            dxb2b.current.partner_users.push(u); dxb2b.openUsers(); dxb2b.open(dxb2b.current.account.id);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+
+    // ── account form ──
+    async editAccount(a) {
+        dxb2b.editing = a;
+        document.getElementById('dxmAccountTitle').textContent = a ? 'Edit ' + a.name : 'New B2B account';
+        const set = (id, v) => { document.getElementById(id).value = v ?? ''; };
+        set('dxmName', a && a.name); set('dxmCode', a && a.code); set('dxmKind', (a && a.kind) || 'hospital'); set('dxmDesk', a && a.desk_whatsapp);
+        set('dxmMode', (a && a.default_billing_mode) || 'b2b_credit'); set('dxmLimit', a && a.credit_limit_paise != null ? a.credit_limit_paise / 100 : '');
+        set('dxmDays', a && a.credit_days); set('dxmCopayMode', (a && a.copay_mode) || 'none');
+        set('dxmCopayValue', a && a.copay_value != null ? a.copay_value / 100 : ''); set('dxmDelivery', a ? a.report_delivery : '');
+        set('dxmCycle', (a && a.statement_cycle) || 'monthly'); set('dxmGstin', a && a.gstin); set('dxmAddress', a && a.billing_address);
+        document.getElementById('dxmAutoHold').checked = a ? a.auto_hold !== false : true;
+        document.getElementById('dxmCode').disabled = document.getElementById('dxmKind').disabled = !!a;
+        const sel = document.getElementById('dxmCard');
+        try {
+            const cards = (await api('/admin/dx/rate-cards')).rate_cards.filter(c => c.is_active || (a && c.id === a.rate_card_id));
+            sel.innerHTML = '<option value="">Clinic MRP</option>' + cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+        } catch (_) { /* the select keeps "Clinic MRP" */ }
+        sel.value = (a && a.rate_card_id) || '';
+        document.getElementById('dxmAccount').classList.add('open'); document.getElementById('dxmName').focus();
+    },
+    async saveAccount(btn) {
+        const v = id => document.getElementById(id).value.trim(), copayMode = v('dxmCopayMode');
+        const body = {
+            name: v('dxmName'), desk_whatsapp: v('dxmDesk') || null, default_billing_mode: v('dxmMode'), rate_card_id: v('dxmCard') || null,
+            credit_limit_paise: v('dxmLimit') === '' ? null : dxmPaise(v('dxmLimit')), credit_days: v('dxmDays') === '' ? null : parseInt(v('dxmDays'), 10),
+            copay_mode: copayMode, copay_value: copayMode === 'none' ? null : dxmPaise(v('dxmCopayValue')),
+            statement_cycle: v('dxmCycle'), auto_hold: document.getElementById('dxmAutoHold').checked,
+            gstin: v('dxmGstin') || null, billing_address: v('dxmAddress') || null };
+        if (v('dxmDelivery')) body.report_delivery = v('dxmDelivery');
+        btn.disabled = true;
+        try {
+            if (dxb2b.editing) await apiPut(`/admin/dx/b2b-accounts/${encodeURIComponent(dxb2b.editing.id)}`, body);
+            else {
+                Object.keys(body).forEach(k => { if (body[k] === null) delete body[k]; });
+                await apiPost('/admin/dx/b2b-accounts', { ...body, kind: v('dxmKind'), code: v('dxmCode') || undefined });
+            }
+            toast('Account saved'); dxb2b.close('dxmAccount');
+            if (dxb2b.editing) await dxb2b.open(dxb2b.editing.id);
+            dxb2b.load();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+
+    // ── rate cards ──
+    renderCards(cards) {
+        const m = dxb2b.manage();
+        return (m ? `<div class="dxc-bar"><div class="field"><label for="dxmNewCard">New rate card</label><input id="dxmNewCard" maxlength="80" placeholder="e.g. City Hospital 2026"></div>
+            <div class="field"><label for="dxmNewKind">Kind</label><select id="dxmNewKind"><option value="b2b">B2B</option><option value="corporate">Corporate</option><option value="camp">Camp</option><option value="insurance">Insurance</option></select></div>
+            <button type="button" class="btn btn-accent" onclick="dxb2b.newCard(this)">Create</button></div>` : '')
+            + (cards.length ? `<div class="table-wrap"><table class="dxm-table"><thead><tr><th>Name</th><th>Kind</th><th>Valid</th><th class="num">Tests priced</th><th>Status</th></tr></thead><tbody>
+            ${cards.map(c => `<tr class="dxm-click" tabindex="0" onclick="dxb2b.openCard('${esc(c.id)}')" onkeydown="if(event.key==='Enter')dxb2b.openCard('${esc(c.id)}')"><td data-l="Name"><b>${esc(c.name)}</b></td><td data-l="Kind">${esc(c.kind)}</td>
+                <td data-l="Valid">${dxmDate(c.valid_from)} – ${c.valid_to ? dxmDate(c.valid_to) : 'open'}</td><td data-l="Tests priced" class="num">${c.item_count}</td>
+                <td data-l="Status">${c.is_active ? '<span class="dxm-badge">Active</span>' : '<span class="dxm-badge closed">Inactive</span>'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No rate cards yet. Accounts without one are billed at the clinic MRP.</p>')
+            + '<div id="dxmCardEditor"></div>';
+    },
+    async newCard(btn) {
+        const name = document.getElementById('dxmNewCard').value.trim();
+        if (name.length < 2) { toast('Give the rate card a name', true); return; }
+        btn.disabled = true;
+        try { const c = await apiPost('/admin/dx/rate-cards', { name, kind: document.getElementById('dxmNewKind').value }); await dxb2b.load(); dxb2b.openCard(c.id); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async openCard(id) {
+        const box = document.getElementById('dxmCardEditor');
+        box.innerHTML = loading();
+        try {
+            const [card, tests] = await Promise.all([api(`/admin/dx/rate-cards/${encodeURIComponent(id)}`), api('/admin/dx/tests?approved=true').catch(() => ({ tests: [] }))]);
+            dxb2b.card = card;
+            const priced = new Map(card.items.map(i => [i.lab_test_id, i]));
+            const m = dxb2b.manage();
+            const rows = tests.tests.filter(t => !t.branch_id && t.is_active !== false).sort((x, y) => x.name.localeCompare(y.name));
+            box.innerHTML = `<hr><div class="page-head"><div><h3>${esc(card.name)}</h3><p class="dxm-note">Leave a price empty to bill that test at the clinic MRP.</p></div>
+                ${m ? `<span class="dxc-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="dxb2b.toggleCard(this)">${card.is_active ? 'Deactivate' : 'Activate'}</button>
+                <label class="btn btn-ghost btn-sm">Import CSV<input type="file" accept=".csv,text/csv" hidden onchange="dxb2b.importCsv(this)"></label></span>` : ''}</div>
+                <p class="dxm-note">CSV columns: <code>test_code</code> and <code>price</code> (₹). The whole file is refused if any row is wrong.</p>
+                <div class="field"><label for="dxmCardQ">Find test</label><input id="dxmCardQ" type="search" oninput="dxb2b.filterCard(this.value)"></div>
+                <div class="table-wrap"><table class="dxm-table" id="dxmCardTable"><thead><tr><th>Test</th><th>Code</th><th class="num">MRP</th><th class="num">Contract price (₹)</th></tr></thead><tbody>
+                ${rows.map(t => { const p = priced.get(t.id); return `<tr data-name="${esc((t.name + ' ' + (t.test_code || '')).toLowerCase())}"><td data-l="Test">${esc(t.name)}</td><td data-l="Code">${esc(t.test_code || '')}</td>
+                    <td data-l="MRP" class="num">${dxmRs(t.price_paise)}</td><td data-l="Contract" class="num"><input type="number" min="0" step="0.01" inputmode="decimal" style="max-width:130px" aria-label="Contract price for ${esc(t.name)}"
+                    data-test="${esc(t.id)}" data-was="${p ? p.price_paise : ''}" value="${p ? p.price_paise / 100 : ''}" ${m ? '' : 'disabled'}></td></tr>`; }).join('')}</tbody></table></div>
+                ${m ? '<div class="modal-actions"><button type="button" class="btn btn-accent" onclick="dxb2b.saveCard(this)">Save prices</button></div>' : ''}`;
+            box.scrollIntoView({ block: 'start' });
+        } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    filterCard(q) { q = q.trim().toLowerCase(); document.querySelectorAll('#dxmCardTable tbody tr').forEach(r => { r.hidden = !!q && !r.dataset.name.includes(q); }); },
+    async saveCard(btn) {
+        const items = [];
+        document.querySelectorAll('#dxmCardTable input[data-test]').forEach(i => {
+            const now = i.value.trim() === '' ? null : dxmPaise(i.value), was = i.dataset.was === '' ? null : Number(i.dataset.was);
+            if (now !== was) items.push({ lab_test_id: i.dataset.test, price_paise: now });
+        });
+        if (!items.length) { toast('No price changed'); return; }
+        btn.disabled = true;
+        try { const r = await apiPost(`/admin/dx/rate-cards/${encodeURIComponent(dxb2b.card.id)}/items`, { items }); toast(`Saved: ${r.added} added, ${r.updated} changed, ${r.removed} removed`); dxb2b.openCard(dxb2b.card.id); }
+        catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async toggleCard(btn) {
+        btn.disabled = true;
+        try { await apiPut(`/admin/dx/rate-cards/${encodeURIComponent(dxb2b.card.id)}`, { is_active: !dxb2b.card.is_active }); await dxb2b.load(); dxb2b.openCard(dxb2b.card.id); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async importCsv(input) {
+        const f = input.files[0]; input.value = '';
+        if (!f) return;
+        const fd = new FormData(); fd.append('file', f);
+        try {
+            const r = await apiRaw(`/admin/dx/rate-cards/${encodeURIComponent(dxb2b.card.id)}/import`, { method: 'POST', headers: authHeaders(), body: fd }, s => s === 422);
+            const d = await r.json();
+            if (r.status === 422) { toast((d.detail.errors || []).slice(0, 5).join(' · ') || d.detail.message, true); return; }
+            toast(`Imported ${d.rows} prices (${d.added} new, ${d.updated} changed)`); dxb2b.openCard(dxb2b.card.id);
+        } catch (e) { toast(e.message, true); }
+    },
+
+    // ── barcode stock ──
+    async renderStock() {
+        const [stock, sites] = await Promise.all([api('/admin/dx/barcode-stock'), api('/admin/dx/sites').catch(() => ({ sites: [] }))]);
+        if (!dxb2b.accounts.length) dxb2b.accounts = (await api('/admin/dx/b2b-accounts').catch(() => ({ accounts: [] }))).accounts;
+        const accName = Object.fromEntries(dxb2b.accounts.map(a => [a.id, a.name])), siteName = Object.fromEntries(sites.sites.map(s => [s.id, s.display_name]));
+        const m = dxb2b.manage() || dxCan('DX_ADMIN');
+        return (m ? `<div class="dxc-bar"><div class="field"><label for="dxmStTo">Issue to</label><select id="dxmStTo">
+                ${dxb2b.accounts.map(a => `<option value="a:${esc(a.id)}">${esc(a.name)}</option>`).join('')}${sites.sites.map(s => `<option value="s:${esc(s.id)}">Site · ${esc(s.display_name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="dxmStPrefix">Prefix</label><input id="dxmStPrefix" maxlength="12" oninput="this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '')"></div>
+            <div class="field"><label for="dxmStFrom">From number</label><input id="dxmStFrom" type="number" min="0" step="1" inputmode="numeric"></div>
+            <div class="field"><label for="dxmStUpto">To number</label><input id="dxmStUpto" type="number" min="0" step="1" inputmode="numeric"></div>
+            <button type="button" class="btn btn-accent" onclick="dxb2b.issueStock(this)">Issue range</button></div>
+            <p class="dxm-note">Pre-printed labels bound to a tube must come from the stock issued to the visit's account or the collecting site. Ranges of one prefix never overlap.</p>` : '')
+            + (stock.stock.length ? `<div class="table-wrap"><table class="dxm-table"><thead><tr><th>Issued to</th><th>Labels</th><th class="num">Count</th><th>Issued</th></tr></thead><tbody>
+            ${stock.stock.map(s => `<tr><td data-l="Issued to">${esc(s.account_id ? accName[s.account_id] || 'Account' : 'Site · ' + (siteName[s.site_id] || ''))}</td>
+                <td data-l="Labels"><code>${esc(s.prefix + s.range_from)}</code> – <code>${esc(s.prefix + s.range_to)}</code></td>
+                <td data-l="Count" class="num">${(s.range_to - s.range_from + 1).toLocaleString('en-IN')}</td><td data-l="Issued">${dxmDate(s.issued_at)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No barcode stock issued.</p>');
+    },
+    async issueStock(btn) {
+        const to = document.getElementById('dxmStTo').value, from = parseInt(document.getElementById('dxmStFrom').value, 10), upto = parseInt(document.getElementById('dxmStUpto').value, 10);
+        if (!to || !Number.isFinite(from) || !Number.isFinite(upto)) { toast('Choose who gets the labels and the number range', true); return; }
+        btn.disabled = true;
+        try {
+            await apiPost('/admin/dx/barcode-stock', { [to.startsWith('a:') ? 'account_id' : 'site_id']: to.slice(2), prefix: document.getElementById('dxmStPrefix').value, range_from: from, range_to: upto });
+            toast('Range issued'); dxb2b.load();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+};
+
+const dxref = {
+    rows: [], volume: [], months: [],
+    async load() {
+        const el = document.getElementById('dxfBody');
+        el.innerHTML = loading();
+        try {
+            const months = document.getElementById('dxfMonths').value;
+            const [r, v] = await Promise.all([api('/admin/dx/referrers'), api('/admin/dx/referrers/volume?months=' + months)]);
+            dxref.rows = r.referrers; dxref.volume = v.rows;
+            const list = [];
+            let [y, mo] = v.from.split('-').map(Number);       // plain calendar months: no time zone shift
+            for (let i = 0; i < Number(months); i++) { list.push(`${y}-${String(mo).padStart(2, '0')}`); if (++mo > 12) { mo = 1; y++; } }
+            dxref.months = list;
+            dxref.render();
+        } catch (e) { el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    render() {
+        const q = (document.getElementById('dxfQ').value || '').trim().toLowerCase(), by = {};
+        dxref.volume.forEach(x => { (by[x.referrer_id] = by[x.referrer_id] || {})[x.month] = x; });
+        const rows = dxref.rows.filter(r => !q || (r.name || '').toLowerCase().includes(q) || (r.phone || '').includes(q));
+        const total = r => dxref.months.reduce((n, m) => n + ((((by[r.id] || {})[m]) || {}).tests || 0), 0);
+        rows.sort((a, b) => total(b) - total(a) || (a.name || '').localeCompare(b.name || ''));
+        const mon = m => new Date(m + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+        const COPY = { none: 'No copy', whatsapp: 'WhatsApp', email: 'E-mail' };
+        document.getElementById('dxfBody').innerHTML = rows.length ? `<p class="dxm-note">Tests referred per month (visits in brackets). Clinical volume only.</p>
+            <div class="table-wrap"><table class="dxm-table"><thead><tr><th>Referrer</th><th>Contact</th><th>Report copy</th>${dxref.months.map(m => `<th class="num">${mon(m)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>
+            ${rows.map(r => `<tr><td data-l="Referrer"><b>${esc(r.name)}</b>${r.qualification ? ' <span class="muted">' + esc(r.qualification) + '</span>' : ''}${r.is_active === false ? ' <span class="dxm-badge closed">inactive</span>' : ''}</td>
+                <td data-l="Contact">${esc([r.phone, r.organisation].filter(Boolean).join(' · ') || '—')}</td><td data-l="Report copy">${esc(COPY[r.report_copy] || r.report_copy)}</td>
+                ${dxref.months.map(m => { const x = (by[r.id] || {})[m]; return `<td data-l="${mon(m)}" class="num">${x ? `${x.tests} <span class="muted">(${x.visits})</span>` : '—'}</td>`; }).join('')}
+                <td data-l="Total" class="num"><b>${total(r)}</b></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No referrers.</p>';
+    },
+};
+
+const dxpartner = {
+    tab: 'new', me: null, picked: new Set(),
+    setTab(t) { dxpartner.tab = t; dxmTabs('data-dxp-tab', t); dxpartner.load(); },
+    async load() {
+        const el = document.getElementById('dxpBody');
+        el.innerHTML = loading();
+        try {
+            if (!dxpartner.me || dxpartner.tab === 'new') dxpartner.me = await api('/admin/dx/partner/me');
+            const a = dxpartner.me.account;
+            document.getElementById('dxpTitle').textContent = a.name;
+            document.getElementById('dxpSub').innerHTML = `Balance <b>${dxmRs(dxpartner.me.balance.balance_paise)}</b>${a.credit_limit_paise != null ? ' · credit limit ' + dxmRs(a.credit_limit_paise) : ''} · ${dxmStatus(a)}`;
+            if (dxpartner.tab === 'new') el.innerHTML = dxpartner.renderNew();
+            else if (dxpartner.tab === 'visits') el.innerHTML = dxpartner.renderVisits((await api('/admin/dx/partner/visits')).visits);
+            else el.innerHTML = dxpartner.renderStatements(await api('/admin/dx/partner/statements'));
+        } catch (e) { el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    renderNew() {
+        const me = dxpartner.me, held = me.account.status !== 'active';
+        dxpartner.picked = new Set(); dxpartner.key = 'req-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random());
+        if (held) return `<p class="dxm-badge hold">Your account is on hold${me.account.hold_reason ? ': ' + esc(me.account.hold_reason) : ''}. Contact the lab to send new samples.</p>`;
+        return `<div class="dxm-grid">
+            <div class="field"><label for="dxpName">Patient name</label><input id="dxpName" maxlength="100" autocomplete="off"></div>
+            <div class="field"><label for="dxpAge">Age (years)</label><input id="dxpAge" type="number" min="0" max="130" inputmode="numeric"></div>
+            <div class="field"><label for="dxpSex">Sex</label><select id="dxpSex"><option value="">—</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></div>
+            <div class="field"><label for="dxpRef">Your OP / IP no.</label><input id="dxpRef" maxlength="40" autocomplete="off"></div>
+            <div class="field"><label for="dxpPri">Priority</label><select id="dxpPri"><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="stat">STAT</option></select></div>
+            ${me.sites.length > 1 ? `<div class="field"><label for="dxpBranch">Send to</label><select id="dxpBranch">${me.sites.map(s => `<option value="${esc(s.branch_id)}">${esc(s.name)}</option>`).join('')}</select></div>` : ''}
+            </div>
+            <div class="field"><label for="dxpNotes">Clinical notes</label><textarea id="dxpNotes" rows="2" maxlength="1000"></textarea></div>
+            <div class="field"><label for="dxpQ">Tests</label><input id="dxpQ" type="search" placeholder="Search tests" oninput="dxpartner.filter(this.value)"></div>
+            <div class="dxm-tests" id="dxpTests">${me.tests.map(t => `<label data-name="${esc((t.name + ' ' + (t.test_code || '')).toLowerCase())}"><input type="checkbox" value="${esc(t.id)}" onchange="dxpartner.pick(this)">
+                <span>${esc(t.name)}${t.contract_price ? '' : ' <span class="muted">(MRP)</span>'}</span><span>${dxmRs(t.price_paise)}</span></label>`).join('')}</div>
+            <div class="modal-actions"><span id="dxpTotal" class="muted">No tests chosen</span><button type="button" class="btn btn-accent" onclick="dxpartner.submit(this)">Send requisition</button></div>
+            <div id="dxpDone"></div>`;
+    },
+    filter(q) { q = q.trim().toLowerCase(); document.querySelectorAll('#dxpTests label').forEach(l => { l.hidden = !!q && !l.dataset.name.includes(q); }); },
+    pick(cb) {
+        cb.checked ? dxpartner.picked.add(cb.value) : dxpartner.picked.delete(cb.value);
+        const sum = dxpartner.me.tests.filter(t => dxpartner.picked.has(t.id)).reduce((n, t) => n + t.price_paise, 0);
+        document.getElementById('dxpTotal').textContent = dxpartner.picked.size ? `${dxpartner.picked.size} test(s) · ${dxmRs(sum)} (final price set by the lab)` : 'No tests chosen';
+    },
+    async submit(btn) {
+        const v = id => (document.getElementById(id) || {}).value;
+        if (!(v('dxpName') || '').trim() || !dxpartner.picked.size) { toast('Enter the patient name and choose at least one test', true); return; }
+        btn.disabled = true;
+        try {
+            const r = await apiPost('/admin/dx/partner/visits', {
+                name: v('dxpName').trim(), age_years: v('dxpAge') === '' ? null : parseInt(v('dxpAge'), 10), gender: v('dxpSex') || null,
+                external_ref: (v('dxpRef') || '').trim() || null, priority: v('dxpPri'), branch_id: v('dxpBranch') || null,
+                clinical_notes: (v('dxpNotes') || '').trim() || null, items: [...dxpartner.picked].map(id => ({ lab_test_id: id })), idempotency_key: dxpartner.key });
+            toast(`${r.visit.accession_number} registered`);
+            const done = `<div class="dxc-visit"><div class="dxc-head"><h4>${esc(r.visit.patient_snapshot.name)}</h4><span class="dxc-num">${esc(r.visit.accession_number)}</span></div>
+                <p>Label the tubes with these numbers (or your issued pre-printed labels):</p><ul>${r.samples.map(s => `<li><code>${esc(s.barcode || 'label at collection')}</code> · ${esc(s.sample_type || '')}</li>`).join('') || '<li>No tube needed</li>'}</ul>
+                <p class="muted">${r.items.map(i => esc(i.item_name) + ' ' + dxmRs(i.payer_share_paise)).join(' · ')}</p></div>`;
+            dxpartner.me = null; await dxpartner.load();
+            document.getElementById('dxpDone').innerHTML = done;
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    renderVisits(rows) {
+        if (!rows.length) return '<p class="muted">No samples yet.</p>';
+        const can = ['account', 'both'].includes(dxpartner.me.account.report_delivery);
+        return `${can ? '' : '<p class="dxm-note">Reports for your account go to the patient directly; the portal shows their progress only.</p>'}
+            <div class="table-wrap"><table class="dxm-table"><thead><tr><th>Date</th><th>Visit</th><th>Patient</th><th>Your ref.</th><th>Status</th><th>Reports</th></tr></thead><tbody>
+            ${rows.map(v => `<tr><td data-l="Date">${dxmDate(v.created_at)}</td><td data-l="Visit"><b>${esc(v.accession_number)}</b></td><td data-l="Patient">${esc((v.patient_snapshot || {}).name || '')}</td>
+                <td data-l="Your ref.">${esc(v.external_ref || '—')}</td><td data-l="Status">${esc((v.status || '').replace(/_/g, ' '))}</td>
+                <td data-l="Reports">${v.releases.length ? v.releases.map(r => can ? `<button type="button" class="btn btn-ghost btn-sm" onclick="dxmPdf('/admin/dx/partner/releases/${esc(r.id)}/pdf', '${esc(v.accession_number)} R${esc(r.release_no)}')">R${esc(r.release_no)} PDF</button>` : `R${esc(r.release_no)} ready`).join(' ') : '<span class="muted">Pending</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+    },
+    renderStatements(d) {
+        return `<p>Current balance <b>${dxmRs(d.balance.balance_paise)}</b>${d.balance.overdue_amount_paise > 0 ? ` · <span class="dxm-debit">overdue ${dxmRs(d.balance.overdue_amount_paise)}</span>` : ''}</p>`
+            + (d.statements.length ? `<div class="table-wrap"><table class="dxm-table"><thead><tr><th>Number</th><th>Period</th><th class="num">Closing</th><th></th></tr></thead><tbody>
+            ${d.statements.map(s => `<tr><td data-l="Number"><b>${esc(s.statement_number)}</b></td><td data-l="Period">${dxmDate(s.period_from)} – ${dxmDate(s.period_to)}</td>
+                <td data-l="Closing" class="num">${dxmRs(s.closing_paise)}</td><td data-l=""><button type="button" class="btn btn-ghost btn-sm" onclick="dxmPdf('/admin/dx/partner/statements/${esc(s.id)}/pdf', '${esc(s.statement_number)}')">PDF</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No statements yet.</p>');
+    },
+};
+/* DX:b2b:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -15289,6 +15880,12 @@ async function login() {
         return;
     }
     // DX:logistics:END
+    // DX:b2b:START — a B2B partner login (migration 132) has its portal only (server-confined to /admin/dx/partner/*)
+    if (myStaffRole === 'B2B_PARTNER') {
+        go('dxpartner');
+        return;
+    }
+    // DX:b2b:END
     // DOCTOR / CASHIER: no dashboard (its endpoints refuse them); open their
     // first OPD page, or the waiting page until the clinic goes live.
     if (isOpdRole()) {
@@ -16816,7 +17413,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ };
     if (loaders[page]) loaders[page]();
 }
 

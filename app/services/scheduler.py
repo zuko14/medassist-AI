@@ -249,6 +249,16 @@ class SchedulerService:
             coalesce=True,
         )
 
+        # DX-50 / W14: automatic B2B holds (credit limit, overdue) applied and lifted daily at 02:10 IST
+        self.scheduler.add_job(
+            self.dx_b2b_hold_evaluation,
+            CronTrigger(hour=2, minute=10),
+            id="dx_b2b_hold_evaluation",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         self.scheduler.add_job(
             self.assign_home_collections,
             "interval",
@@ -625,6 +635,18 @@ class SchedulerService:
                         logger.info(f"DX outbox: {n} visit(s) re-evaluated")
                 except Exception as e:
                     logger.error(f"DX outbox dispatch failed: {type(e).__name__}")
+
+    async def dx_b2b_hold_evaluation(self):
+        from app.services import dx_b2b
+        from app.services.distributed_lock import distributed_job_lock
+
+        async with distributed_job_lock("dx_b2b_hold_evaluation", lease_seconds=1800) as acquired:
+            if acquired:
+                try:
+                    n = await dx_b2b.hold_evaluation()
+                    logger.info(f"DX B2B hold evaluation: {n} account(s) changed")
+                except Exception as e:
+                    logger.error(f"DX B2B hold evaluation failed: {type(e).__name__}")
 
     async def assign_home_collections(self):
         from app.services import home_collection

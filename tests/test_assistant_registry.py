@@ -84,12 +84,12 @@ def drift(spec: ActionSpec) -> list[str]:
 # ── RT-14: page table = sidebar ──────────────────────────────────────────────
 
 def test_page_table_equals_the_sidebar():
-    sidebar = set(re.findall(r'class="nav-link[^"]*"[^>]*data-page="([a-z]+)"', HTML))
+    sidebar = set(re.findall(r'class="nav-link[^"]*"[^>]*data-page="([a-z0-9]+)"', HTML))   # dxb2b has a digit
     assert set(PAGES) == sidebar
 
 
 def test_every_page_has_a_section_go_can_open():
-    sections = set(re.findall(r'id="pg-([a-z]+)"', HTML))
+    sections = set(re.findall(r'id="pg-([a-z0-9]+)"', HTML))
     assert set(PAGES) <= sections
 
 

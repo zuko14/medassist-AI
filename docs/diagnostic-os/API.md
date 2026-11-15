@@ -147,20 +147,36 @@ open batch, cancelling a batch, re-batching a tube recorded missing.
 | GET / POST | `/public/dx/r/{token}`, `/public/dx/r/{token}/unlock` | public, 10/min/IP | HTML prompt; unlock `{phone_last4}` (JSON or form): 5 attempts consumed before the compare, decision re-checked, PDF `no-store` |
 Not built in P7: `templates/clone-from-pdf`, `DELETE /releases/{id}/share-link` (links expire), `GET /releases/{id}/deliveries` (the visit's releases carry them).
 
-## P8 — B2B
+## P8 — B2B (as built, migration 132)
+All under `/admin/dx`. NW = refused while the module is in WIND_DOWN. Money routes are audit-logged.
 | Method | Path | Permission | Notes |
 |:-|:-|:-|:-|
-| GET/POST/PATCH | `/rate-cards`, `/rate-cards/{id}/items` (+ CSV import) | DX_B2B_MANAGE (POST NW) | |
-| PATCH | `/b2b/accounts/{id}/billing` | DX_B2B_MANAGE | limit, days, mode, rate card, white label, template |
-| GET | `/b2b/accounts/{id}/ledger?from&to` | DX_B2B_MANAGE | derived balance |
-| POST | `/b2b/accounts/{id}/payments` | DX_B2B_MANAGE | idempotency key; UTR for NEFT |
-| POST | `/b2b/accounts/{id}/hold`, `/release-hold` | DX_B2B_MANAGE | reason |
-| POST / GET | `/b2b/statements`, `/b2b/statements/{id}`, `/b2b/statements/{id}/pdf`, `/b2b/statements/{id}/void` | DX_B2B_MANAGE | |
-| GET | `/b2b/receivables` | DX_B2B_MANAGE | ageing |
-| POST / GET | `/barcode-stock` | DX_ADMIN | non-overlapping ranges |
-| — | staff create (existing) | STAFF_MANAGE | `staff_role=B2B_PARTNER` requires `dx_b2b_account_id` of this clinic |
-| GET | `/partner/me`, `/partner/catalog`, `/partner/visits`, `/partner/visits/{id}`, `/partner/releases/{id}/pdf`, `/partner/statements`, `/partner/visits/{id}/labels.pdf` | B2B_PARTNER (confined) | every query `.eq("b2b_account_id", user.dx_b2b_account_id)` |
-| POST | `/partner/visits` | B2B_PARTNER (NW) | `source='partner_portal'`, account forced from the session |
+| GET / POST | `/rate-cards` | read DX_B2B_MANAGE, DX_REPORTS_MIS, DX_BILLING · write DX_B2B_MANAGE (NW) | list with `item_count` |
+| GET / PUT | `/rate-cards/{id}` | as above | detail with items (test name, code, MRP) |
+| POST | `/rate-cards/{id}/items` | DX_B2B_MANAGE | upsert by test; `price_paise: null` removes the test |
+| POST | `/rate-cards/{id}/import?dry_run` | DX_B2B_MANAGE | CSV `test_code` + `price` (₹) or `price_paise`, ≤ 1 MB, all or nothing (422 lists rows) |
+| GET | `/b2b-accounts` | (P3) | + `balance_paise` for money grants |
+| POST / PUT | `/b2b-accounts`, `/b2b-accounts/{id}` | DX_B2B_MANAGE | + `rate_card_id`, `credit_limit_paise`, `credit_days`, `gstin`, `billing_address`, `statement_cycle`, `auto_hold`, `copay_mode`, `copay_value` (basis points / paise); a status set here is a manual hold |
+| GET | `/b2b-accounts/{id}` | DX_B2B_MANAGE, DX_REPORTS_MIS | account + `dx_b2b_balance` + rate card + partner logins |
+| GET | `/b2b-accounts/{id}/ledger` | as above | every entry, oldest first, running balance, visit / patient / test |
+| POST | `/b2b-accounts/{id}/payments` | DX_B2B_MANAGE | body idempotency key; `payment` (credit) or `prepaid_topup` (prepaid); reference required for NEFT / UPI / cheque |
+| POST | `/b2b-accounts/{id}/hold` | DX_B2B_MANAGE | `{status: active\|on_hold, reason}` (manual hold) |
+| GET | `/b2b-accounts/ageing` | DX_B2B_MANAGE, DX_REPORTS_MIS | not due, 1–30, 31–60, 61–90, 90+ days past due (+ totals) |
+| GET / POST | `/b2b-accounts/{id}/statements` | read as above · issue DX_B2B_MANAGE | issue `{period_from, period_to}` → `B2B-YYYY-NNNNN`, PDF stored at `<clinic>/dx-statements/` |
+| GET | `/b2b-accounts/statements/{id}/pdf` | DX_B2B_MANAGE, DX_REPORTS_MIS | stored PDF, else re-rendered |
+| POST | `/b2b-accounts/statements/{id}/send` | DX_B2B_MANAGE | WhatsApp text + 7-day private link to the account desk (in-session) |
+| POST | `/b2b-accounts/statements/{id}/void` | DX_B2B_MANAGE | reason; latest live statement only |
+| POST | `/b2b-accounts/{id}/users` | DX_B2B_MANAGE (clinic-wide, NW) | creates a `B2B_PARTNER` login bound to the account; the generic staff route refuses this role |
+| GET / POST | `/barcode-stock` | read + DX_ADMIN, DX_COLLECT · issue DX_B2B_MANAGE, DX_ADMIN (NW) | one account or one site; ranges of a prefix never overlap (409) |
+| GET | `/referrers/volume?months` | VISIT_READ, DX_B2B_MANAGE, DX_REPORTS_MIS | visits and tests per referrer per IST month — counts only (ADR-DX-11) |
+| GET | `/partner/me` | B2B_PARTNER (confined) | own account, balance, rate card, sites, tests at contract price |
+| GET / POST | `/partner/visits` | B2B_PARTNER | own visits (+ current releases); register: `source='partner_portal'`, account and billing mode from the login, subject = account dependant |
+| GET | `/partner/statements`, `/partner/statements/{id}/pdf` | B2B_PARTNER | issued statements only |
+| GET | `/partner/releases/{id}/pdf` | B2B_PARTNER | only when `report_delivery` is `account` / `both` and `dx_delivery_decision(…, 'partner_portal')` allows (dues, owner, payer rules) |
+
+Partner confinement (`verify_credentials`): a `B2B_PARTNER` login reaches only `/admin/dx/partner/*`, `/admin/me` and its
+own password / username changes; without `dx_b2b_account_id` it reaches nothing. The account id is read live from
+`clinic_admins` on every session request and never taken from the request.
 
 ## P9 — Dashboards, MIS, assistants
 | Method | Path | Permission | Notes |

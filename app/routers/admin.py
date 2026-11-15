@@ -113,6 +113,7 @@ class AdminUser(str):
     branch_id: Optional[str]
     staff_role: Optional[str]
     doctor_id: Optional[str]
+    dx_b2b_account_id: Optional[str]
 
     def __new__(
         cls,
@@ -124,6 +125,7 @@ class AdminUser(str):
         branch_id: Optional[str] = None,
         staff_role: Optional[str] = None,
         doctor_id: Optional[str] = None,
+        dx_b2b_account_id: Optional[str] = None,
     ):
         obj = super().__new__(cls, username)
         obj.username = username
@@ -134,6 +136,7 @@ class AdminUser(str):
         obj.branch_id = branch_id
         obj.staff_role = staff_role
         obj.doctor_id = doctor_id
+        obj.dx_b2b_account_id = dx_b2b_account_id   # migration 132: a B2B_PARTNER login's account
         return obj
 
     def can_access_clinic(self, target_clinic_id: str) -> bool:
@@ -273,6 +276,7 @@ async def _authenticate_password(
                     branch_id=user_row.get("branch_id"),
                     staff_role=user_row.get("staff_role"),
                     doctor_id=user_row.get("doctor_id"),
+                    dx_b2b_account_id=user_row.get("dx_b2b_account_id"),
                 )
     except HTTPException:
         raise
@@ -391,12 +395,16 @@ async def resolve_admin_session(token: str) -> Optional[AdminUser]:
 
     user_id = row.get("user_id")
     doctor_id = None
+    dx_b2b_account_id = None
+    # A partner's account is read live on every request (SECURITY §5: a change applies next request);
+    # other logins keep the narrow select, so a deploy before migration 132 cannot break them.
+    ca_cols = "doctor_id, dx_b2b_account_id" if row.get("staff_role") == "B2B_PARTNER" else "doctor_id"
     if user_id and user_id not in ("super_admin_env", "platform_owner_env"):
         try:
             if row.get("clinic_id"):
                 ca_res = await sb(
                     scoped_query("clinic_admins", row["clinic_id"])
-                    .select("doctor_id")
+                    .select(ca_cols)
                     .eq("id", user_id)
                     .limit(1)
                 )
@@ -404,12 +412,13 @@ async def resolve_admin_session(token: str) -> Optional[AdminUser]:
                 # unscoped: global_auth_lookup — super admin has no clinic_id
                 ca_res = await sb(
                     supabase.table("clinic_admins")
-                    .select("doctor_id")
+                    .select(ca_cols)
                     .eq("id", user_id)
                     .limit(1)
                 )
             if ca_res.data:
                 doctor_id = ca_res.data[0].get("doctor_id")
+                dx_b2b_account_id = ca_res.data[0].get("dx_b2b_account_id")
         except Exception as e:
             logger.warning(f"Could not load doctor_id for session user {user_id}: {e}")
 
@@ -422,6 +431,7 @@ async def resolve_admin_session(token: str) -> Optional[AdminUser]:
         branch_id=row.get("branch_id"),
         staff_role=row.get("staff_role"),
         doctor_id=doctor_id,
+        dx_b2b_account_id=dx_b2b_account_id,
     )
 
 
@@ -522,6 +532,10 @@ def _enforce_dx_confined_scope(request: Request, user: AdminUser) -> AdminUser:
     if allowed is None:
         return user
     path = request.url.path.rstrip("/") or "/"
+    # ADR-DX-09: a partner login without its account reaches nothing (fail closed)
+    if user.staff_role == "B2B_PARTNER" and not getattr(user, "dx_b2b_account_id", None):
+        logger.warning(f"DX_CONFINED_DENIED role='B2B_PARTNER' user='{user.username}' reason=no_account")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This login is not linked to a B2B account.")
     if allowed.match(path) or any(request.method == m and rx.match(path) for m, rx in _DX_CONFINED_COMMON):
         return user
     logger.warning(f"DX_CONFINED_DENIED role='{user.staff_role}' user='{user.username}' {request.method} {path}")
@@ -1299,6 +1313,10 @@ async def create_staff(
             status_code=422,
             detail="Company viewer logins are created for a company from the Corporate Health page.",
         )
+    if body.staff_role == "B2B_PARTNER":
+        # Needs its B2B account (confinement fails closed without one): POST /admin/dx/b2b-accounts/{id}/users
+        raise HTTPException(status_code=422, detail="B2B partner logins are created for an account from the B2B "
+                                                    "Accounts page.")
     _refuse_role_beyond_authority(role_grants_beyond_authority(body.staff_role, user), body.staff_role)
 
     # migration 103: DOCTOR requires a doctor profile from the same clinic

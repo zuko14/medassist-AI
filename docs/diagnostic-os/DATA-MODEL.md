@@ -584,6 +584,22 @@ account is `on_hold` or prepaid balance insufficient), `dx_b2b_reverse_charge` (
 `dx_b2b_record_payment`, `dx_b2b_issue_statement(account, period)` (locks account; totals = SQL sums over ledger rows
 in period; assigns number), `dx_b2b_balance(account)` (STABLE; derived), `dx_b2b_set_hold`.
 
+**As built (migration 132, 2026-11-15).** Composite tenant FKs throughout. Ledger debits = `opening_balance`,
+`charge`; credits = every other type; a CHECK ties `payment_mode` to `payment` / `prepaid_topup`. Writes only inside
+`dx_b2b_*` functions (`trg_dx_b2b_ledger_guard`); the one update allowed is the statement link. Charges are posted by
+`dx_b2b_post_visit_charges` (called after the lines in `dx_register_visit` / `dx_add_items`, text-patched) and
+reversed by `dx_b2b_reverse_charge` / `dx_b2b_reverse_visit_charges` (in `dx_cancel_item` / `dx_cancel_visit`;
+idempotency key `reverse:<item>`). `dx_b2b_post_charge` refuses any non-active account and a prepaid charge above the
+held balance; it locks the account row (lock order: clinic counter row, then account — statements take their counter
+first). `dx_price_items` takes `b2b_account_id` / `accession_id` in its context: live rate card price (else branch /
+clinic MRP; booking lines keep their price), shares per ADR-DX-20 (percent floor per item, fixed per visit first items
+first). Balance / overdue / ageing are FIFO over the ledger (`dx_b2b_unpaid`); overdue needs `credit_days`. A
+statement links every unbilled row dated (IST) up to `period_to` — opening = rows on earlier live statements, so each
+closing is the next opening; periods of an account never overlap; void unlinks (latest only). Added: `dx_b2b_ageing`,
+`dx_b2b_void_statement`, `dx_b2b_evaluate_holds`, `dx_check_barcode_stock` (in `dx_bind_barcode`), stock overlap
+trigger, `hold_kind` only while on hold, co-pay percent ≤ 10000 bp, `issued_by_name` on statements. Purge v8 deletes
+partner logins with the accounts.
+
 ## 10. DX-M9 — Instruments and QC
 ```sql
 CREATE TABLE dx_bridge_agents (id, clinic_id, site_id, name, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL,

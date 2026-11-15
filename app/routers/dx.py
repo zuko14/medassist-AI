@@ -5,7 +5,8 @@ Every route: permission -> enforce_clinic_access -> dx_access(clinic) ->
 (new work) wind-down rule -> site/branch scope -> service. Zero-LLM.
 """
 
-from datetime import datetime, timezone
+import hashlib
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -22,7 +23,7 @@ from app.routers.admin import (
 )
 from app.routers.lis import ParameterIn
 from app.routers.opd import PatientRegisterIn
-from app.services import dx, dx_billing, dx_catalogue, dx_results, dx_seed
+from app.services import dx, dx_b2b, dx_billing, dx_catalogue, dx_results, dx_seed
 from app.services.permissions import holds_dx_permission, resolve_owned_branch
 from app.services.tenant import dx_access, get_clinic_by_id, invalidate_tenant_cache
 
@@ -658,6 +659,16 @@ class AccountIn(_In):
     patient_copy_reason: Optional[str] = Field(None, min_length=10, max_length=300)
     default_billing_mode: Literal["patient", "b2b_credit", "b2b_prepaid", "b2b_split"] = "b2b_credit"
     white_label: bool = False
+    # migration 132: money terms (all optional; DB defaults otherwise)
+    rate_card_id: Optional[UUID] = None
+    credit_limit_paise: Optional[int] = Field(None, ge=0, le=10_000_000_000)
+    credit_days: Optional[int] = Field(None, ge=0, le=365)
+    gstin: Optional[str] = Field(None, pattern=r"^[0-9A-Z]{15}$")
+    billing_address: Optional[str] = Field(None, max_length=500)
+    statement_cycle: Optional[Literal["weekly", "fortnightly", "monthly"]] = None
+    auto_hold: Optional[bool] = None
+    copay_mode: Optional[Literal["none", "percent", "fixed"]] = None
+    copay_value: Optional[int] = Field(None, ge=0, le=100_000_000)   # basis points (percent) or paise (fixed)
 
 
 class AccountPatch(_In):
@@ -670,6 +681,16 @@ class AccountPatch(_In):
     white_label: Optional[bool] = None
     status: Optional[Literal["active", "on_hold", "closed"]] = None
     hold_reason: Optional[str] = Field(None, max_length=300)
+    default_billing_mode: Optional[Literal["patient", "b2b_credit", "b2b_prepaid", "b2b_split"]] = None
+    rate_card_id: Optional[UUID] = None
+    credit_limit_paise: Optional[int] = Field(None, ge=0, le=10_000_000_000)
+    credit_days: Optional[int] = Field(None, ge=0, le=365)
+    gstin: Optional[str] = Field(None, pattern=r"^[0-9A-Z]{15}$")
+    billing_address: Optional[str] = Field(None, max_length=500)
+    statement_cycle: Optional[Literal["weekly", "fortnightly", "monthly"]] = None
+    auto_hold: Optional[bool] = None
+    copay_mode: Optional[Literal["none", "percent", "fixed"]] = None
+    copay_value: Optional[int] = Field(None, ge=0, le=100_000_000)
 
 
 class SubjectIn(_In):
@@ -699,7 +720,8 @@ class QuoteIn(_CartIn):
     patient_id: Optional[str] = None
     family_member_id: Optional[str] = None
     branch_id: Optional[str] = None
-    billing_mode: Literal["patient", "internal"] = "patient"
+    billing_mode: Literal["patient", "internal", "b2b_credit", "b2b_prepaid", "b2b_split"] = "patient"
+    b2b_account_id: Optional[str] = None
 
 
 class _VisitFields(_CartIn):
@@ -846,6 +868,36 @@ async def list_referrers(q: Optional[str] = Query(None, max_length=80), clinic_i
     return {"referrers": rows[:200]}
 
 
+@router.get("/referrers/volume")
+async def referrer_volume(months: int = Query(6, ge=1, le=24), clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    """Referral volume (visits and tests per referrer per IST month). ADR-DX-11: counts only —
+    no payout, incentive or commission is computed or returned."""
+    scope, _ = await _dx_scope(user, clinic_id, *VISIT_READ, "DX_B2B_MANAGE", "DX_REPORTS_MIS")
+    from app.utils.helpers import today_ist
+    start = today_ist().replace(day=1)
+    for _ in range(months - 1):
+        start = (start - timedelta(days=1)).replace(day=1)
+    visits = await dx_b2b._rows(scoped_query("dx_accessions", scope, "id, referrer_id, created_at")
+                                .not_.is_("referrer_id", "null").neq("status", "cancelled")
+                                .gte("created_at", f"{start.isoformat()}T00:00:00+05:30"))
+    items = await dx_b2b._in("dx_accession_items", scope, "accession_id, kind, status", "accession_id",
+                             [v["id"] for v in visits])
+    tests: dict[str, int] = {}
+    for i in items:
+        if i["status"] == "active" and i["kind"] != "fee":
+            tests[i["accession_id"]] = tests.get(i["accession_id"], 0) + 1
+    ist = timezone(timedelta(hours=5, minutes=30))
+    out: dict[tuple, dict] = {}
+    for v in visits:
+        month = datetime.fromisoformat(str(v["created_at"]).replace("Z", "+00:00")).astimezone(ist).strftime("%Y-%m")
+        row = out.setdefault((v["referrer_id"], month), {"referrer_id": v["referrer_id"], "month": month,
+                                                         "visits": 0, "tests": 0})
+        row["visits"] += 1
+        row["tests"] += tests.get(v["id"], 0)
+    return {"from": start.isoformat(), "rows": sorted(out.values(), key=lambda r: (r["month"], r["referrer_id"]))}
+
+
 @router.post("/referrers", status_code=status.HTTP_201_CREATED)
 async def create_referrer(body: ReferrerIn, request: Request, clinic_id: str = "default",
                           user: AdminUser = Depends(verify_credentials)):
@@ -886,14 +938,18 @@ def _authorisation(user: AdminUser, reason: Optional[str]) -> dict:
 @router.get("/b2b-accounts")
 async def list_accounts(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _dx_scope(user, clinic_id, "DX_B2B_MANAGE", *VISIT_READ)
-    return {"accounts": await dx_catalogue.list_rows("dx_b2b_accounts", scope)}
+    accounts = await dx_catalogue.list_rows("dx_b2b_accounts", scope)
+    if _can_money(user):        # balances are money (SECURITY §4)
+        bal = await dx_b2b.balances(scope)
+        accounts = [{**a, "balance_paise": (bal.get(a["id"]) or {}).get("balance_paise", 0)} for a in accounts]
+    return {"accounts": accounts}
 
 
 @router.post("/b2b-accounts", status_code=status.HTTP_201_CREATED)
 async def create_account(body: AccountIn, request: Request, clinic_id: str = "default",
                          user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _dx_scope(user, clinic_id, "DX_B2B_MANAGE", new_work=True)
-    data = body.model_dump(exclude={"patient_copy_reason"}, exclude_none=True)
+    data = body.model_dump(exclude={"patient_copy_reason"}, exclude_none=True, mode="json")
     # ADR-DX-20: a payer (insurance / TPA / corporate) gets the report; the patient only with an authorisation
     data.setdefault("report_delivery", "account" if body.kind in ("insurance_tpa", "corporate") else "patient")
     row = await dx_catalogue.create_row("dx_b2b_accounts", scope, {**data, **_authorisation(user, body.patient_copy_reason)})
@@ -906,8 +962,15 @@ async def create_account(body: AccountIn, request: Request, clinic_id: str = "de
 async def update_account(account_id: str, body: AccountPatch, request: Request, clinic_id: str = "default",
                          user: AdminUser = Depends(verify_credentials)):
     scope, _ = await _dx_scope(user, clinic_id, "DX_B2B_MANAGE")
-    patch = {k: v for k, v in _nullable_patch(body, ("name", "report_delivery", "white_label", "status")).items()
+    patch = {k: v for k, v in _nullable_patch(body, ("name", "report_delivery", "white_label", "status",
+                                                     "default_billing_mode", "statement_cycle", "auto_hold",
+                                                     "copay_mode")).items()
              if k != "patient_copy_reason"}
+    patch = {k: (str(v) if isinstance(v, UUID) else v) for k, v in patch.items()}
+    if "status" in patch:       # a hold set here is a manual hold; leaving it clears the kind
+        patch["hold_kind"] = "manual" if patch["status"] == "on_hold" else None
+        if patch["status"] != "on_hold":
+            patch["hold_reason"] = None
     if "patient_copy_reason" in body.model_fields_set:
         # a reason records a new patient-copy authorisation; an explicit null revokes it
         patch.update(_authorisation(user, body.patient_copy_reason) or
@@ -2142,3 +2205,411 @@ async def create_delivery_override(accession_id: UUID, body: OverrideIn, request
     await _audit(user, request, "dx_delivery_override", "dx_accession", str(accession_id),
                  {"override_id": out["id"], "reason": out["reason"], "expires_at": out["expires_at"]})
     return out
+
+
+# ── B2B money (migration 132, DX-49…DX-52) ──────────────────────────────────
+
+B2B = ("DX_B2B_MANAGE",)
+B2B_READ = ("DX_B2B_MANAGE", "DX_REPORTS_MIS")
+CSV_MAX_BYTES = 1024 * 1024
+
+
+class RateCardIn(_In):
+    name: str = Field(..., min_length=2, max_length=80)
+    kind: Literal["b2b", "corporate", "camp", "insurance"] = "b2b"
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
+    is_active: bool = True
+
+
+class RateCardPatch(_In):
+    name: Optional[str] = Field(None, min_length=2, max_length=80)
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
+    is_active: Optional[bool] = None
+
+
+class RateItemIn(_In):
+    lab_test_id: str = Field(..., pattern=UUID_RX)
+    price_paise: Optional[int] = Field(None, ge=0, le=100_000_000)     # null removes the test from the card
+
+
+class RateItemsIn(_In):
+    items: list[RateItemIn] = Field(..., min_length=1, max_length=2000)
+
+
+class PaymentIn(_In):
+    amount_paise: int = Field(..., gt=0, le=10_000_000_000)
+    mode: Literal["neft", "upi", "cheque", "cash", "card", "gateway"]
+    reference: Optional[str] = Field(None, max_length=80)
+    idempotency_key: str = IDEM
+
+
+class StatementIn(_In):
+    period_from: date
+    period_to: date
+
+
+class HoldIn(_In):
+    status: Literal["active", "on_hold"]
+    reason: Optional[str] = Field(None, max_length=300)
+
+
+class StockIn(_In):
+    account_id: Optional[str] = Field(None, pattern=UUID_RX)
+    site_id: Optional[str] = Field(None, pattern=UUID_RX)
+    prefix: str = Field("", pattern=r"^[A-Z0-9]{0,12}$")
+    range_from: int = Field(..., ge=0, le=999_999_999_999_999_999)
+    range_to: int = Field(..., ge=0, le=999_999_999_999_999_999)
+
+
+class PartnerUserIn(_In):
+    username: str = Field(..., min_length=3, max_length=60, pattern=r"^[A-Za-z0-9._@-]+$")
+    password: str = Field(..., min_length=8, max_length=200)
+    full_name: Optional[str] = Field(None, max_length=100)
+    phone: Optional[str] = Field(None, pattern=PHONE)
+
+
+# rate cards
+
+@router.get("/rate-cards")
+async def list_rate_cards(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B_READ, "DX_BILLING")
+    return {"rate_cards": await dx_b2b.list_rate_cards(scope)}
+
+
+@router.post("/rate-cards", status_code=status.HTTP_201_CREATED)
+async def create_rate_card(body: RateCardIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B, new_work=True)
+    row = await dx_b2b.save_rate_card(scope, body.model_dump(exclude_none=True, mode="json"))
+    await _audit(user, request, "dx_rate_card_create", "dx_rate_card", row["id"], {"name": body.name})
+    return row
+
+
+@router.get("/rate-cards/{card_id}")
+async def get_rate_card(card_id: UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B_READ, "DX_BILLING")
+    return await dx_b2b.get_rate_card(scope, str(card_id))
+
+
+@router.put("/rate-cards/{card_id}")
+async def update_rate_card(card_id: UUID, body: RateCardPatch, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B)
+    patch = {k: (v.isoformat() if isinstance(v, date) else v)
+             for k, v in _nullable_patch(body, ("name", "valid_from", "is_active")).items()}
+    if not patch:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    row = await dx_b2b.save_rate_card(scope, patch, str(card_id))
+    await _audit(user, request, "dx_rate_card_update", "dx_rate_card", str(card_id), {"keys": sorted(patch)})
+    return row
+
+
+@router.post("/rate-cards/{card_id}/items")
+async def set_rate_card_items(card_id: UUID, body: RateItemsIn, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B)
+    out = await dx_b2b.set_rate_card_items(scope, str(card_id), [i.model_dump() for i in body.items])
+    await _audit(user, request, "dx_rate_card_items", "dx_rate_card", str(card_id), out)
+    return out
+
+
+@router.post("/rate-cards/{card_id}/import")
+async def import_rate_card(card_id: UUID, request: Request, file: UploadFile = File(...), dry_run: bool = False,
+                           clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B)
+    data = await file.read(CSV_MAX_BYTES + 1)
+    if len(data) > CSV_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="The file is larger than 1 MB.")
+    await dx_b2b.get_rate_card(scope, str(card_id))
+    out = await dx_b2b.import_rate_csv(scope, str(card_id), data, dry_run)
+    if out["applied"]:
+        await _audit(user, request, "dx_rate_card_import", "dx_rate_card", str(card_id), out)
+    return out
+
+
+# accounts: money
+
+@router.get("/b2b-accounts/ageing")
+async def receivables_ageing(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B_READ)
+    rows = await dx_b2b.ageing(scope)
+    keys = ("current_paise", "d1_30_paise", "d31_60_paise", "d61_90_paise", "d90_plus_paise", "balance_paise")
+    return {"accounts": rows, "totals": {k: sum(int(r.get(k) or 0) for r in rows) for k in keys}}
+
+
+@router.get("/b2b-accounts/{account_id}")
+async def get_account(account_id: UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B_READ)
+    out = await dx_b2b.account_summary(scope, str(account_id))
+    out["partner_users"] = await dx_b2b._rows(scoped_query("clinic_admins", scope, "id, username, full_name, is_active, "
+                                                           "created_at").eq("dx_b2b_account_id", str(account_id)))
+    return out
+
+
+@router.get("/b2b-accounts/{account_id}/ledger")
+async def account_ledger(account_id: UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B_READ)
+    await dx_b2b.get_account(scope, str(account_id), "id")
+    return {"entries": await dx_b2b.ledger(scope, str(account_id)),
+            "balance": await dx_b2b.balance(scope, str(account_id))}
+
+
+@router.post("/b2b-accounts/{account_id}/payments", status_code=status.HTTP_201_CREATED)
+async def record_payment(account_id: UUID, body: PaymentIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B)
+    out = await dx_b2b.record_payment(scope, str(account_id), body.model_dump(), user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_b2b_payment", "dx_b2b_account", str(account_id),
+                     {"entry_id": out["id"], "entry_type": out["entry_type"], "amount_paise": body.amount_paise,
+                      "mode": body.mode, "reference": body.reference})
+    return out
+
+
+@router.post("/b2b-accounts/{account_id}/hold")
+async def set_account_hold(account_id: UUID, body: HoldIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B)
+    if body.status == "on_hold" and not (body.reason or "").strip():
+        raise HTTPException(status_code=422, detail="Say why the account is put on hold.")
+    out = await dx_b2b.set_hold(scope, str(account_id), body.status, body.reason, user)
+    await _audit(user, request, "dx_b2b_hold", "dx_b2b_account", str(account_id),
+                 {"status": body.status, "reason": body.reason, "changed": out.get("changed")})
+    return out
+
+
+@router.get("/b2b-accounts/{account_id}/statements")
+async def list_statements(account_id: UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B_READ)
+    await dx_b2b.get_account(scope, str(account_id), "id")
+    return {"statements": await dx_b2b.list_statements(scope, str(account_id))}
+
+
+@router.post("/b2b-accounts/{account_id}/statements", status_code=status.HTTP_201_CREATED)
+async def issue_statement(account_id: UUID, body: StatementIn, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B)
+    st = await dx_b2b.issue_statement(scope, str(account_id), body.period_from.isoformat(), body.period_to.isoformat(),
+                                      user)
+    await _audit(user, request, "dx_b2b_statement_issue", "dx_b2b_statement", st["id"],
+                 {"number": st["statement_number"], "closing_paise": st["closing_paise"]})
+    return st
+
+
+@router.get("/b2b-accounts/statements/{statement_id}/pdf")
+async def statement_pdf(statement_id: UUID, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    from fastapi.responses import Response
+    scope, _ = await _dx_scope(user, clinic_id, *B2B_READ)
+    st = await dx_b2b.get_statement(scope, str(statement_id))
+    pdf = await dx_b2b.statement_pdf(scope, st)
+    await _audit(user, request, "dx_b2b_statement_view", "dx_b2b_statement", st["id"], {})
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store", "Content-Disposition": f'inline; filename="{st["statement_number"]}.pdf"'})
+
+
+@router.post("/b2b-accounts/statements/{statement_id}/send")
+async def send_statement(statement_id: UUID, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _dx_scope(user, clinic_id, *B2B)
+    st = await dx_b2b.get_statement(scope, str(statement_id))
+    out = await dx_b2b.send_statement(clinic, st)
+    await _audit(user, request, "dx_b2b_statement_send", "dx_b2b_statement", st["id"], out)
+    return out
+
+
+@router.post("/b2b-accounts/statements/{statement_id}/void")
+async def void_statement(statement_id: UUID, body: ReasonIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B)
+    out = await dx_b2b.void_statement(scope, str(statement_id), body.reason, user)
+    await _audit(user, request, "dx_b2b_statement_void", "dx_b2b_statement", str(statement_id), {"reason": body.reason})
+    return out
+
+
+@router.post("/b2b-accounts/{account_id}/users", status_code=status.HTTP_201_CREATED)
+async def create_partner_user(account_id: UUID, body: PartnerUserIn, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    """ADR-DX-09: a B2B client's login (staff_role B2B_PARTNER, no permissions), confined to
+    /admin/dx/partner/* and to this account in verify_credentials."""
+    from app.database import supabase
+    from app.routers.admin import hash_password
+    scope, _ = await _dx_scope(user, clinic_id, *B2B, new_work=True)
+    _clinic_wide(user)
+    await dx_b2b.get_account(scope, str(account_id), "id")
+    # unscoped: checking global username uniqueness across all clinic admins
+    if (await sb(supabase.table("clinic_admins").select("id").eq("username", body.username))).data:
+        raise HTTPException(status_code=409, detail="Username already exists")
+    # unscoped: insert_scoped_by_payload
+    res = await sb(supabase.table("clinic_admins").insert({
+        "clinic_id": scope, "username": body.username, "password_hash": hash_password(body.password), "role": "staff",
+        "staff_role": "B2B_PARTNER", "permissions": [], "dx_b2b_account_id": str(account_id), "is_active": True,
+        **({"full_name": body.full_name} if body.full_name else {}), **({"phone": body.phone} if body.phone else {})}))
+    row = res.data[0]
+    await _audit(user, request, "dx_partner_user_create", "clinic_admin", row["id"], {"b2b_account_id": str(account_id)})
+    return {k: row.get(k) for k in ("id", "username", "full_name", "is_active", "dx_b2b_account_id", "created_at")}
+
+
+# barcode stock
+
+@router.get("/barcode-stock")
+async def list_barcode_stock(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B, "DX_ADMIN", "DX_COLLECT")
+    return {"stock": await dx_b2b.list_stock(scope)}
+
+
+@router.post("/barcode-stock", status_code=status.HTTP_201_CREATED)
+async def issue_barcode_stock(body: StockIn, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _dx_scope(user, clinic_id, *B2B, "DX_ADMIN", new_work=True)
+    if (body.account_id is None) == (body.site_id is None):
+        raise HTTPException(status_code=422, detail="Issue a barcode range to one account or one site.")
+    if body.range_to < body.range_from:
+        raise HTTPException(status_code=422, detail="The range must run from a lower to a higher number.")
+    row = await dx_b2b.issue_stock(scope, body.model_dump(), user)
+    await _audit(user, request, "dx_barcode_stock_issue", "dx_barcode_stock", row["id"],
+                 {"prefix": body.prefix, "from": body.range_from, "to": body.range_to,
+                  "account_id": body.account_id, "site_id": body.site_id})
+    return row
+
+
+# ── partner portal (B2B_PARTNER; SECURITY §5) ───────────────────────────────
+
+class PartnerLineIn(_In):
+    lab_test_id: str = Field(..., pattern=UUID_RX)
+
+
+class PartnerVisitIn(_In):
+    name: str = Field(..., min_length=1, max_length=100)
+    gender: Optional[Literal["male", "female", "other", "undisclosed"]] = None
+    age_years: Optional[int] = Field(None, ge=0, le=130)
+    external_ref: Optional[str] = Field(None, max_length=40)       # the hospital's OP / IP number
+    branch_id: Optional[str] = Field(None, pattern=UUID_RX)         # only when the lab has several sites
+    priority: Literal["routine", "urgent", "stat"] = "routine"
+    clinical_notes: Optional[str] = Field(None, max_length=1000)
+    items: list[PartnerLineIn] = Field(..., min_length=1, max_length=50)
+    idempotency_key: str = IDEM
+
+
+async def _partner(user: AdminUser, clinic_id: str) -> tuple[str, dict, dict]:
+    """The login's own account, never one from the request (verify_credentials already confined the path)."""
+    if getattr(user, "staff_role", None) != "B2B_PARTNER" or not getattr(user, "dx_b2b_account_id", None):
+        raise HTTPException(status_code=403, detail="Partner portal only.")
+    scope, clinic = await _dx_scope(user, clinic_id)
+    acc = await dx_b2b.get_account(scope, str(user.dx_b2b_account_id), dx_b2b.ACCOUNT_PUBLIC)
+    if acc["status"] == "closed":
+        raise HTTPException(status_code=403, detail="This B2B account is closed.")
+    return scope, clinic, acc
+
+
+@router.get("/partner/me")
+async def partner_me(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _, acc = await _partner(user, clinic_id)
+    summary = await dx_b2b.account_summary(scope, acc["id"], dx_b2b.ACCOUNT_PUBLIC)
+    tests = await dx_b2b._rows(scoped_query("lab_tests", scope, "id, name, test_code, kind, price_paise")
+                               .eq("is_active", True).is_("branch_id", "null").not_.is_("approved_at", "null")
+                               .order("name"))
+    card = {}
+    if summary["rate_card"] and summary["rate_card"].get("is_active"):
+        card = {i["lab_test_id"]: i["price_paise"] for i in
+                (await dx_b2b.get_rate_card(scope, summary["rate_card"]["id"]))["items"]}
+    sites = [{"branch_id": s["branch_id"], "name": s["display_name"]} for s in await dx.list_sites(scope)
+             if s.get("is_active")]
+    return {**summary, "sites": sites, "tests": [{**t, "price_paise": card.get(t["id"], t["price_paise"]),
+                                                  "contract_price": t["id"] in card} for t in tests]}
+
+
+@router.get("/partner/visits")
+async def partner_visits(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _, acc = await _partner(user, clinic_id)
+    visits = await dx_b2b.partner_visits(scope, acc["id"])
+    releases = await dx_b2b.partner_releases(scope, acc["id"], [v["id"] for v in visits])
+    by_visit: dict[str, list] = {}
+    for r in releases:
+        if r["status"] != "superseded":
+            by_visit.setdefault(r["accession_id"], []).append(r)
+    return {"visits": [{**v, "releases": sorted(by_visit.get(v["id"], []), key=lambda r: r["release_no"])}
+                       for v in visits]}
+
+
+@router.post("/partner/visits", status_code=status.HTTP_201_CREATED)
+async def partner_register_visit(body: PartnerVisitIn, request: Request, clinic_id: str = "default",
+                                 user: AdminUser = Depends(verify_credentials)):
+    """W5-A: the hospital registers its own sample at the account's contract price, billed per the
+    account (subjects are the account's dependants: ADR-DX-21)."""
+    scope, clinic, acc = await _partner(user, clinic_id)
+    if dx_access(clinic) != "ACTIVE":
+        raise HTTPException(status_code=409, detail="The lab is not taking new samples through the portal.")
+    if acc["status"] != "active":
+        raise HTTPException(status_code=409, detail={"code": "dx_b2b_on_hold",
+                                                     "message": "This account is on hold. Contact the lab."})
+    sites = [s for s in await dx.list_sites(scope) if s.get("is_active")]
+    branch = body.branch_id if body.branch_id in {s["branch_id"] for s in sites} else \
+        (sites[0]["branch_id"] if len(sites) == 1 else None)
+    if not branch:
+        raise HTTPException(status_code=422, detail="Choose the lab branch the sample goes to.")
+    subject = await dx.ensure_b2b_subject(scope, acc["id"], {"name": body.name, "gender": body.gender,
+                                                             "age_years": body.age_years})
+    payload = {"branch_id": branch, "patient_id": subject["patient_id"], "family_member_id": subject["family_member_id"],
+               "source": "partner_portal", "b2b_account_id": acc["id"], "billing_mode": acc["default_billing_mode"],
+               "patient_type": "b2b", "priority": body.priority, "external_ref": body.external_ref,
+               "clinical_notes": body.clinical_notes,
+               # per-account key space, fixed length (the visit key column allows 80 characters)
+               "idempotency_key": "partner:" + hashlib.sha256(f"{acc['id']}:{body.idempotency_key}".encode()).hexdigest()[:48],
+               "items": [{"lab_test_id": i.lab_test_id} for i in body.items], "fees": []}
+    out = await dx.register_visit(scope, clinic, {k: v for k, v in payload.items() if v is not None}, user)
+    if not out.get("replayed"):
+        await _audit(user, request, "dx_partner_visit_register", "dx_accession", out["visit"]["id"],
+                     {"number": out["visit"]["accession_number"], "b2b_account_id": acc["id"]})
+    v = out["visit"]
+    return {"visit": {k: v.get(k) for k in ("id", "accession_number", "status", "priority", "external_ref",
+                                            "patient_snapshot", "created_at")},
+            "items": [{k: i.get(k) for k in ("id", "item_name", "price_paise", "payer_share_paise", "status")}
+                      for i in out["items"]],
+            "samples": [{k: s.get(k) for k in ("id", "barcode", "container_code", "sample_type")}
+                        for s in out.get("samples", [])],
+            "replayed": out.get("replayed", False)}
+
+
+@router.get("/partner/statements")
+async def partner_statements(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _, acc = await _partner(user, clinic_id)
+    rows = [s for s in await dx_b2b.list_statements(scope, acc["id"]) if s["status"] == "issued"]
+    return {"statements": rows, "balance": await dx_b2b.balance(scope, acc["id"])}
+
+
+@router.get("/partner/statements/{statement_id}/pdf")
+async def partner_statement_pdf(statement_id: UUID, request: Request, clinic_id: str = "default",
+                                user: AdminUser = Depends(verify_credentials)):
+    from fastapi.responses import Response
+    scope, _, acc = await _partner(user, clinic_id)
+    st = await dx_b2b._one(scoped_query("dx_b2b_statements", scope).eq("account_id", acc["id"])
+                           .eq("id", str(statement_id)).eq("status", "issued"), "Statement")
+    pdf = await dx_b2b.statement_pdf(scope, st)
+    await _audit(user, request, "dx_partner_statement_download", "dx_b2b_statement", st["id"], {})
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store", "Content-Disposition": f'inline; filename="{st["statement_number"]}.pdf"'})
+
+
+@router.get("/partner/releases/{release_id}/pdf")
+async def partner_release_pdf(release_id: UUID, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    """Only the account's own visits, only when it receives reports (report_delivery account / both), and
+    only when the delivery rulebook allows the partner target (dues, owner, payer rules: DELIVERY-POLICY)."""
+    from fastapi.responses import Response
+    from app.services import dx_reports
+    scope, _, acc = await _partner(user, clinic_id)
+    if acc["report_delivery"] not in ("account", "both"):
+        raise HTTPException(status_code=403, detail="Reports for this account are not delivered to the portal.")
+    rel = await dx_reports.get_release(scope, str(release_id))
+    await dx_b2b.partner_visit(scope, acc["id"], rel["accession_id"])          # 404 for another account's visit
+    ok, reason = await dx_reports.decision(scope, rel["id"], "partner_portal")
+    if not ok:
+        raise HTTPException(status_code=409, detail={"code": reason, "message": dx_reports.HELD_TEXT.get(
+            reason, "This report cannot be downloaded yet.")})
+    pdf = await dx_reports._stored_or_render(scope, rel, None)
+    await _audit(user, request, "dx_partner_release_download", "dx_report_release", rel["id"], {})
+    return Response(pdf, media_type="application/pdf", headers={
+        "Cache-Control": "no-store", "Content-Disposition": f'inline; filename="R{rel["release_no"]}.pdf"'})

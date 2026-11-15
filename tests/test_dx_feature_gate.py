@@ -132,6 +132,10 @@ def _req(method, path):
 
 def test_logistics_runner_and_partner_are_confined():
     runner, partner = _staff("LOGISTICS_RUNNER"), _staff("B2B_PARTNER")
+    with pytest.raises(HTTPException) as e:      # migration 132: a partner without its account reaches nothing
+        _enforce_dx_confined_scope(_req("GET", "/admin/dx/partner/me"), partner)
+    assert e.value.status_code == 403
+    partner.dx_b2b_account_id = str(uuid.uuid4())
     for user, ok in ((runner, "/admin/dx/logistics/batches"), (partner, "/admin/dx/partner/visits")):
         assert _enforce_dx_confined_scope(_req("GET", ok), user) is user
         assert _enforce_dx_confined_scope(_req("GET", "/admin/me"), user) is user

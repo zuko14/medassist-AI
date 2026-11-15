@@ -27,6 +27,8 @@ LAYOUT = {"schema": 1, "body": {"font_pt": 9}}
 def unwind_131(cur) -> None:
     """Inside an open transaction: purge every clinic with DX-M7 rows (or adopted orders),
     run the 131 rollback. Called first by unwind_130 (newest first)."""
+    from tests.test_migration_dx_m8 import unwind_132
+    unwind_132(cur)   # newest first: 132's ledger references visits and its purge v8 replaces v7
     cur.execute("SELECT to_regclass('public.dx_report_releases') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

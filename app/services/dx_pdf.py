@@ -451,3 +451,90 @@ def render_visit_report(release_dict: dict, results_list: list[dict], visit_dict
     pdf.put(pdf.l_margin, pdf.get_y() + 5, pdf.W, 5, f"** {body['end_marker']} **", 8.5, bold=True, align="C")
     data = bytes(pdf.output())
     return data, hashlib.sha256(data).hexdigest(), pdf.pages_count
+
+
+# ── B2B statement (W14, DX-50) ──────────────────────────────────────────────
+
+ENTRY_LABELS = {"opening_balance": "Opening balance", "charge": "Test", "charge_reversal": "Cancelled test",
+                "payment": "Payment received", "prepaid_topup": "Prepaid top-up", "credit_note": "Credit note",
+                "write_off": "Write-off"}
+DEBITS = ("opening_balance", "charge")
+
+
+def _rupees(paise: Any) -> str:
+    v = int(paise or 0)
+    sign = "-" if v < 0 else ""
+    return f"{sign}Rs {abs(v) // 100:,}.{abs(v) % 100:02d}"
+
+
+def render_statement_pdf(statement: dict, account: dict, rows: list[dict], lab: dict) -> tuple[bytes, str, int]:
+    """A bill of supply listing the statement's ledger rows (visit, patient, test, contract price,
+    credits) with opening / closing. rows: [{entry_type, amount_paise, created_at, accession_number,
+    patient_name, item_name, payment_mode, reference, reason}], oldest first. Pure, deterministic."""
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_margins(12, 12, 12)
+    pdf.set_auto_page_break(True, margin=14)
+    pdf.add_font("Noto", "", os.path.join(FONTS_DIR, "NotoSans-Regular.ttf"))
+    pdf.add_font("Noto", "B", os.path.join(FONTS_DIR, "NotoSans-Bold.ttf"))
+    pdf.set_creation_date(_dt(statement.get("issued_at")) or datetime(2000, 1, 1, tzinfo=timezone.utc))
+    pdf.set_title(str(statement.get("statement_number") or "Statement"))
+    pdf.set_producer("Kriya Diagnostic OS")
+    pdf.add_page()
+    W = pdf.w - 24
+
+    def line(text, size=9, bold=False, h=5, align="L", w=None):
+        pdf.set_font("Noto", "B" if bold else "", size)
+        pdf.cell(w or W, h, str(text or ""), align=align, new_x="RIGHT" if w else "LMARGIN", new_y="TOP" if w else "NEXT")
+
+    line(lab.get("name") or "", 14, True, 7)
+    if lab.get("address"):
+        line(lab["address"], 8)
+    pdf.ln(2)
+    line("STATEMENT OF ACCOUNT (BILL OF SUPPLY)", 11, True, 6, "C")
+    line(f"{statement.get('statement_number', '')}   |   Period {ist_date(statement.get('period_from'))} to "
+         f"{ist_date(statement.get('period_to'))}   |   Issued {ist_date(statement.get('issued_at'))}", 8.5, h=5, align="C")
+    pdf.ln(2)
+    line(f"To: {account.get('name', '')}" + (f" ({account['code']})" if account.get("code") else ""), 10, True)
+    for extra in (account.get("billing_address"), f"GSTIN: {account['gstin']}" if account.get("gstin") else None):
+        if extra:
+            line(extra, 8.5)
+    pdf.ln(3)
+    cols = (("Date", 22), ("Visit", 30), ("Patient", 42), ("Particulars", 56), ("Debit", 18), ("Credit", 18))
+    pdf.set_fill_color(235, 235, 235)
+    for name, w in cols:
+        pdf.set_font("Noto", "B", 8)
+        pdf.cell(w, 6, name, border=1, fill=True, align="R" if name in ("Debit", "Credit") else "L")
+    pdf.ln(6)
+    pdf.set_font("Noto", "", 8)
+    pdf.cell(sum(w for _, w in cols[:4]), 5.5, "Brought forward (opening balance)", border=1)
+    pdf.cell(36, 5.5, _rupees(statement.get("opening_paise")), border=1, align="R")
+    pdf.ln(5.5)
+    for r in rows:
+        debit = r.get("entry_type") in DEBITS
+        particulars = ENTRY_LABELS.get(r.get("entry_type"), r.get("entry_type"))
+        if r.get("entry_type") in ("charge", "charge_reversal") and r.get("item_name"):
+            particulars += f": {r['item_name']}"
+        if r.get("payment_mode"):
+            particulars += f" ({' '.join(x for x in (str(r['payment_mode']).upper(), r.get('reference')) if x)})"
+        cells = (ist_date(r.get("created_at")), r.get("accession_number") or "", r.get("patient_name") or "",
+                 particulars, _rupees(r["amount_paise"]) if debit else "", "" if debit else _rupees(r["amount_paise"]))
+        for (name, w), text in zip(cols, cells):
+            pdf.cell(w, 5.5, str(text)[:48 if w > 40 else 30], border=1, align="R" if name in ("Debit", "Credit") else "L")
+        pdf.ln(5.5)
+    pdf.set_font("Noto", "B", 8.5)
+    pdf.cell(sum(w for _, w in cols[:4]), 6, "Totals for the period", border=1)
+    pdf.cell(18, 6, _rupees(statement.get("total_charges_paise")), border=1, align="R")
+    pdf.cell(18, 6, _rupees(statement.get("total_credits_paise")), border=1, align="R")
+    pdf.ln(8)
+    closing = int(statement.get("closing_paise") or 0)
+    line(f"Closing balance: {_rupees(closing)}" + (" (amount due)" if closing > 0 else " (in credit)" if closing < 0 else ""),
+         11, True, 6)
+    if account.get("credit_days") is not None and closing > 0:
+        line(f"Payment due within {account['credit_days']} days of issue.", 8.5)
+    pdf.ln(3)
+    line("Diagnostic services are exempt from GST unless stated. Contract prices as agreed with the account. "
+         "No referral fee or commission is paid on any test.", 7.5)
+    if statement.get("status") == "void":
+        line(f"VOID: {statement.get('void_reason') or ''}", 12, True, 7, "C")
+    data = bytes(pdf.output())
+    return data, hashlib.sha256(data).hexdigest(), pdf.pages_count
