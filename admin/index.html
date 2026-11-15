@@ -3501,6 +3501,36 @@
             .dxm-kv dd { margin-bottom: 6px; }
         }
         /* DX:b2b:END */
+        /* DX:mis:START — DX Dashboard: stage funnel, alerts, MIS (P9) */
+        .dxd-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+        .dxd-controls .field { margin: 0; min-width: 0; }
+        .dxd-controls select, .dxd-controls input { max-width: 100%; }
+        .dxd-alerts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+        .dxd-alert { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; min-width: 0; }
+        .dxd-alert b { font-size: 1.6rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+        .dxd-alert span { font-weight: 600; }
+        .dxd-alert small { color: var(--text2); overflow-wrap: anywhere; }
+        .dxd-alert.on { border-color: var(--red, #c0392b); }
+        .dxd-alert.on b { color: var(--red, #c0392b); }
+        .dxd-alert:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .dxd-funnel { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
+        .dxd-stage { position: relative; padding: 10px 6px; border: 1px solid var(--border); border-radius: 10px; text-align: center; background: var(--surface); min-width: 0; }
+        .dxd-stage b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+        .dxd-stage span { font-size: 0.78rem; color: var(--text2); }
+        .dxd-stage + .dxd-stage::before { content: '›'; position: absolute; left: -6px; top: 50%; transform: translate(-50%, -50%); color: var(--text2); }
+        .dxd-money { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 0.92rem; }
+        .dxd-money b { font-variant-numeric: tabular-nums; }
+        .dxd-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
+        .dxd-tabs { flex-wrap: wrap; max-width: 100%; }
+        .dxd-bar { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
+        .dxd-sub { margin: 16px 0 6px; font-size: 0.95rem; }
+        @media (max-width: 1100px) { .dxd-funnel { grid-template-columns: repeat(4, minmax(0, 1fr)); } .dxd-stage:nth-child(4n+1)::before { display: none; } }
+        @media (max-width: 760px) {
+            .dxd-alerts, .dxd-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .dxd-stage::before { display: none; }
+            .dxd-controls .field { flex: 1 1 140px; }
+        }
+        /* DX:mis:END */
     </style>
 </head>
 <body>
@@ -3822,6 +3852,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-6 9 6v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"></path><path d="M9 21V12h6v9"></path></svg></span> Partner Portal
             </div>
             <!-- DX:b2b:END -->
+            <!-- DX:mis:START — DX Dashboard and MIS (P9) -->
+            <div class="nav-link" tabindex="0" data-page="dxdash" data-dx="nav DX_READ DX_REPORTS_MIS" style="display:none" onclick="go('dxdash',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M7 15l4-4 3 3 5-6"></path></svg></span> DX Dashboard
+            </div>
+            <!-- DX:mis:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -8139,6 +8174,35 @@
             <div class="card" id="dxpBody" aria-live="polite"></div>
         </div>
         <!-- DX:b2b:END -->
+        <!-- DX:mis:START — DX Dashboard (dxdash): stage funnel, alerts, MIS; P9 / DX-58. Counts use the Lab Worklist's stage rules -->
+        <div id="pg-dxdash" class="sec">
+            <div class="page-head"><div><h2>DX Dashboard</h2><p>Where every test is now, what needs attention, and the lab's numbers over time. Counts follow the same stage rules as the Lab Worklist.</p></div>
+                <div class="dxd-controls">
+                    <div class="field"><label for="dxdSite">Site</label><select id="dxdSite" onchange="dxdash.load()"><option value="">All my sites</option></select></div>
+                    <div class="field"><label for="dxdDate">Day</label><input type="date" id="dxdDate" onchange="dxdash.load()" title="Empty = today plus every open visit of the last 7 days"></div>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dxdash.load()">Refresh</button>
+                </div></div>
+            <div class="dxd-alerts" id="dxdAlerts" aria-live="polite"></div>
+            <div class="dxd-funnel" id="dxdFunnel" role="list" aria-label="Tests by stage"></div>
+            <div class="card" id="dxdMoney" hidden></div>
+            <div class="card" id="dxdMisCard" data-dx="DX_REPORTS_MIS" style="display:none">
+                <div class="dxd-head"><h3>MIS</h3>
+                    <div class="dxd-controls">
+                        <div class="field"><label for="dxdFrom">From</label><input type="date" id="dxdFrom" onchange="dxdash.loadMis()"></div>
+                        <div class="field"><label for="dxdTo">To</label><input type="date" id="dxdTo" onchange="dxdash.loadMis()"></div>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="dxdash.exportCsv()">Export CSV</button>
+                    </div></div>
+                <div class="toggle-group dxd-tabs" role="tablist" aria-label="MIS reports">
+                    <button type="button" class="toggle-btn on" role="tab" aria-selected="true" data-dxd-tab="tat" onclick="dxdash.setTab('tat')">TAT</button>
+                    <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxd-tab="volumes" onclick="dxdash.setTab('volumes')">Volumes</button>
+                    <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxd-tab="revenue" id="dxdRevenueTab" onclick="dxdash.setTab('revenue')">Revenue</button>
+                    <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxd-tab="rejections" onclick="dxdash.setTab('rejections')">Rejections</button>
+                    <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxd-tab="referrers" onclick="dxdash.setTab('referrers')">Referrers</button>
+                </div>
+                <div id="dxdMis" aria-live="polite"></div>
+            </div>
+        </div>
+        <!-- DX:mis:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -12095,6 +12159,118 @@ const dxpartner = {
     },
 };
 /* DX:b2b:END */
+/* DX:mis:START — DX Dashboard (P9). Every count, minute and rupee comes from /admin/dx/dashboard and
+   /admin/dx/mis/* (the bench's own stage rules, the OPD and B2B ledgers); this page only shows them.
+   Referral numbers are counts only (ADR-DX-11). */
+const DXD_STAGES = [['registered', 'Registered'], ['collected', 'Collected'], ['in_transit', 'In transit'], ['received', 'Received'],
+    ['entered', 'Entered'], ['verified', 'Verified'], ['approved', 'Approved'], ['released', 'Released']];
+const dxdDay = n => new Date(Date.now() + 330 * 60000 + n * 86400000).toISOString().slice(0, 10);
+const dxdMin = m => m == null ? '—' : m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`;
+const dxdashTable = (cols, rows) => rows.length ? `<div class="table-wrap"><table class="dxm-table"><thead><tr>${cols.map(c => `<th${c[2] ? ' class="num"' : ''}>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r => `<tr>${cols.map(c => `<td data-l="${esc(c[0])}"${c[2] ? ' class="num"' : ''}>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nothing in this range.</p>';
+
+const dxdash = {
+    tab: 'tat', seq: 0, mseq: 0,
+    open(page) {
+        const link = document.querySelector(`.nav-link[data-page="${page}"]`);
+        if (link && link.style.display !== 'none') go(page, link); else toast('That page is not available for your login.', true);
+    },
+    async load() {
+        const from = document.getElementById('dxdFrom');
+        if (!from.value) { from.value = dxdDay(-6); document.getElementById('dxdTo').value = dxmToday(); }
+        document.getElementById('dxdRevenueTab').hidden = !dxCan('DX_BILLING');
+        const seq = ++dxdash.seq, site = document.getElementById('dxdSite').value, day = document.getElementById('dxdDate').value;
+        const q = new URLSearchParams();
+        if (site) q.set('site_id', site);
+        if (day) q.set('date', day);
+        const fun = document.getElementById('dxdFunnel');
+        fun.innerHTML = loading();
+        try {
+            const d = await api('/admin/dx/dashboard' + (q.toString() ? '?' + q : ''));
+            if (seq !== dxdash.seq) return;
+            const sel = document.getElementById('dxdSite');
+            sel.innerHTML = '<option value="">All my sites</option>' + (d.sites || []).map(s => `<option value="${esc(s.id)}"${s.id === site ? ' selected' : ''}>${esc(s.code)} · ${esc(s.display_name)}</option>`).join('');
+            dxdash.render(d);
+        } catch (e) { if (seq === dxdash.seq) fun.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+        if (dxCan('DX_REPORTS_MIS')) dxdash.loadMis();
+    },
+    render(d) {
+        const a = d.alerts, f = d.funnel;
+        document.getElementById('dxdAlerts').innerHTML = [
+            [a.critical_open, 'Open critical values', 'Call before sign-off', 'dxapprove'],
+            [a.tat_breaches, 'Past TAT', 'Open tests over their target', 'dxbench'],
+            [a.held_dues.visits, 'Held for dues', dxmRs(a.held_dues.dues_paise) + ' pending', 'dxreports'],
+            [a.rejections_today, 'Rejected tubes', d.open_visits_included ? 'Today' : dxmDate(d.date), 'dxcollect'],
+        ].map(([n, label, sub, page]) => `<button type="button" class="dxd-alert${n ? ' on' : ''}" onclick="dxdash.open('${page}')"><b>${Number(n)}</b><span>${esc(label)}</span><small>${esc(sub)}</small></button>`).join('');
+        document.getElementById('dxdFunnel').innerHTML = DXD_STAGES.map(([k, label]) => `<div class="dxd-stage" role="listitem"><b>${Number(f[k])}</b><span>${label}</span></div>`).join('');
+        const m = document.getElementById('dxdMoney'), r = d.revenue;
+        m.hidden = !r;
+        if (r) m.innerHTML = `<div class="dxd-money"><span>Collected <b>${dxmRs(r.collected)}</b></span><span>Cash ${dxmRs(r.cash)}</span><span>UPI ${dxmRs(r.upi)}</span><span>Card ${dxmRs(r.card)}</span><span>Online ${dxmRs(r.online)}</span>
+            <span>B2B credit <b>${dxmRs(r.b2b_credit)}</b></span><span>Billed ${dxmRs(r.billed_paise)}</span><span>Dues on these bills <b>${dxmRs(r.dues_paise)}</b></span></div>
+            <p class="dxm-note">${d.open_visits_included ? 'Today' : esc(dxmDate(d.date))}: money received on lab bills, by mode (refunds subtracted).</p>`;
+    },
+    setTab(t) { dxdash.tab = t; dxmTabs('data-dxd-tab', t); dxdash.loadMis(); },
+    query() {
+        const q = new URLSearchParams({ start_date: document.getElementById('dxdFrom').value, end_date: document.getElementById('dxdTo').value });
+        const site = document.getElementById('dxdSite').value;
+        if (site) q.set('site_id', site);
+        return q;
+    },
+    async loadMis() {
+        if (dxdash.tab === 'revenue' && !dxCan('DX_BILLING')) dxdash.tab = 'tat';
+        dxmTabs('data-dxd-tab', dxdash.tab);
+        const el = document.getElementById('dxdMis'), seq = ++dxdash.mseq;
+        el.innerHTML = loading();
+        try {
+            const d = await api(`/admin/dx/mis/${dxdash.tab}?${dxdash.query()}`);
+            if (seq !== dxdash.mseq) return;
+            el.innerHTML = dxdash['mis_' + dxdash.tab](d) + (d.truncated ? '<p class="dxm-note">Only the first 5,000 visits of this range are counted. Choose a shorter range.</p>' : '');
+        } catch (e) { if (seq === dxdash.mseq) el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    mis_tat(d) {
+        const cols = [['Tests', r => r.tests, 1], ['Finished', r => r.finished, 1], ['Median', r => dxdMin(r.median_minutes), 1],
+            ['90th percentile', r => dxdMin(r.p90_minutes), 1], ['Target', r => dxdMin(r.target_minutes), 1],
+            ['Late', r => `${r.breached + r.open_breached} <span class="muted">(${r.breach_percent}%)</span>`, 1]];
+        return `<p class="dxm-note">Time from registration (or receipt, per your TAT clock) to approval. Late = finished after the target, or still open past it.</p>
+            <h4 class="dxd-sub">By test</h4>${dxdashTable([['Test', r => esc(r.name)], ...cols], d.tests)}
+            <h4 class="dxd-sub">By department</h4>${dxdashTable([['Department', r => esc(r.name)], ...cols.filter(c => c[0] !== 'Target')], d.departments)}`;
+    },
+    mis_volumes(d) {
+        const max = Math.max(1, ...d.days.map(r => r.tests)), t = d.totals;
+        return `<p class="dxm-note">${t.visits} visits · ${t.tests} tests · ${t.samples} tubes · ${t.rejected} rejected</p>
+            ${dxdashTable([['Day', r => esc(dxmDate(r.date + 'T12:00:00+05:30'))], ['Visits', r => r.visits, 1], ['Tests', r => r.tests, 1], ['Tubes', r => r.samples, 1],
+                ['Rejected', r => r.rejected, 1], ['', r => `<div class="dxd-bar" style="width:${Math.round(100 * r.tests / max)}%" aria-hidden="true"></div>`]], d.days)}`;
+    },
+    mis_revenue(d) {
+        const t = d.totals, R = k => r => dxmRs(r[k]);
+        return `<div class="dxd-money"><span>Collected <b>${dxmRs(t.collected)}</b></span><span>B2B credit <b>${dxmRs(t.b2b_credit)}</b></span><span>Billed ${dxmRs(t.billed_paise)}</span><span>Paid ${dxmRs(t.paid_paise)}</span><span>Dues <b>${dxmRs(t.dues_paise)}</b></span></div>
+            <h4 class="dxd-sub">By day</h4>${dxdashTable([['Day', r => esc(dxmDate(r.date + 'T12:00:00+05:30'))], ['Cash', R('cash'), 1], ['UPI', R('upi'), 1], ['Card', R('card'), 1],
+                ['Online', R('online'), 1], ['B2B credit', R('b2b_credit'), 1], ['Collected', R('collected'), 1]], d.days)}
+            <h4 class="dxd-sub">By branch</h4>${dxdashTable([['Branch', r => esc(r.name)], ['Collected', R('collected'), 1], ['B2B credit', R('b2b_credit'), 1]], d.by_branch)}
+            <h4 class="dxd-sub">Tests billed by department</h4>${dxdashTable([['Department', r => esc(r.name)], ['Tests', r => r.tests, 1], ['Billed', R('billed_paise'), 1]], d.by_department)}`;
+    },
+    mis_rejections(d) {
+        const cols = n => [[n, r => esc(r.name)], ['Rejected', r => r.rejected, 1]];
+        return `<p class="dxm-note">${d.rejected} of ${d.collected} tubes collected in this range were rejected${d.rate_percent != null ? ` (${d.rate_percent}%)` : ''}.</p>
+            <h4 class="dxd-sub">By reason</h4>${dxdashTable(cols('Reason'), d.by_reason)}
+            <h4 class="dxd-sub">By collection site</h4>${dxdashTable(cols('Site'), d.by_site)}
+            <h4 class="dxd-sub">By collector</h4>${dxdashTable(cols('Collected by'), d.by_collector)}`;
+    },
+    mis_referrers(d) {
+        return `<p class="dxm-note">Visits and tests per referrer. Clinical volume only.</p>${dxdashTable([['Referrer', r => esc(r.name || '—')], ['Visits', r => r.visits, 1], ['Tests', r => r.tests, 1]], d.referrers)}`;
+    },
+    async exportCsv() {
+        const report = dxdash.tab === 'volumes' ? 'visits' : dxdash.tab, q = dxdash.query();
+        try {
+            const r = await apiRaw(`/admin/dx/mis/export.csv?report=${report}&${q}`);
+            const url = URL.createObjectURL(await r.blob()), a = document.createElement('a');
+            a.href = url; a.download = `dx-${report}-${q.get('start_date')}-to-${q.get('end_date')}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+        } catch (e) { toast(e.message, true); }
+    },
+};
+/* DX:mis:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -17413,7 +17589,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ };
     if (loaders[page]) loaders[page]();
 }
 

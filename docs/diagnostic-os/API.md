@@ -185,6 +185,15 @@ own password / username changes; without `dx_b2b_account_id` it reaches nothing.
 | GET | `/mis/tat`, `/mis/volumes`, `/mis/revenue`, `/mis/rejections`, `/mis/referrers` | DX_REPORTS_MIS | date range ≤ 366 days; revenue needs DX_BILLING too |
 | GET | `/mis/export.csv?report` | DX_REPORTS_MIS | streamed, audit-logged |
 
+As built (P9, `app/services/dx_mis.py`): every route takes `site_id` (404 outside the caller's sites; a pinned login
+is limited to its sites). `/dashboard?site_id&date` (DX_READ or DX_REPORTS_MIS) returns `funnel` (registered,
+collected, in_transit, received, entered, verified, approved, released — the worklist's stage per test), `alerts`
+(`critical_open`, `tat_breaches`, `held_dues {visits, dues_paise}`, `rejections_today`), `sites`, and `revenue` (day
+totals) only for DX_BILLING / DX_B2B_MANAGE / DX_REPORTS_MIS. MIS routes take `start_date`, `end_date` (IST, ≤ 366 days,
+else 422); `tat` and `volumes` also `department_id`; `revenue` needs DX_BILLING as well. `export.csv?report=visits|tat|
+revenue|rejections|referrers` (revenue also DX_BILLING): no patient name or phone, formula-safe cells, audit
+`dx_mis_export`. At most 5,000 visits per range (`truncated: true`).
+
 ## P10 — Instruments and QC
 | Method | Path | Auth | Notes |
 |:-|:-|:-|:-|

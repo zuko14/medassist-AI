@@ -904,6 +904,11 @@ class ConversationManager:
                 await self._handle_view_reports(clinic, phone, lang)
                 return
 
+            elif button_id in ("dx_recollect_home", "dx_recollect_centre"):
+                lang = await get_lang(clinic, phone)
+                await self._handle_dx_recollection(clinic, phone, button_id.removeprefix("dx_recollect_"), lang)
+                return
+
             elif button_id == "menu_book":
                 lang = await get_lang(clinic, phone)
                 patient_obj = await get_patient_by_phone(clinic["id"], phone)
@@ -5222,11 +5227,66 @@ class ConversationManager:
             )
 
         await self.whatsapp.send_text(clinic, phone, body)
+        await self._send_dx_visit_status(clinic, phone, lang)
         # Reached from the global escape hatch, so the patient may have been
         # mid-booking. Reset before showing the menu, or their next tap is
         # routed by a state that no longer matches what is on their screen.
         await self.update_state(clinic, phone, "main_menu", {"menu_shown": False})
         await self._send_main_menu(clinic, phone, lang)
+
+    async def _send_dx_visit_status(self, clinic: dict, phone: str, lang: str) -> None:
+        """Diagnostic OS clinics (KRIYA-KETU §3): the latest lab visit's status, status only (dx_status;
+        never a value). Held for dues -> the balance payment link; recollection -> home / centre buttons.
+        No "send my report" button (O-DX-14): reports go out on their own once released. Never raises."""
+        from app.services import dx_status
+        from app.services.tenant import dx_access
+
+        if not dx_access(clinic):
+            return
+        try:
+            st = await dx_status.get_patient_dx_status(clinic["id"], phone)
+            if not st:
+                return
+            text = f"🧪 {st['accession_number']}: {dx_status.status_text(st, lang)}"
+            if st["state"] == "held_dues":
+                try:
+                    link = await dx_status.dues_payment_link(clinic["id"], clinic, st["accession_id"])
+                    text += f"\n\n💳 {link['url']}"
+                except Exception as e:  # noqa: BLE001 - no issued bill / gateway down: the status still goes
+                    logger.warning(f"DX_CHAT_LINK_FAILED type={type(e).__name__}")
+            if st["state"] == "recollect":
+                await self.whatsapp.send_interactive_buttons(clinic, phone, body=text, buttons=[
+                    {"id": "dx_recollect_home", "title": {"hi": "घर पर सैंपल", "te": "ఇంటి వద్ద శాంపిల్"}.get(
+                        lang, "Home collection")},
+                    {"id": "dx_recollect_centre", "title": {"hi": "सेंटर आऊँगा", "te": "సెంటర్‌కి వస్తాను"}.get(
+                        lang, "Visit the centre")}])
+            else:
+                await self.whatsapp.send_text(clinic, phone, text)
+        except Exception as e:  # noqa: BLE001 - the canned reply above already answered
+            logger.error(f"DX_CHAT_STATUS_FAILED type={type(e).__name__}")
+
+    async def _handle_dx_recollection(self, clinic: dict, phone: str, where: str, lang: str) -> None:
+        """A recollection button: tell the lab desk; the visit is re-read from the phone, never the button."""
+        from app.services import dx_status
+
+        st = await dx_status.get_patient_dx_status(clinic["id"], phone)
+        if not st or st["state"] != "recollect":
+            await self.whatsapp.send_text(clinic, phone, {
+                "hi": "इस नंबर पर दोबारा सैंपल की कोई ज़रूरत नहीं दिख रही।",
+                "te": "ఈ నంబర్‌పై మళ్లీ శాంపిల్ అవసరం కనిపించలేదు.",
+            }.get(lang, "There is no fresh sample pending on this number."))
+            return
+        await dx_status.request_recollection(clinic["id"], phone, st["accession_number"], where)
+        if where == "home":
+            body = {"hi": "ठीक है। हमारी टीम घर पर सैंपल लेने का समय तय करने के लिए आपको कॉल करेगी।",
+                    "te": "సరే. ఇంటి వద్ద శాంపిల్ తీసుకునే సమయం కోసం మా టీమ్ మీకు కాల్ చేస్తారు."}.get(
+                lang, "Thank you. Our team will call you to fix a time to collect the sample at home.")
+        else:
+            body = {"hi": f"ठीक है। कृपया सेंटर आएँ और विज़िट नंबर {st['accession_number']} बताएँ — कोई शुल्क नहीं।",
+                    "te": f"సరే. దయచేసి సెంటర్‌కి వచ్చి విజిట్ నంబర్ {st['accession_number']} చెప్పండి — ఛార్జీ లేదు."}.get(
+                lang, f"Thank you. Please visit the centre and quote visit number {st['accession_number']} — "
+                      "there is no charge.")
+        await self.whatsapp.send_text(clinic, phone, body)
 
     #: Above this many tests, paging 9-at-a-time is unusable (a 1000-test
     #: catalogue is 110 taps deep), so the list is introduced as searchable.

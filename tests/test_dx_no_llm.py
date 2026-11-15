@@ -4,18 +4,26 @@
    imports nothing from the AI, voice or assistant packages: reference ranges,
    flags, formulas and sign-off never depend on a model.
 2. AI, voice, patient-chat and Kriya Ketu code never names a dx_* table: they
-   reach DX only through the HTTP routes (same permission, entitlement, audit).
+   reach DX only through the HTTP routes (same permission, entitlement, audit)
+   or the status-only service app/services/dx_status.py (P9).
+3. Voice code never names a clinical result table, and dx_status (what voice and
+   chat read) never reads a result value, flag, range or interpretation.
 """
 
 import ast
 import pathlib
 import re
 
+from app.tenancy import TENANT_OWNED_TABLES
+
 BANNED = ("app.services.ai_", "app.services.faq_engine", "app.services.hybrid_search",
           "app.services.report_summarizer", "app.voice", "app.assistant",
           "openai", "groq", "anthropic", "google.generativeai")
 AI_PATHS = ("app/services/ai_*.py", "app/services/conversation.py", "app/voice/**/*.py", "app/assistant/**/*.py")
-DX_TABLE = re.compile(r"\bdx_[a-z][a-z_]*\b")
+# The DX database tables themselves (dx_access, dx_status, dx_visit_status are code names, not tables).
+DX_TABLES = sorted(t for t in TENANT_OWNED_TABLES if t.startswith("dx_"))
+DX_TABLE = re.compile(r"\b(" + "|".join(DX_TABLES) + r")\b")
+RESULT_TABLES = re.compile(r"\b(lab_results|lab_result_values|dx_result_value_meta|dx_critical_events)\b")
 
 
 def _dx_files() -> list[pathlib.Path]:
@@ -51,6 +59,37 @@ def test_ai_voice_chat_and_assistant_never_name_dx_tables():
     for p in paths:
         hits = sorted(set(DX_TABLE.findall(p.read_text(encoding="utf-8"))))
         assert not hits, f"{p} names DX tables {hits}; go through /admin/dx routes"
+
+
+def test_dx_tables_are_known():
+    assert {"dx_accessions", "dx_samples", "dx_release_deliveries"} <= set(DX_TABLES)
+    assert DX_TABLE.search("x = 'dx_samples'") and not DX_TABLE.search("dx_access(c) or dx_status.x")
+
+
+def test_voice_never_names_clinical_result_tables():
+    paths = sorted(pathlib.Path("app/voice").rglob("*.py"))
+    assert paths
+    for p in paths:
+        hits = sorted(set(RESULT_TABLES.findall(p.read_text(encoding="utf-8"))))
+        assert not hits, f"{p} names result tables {hits}"
+
+
+def test_dx_status_reads_no_result_values():
+    """What voice and WhatsApp read: tube, visit, delivery states, TAT targets, dues. No values."""
+    tree = ast.parse(pathlib.Path("app/services/dx_status.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):         # code only: docstrings explain the rule and may name it
+        body = getattr(node, "body", None)
+        if isinstance(body, list) and body and isinstance(body[0], ast.Expr) \
+                and isinstance(getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
+            body.pop(0)
+    src = ast.unparse(tree)
+    assert not RESULT_TABLES.search(src)
+    for word in ("normal_low", "normal_high", "critical_low", "critical_high", "flag", "value_text",
+                 "value_numeric", "interpretation", "reference_range"):
+        assert word not in src, word
+    bad = [m for m in _imports(pathlib.Path("app/services/dx_status.py"))
+           if m.startswith(("app.services.dx_results", "app.services.lis", "app.services.dx_pdf"))]
+    assert not bad, bad
 
 
 def test_guard_catches_a_banned_import(tmp_path):

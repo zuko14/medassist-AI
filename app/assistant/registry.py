@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 from app.assistant import playbooks, present, resolve
 from app.services.permissions import (
     PERMISSIONS,
+    holds_dx_permission,
     holds_credit_note_permission,
     holds_document_permission,
     holds_emergency_permission,
@@ -27,6 +28,7 @@ from app.services.tenant import (
     corporate_health_enabled,
     ai_receptionist_enabled,
     dental_plans_enabled,
+    dx_access,
     home_collection_available,
     ipd_access,
     opd_enabled,
@@ -78,6 +80,7 @@ PAGES: dict[str, str] = {
     "dxb2b": "B2B Accounts",   # Diagnostic OS B2B money (migration 132); page hand-off only
     "dxreferrers": "Referrers",   # Diagnostic OS referral volume, counts only (migration 132); page hand-off only
     "dxpartner": "Partner Portal",   # B2B partner logins only (migration 132); Ketu is off for partners
+    "dxdash": "DX Dashboard",   # Diagnostic OS stage funnel, alerts and MIS (P9); R0 reads via /admin/dx/dashboard
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
     "casualty": "Casualty / ER",
@@ -137,6 +140,7 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "dxb2b": ("b2b accounts", "hospital accounts", "b2b ledger", "b2b statement", "receivables ageing", "rate card"),
     "dxreferrers": ("referrers", "referring doctors", "referral volume"),
     "dxpartner": ("partner portal", "new requisition"),
+    "dxdash": ("dx dashboard", "lab dashboard", "lab mis", "tat report", "rejection report", "lab revenue"),
     "dxcatalog": ("test master", "lab test master", "reference ranges", "test parameters", "lab catalogue"),
     "lisqueue": ("lab sign-off", "sign lab report", "pathologist queue", "pending validation", "validate results"),
     "radiology": ("radiology", "imaging", "x-ray reports", "scan reports", "radiology worklist", "form f",
@@ -1435,6 +1439,123 @@ HOSPITAL_ACTIONS = (
 # ── Operation theatre (migration 122): one read + hand-offs (ADR-IPD-08). Booking, the WHO checklist,
 # the anaesthesia record and finishing a surgery are clinical writes a person makes on the page.
 
+# ── Diagnostic OS (P9, DX-55; docs/diagnostic-os/KRIYA-KETU.md §1) ─────────────────────────────────────────
+# The SAME /admin/dx routes the pages use, dispatched with the speaker's session: _dx_scope (permission
+# inside the handler), site scope, field filtering and audit apply unchanged. Status and counts only;
+# no clinical write (entry, verification, approval) ever goes through Ketu.
+
+def _dx_on(clinic: dict) -> bool:  # _dx_scope(): module ACTIVE or WIND_DOWN
+    return bool(dx_access(clinic))
+
+
+def _dx(perm: str, *also: str) -> dict:
+    return dict(permission=perm, also=also, perm_source=_HANDLER, feature=_dx_on,
+                holds=lambda u: any(holds_dx_permission(u, p) for p in (perm, *also)))
+
+
+_DX_OPEN = ("awaiting_payment", "pending_collection", "pending_receipt", "pending_entry", "pending_verification",
+            "pending_approval")
+
+
+def _dx_tests(data, keep) -> list:
+    """Worklist visits -> one row per test (visit number, patient, test, stage, TAT minutes)."""
+    visits = data.get("visits") if isinstance(data, dict) else None
+    return [{"accession_number": v.get("accession_number"), "patient": (v.get("patient") or {}).get("name"),
+             "item_name": o.get("item_name"), "stage": o.get("stage"),
+             "elapsed": (o.get("tat") or {}).get("elapsed_minutes"), "target": (o.get("tat") or {}).get("target_minutes")}
+            for v in visits or [] if isinstance(v, dict) for o in v.get("orders") or [] if isinstance(o, dict) and keep(o)]
+
+
+_DX_TEST_COLS = (("Visit", "accession_number", "text"), ("Patient", "patient", "text"), ("Test", "item_name", "text"),
+                 ("Stage", "stage", "label"), ("Minutes", "elapsed", "text"), ("Target", "target", "text"))
+_DX_FUNNEL = (("Registered, not collected", "funnel.registered", "text"), ("Collected", "funnel.collected", "text"),
+              ("In transit", "funnel.in_transit", "text"), ("Received at lab", "funnel.received", "text"),
+              ("Results entered", "funnel.entered", "text"), ("Verified", "funnel.verified", "text"),
+              ("Approved", "funnel.approved", "text"), ("Released", "funnel.released", "text"))
+_DX_ALERTS = (("Open critical values", "alerts.critical_open", "text"), ("TAT breaches", "alerts.tat_breaches", "text"),
+              ("Reports held for dues", "alerts.held_dues.visits", "text"),
+              ("Dues on held reports", "alerts.held_dues.dues_paise", "paise"),
+              ("Rejections today", "alerts.rejections_today", "text"))
+_DX_VISIT_NOISE = {"find", "search", "show", "report", "reports", "of", "for", "status", "lab", "visit", "the", "a",
+                   "patient", "where", "is", "what", "check", "ka", "ki", "ke", "dhundo", "vetuku", "today", "s"}
+_DX_VISIT_NO = re.compile(r"\blab-(\d{4})-(\d{1,6})\b", re.I)
+
+
+def _dx_visit_term(params: dict, text: str) -> dict:
+    """The visit number (zero-padded as the desk prints it) or the patient's name the sentence names."""
+    m = _DX_VISIT_NO.search(text or "")
+    if m:  # before the generic term, which would take "2026" (its first run of digits)
+        return {**params, "q": f"LAB-{m.group(1)}-{int(m.group(2)):06d}"}
+    if params.get("q"):
+        return params
+    words = [w for w in re.findall(r"[^\W\d_]+", (text or "").lower()) if w not in _DX_VISIT_NOISE]
+    term = " ".join(words)
+    return {**params, "q": term} if 2 <= len(term) <= 40 else params
+
+
+DX_ACTIONS = (
+    _read("dx.pending_by_stage", "Lab samples pending by stage", "/admin/dx/dashboard", "dxdash",
+          ("pending samples", "samples pending", "kitne samples pending hain", "ఎన్ని శాంపిల్స్ పెండింగ్",
+           "कितने सैंपल बाकी", "samples+stage", "pending+stage", "lab pipeline"),
+          lambda d, p: present.metrics("Lab work by stage", "dxdash", d, _DX_FUNNEL), **_dx("DX_READ", "DX_REPORTS_MIS")),
+    _read("dx.tat_breaches", "Lab tests past their TAT", "/admin/dx/worklist", "dxbench",
+          ("tat breach", "tat breaches", "late reports", "der wale reports", "overdue reports", "reports+late"),
+          lambda d, p: present.table("Past TAT", "dxbench", _DX_TEST_COLS,
+                                     _dx_tests(d, lambda o: o.get("stage") in _DX_OPEN
+                                               and (o.get("tat") or {}).get("status") == "red")),
+          query=lambda p: {"open_only": True}, **_dx("DX_READ", "DX_RECEIVE", "DX_VERIFY")),
+    _read("dx.my_approvals", "Lab reports waiting for my signature", "/admin/dx/worklist", "dxapprove",
+          ("reports waiting for my signature", "waiting for my signature", "mere sign ke liye", "నా సంతకం కోసం",
+           "my approvals", "pending my approval", "naa sign kosam", "naa signature kosam"),
+          lambda d, p: present.table("Waiting for your signature", "dxapprove", _DX_TEST_COLS,
+                                     _dx_tests(d, lambda o: o.get("stage") == "pending_approval")),
+          query=lambda p: {"open_only": True, "stage": "pending_approval"},
+          permission="LAB_VALIDATE", perm_source=_HANDLER, feature=_dx_on,
+          holds=lambda u: holds_lab_permission(u, "LAB_VALIDATE")),
+    _read("dx.critical_open", "Open critical values (lab)", "/admin/dx/dashboard", "dxapprove",
+          ("critical values", "critical results today", "critical+not called", "open criticals", "critical+call nahi",
+           "critical+call cheyaledu"),
+          lambda d, p: present.metrics("Critical values not yet called", "dxapprove", d, _DX_ALERTS[:1]),
+          **_dx("DX_READ", "DX_REPORTS_MIS")),
+    _read("dx.find_visit", "Find a lab visit", "/admin/dx/visits", "dxdesk",
+          ("find report of", "lab visit status", "visit status", r"re:\blab \d{4} \d{1,6}\b", "lab visit of"),
+          lambda d, p: present.table(f'Lab visits matching "{p.get("q")}"' if p.get("q") else "Lab visits today",
+                                     "dxdesk", (("Visit", "accession_number", "text"),
+                                                ("Patient", "patient_snapshot.name", "text"),
+                                                ("Status", "status", "label"), ("Priority", "priority", "label"),
+                                                ("Registered", "created_at", "time")), _rows(d, "visits")),
+          query=lambda p: {k: v for k, v in (("q", p.get("q")), ("date", p.get("date"))) if v},
+          slots=(SlotSpec("q", "term", required=False), *_DATE), derive=_dx_visit_term,
+          **_dx("DX_READ", "DX_REGISTER", "DX_BILLING", "DX_COLLECT", "DX_DISPATCH", "DX_ADMIN")),
+    _read("dx.held_dues", "Lab reports held for payment", "/admin/dx/deliveries", "dxreports",
+          ("reports held for payment", "held for dues", "unpaid reports", "reports+not paid", "ruke+reports",
+           "aagina+reports"),
+          lambda d, p: present.table("Held for payment", "dxreports", (
+              ("Visit", "accession_number", "text"), ("Patient", "patient_name", "text"), ("To", "target", "label"),
+              ("Due", "dues_paise", "paise")), _rows(d, "deliveries")),
+          query=lambda p: {"status": "held_dues"}, **_dx("DX_DISPATCH", "DX_READ", "DX_ADMIN")),
+    _read("dx.today_summary", "Today's lab summary", "/admin/dx/dashboard", "dxdash",
+          ("today's lab summary", "lab summary today", "lab summary", "todays lab summary", "lab status today"),
+          lambda d, p: present.metrics("Today in the lab", "dxdash", d, (
+              *_DX_FUNNEL, *_DX_ALERTS, ("Collected today", "revenue.collected", "paise"))),
+          **_dx("DX_READ", "DX_REPORTS_MIS")),
+    _h("dx.register", "Register a lab visit", "dxdesk", "",
+       ("register+for cbc", "new lab registration", "register a patient for", "lab registration+new"),
+       "Search or add the patient, pick the tests and press Save & Bill yourself.", feature=_dx_on),
+    _h("dx.collect", "Mark a lab sample collected", "dxcollect", "",
+       ("mark sample collected", "collect sample", "sample collected+mark", "tube+collected"),
+       "Find the visit in the queue, scan or print its labels and press Collected on its row.", feature=_dx_on),
+    _h("dx.approve", "Sign a lab report", "dxapprove", "",
+       ("sign this report", "approve report", "approve+lab report"),
+       "Open the result in Result Approval, check every value and press Approve & sign yourself. Sign-off is the "
+       "pathologist's, never Kriya's.", feature=_dx_on, unless=("waiting", "pending", "which", "how many", "list")),
+    _h("dx.resend", "Resend a lab report", "dxreports", "",
+       ("resend report on whatsapp", "resend report", "resend+lab report"),
+       "Find the report in Reports & Dispatch and press Resend on its row; the delivery rules still apply.",
+       feature=_dx_on),
+)
+
+
 def _ot(perm: str) -> dict:
     return dict(permission=perm, holds=lambda u: holds_ot_permission(u, perm), feature=_ipd_on)
 
@@ -1972,6 +2093,7 @@ REGISTRY: dict[str, ActionSpec] = _build(
     *BILLING,
     *IPD_ACTIONS,
     *HOSPITAL_ACTIONS,
+    *DX_ACTIONS,
     *OT_ACTIONS,
     *VOICE_ENTRY_3,
     *VOICE_ENTRY_4,

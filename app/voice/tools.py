@@ -229,6 +229,48 @@ class KriyaTools:
         await self._trace("REPORT_LOOKUP", "ok", t0, {"found": len(rows)})
         return rows
 
+    async def dx_visit_status(self):
+        """KRIYA-KETU §2: the caller's latest Diagnostic OS visit, status only (dx_status: tube, visit and
+        delivery states, never a result value). None = not a DX clinic, no visit, or the lookup failed."""
+        from app.services import dx_status
+        from app.services.tenant import dx_access
+        if not dx_access(self.ctx.clinic):
+            return None
+        t0 = time.monotonic()
+        try:
+            st = await dx_status.get_patient_dx_status(self.ctx.clinic_id, self.ctx.caller_phone)
+        except Exception as e:
+            await self._trace("DX_STATUS", "fail", t0, {"error": type(e).__name__})
+            return None
+        if st:
+            st["text"] = _speakable(dx_status.status_text(st, self.ctx.lang))
+        await self._trace("DX_STATUS", "ok", t0, {"state": (st or {}).get("state")})
+        return st
+
+    async def dx_send_payment_link(self, status):
+        """The balance link of a visit held for dues, to this caller's own WhatsApp (in-session text).
+        One per visit per 10 minutes: a second ask within that reuses the link and sends nothing."""
+        from app.services import dx_status
+        from app.services.whatsapp import whatsapp_service
+        t0 = time.monotonic()
+        if self._simulated:
+            await self._trace("DX_PAYMENT_LINK", "skipped", t0, {"simulated": True})
+            return {"status": "sent", "simulated": True}
+        try:
+            link = await dx_status.dues_payment_link(self.ctx.clinic_id, self.ctx.clinic, status["accession_id"])
+            if not link["fresh"]:
+                await self._trace("DX_PAYMENT_LINK", "ok", t0, {"throttled": True})
+                return {"status": "already_sent"}
+            msg = (f"{self.ctx.clinic.get('name') or 'Lab'}: balance for lab visit {status['accession_number']} is "
+                   f"Rs {link['amount_paise'] / 100:.0f}. Your report is sent as soon as it is paid.\n{link['url']}")
+            ok = bool(await self._window_open() and await whatsapp_service.send_text(
+                self.ctx.clinic, self.ctx.caller_phone, msg, _source="voice_dx_payment_link"))
+        except Exception as e:
+            await self._trace("DX_PAYMENT_LINK", "fail", t0, {"error": type(e).__name__})
+            return {"status": "failed"}
+        await self._trace("DX_PAYMENT_LINK", "ok" if ok else "fail", t0, {"accession_id": status["accession_id"]})
+        return {"status": "sent" if ok else "failed"}
+
     async def doctor_fees(self, department, doctor_ids):
         return await self.find_doctors(department, doctor_ids)
 

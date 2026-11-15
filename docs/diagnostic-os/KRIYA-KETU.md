@@ -58,8 +58,13 @@ approved templates; the conversation FSM gets a new intent but no change to exis
 ## 4. Status
 | Item | State |
 |:-|:-|
-| DX pages in the Ketu page table | NOT_STARTED (P9) |
-| R0 reads + H hand-offs registered and validated | NOT_STARTED (P9) |
-| Voice `report_status` / `resend_report` | NOT_STARTED (P9) |
-| WhatsApp report-status intent | NOT_STARTED (P9) |
-| Boundary test `tests/test_dx_no_llm.py` | NOT_STARTED (P1) |
+| DX pages in the Ketu page table | VERIFIED (P9; `dxdash` added) |
+| R0 reads + H hand-offs registered and validated | VERIFIED (P9, `tests/test_assistant_registry.py`, `tests/test_assistant_dx.py`) |
+| Voice `dx_visit_status` + payment link (status only) | VERIFIED (P9, `tests/voice/test_dx_voice_status.py`, `tests/test_dx_status.py`) |
+| WhatsApp report-status intent | VERIFIED (P9, `tests/test_dx_status.py`; FSM / webhook tests unchanged) |
+| Boundary test `tests/test_dx_no_llm.py` | VERIFIED (P1; P9 adds the voice result-table and `dx_status` checks) |
+
+As built (P9): routes that §1 named but do not exist are mapped to existing ones — `dx.my_approvals` →
+`GET /admin/dx/worklist?open_only=true&stage=pending_approval`, `dx.critical_open` → the dashboard's open-critical
+count, `dx.held_dues` → `GET /admin/dx/deliveries?status=held_dues`. Voice and chat read `app/services/dx_status.py`
+(tube, visit and delivery states, TAT targets, dues — never a value). `book_recollection` is a staff callback.

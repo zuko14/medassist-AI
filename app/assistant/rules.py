@@ -541,6 +541,10 @@ def _match_action(text: str, t: str, actions: dict, ui_page: Optional[str], doct
         top = [create]  # a full profile for a name not on the list: add that doctor, never edit a look-alike
     if len(top) > 1:
         top = _tie_break(text, t, top, ui_page)
+    if len(top) > 1 and {s.module for s in top} > {"dx"}:
+        # Diagnostic OS (P9): a phrase the hospital modules owned first ("collect sample", "critical values")
+        # keeps their action; a lab-only clinic has those switched off, so there the DX action is the only one.
+        top = [s for s in top if s.module != "dx"]
     if len(top) > 1:
         on_page = [s for s in top if ui_page and s.page == ui_page]
         if len(on_page) != 1:

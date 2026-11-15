@@ -62,6 +62,9 @@ class Tools(Protocol):
     async def cancel(self, appointment: dict) -> dict: ...
     async def reports(self) -> Optional[list]: ...
     async def resend_report(self, report: dict) -> dict: ...
+    # Optional (Diagnostic OS clinics, KRIYA-KETU §2): status only, never values.
+    # async def dx_visit_status(self) -> Optional[dict]: ...
+    # async def dx_send_payment_link(self, status: dict) -> dict: ...
     async def doctor_fees(self, department: Optional[str], doctor_ids: Optional[list]) -> Optional[list]: ...
     async def lab_tests(self, query: str) -> Optional[list]: ...
     async def book_lab(self, test: dict, date: str, patient_name: str) -> dict: ...
@@ -897,6 +900,23 @@ class DialogEngine:
         s = task["slots"]
         expect = state.get("expect")
         state["expect"] = None
+        if "report" not in s and not s.get("dx_checked") and hasattr(self.tools, "dx_visit_status"):
+            s["dx_checked"] = True
+            dx = await self.tools.dx_visit_status()
+            if dx and dx.get("state") != "sent":      # sent: the report flow below offers a resend
+                out.says.append(Say("dx_status", {"text": dx["text"]}))
+                if dx["state"] == "held_dues":
+                    res = await self.tools.dx_send_payment_link(dx) or {}
+                    if res.get("status") in ("sent", "already_sent"):
+                        out.says.append(Say("dx_link_sent"))
+                    else:
+                        out.says.append(Say("dx_link_failed"))
+                        await self.tools.create_callback("dx_payment_link_failed")
+                elif dx["state"] == "recollect":
+                    out.says.append(Say("dx_recollect_callback"))
+                    await self.tools.create_callback("dx_recollection")
+                task["outcome"] = f"dx_{dx['state']}"
+                return True
         if "report" not in s:
             reps = await self.tools.reports()
             if reps is None:

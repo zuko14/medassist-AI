@@ -14,7 +14,7 @@ import re
 from datetime import date
 from typing import Optional
 
-TEMPLATES_VERSION = "templates-2026.11.04"
+TEMPLATES_VERSION = "templates-2026.11.15"
 
 T: dict = {
     "greeting": {
@@ -365,6 +365,22 @@ T: dict = {
         "te": "క్షమించండి, ఇప్పుడు రిపోర్ట్ పంపలేకపోయాను. మా టీమ్ మీకు పంపిస్తారు.",
         "en": "Sorry, I couldn't send the report right now. Our team will send it to you.",
         "hi": "माफ़ कीजिए, अभी रिपोर्ट नहीं भेज पाई। हमारी टीम आपको भेज देगी।",
+    },
+    # Diagnostic OS visit status (KRIYA-KETU §2): the sentence comes from dx_status, status only
+    "dx_status": {"te": "{text}", "en": "{text}", "hi": "{text}"},
+    "dx_link_sent": {
+        "te": "చెల్లింపు లింక్ మీ WhatsAppకి పంపించాను.", "en": "I've sent the payment link to your WhatsApp.",
+        "hi": "मैंने पेमेंट लिंक आपके WhatsApp पर भेज दिया है।",
+    },
+    "dx_link_failed": {
+        "te": "ఇప్పుడు చెల్లింపు లింక్ పంపలేకపోయాను. మా టీమ్ మీకు కాల్ చేస్తారు.",
+        "en": "I couldn't send the payment link right now. Our team will call you.",
+        "hi": "अभी पेमेंट लिंक नहीं भेज पाई। हमारी टीम आपको कॉल करेगी।",
+    },
+    "dx_recollect_callback": {
+        "te": "మళ్లీ శాంపిల్ తీసుకునే సమయం కోసం మా టీమ్ మీకు కాల్ చేస్తారు.",
+        "en": "Our team will call you to arrange a time for the fresh sample, at home or at the centre.",
+        "hi": "नया सैंपल लेने का समय तय करने के लिए हमारी टीम आपको कॉल करेगी, घर पर या सेंटर पर।",
     },
     "info_answer": {"te": "{text}", "en": "{text}", "hi": "{text}"},
     "info_unavailable": {

@@ -4880,6 +4880,270 @@
    "text": "operation ho gaya",
    "expect": "action:ot.finish",
    "lang": "hi-Latin"
+  },
+  {
+   "text": "kitne samples pending hain",
+   "expect": "action:dx.pending_by_stage",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "samples stage wise ga pending entha",
+   "expect": "action:dx.pending_by_stage",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "samples pending by stage",
+   "expect": "action:dx.pending_by_stage",
+   "lang": "en"
+  },
+  {
+   "text": "lab pipeline status",
+   "expect": "action:dx.pending_by_stage",
+   "lang": "en"
+  },
+  {
+   "text": "ఎన్ని శాంపిల్స్ పెండింగ్",
+   "expect": "action:dx.pending_by_stage",
+   "lang": "te"
+  },
+  {
+   "text": "कितने सैंपल बाकी",
+   "expect": "action:dx.pending_by_stage",
+   "lang": "hi"
+  },
+  {
+   "text": "open dx dashboard",
+   "expect": "nav:dxdash",
+   "lang": "en",
+   "near": "dx.pending_by_stage"
+  },
+  {
+   "text": "how many samples to collect",
+   "expect": "action:orders.to_collect",
+   "lang": "en",
+   "near": "dx.pending_by_stage"
+  },
+  {
+   "text": "show tat breaches",
+   "expect": "action:dx.tat_breaches",
+   "lang": "en"
+  },
+  {
+   "text": "tat breach list",
+   "expect": "action:dx.tat_breaches",
+   "lang": "en"
+  },
+  {
+   "text": "der wale reports dikhao",
+   "expect": "action:dx.tat_breaches",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "late reports enni unnayi",
+   "expect": "action:dx.tat_breaches",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "overdue reports in the lab",
+   "expect": "action:dx.tat_breaches",
+   "lang": "en"
+  },
+  {
+   "text": "open lab worklist",
+   "expect": "nav:dxbench",
+   "lang": "en",
+   "near": "dx.tat_breaches"
+  },
+  {
+   "text": "reports pending sign off",
+   "expect": "action:lis.pending_signoff",
+   "lang": "en",
+   "near": "dx.tat_breaches"
+  },
+  {
+   "text": "reports waiting for my signature",
+   "expect": "action:dx.my_approvals",
+   "lang": "en"
+  },
+  {
+   "text": "mere sign ke liye kitne reports hain",
+   "expect": "action:dx.my_approvals",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "naa sign kosam reports enni",
+   "expect": "action:dx.my_approvals",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "show my approvals",
+   "expect": "action:dx.my_approvals",
+   "lang": "en"
+  },
+  {
+   "text": "anything pending my approval",
+   "expect": "action:dx.my_approvals",
+   "lang": "en"
+  },
+  {
+   "text": "open result approval",
+   "expect": "nav:dxapprove",
+   "lang": "en",
+   "near": "dx.my_approvals"
+  },
+  {
+   "text": "reports pending sign off today",
+   "expect": "action:lis.pending_signoff",
+   "lang": "en",
+   "near": "dx.my_approvals"
+  },
+  {
+   "text": "critical results today",
+   "expect": "action:dx.critical_open",
+   "lang": "en"
+  },
+  {
+   "text": "any open criticals",
+   "expect": "action:dx.critical_open",
+   "lang": "en"
+  },
+  {
+   "text": "critical values not called yet",
+   "expect": "action:dx.critical_open",
+   "lang": "en"
+  },
+  {
+   "text": "aaj ke open criticals dikhao",
+   "expect": "action:dx.critical_open",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "critical values ki call cheyaledu",
+   "expect": "action:dx.critical_open",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "critical values",
+   "expect": "action:lis.pending_signoff",
+   "lang": "en",
+   "near": "dx.critical_open"
+  },
+  {
+   "text": "open result approval page",
+   "expect": "nav:dxapprove",
+   "lang": "en",
+   "near": "dx.critical_open"
+  },
+  {
+   "text": "find report of Ramana Babu",
+   "expect": "action:dx.find_visit",
+   "lang": "en"
+  },
+  {
+   "text": "LAB-2026-123 status",
+   "expect": "action:dx.find_visit",
+   "lang": "en"
+  },
+  {
+   "text": "lab visit status of ravi",
+   "expect": "action:dx.find_visit",
+   "lang": "en"
+  },
+  {
+   "text": "ravi ka lab visit status",
+   "expect": "action:dx.find_visit",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ravi lab visit status enti",
+   "expect": "action:dx.find_visit",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "find patient ravi",
+   "expect": "action:patients.search",
+   "lang": "en",
+   "near": "dx.find_visit"
+  },
+  {
+   "text": "open dx registration",
+   "expect": "nav:dxdesk",
+   "lang": "en",
+   "near": "dx.find_visit"
+  },
+  {
+   "text": "reports held for payment",
+   "expect": "action:dx.held_dues",
+   "lang": "en"
+  },
+  {
+   "text": "unpaid reports list",
+   "expect": "action:dx.held_dues",
+   "lang": "en"
+  },
+  {
+   "text": "reports held for dues",
+   "expect": "action:dx.held_dues",
+   "lang": "en"
+  },
+  {
+   "text": "payment ke liye ruke reports",
+   "expect": "action:dx.held_dues",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "payment kosam aagina reports",
+   "expect": "action:dx.held_dues",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "pending payments",
+   "expect": "action:opd.unpaid",
+   "lang": "en",
+   "near": "dx.held_dues"
+  },
+  {
+   "text": "open reports and dispatch",
+   "expect": "nav:dxreports",
+   "lang": "en",
+   "near": "dx.held_dues"
+  },
+  {
+   "text": "today's lab summary",
+   "expect": "action:dx.today_summary",
+   "lang": "en"
+  },
+  {
+   "text": "lab summary today",
+   "expect": "action:dx.today_summary",
+   "lang": "en"
+  },
+  {
+   "text": "lab status today",
+   "expect": "action:dx.today_summary",
+   "lang": "en"
+  },
+  {
+   "text": "aaj ka lab summary",
+   "expect": "action:dx.today_summary",
+   "lang": "hi-Latin"
+  },
+  {
+   "text": "ee roju lab summary",
+   "expect": "action:dx.today_summary",
+   "lang": "te-Latin"
+  },
+  {
+   "text": "dashboard stats",
+   "expect": "action:stats.summary",
+   "lang": "en",
+   "near": "dx.today_summary"
+  },
+  {
+   "text": "today's collection",
+   "expect": "action:opd.collections",
+   "lang": "en",
+   "near": "dx.today_summary"
   }
  ],
  "doctors": [

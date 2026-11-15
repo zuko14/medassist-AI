@@ -44,6 +44,8 @@ READS = {
     "ipd_finance.receivables",
     "ot.today",  # operation theatre (migration 122)
     "opd.collections", "opd.unpaid", "holidays.list",  # 2026-10-26: everyday questions from the probe
+    "dx.pending_by_stage", "dx.tat_breaches", "dx.my_approvals", "dx.critical_open", "dx.find_visit",  # DX (P9)
+    "dx.held_dues", "dx.today_summary",
 }
 NOT_YET = {"patient.view", "voice.call_detail", "patient.duplicate_check", "voice.test_turn"}
 CORPUS = json.loads((Path(__file__).parent / "fixtures" / "assistant_corpus.json")
@@ -256,6 +258,21 @@ DATA = {
     "/admin/voice/learning/suggestions": {"catalogue": {}, "suggestions": [
         {"patient_phrase": "skin doctor", "category": "specialty_synonym", "evidence_count": 4,
          "proposed_canonical": "Dermatology", "sample_utterances": [f"call me on {PHONE}"]}]},
+    # Diagnostic OS (P9): counts and stages only
+    "/admin/dx/dashboard": {"date": TODAY, "open_visits_included": True,
+                            "funnel": {"registered": 4, "collected": 2, "in_transit": 0, "received": 5, "entered": 1,
+                                       "verified": 0, "approved": 0, "released": 3},
+                            "alerts": {"critical_open": 1, "tat_breaches": 2, "rejections_today": 1,
+                                       "held_dues": {"visits": 1, "dues_paise": 35000}},
+                            "revenue": {"collected": 900000}},
+    "/admin/dx/worklist": {"counts": {}, "visits": [{"accession_number": "LAB-2026-000007", "patient": {"name": "Ravi Kumar"},
+                                                     "orders": [{"item_name": "CBC", "stage": "pending_approval",
+                                                                 "tat": {"status": "red", "elapsed_minutes": 300,
+                                                                         "target_minutes": 120}}]}]},
+    "/admin/dx/visits": {"visits": [{"accession_number": "LAB-2026-000123", "patient_snapshot": {"name": "Ramana Babu"},
+                                     "status": "in_process", "priority": "routine", "created_at": "2026-11-15T04:30:00Z"}]},
+    "/admin/dx/deliveries": {"deliveries": [{"accession_number": "LAB-2026-000009", "patient_name": "Sita Devi",
+                                             "target": "patient", "dues_paise": 35000}]},
 }
 
 
@@ -322,10 +339,19 @@ CASES = [
     ("today's collection", "opd.collections", "/admin/opd/collections/summary", {"date": TODAY}, "₹9,000", None),
     ("pending payments", "opd.unpaid", "/admin/opd/invoices", {"status": "issued,partially_paid"}, "₹300", 1),
     ("list holidays", "holidays.list", "/admin/holidays", {}, "Diwali", 1),   # past holidays are not listed
+    ("kitne samples pending hain", "dx.pending_by_stage", "/admin/dx/dashboard", {}, "Received at lab", None),
+    ("show tat breaches", "dx.tat_breaches", "/admin/dx/worklist", {"open_only": "true"}, "LAB-2026-000007", 1),
+    ("reports waiting for my signature", "dx.my_approvals", "/admin/dx/worklist",
+     {"open_only": "true", "stage": "pending_approval"}, "Ravi Kumar", 1),
+    ("critical results today", "dx.critical_open", "/admin/dx/dashboard", {}, "Open critical values", None),
+    ("LAB-2026-123 status", "dx.find_visit", "/admin/dx/visits", {"q": "LAB-2026-000123"}, "Ramana Babu", 1),
+    ("reports held for payment", "dx.held_dues", "/admin/dx/deliveries", {"status": "held_dues"}, "₹350", 1),
+    ("today's lab summary", "dx.today_summary", "/admin/dx/dashboard", {}, "₹9,000", None),
 ]
 EVERYTHING_ON = {"id": CID, "plan": "diagbooking", "account_type": "tenant", "opd_state": "READY",
                  "features": {"kriya_ketu": True, "opd_enabled": True, "ai_receptionist": True, "booking": True,
-                              "specialty_treatments": True, "ipd_enabled": True}}
+                              "specialty_treatments": True, "ipd_enabled": True,
+                              "dx_enabled": True}}
 
 client = TestClient(app)
 
@@ -409,7 +435,9 @@ def test_handler_reads_are_the_expected_ones():
                                   "voice.analytics", "voice.usage", "voice.outbound_list",
                                   "voice.learning_review", "ipd.census", "ipd.inpatients", "ipd.waiting",
                                   "ipd.discharges", "orders.to_collect", "lis.pending_signoff", "emergency.board",
-                                  "services.prices", "ipd_finance.receivables", "ot.today"}
+                                  "services.prices", "ipd_finance.receivables", "ot.today",
+                                  "dx.pending_by_stage", "dx.tat_breaches", "dx.my_approvals", "dx.critical_open",
+                                  "dx.find_visit", "dx.held_dues", "dx.today_summary"}
 
 
 @pytest.mark.parametrize("aid", HANDLER_READS)

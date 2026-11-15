@@ -1727,8 +1727,8 @@ async def bench_worklist(clinic_id: str = "default", stage: Optional[Stage] = No
                          date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
                          open_only: bool = False, user: AdminUser = Depends(verify_credentials)):
     """Tests by stage. `open_only` = every open visit of the last 7 days (else the day's visits)."""
+    _lab_perm(user, *BENCH_READ, "LAB_ENTRY", "LAB_VALIDATE")      # permission before entitlement (house order)
     scope, clinic = await _dx_scope(user, clinic_id)
-    _lab_perm(user, *BENCH_READ, "LAB_ENTRY", "LAB_VALIDATE")
     sites = await _user_site_ids(user, scope, site_id)
     visits = await dx.open_visits(scope) if open_only else await dx.list_visits(scope, None, date, None, None, 500)
     out = await dx.worklist(scope, visits, sites, department_id, priority, stage)
@@ -2613,3 +2613,119 @@ async def partner_release_pdf(release_id: UUID, request: Request, clinic_id: str
     await _audit(user, request, "dx_partner_release_download", "dx_report_release", rel["id"], {})
     return Response(pdf, media_type="application/pdf", headers={
         "Cache-Control": "no-store", "Content-Disposition": f'inline; filename="R{rel["release_no"]}.pdf"'})
+
+
+# ═══ Dashboard and MIS (P9, DX-54) ═══════════════════════════════════════════
+
+MONEY_VIEW = ("DX_BILLING", "DX_B2B_MANAGE", "DX_REPORTS_MIS")
+DAY = r"^\d{4}-\d{2}-\d{2}$"
+
+
+def _iso_day(v: str) -> date:
+    try:
+        return date.fromisoformat(v)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"{v} is not a calendar date.")
+
+
+def _range(start_date: str, end_date: str) -> tuple[date, date]:
+    from app.services import dx_mis
+    start, end = _iso_day(start_date), _iso_day(end_date)
+    dx_mis.check_range(start, end)
+    return start, end
+
+
+async def _mis(user: AdminUser, clinic_id: str, site_id: Optional[str], *also: str) -> tuple[str, Optional[list]]:
+    """DX_REPORTS_MIS (+ every permission in `also`), tenant, entitlement, the caller's sites."""
+    scope, _ = await _dx_scope(user, clinic_id, "DX_REPORTS_MIS")
+    for p in also:
+        if not holds_dx_permission(user, p):
+            raise HTTPException(status_code=403, detail=f"Missing permission: {p}")
+    return scope, await _user_site_ids(user, scope, site_id)
+
+
+@router.get("/dashboard")
+async def dx_dashboard(clinic_id: str = "default", site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                       date_: Optional[str] = Query(None, alias="date", pattern=DAY),
+                       user: AdminUser = Depends(verify_credentials)):
+    """Stage funnel, open criticals, TAT breaches, reports held for dues, rejections; money only for
+    billing / B2B / MIS logins. Same stage derivation as the Lab Worklist."""
+    from app.services import dx_mis
+    scope, _ = await _dx_scope(user, clinic_id, "DX_READ", "DX_REPORTS_MIS")
+    sites = await _user_site_ids(user, scope, site_id)
+    out = await dx_mis.get_dx_dashboard(scope, sites, _iso_day(date_) if date_ else None,
+                                        with_money=any(holds_dx_permission(user, p) for p in MONEY_VIEW))
+    out["sites"] = [{k: s.get(k) for k in ("id", "code", "display_name", "kind")}
+                    for s in await dx.list_sites(scope, _pinned_branch(user)) if s.get("is_active")]
+    return out
+
+
+@router.get("/mis/tat")
+async def mis_tat(start_date: str = Query(..., pattern=DAY), end_date: str = Query(..., pattern=DAY),
+                  clinic_id: str = "default", site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                  department_id: Optional[str] = Query(None, pattern=UUID_RX),
+                  user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_mis
+    start, end = _range(start_date, end_date)
+    scope, sites = await _mis(user, clinic_id, site_id)
+    return await dx_mis.get_mis_tat(scope, start, end, sites, department_id)
+
+
+@router.get("/mis/volumes")
+async def mis_volumes(start_date: str = Query(..., pattern=DAY), end_date: str = Query(..., pattern=DAY),
+                      clinic_id: str = "default", site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                      department_id: Optional[str] = Query(None, pattern=UUID_RX),
+                      user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_mis
+    start, end = _range(start_date, end_date)
+    scope, sites = await _mis(user, clinic_id, site_id)
+    return await dx_mis.get_mis_volumes(scope, start, end, sites, department_id)
+
+
+@router.get("/mis/revenue")
+async def mis_revenue(start_date: str = Query(..., pattern=DAY), end_date: str = Query(..., pattern=DAY),
+                      clinic_id: str = "default", site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                      department_id: Optional[str] = Query(None, pattern=UUID_RX),
+                      user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_mis
+    start, end = _range(start_date, end_date)
+    scope, sites = await _mis(user, clinic_id, site_id, "DX_BILLING")
+    return await dx_mis.get_mis_revenue(scope, start, end, sites, department_id)
+
+
+@router.get("/mis/rejections")
+async def mis_rejections(start_date: str = Query(..., pattern=DAY), end_date: str = Query(..., pattern=DAY),
+                         clinic_id: str = "default", site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                         user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_mis
+    start, end = _range(start_date, end_date)
+    scope, sites = await _mis(user, clinic_id, site_id)
+    return await dx_mis.get_mis_rejections(scope, start, end, sites)
+
+
+@router.get("/mis/referrers")
+async def mis_referrers(start_date: str = Query(..., pattern=DAY), end_date: str = Query(..., pattern=DAY),
+                        clinic_id: str = "default", site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                        user: AdminUser = Depends(verify_credentials)):
+    """Counts only (ADR-DX-11): no referral fee, incentive or commission exists in Kriya."""
+    from app.services import dx_mis
+    start, end = _range(start_date, end_date)
+    scope, sites = await _mis(user, clinic_id, site_id)
+    return await dx_mis.get_mis_referrers(scope, start, end, sites)
+
+
+@router.get("/mis/export.csv")
+async def mis_export(request: Request, report: Literal["visits", "tat", "revenue", "rejections", "referrers"],
+                     start_date: str = Query(..., pattern=DAY), end_date: str = Query(..., pattern=DAY),
+                     clinic_id: str = "default", site_id: Optional[str] = Query(None, pattern=UUID_RX),
+                     user: AdminUser = Depends(verify_credentials)):
+    from fastapi.responses import StreamingResponse
+    from app.services import dx_mis
+    start, end = _range(start_date, end_date)
+    scope, sites = await _mis(user, clinic_id, site_id, *(("DX_BILLING",) if report == "revenue" else ()))
+    body = await dx_mis.export_mis_csv(scope, report, start, end, sites)
+    await _audit(user, request, "dx_mis_export", "dx_mis", report,
+                 {"report": report, "start_date": start_date, "end_date": end_date, "site_id": site_id})
+    return StreamingResponse(body, media_type="text/csv; charset=utf-8", headers={
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="dx-{report}-{start_date}-to-{end_date}.csv"'})
