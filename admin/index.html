@@ -1540,7 +1540,14 @@
         .ord-placed { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--border); }
         .ord-stat { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 0.7rem; font-weight: 800; letter-spacing: .04em; color: #fff; background: var(--red); }
         .ord-urgent { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 0.7rem; font-weight: 700; color: var(--amber); border: 1px solid var(--amber); }
-        .opd-order-tag { display: inline-block; margin-top: 3px; font-size: 0.68rem; font-weight: 600; color: var(--accent); }
+        /* A doctor's order line: description and its tag stacked inside the cell (the table cells do not wrap,
+           so an inline tag used to run on into the Qty column and hide the quantity). */
+        .opd-desc-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+        .opd-desc-cell > input { width: 100%; }
+        .opd-order-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 8px;
+            font-size: 0.68rem; font-weight: 600; line-height: 1.5; white-space: nowrap; color: var(--accent);
+            background: var(--accent-glow); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+            border-radius: 999px; overflow: hidden; text-overflow: ellipsis; }
         .opd-orders-banner { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--amber); border-radius: 8px; font-size: 0.85rem; }
         .opd-orders-banner[hidden] { display: none; }
         .dx-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -2895,6 +2902,54 @@
             padding-right: 38px !important; text-overflow: ellipsis;
         }
         select option { background-color: var(--surface-solid); color: var(--text); }
+
+        /* ══ Premium dropdowns — every <select> in the panel ══════════════════
+           Pure CSS on the native element, so every value, onchange and innerHTML rebuild keeps working.
+           Closed control: one field look everywhere (page rules with more specific selectors still size it).
+           Open menu: on browsers with customizable <select> (appearance: base-select, Chromium 135+) the list
+           itself is a themed panel with hover, a checkmark and an open animation; elsewhere the OS list is
+           kept, coloured by the option rule above. */
+        select {
+            font-family: inherit; font-size: 0.9rem; line-height: 1.3; color: var(--text);
+            background-color: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+            min-height: 38px; padding: 8px 14px; text-align: left; cursor: pointer; max-width: 100%;
+            transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+        }
+        select:hover:not(:disabled) { border-color: var(--border2); }
+        select:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+        select:disabled { cursor: not-allowed; opacity: 0.72; }
+        @supports (appearance: base-select) {
+            select:not([multiple]):not([size]), select:not([multiple]):not([size])::picker(select) { appearance: base-select; }
+            select:not([multiple]):not([size]) { display: inline-flex; align-items: center; }
+            select:not([multiple]):not([size])::picker-icon { display: none; }   /* the drawn chevron above stays */
+            select:not([multiple]):not([size]):open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+            select::picker(select) {
+                margin-top: 6px; padding: 6px; min-width: anchor-size(width); max-height: min(360px, 60vh);
+                overflow-y: auto; overscroll-behavior: contain;
+                color: var(--text); background: var(--surface-solid);
+                border: 1px solid var(--border2); border-radius: 12px;
+                box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34), 0 3px 10px rgba(0, 0, 0, 0.18);
+                opacity: 1; transform: translateY(0) scale(1);
+                transition: opacity 0.14s ease, transform 0.14s ease, overlay 0.14s allow-discrete, display 0.14s allow-discrete;
+            }
+            @starting-style { select::picker(select) { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+            select:not([multiple]):not([size]) option {
+                display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 8px 12px;
+                border-radius: 8px; background: transparent; color: var(--text); font-size: 0.9rem;
+                white-space: normal; cursor: pointer; transition: background-color 0.12s, color 0.12s;
+            }
+            select:not([multiple]):not([size]) option:hover,
+            select:not([multiple]):not([size]) option:focus-visible { background: var(--accent-glow); color: var(--text-strong); outline: none; }
+            select:not([multiple]):not([size]) option:checked { color: var(--accent); font-weight: 600; }
+            select:not([multiple]):not([size]) option::checkmark { order: 1; margin-left: auto; content: "\2713"; color: var(--accent); font-weight: 700; }
+            select:not([multiple]):not([size]) option:disabled { opacity: 0.45; cursor: not-allowed; }
+            select:not([multiple]):not([size]) optgroup { padding: 4px 0; }
+            select:not([multiple]):not([size]) optgroup legend { padding: 6px 12px 4px; font-size: 0.72rem; font-weight: 700;
+                letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            select, select::picker(select), select option { transition: none !important; }
+        }
 
         /* ═══════ DASHBOARD · PREMIUM ═══════════════════════════════════════
            Every selector is scoped to #clinicDashboardContent, so the shared
@@ -17787,6 +17842,38 @@ async function loadMyCollections(silent) {
 }
 
 // ═══════ NAV ═══════
+/* Premium dropdowns: a customizable <select> (appearance: base-select) sizes to the CHOSEN label, a native one to
+   its LONGEST option. Keep the native width — min(longest label, 100% of its box) — so no filter bar or form shrinks,
+   jumps on change, or overflows on a phone. Re-measured when a select's options are rebuilt. No-op elsewhere. */
+(function keepSelectWidths() {
+    if (!(window.CSS && CSS.supports && CSS.supports('appearance', 'base-select'))) return;
+    const ctx = document.createElement('canvas').getContext('2d');
+    const size = sel => {
+        if (!sel.isConnected || sel.multiple || sel.size > 1) return;
+        if (sel.style.minWidth && !sel.dataset.selSized) return;          // an authored inline min-width wins
+        const cs = getComputedStyle(sel);
+        ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        let w = 0;
+        for (const o of sel.options) w = Math.max(w, ctx.measureText(o.label || o.text || '').width);
+        const box = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth']
+            .reduce((n, k) => n + (parseFloat(cs[k]) || 0), 0);
+        sel.style.minWidth = `min(${Math.ceil(w + box)}px, 100%)`;
+        sel.dataset.selSized = '1';
+    };
+    const queue = new Set();
+    let frame = 0;
+    const add = sel => { queue.add(sel); frame = frame || requestAnimationFrame(() => { frame = 0; queue.forEach(size); queue.clear(); }); };
+    new MutationObserver(records => records.forEach(m => {
+        const owner = m.target.closest ? m.target.closest('select') : null;
+        if (owner) add(owner);
+        m.addedNodes.forEach(n => {
+            if (n.nodeType !== 1) return;
+            if (n.tagName === 'SELECT') add(n); else if (n.querySelectorAll) n.querySelectorAll('select').forEach(add);
+        });
+    })).observe(document.documentElement, { childList: true, subtree: true });
+    document.querySelectorAll('select').forEach(add);
+})();
+
 function go(page, el) {
     // An unknown page used to hide every section and then throw: a blank screen.
     const target = document.getElementById('pg-' + page);
@@ -28940,8 +29027,10 @@ function renderOpdActiveInvoiceLines(items, isEditable) {
                     </select>
                 </td>
                 <td>
-                    <input type="text" class="opd-cell opd-line-desc" maxlength="200" value="${esc(item.description || '')}" aria-label="Description, line ${idx + 1}" oninput="onOpdLineItemChange(${idx})">
-                    ${item.order_id ? '<span class="opd-order-tag">Doctor\'s order</span>' : ''}
+                    <div class="opd-desc-cell">
+                        <input type="text" class="opd-cell opd-line-desc" maxlength="200" value="${esc(item.description || '')}" aria-label="Description, line ${idx + 1}" oninput="onOpdLineItemChange(${idx})">
+                        ${item.order_id ? '<span class="opd-order-tag" title="Type, quantity and price are fixed by the doctor\'s order">Doctor\'s order</span>' : ''}
+                    </div>
                 </td>
                 <td>
                     <input type="number" class="opd-cell opd-line-qty" min="1" max="999" step="1" inputmode="numeric" value="${qty}" aria-label="Quantity, line ${idx + 1}" ${ordered} oninput="onOpdLineItemChange(${idx})">
