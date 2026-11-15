@@ -123,3 +123,26 @@ Still open (decisions, not code defects):
 - `get_treatment_doctor_ids` fails open on a DB error (Session 21 decision; the doctor list read right after it fails too).
 - 2026-09-23 read-only check: all 3 live clinics (Aura, Accumx, Visakha) have NO `config.integration_secret`, so each accepts lab reports signed with the shared platform secret. Setting one without updating that clinic's sender breaks report delivery — coordinate per clinic.
 - Tenant cache staleness up to 30 s across workers (KA-19, section 2).
+
+---
+
+## 7. DIAGNOSTIC OS CAPABILITY STATUS (2026-11-15)
+
+Status vocabulary as §1. "Implemented & Verified" = code + tests on real PostgreSQL (`pgserver`) + a live UI check
+(docs/diagnostic-os/status.md §9). **Not deployed**: migrations 125–133 are not applied to Supabase and the module is
+off for every clinic until the owner enables it (ROLLOUT §1–§3).
+
+| Capability | Status | Evidence | Constraints |
+| :--- | :--- | :--- | :--- |
+| Foundation, setup, sites | Implemented & Verified | `dx.py`, `test_migration_dx_m1.py`, `test_dx_feature_gate.py` | owner toggle only |
+| Catalogue (test master, formulas, approval) | Implemented & Verified | `dx_catalogue.py`, `dx_formula.py`, `test_dx_catalogue_api.py`, `test_dx_formula.py` | |
+| Registration, billing, bookings | Implemented & Verified | `dx.py`, `dx_billing.py`, `test_dx_visits_e2e.py`, `test_dx_bookings.py` | |
+| Collection, labels, rejection | Implemented & Verified | `dx_barcode.py`, `test_dx_samples.py`, `test_dx_labels.py` | label print via PDF / ZPL (no local print agent) |
+| Logistics, outsourcing | Implemented & Verified | `test_dx_logistics.py` | |
+| Bench, verification, approval, criticals | Implemented & Verified | `dx_results.py`, `test_dx_results_e2e.py` | |
+| Reports, templates, delivery policy | Implemented & Verified | `dx_reports.py`, `dx_pdf.py`, `test_dx_reports_e2e.py`, `test_dx_delivery_policy.py` | new WhatsApp templates need Meta approval (owner) |
+| B2B money, partner portal | Implemented & Verified | `dx_b2b.py`, `test_dx_b2b_e2e.py` | credit notes / write-offs SQL-only; statements issued manually |
+| Dashboard, MIS, Ketu, voice, WhatsApp status | Implemented & Verified | `dx_mis.py`, `dx_status.py`, `test_dx_mis.py`, `test_dx_status.py`, `test_assistant_dx.py` | MIS ≤ 5,000 visits per range |
+| Analyser bridge (server side), instrument prefill | Implemented & Verified | `dx_bridge.py`, `connectors/bridge/parsers.py`, `test_dx_bridge.py` | lab-side serial / TCP service DEFERRED |
+| QC (Westgard, Levey-Jennings) | Implemented & Verified | `dx_qc.py`, `test_dx_bridge.py` | a rejected QC run does not block patient results |
+| Release readiness (matrices, lifecycle, rollback chain, purge) | Implemented & Verified | `test_dx_release_readiness.py` | staging on a Supabase branch and the sandbox-clinic run are owner actions |

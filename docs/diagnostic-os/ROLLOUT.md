@@ -57,6 +57,14 @@ migration rollback in production with data present.
 - Pathologists' doctor records have registration numbers and signature images.
 - Paper backup for the first two weeks of stage D (NABL continuity).
 
+Status at P11 (2026-11-15). Engineering side, verified on local real PostgreSQL (status.md §9): migrations 125–133
+apply in order and roll back 133 → 125 and re-apply; `verify_supabase_schema.sql` §19–§27 all PASS; the full
+desk → release lifecycle (incl. no payment → no report) and `dx_purge_clinic` v9 emptying every DX table; queries 1,
+2, 3 and 7 of §4 return 0 rows after that lifecycle; route, partner and zero-LLM matrices green. **Still owner
+actions, not done**: staging on a Supabase branch (§1, TEST-PLAN §6), the sandbox-clinic W1–W14 run in production,
+the decisions O-DX-1…11, Meta approval of the five templates above, the label printer test print, pathologist
+registration numbers / signatures per centre, and the paper backup plan.
+
 ## 4. Daily reconciliation queries (run by ops during pilot; all must return 0 rows)
 1. Visits with a patient bill whose total ≠ Σ active items (price − discount).
 2. Orders `source='dx'` with `status='sample_collected'` whose sample is not `collected|in_transit|received|stored`.

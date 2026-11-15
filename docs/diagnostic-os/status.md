@@ -31,11 +31,11 @@ unless the account carries a recorded authorisation.
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P11** — hardening, staging, docs, sandbox run, pilot readiness (P0–P4 VERIFIED 2026-11-13, P5–P6 VERIFIED 2026-11-14, P6b + P7 + P8a + P8b + P9 + P10 VERIFIED 2026-11-15) |
-| Next task | **DX-63** (P11: full matrices, partner matrix, no-LLM, full regression, Playwright desk → release); no migration planned |
-| Working branch | `dx/p1-foundation` (from `main` @ `94de8ae`; P1 `224e902`, P2 `2fec764`, P3 `ee6a219`, P4 `9c3cd66`, P5 `8acb461`, P6 `5fbf053`, P6b + P7 `0af71f1`, P8a + P8b `9df7c21`, P9 `f94b5b5`, P10 on top; not pushed, no PR) |
-| Last commit touching DX | `feat(dx): P10 analyser bridge, instruments and QC (DX-59…DX-62)` on `dx/p1-foundation` |
-| Last VERIFIED gate | P10 DG1–DG7 (§9, 2026-11-15) |
+| Active phase | **Diagnostic OS implementation COMPLETE (code)** — P0–P11 engineering VERIFIED 2026-11-13…15 on local real PostgreSQL. **Release blocked on owner actions**: Supabase staging (DX-64 staging half), production sandbox run (DX-66), templates / printer / pathologist records (ROLLOUT §3) |
+| Next task | **Owner**: §11. **Agent**: none in this plan; pick from §8 gaps only on an owner decision |
+| Working branch | `dx/p1-foundation` (from `main` @ `94de8ae`; P1 `224e902`, P2 `2fec764`, P3 `ee6a219`, P4 `9c3cd66`, P5 `8acb461`, P6 `5fbf053`, P6b + P7 `0af71f1`, P8a + P8b `9df7c21`, P9 `f94b5b5`, P10 `f7c90cf`, P11 on top; not pushed, no PR) |
+| Last commit touching DX | `feat(dx): P11 hardening, documentation, and release readiness (DX-63…DX-66)` on `dx/p1-foundation` |
+| Last VERIFIED gate | P11 DG1–DG7 + release readiness (§9, 2026-11-15) |
 | Open blockers | none for code. Migrations 125–133 are **not applied** to Supabase (owner action, ROLLOUT §0.4: apply before deploying this code — `get_family_members` reads the 127 column) |
 | Lanes running in parallel | none |
 
@@ -77,7 +77,7 @@ unless the account carries a recorded authorisation.
 | P8b | Partner portal, white-label delivery, barcode stock, B2B & referrer pages | DX-51–53 | P7, P8a | P9 | (DX-M8) | DG1–DG7 | VERIFIED |
 | P9 | Dashboard, MIS, Ketu, voice, WhatsApp intents | DX-54–58 | P7 | P8b, P10 | — | DG1–DG7 | VERIFIED |
 | P10 | Analyser bridge, instrument results, QC | DX-59–62 | P6 | P7–P9 | DX-M9 | DG1–DG7 | VERIFIED |
-| P11 | Hardening, staging, docs, sandbox run, pilot readiness | DX-63–66 | all above that ship | — | — | TEST-PLAN §6 + ROLLOUT §1 | NOT_STARTED |
+| P11 | Hardening, staging, docs, sandbox run, pilot readiness | DX-63–66 | all above that ship | — | — | TEST-PLAN §6 + ROLLOUT §1 | VERIFIED (local real-Postgres); staging + sandbox run pending (owner) |
 
 Lane PURE = modules with no DB or route dependency (formula engine, Code128/labels, PDF renderer + template schema)
 that may be built from P1 onward by a separate agent (AGENT-PROMPT.md §3).
@@ -217,10 +217,10 @@ booking of the same tests unchanged.
 ### P11 — Hardening and release
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| DX-63 | Full matrices, partner matrix, no-LLM, full regression, Playwright regression of desk → release | all shipping phases | DG1–DG7 | all | NOT_STARTED |
-| DX-64 | Staging: apply 115–124 (if needed) + DX migrations on a Supabase branch; E2E with `TEST_DATABASE_URL`; grants/RLS check | DX-63 | TEST-PLAN §6 | E2E | NOT_STARTED |
-| DX-65 | Docs: `docs/agent-context/03,04,05,08,09,13` DX sections; AGENTS.md table; `docs/hospital-os/status.md` G2 board drift (F8) | DX-63 | | — | NOT_STARTED |
-| DX-66 | Sandbox clinic run of W1–W14 in production; ROLLOUT §3 prerequisites recorded | DX-64 | | manual | NOT_STARTED |
+| DX-63 | Full matrices, partner matrix, no-LLM, full regression, desk → release regression | all shipping phases | DG1–DG7 | `test_dx_release_readiness.py`, matrices, all | VERIFIED |
+| DX-64 | Migrations 125–133 in order, rollback 133 → 125 + re-apply, verify §19–§27, purge v9 across every DX table (local real PostgreSQL); Supabase branch + `TEST_DATABASE_URL` run + grants/RLS on staging | DX-63 | TEST-PLAN §6 | `test_dx_release_readiness.py`, `test_migration_dx_m*.py` | VERIFIED (local real-Postgres; staging apply pending — owner) |
+| DX-65 | Docs: `docs/agent-context/00,03,04,05,08,09,13` DX sections; AGENTS.md; `docs/hospital-os/status.md` G2 board drift (F8) | DX-63 | | — | VERIFIED |
+| DX-66 | Sandbox clinic run of W1–W14 in production; ROLLOUT §3 prerequisites recorded | DX-64 | | manual | BLOCKED (owner: needs production access and an internal sandbox tenant; prerequisites recorded in ROLLOUT §3) |
 
 ### Deferred (do not start without an owner decision)
 | ID | Item | Why deferred |
@@ -303,6 +303,8 @@ booking of the same tests unchanged.
 | 2026-11-15 | DX-59 | Columns beyond the brief: `dx_instrument_results.mapping` (Kriya's prefill per order) and `mapped_by_name`; `dx_qc_results.entered_by_name`; composite tenant FKs (house style) beside the brief's single-column ones; `key_hash` must be 64 hex, `key_prefix` `kba_` + 8, unique platform-wide; QC flags limited to the six rule names; `valid_to >= valid_from`. Raw results are append-only except `mapping`, `mapping_status`, `applied_result_id`, `mapped_by_name`. Purge v9 and the `dx_record_results` change (value meta now stores `instrument_result_id`) are guarded text patches (131/132 precedent), reversed by the rollback | the prefill must survive a technician's mapping without touching the raw message | DATA-MODEL §10 |
 | 2026-11-15 | DX-60 | Signing key = SHA-256 of the agent secret (= `key_hash`): Kriya stores no secret, the bridge derives the same key. The signed path includes the query string (`/orders?barcode=` is covered). No nonce table: the ±300 s window plus idempotent results (`(instrument, message_id)`) and read-only host query / heartbeat make a replay harmless. Kriya parses `raw_message` itself with `connectors/bridge/parsers.py` (one specimen per message, else 422) instead of trusting a parsed body. Host query and ingestion only reach tubes at the agent's site. Auto-enter: only with `instrument_auto_enter`, only when the order has no result yet, only for a received tube; otherwise the values stay a prefill. Technician saves send `instrument_result_id`; a value equal to the analyser's is stored with source `instrument`, a changed one as `manual`. Added `GET /instrument-results/{id}/candidates?barcode=` (open orders + parameters of a tube) for the Map form | a stored HMAC secret would need a new key store; the parser is the single source of truth | API.md P10 |
 | 2026-11-15 | DX-62 | Westgard: 1_2s warning only; 1_3s, 2_2s, R_4s (one run > +2 s and the previous < −2 s or the reverse), 4_1s and 10_x reject (`accepted = false`); rules use the material's own earlier runs (accepted or not), newest first. A run is refused (409 `dx_qc_material_expired`) outside the lot's validity dates. The worksheet drawer (DX:bench) fills an empty worksheet from a pending analyser prefill with a "check every value" note | the brief's rule list | — |
+| 2026-11-15 | DX-63 | The desk → release regression is a pytest end-to-end through the real routes and real PostgreSQL (`test_desk_to_release_lifecycle_then_purge`), not a Playwright browser run; each page was browser-checked in its own phase (§9). The bind step uses a preprinted tube on the same visit (registration always generates labels). The DX table count is **41** (the P11 brief said 36). Matrix floors raised to 156 `/admin/dx` routes; `/internal/dx` (3) is covered by an unsigned-call 401 check, `/public/dx` (3) by P7 tests. ROLLOUT §4 queries 4–6 are not automated (4 is impossible by the approval gate; 5 needs a clock; 6 is the hold job's own test) | browser E2E needs a seeded live app; the route-level chain covers the same states | — |
+| 2026-11-15 | DX-64 / DX-66 | Marked as the Hospital OS tracker does: VERIFIED for local real PostgreSQL, staging apply pending. The production sandbox run is BLOCKED on the owner (no production access from the repository) | honesty rule of §0: VERIFIED only for what was run | ROLLOUT §3 |
 
 ## 8. Known issues and limitations
 - At authoring, migrations 115–124 (which DX builds on) are not applied to Supabase; DX cannot reach staging first.
@@ -352,6 +354,13 @@ booking of the same tests unchanged.
 ## 9. Verification evidence (paste command and summary line; newest first)
 | Date (IST) | Task / gate | Command | Result |
 |:-|:-|:-|:-|
+| 2026-11-15 | P11 / DG7 | python -m pytest -q -rs | 9408 passed, 5 skipped in 668.89s (P10 9401 + 7 release-readiness tests; same 5 skips), first run green. The one pytest warning on every run is repo config (`asyncio_default_fixture_loop_scope` unknown to the installed pytest-asyncio), not a DX test |
+| 2026-11-15 | P11 / DX suites | python -m pytest tests/test_dx_*.py tests/test_migration_dx_*.py -q | 382 passed |
+| 2026-11-15 | DX-63 / DX-64 | python -m pytest tests/test_dx_release_readiness.py -q | 7 passed: 41 DX tables = tenant tables, RLS forced; 156 `/admin/dx` routes need a session and reach `_dx_scope` / `_partner` / `_mis`; 3 `/internal/dx` routes 401 unsigned; partner login allowed only `/admin/dx/partner/*` + `/admin/me` + own credential changes across every `/admin` route; `verify_supabase_schema.sql` M125–M133 = 34 checks, all PASS; rollback 133 → 125 leaves no DX table or purge function, 125 → 133 re-apply restores 41 tables and purge v9; lifecycle desk → release (preprinted bind, collect, batch to hub, receive, LIPID/HDL → ratio 4.0, verify, approve, PDF, held for dues, paid, one dispatch, tube timeline collected < dispatched < received), ROLLOUT §4 queries 1/2/3/7 = 0, purge v9 leaves 0 rows in all 41 DX tables (21 populated) |
+| 2026-11-15 | P11 / registry | python -m pytest tests/test_assistant_registry.py tests/test_admin_sidebar_groups_and_voice_layout.py -q | 256 passed |
+| 2026-11-15 | P11 / DG3 | python -m pytest tests/test_clinical_firewall.py tests/test_dx_no_llm.py -q | 41 passed |
+| 2026-11-15 | P11 / DG2 | python -m pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q | 1587 passed (DX floors now 156) |
+| 2026-11-15 | P11 / DG1 | python -m pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q | 10 passed |
 | 2026-11-15 | P10 / DG7 | python -m pytest -q -rs | 9401 passed, 5 skipped in 360.88s (P9 9322 + 79 new: 5 migration M9, 30 bridge / parser / Westgard / QC, matrix cases for the 16 new admin routes; same 5 skips), first run green |
 | 2026-11-15 | P10 / DG5 | python -m pytest tests/test_webhook.py tests/test_fsm_transitions.py -q | 15 passed |
 | 2026-11-15 | P10 / DG4 | python -m pytest tests/test_dx_bridge.py tests/test_assistant_registry.py -q | 272 passed (parsers: ASTM frames over ETB/ETX with checksum, bad checksum / sequence / truncation refused, unframed text, two specimens, HL7 MLLP + escapes + OBR-3 fallback; Westgard 10 vectors; signature bound to method / path / time / body; agent secret once + rotation kills the old key; stale / forged / unknown / inactive / module-off refused, ±300 s edge; host query machine codes, no patient data; prefill only, replay by message id, technician save -> source `instrument` + applied, typed-over value -> `manual`, foreign prefill 409, still pending approval; auto-enter only when on, never over an existing result, never before receipt; unmatched -> candidates -> map / ignore; one specimen per message, another agent's instrument 404; QC 2_2s / 1_3s + R_4s rejected, chart lines, expired lot 409, roles) |
@@ -444,6 +453,7 @@ booking of the same tests unchanged.
 ## 10. Log
 | Date (IST) | Entry |
 |:-|:-|
+| 2026-11-15 | **P11 engineering VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P11 hardening, documentation, and release readiness (DX-63…DX-66)`). No migration. `tests/test_dx_release_readiness.py`: 41 DX tables = tenant tables with RLS forced; every `/admin/dx` route needs a session and reaches a DX scope helper; `/internal/dx` refuses unsigned calls; partner login swept over every `/admin` route; verify §19–§27 all PASS; rollback 133 → 125 then re-apply 125 → 133; desk → release lifecycle (bind, collect, batch to hub, receive, formula entry, 3-level verify, approve, PDF, dues hold, payment, single dispatch) then ROLLOUT §4 queries 1/2/3/7 = 0 and purge v9 empties every DX table. Matrix floors 66 → 156. Docs: agent-context 00/03/04/05/08/09/13, AGENTS.md, ROLLOUT §3 status, hospital-os G2 drift (F8). Not applied to Supabase, not pushed. |
 | 2026-11-15 | **P10 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P10 analyser bridge, instruments and QC (DX-59…DX-62)`). Migration 133: `dx_bridge_agents` (key hash + prefix only), `dx_instruments`, `dx_instrument_results` (raw, replay-safe, immutable but for the mapping), `dx_qc_materials`, `dx_qc_results` (append-only); value meta keeps `instrument_result_id`; purge v9; rollback; verify §27; 5 tables in `TENANT_OWNED_TABLES`. Python: `connectors/bridge/parsers.py` (ASTM E1381/E1394, HL7 v2), `dx_bridge.py` (HMAC auth, host query, ingestion, matching, auto-enter, prefill, map / ignore, admin), `dx_qc.py` (Westgard, Levey-Jennings), `routers/dx_bridge.py` (3 bridge + 11 staff routes), 5 QC routes; worksheet prefill in the Lab Worklist drawer; Instruments & QC page (DX:instruments markers); Ketu page `dxinstruments`. Existing tests edited only for: newest-first unwind (`unwind_132` → `unwind_133`), sidebar order (+`dxinstruments`). Not applied to Supabase, not pushed. |
 | 2026-11-15 | **P9 VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P9 dashboard, mis, ketu, voice, whatsapp (DX-54…DX-58)`). No migration. `dx_mis.py` (dashboard funnel from the worklist's stages, alerts, TAT / volumes / revenue / rejections / referrers, CSV) + 7 routes; `dx_status.py` (status-only patient view, en / hi / te texts, 10-minute link reuse, recollection note); voice `dx_visit_status` / `dx_send_payment_link` + dialog step + 4 phrases; WhatsApp report reply adds the DX status, payment link, recollection buttons; Ketu: `dxdash` page, 7 R0 reads + 4 hand-offs, DX/hospital tie rule; DX Dashboard page (DX:mis markers). Existing tests edited only for: sidebar order (+`dxdash`), the no-LLM guard (brief), the approved-read list / cases / all-on clinic (+DX) and 50 corpus phrases. Not applied to Supabase, not pushed. |
 | 2026-11-15 | **P8a + P8b VERIFIED** on `dx/p1-foundation` (commit `feat(dx): P8a b2b money + P8b partner portal, stock (DX-48…DX-53)`). Migration 132: `dx_rate_cards`, `dx_rate_card_items`, account money columns, `clinic_admins.dx_b2b_account_id`, append-only `dx_b2b_ledger` (`uq_dx_ledger_charge`, `uq_dx_ledger_idem`), `dx_b2b_statements` (`B2B-YYYY-NNNNN`, one live statement per period), `dx_barcode_stock` (non-overlap trigger); `dx_b2b_balance` / `_unpaid` / `_ageing`, `_post_charge`, `_post_visit_charges`, `_reverse_charge`, `_reverse_visit_charges`, `_record_payment`, `_issue_statement`, `_void_statement`, `_set_hold`, `_evaluate_holds`, `dx_check_barcode_stock`; `dx_price_items` replaced (rate cards, co-pay); guarded text patches of register / add items / quote / cancel item / cancel visit / bill visit / insert lines / bind barcode; purge v8; rollback; verify §26. Python: `dx_b2b.py`, statement PDF in `dx_pdf.py`, 28 routes (rate cards + CSV, ledger, payments, holds, ageing, statements + PDF + WhatsApp + void, partner users, barcode stock, referral volume, partner portal), `dx_b2b_hold_evaluation` job (02:10 IST, `scheduler_locks`), partner account on `AdminUser` + fail-closed confinement, generic staff route refuses `B2B_PARTNER`; B2B Accounts, Referrers and Partner Portal pages (DX:b2b markers). Existing tests edited only for: newest-first unwind (`unwind_131` → `unwind_132`), the P3 B2B refusal now `dx_b2b_account_required`, sidebar order / Ketu page table (+3 pages, page-id regex `[a-z0-9]+`), the partner-confinement test (account required). Not applied to Supabase, not pushed. |
@@ -458,15 +468,17 @@ booking of the same tests unchanged.
 | 2026-11-05 | Document set authored (no code): competitive research (MocDoc screenshots + public pages for MocDoc/CrelioHealth; direct fetch blocked by network policy), gap analysis against `main` @ `56f719f`, architecture, 18 ADRs, data model DX-M1…M9, workflows W1–W18, report/template/label spec, API, UI, security, test plan, rollout, assistants, agent prompts. Baseline suite not run in the authoring session (no pytest installed). |
 
 ## 11. Next exact action
-Owner: review/merge `dx/p1-foundation`; apply migrations 125–133 to Supabase **before** deploying it (ROLLOUT §0.4);
-submit the `dx_recollection_required`, `dx_report_copy_referrer` and `dx_payment_due` WhatsApp templates; set
-`MEDASSIST_URL`; decide whether the lab-side bridge service (serial / TCP loop, outbound queue) is built here or
-DEFERRED (DX-61 shipped the shared parsers only).
-Agent: start **DX-63** (P11) with the master prompt in [AGENT-PROMPT.md](AGENT-PROMPT.md) §1. Gaps worth a task are
-listed in §8 (P8, P9, P10).
+Owner, in order: (1) review / merge `dx/p1-foundation`; (2) on a Supabase **branch**, apply 115–124 if missing, then
+125–133, run `tests/test_dx_*.py` with `TEST_DATABASE_URL` and `verify_supabase_schema.sql` (TEST-PLAN §6) and record
+it here; (3) apply to production before deploying this code; (4) submit the five WhatsApp templates (ROLLOUT §3) and
+set `MEDASSIST_URL`; (5) enable DX on an internal sandbox tenant and run W1–W14, then purge it; (6) choose the pilot
+centre (shadow mode, ROLLOUT §2).
+Agent: nothing queued. Candidate follow-ups (each needs an owner decision): the lab-side bridge service (DX-61
+DEFERRED), QC lockout of patient results after a rejected run, B2B credit notes / write-offs / automatic statements,
+MIS as SQL views past 5,000 visits, voice recollection booking.
 
 ## 12. Release decision
-**P1–P10 built, not released.** Owner toggle, setup, test master with approval, registration, billing, booking
+**P1–P11 built and verified locally, not released.** Owner toggle, setup, test master with approval, registration, billing, booking
 conversion, tube labels, collection (desk and home), rejection with recollection, same-site receipt, routing,
 hub-and-spoke batches, outsourcing, result entry, verification, approval, visit reports with delivery rules (P7),
 B2B rate cards, ledger, statements, holds and the partner portal (P8), the DX Dashboard / MIS with Ketu, voice and

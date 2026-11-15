@@ -14,7 +14,8 @@
 | G8 | Operation theatre: theatres, booking (no double booking), WHO checklist, anaesthesia record, post-op note, auto-posted charge | **VERIFIED** (local real-Postgres; staging apply pending) | [48](../sessions/SESSION_48_G8_OPERATION_THEATRE.md) |
 | G13 | Radiology: imaging worklist, reports (draft → signed, amendments), PACS link, letterhead PDF to WhatsApp, statutory PCPNDT Form F, fetal-sex firewall | **VERIFIED** (local real-Postgres; staging apply pending) | [49](../sessions/SESSION_49_G13_RADIOLOGY_AND_PCPNDT.md) |
 | G6 | Insurance / TPA: payers, policies, cashless pre-auth (query / enhancement), dual-debtor claim on the GST bill, NEFT / TDS / disallowance settlement, write-off via credit note, ageing | **VERIFIED** (local real-Postgres; staging apply pending) | [50](../sessions/SESSION_50_G6_INSURANCE_TPA.md) |
-| G2–G4, G6, G7, G9–G18 | See gap analysis §4 | NOT_STARTED | — |
+| G2 | In-house LIS: parameters, ranges, result entry, pathologist sign-off, signed PDF (migration 118) | **BUILT** (full suite green at Session 44; UI not browser-checked there; the DX bench (P6) runs on it and is browser-verified) | [44](../sessions/SESSION_44_G2_LIS.md) |
+| G3, G4, G7, G9–G18 | See gap analysis §4 | NOT_STARTED | — |
 
 **Pre-production re-audit (2026-10-30, [Session 51](../sessions/SESSION_51_PRE_PRODUCTION_REAUDIT.md))**: 1 high
 (role-implied grants bypassed the staff grant cap) and 1 GST defect (OT override dropped the service's tax) fixed;

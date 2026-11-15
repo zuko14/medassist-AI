@@ -353,3 +353,65 @@ Defined across [`app/routers/opd.py`](file:///c:/Users/chait/OneDrive/Desktop/SY
 | :--- | :--- | :--- | :--- |
 | `GET` | `/public/queue-display/board` | Bearer Token / Query Param | Zero-PII live token call display for waiting hall TVs. |
 
+---
+
+## 12. DIAGNOSTIC OS ENDPOINTS (`/admin/dx/*`, `/internal/dx/*`, `/public/dx/*`) — added 2026-11-15
+
+162 routes (156 staff, 3 bridge, 3 public), generated from the app's route table. **Permission is checked inside each
+handler**, not by `Depends(require_permission)`: every `/admin/dx` handler opens with `_dx_scope(user, clinic_id,
+*perms)` (any one permission → `enforce_clinic_access` → `dx_access(clinic)`; `new_work=True` also refuses in
+`WIND_DOWN`), the partner portal with `_partner()`, MIS with `_mis()`; lab permissions (`LAB_ENTRY`, `LAB_VALIDATE`)
+via `_lab_perm`. Branch-pinned logins are limited to their sites (`_user_site_ids`, `_visit_for`). Per-route
+permissions: `docs/diagnostic-os/API.md` (with "As built" notes per phase). `tests/test_dx_release_readiness.py`
+asserts every `/admin/dx` route needs a session and reaches a scope helper.
+
+- `/internal/dx/bridge/*`: no session; `X-Bridge-Key-Prefix`, `X-Bridge-Timestamp` (±300 s), `X-Bridge-Signature`
+  (HMAC-SHA256 keyed by `sha256(agent secret)` over `METHOD\nPATH[?QUERY]\nTIMESTAMP\nsha256(body)`); one 401 for
+  every failure.
+- `/public/dx/*`: report verification code and time-limited share links (no session, no patient identifiers beyond
+  what the release shows).
+
+| Area | Routes |
+| :--- | :--- |
+| `b2b-accounts` | `GET /admin/dx/b2b-accounts`<br>`POST /admin/dx/b2b-accounts`<br>`GET /admin/dx/b2b-accounts/ageing`<br>`GET /admin/dx/b2b-accounts/statements/{statement_id}/pdf`<br>`POST /admin/dx/b2b-accounts/statements/{statement_id}/send`<br>`POST /admin/dx/b2b-accounts/statements/{statement_id}/void`<br>`GET /admin/dx/b2b-accounts/{account_id}`<br>`PUT /admin/dx/b2b-accounts/{account_id}`<br>`POST /admin/dx/b2b-accounts/{account_id}/hold`<br>`GET /admin/dx/b2b-accounts/{account_id}/ledger`<br>`POST /admin/dx/b2b-accounts/{account_id}/payments`<br>`GET /admin/dx/b2b-accounts/{account_id}/statements`<br>`POST /admin/dx/b2b-accounts/{account_id}/statements`<br>`POST /admin/dx/b2b-accounts/{account_id}/subjects`<br>`POST /admin/dx/b2b-accounts/{account_id}/users` |
+| `barcode-stock` | `GET /admin/dx/barcode-stock`<br>`POST /admin/dx/barcode-stock` |
+| `batches` | `GET /admin/dx/batches`<br>`POST /admin/dx/batches`<br>`GET /admin/dx/batches/{batch_id}`<br>`POST /admin/dx/batches/{batch_id}/dispatch`<br>`POST /admin/dx/batches/{batch_id}/receive`<br>`POST /admin/dx/batches/{batch_id}/samples` |
+| `bookings` | `POST /admin/dx/bookings/convert`<br>`GET /admin/dx/bookings/today` |
+| `bridge-agents` | `GET /admin/dx/bridge-agents`<br>`POST /admin/dx/bridge-agents`<br>`PATCH /admin/dx/bridge-agents/{agent_id}` |
+| `collection` | `GET /admin/dx/collection/queue` |
+| `containers` | `GET /admin/dx/containers`<br>`POST /admin/dx/containers`<br>`PUT /admin/dx/containers/{container_id}` |
+| `critical-events` | `POST /admin/dx/critical-events/{event_id}/call` |
+| `dashboard` | `GET /admin/dx/dashboard` |
+| `deliveries` | `GET /admin/dx/deliveries`<br>`POST /admin/dx/deliveries/{delivery_id}/resend` |
+| `departments` | `GET /admin/dx/departments`<br>`POST /admin/dx/departments`<br>`PUT /admin/dx/departments/{department_id}` |
+| `formula` | `POST /admin/dx/formula/check` |
+| `go-live` | `POST /admin/dx/go-live` |
+| `home-collection` | `GET /admin/dx/home-collection/field-collections`<br>`POST /admin/dx/home-collection/field-collections/{fc_id}/handover`<br>`POST /admin/dx/home-collection/visits/{appointment_id}/doorstep-cash`<br>`GET /admin/dx/home-collection/visits/{appointment_id}/samples`<br>`POST /admin/dx/home-collection/visits/{appointment_id}/samples` |
+| `import` | `POST /admin/dx/import/apply`<br>`POST /admin/dx/import/dry-run` |
+| `instrument-results` | `GET /admin/dx/instrument-results`<br>`GET /admin/dx/instrument-results/{result_id}/candidates`<br>`POST /admin/dx/instrument-results/{result_id}/ignore`<br>`POST /admin/dx/instrument-results/{result_id}/map` |
+| `instruments` | `GET /admin/dx/instruments`<br>`POST /admin/dx/instruments`<br>`PATCH /admin/dx/instruments/{instrument_id}` |
+| `mis` | `GET /admin/dx/mis/export.csv`<br>`GET /admin/dx/mis/referrers`<br>`GET /admin/dx/mis/rejections`<br>`GET /admin/dx/mis/revenue`<br>`GET /admin/dx/mis/tat`<br>`GET /admin/dx/mis/volumes` |
+| `orders` | `POST /admin/dx/orders/adopt`<br>`POST /admin/dx/orders/{order_id}/results`<br>`GET /admin/dx/orders/{order_id}/worksheet` |
+| `outsource-partners` | `GET /admin/dx/outsource-partners`<br>`POST /admin/dx/outsource-partners`<br>`PUT /admin/dx/outsource-partners/{partner_id}` |
+| `partner` | `GET /admin/dx/partner/me`<br>`GET /admin/dx/partner/releases/{release_id}/pdf`<br>`GET /admin/dx/partner/statements`<br>`GET /admin/dx/partner/statements/{statement_id}/pdf`<br>`GET /admin/dx/partner/visits`<br>`POST /admin/dx/partner/visits` |
+| `patients` | `POST /admin/dx/patients`<br>`GET /admin/dx/patients/search` |
+| `prints` | `GET /admin/dx/prints` |
+| `qc` | `GET /admin/dx/qc/chart`<br>`GET /admin/dx/qc/materials`<br>`POST /admin/dx/qc/materials`<br>`GET /admin/dx/qc/results`<br>`POST /admin/dx/qc/results` |
+| `rate-cards` | `GET /admin/dx/rate-cards`<br>`POST /admin/dx/rate-cards`<br>`GET /admin/dx/rate-cards/{card_id}`<br>`PUT /admin/dx/rate-cards/{card_id}`<br>`POST /admin/dx/rate-cards/{card_id}/import`<br>`POST /admin/dx/rate-cards/{card_id}/items` |
+| `referrers` | `GET /admin/dx/referrers`<br>`POST /admin/dx/referrers`<br>`GET /admin/dx/referrers/volume`<br>`PUT /admin/dx/referrers/{referrer_id}` |
+| `rejection-reasons` | `GET /admin/dx/rejection-reasons` |
+| `releases` | `GET /admin/dx/releases/{release_id}/pdf`<br>`POST /admin/dx/releases/{release_id}/print`<br>`POST /admin/dx/releases/{release_id}/render`<br>`POST /admin/dx/releases/{release_id}/share-link` |
+| `results` | `POST /admin/dx/results/approve`<br>`GET /admin/dx/results/{result_id}`<br>`POST /admin/dx/results/{result_id}/attachments`<br>`GET /admin/dx/results/{result_id}/attachments/{attachment_id}`<br>`POST /admin/dx/results/{result_id}/verify` |
+| `routing-rules` | `GET /admin/dx/routing-rules`<br>`POST /admin/dx/routing-rules`<br>`POST /admin/dx/routing-rules/preview`<br>`DELETE /admin/dx/routing-rules/{rule_id}`<br>`PUT /admin/dx/routing-rules/{rule_id}` |
+| `samples` | `POST /admin/dx/samples/receive-direct`<br>`GET /admin/dx/samples/{barcode}/track`<br>`POST /admin/dx/samples/{sample_id}/bind`<br>`POST /admin/dx/samples/{sample_id}/reject` |
+| `seed` | `POST /admin/dx/seed/apply`<br>`GET /admin/dx/seed/preview` |
+| `settings` | `GET /admin/dx/settings`<br>`PATCH /admin/dx/settings` |
+| `setup` | `GET /admin/dx/setup` |
+| `signatories` | `GET /admin/dx/signatories`<br>`POST /admin/dx/signatories`<br>`PUT /admin/dx/signatories/{signatory_id}`<br>`POST /admin/dx/signatories/{signatory_id}/signature` |
+| `sites` | `GET /admin/dx/sites`<br>`POST /admin/dx/sites`<br>`PUT /admin/dx/sites/{site_id}` |
+| `templates` | `GET /admin/dx/templates`<br>`POST /admin/dx/templates`<br>`POST /admin/dx/templates/assets`<br>`GET /admin/dx/templates/{template_id}`<br>`PUT /admin/dx/templates/{template_id}`<br>`POST /admin/dx/templates/{template_id}/preview`<br>`POST /admin/dx/templates/{template_id}/publish`<br>`POST /admin/dx/templates/{template_id}/retire` |
+| `tests` | `GET /admin/dx/tests`<br>`POST /admin/dx/tests`<br>`GET /admin/dx/tests/{test_id}`<br>`PUT /admin/dx/tests/{test_id}`<br>`POST /admin/dx/tests/{test_id}/approve`<br>`GET /admin/dx/tests/{test_id}/components`<br>`POST /admin/dx/tests/{test_id}/components`<br>`DELETE /admin/dx/tests/{test_id}/components/{child_test_id}`<br>`POST /admin/dx/tests/{test_id}/parameters`<br>`PUT /admin/dx/tests/{test_id}/parameters/{parameter_id}` |
+| `visits` | `GET /admin/dx/visits`<br>`POST /admin/dx/visits`<br>`POST /admin/dx/visits/quote`<br>`GET /admin/dx/visits/{accession_id}`<br>`POST /admin/dx/visits/{accession_id}/bill`<br>`POST /admin/dx/visits/{accession_id}/cancel`<br>`POST /admin/dx/visits/{accession_id}/collect`<br>`POST /admin/dx/visits/{accession_id}/delivery-overrides`<br>`POST /admin/dx/visits/{accession_id}/items`<br>`POST /admin/dx/visits/{accession_id}/items/{item_id}/cancel`<br>`POST /admin/dx/visits/{accession_id}/labels/print`<br>`POST /admin/dx/visits/{accession_id}/payment-link`<br>`POST /admin/dx/visits/{accession_id}/receipts`<br>`GET /admin/dx/visits/{accession_id}/releases`<br>`POST /admin/dx/visits/{accession_id}/releases` |
+| `worklist` | `GET /admin/dx/worklist` |
+| `internal` | `POST /internal/dx/bridge/heartbeat`<br>`GET /internal/dx/bridge/orders`<br>`POST /internal/dx/bridge/results` |
+| `public` | `GET /public/dx/r/{token}`<br>`POST /public/dx/r/{token}/unlock`<br>`GET /public/dx/verify/{code}` |

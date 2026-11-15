@@ -77,3 +77,17 @@ All jobs are configured in [`app/services/scheduler.py`](file:///c:/Users/chait/
    - `reap_abandoned_message_claims` re-opens expired claims (`claim_expires_at < now()`).
    - `recover_pending_inbound_messages` reconstructs the original `WhatsAppMessage` from `raw_payload` and re-dispatches it to `conversation_service`.
 5. **Dead-Letter Handling**: After 3 failed processing attempts, the message transitions to `'failed'`, is recorded in `failed_messages`, and alerts clinic operations.
+
+---
+
+## 5. DIAGNOSTIC OS JOBS (4 jobs, added 2026-11-15)
+
+All four take a `distributed_job_lock` and sweep only clinics with `dx_state IN ('ACTIVE', 'WIND_DOWN')`
+(`# unscoped: platform_sweep`); one clinic's failure never stops the sweep.
+
+| Job ID | Schedule | Target | Purpose |
+| :--- | :--- | :--- | :--- |
+| `dx_sample_stability_scan` | every 10 min | `dx.stability_scan()` | Flags tubes in transit / at rest past their stability window (room / cold). |
+| `dx_tat_breach_scan` | every 5 min | `dx.tat_breach_scan()` | Logs open DX tests past their TAT target (`DX_TAT_BREACH`); no state change. |
+| `dx_outbox_dispatch` | every 1 min | `dx_reports.outbox_dispatch()` | Re-decides held report deliveries after a payment / bill change (`dx_outbox`) and sends what is now allowed. |
+| `dx_b2b_hold_evaluation` | daily 02:10 IST | `dx_b2b` hold evaluation | Puts B2B accounts over their credit limit / overdue on automatic hold, lifts holds that cleared; never touches a manual hold. |

@@ -143,3 +143,24 @@ KriyaAI/
 3. **`admin/admin.js` (Removed)**: Note in `app/main.py:446` documents that `admin/admin.js` was removed because it was a stale, desynchronized copy of `admin/index.html` inline JS that contained cross-tenant query vulnerabilities.
 4. **Shell Redirection Artifacts at Root**: `main`, `tuple[bool`, `type`, `bool`, `Expected`, `str`, `CUserschaittmp_nlm_login_output.txt` are accidental shell output files from past terminal redirections. They are not referenced by any Python code or tests.
 5. **`railway.toml`**: Minimal config; production deployment runs on Render.com (`render.yaml`).
+
+---
+
+## 5. Diagnostic OS (v2.0.0, migrations 125–133) — added 2026-11-15
+
+An optional, owner-enabled lab operating system for diagnostic centres, multi-branch chains, hub-and-spoke networks and
+hospital labs: registration → billing → tube labels → collection (desk, home, partner) → transit batches → receipt →
+result entry (formulas, deltas) → verification → pathologist approval → visit reports on the lab's or a B2B client's
+letterhead → WhatsApp / portal / print delivery (no payment → no report; payer-routed reports never to the patient)
+→ B2B rate cards, ledger and statements → dashboard / MIS → analyser bridge and QC. Off for every clinic until the
+platform owner enables it (`features.dx_enabled` + an eligible plan → `dx_access(clinic)`); zero-LLM throughout.
+
+| Layer | Authoritative files |
+| :--- | :--- |
+| Design and tracker | `docs/diagnostic-os/status.md` (start here), ADR / ARCHITECTURE / DATA-MODEL / API / DELIVERY-POLICY / SECURITY / ROLLOUT / KRIYA-KETU |
+| Migrations | `migrations/125_…` … `133_dx_instruments_qc.sql`, rollbacks in `migrations/rollback/`, checks in `migrations/verify_supabase_schema.sql` §19–§27 |
+| Services | `app/services/dx.py` (settings, sites, visits, samples, logistics, bench stages / TAT), `dx_catalogue.py`, `dx_seed.py`, `dx_formula.py`, `dx_results.py`, `dx_billing.py`, `dx_barcode.py`, `dx_reports.py` (single sender, outbox), `dx_pdf.py`, `dx_qr.py`, `dx_templates.py`, `dx_template_schema.py`, `dx_sample_report.py`, `dx_b2b.py`, `dx_mis.py`, `dx_status.py` (patient-facing status only), `dx_bridge.py`, `dx_qc.py` |
+| Routers | `app/routers/dx.py` (`/admin/dx/*`), `app/routers/dx_bridge.py` (`/internal/dx/bridge/*` + bridge admin), `app/routers/dx_public.py` (`/public/dx/*` verify / share) |
+| Analyser parsers | `connectors/bridge/parsers.py` (ASTM E1381/E1394, HL7 v2); the lab-side serial / TCP service is DEFERRED |
+| UI | `admin/index.html`, 14 pages between `DX:<area>:START/END` markers (see 05-FRONTEND-MAP §5) |
+| Assistants | Kriya Ketu `dx.*` actions in `app/assistant/registry.py`; voice `dx_visit_status` in `app/voice/tools.py`; WhatsApp report-status reply in `app/services/conversation.py` — all status-only via `dx_status.py` |

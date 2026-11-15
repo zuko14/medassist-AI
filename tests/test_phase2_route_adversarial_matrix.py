@@ -71,9 +71,9 @@ def test_all_ipd_routes_covered_by_adversarial_matrix():
 
 
 def test_all_dx_routes_covered_by_adversarial_matrix():
-    """Every /admin/dx route (migrations 125–128) gets the cross-tenant rejection check below."""
+    """Every /admin/dx route (migrations 125–133; 156 at P11) gets the cross-tenant rejection check below."""
     dx_routes = [r for r in ALL_ADMIN_ROUTES if r[1].startswith("/admin/dx")]
-    assert len(dx_routes) >= 66, f"Expected all /admin/dx routes in adversarial matrix, found only {len(dx_routes)}"
+    assert len(dx_routes) >= 156, f"Expected all /admin/dx routes in adversarial matrix, found only {len(dx_routes)}"
 
 
 @pytest.mark.parametrize("method,path", ALL_ADMIN_ROUTES)

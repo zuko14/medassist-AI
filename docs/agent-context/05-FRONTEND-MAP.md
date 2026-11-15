@@ -115,3 +115,30 @@ Served at route `/platform-panel`.
    - If `/panel-assets/chart.umd.min.js` fails to load, `renderInsights()` gracefully displays a fallback message without crashing dashboard navigation.
 3. **Branch Scoping Realities**:
    - If an authenticated user is assigned a `branch_id`, the UI automatically locks the branch selector dropdown to that specific branch.
+
+---
+
+## 5. DIAGNOSTIC OS PAGES (14 pages in `admin/index.html`) — added 2026-11-15
+
+All live in the Diagnostics sidebar group. A link shows when DX is on and the login holds any permission in its
+`data-dx="nav …"` attribute (`applyDxGates()`, `dxCan(perm)` mirrors `holds_dx_permission` incl. role-implied
+grants). HTML, CSS and JS of each area sit between `<!-- DX:<area>:START/END -->` and `/* DX:<area>:START/END */`
+markers; the page loader is registered in the `loaders` map. Every page is in Kriya Ketu's `PAGES`
+(RT-14: `tests/test_assistant_registry.py`).
+
+| Page id | Label | Nav gate (`data-dx`) | JS controller | Markers |
+| :--- | :--- | :--- | :--- | :--- |
+| `dxsetup` | DX Setup | `DX_ADMIN DX_READ` | `dxos` | foundation |
+| `dxcatalog` | Test Master | `DX_CATALOGUE DX_CATALOGUE_APPROVE` | `dxcat` | catalogue |
+| `dxdesk` | DX Registration | `DX_REGISTER` | `dxdesk` | desk |
+| `dxcollect` | Sample Collection | `DX_COLLECT` | `dxcollect` | samples |
+| `dxlogistics` | Logistics | `DX_LOGISTICS DX_RECEIVE DX_ADMIN` | `dxlog` | logistics |
+| `dxbench` | Lab Worklist (+ worksheet drawer `dxws`, prefilled from analysers) | `DX_READ DX_RECEIVE DX_VERIFY` | `dxbench`, `dxws` | bench |
+| `dxapprove` | Result Approval | `DX_VERIFY` | `dxapprove` | bench |
+| `dxreports` | Reports & Dispatch | `DX_DISPATCH DX_READ` | `dxrep` | reports |
+| `dxtemplates` | Report Templates | `DX_ADMIN` | `dxtpl` | reports |
+| `dxb2b` | B2B Accounts | `DX_B2B_MANAGE DX_REPORTS_MIS` | `dxb2b` | b2b |
+| `dxreferrers` | Referrers | `DX_READ DX_REGISTER DX_ADMIN DX_B2B_MANAGE DX_REPORTS_MIS` | `dxref` | b2b |
+| `dxpartner` | Partner Portal (B2B_PARTNER logins only, `data-dx-partner`) | — | `dxpartner` | b2b |
+| `dxdash` | DX Dashboard (funnel, alerts, MIS, CSV) | `DX_READ DX_REPORTS_MIS` | `dxdash` | mis |
+| `dxinstruments` | Instruments & QC (bridge agents, analysers, unmatched results, Levey-Jennings) | `DX_ADMIN DX_QC` | `dxinst` | instruments |

@@ -42,7 +42,7 @@ Detailed, implementation-level intelligence documents are maintained in [`docs/a
 | [14-CURRENT-STATE.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/14-CURRENT-STATE.md) | Documentation drift analysis comparing historical specs to current code. |
 | [15-AGENT-HANDOFF.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/15-AGENT-HANDOFF.md) | Direct answers to the 16 architectural handoff questions and debugging entry points. |
 | [docs/ipd-os/status.md](docs/ipd-os/status.md) | **IPD OS (migration 111)**: execution tracker; start here, then ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU in the same folder. |
-| [docs/diagnostic-os/status.md](docs/diagnostic-os/status.md) | **Diagnostic OS (planned, migrations DX-M1…M9)**: execution tracker and resume pointer; master prompts in AGENT-PROMPT.md; **binding: AUDIT.md (code evidence) and DELIVERY-POLICY.md (no payment → no report; insurance/TPA reports never to the patient)**; design in ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / REPORT-TEMPLATES / API / UI / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU / GAP-ANALYSIS / COMPETITIVE-ANALYSIS in the same folder. |
+| [docs/diagnostic-os/status.md](docs/diagnostic-os/status.md) | **Diagnostic OS (built P0–P11, migrations 125–133; not yet applied to Supabase, off for every clinic until the owner enables it)**: execution tracker and resume pointer; master prompts in AGENT-PROMPT.md; **binding: AUDIT.md (code evidence) and DELIVERY-POLICY.md (no payment → no report; insurance/TPA reports never to the patient)**; design in ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / REPORT-TEMPLATES / API / UI / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU / GAP-ANALYSIS / COMPETITIVE-ANALYSIS in the same folder. |
 
 ---
 
@@ -65,4 +65,16 @@ pytest tests/test_clinical_firewall.py
 
 # 4. Run Core Conversation & WhatsApp Tests
 pytest tests/test_webhook.py tests/test_fsm_transitions.py  # tests/test_conversation.py does not exist
+```
+
+Diagnostic OS (any change under `app/services/dx*`, `app/routers/dx*`, `migrations/12[5-9]*|13[0-3]*` or a `DX:` block
+of `admin/index.html`):
+
+```bash
+# zero-LLM boundary + clinical firewall
+pytest tests/test_clinical_firewall.py tests/test_dx_no_llm.py
+# every DX suite, migrations M1–M9 on real PostgreSQL, release readiness (lifecycle, rollback chain, purge, partner sweep)
+pytest tests/test_dx_*.py tests/test_migration_dx_*.py
+# Kriya Ketu page table / action drift (a new DX page or route)
+pytest tests/test_assistant_registry.py
 ```

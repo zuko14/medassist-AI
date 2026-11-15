@@ -167,3 +167,24 @@ The FastAPI application connects to Supabase using `SUPABASE_SERVICE_ROLE_KEY`. 
 2. Multi-tenant isolation is enforced **strictly in Python application code** via [`app/tenancy.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/tenancy.py) (`TENANT_OWNED_TABLES`) and [`app/database.py`](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/app/database.py) (`scoped_query()`).
 3. If an engineer writes a direct `supabase.table("patients").select("*")` without `scoped_query` or `.eq("clinic_id", clinic_id)`, PostgreSQL will return rows belonging to **every hospital on the platform**.
 4. The automated safety gate against this is `tests/test_lint_unscoped_queries.py`, which parses the Python AST and fails CI if any unscoped query is added.
+
+---
+
+## 5. Diagnostic OS tables (41 tables, migrations 125–133) — added 2026-11-15
+
+All 41 are in `TENANT_OWNED_TABLES`, have RLS enabled **and forced**, and carry `UNIQUE (clinic_id, id)` with composite
+`(clinic_id, …)` foreign keys. Writes to clinical / money tables happen only inside SQL functions that set
+`kriya.dx_tx` (guards raise `dx_managed:<table>` otherwise). `dx_purge_clinic(clinic)` (v9) deletes every DX row of a
+clinic child-first and is the only path that may delete append-only rows (`dx_purging(clinic)`).
+
+| Migration | Tables | Notes |
+| :--- | :--- | :--- |
+| 125 foundation | `dx_sites` | `clinics.dx_state` / `dx_settings` (CAS via `dx_update_settings`) |
+| 126 catalogue | `dx_departments`, `dx_containers`, `dx_signatories`, `dx_test_components` | DX columns on `lab_tests` / `lab_test_parameters` (bands, formula, `machine_code`); approval digest locks a test |
+| 127 visits & billing | `dx_referrers`, `dx_b2b_accounts`, `dx_accessions` (visits, `LAB-YYYY-NNNNNN`), `dx_accession_bookings`, `dx_accession_items`, `dx_samples` (tubes, barcode immutable), `dx_events` (timeline) | DX orders live in `opd_orders` (`source='dx'`); bills on `opd_invoices.accession_id` |
+| 128 collection | `dx_rejection_reasons`, `dx_field_collections`, `dx_label_prints` | rejection creates the replacement tube |
+| 129 logistics | `dx_outsource_partners`, `dx_routing_rules`, `dx_batches` (`TRN-`), `dx_batch_samples` | one live batch per tube |
+| 130 result workflow | `dx_result_value_meta`, `dx_result_verifications` (append-only), `dx_critical_events`, `dx_result_attachments` | results themselves in `lab_results` / `lab_result_values` (118), gated by `trg_dx_lab_results_gate` |
+| 131 reports | `dx_report_templates`, `dx_report_releases`, `dx_release_results`, `dx_release_deliveries`, `dx_delivery_overrides`, `dx_outbox`, `dx_print_log`, `dx_share_links` | `dx_delivery_decision` = DELIVERY-POLICY rules; one sender (`dx_reports.send_delivery`) |
+| 132 B2B money | `dx_rate_cards`, `dx_rate_card_items`, `dx_b2b_ledger` (append-only), `dx_b2b_statements` (`B2B-YYYY-NNNNN`), `dx_barcode_stock` | `clinic_admins.dx_b2b_account_id` for partner logins |
+| 133 instruments & QC | `dx_bridge_agents` (key hash only), `dx_instruments`, `dx_instrument_results` (raw, replay-safe by `(instrument, message_id)`), `dx_qc_materials`, `dx_qc_results` (append-only) | value meta keeps `instrument_result_id` |

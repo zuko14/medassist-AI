@@ -100,3 +100,32 @@ return requested_clinic_id
 - **Mechanism**: Dedicated HTTP Basic Authentication checking `settings.owner_username` and `settings.owner_password`.
 - **Isolation from Clinic Admin**: Platform owner authentication is **completely independent** from `admin_users`. A clinic admin cannot access `/platform/*` endpoints, and owner credentials cannot be used on `/admin/*` routes without an explicitly specified clinic tenant.
 - **Fail-Safe**: If `OWNER_USERNAME` or `OWNER_PASSWORD` is unconfigured, all `/platform/*` endpoints return HTTP 503 Service Unavailable.
+
+---
+
+## 6. DIAGNOSTIC OS ACCESS CONTROL (migrations 125–133) — added 2026-11-15
+
+- **Entitlement**: `dx_access(clinic)` → `ACTIVE` (owner set `features.dx_enabled` on an eligible plan), `WIND_DOWN`
+  (owner disabled with visits in process; no new work) or `None` (every DX route 403). `dx_eligible(clinic)`: a
+  regular tenant whose plan has lab booking or lab reports, or enterprise.
+- **14 permissions** (`app/services/permissions.py`): `DX_READ`, `DX_REGISTER`, `DX_COLLECT`, `DX_BILLING`,
+  `DX_RECEIVE`, `DX_VERIFY`, `DX_DISPATCH`, `DX_LOGISTICS`, `DX_CATALOGUE`, `DX_CATALOGUE_APPROVE`, `DX_B2B_MANAGE`,
+  `DX_REPORTS_MIS`, `DX_QC`, `DX_ADMIN`. Approval additionally needs `LAB_VALIDATE` and a doctor-linked login; result
+  entry is `LAB_ENTRY`.
+- **`holds_dx_permission(user, perm)`**: clinic / super admin always; else a stored grant; else a grant implied by
+  the staff role (`_DX_GRANTS_IMPLIED_BY_ROLE`, so older lab logins keep working). The admin panel mirrors it in
+  `dxCan()`.
+- **5 DX roles** (`STAFF_ROLES`, presets in `ROLE_PRESETS`): `LAB_SUPERVISOR` (entry, receive, verify, read),
+  `LOGISTICS_RUNNER` (logistics, read; **confined**), `PROCESSING_ADMIN` (a processing site's admin; must be
+  branch-pinned), `B2B_MANAGER` (B2B money, read), `B2B_PARTNER` (a B2B client's login; **confined**).
+- **Confinement** (`_enforce_dx_confined_scope`, called by `verify_credentials`): a `LOGISTICS_RUNNER` reaches only
+  `/admin/dx/batches*`, `/admin/dx/outsource-partners`, `/admin/dx/samples/{barcode}/track`; a `B2B_PARTNER` only
+  `/admin/dx/partner/*` — plus `/admin/me` and its own password / username change. A partner login without
+  `dx_b2b_account_id` reaches nothing (fail closed); the account id is read live from `clinic_admins` on every
+  request, never from the request. The generic staff route refuses to create `B2B_PARTNER` logins
+  (`POST /admin/dx/b2b-accounts/{id}/users` only). Swept over every `/admin` route in
+  `tests/test_dx_release_readiness.py`.
+- **Site scope**: a branch-pinned login reaches visits of its branch or with a tube collected / processed /
+  received at its sites; MIS, dashboard, instruments and QC are filtered to its sites.
+- **Analyser bridge**: no staff session; per-agent key (SHA-256 stored, shown once), HMAC + ±300 s timestamp; an
+  agent reaches only tubes and instruments of its own site.
