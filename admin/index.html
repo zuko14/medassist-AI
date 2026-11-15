@@ -3531,6 +3531,23 @@
             .dxd-controls .field { flex: 1 1 140px; }
         }
         /* DX:mis:END */
+        /* DX:instruments:START — Instruments & QC: bridge agents, analysers, unmatched results, Levey-Jennings (P10) */
+        .dxi-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 12px; align-items: end; margin: 10px 0 14px; }
+        .dxi-form .field { margin: 0; min-width: 0; }
+        .dxi-secret { border: 1px solid var(--amber); background: var(--amber-bg); border-radius: 10px; padding: 12px 14px; margin: 10px 0; overflow-wrap: anywhere; }
+        .dxi-secret code { font-size: 0.92rem; user-select: all; }
+        .dxi-chart { width: 100%; height: auto; display: block; margin: 8px 0; }
+        .dxi-chart text { font-size: 11px; fill: var(--text2); }
+        .dxi-flag { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; margin: 1px 2px; border: 1px solid var(--amber); color: var(--amber); }
+        .dxi-flag.rej { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
+        .dxi-map { display: grid; gap: 8px; margin-top: 8px; }
+        .dxi-map label { display: grid; grid-template-columns: minmax(80px, 30%) 1fr; gap: 8px; align-items: center; font-size: 0.9rem; }
+        @media (max-width: 760px) {
+            .dxi-map label { grid-template-columns: 1fr; }
+            .dxi-chart text { font-size: 24px; }      /* the 720-unit chart is drawn at ~40 %: keep labels readable */
+            .dxi-chart circle { r: 10; }
+        }
+        /* DX:instruments:END */
     </style>
 </head>
 <body>
@@ -3857,6 +3874,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M7 15l4-4 3 3 5-6"></path></svg></span> DX Dashboard
             </div>
             <!-- DX:mis:END -->
+            <!-- DX:instruments:START — Instruments & QC (P10) -->
+            <div class="nav-link" tabindex="0" data-page="dxinstruments" data-dx="nav DX_ADMIN DX_QC" style="display:none" onclick="go('dxinstruments',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="12" rx="2"></rect><path d="M8 21h8"></path><path d="M12 15v6"></path><path d="M7 11l3-3 2 2 4-4"></path></svg></span> Instruments &amp; QC
+            </div>
+            <!-- DX:instruments:END -->
             </div></div></div>
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
@@ -8203,6 +8225,18 @@
             </div>
         </div>
         <!-- DX:mis:END -->
+        <!-- DX:instruments:START — Instruments & QC (dxinstruments): bridge agents, analysers, unmatched results, QC; P10 / ADR-DX-13 -->
+        <div id="pg-dxinstruments" class="sec">
+            <div class="page-head"><div><h2>Instruments &amp; QC</h2><p>Analysers send results through a small bridge program at the lab, which only connects out to Kriya. Results fill the worksheet for a technician to check; a pathologist still approves every report.</p></div></div>
+            <div class="toggle-group dxd-tabs" role="tablist" aria-label="Instrument views">
+                <button type="button" class="toggle-btn on" role="tab" aria-selected="true" data-dxi-tab="agents" onclick="dxinst.setTab('agents')">Bridge Agents</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxi-tab="instruments" onclick="dxinst.setTab('instruments')">Instruments</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxi-tab="unmatched" onclick="dxinst.setTab('unmatched')">Unmatched Results</button>
+                <button type="button" class="toggle-btn" role="tab" aria-selected="false" data-dxi-tab="qc" onclick="dxinst.setTab('qc')">Quality Control</button>
+            </div>
+            <div class="card" id="dxiBody" aria-live="polite"></div>
+        </div>
+        <!-- DX:instruments:END -->
 
         <!-- IPD finance (migration 116): money still owed on inpatient bills, deposits held, discounts awaiting approval -->
         <div id="pg-ipdfinance" class="sec">
@@ -11234,8 +11268,14 @@ const dxws = {
     order: null, ws: null, timer: null, values: {},
     async open(orderId) {
         try { dxws.ws = await api(`/admin/dx/orders/${encodeURIComponent(orderId)}/worksheet`); } catch (e) { toast(e.message, true); return; }
-        dxws.order = orderId; dxws.values = {};
+        dxws.order = orderId; dxws.values = {}; dxws.prefill = null;
         (dxws.ws.parameters || []).forEach(p => { if (p.entered) dxws.values[p.parameter_id] = p.entered.value; });
+        /* DX:instruments — an analyser's values fill an empty worksheet; the technician checks and saves (ADR-DX-13) */
+        const pre = dxws.ws.instrument_prefill;
+        if (pre && pre.status === 'pending' && !Object.keys(dxws.values).length) {
+            dxws.prefill = pre;
+            Object.entries(pre.values).forEach(([pid, v]) => { dxws.values[pid] = v.value; });
+        }
         dxws.render(null);
         document.getElementById('dxwsDrawer').classList.add('open');
         const first = document.querySelector('#dxwsBody input:not([readonly]), #dxwsBody select');
@@ -11271,6 +11311,7 @@ const dxws = {
         const last = ver[ver.length - 1];
         document.getElementById('dxwsBody').innerHTML = `
             <p class="muted">${esc(o.specimen_barcode || '')} · ${esc(dxbAgeSex(p))} · MRN ${esc(p.mrn || '—')}${r ? ` · ${esc(r.status)} v${esc(r.version)}` : ''}</p>
+            ${dxws.prefill ? `<div class="dxi-secret" role="status">Filled from <strong>${esc(dxws.prefill.instrument_name)}</strong> (${esc(new Date(dxws.prefill.received_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }))}). Check every value before saving.</div>` : ''}
             ${crit ? '<div class="dxb-banner" role="alert"><strong>Critical value.</strong> Phone it through (with read-back) before approval.</div>' : ''}
             ${(evaluated || []).some(x => x.flag && x.flag.startsWith('critical')) && !crit ? '<div class="dxb-banner" role="alert"><strong>Critical value</strong> in these values. Saving records it for a call.</div>' : ''}
             ${last && last.decision === 'returned' ? `<div class="dxb-banner">Returned: ${esc(last.comment || '')} — ${esc(last.verifier_name)}</div>` : ''}
@@ -11297,6 +11338,7 @@ const dxws = {
         const body = { values: Object.entries(dxws.values).map(([parameter_id, value]) => ({ parameter_id, value: value === '' ? null : String(value) })), preview };
         const a = document.getElementById('dxwsAmend');
         if (a && a.value.trim()) body.amendment_reason = a.value.trim();
+        if (dxws.prefill && !preview) body.instrument_result_id = dxws.prefill.instrument_result_id;
         return body;
     },
     async preview() {
@@ -12271,6 +12313,194 @@ const dxdash = {
     },
 };
 /* DX:mis:END */
+/* DX:instruments:START — Instruments & QC (P10). Keys, matching, z-scores and Westgard flags are computed by the
+   server; this page shows them. An agent key appears once, right after it is made. */
+const dxiTime = t => esc(dxmDate(t)) + ' ' + esc(new Date(t).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }));
+const dxinst = {
+    tab: 'agents', seq: 0, sites: [], agents: [], instruments: [], depts: [], materials: [], unmatched: [], cands: null,
+    qcMaterial: null, secretBox: '',
+    setTab(t) { dxinst.tab = t; dxmTabs('data-dxi-tab', t); dxinst.load(); },
+    async load() {
+        const admin = dxCan('DX_ADMIN');
+        document.querySelectorAll('[data-dxi-tab="agents"],[data-dxi-tab="instruments"]').forEach(b => { b.hidden = !admin; });
+        if (!admin && (dxinst.tab === 'agents' || dxinst.tab === 'instruments')) { dxinst.tab = 'qc'; dxmTabs('data-dxi-tab', 'qc'); }
+        const el = document.getElementById('dxiBody'), seq = ++dxinst.seq;
+        el.innerHTML = loading();
+        try {
+            const html = await dxinst['render_' + dxinst.tab]();
+            if (seq !== dxinst.seq) return;
+            el.innerHTML = html;
+            if (dxinst.tab === 'qc') dxinst.chart();
+        } catch (e) { if (seq === dxinst.seq) el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    async base() {
+        const [s, a, i] = await Promise.all([api('/admin/dx/sites'), dxCan('DX_ADMIN') ? api('/admin/dx/bridge-agents') : { agents: [] },
+            api('/admin/dx/instruments')]);
+        dxinst.sites = s.sites || []; dxinst.agents = a.agents; dxinst.instruments = i.instruments;
+    },
+    siteName(id) { const s = dxinst.sites.find(x => x.id === id); return s ? `${s.code} · ${s.display_name}` : '—'; },
+    seen(t) {
+        if (!t) return '<span class="dxm-badge closed">never</span>';
+        return Date.now() - new Date(t) < 5 * 60000 ? '<span class="dxm-badge">online</span>' : `<span class="dxm-badge closed">${dxiTime(t)}</span>`;
+    },
+    async render_agents() {
+        await dxinst.base();
+        const sites = dxinst.sites.filter(s => s.is_active);
+        return `${dxinst.secretBox}<form class="dxi-form" onsubmit="event.preventDefault(); dxinst.addAgent()">
+            <div class="field"><label for="dxiAgentSite">Site</label><select id="dxiAgentSite">${sites.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.display_name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="dxiAgentName">Name</label><input id="dxiAgentName" maxlength="80" placeholder="Hub lab PC" autocomplete="off"></div>
+            <button type="submit" class="btn btn-accent">New bridge agent</button></form>
+            ${dxdashTable([['Agent', a => `<b>${esc(a.name)}</b>`], ['Site', a => esc(dxinst.siteName(a.site_id))], ['Key', a => `<code>${esc(a.key_prefix)}…</code>`],
+                ['Last seen', a => dxinst.seen(a.last_seen_at)], ['Status', a => a.is_active ? '<span class="dxm-badge">active</span>' : '<span class="dxm-badge closed">off</span>'],
+                ['', a => `<button type="button" class="btn btn-ghost btn-sm" onclick="dxinst.agentPatch('${esc(a.id)}', {rotate_key: true})">New key</button> <button type="button" class="btn btn-ghost btn-sm" onclick="dxinst.agentPatch('${esc(a.id)}', {is_active: ${!a.is_active}})">${a.is_active ? 'Switch off' : 'Switch on'}</button>`]], dxinst.agents)}`;
+    },
+    showSecret(a) {
+        dxinst.secretBox = `<div class="dxi-secret" role="alert"><b>Key for ${esc(a.name)} — shown only now.</b> Paste it into the bridge program's settings. Kriya keeps only a fingerprint and cannot show it again.<br><code id="dxiSecret">${esc(a.secret)}</code>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('dxiSecret').textContent).then(() => toast('Key copied'))">Copy</button></div>`;
+    },
+    async addAgent() {
+        try {
+            const a = await apiPost('/admin/dx/bridge-agents', { site_id: document.getElementById('dxiAgentSite').value, name: document.getElementById('dxiAgentName').value.trim() });
+            dxinst.showSecret(a); toast('Bridge agent created'); dxinst.load();
+        } catch (e) { toast(e.message, true); }
+    },
+    async agentPatch(id, body) {
+        if (body.rotate_key && !confirm('Make a new key? The bridge stops working until the new key is entered there.')) return;
+        try { const a = await apiPatch(`/admin/dx/bridge-agents/${id}`, body); dxinst.secretBox = ''; if (a.secret) dxinst.showSecret(a); dxinst.load(); }
+        catch (e) { toast(e.message, true); }
+    },
+    async render_instruments() {
+        dxinst.secretBox = '';
+        await dxinst.base();
+        dxinst.depts = (await api('/admin/dx/departments')).departments || [];
+        const agent = id => (dxinst.agents.find(a => a.id === id) || {}).name || '—', dep = id => (dxinst.depts.find(d => d.id === id) || {}).name || '—';
+        return `<form class="dxi-form" onsubmit="event.preventDefault(); dxinst.addInstrument()">
+            <div class="field"><label for="dxiInstAgent">Bridge agent</label><select id="dxiInstAgent">${dxinst.agents.filter(a => a.is_active).map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="dxiInstName">Name</label><input id="dxiInstName" maxlength="80" placeholder="Sysmex XN-550" autocomplete="off"></div>
+            <div class="field"><label for="dxiInstModel">Model</label><input id="dxiInstModel" maxlength="80" autocomplete="off"></div>
+            <div class="field"><label for="dxiInstProto">Protocol</label><select id="dxiInstProto"><option value="astm">ASTM (E1381 / E1394)</option><option value="hl7v2">HL7 v2</option></select></div>
+            <div class="field"><label for="dxiInstDept">Department</label><select id="dxiInstDept"><option value="">—</option>${dxinst.depts.map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('')}</select></div>
+            <button type="submit" class="btn btn-accent">Add instrument</button></form>
+            ${dxinst.agents.length ? '' : '<p class="dxm-note">Create a bridge agent first.</p>'}
+            ${dxdashTable([['Instrument', i => `<b>${esc(i.name)}</b>${i.model ? ' <span class="muted">' + esc(i.model) + '</span>' : ''}`], ['Protocol', i => i.protocol === 'astm' ? 'ASTM' : 'HL7 v2'],
+                ['Agent', i => esc(agent(i.agent_id))], ['Department', i => esc(dep(i.department_id))], ['Site', i => esc(dxinst.siteName(i.site_id))],
+                ['Status', i => i.is_active ? '<span class="dxm-badge">active</span>' : '<span class="dxm-badge closed">off</span>'],
+                ['', i => `<button type="button" class="btn btn-ghost btn-sm" onclick="dxinst.instPatch('${esc(i.id)}', {is_active: ${!i.is_active}})">${i.is_active ? 'Switch off' : 'Switch on'}</button>`]], dxinst.instruments)}`;
+    },
+    async addInstrument() {
+        const v = id => document.getElementById(id).value.trim();
+        try {
+            await apiPost('/admin/dx/instruments', { agent_id: v('dxiInstAgent'), name: v('dxiInstName'), model: v('dxiInstModel') || null,
+                protocol: v('dxiInstProto'), department_id: v('dxiInstDept') || null });
+            toast('Instrument added'); dxinst.load();
+        } catch (e) { toast(e.message, true); }
+    },
+    async instPatch(id, body) { try { await apiPatch(`/admin/dx/instruments/${id}`, body); dxinst.load(); } catch (e) { toast(e.message, true); } },
+    async render_unmatched() {
+        dxinst.unmatched = (await api('/admin/dx/instrument-results?status=unmatched')).results;
+        const vals = r => (r.parsed.specimens || []).flatMap(s => s.results).map(x => `<code>${esc(x.code)}</code> ${esc(x.value)}${x.unit ? ' ' + esc(x.unit) : ''}`).join('<br>');
+        return `<p class="dxm-note">Messages whose tube or analyser codes Kriya could not place. Map one to the right tube's test, or ignore it. The original message is always kept.</p>
+            ${dxdashTable([['Received', r => dxiTime(r.received_at)], ['Instrument', r => esc(r.instrument_name || '—')], ['Tube', r => `<code>${esc(r.barcode)}</code>`], ['Values', vals],
+                ['', r => `<button type="button" class="btn btn-ghost btn-sm" onclick="dxinst.mapOpen('${esc(r.id)}')">Map</button> <button type="button" class="btn btn-ghost btn-sm" onclick="dxinst.ignore('${esc(r.id)}')">Ignore</button><div id="dxiMap-${esc(r.id)}"></div>`]], dxinst.unmatched)}`;
+    },
+    mapOpen(id) {
+        const r = dxinst.unmatched.find(x => x.id === id);
+        document.getElementById('dxiMap-' + id).innerHTML = `<form class="dxi-form" onsubmit="event.preventDefault(); dxinst.mapLoad('${esc(id)}')">
+            <div class="field"><label for="dxiMapTube-${esc(id)}">Tube barcode</label><input id="dxiMapTube-${esc(id)}" value="${esc(r.barcode)}" maxlength="64" autocomplete="off"></div>
+            <button type="submit" class="btn btn-ghost btn-sm">Find tests</button></form><div id="dxiMapForm-${esc(id)}"></div>`;
+    },
+    async mapLoad(id) {
+        const r = dxinst.unmatched.find(x => x.id === id), tube = document.getElementById('dxiMapTube-' + id).value.trim(), box = document.getElementById('dxiMapForm-' + id);
+        try {
+            const c = await api(`/admin/dx/instrument-results/${id}/candidates?barcode=${encodeURIComponent(tube)}`);
+            if (!c.orders.length) { box.innerHTML = '<p class="muted">No open tests on this tube.</p>'; return; }
+            dxinst.cands = c;
+            const codes = [...new Set((r.parsed.specimens || []).flatMap(s => s.results).map(x => x.code))];
+            box.innerHTML = `<div class="dxi-map"><label>Test<select id="dxiMapOrder-${esc(id)}" onchange="dxinst.mapParams('${esc(id)}')">${c.orders.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('')}</select></label>
+                ${codes.map(code => `<label>${esc(code)}<select data-code="${esc(code)}" class="dxi-map-${esc(id)}"></select></label>`).join('')}
+                <button type="button" class="btn btn-accent btn-sm" onclick="dxinst.mapSave('${esc(id)}')">Map to this test</button></div>`;
+            dxinst.mapParams(id);
+        } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    mapParams(id) {
+        const o = dxinst.cands.orders.find(x => x.id === document.getElementById('dxiMapOrder-' + id).value);
+        document.querySelectorAll('.dxi-map-' + id).forEach(sel => {
+            sel.innerHTML = '<option value="">— not this test —</option>' + o.parameters.map(p => `<option value="${esc(p.id)}"${(p.machine_code || '').toUpperCase() === sel.dataset.code.toUpperCase() ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+        });
+    },
+    async mapSave(id) {
+        const codes = {};
+        document.querySelectorAll('.dxi-map-' + id).forEach(sel => { if (sel.value) codes[sel.dataset.code] = sel.value; });
+        try {
+            await apiPost(`/admin/dx/instrument-results/${id}/map`, { order_id: document.getElementById('dxiMapOrder-' + id).value, codes });
+            toast('Mapped: the values now prefill that worksheet'); dxinst.load();
+        } catch (e) { toast(e.message, true); }
+    },
+    async ignore(id) { try { await apiPost(`/admin/dx/instrument-results/${id}/ignore`, {}); toast('Ignored'); dxinst.load(); } catch (e) { toast(e.message, true); } },
+    async render_qc() {
+        const [i, m] = await Promise.all([api('/admin/dx/instruments'), api('/admin/dx/qc/materials')]);
+        dxinst.instruments = i.instruments; dxinst.materials = m.materials;
+        if (!dxinst.materials.some(x => x.id === dxinst.qcMaterial)) dxinst.qcMaterial = (dxinst.materials[0] || {}).id || null;
+        const inst = id => (dxinst.instruments.find(x => x.id === id) || {}).name || '—';
+        return `${dxCan('DX_QC') || dxCan('DX_ADMIN') ? `<details${dxinst.materials.length ? '' : ' open'}><summary>New QC material / lot</summary><form class="dxi-form" onsubmit="event.preventDefault(); dxinst.addMaterial()">
+            <div class="field"><label for="dxiQcInst">Instrument</label><select id="dxiQcInst">${dxinst.instruments.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="dxiQcCode">Analyte code</label><input id="dxiQcCode" maxlength="40" placeholder="HGB" autocomplete="off"></div>
+            <div class="field"><label for="dxiQcLevel">Level</label><input id="dxiQcLevel" maxlength="20" placeholder="L1" autocomplete="off"></div>
+            <div class="field"><label for="dxiQcLot">Lot</label><input id="dxiQcLot" maxlength="40" autocomplete="off"></div>
+            <div class="field"><label for="dxiQcMean">Target mean</label><input id="dxiQcMean" inputmode="decimal" autocomplete="off"></div>
+            <div class="field"><label for="dxiQcSd">Target SD</label><input id="dxiQcSd" inputmode="decimal" autocomplete="off"></div>
+            <div class="field"><label for="dxiQcFrom">Valid from</label><input type="date" id="dxiQcFrom" value="${dxmToday()}"></div>
+            <div class="field"><label for="dxiQcTo">Valid to</label><input type="date" id="dxiQcTo"></div>
+            <button type="submit" class="btn btn-accent">Add material</button></form></details>` : ''}
+            ${dxinst.materials.length ? `<form class="dxi-form" onsubmit="event.preventDefault(); dxinst.addRun()">
+                <div class="field"><label for="dxiQcMat">Material</label><select id="dxiQcMat" onchange="dxinst.qcMaterial = this.value; dxinst.chart()">${dxinst.materials.map(x => `<option value="${esc(x.id)}"${x.id === dxinst.qcMaterial ? ' selected' : ''}>${esc(x.parameter_code)} · ${esc(x.level)} · lot ${esc(x.lot)} (${esc(inst(x.instrument_id))})</option>`).join('')}</select></div>
+                <div class="field"><label for="dxiQcValue">QC value</label><input id="dxiQcValue" inputmode="decimal" autocomplete="off"></div>
+                <div class="field"><label for="dxiQcNote">Note</label><input id="dxiQcNote" maxlength="500" autocomplete="off"></div>
+                <button type="submit" class="btn btn-accent">Record run</button></form>
+                <div id="dxiChart"></div>` : '<p class="muted">No QC materials yet.</p>'}`;
+    },
+    async addMaterial() {
+        const v = id => document.getElementById(id).value.trim();
+        try {
+            const m = await apiPost('/admin/dx/qc/materials', { instrument_id: v('dxiQcInst'), parameter_code: v('dxiQcCode'), level: v('dxiQcLevel'), lot: v('dxiQcLot'),
+                target_mean: Number(v('dxiQcMean')), target_sd: Number(v('dxiQcSd')), valid_from: v('dxiQcFrom'), valid_to: v('dxiQcTo') });
+            dxinst.qcMaterial = m.id; toast('QC material added'); dxinst.load();
+        } catch (e) { toast(e.message, true); }
+    },
+    async addRun() {
+        const raw = document.getElementById('dxiQcValue').value.trim(), value = Number(raw);
+        if (!raw || !Number.isFinite(value)) { toast('Enter the QC value', true); return; }
+        try {
+            const r = await apiPost('/admin/dx/qc/results', { material_id: dxinst.qcMaterial, value, note: document.getElementById('dxiQcNote').value.trim() || null });
+            toast(r.accepted ? (r.westgard_flags.length ? 'Run accepted with a 1-2s warning' : 'Run accepted') : 'Run REJECTED: ' + r.westgard_flags.join(', '), !r.accepted);
+            document.getElementById('dxiQcValue').value = ''; document.getElementById('dxiQcNote').value = '';
+            dxinst.chart();
+        } catch (e) { toast(e.message, true); }
+    },
+    async chart() {
+        const box = document.getElementById('dxiChart');
+        if (!box || !dxinst.qcMaterial) return;
+        try { box.innerHTML = dxinst.svg(await api(`/admin/dx/qc/chart?material_id=${dxinst.qcMaterial}&days=30`)); }
+        catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    svg(d) {
+        const W = 720, H = 260, L = 64, R = 14, T = 12, B = 14, pts = d.points, m = d.material;
+        const y = z => T + (H - T - B) * (4 - Math.max(-4, Math.min(4, z))) / 8;
+        const x = i => L + (pts.length < 2 ? (W - L - R) / 2 : (W - L - R) * i / (pts.length - 1));
+        const grid = [['+3s', 3, '4 3', 'var(--red, #c0392b)'], ['+2s', 2, '4 3', 'var(--amber)'], ['+1s', 1, '1 3', 'var(--text2)'], ['mean', 0, '', 'var(--text2)'],
+            ['-1s', -1, '1 3', 'var(--text2)'], ['-2s', -2, '4 3', 'var(--amber)'], ['-3s', -3, '4 3', 'var(--red, #c0392b)']]
+            .map(([k, z, dash, c]) => `<line x1="${L}" x2="${W - R}" y1="${y(z)}" y2="${y(z)}" stroke="${c}" stroke-width="1"${dash ? ` stroke-dasharray="${dash}"` : ''}/><text x="${L - 6}" y="${y(z) + 4}" text-anchor="end">${k === 'mean' ? esc(d.lines.mean) : k}</text>`).join('');
+        const color = p => !p.accepted ? 'var(--red, #c0392b)' : p.flags.length ? 'var(--amber)' : 'var(--accent)';
+        const line = pts.length > 1 ? `<polyline points="${pts.map((p, i) => `${x(i)},${y(Number(p.z_score))}`).join(' ')}" fill="none" stroke="var(--text2)" stroke-width="1"/>` : '';
+        const dots = pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(Number(p.z_score))}" r="5" fill="${color(p)}"><title>${esc(dxmDate(p.run_at))}: ${esc(p.value)} (z ${esc(Number(p.z_score).toFixed(2))})${p.flags.length ? ' — ' + esc(p.flags.join(', ')) : ''}</title></circle>`).join('');
+        return `<p class="dxm-note">${esc(m.parameter_code)} · level ${esc(m.level)} · lot ${esc(m.lot)} — target ${esc(d.lines.mean)} ± ${esc(String(Number(m.target_sd)))} (1 SD), last ${d.days} days. Amber = 1-2s warning; red = run rejected.</p>
+            <svg class="dxi-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Levey-Jennings chart of ${pts.length} QC runs">${grid}${line}${dots}</svg>
+            ${pts.length ? dxdashTable([['Run', p => dxiTime(p.run_at)], ['Value', p => esc(p.value), 1], ['z', p => esc(Number(p.z_score).toFixed(2)), 1],
+                ['Westgard', p => p.flags.map(f => `<span class="dxi-flag${f === '1_2s' ? '' : ' rej'}">${esc(f)}</span>`).join('') || '—'],
+                ['Result', p => p.accepted ? 'Accepted' : '<b>Rejected</b>'], ['By', p => esc(p.entered_by_name || '—')]], pts.slice().reverse()) : '<p class="muted">No runs in the last 30 days.</p>'}`;
+    },
+};
+/* DX:instruments:END */
 
 // ═══════ INVESTIGATION & PROCEDURE ORDERS (migration 115) ═══════
 // Mirrors app.services.permissions.holds_order_permission (module grants from
@@ -17589,7 +17819,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ };
     if (loaders[page]) loaders[page]();
 }
 

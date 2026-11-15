@@ -199,8 +199,11 @@ def evaluate_lines(lines: list[dict], values: list[dict], subject: dict, previou
 
 
 async def enter_worksheet_results(clinic_id: str, order_id: str, values: list[dict], actor,
-                                  amendment_reason: Optional[str] = None, preview: bool = False) -> dict:
-    """W8 steps 2–3. preview=True evaluates without saving (live calculated values and flags)."""
+                                  amendment_reason: Optional[str] = None, preview: bool = False,
+                                  instrument: Optional[dict] = None) -> dict:
+    """W8 steps 2–3. preview=True evaluates without saving (live calculated values and flags).
+    instrument = {"id": instrument result id, "values": {parameter_id: value}} (P10): a saved value equal to
+    the analyser's is recorded with source 'instrument' and that id; anything typed differently is 'manual'."""
     from app.services import lis
     from app.services.dx import _actor
     order, subject, lines = await _context(clinic_id, order_id)
@@ -217,11 +220,20 @@ async def enter_worksheet_results(clinic_id: str, order_id: str, values: list[di
                  "delta_failed")
     result = await _call("dx_record_results", {
         "p_clinic_id": clinic_id, "p_order_id": order_id, "p_values": [{k: r[k] for k in lis_keys} for r in rows],
-        "p_meta": [{**{k: r[k] for k in meta_keys}, "source": "calculated" if r["is_calculated"] else "manual"}
-                   for r in rows],
+        "p_meta": [{**{k: r[k] for k in meta_keys}, **_source(r, values, instrument)} for r in rows],
         "p_has_critical": critical, "p_amendment_reason": (amendment_reason or "").strip() or None,
         "p_actor_id": aid, "p_actor_name": name})
     return {**result, "values": rows, "saved": True, "stored_values": await lis._values_of(clinic_id, result["id"])}
+
+
+def _source(row: dict, values: list[dict], instrument: Optional[dict]) -> dict:
+    if row["is_calculated"]:
+        return {"source": "calculated"}
+    typed = next((str(v.get("value") or "").strip() for v in values if str(v.get("parameter_id")) == row["parameter_id"]),
+                 None)
+    if instrument and typed is not None and typed == str((instrument.get("values") or {}).get(row["parameter_id"], "")).strip():
+        return {"source": "instrument", "instrument_result_id": instrument["id"]}
+    return {"source": "manual"}
 
 
 async def result_detail(clinic_id: str, result_id: str) -> dict:

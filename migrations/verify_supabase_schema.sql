@@ -904,6 +904,36 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 27. MIGRATION 133 — Diagnostic OS instruments and QC (DX-M9)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tables int;
+    v_trg int;
+    v_patch int;
+BEGIN
+    SELECT count(*) INTO v_tables FROM pg_class
+     WHERE relname IN ('dx_bridge_agents', 'dx_instruments', 'dx_instrument_results', 'dx_qc_materials', 'dx_qc_results')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M133', 'Tables: bridge agents, instruments, instrument results, QC materials, QC results (RLS forced)',
+            CASE WHEN v_tables = 5 THEN 'PASS' ELSE 'FAIL' END, v_tables || ' of 5 present with RLS forced');
+
+    SELECT count(*) INTO v_trg FROM pg_trigger
+     WHERE tgname IN ('trg_dx_instrument_results_guard', 'trg_dx_qc_results_append_only');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M133', 'Triggers: raw instrument results immutable, QC run log append-only',
+            CASE WHEN v_trg = 2 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 2 present');
+
+    SELECT (position('v9 (133)' IN pg_get_functiondef('dx_purge_clinic(uuid)'::regprocedure)) > 0)::int
+         + (position('instrument_result_id UUID' IN pg_get_functiondef(
+              'dx_record_results(uuid,uuid,jsonb,jsonb,boolean,text,uuid,text)'::regprocedure)) > 0)::int INTO v_patch;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M133', 'Functions: dx_purge_clinic v9, dx_record_results keeps the instrument result id',
+            CASE WHEN v_patch = 2 THEN 'PASS' ELSE 'FAIL' END, v_patch || ' of 2 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

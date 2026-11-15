@@ -1693,6 +1693,7 @@ class WorksheetIn(_In):
     values: list[ValueIn] = Field(..., min_length=1, max_length=100)
     amendment_reason: Optional[str] = Field(None, max_length=500)
     preview: bool = False
+    instrument_result_id: Optional[str] = Field(None, pattern=UUID_RX)   # P10: saved from an analyser prefill
 
 
 class VerifyIn(_In):
@@ -1745,7 +1746,10 @@ async def bench_worksheet(order_id: str, clinic_id: str = "default", user: Admin
     scope, _ = await _dx_scope(user, clinic_id)
     _lab_perm(user, "LAB_ENTRY", "LAB_VALIDATE", "DX_VERIFY")
     await _dx_order(user, scope, order_id)
-    return await dx_results.worksheet(scope, order_id)
+    from app.services import dx_bridge
+    ws = await dx_results.worksheet(scope, order_id)
+    ws["instrument_prefill"] = await dx_bridge.prefill_for_order(scope, order_id)   # P10: values to review
+    return ws
 
 
 @router.post("/orders/{order_id}/results")
@@ -1754,8 +1758,18 @@ async def bench_save_results(order_id: str, body: WorksheetIn, request: Request,
     scope, _ = await _dx_scope(user, clinic_id)
     _lab_perm(user, "LAB_ENTRY")
     await _dx_order(user, scope, order_id)
+    instrument = None
+    if body.instrument_result_id:
+        from app.services import dx_bridge
+        pre = await dx_bridge.prefill_for_order(scope, order_id)
+        if not pre or pre["instrument_result_id"] != body.instrument_result_id:
+            raise HTTPException(status_code=409, detail="That analyser result is not the prefill of this order.")
+        instrument = {"id": pre["instrument_result_id"], "values": {k: v["value"] for k, v in pre["values"].items()}}
     out = await dx_results.enter_worksheet_results(scope, order_id, [v.model_dump() for v in body.values], user,
-                                                   body.amendment_reason, body.preview)
+                                                   body.amendment_reason, body.preview, instrument=instrument)
+    if out.get("saved") and instrument:
+        from app.services import dx_bridge
+        await dx_bridge.mark_applied(scope, instrument["id"], out["id"], user)
     if out.get("saved"):
         await _audit(user, request, "dx_results_enter", "lab_result", out["id"],
                      {"order_id": order_id, "version": out["version"], "critical": out["has_critical_value"],
@@ -2729,3 +2743,102 @@ async def mis_export(request: Request, report: Literal["visits", "tat", "revenue
     return StreamingResponse(body, media_type="text/csv; charset=utf-8", headers={
         "Cache-Control": "no-store",
         "Content-Disposition": f'attachment; filename="dx-{report}-{start_date}-to-{end_date}.csv"'})
+
+
+
+# ═══ Quality control (P10, DX-62) ════════════════════════════════════════════
+
+QC_READ = ("DX_QC", "LAB_ENTRY", "LAB_VALIDATE")
+
+
+class QcMaterialIn(_In):
+    instrument_id: str = Field(..., pattern=UUID_RX)
+    parameter_code: str = Field(..., min_length=1, max_length=40)
+    level: str = Field(..., min_length=1, max_length=20)
+    lot: str = Field(..., min_length=1, max_length=40)
+    target_mean: float
+    target_sd: float = Field(..., gt=0)
+    valid_from: date
+    valid_to: date
+
+
+class QcResultIn(_In):
+    material_id: str = Field(..., pattern=UUID_RX)
+    value: float
+    note: Optional[str] = Field(None, max_length=500)
+
+
+async def _qc_material(user: AdminUser, scope: str, material_id: str) -> dict:
+    from app.services import dx_bridge, dx_qc
+    m = await dx_qc.get_material(scope, material_id)
+    inst = await dx_bridge.get_instrument(scope, m["instrument_id"])
+    sites = await _user_site_ids(user, scope, None)
+    if sites is not None and inst["site_id"] not in sites:
+        raise HTTPException(status_code=404, detail="QC material not found.")
+    return m
+
+
+@router.get("/qc/materials")
+async def qc_materials(clinic_id: str = "default", instrument_id: Optional[str] = Query(None, pattern=UUID_RX),
+                       user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_bridge, dx_qc
+    _lab_perm(user, "DX_QC", "DX_ADMIN", *QC_READ[1:])
+    scope, _ = await _dx_scope(user, clinic_id)
+    sites = await _user_site_ids(user, scope, None)
+    mine = {i["id"] for i in await dx_bridge.list_instruments(scope, sites)}
+    return {"materials": [m for m in await dx_qc.list_materials(scope, instrument_id) if m["instrument_id"] in mine]}
+
+
+@router.post("/qc/materials", status_code=status.HTTP_201_CREATED)
+async def qc_material_create(body: QcMaterialIn, request: Request, clinic_id: str = "default",
+                             user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_bridge
+    _lab_perm(user, "DX_QC", "DX_ADMIN")
+    scope, _ = await _dx_scope(user, clinic_id, new_work=True)
+    inst = await dx_bridge.get_instrument(scope, body.instrument_id)
+    sites = await _user_site_ids(user, scope, None)
+    if sites is not None and inst["site_id"] not in sites:
+        raise HTTPException(status_code=404, detail="Instrument not found.")
+    if body.valid_to < body.valid_from:
+        raise HTTPException(status_code=422, detail="valid_to is before valid_from.")
+    out = await dx.save_config_row("dx_qc_materials", scope, {
+        **body.model_dump(mode="json"), "parameter_code": body.parameter_code.strip().upper(),
+        "target_mean": str(body.target_mean), "target_sd": str(body.target_sd)})
+    await _audit(user, request, "dx_qc_material_create", "dx_qc_material", out["id"],
+                 {"instrument_id": body.instrument_id, "parameter_code": out["parameter_code"], "lot": body.lot})
+    return out
+
+
+@router.get("/qc/results")
+async def qc_results(material_id: str = Query(..., pattern=UUID_RX), days: int = Query(30, ge=1, le=366),
+                     clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_qc
+    _lab_perm(user, *QC_READ)
+    scope, _ = await _dx_scope(user, clinic_id)
+    await _qc_material(user, scope, material_id)
+    return {"results": await dx_qc.list_results(scope, material_id, days)}
+
+
+@router.post("/qc/results", status_code=status.HTTP_201_CREATED)
+async def qc_result_record(body: QcResultIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    """One QC run: z-score and Westgard flags computed here; a 1_3s / 2_2s / R_4s / 4_1s / 10_x run is
+    recorded as rejected (append-only — the next run is a new row)."""
+    from app.services import dx_qc
+    _lab_perm(user, *QC_READ)
+    scope, _ = await _dx_scope(user, clinic_id)
+    await _qc_material(user, scope, body.material_id)
+    out = await dx_qc.record_qc_result(scope, body.material_id, body.value, user, body.note)
+    await _audit(user, request, "dx_qc_result", "dx_qc_result", out["id"],
+                 {"material_id": body.material_id, "flags": out["westgard_flags"], "accepted": out["accepted"]})
+    return out
+
+
+@router.get("/qc/chart")
+async def qc_chart(material_id: str = Query(..., pattern=UUID_RX), days: int = Query(30, ge=1, le=366),
+                   clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    from app.services import dx_qc
+    _lab_perm(user, *QC_READ)
+    scope, _ = await _dx_scope(user, clinic_id)
+    await _qc_material(user, scope, material_id)
+    return await dx_qc.get_levey_jennings_chart(scope, material_id, days)

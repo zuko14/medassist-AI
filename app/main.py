@@ -11,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 from app.config import settings
-from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd, ipd, orders, lis, documents, masters, emergency, ot, radiology, insurance, dx, dx_public
+from app.routers import webhook, health, admin, clinics, platform, corporate_health, home_collection, opd, ipd, orders, lis, documents, masters, emergency, ot, radiology, insurance, dx, dx_public, dx_bridge
 from app.routers import voice_admin, voice_platform, assistant
 from app.voice import gateway as voice_gateway
 from app.routers.integrations import router as integrations_router
@@ -413,6 +413,8 @@ app.include_router(insurance.ipd_router)
 # Diagnostic OS (migration 125): every route gated by dx_access(clinic)
 app.include_router(dx.router)
 app.include_router(dx_public.router)    # DX-46: public verify / share links (no session)
+app.include_router(dx_bridge.router)    # DX-60: bridge agents, instruments, instrument results (staff)
+app.include_router(dx_bridge.internal)  # DX-60: /internal/dx/bridge/* (lab bridge, HMAC; outbound from the lab)
 
 
 @app.get("/")

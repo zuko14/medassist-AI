@@ -616,6 +616,11 @@ CREATE TABLE dx_qc_results (id, clinic_id, material_id, value NUMERIC NOT NULL, 
   westgard_flags TEXT[] NOT NULL DEFAULT '{}', run_at, entered_by, accepted BOOLEAN, reviewer_note);   -- append-only
 ```
 
+As built (133): composite tenant FKs; `dx_instrument_results.mapping` (prefill per order) and `mapped_by_name`, raw
+columns immutable (`trg_dx_instrument_results_guard`); `dx_qc_results.entered_by_name`, append-only
+(`trg_dx_qc_results_append_only`), flags limited to the six rule names; `dx_result_value_meta.instrument_result_id`
+now written by `dx_record_results`; purge v9.
+
 ## 11. Erasure and retention (DPDP)
 `app/services/data_retention.py` gains a DX section (P3): on patient erasure, `dx_accessions.patient_snapshot`,
 `referrer_snapshot` and `external_ref` are redacted in place; `dx_samples` keep barcodes; releases keep their

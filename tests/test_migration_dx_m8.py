@@ -26,6 +26,8 @@ UP, DOWN = MIG / "132_dx_b2b.sql", MIG / "rollback" / "132_rollback_dx_b2b.sql"
 def unwind_132(cur) -> None:
     """Inside an open transaction: purge every clinic with DX-M8 rows, run the 132
     rollback. Called first by unwind_131 (newest first)."""
+    from tests.test_migration_dx_m9 import unwind_133
+    unwind_133(cur)   # newest first: 133's purge v9 patches v8
     cur.execute("SELECT to_regclass('public.dx_b2b_ledger') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

@@ -120,6 +120,8 @@ TENANT_OWNED_TABLES = frozenset({
     "dx_delivery_overrides", "dx_outbox", "dx_print_log", "dx_share_links",
     # Migration 132: Diagnostic OS B2B money (rate cards, ledger, statements, barcode stock)
     "dx_rate_cards", "dx_rate_card_items", "dx_b2b_ledger", "dx_b2b_statements", "dx_barcode_stock",
+    # Diagnostic OS instruments and QC (migration 133)
+    "dx_bridge_agents", "dx_instruments", "dx_instrument_results", "dx_qc_materials", "dx_qc_results",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

@@ -81,6 +81,7 @@ PAGES: dict[str, str] = {
     "dxreferrers": "Referrers",   # Diagnostic OS referral volume, counts only (migration 132); page hand-off only
     "dxpartner": "Partner Portal",   # B2B partner logins only (migration 132); Ketu is off for partners
     "dxdash": "DX Dashboard",   # Diagnostic OS stage funnel, alerts and MIS (P9); R0 reads via /admin/dx/dashboard
+    "dxinstruments": "Instruments & QC",   # Diagnostic OS analyser bridge and QC (migration 133); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
     "casualty": "Casualty / ER",
@@ -141,6 +142,8 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "dxreferrers": ("referrers", "referring doctors", "referral volume"),
     "dxpartner": ("partner portal", "new requisition"),
     "dxdash": ("dx dashboard", "lab dashboard", "lab mis", "tat report", "rejection report", "lab revenue"),
+    "dxinstruments": ("instruments", "analysers", "analyzers", "bridge agent", "lab bridge", "quality control",
+                      "qc chart", "levey jennings", "westgard", "unmatched results"),
     "dxcatalog": ("test master", "lab test master", "reference ranges", "test parameters", "lab catalogue"),
     "lisqueue": ("lab sign-off", "sign lab report", "pathologist queue", "pending validation", "validate results"),
     "radiology": ("radiology", "imaging", "x-ray reports", "scan reports", "radiology worklist", "form f",

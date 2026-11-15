@@ -202,4 +202,14 @@ revenue|rejections|referrers` (revenue also DX_BILLING): no patient name or phon
 | POST | `/internal/dx/bridge/heartbeat` | bridge HMAC | `last_seen_at` |
 | GET/POST/PATCH | `/bridge-agents` (key shown once), `/instruments` | DX_ADMIN | |
 | GET / POST | `/instrument-results?status=unmatched`, `/instrument-results/{id}/map`, `/ignore` | LAB_ENTRY | |
+
+As built (P10, `app/routers/dx_bridge.py`, `app/services/dx_bridge.py`, `dx_qc.py`): bridge headers `X-Bridge-Key-Prefix`,
+`X-Bridge-Timestamp` (ISO 8601, ±300 s) and `X-Bridge-Signature` = hex HMAC-SHA256 keyed by `sha256(secret)` hex over
+`METHOD\nPATH[?QUERY]\nTIMESTAMP\nsha256(body)`; every failure is one 401. `POST /internal/dx/bridge/results` body
+`{instrument_id, message_id, raw_message}` (Kriya parses ASTM / HL7; one specimen per message; replays return the first
+outcome). Staff: `GET/POST /bridge-agents`, `PATCH /bridge-agents/{id}` (`rotate_key` shows a new secret once) — DX_ADMIN;
+`GET/POST /instruments`, `PATCH /instruments/{id}`; `GET /instrument-results?status`, `GET /instrument-results/{id}/candidates?barcode`,
+`POST …/map {order_id, codes}`, `POST …/ignore`; the worksheet carries `instrument_prefill`, and saving it sends
+`instrument_result_id`. QC: `GET/POST /qc/materials` (DX_QC, DX_ADMIN), `GET/POST /qc/results`, `GET /qc/chart`
+(DX_QC, LAB_ENTRY, LAB_VALIDATE).
 | GET/POST | `/qc/materials`, `/qc/results`, `/qc/chart?material` | DX_QC | Westgard flags computed server-side |
