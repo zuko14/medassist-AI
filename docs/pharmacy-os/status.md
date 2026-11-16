@@ -1,10 +1,13 @@
 # Kriya Pharmacy OS — Execution Status (source of truth)
 
 > **Every agent starts here.** Then read, in order: [AGENT-PROMPT.md](AGENT-PROMPT.md) (how to work) ·
-> **[AUDIT.md](AUDIT.md)** (code evidence — read before touching any existing file) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
+> **[AUDIT.md](AUDIT.md)** (code evidence — read before touching any existing file) · **[VERIFICATION.md](VERIFICATION.md)**
+> (adversarial review: defects D1–D15, latent bugs L1–L2, loopholes X1–X19, zero-impact matrix — binding) ·
+> [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [ADR.md](ADR.md) · [DATA-MODEL.md](DATA-MODEL.md) · [WORKFLOWS.md](WORKFLOWS.md) · [API.md](API.md) · [UI.md](UI.md) ·
 > [SECURITY.md](SECURITY.md) · [TEST-PLAN.md](TEST-PLAN.md) · [ROLLOUT.md](ROLLOUT.md) · [KRIYA-KETU.md](KRIYA-KETU.md) ·
-> [GAP-ANALYSIS.md](GAP-ANALYSIS.md) · [COMPETITIVE-ANALYSIS.md](COMPETITIVE-ANALYSIS.md).
+> [GAP-ANALYSIS.md](GAP-ANALYSIS.md) · [COMPETITIVE-ANALYSIS.md](COMPETITIVE-ANALYSIS.md) ·
+> [ADVANCED-FEATURES.md](ADVANCED-FEATURES.md) (staff accelerators A1–A14).
 >
 > States: `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` (say why) · `IMPLEMENTED` (code written, evidence incomplete) ·
 > `VERIFIED` (the listed command was run and passed — summary pasted in §9) · `DEFERRED` (reason given).
@@ -22,10 +25,10 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **Specification complete** (this document suite, 2026-11-16). Implementation not started |
+| Active phase | **Specification complete and verified** (review round 1, VERIFICATION.md, 2026-11-16). Implementation not started |
 | Next task | **RX-00** (P0 baseline) — after the owner reviews the open decisions in ADR.md (O-1…O-6; defaults are in force, so P0–P6 are not blocked) |
 | Working branch | spec on `rx/spec` (from `main` @ `e5f99b5`, not pushed); create `rx/p0-baseline` from it when RX-00 starts |
-| Last commit touching RX | `docs(rx): Pharmacy OS specification suite` on `rx/spec` |
+| Last commit touching RX | `docs(rx): forensic verification round 1 and advanced staff features` on `rx/spec` |
 | Last VERIFIED gate | none (no code) |
 | Open blockers | none for P0–P6. P7 go-live needs O-4 (legal confirmation of register formats). P8 refill sends need Meta-approved templates in each clinic's WABA |
 | Lanes running in parallel | none |
@@ -77,8 +80,8 @@ for pages added; no existing test edited; this file updated.
 | 135 | `135_rx_catalogue.sql` | RX-12 | manufacturers, generics, items, barcodes, aliases, item changes | `rollback/135_…` | NOT_STARTED |
 | 136 | `136_rx_stock_ledger.sql` | RX-17 | batches, movements, balances, triggers, views | `rollback/136_…` | NOT_STARTED |
 | 137 | `137_rx_purchase.sql` | RX-22 | suppliers, PO, GRN, supplier returns | `rollback/137_…` | NOT_STARTED |
-| 138 | `138_rx_pos.sql` | RX-28 | sales, items, payments, fulfilments, returns, credit notes | `rollback/138_…` | NOT_STARTED |
-| 139 | `139_rx_ipd.sql` | RX-37 | indents, dispenses, `ipd_charges.source` widen, MAR column, order-end trigger | `rollback/139_…` (restores CHECK only if no `source='pharmacy'` rows) | NOT_STARTED |
+| 138 | `138_rx_pos.sql` | RX-28 | sales, items, payments, fulfilments, returns, credit notes, overrides; **redefines `opd_close_shift`** (+ pharmacy cash, D1) | `rollback/138_…` (restores the 116 `opd_close_shift` body) | NOT_STARTED |
+| 139 | `139_rx_ipd.sql` | RX-37 | indents, dispenses, `ipd_charges.source` widen (NOT VALID + VALIDATE), `rx_mar_links`, `rx_empty_returns` — no other IPD table touched, no trigger on IPD tables | `rollback/139_…` (restores CHECK only if no `source='pharmacy'` rows) | NOT_STARTED |
 | 140 | `140_rx_transfers_audits.sql` | RX-41 | transfers, audits, audit delta trigger | `rollback/140_…` | NOT_STARTED |
 | 141 | `141_rx_registers.sql` | RX-48 | register entries, append/verify functions, redefined writers | `rollback/141_…` | NOT_STARTED |
 | 142 | `142_rx_refills_alerts.sql` | RX-55 | refill plans/requests, alerts | `rollback/142_…` | NOT_STARTED |
@@ -99,9 +102,9 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | RX-03 | `tenant.py`: `OPT_IN_FEATURES["pharmacy_enabled"]`, `rx_eligible`, `rx_access` (ADR-RX-09) | RX-02 | off by default; needs OPD; wildcard never enables | `test_rx_feature_gate.py` | NOT_STARTED |
 | RX-04 | `permissions.py`: RX perms, PHARMACIST/PHARMACY_MANAGER/STORE_KEEPER, implied grants, `holds_rx_permission`, `allowed_store_ids` | — | existing logins gain only SECURITY §3.2 grants, only while rx_access | `test_rx_feature_gate.py`, existing permission tests | NOT_STARTED |
 | RX-05 | `app/routers/rx.py` + `app/services/rx.py`: `_rx_scope`, settings (CAS), stores CRUD, setup checklist, deactivation preview; mount in `app/main.py` | RX-03, RX-04 | check order permission → tenant → access → wind-down → store | `test_rx_feature_gate.py` | NOT_STARTED |
-| RX-06 | `platform.py`: `pharmacy_enabled` toggle (eligibility 400, provision default store, 409 preview, confirm → WIND_DOWN, re-enable); owner console card | RX-05 | ADR-RX-09 lifecycle | `test_rx_feature_gate.py` | NOT_STARTED |
+| RX-06 | `platform.py`: `pharmacy_enabled` toggle (eligibility 400, provision default store, 409 preview, confirm → WIND_DOWN, re-enable; `None` = disable); refuse `opd_enabled` off while `rx_state ≠ OFF` (D7); owner console card | RX-05 | ADR-RX-09 lifecycle | `test_rx_feature_gate.py` | NOT_STARTED |
 | RX-07 | `/admin/me` + `rx_access`, `rx_state`, `rx_store_ids`, `rx_perms` | RX-04 | additive keys | `test_rx_feature_gate.py` | NOT_STARTED |
-| RX-08 | Platform purge: `rx_purge_clinic` before dx/ipd (AUDIT A38) | RX-02 | purge of RX clinic leaves zero rx rows; non-RX purge unchanged | `test_migration_rx_m1.py::test_platform_purge_order` | NOT_STARTED |
+| RX-08 | Platform purge: gate also counts `rx_sales`/`rx_stock_movements`; `rx_purge_clinic` first when the `rx_state` column exists (D8, A60) | RX-02 | purge of RX clinic leaves zero rx rows and succeeds; non-RX purge unchanged | `test_migration_rx_m1.py::test_platform_purge_order` | NOT_STARTED |
 | RX-09 | `tenancy.py` registration (134 tables); `test_rx_tenancy_registry.py`; `test_rx_route_matrix.py` skeleton | RX-05 | RG1, RG2 green | RG1, RG2 | NOT_STARTED |
 | RX-10 | `tests/test_rx_no_llm.py` (ADR-RX-06) | RX-05 | | itself | NOT_STARTED |
 | RX-11 | UI: Pharmacy nav group, `applyRxGates()`, **Pharmacy Setup** page (`<!-- RX:foundation -->`) | RX-05–07 | hidden for non-RX clinic; 1440/390 | manual (§9) | NOT_STARTED |
@@ -140,7 +143,7 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | RX-31 | Draft lines: server pricing, FEFO pick/split, warnings, discount cap | RX-29, RX-30 | | `test_rx_pos.py` | NOT_STARTED |
 | RX-32 | `rx_complete_sale` + route (schedule checks, payments, fulfilments, idempotency) | RX-31 | W2/W3 lists | `test_rx_pos.py`, `test_rx_concurrency.py` | NOT_STARTED |
 | RX-33 | Receipts 80 mm / A5 PDF + print view; WhatsApp e-bill (template) | RX-32 | UI §2.5 fields | `test_rx_pos.py::test_receipt_*` | NOT_STARTED |
-| RX-34 | Shift integration: `close_shift` / collections summary pharmacy keys | RX-32 | non-RX totals unchanged | `test_rx_pos.py::test_shift_*`; RG5 | NOT_STARTED |
+| RX-34 | Shift integration: 138 redefines SQL `opd_close_shift` adding `rx_sale_payments` cash (D1); `get_collections_summary` gains additive `pharmacy_*` keys | RX-32 | expected cash identical for shifts without pharmacy cash; pharmacy cash reconciles | `test_rx_pos.py::test_shift_*`, `test_rx_zero_impact.py::test_close_shift_unchanged_without_rx`; RG5 | NOT_STARTED |
 | RX-35 | Returns, credit notes, same-day void (W5a) | RX-32 | | `test_rx_returns.py` | NOT_STARTED |
 | RX-36 | UI **Pharmacy POS** (keyboard map, drawer, mapping, receipt) | RX-29–35 | ≤ 3 s timing script | manual + timing (§9) | NOT_STARTED |
 
@@ -149,7 +152,7 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 |:-|:-|:-|:-|:-|:-|
 | RX-37 | Migration 139 (NOT VALID + VALIDATE for CHECK/FK) | P4 | 111/115/116/117 suites unedited green | `test_migration_rx_m6.py`, RG5 | NOT_STARTED |
 | RX-38 | Indents: indentable list, raise, cancel, queue; order-end cascade | RX-37 | W4 steps 1–3 | `test_rx_ipd.py` | NOT_STARTED |
-| RX-39 | `rx_dispense_indent`, ward issue, receive, slip PDF; MAR `rx_dispense_line_id` validation in IPD MAR route | RX-38 | ADR-RX-04 list | `test_rx_ipd.py`, `test_rx_concurrency.py` | NOT_STARTED |
+| RX-39 | `rx_dispense_indent` (admission lock first, order re-check, D9/D10), ward issue, receive, slip PDF; MAR route pops `rx_dispense_line_id` and writes `rx_mar_links` after the unchanged insert (D2) | RX-38 | ADR-RX-04 list | `test_rx_ipd.py`, `test_rx_concurrency.py` | NOT_STARTED |
 | RX-40 | IPD returns (W5b) + UI **Ward Indents** + MAR batch select | RX-39 | | `test_rx_ipd.py`, manual | NOT_STARTED |
 
 ### P6 — Transfers & audits (140)
@@ -177,7 +180,7 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | RX-55 | Migration 142 | P7 | | `test_migration_rx_m9.py` | NOT_STARTED |
 | RX-56 | `rx_alerts_scan` job + alert routes + STAT indent notifications | RX-55 | dedupe/day; OFF clinics skipped | `test_rx_alerts.py` | NOT_STARTED |
 | RX-57 | Refill plan creation on sale (closed frequency map only; exclusions) | RX-55 | | `test_rx_refills.py` | NOT_STARTED |
-| RX-58 | `rx_refill_reminders` job, consent gate, templates, REFILL/STOP keyword handler on inbound pipeline | RX-57 | W10; webhook SLA untouched (handler runs in the async worker, not the webhook thread) | `test_rx_refills.py`, RG4 | NOT_STARTED |
+| RX-58 | `rx_refill_reminders` job (`distributed_job_lock`), opt-in + `accepts_engagement` gate, button templates, `rx_refill:`/`rx_refill_off:` prefix hook beside the dental-review hook (D3) | RX-57 | W10; typed text never intercepted; webhook SLA untouched (async worker) | `test_rx_refills.py`, RG4 | NOT_STARTED |
 | RX-59 | UI **Refill Requests** + verify/pack/reject | RX-58 | | manual | NOT_STARTED |
 
 ### P9 — Ketu & dashboard
@@ -201,6 +204,27 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | RX-64 | Cutover rehearsal on sandbox with a real legacy export (ROLLOUT §5) | P10 | reconciliation ≤ 0.5% | manual, §9 | NOT_STARTED |
 | RX-65 | `tests/test_rx_release_readiness.py` (lifecycle, rollback chain 142→133, purge) | RX-63 | | itself | NOT_STARTED |
 | RX-66 | AGENTS.md row + `docs/agent-context` updates; ROLLOUT owner checklist handed over | RX-65 | | — | NOT_STARTED |
+
+### Verification fixes and advanced features (VERIFICATION.md, ADVANCED-FEATURES.md)
+| ID | Task | Phase | Depends | Acceptance | Tests | State |
+|:-|:-|:-|:-|:-|:-|:-|
+| RX-67 | `delete_branch`: on FK violation (23503) fall back to the existing deactivate path (latent bug L1) | P1 | RX-02 | branch with IPD ward / DX site / RX store → deactivated, not 500; clean branch still deleted | `test_rx_zero_impact.py::test_branch_delete_fk_fallback` | NOT_STARTED |
+| RX-68 | DPDP erasure: per-member 23503 → redact and continue (latent bug L2); delete the patient's refill plans/requests | P1 (plans part in P8) | RX-02 | erasure completes for members referenced by IPD/DX/RX; registers retained | `test_rx_zero_impact.py::test_erasure_with_rx_references` | NOT_STARTED |
+| RX-69 | Rx Inbox (A1) | P4 | RX-32 | | `test_rx_pos.py::test_inbox_*` | NOT_STARTED |
+| RX-70 | Park / recall bills (A2) | P4 | RX-31 | | `test_rx_pos.py::test_park_*` | NOT_STARTED |
+| RX-71 | GS1 / pharma QR parser at GRN and POS (A3) | P3 | RX-25 | parser vectors | `test_rx_gs1.py` | NOT_STARTED |
+| RX-72 | Dispensing labels (A4) | P4 | RX-33 | verbatim prescriber text; closed vocabulary only | `test_rx_labels.py` | NOT_STARTED |
+| RX-73 | Repeat last bill (A5) | P4 | RX-32 | scheduled items need valid Rx | `test_rx_pos.py::test_repeat_*` | NOT_STARTED |
+| RX-74 | Batch recall trace + confirmed notify (A6) | P7 | RX-50 | | `test_rx_recall.py` | NOT_STARTED |
+| RX-75 | ADU reorder suggestions, ABC/VED/FSN, dead stock (A7) | P10 | P8 | suggest-then-apply only | `test_rx_metrics.py` | NOT_STARTED |
+| RX-76 | Expiry-return planner (A8) | P8 | RX-26 | drafts only | `test_rx_purchase.py::test_planner_*` | NOT_STARTED |
+| RX-77 | Manager override tokens (A9) | P4 | RX-32 | single-use, 60 s, approver ≠ requester | `test_rx_pos.py::test_override_*` | NOT_STARTED |
+| RX-78 | Ward par levels + rack-sorted pick lists (A10) | P6 | RX-42 | drafts only | `test_rx_transfers.py::test_par_*` | NOT_STARTED |
+| RX-79 | Narcotic empty-ampoule control (A11) | P7 | RX-49 | two-person; override with reason | `test_rx_registers.py::test_empties_*` | NOT_STARTED |
+| RX-80 | Lost-sale / pending-balance call list (A12) | P9 | P8 | no automatic messages | `test_rx_reports.py::test_lost_sale_list` | NOT_STARTED |
+| RX-81 | Pharmacy shift Z-report (A13) | P4 | RX-34 | matches `opd_close_shift` expected cash | `test_rx_pos.py::test_z_report_*` | NOT_STARTED |
+| RX-82 | Medicine history + recorded allergies panel, display only (A14) | P4 | RX-29 | no checking logic | `test_rx_pos.py::test_history_panel_*` | NOT_STARTED |
+| RX-83 | `tests/test_rx_zero_impact.py`: one test per VERIFICATION §7 row | P1→P11 (grows per phase) | — | every row green | itself | NOT_STARTED |
 
 ### Deferred (owner decision needed)
 | ID | Item | Reason |
@@ -234,3 +258,4 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | Date | Agent | What happened |
 |:-|:-|:-|
 | 2026-11-16 | Claude Code | Forensic audit (AUDIT.md, A1–A48, brief corrections §0) and 15-document specification suite written. No code, no migrations. |
+| 2026-11-16 | Claude Code | Review round 1 (VERIFICATION.md): 15 design defects fixed (2 critical: shift cash D1, MAR guard/purge D2), 2 latent production bugs found (L1 branch delete 500, L2 erasure abort) with fix tasks RX-67/68, 19 loopholes closed, zero-impact matrix; ADVANCED-FEATURES.md A1–A14 (RX-69…RX-82). |

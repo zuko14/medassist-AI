@@ -75,8 +75,8 @@
 - **Decision.** (c). Nurse raises `rx_ipd_indents` with lines referencing **active medication** `ipd_orders`
   (trigger-checked). Pharmacist dispenses with `rx_dispense_indent`: stock movement + `ipd_charges` row
   (`category='pharmacy'`, `source='pharmacy'`, `source_ref='rx:dl:<line>'`, `posted` when `ipd_autopost`) in one
-  transaction. The nurse administers on the existing MAR and may tag `rx_dispense_line_id` (optional column) for batch
-  traceability. Unused stock comes back via `ipd_return_in` → charge void + re-issue for the kept quantity (unbilled)
+  transaction. The nurse administers on the existing MAR and may pick the dispensed batch, stored in the RX-owned link table
+  `rx_mar_links` (no IPD table is altered — VERIFICATION D2) for recall traceability. Unused stock comes back via `ipd_return_in` → charge void + re-issue for the kept quantity (unbilled)
   or a credit note on the final IPD invoice (billed). Discharge medicines are an `rx_sales` with
   `sale_kind='ipd_discharge_meds'`, payable at the counter or added to the IPD bill (`mode='ipd_bill'` → a pharmacy
   charge on the admission).
@@ -176,7 +176,9 @@
 ## ADR-RX-09 — Feature gate and lifecycle (OFF → ACTIVE → WIND_DOWN → OFF)
 - **Decision.** `OPT_IN_FEATURES["pharmacy_enabled"]`; `rx_eligible(clinic) = opd_enabled(clinic)`; `rx_access(clinic)`
   → `ACTIVE` when `features.pharmacy_enabled is True` and eligible; `WIND_DOWN` when `clinics.rx_state='WIND_DOWN'`;
-  else `None`. IPD dispensing additionally needs `ipd_access(clinic) == 'ACTIVE'`. Disable with open drafts, open
+  else `None`. IPD dispensing additionally needs `ipd_access(clinic) is not None` (WIND_DOWN keeps admitted patients
+  supplied — VERIFICATION D6). The platform refuses disabling OPD while `rx_state ≠ 'OFF'`, and treats
+  `pharmacy_enabled = None` exactly like `false` (D7). Disable with open drafts, open
   indents or undispatched transfers → 409 with a preview; confirm → `WIND_DOWN` (no new sales/GRNs; returns, register
   export and stock audit still work) → `OFF` when the preview is empty. Re-enable restores ACTIVE with data intact.
   Never `has_feature(clinic, "pharmacy_enabled")` (enterprise wildcard must not switch it on).
@@ -184,8 +186,10 @@
 
 ## ADR-RX-10 — Numbering
 `PHS-` sales (width 6), `PRT-` returns, `PCN-` credit notes, `PO-`, `GRN-`, `IND-`, `STR-`, `AUD-` — all from
-`opd_next_counter(clinic, 'rx_<kind>')` (103:195) under its row lock: gapless, per clinic, per IST year. Drafts have
-no number (like 103 invoices). Number assigned inside the completing function only.
+`opd_next_counter(clinic, 'rx_<kind>:'||year)` (103:195; year-in-key like `inv:`/`rct:`) under its row lock on the
+`clinics` row: gapless, per clinic, per IST year. Drafts have no number (like 103 invoices). The number is assigned
+as the **last** statement of the completing function so the `clinics` row lock is held for microseconds and never
+delays OPD invoicing (VERIFICATION D11/D12).
 
 ## Open owner decisions (defaults in force)
 | ID | Decision | Default |

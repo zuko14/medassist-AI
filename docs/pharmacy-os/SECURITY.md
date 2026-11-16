@@ -89,6 +89,11 @@ A row outside scope returns **404**.
   - H1: additionally patient address line (snapshot); quantity ≤ prescribed when linked to an in-house Rx line.
   - X / narcotic / psychotropic: in-house signed Rx **or** a captured external Rx with prescriber registration and
     Rx date ≤ `rx_validity_days`; actor holds `RX_CONTROLLED`; per-unit quantities; no OTC; no refill plans.
+  - One Rx, one fill (loophole X1): cumulative units per Rx line across all counters ≤ prescribed, under a per-Rx
+    advisory lock; an external Rx's fingerprint cannot be reused for X/narcotic (X2).
+  - Overrides (discount over cap, return past window, over-fulfilment of non-controlled lines, staff sales) need a
+    single-use `rx_overrides` approval by a different user holding RX_ADMIN (ADVANCED-FEATURES A9); both ids are
+    audited. Full loophole register: VERIFICATION.md §5.
 - **Custody:** controlled transfers need dispatcher ≠ receiver (both RX_CONTROLLED); controlled audit scope available
   daily; register running balance must equal `rx_stock_balances` for that item×store (nightly check; mismatch → P1).
 - **Trail:** every controlled movement has a register row in the same transaction; voids create `return` rows.
@@ -97,8 +102,10 @@ A row outside scope returns **404**.
 
 ## 5. DPDP Act 2023 and PHI
 - **Purpose limitation.** Pharmacy uses patient identity for dispensing, billing, statutory registers and (only with
-  consent) refill reminders. Refill reminders are a distinct purpose recorded in `consent.py` (`purpose='pharmacy_refill'`);
-  absent consent → no plan is messaged.
+  consent) refill reminders. Refill consent is explicit and per item: the pharmacist ticks "Patient wants refill
+  reminders" (`rx_refill_plans.opt_in_by/at`), and every send also requires the existing
+  `ConsentService.accepts_engagement()` (global STOP wins). The template's "Stop refill reminders" button opts out of
+  refills only.
 - **Data minimisation.** Receipts print name, age/gender, MRN, prescriber name — never phone or full address.
   Registers include address only where the law asks (H1/X). Ketu and dashboards show masked phones.
 - **Logs.** Phones masked `+91XXXXXX7890` (CLAUDE.md); no drug names alongside phone numbers in application logs

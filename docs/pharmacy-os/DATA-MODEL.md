@@ -14,6 +14,14 @@
 - **Time.** `TIMESTAMPTZ` stored UTC; business dates via `rx_ist_date(ts)` (= `ipd_ist_date`, 111:45). Expiry is a
   `DATE` = **last day of the printed expiry month** (label "EXP 03/2027" → `2027-03-31`).
 - **Errors.** `rx_raise('rx_<code>')` → `ERRCODE P0001`; Python maps codes to HTTP (API.md §0).
+- **Numbering.** `opd_next_counter(clinic, 'rx_sale:'||year)` (also `rx_ret:`, `rx_cn:`, `rx_po:`, `rx_grn:`, `rx_srn:`,
+  `rx_ind:`, `rx_str:`, `rx_aud:`) — the year-in-key pattern of `inv:`/`rct:` (VERIFICATION A51). The counter row-locks
+  the **`clinics` row**, so every RX function assigns its number as its **last** statement (VERIFICATION D12).
+- **Lock order** inside every RX function (VERIFICATION §6): Rx advisory lock → `ipd_lock_admission` (IPD functions) →
+  own document row `FOR UPDATE` → movements in ascending `(store_id, batch_id)` → register advisory locks →
+  number. Python retries an RPC once on SQLSTATE 40P01/40001 with the same idempotency key.
+- **No FKs to `doctors` or `clinic_admins`.** Prescribers and actors are stored as snapshots / plain ids, so deleting a
+  doctor or a staff login never meets an RX row (VERIFICATION §7.2).
 - **Purge.** Every guard returns early when `rx_purging(clinic_id)` (GUC `kriya.rx_purge_clinic`).
 - **Function-only writes.** Tables marked **[F]** accept inserts only while GUC `kriya.rx_tx = clinic_id` is set by an
   `rx_*` SQL function (pattern: `ipd_in_tx`, 111:38; `opd_guard_credit_note_insert`, 117:272).
@@ -94,6 +102,7 @@ CREATE TABLE rx_items (                            -- one sellable SKU (brand + 
   tax_rate_bps   SMALLINT NOT NULL CHECK (tax_rate_bps IN (0,500,1200,1800,2800,4000)),  -- same CHECK as 117:55
   reorder_level_units INTEGER NOT NULL DEFAULT 0 CHECK (reorder_level_units >= 0),
   reorder_qty_units   INTEGER NOT NULL DEFAULT 0 CHECK (reorder_qty_units >= 0),
+  ved_class      TEXT NULL CHECK (ved_class IN ('V','E','D')),          -- ADVANCED-FEATURES A7
   is_chronic     BOOLEAN NOT NULL DEFAULT false,    -- eligible for refill reminders (W10)
   is_cold_chain  BOOLEAN NOT NULL DEFAULT false,
   rack_location  TEXT NULL CHECK (char_length(rack_location) <= 40),
@@ -107,7 +116,8 @@ CREATE TABLE rx_items (                            -- one sellable SKU (brand + 
   CONSTRAINT rx_items_mfr_fk     FOREIGN KEY (clinic_id, manufacturer_id) REFERENCES rx_manufacturers (clinic_id, id)
 );
 CREATE INDEX idx_rx_items_generic ON rx_items (clinic_id, generic_id) WHERE is_active;
-CREATE INDEX idx_rx_items_name_trgm ON rx_items USING gin (lower(brand_name) gin_trgm_ops);  -- when pg_trgm exists (120 pattern)
+-- only IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') (120 pattern); else the resolver uses prefix/ILIKE
+CREATE INDEX idx_rx_items_name_trgm ON rx_items USING gin (lower(brand_name) gin_trgm_ops);
 
 CREATE TABLE rx_item_barcodes (id, clinic_id, item_id, barcode TEXT NOT NULL CHECK (barcode ~ '^[0-9A-Za-z]{6,40}$'),
   symbology TEXT NOT NULL CHECK (symbology IN ('ean13','ean8','gs1_128','gs1_datamatrix','upc','internal')),
@@ -216,6 +226,8 @@ difference raises an `admin_notifications` P1 and is a release blocker.
 CREATE TABLE rx_suppliers (id, clinic_id, name TEXT NOT NULL, gstin TEXT NULL CHECK (gstin ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$'),
   state_code CHAR(2) NULL, drug_licence_no TEXT NULL, phone TEXT NULL, email TEXT NULL, address TEXT NULL,
   payment_terms_days SMALLINT NOT NULL DEFAULT 30 CHECK (payment_terms_days BETWEEN 0 AND 365),
+  lead_time_days SMALLINT NOT NULL DEFAULT 3 CHECK (lead_time_days BETWEEN 0 AND 90),          -- A7
+  return_window_days SMALLINT NULL CHECK (return_window_days BETWEEN 0 AND 365),              -- A8
   is_active BOOLEAN NOT NULL DEFAULT true, created_at, updated_at,
   UNIQUE (clinic_id, id), UNIQUE (clinic_id, gstin) WHERE gstin IS NOT NULL);
 
@@ -299,6 +311,9 @@ CREATE TABLE rx_sales (
   opd_prescription_id UUID NULL,                   -- signed Rx fulfilled (composite FK → opd_prescriptions)
   prescriber_snapshot JSONB NULL,                  -- copied from opd_prescriptions.signer_snapshot or entered (external Rx)
   external_rx_ref TEXT NULL,                       -- paper Rx from outside doctor: reg. no. + name required for H/H1/X
+  external_rx_fingerprint BYTEA NULL,              -- sha256(reg_no‖rx_date‖normalised patient name) — loophole X2
+  parked_label TEXT NULL CHECK (char_length(parked_label) <= 60), parked_at TIMESTAMPTZ NULL,   -- A2
+  picked_at TIMESTAMPTZ NULL, picked_by UUID NULL,                                              -- A1
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','completed','void')),
   sale_year SMALLINT NULL, sale_seq INTEGER NULL,
   sale_number TEXT GENERATED ALWAYS AS (… opd_format_number('PHS-', sale_year, sale_seq, 6) …) STORED,
@@ -309,12 +324,15 @@ CREATE TABLE rx_sales (
   round_off_paise SMALLINT NOT NULL DEFAULT 0 CHECK (round_off_paise BETWEEN -99 AND 99),
   net_paise BIGINT GENERATED ALWAYS AS (gross_paise - discount_paise + round_off_paise) STORED,
   taxable_paise BIGINT NOT NULL DEFAULT 0, cgst_paise BIGINT NOT NULL DEFAULT 0, sgst_paise BIGINT NOT NULL DEFAULT 0,
-  paid_paise BIGINT NOT NULL DEFAULT 0, credited_paise BIGINT NOT NULL DEFAULT 0,
+  paid_paise BIGINT NOT NULL DEFAULT 0,           -- fixed at completion (D4)
+  refunded_paise BIGINT NOT NULL DEFAULT 0 CHECK (refunded_paise >= 0),   -- money given back (returns, void)
+  credited_paise BIGINT NOT NULL DEFAULT 0 CHECK (credited_paise >= 0),   -- PCN credit notes issued
   idempotency_key TEXT NULL CHECK (char_length(idempotency_key) BETWEEN 8 AND 80),
   completed_at, completed_by, completed_by_name, voided_at, voided_by, void_reason, created_by, created_at,
   UNIQUE (clinic_id, id), UNIQUE (clinic_id, sale_year, sale_seq),
   CHECK (status = 'draft' OR sale_seq IS NOT NULL),
-  CHECK (status <> 'completed' OR paid_paise = net_paise),   -- POS is pay-at-counter; credit sales = RX-D2 (deferred)
+  CHECK (status = 'draft' OR paid_paise = net_paise),        -- pay-at-counter; credit sales = RX-D2 (deferred)
+  CHECK (refunded_paise + credited_paise <= net_paise),       -- never give back more than was charged
   CHECK (discount_paise <= gross_paise),
   CHECK (patient_id IS NOT NULL OR walkin_name IS NOT NULL OR sale_kind = 'otc')
 );
@@ -341,10 +359,26 @@ CREATE TABLE rx_sale_items (
   CHECK (line_gross_paise <= mrp_pack_paise::BIGINT * qty_units / pack_size + 1)    -- never above MRP (DPCO)
 );
 CREATE TABLE rx_sale_payments (                    -- [A]
-  id, clinic_id, sale_id, shift_id UUID NOT NULL,  -- composite FK → opd_cashier_shifts (103:483)
+  id, clinic_id, sale_id, shift_id UUID NULL,      -- composite FK → opd_cashier_shifts (103:483)
   mode TEXT NOT NULL CHECK (mode IN ('cash','upi','card','wallet','ipd_bill')),
-  amount_paise BIGINT NOT NULL,                    -- negative = refund
-  reference TEXT NULL, created_by, created_at, UNIQUE (clinic_id, id));
+  amount_paise BIGINT NOT NULL CHECK (amount_paise <> 0),   -- negative = refund
+  return_id UUID NULL,                             -- set on refund rows
+  ipd_charge_id UUID NULL,                         -- mode 'ipd_bill' only (discharge medicines on the IPD bill)
+  reference TEXT NULL, created_by, created_at, UNIQUE (clinic_id, id),
+  CHECK (mode <> 'cash' OR shift_id IS NOT NULL),  -- D5: same rule as opd_receipts_counter_needs_shift (116:42)
+  CHECK ((mode = 'ipd_bill') = (ipd_charge_id IS NOT NULL)));
+```
+**`opd_close_shift` redefinition (138, VERIFICATION D1).** Expected cash is computed in SQL (116:760). 138 re-creates
+the function with the 116 body plus one term:
+`+ COALESCE((SELECT SUM(amount_paise) FROM rx_sale_payments WHERE clinic_id = p_clinic_id AND shift_id = p_shift_id
+AND mode = 'cash'), 0)` (refunds are negative rows, so they subtract). For a shift with no pharmacy cash the term is 0
+and the result is identical; rollback 138 re-creates the 116 body verbatim.
+
+Shift resolution reuses `resolve_counter_shift(clinic, actor, shift_id, require_drawer = <any cash tender>)`
+(VERIFICATION A50): drawer-less logins can take UPI/card, never cash. Mode `ipd_bill` (discharge medicines added to
+the patient's IPD bill) writes one `ipd_charges` row in the same transaction and is refused unless the admission is
+`admitted|discharge_pending` (the 111 trigger enforces it too).
+```sql
 
 CREATE TABLE rx_returns (                          -- patient return; [F]
   id, clinic_id, sale_id, store_id, return_year, return_seq,
@@ -359,11 +393,21 @@ CREATE TABLE rx_credit_notes (                     -- [A][F] same shape as opd_c
   id, clinic_id, sale_id, cn_year, cn_seq, cn_number GENERATED ('PCN-'), amount_paise, tax_paise,
   reason, issued_by, issued_by_name, created_at, UNIQUE (clinic_id, id), UNIQUE (clinic_id, cn_year, cn_seq));
 ```
-`rx_complete_sale(clinic, sale_id, payments JSONB, shift_id, idem, actor)` **[F]**: lock sale `FOR UPDATE`; refuse if
-not draft; re-price every line from the batch snapshot (client prices ignored); re-check Schedule H/H1/X
-preconditions (§7); insert one `sale_out` movement per line (balance trigger enforces stock and expiry); compute
-GST split (ADR-RX-08); assign `PHS-` number; insert payments (Σ = net); write register rows; mark completed. Any
-failure rolls back everything — no half-sold sale, no orphan movement.
+`rx_complete_sale(clinic, sale_id, payments JSONB, shift_id, idem, actor, override_id)` **[F]**, in this order:
+1. If the sale links an Rx: `pg_advisory_xact_lock(hashtext('rx_rx:'||opd_prescription_id))`; Rx must still be
+   `signed` (else `rx_prescription_superseded`).
+2. Lock sale `FOR UPDATE`; refuse unless draft; replay → return the completed sale.
+3. Re-price every line from the batch snapshot (client prices ignored); discount cap on Σ(line + allocated header)
+   unless a valid unused `rx_overrides` row for this sale/action/amount is consumed (ADVANCED-FEATURES A9).
+4. Fulfilment cap (loophole X1): for each Rx-linked line, Σ `rx_rx_fulfilments.units` (all stores) + this line ≤
+   prescribed units when computable; for H1/X/narcotic/psychotropic the cap is **hard** and, when not computable,
+   one fill per Rx line; for other schedules over-cap needs an override.
+5. Schedule preconditions (SECURITY §4); for X/narcotic with an external Rx, refuse if another completed sale has the
+   same `external_rx_fingerprint` (H1: warning recorded in the register snapshot).
+6. Insert one `sale_out` movement per line **sorted by (store_id, batch_id)** (balance trigger enforces stock/expiry).
+7. GST split (ADR-RX-08); payments (Σ = net; shift rule above); fulfilments; register rows.
+8. Assign the `PHS-` number **last**; mark completed.
+Any failure rolls back everything — no half-sold sale, no orphan movement.
 
 `rx_complete_sale` also writes `rx_rx_fulfilments(clinic_id, opd_prescription_item_id, sale_item_id, units)` so a
 second counter sees the line as fulfilled; partial fulfilment (out of stock) leaves the remainder open for 7 days.
@@ -373,7 +417,8 @@ second counter sees the line as fulfilled; partial fulfilment (out of stock) lea
 ALTER TABLE ipd_charges DROP CONSTRAINT ipd_charges_source_check;            -- widen only
 ALTER TABLE ipd_charges ADD CONSTRAINT ipd_charges_source_check
   CHECK (source IN ('manual','bed_day','order','pharmacy'));
-ALTER TABLE ipd_med_administrations ADD COLUMN IF NOT EXISTS rx_dispense_line_id UUID NULL;   -- FK added below
+-- ADD ... NOT VALID then VALIDATE CONSTRAINT (lighter lock; every existing row satisfies the wider CHECK).
+-- No other IPD table is altered and no trigger is added to any IPD table (VERIFICATION D2, D9).
 
 CREATE TABLE rx_ipd_indents (
   id, clinic_id, admission_id, ward_id, from_store_id,            -- store asked to supply
@@ -399,14 +444,29 @@ CREATE TABLE rx_dispense_lines (                   -- [A][F]
   unit_price_paise INTEGER NOT NULL,                -- per base unit, IPD tariff (ADR-RX-08 §IPD)
   ipd_charge_id UUID NULL,                          -- charge written in the same tx
   UNIQUE (clinic_id, id));
-ALTER TABLE ipd_med_administrations ADD CONSTRAINT ipd_mar_rx_dispense_fk
-  FOREIGN KEY (clinic_id, rx_dispense_line_id) REFERENCES rx_dispense_lines (clinic_id, id);
+CREATE TABLE rx_mar_links (                       -- batch traceability for a MAR dose, owned by RX (replaces v1 MAR column)
+  id UUID PK, clinic_id UUID NOT NULL,
+  mar_id UUID NOT NULL,                             -- composite FK → ipd_med_administrations (clinic_id, id) ON DELETE CASCADE
+  dispense_line_id UUID NOT NULL,                   -- composite FK → rx_dispense_lines
+  created_by UUID NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (clinic_id, id), UNIQUE (clinic_id, mar_id));
+CREATE TABLE rx_empty_returns (                   -- [A] narcotic empties (ADVANCED-FEATURES A11)
+  id, clinic_id, dispense_line_id, units INTEGER CHECK (units > 0), returned_by UUID NOT NULL, received_by UUID NOT NULL,
+  created_at, UNIQUE (clinic_id, id), CHECK (returned_by <> received_by));
 ```
+`rx_mar_links` is written by the IPD MAR route **after** the unchanged MAR insert: the route pops
+`rx_dispense_line_id` from the body (its model is `extra="forbid"` and the body is inserted verbatim — VERIFICATION
+A53), records the MAR exactly as today, then calls `rx_link_mar(clinic, mar_id, dispense_line_id)`, which checks the
+dispense line belongs to the same admission and order. A failed link never fails the MAR (logged, shown as "batch
+not linked"). `ON DELETE CASCADE` from MAR means `ipd_purge_clinic` needs no change.
+
 Triggers: `rx_check_indent_line` (BEFORE INSERT): the `ipd_order_id` is `order_type='medication'`, `status='active'`,
 same admission as the indent, admission `admitted|discharge_pending` (reuses the 111:559 logic). Raised codes:
 `rx_order_not_medication`, `rx_order_not_active`, `rx_admission_not_active`.
 
-`rx_dispense_indent(clinic, indent_id, lines JSONB, store_id, idem, actor)` **[F]**: lock indent and lines; for each
+`rx_dispense_indent(clinic, indent_id, lines JSONB, store_id, idem, actor)` **[F]**: `ipd_lock_admission` first
+(serialises with `ipd_generate_final_bill`, VERIFICATION D10); re-check each line's order is still `active`
+(`rx_order_not_active` otherwise — there is no trigger on `ipd_orders`, D9); then lock indent and lines; for each
 line: batch FEFO-checked, `ipd_dispense_out` movement, `dispensed_units += qty` (CHECK caps over-dispense), write
 `ipd_charges (category 'pharmacy', source 'pharmacy', source_ref 'rx:dl:'||line.id, quantity, unit_price_paise,
 tax_rate_bps 0, hsn_sac item.hsn, status posted|proposed per ipd_autopost)`, store `ipd_charge_id`; update indent
@@ -478,7 +538,9 @@ CREATE TABLE rx_refill_plans (id, clinic_id, patient_id, family_member_id NULL, 
   opd_prescription_item_id NULL, units_per_day NUMERIC(6,2) NOT NULL CHECK (units_per_day > 0),
   covered_until DATE NOT NULL, remind_on DATE NOT NULL,
   status TEXT CHECK (status IN ('scheduled','sent','requested','fulfilled','expired','opted_out','cancelled')),
-  last_message_id TEXT NULL, UNIQUE (clinic_id, id),
+  opt_in_by UUID NOT NULL, opt_in_at TIMESTAMPTZ NOT NULL,   -- pharmacist ticked "wants refill reminders" (X16)
+  last_message_id TEXT NULL,                       -- WhatsApp id of the last send (delivery tracking only)
+  send_failures SMALLINT NOT NULL DEFAULT 0, UNIQUE (clinic_id, id),
   UNIQUE (clinic_id, sale_item_id));                -- one plan per sold line
 CREATE TABLE rx_refill_requests (id, clinic_id, plan_id, patient_id, channel TEXT CHECK (channel IN ('whatsapp','counter','voice')),
   fulfilment TEXT CHECK (fulfilment IN ('pickup','home_delivery')), status TEXT CHECK (status IN ('new','verified','packed','completed','rejected')),
@@ -505,14 +567,16 @@ DECLARE v JSONB := '{}'::jsonb; n INTEGER;
 BEGIN
   PERFORM set_config('kriya.rx_purge_clinic', p_clinic_id::TEXT, true);
   PERFORM set_config('kriya.rx_tx', p_clinic_id::TEXT, true);
-  UPDATE ipd_med_administrations SET rx_dispense_line_id = NULL                -- 111 guard honours ipd purge GUC;
-   WHERE clinic_id = p_clinic_id AND rx_dispense_line_id IS NOT NULL;         -- set kriya.ipd_purge_clinic too
+  -- touches no IPD/OPD table (v1's MAR UPDATE was rejected by ipd_guard_clinical_record — VERIFICATION D2)
+  DELETE FROM rx_overrides WHERE clinic_id = p_clinic_id;          DELETE FROM rx_item_metrics WHERE clinic_id = p_clinic_id;
+  DELETE FROM rx_par_levels WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_alerts WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_refill_requests WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_refill_plans WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_register_entries WHERE clinic_id = p_clinic_id; GET DIAGNOSTICS n = ROW_COUNT; v := v || jsonb_build_object('register_entries', n);
   DELETE FROM rx_stock_audit_lines WHERE clinic_id = p_clinic_id;  DELETE FROM rx_stock_audits WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_transfer_lines WHERE clinic_id = p_clinic_id;     DELETE FROM rx_transfers WHERE clinic_id = p_clinic_id;
+  DELETE FROM rx_mar_links WHERE clinic_id = p_clinic_id;          DELETE FROM rx_empty_returns WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_dispense_lines WHERE clinic_id = p_clinic_id;     DELETE FROM rx_dispenses WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_indent_lines WHERE clinic_id = p_clinic_id;       DELETE FROM rx_ipd_indents WHERE clinic_id = p_clinic_id;
   DELETE FROM rx_credit_notes WHERE clinic_id = p_clinic_id;       DELETE FROM rx_return_lines WHERE clinic_id = p_clinic_id;
@@ -541,18 +605,39 @@ END $$;
 owner purge (account deletion) and is logged in `platform_audit_log` with row counts; statutory retention is the
 owner's contractual duty before deletion (SECURITY §6).
 
-## 12. `TENANT_OWNED_TABLES` additions (36)
+## 12. `TENANT_OWNED_TABLES` additions (41)
 `rx_stores`, `rx_manufacturers`, `rx_generics`, `rx_items`, `rx_item_barcodes`, `rx_item_aliases`, `rx_item_changes`,
 `rx_batches`, `rx_stock_movements`, `rx_stock_balances`, `rx_suppliers`, `rx_purchase_orders`, `rx_po_lines`,
 `rx_grns`, `rx_grn_lines`, `rx_supplier_returns`, `rx_supplier_return_lines`, `rx_sales`, `rx_sale_items`, `rx_sale_payments`, `rx_rx_fulfilments`, `rx_returns`,
 `rx_return_lines`, `rx_credit_notes`, `rx_ipd_indents`, `rx_indent_lines`, `rx_dispenses`, `rx_dispense_lines`,
 `rx_transfers`, `rx_transfer_lines`, `rx_stock_audits`, `rx_stock_audit_lines`, `rx_register_entries`,
-`rx_refill_plans`, `rx_refill_requests`, `rx_alerts` — each registered in the task that creates it; DG1 asserts the
-set equals `SELECT tablename FROM pg_tables WHERE tablename LIKE 'rx\_%'` (36 names; `rx_rx_fulfilments` lands in
-138, the supplier-return pair in 137). `rx_rx_fulfilments(id, clinic_id, opd_prescription_item_id, sale_item_id,
+`rx_refill_plans`, `rx_refill_requests`, `rx_alerts`, `rx_mar_links`, `rx_empty_returns`, `rx_par_levels`,
+`rx_item_metrics`, `rx_overrides` — each registered in the task that creates it; DG1 asserts the
+set equals `SELECT tablename FROM pg_tables WHERE tablename LIKE 'rx\_%'` (41 names; `rx_rx_fulfilments` and `rx_overrides` land in
+138, the supplier-return pair in 137, `rx_mar_links`/`rx_empty_returns` in 139, `rx_par_levels` in 140,
+`rx_item_metrics` in 142). `rx_rx_fulfilments(id, clinic_id, opd_prescription_item_id, sale_item_id,
 units, created_at)` is **[A][F]** with `UNIQUE (clinic_id, sale_item_id)`.
 
 ## 13. RLS parity
 Each migration ends with the 111:1334 block: `ENABLE` + `FORCE ROW LEVEL SECURITY`, `service_role_all_<t>` policy,
 `REVOKE ALL … FROM anon, authenticated`. RLS is defence in depth only (AGENTS.md §1.1); application scoping is the
 control.
+
+## 14. Advanced-feature tables (ADVANCED-FEATURES.md)
+```sql
+CREATE TABLE rx_overrides (                        -- A9 manager override; the row IS the single-use token
+  id UUID PK, clinic_id UUID NOT NULL, sale_id UUID NULL, return_id UUID NULL,
+  action TEXT NOT NULL CHECK (action IN ('discount_over_cap','return_past_window','restock_opened','fefo_override',
+                                         'rx_over_fulfil','staff_sale','controlled_empties')),
+  amount_paise BIGINT NULL, approved_by UUID NOT NULL, approved_by_name TEXT NOT NULL,
+  requested_by UUID NOT NULL, reason TEXT NOT NULL CHECK (char_length(btrim(reason)) >= 3),
+  expires_at TIMESTAMPTZ NOT NULL,                  -- created_at + 60 s
+  used_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (clinic_id, id), CHECK (approved_by <> requested_by));
+-- consumed inside the RX function: UPDATE … SET used_at = now() WHERE id = $1 AND used_at IS NULL AND expires_at > now()
+CREATE TABLE rx_par_levels (clinic_id, store_id, item_id, par_units INTEGER NOT NULL CHECK (par_units > 0),
+  updated_by UUID NULL, updated_at, PRIMARY KEY (clinic_id, store_id, item_id));       -- A10
+CREATE TABLE rx_item_metrics (clinic_id, store_id, item_id, adu_x1000 INTEGER NOT NULL, abc CHAR(1), fsn CHAR(1),
+  suggested_reorder_units INTEGER, suggested_max_units INTEGER, computed_on DATE NOT NULL,
+  PRIMARY KEY (clinic_id, store_id, item_id));                                         -- A7, replaced nightly
+```

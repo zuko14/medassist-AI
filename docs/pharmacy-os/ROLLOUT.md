@@ -11,9 +11,9 @@
 3. **Lock impact:** `ALTER TABLE clinics ADD COLUMN … DEFAULT` (constant default — metadata-only in PG ≥ 11);
    `ALTER TABLE ipd_charges DROP/ADD CONSTRAINT … CHECK` — the ADD validates existing rows (short `ACCESS EXCLUSIVE`
    on `ipd_charges`). Run 139 off-peak (02:00–04:00 IST) or use `ADD CONSTRAINT … NOT VALID` then `VALIDATE
-   CONSTRAINT` (lighter lock) — the migration uses the NOT VALID + VALIDATE form. `ALTER TABLE
-   ipd_med_administrations ADD COLUMN … NULL` is metadata-only; its FK is added `NOT VALID` then validated (column is
-   all NULL).
+   CONSTRAINT` (lighter lock) — the migration uses the NOT VALID + VALIDATE form. No other existing table is altered
+   (the v1 MAR column was dropped from the design — VERIFICATION D2). 138 redefines `opd_close_shift` (`CREATE OR
+   REPLACE`, instant; identical results for shifts without pharmacy cash).
 4. **Deploy code** (Render): router mounted, every route gated → no behaviour change for any clinic.
 5. **Verify in production** (no clinic enabled yet): `GET /health` OK; `GET /admin/rx/setup` as any clinic → 403
    `pharmacy_not_enabled`; scheduler log shows RX jobs with `clinics=0`.
@@ -40,8 +40,9 @@
 7. Settings: discount cap, near-expiry days, receipt format, return days, IPD autopost and price basis (ADR open O-2/O-3).
 8. Printer test: 80 mm thermal (USB/Bluetooth via OS driver) or A5; barcode scanner test on POS search.
 9. Cashier shift flow test: open shift → test sale → return → close shift totals include pharmacy.
-10. WhatsApp: template `rx_refill_due_v1` (utility) and `rx_bill_v1` submitted/approved in the clinic's WABA — only if
-    using refills/e-bills.
+10. WhatsApp: template `rx_refill_due_v1` (utility, two quick-reply buttons) and `rx_bill_v1` submitted/approved in
+    the clinic's WABA — only if using refills/e-bills. If Meta re-categorises the refill template as **marketing**,
+    tell the clinic the per-message cost; refills stay opt-in only (VERIFICATION §9).
 11. Legal: register formats confirmed for the state (owner decision O-4).
 
 ## 3. Go-live gates (pilot clinic)

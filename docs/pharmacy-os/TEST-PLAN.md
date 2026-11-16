@@ -34,6 +34,7 @@ linter baseline.
 | Phase | File | Must cover |
 |:-|:-|:-|
 | P1 | `tests/test_migration_rx_m1.py` (real PG) | 134 applies on 133; idempotent; `rx_state` default/CHECK; stores composite FKs (no cross-tenant ward/branch/parent); one central per branch; rollback + re-apply; `rx_purge_clinic` v1 |
+| P1 | `tests/test_rx_zero_impact.py` | VERIFICATION §7 rows available at P1: OPD disable refused under pharmacy, branch delete FK fallback (RX-67), erasure FK fallback (RX-68), doctor/staff delete with RX rows, platform purge order; grows each phase (RX-83) |
 | P1 | `tests/test_rx_feature_gate.py` | off by default; owner enable; requires `opd_enabled` (400); enterprise wildcard alone does not enable; partner account 400; `/admin/me.rx_access`; 409 preview → WIND_DOWN → re-enable keeps data; every `/admin/rx` route 403 when OFF **before any rx_* query** (spy on `sb`); route count pin |
 | P1 | `tests/test_rx_no_llm.py` | AST: `app/services/rx*.py`, `app/routers/rx.py`, RX jobs import nothing from `ai_engine`, `ai_gateway`, `hybrid_search`, `app.voice.llm*`, `openai`, `groq`; AI/voice code never names `rx_` tables |
 | P1 | `tests/test_rx_tenancy_registry.py` | set of `rx_*` names in `TENANT_OWNED_TABLES` == tables created by RX migrations (parsed from SQL) |
@@ -42,10 +43,10 @@ linter baseline.
 | P2 | `tests/test_rx_catalogue_api.py` | CRUD, import dry-run/apply idempotent, resolve candidates deterministic (same input → same order), substitutes same generic only |
 | P3 | `tests/test_migration_rx_m4.py`, `tests/test_rx_purchase.py` | W1/W6 acceptance list; GRN calc vectors (§4.2); supplier invoice unique; void rules |
 | P4 | `tests/test_migration_rx_m5.py`, `tests/test_rx_pos.py`, `tests/test_rx_tax.py`, `tests/test_rx_returns.py` | W2/W3/W5a lists; tax vectors (§4.1); MRP ceiling; discount cap; shift link; void same-day only; receipt PDF fields |
-| P5 | `tests/test_migration_rx_m6.py`, `tests/test_rx_ipd.py` | W4/W5b lists; `ipd_charges.source` widening keeps 111/115 rows valid; MAR FK optional; discontinue cascade to open indent lines; charge split > 999 units |
+| P5 | `tests/test_migration_rx_m6.py`, `tests/test_rx_ipd.py` | W4/W5b lists; `ipd_charges.source` widening keeps 111/115 rows valid; MAR insert unchanged with and without `rx_dispense_line_id` (field popped, link written after; wrong line → MAR saved, link refused); `ipd_purge_clinic` cascades `rx_mar_links`; discontinued order → dispense 409, no trigger on `ipd_orders`; IPD WIND_DOWN still dispenses; dispense waits on `ipd_lock_admission` vs final bill; charge split > 999 units |
 | P6 | `tests/test_migration_rx_m7.py`, `tests/test_rx_transfers.py`, `tests/test_rx_audit.py` | W7/W8 lists |
 | P7 | `tests/test_migration_rx_m8.py`, `tests/test_rx_registers.py` | ADR-RX-05 list; W9 list |
-| P8 | `tests/test_migration_rx_m9.py`, `tests/test_rx_refills.py`, `tests/test_rx_alerts.py` | W10 list; alert dedupe per day; jobs skip OFF clinics (0 queries beyond the clinic filter) |
+| P8 | `tests/test_migration_rx_m9.py`, `tests/test_rx_refills.py`, `tests/test_rx_alerts.py` | W10 list; opt-in required; `accepts_engagement` honoured (global STOP); button payload for another phone/clinic ignored; dental-review and check-in payloads untouched; typed "refill"/"stop" not intercepted; alert dedupe per day; jobs skip OFF clinics |
 | P9 | `tests/test_assistant_registry.py` (extended), `tests/test_rx_ketu.py` | RT-14 page table; stock answer R0; hand-offs; no write actions |
 | P10 | `tests/test_rx_reports.py` | GSTR-1 golden file unchanged for non-RX clinic; RX sections correct; CSV formula-injection guard |
 | P4–P11 | `tests/test_rx_concurrency.py` (real PG, threads with separate connections) | §3 |
@@ -103,8 +104,11 @@ missing from the table fails the test.
 ## 6. Zero-impact proofs (P1 and every phase)
 1. RG4, RG5 unedited and green.
 2. `test_rx_feature_gate.py::test_non_rx_clinic_zero_rx_queries` — drive a full OPD visit + IPD admission + discharge
-   on a clinic with pharmacy OFF with a spy on `sb()`; assert no builder names an `rx_` table (except the documented
-   `close_shift` union, which must return 0 rows) and the `ipd_orders` trigger performs no write.
+   on a clinic with pharmacy OFF with a spy on `sb()`; assert no builder names an `rx_` table, and that
+   `opd_close_shift` returns the same `expected_cash_paise` before and after migration 138
+   (`test_close_shift_unchanged_without_rx`).
+2b. VERIFICATION §7 matrix: one test per row (branch delete, erasure, doctor/staff delete, toggles, purge, STOP, other
+   template buttons, package coverage, bill void) — `tests/test_rx_zero_impact.py`.
 3. Latency check (P11, documented in status §9): p95 of `/admin/opd/invoices` issue, `/admin/ipd/admissions/{id}`
    and `/webhook` on the perf fixture before vs after migrations 134–142 — regression ≤ 5%.
 4. GSTR-1 export golden file for a non-RX clinic byte-identical.

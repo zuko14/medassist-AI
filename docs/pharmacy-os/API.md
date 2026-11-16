@@ -33,7 +33,8 @@
 | GET | `/admin/rx/deactivation-preview` | RX_ADMIN | open drafts, indents, transfers, audits (also used by platform toggle) |
 | GET | `/admin/me` (existing) | — | + `rx_access`, `rx_state`, `rx_store_ids`, `rx_perms` |
 
-Platform (existing router `app/routers/platform.py`): `PATCH /platform/clinics/{id}/features {pharmacy_enabled}` →
+Platform (existing router `app/routers/platform.py`): `opd_enabled=false|null` → 409 while `rx_state ≠ 'OFF'` (D7);
+`PATCH /platform/clinics/{id}/features {pharmacy_enabled}` →
 eligibility 400 (`opd_enabled` required) → provision default store → disable with non-empty preview → 409 → `confirm`
 → `WIND_DOWN`. `GET /platform/clinics/{id}/rx/deactivation-preview`.
 
@@ -85,6 +86,10 @@ eligibility 400 (`opd_enabled` required) → provision default store → disable
 ## 5. POS (P4)
 | Method | Path | Perm | Notes |
 |:-|:-|:-|:-|
+| GET | `/admin/rx/pos/inbox?store_id&since` | RX_DISPENSE | Rx Inbox (ADVANCED-FEATURES A1) |
+| POST | `/admin/rx/sales/{id}/park` / `/recall` | RX_DISPENSE | A2 |
+| POST | `/admin/rx/overrides` | (approver credentials in body) | A9: `{action, sale_id?, return_id?, amount_paise?, reason, approver_username, approver_password}` → `{override_id, expires_at}`; approver must hold RX_ADMIN or be PHARMACY_MANAGER and differ from requester. Rate-limited 5/min per user. *audit: rx_override_grant* |
+| GET | `/admin/rx/sales/{id}/labels.pdf` | RX_READ | dispensing labels (A4) |
 | GET | `/admin/rx/pos/lookup?q=` | RX_DISPENSE | q = token / MRN / phone / Rx QR id / bill no. → `{prescriptions:[{id,doctor,signed_at,lines:[{id,drug_name,strength,formulation,frequency,duration_days,fulfilled_units,pending}]}], patient}` |
 | POST | `/admin/rx/sales` | RX_DISPENSE | `{store_id, sale_kind, opd_prescription_id?, patient_id?, walkin_name?, external_rx?:{prescriber_name,registration_number,council,rx_date}}` → draft with auto-mapped lines (W2). *new-work* |
 | GET | `/admin/rx/sales/{id}` | RX_READ | draft or completed with lines, taxes, payments, returns |
@@ -99,7 +104,7 @@ eligibility 400 (`opd_enabled` required) → provision default store → disable
 | GET | `/admin/rx/credit-notes/{id}.pdf` | RX_READ | |
 | GET | `/admin/rx/pos/day-summary?store_id&date` | RX_READ | sales, returns, by mode, by GST slab, by schedule |
 
-## 6. IPD (P5) — additionally require `ipd_access == 'ACTIVE'` for new work
+## 6. IPD (P5) — additionally require `ipd_access(clinic) is not None` (ACTIVE or WIND_DOWN, VERIFICATION D6) and an active admission
 | Method | Path | Perm | Notes |
 |:-|:-|:-|:-|
 | GET | `/admin/rx/ipd/admissions/{id}/indentable` | IPD_NURSING or RX_DISPENSE | active medication orders + last dispensed + ward stock |
@@ -115,8 +120,10 @@ eligibility 400 (`opd_enabled` required) → provision default store → disable
 | POST | `/admin/rx/ipd/returns/{id}/accept` | RX_DISPENSE | `{restock per line}` → void/re-issue or credit note. *audit* |
 | GET | `/admin/rx/ipd/admissions/{id}/dispense-lines?order_id` | IPD_NURSING | for the MAR batch select (W4 step 6) |
 
-Existing MAR route `POST /admin/ipd/admissions/{id}/mar` accepts optional `rx_dispense_line_id`; validated to belong
-to the same admission and order (422 otherwise). Pre-RX clients that omit it are unaffected.
+Existing MAR route `POST /admin/ipd/admissions/{id}/administrations` (`app/routers/ipd.py:701`): `AdministrationIn`
+gains optional `rx_dispense_line_id`; the handler **pops it** before `ipd.record_administration` (the body is inserted
+verbatim, VERIFICATION A53), records the MAR unchanged, then calls `rx_link_mar` when RX is on. A wrong line → MAR
+still saved, response `rx_link: "refused: <reason>"`. Pre-RX clients that omit the field see no change.
 
 ## 7. Transfers & audits (P6)
 | Method | Path | Perm | Notes |

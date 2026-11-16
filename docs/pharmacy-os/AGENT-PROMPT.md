@@ -25,8 +25,8 @@
 ## 2. Lane ownership
 | Lane | Owns (may edit) | Must not edit |
 |:-|:-|:-|
-| RX-DB | `migrations/13[4-9]_rx_*.sql`, `migrations/14[0-2]_rx_*.sql`, `migrations/rollback/1(3[4-9]|4[0-2])_*`, verify block | any earlier migration |
-| RX-API | `app/routers/rx.py`, `app/services/rx*.py`; **listed** edits to `tenant.py`, `permissions.py`, `tenancy.py`, `platform.py`, `admin.py` (`/admin/me`), `opd_billing.py` (shift summary only), `gst_billing.py` (RX-52 only), `routers/ipd.py` (MAR `rx_dispense_line_id` only), `scheduler.py` (job registration only), `main.py` (router include) | anything else in `app/` |
+| RX-DB | `migrations/13[4-9]_rx_*.sql`, `migrations/14[0-2]_rx_*.sql`, `migrations/rollback/1(3[4-9]|4[0-2])_*`, verify block; inside them only these existing objects: `clinics` columns, `ipd_charges` source CHECK, `opd_close_shift` redefinition | any earlier migration file; any other existing table, function or trigger |
+| RX-API | `app/routers/rx.py`, `app/services/rx*.py`; **listed** edits to `tenant.py`, `permissions.py`, `tenancy.py`, `platform.py`, `admin.py` (`/admin/me`; `delete_branch` FK fallback RX-67), `opd_billing.py` (`get_collections_summary` additive keys only), `gst_billing.py` (RX-52 only), `routers/ipd.py` (AdministrationIn optional field + pop + link call only), `data_retention.py` (per-member FK fallback RX-68), `conversation.py` (one `rx_refill` payload-prefix hook beside the dental-review hook), `scheduler.py` (job registration only), `main.py` (router include) | anything else in `app/` |
 | RX-UI | `RX:` blocks in `admin/index.html`, one `loaders` entry per page, IPD MAR form batch select (RX-40) | non-RX markup, `admin.js` |
 | RX-KETU | `app/assistant/registry.py` / `resolve.py` / `present` additions for RX, `app/voice/intents.py` `PHARMACY_REFILL` | other intents' behaviour |
 | RX-TEST | `tests/test_rx_*.py`, `tests/test_migration_rx_*.py`, bridge extensions in `tests/ipd_pg_bridge.py` (additive, documented) | existing tests |
@@ -66,6 +66,9 @@ Two agents never hold the same lane on overlapping tasks. Parallel lanes are rec
 | Add `pharmacy` to `opd_invoice_items.item_type` | unnecessary widening of a core OPD CHECK |
 | Delete or edit a register row to "fix" it | write a correcting entry; chain must verify |
 | Skip a failing existing test | RG5/RG7 rule — find the regression |
+| Add a column or trigger to an IPD/OPD table "just for a link" | VERIFICATION D2/D9 — use an RX-owned table |
+| Intercept typed WhatsApp words ("stop", "refill") | shadows the global opt-out — only claim our button payload prefixes (D3) |
+| Sum shift cash in Python | expected cash lives in `opd_close_shift` (D1) |
 
 ## 6. Reporting back
 At the end of a session: update status §1 (pointer), §9 (evidence), §10 (one-line log). Report to the owner: tasks

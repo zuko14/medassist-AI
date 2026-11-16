@@ -34,7 +34,7 @@ flowchart LR
   Led --> Bal
   Ind -->|charge| Chg
   POS -->|payments| Shift
-  Ind -.->|optional batch tag| MAR
+  Ind -.->|rx_mar_links, RX-owned| MAR
   POS --> Reg
   Ind --> Reg
   Pat --> POS
@@ -142,29 +142,37 @@ stateDiagram-v2
   dispensed --> closed: received by ward (nurse acknowledges)
 ```
 Line states: `open → partial → done`, or `cancelled` / `not_available`. When the doctor discontinues the order
-(existing route, AUDIT A18), open lines of that order become `cancelled` by trigger `rx_order_end_to_indent`
-(AFTER UPDATE OF status ON ipd_orders, only when RX tables have rows for that order — zero cost otherwise).
+(existing route, AUDIT A18) **no trigger fires on `ipd_orders`** (VERIFICATION D9): the queue reads each line's order
+status and shows "order stopped"; `rx_dispense_indent` re-checks `status='active'` under the admission lock and
+refuses (`rx_order_not_active`); the pharmacist closes the line as `cancelled`.
+
+Wind-down rules (VERIFICATION D6): indents, dispenses and ward issues need `ipd_access(clinic) is not None` (ACTIVE or
+WIND_DOWN — admitted patients keep getting medicines) and an `admitted|discharge_pending` admission. Pharmacy
+WIND_DOWN blocks new indents but lets the pharmacy dispense indents already raised.
 
 ## 7. Integration contracts with existing modules (all additive)
 | Existing object | Change | Backward compatibility |
 |:-|:-|:-|
 | `clinics` | + `rx_state`, `rx_settings` | defaults `OFF`, `{}` |
 | `ipd_charges.source` CHECK | widened to add `'pharmacy'` | existing values still valid; no reader switches on `source` except 115's void (`source='order'`), unaffected |
-| `ipd_med_administrations` | + nullable `rx_dispense_line_id` (composite FK) | 111 insert path unchanged; `ipd_guard_clinical_record` already locks it after insert |
-| `ipd_orders` | AFTER UPDATE trigger `rx_order_end_to_indent` | no-op when no indent lines reference the order; does not modify `ipd_orders` |
-| `opd_cashier_shifts` | referenced by `rx_sale_payments.shift_id` | `close_shift` summary adds `pharmacy_*` keys (RX-34); existing keys and totals unchanged |
+| `ipd_med_administrations` | **no schema change**; RX-owned `rx_mar_links` references it (`ON DELETE CASCADE`); the MAR route pops the optional `rx_dispense_line_id`, inserts the MAR exactly as today, then links | MAR insert, guards and purge unchanged (VERIFICATION D2) |
+| `ipd_orders` | **nothing** (no trigger; RX reads status) | unchanged (D9) |
+| `opd_cashier_shifts` / `opd_close_shift` | referenced by `rx_sale_payments.shift_id`; migration 138 **redefines `opd_close_shift`** adding `rx_sale_payments` cash to expected cash (116 precedent) | the added sub-select returns 0 for any shift without pharmacy cash → identical result; 138 rollback restores the 116 body (D1) |
+| `conversation.py` template-button hook | claims payload prefixes `rx_refill:` / `rx_refill_off:` (dental-review pattern, VERIFICATION A57) | every other button and message flows exactly as before |
+| `delete_branch`, DPDP erasure | FK-violation fallbacks (RX-67, RX-68) | fix latent 500s that exist today for IPD/DX (VERIFICATION L1, L2) |
+| Platform toggle | refuse disabling OPD while `rx_state ≠ OFF` | mirrors the IPD guard (D7) |
 | `opd_next_counter` | new keys `rx_sale`, `rx_return`, … | per-key rows; existing keys untouched |
 | GSTR-1 export | + pharmacy sections (RX-52) | only when `rx_access`; otherwise identical output (golden-file test) |
-| `TENANT_OWNED_TABLES` | + 36 names | lint covers them |
+| `TENANT_OWNED_TABLES` | + 41 names | lint covers them |
 | `admin/index.html` | `<!-- RX:… -->` blocks, `data-rx` gating | hidden unless `rx_access`; no existing element edited except the `loaders` map line (append inside `/* RX:…*/`) |
 | `/admin/me` | + `rx_access`, `rx_state`, `rx_store_ids` | additive keys |
 | Platform purge | `rx_purge_clinic` first | no-op on clinics without RX rows |
 
 ## 8. Zero-impact guarantees for clinics without Pharmacy OS
 1. **No new code on hot paths.** Webhook, booking, voice, OPD billing and IPD charge routes do not import `rx_*`.
-   The only shared-path additions are: one trigger on `ipd_orders` status change (early-exit `IF NOT EXISTS (SELECT 1
-   FROM rx_indent_lines WHERE clinic_id=… AND ipd_order_id=…)` on an index), and the `close_shift` summary union
-   (one indexed `SUM` returning 0 rows).
+   The only shared-path additions are: one extra indexed `SUM` inside `opd_close_shift` (returns 0 rows without
+   pharmacy), one `startswith` check on template-button payloads, and the failure-branch fixes of RX-67/RX-68.
+   **No trigger is added to any existing table.**
 2. **Router mounted but gated.** Every `/admin/rx/*` route returns 403 `pharmacy_not_enabled` before any DB read
    (except the clinic row already loaded for auth).
 3. **Scheduler jobs filter first.** `rx_*` jobs select `clinics WHERE rx_state <> 'OFF'` — an indexed predicate; zero

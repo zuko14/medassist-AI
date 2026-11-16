@@ -20,7 +20,7 @@ G13, which extend existing objects additively.
 | G6 | Suppliers, PO, GRN, landed cost, purchase GST | none | full | RX-22…RX-27 | P3 |
 | G7 | OPD POS with Rx load, FEFO, inclusive GST, receipts | Rx signed and structured (A1–A5); no sale object; OPD invoices tax-exclusive and one-per-visit (A7, A9) | full (new sales series) | RX-28…RX-36 | P4 |
 | G8 | Free-text Rx → item mapping | none | deterministic resolver + learned aliases | RX-29 | P4 |
-| G9 | Cashier shift includes pharmacy cash | shifts total only `opd_receipts` (A14) | additive summary | RX-34 | P4 |
+| G9 | Cashier shift includes pharmacy cash | expected cash computed in SQL `opd_close_shift` from receipts + deposits only (A14, VERIFICATION A49) | redefine `opd_close_shift` in 138 (+ pharmacy cash) | RX-34 | P4 |
 | G10 | IPD indent → dispense → charge | medication orders not charged anywhere (A22); `ipd_charges` has `pharmacy` category (A20) but source CHECK lacks `pharmacy` | widen CHECK, new indent tables, atomic dispense | RX-37…RX-40 | P5 |
 | G11 | MAR batch traceability (recalls) | MAR has no batch link (A19) | nullable FK column | RX-39 | P5 |
 | G12 | Returns: patient & IPD, credit notes | OPD credit notes exist but bound to `opd_invoices` (A12) | `rx_returns`, `rx_credit_notes`; IPD path reuses `opd_issue_credit_note` | RX-35, RX-40 | P4, P5 |
@@ -49,7 +49,8 @@ G13, which extend existing objects additively.
 |:-|:-|
 | Widening `ipd_charges.source` CHECK breaks a reader | grep shows only 115 reads `source='order'` (A22); RG5 unedited |
 | New trigger on `ipd_orders` adds latency to order end | early-exit indexed EXISTS; measured in RG7/P11 latency check |
-| `close_shift` change alters cash totals | additive keys; existing keys asserted unchanged for non-RX clinics |
+| `opd_close_shift` redefinition alters cash totals | added sub-select is 0 without pharmacy cash; `test_close_shift_unchanged_without_rx`; rollback restores the 116 body |
+| Branch delete / DPDP erasure meet new FKs | latent bugs L1/L2 fixed first (RX-67/68) |
 | Register purge during account deletion destroys statutory records | owner purge only, with retention acknowledgment (SECURITY §6) |
 | GST rates change again by notification | rates are item data + per-line snapshot; `rx_item_changes` logs who changed what |
 | Legacy 12% batches after the 2025 rationalisation | 12% kept in the CHECK for old stock, returns of pre-change bills and credit notes; item master defaults to the current rate on import (ROLLOUT §4.2) |

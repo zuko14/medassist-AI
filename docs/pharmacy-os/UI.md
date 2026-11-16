@@ -69,7 +69,11 @@ The Ketu `PAGES` table gains the same ids (RT-14).
 | F4 | discount (amount or %) |
 | F6 / F7 / F8 | payment mode cash / UPI / card (amount defaults to the remaining balance) |
 | Enter (on totals) | Complete & print |
+| F3 | park current bill / show parked bills (ADVANCED-FEATURES A2) |
 | F9 | recent bills (reprint / return) |
+| F11 | repeat a previous bill of this patient (A5) |
+| Ctrl+I | Rx Inbox panel (A1) |
+| Ctrl+O | request manager override (A9) |
 | F10 | return mode on a scanned bill |
 | Esc | close drawer / cancel prompt (never discards the draft) |
 - Barcode scanners (keyboard wedge, suffix Enter) are detected by inter-key timing < 30 ms; a scan never lands in a

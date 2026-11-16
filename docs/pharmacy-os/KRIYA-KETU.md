@@ -57,13 +57,13 @@ active refill plan; otherwise routes to the pharmacy number.
 ## 4. WhatsApp automations
 | Trigger | Template (utility) | Content rules |
 |:-|:-|:-|
-| Refill due (W10) | `rx_refill_due_v1` | clinic name, brand, last fill date, run-out date, "Reply REFILL / STOP". No dose, no advice |
+| Refill due (W10) | `rx_refill_due_v1` | clinic name, brand, last fill date, run-out date; quick-reply buttons *Request refill* / *Stop refill reminders* (payloads `rx_refill:<plan>` / `rx_refill_off:<plan>`). No dose, no advice |
 | Refill packed | `rx_refill_ready_v1` | "Your medicines are ready for pickup at {store} until {time}. Bill: ₹{amount}" |
 | Refill rejected | `rx_refill_rejected_v1` | fixed text: consult doctor + booking link |
 | E-bill after sale (optional, patient opted in) | `rx_bill_v1` | bill number, amount, PDF link (signed short-lived URL, existing share-link pattern) |
-Inbound keywords (`REFILL`, `STOP`, Hindi/Telugu equivalents "रिफिल", "రీఫిల్") matched deterministically on replies
-whose context id equals `rx_refill_plans.last_message_id`. Free text in reply → forwarded to the clinic inbox as a
-normal message; the bot does not interpret it. All sends go through the existing per-clinic credential path
+Only the two button payloads are claimed (prefix hook beside the dental-review hook, VERIFICATION A57); the plan must
+match the clinic and the sender's phone. Typed replies are not intercepted — they go through the existing
+conversation flow, where STOP is the global opt-out (A56) that also silences refills. All sends go through the existing per-clinic credential path
 (`_get_credentials`, no platform fallback — AGENTS.md §1.6) and the message ledger/quota.
 
 ## 5. Automated staff alerts
@@ -79,5 +79,5 @@ stops others; masked phones in logs.
 ## 6. Tests
 `tests/test_rx_ketu.py`: stock answer (match, out-of-stock with same-generic list, ambiguous, nurse scope), clinical
 question refusal text, no write action registered, every action has `feature=_rx_on`; RT-14 page table includes the
-eleven RX pages; voice `PHARMACY_REFILL` only for patients with active plans; keyword reply matching ignores messages
-without matching context id.
+eleven RX pages; voice `PHARMACY_REFILL` only for patients with active plans; button payloads for another phone or clinic are
+ignored; other template buttons (dental review, check-ins) are untouched.

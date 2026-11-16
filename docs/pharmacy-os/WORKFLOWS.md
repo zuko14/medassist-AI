@@ -16,7 +16,7 @@
    **manual share** (download) — Kriya does not message suppliers in v1.
 3. Goods arrive. Store keeper opens **GRN** → picks supplier + PO (optional), enters supplier invoice no./date →
    `POST /admin/rx/grns` (draft). `is_interstate` defaults from supplier `state_code` ≠ clinic GSTIN state.
-4. Per line: scan barcode (resolves item) or search; enter batch, expiry (MM/YYYY → last day of month), packs, free
+4. Per line: scan barcode (resolves item) or search; enter batch, expiry (MM/YYYY → last day of month, or DD/MM/YYYY exact), packs, free
    packs, rate, scheme %, cash %, GST rate (prefilled from item), MRP. Trigger `rx_grn_line_calc` computes taxable,
    tax, landed unit cost. Warnings: expiry < `near_expiry_days`, rate > MRP, MRP differs from last batch (DPCO check),
    GST rate differs from item master (store keeper chooses which is right; item change goes to `rx_item_changes`).
@@ -51,7 +51,9 @@
    split allowed), **Enter** → `POST /admin/rx/sales/{id}/complete` `{payments, shift_id, idempotency_key}` →
    `rx_complete_sale` (DATA-MODEL §5). Receipt (80 mm or A5) prints; optional WhatsApp e-bill to the patient's
    registered number (consented channel, utility template).
-6. `rx_rx_fulfilments` rows mark lines done; partial lines remain open with balance printed.
+6. `rx_rx_fulfilments` rows mark lines done; partial lines remain open with balance printed. A second fill of the same
+   Rx (any counter, any store) is capped at the prescribed units under a per-Rx lock — hard for H1/X/narcotic,
+   override-only for others (loophole X1).
 7. If chronic items were sold, `rx_refill_plans` rows are created (W10) when `refill_enabled`.
 **Failure branches:** Rx superseded between lookup and complete → 409 `rx_prescription_superseded` (reload);
 stock taken by another counter → 409 with line; expired batch picked by stale screen → trigger 409
@@ -90,9 +92,14 @@ stock taken by another counter → 409 with line; expired batch picked by stale 
    items, batches.
 5. Runner delivers; nurse acknowledges **Received** (`POST /admin/rx/ipd/dispenses/{id}/receive`) → indent `closed`
    when all lines done.
-6. Nurse gives the dose on the **existing MAR** (`POST /admin/ipd/admissions/{id}/mar`). The MAR form gains an
-   optional "Batch" select listing this admission's dispense lines for that order (fills `rx_dispense_line_id`).
-7. Billing sees the pharmacy lines on the running bill (`ipd_running_bill`, 117:492) immediately.
+6. Nurse gives the dose on the **existing MAR** (`POST /admin/ipd/admissions/{id}/administrations`). When RX is on,
+   the form shows an optional "Batch" select of this admission's dispense lines for that order. The route pops
+   `rx_dispense_line_id` before the unchanged MAR insert, then writes `rx_mar_links` (a failed link never fails the
+   dose record).
+7. Billing sees the pharmacy lines on the running bill (`ipd_running_bill`, 117:492) immediately. If the admission's
+   package covers `pharmacy` (116:340), the lines show as covered — existing package behaviour; the issue slip says
+   "Covered by package". If a final bill already exists, the slip says "Final bill generated — regenerate before
+   discharge" (the discharge checklist already blocks unbilled posted charges, 117:572).
 **Ward sub-store variant:** nurse issues from ward stock: `POST /admin/rx/ipd/ward-issue` (permission
 `IPD_NURSING` + store scope = their ward) → `rx_ward_issue` (same charge path, `ward_issue_out`).
 **Failure branches:** order discontinued after indent → open lines auto-cancelled (trigger); dispense > requested →
@@ -107,7 +114,10 @@ CHECK 409; admission discharged → 409 `rx_admission_not_active`; retry → sam
 unless `RX_ADMIN`) → `POST /admin/rx/sales/{id}/returns` → `rx_record_return`: `sale_return_in` movements for restock
 lines (to the original batch and store — even if now near-expiry; if **expired**, the return is accepted and
 immediately written off with `expiry_writeoff_out`), `damage_writeoff_out` for non-restock, `PRT-` number; refund in
-the same tx: cash/UPI/card as a negative `rx_sale_payments` row in the actor's open shift, or a `PCN-` credit note.
+the same tx as a negative `rx_sale_payments` row (in the actor's open shift for cash) or a `PCN-` credit note.
+Refund value = **sold** net per unit (after the line's share of the header discount) × units, half-up — never today's
+MRP (loophole X4). Refund tender follows the original tender: cash back only up to the cash paid; UPI/card refunds
+are recorded against the original reference; any other split needs an `rx_overrides` approval (X3).
 Tax reversed proportionally (same inclusive split on the returned value). Register `return` entries for scheduled
 items. Return window `rx_settings.return_days` (default 7); older needs `RX_ADMIN`.
 **W5b IPD return.** Nurse returns unused units → `POST /admin/rx/ipd/returns` → pharmacist verifies physically →
@@ -176,20 +186,26 @@ n units") then insert a new charge for the kept units (`source_ref rx:dl:<id>:r<
 
 ## W10 — Automated WhatsApp chronic refill & delivery flow
 **Preconditions:** `rx_settings.refill_enabled`; clinic has its own WhatsApp credentials (AGENTS.md §1.6); utility
-template `rx_refill_due_v1` approved by Meta; patient has WhatsApp consent (`consent.py`) and has not opted out.
-1. On sale completion, for each line with `item.is_chronic` and schedule not H1/X/narcotic/psychotropic and a
+template `rx_refill_due_v1` (two quick-reply buttons) approved by Meta; the pharmacist ticked **"Patient wants refill
+reminders"** at the counter (recorded `opt_in_by/at`); at send time `ConsentService.accepts_engagement()` is true (the
+patient has not sent the existing global STOP — VERIFICATION A56).
+1. On sale completion, for each opted-in line with `item.is_chronic` and schedule not H1/X/narcotic/psychotropic and a
    derivable `units_per_day` (DATA-MODEL §9): `covered_until = sale_date + floor(units / units_per_day)`;
    `remind_on = covered_until − refill_lead_days`. Upsert `rx_refill_plans` (newer sale of the same item for the same
    patient supersedes the older plan → `cancelled`).
 2. Job `rx_refill_reminders` daily 09:30 IST (CAS-locked): plans `scheduled` with `remind_on ≤ today`, clinic
-   ACTIVE, consent valid, no send in the last 3 days → send template:
-   *"{clinic}: Your {brand} supply from {date} is likely to run out around {covered_until}. Reply REFILL to request
-   a refill, or STOP to stop these reminders."* (no dose text, no clinical advice). Status `sent`, `last_message_id`
-   stored; masked phone in logs.
-3. Patient replies **REFILL** → the inbound pipeline (existing webhook persists first, AGENTS.md §1.4) routes keyword
-   replies on a message whose context id matches `last_message_id` to `rx_refills.handle_reply` (deterministic match,
-   no LLM) → `rx_refill_requests` (`new`), patient gets "Request received — the pharmacy will confirm." **STOP** →
-   all plans of that patient `opted_out` + consent record updated.
+   ACTIVE, `accepts_engagement` true, no send in the last 3 days → send template:
+   *"{clinic}: Your {brand} supply from {date} is likely to run out around {covered_until}."* with buttons
+   **[Request refill]** (payload `rx_refill:<plan_id>`) and **[Stop refill reminders]** (payload
+   `rx_refill_off:<plan_id>`). No dose text, no clinical advice. Status `sent`, `last_message_id` stored (delivery
+   tracking only); masked phone in logs. 3 consecutive send failures → `expired`.
+3. A button tap arrives as `message_type="button"` with our payload (webhook.py:299–306). In `conversation.py`, next
+   to the dental-review prefix hook (680–689), `rx_refills.handle_button(clinic, phone, payload)` claims **only** the
+   two `rx_refill` prefixes: the plan must belong to this clinic **and** this sender's phone (else ignored and logged —
+   loophole X17). *Request refill* → `rx_refill_requests` (`new`) + fixed reply "Request received — the pharmacy will
+   confirm."; *Stop refill reminders* → that patient's plans `opted_out`. Typed text ("refill", "STOP") is **not**
+   intercepted: it flows through the existing FSM, where STOP is the global opt-out that already silences refills.
+   Runs in the existing async worker after the webhook has persisted the message (AGENTS.md §1.4).
 4. Pharmacist sees **Refill Requests** queue: verifies the original Rx still valid (`rx_validity_days`, or doctor
    repeat instruction) → **Verify** → **Pack** creates a draft sale from the plan's item (FEFO) → patient notified
    "ready for pickup" → **Complete** at counter (W2 step 5). Invalid Rx → **Reject** with reason → patient told
