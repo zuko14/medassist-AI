@@ -8457,37 +8457,45 @@ async def delete_branch(
     try:
         from app.services.tenant import invalidate_branch_cache
 
+        async def _deactivate(reason: str, label: str) -> dict:
+            # unscoped: updating branch configuration by branch_id within verified clinic
+            query = supabase.table("branches").update({"is_active": False})
+            query = query.eq("clinic_id", effective_clinic_id)
+            await sb(query.eq("id", branch_id))
+            invalidate_branch_cache(effective_clinic_id)
+            await log_admin_action(
+                user=user,
+                action="deactivate_branch",
+                resource_type="branch",
+                resource_id=branch_id,
+                details={"reason": reason, "billing_impact": "removes_one_billable_location"},
+                ip_address=request.client.host if (request and request.client) else "unknown",
+            )
+            return {
+                "success": True,
+                "deleted": False,
+                "message": f"Branch has existing {label} records — deactivated instead of deleted.",
+            }
+
         for table in _BRANCH_DEPENDENT_TABLES:
             # unscoped: tenant-scoped operation with verified clinic authorization
             dep = await sb(supabase.table(table).select("id").eq("branch_id", branch_id).limit(1))
             if dep.data:
-                # unscoped: updating branch configuration by branch_id within verified clinic
-                query = supabase.table("branches").update({"is_active": False})
-                query = query.eq("clinic_id", effective_clinic_id)
-                await sb(query.eq("id", branch_id))
-                invalidate_branch_cache(effective_clinic_id)
-                await log_admin_action(
-                    user=user,
-                    action="deactivate_branch",
-                    resource_type="branch",
-                    resource_id=branch_id,
-                    details={
-                        "reason": f"has {table} records",
-                        "billing_impact": "removes_one_billable_location",
-                    },
-                    ip_address=request.client.host if (request and request.client) else "unknown",
-                )
-                label = table.replace("_", " ")
-                return {
-                    "success": True,
-                    "deleted": False,
-                    "message": f"Branch has existing {label} records — deactivated instead of deleted.",
-                }
+                return await _deactivate(f"has {table} records", table.replace("_", " "))
 
-        # unscoped: deleting branch record by branch_id within verified clinic
-        query = supabase.table("branches").delete()
-        query = query.eq("clinic_id", effective_clinic_id)
-        await sb(query.eq("id", branch_id))
+        try:
+            # unscoped: deleting branch record by branch_id within verified clinic
+            query = supabase.table("branches").delete()
+            query = query.eq("clinic_id", effective_clinic_id)
+            await sb(query.eq("id", branch_id))
+        except Exception as e:
+            # Modules other than the four checked above (IPD wards and admissions, DX sites
+            # and visits, ...) also reference branches; the database refuses the delete.
+            # Deactivate like any other referenced branch instead of failing with a 500.
+            msg = str(e).lower()
+            if "23503" in msg or "foreign key" in msg:
+                return await _deactivate("has linked records (foreign key)", "linked")
+            raise
         invalidate_branch_cache(effective_clinic_id)
         await log_admin_action(
             user=user,

@@ -425,8 +425,7 @@ class DataRetentionService:
                                 break
                         except Exception:
                             pass
-                    if has_opd_ref:
-                        # Redact in place
+                    async def _redact(fm_id=fm_id):
                         redacted_name = f"[REDACTED:{str(fm_id)[:8]}]"
                         await sb(
                             supabase.table("family_members")
@@ -438,14 +437,26 @@ class DataRetentionService:
                             .eq("clinic_id", clinic_id)
                             .eq("id", fm_id)
                         )
+
+                    if has_opd_ref:
+                        await _redact()
                     else:
-                        await sb(
-                            supabase.table("family_members")
-                            .delete()
-                            .eq("clinic_id", clinic_id)
-                            .eq("id", fm_id)
-                        )
-                        del_count += 1
+                        try:
+                            await sb(
+                                supabase.table("family_members")
+                                .delete()
+                                .eq("clinic_id", clinic_id)
+                                .eq("id", fm_id)
+                            )
+                            del_count += 1
+                        except Exception as fm_err:
+                            # Referenced by a table the check above does not list (IPD
+                            # admissions, DX visits, ...): retained record, so redact in
+                            # place and carry on with the remaining members.
+                            msg = str(fm_err).lower()
+                            if "23503" not in msg and "foreign key" not in msg:
+                                raise
+                            await _redact()
                 results["family_members_deleted"] = del_count
             except Exception as e:
                 logger.error(f"Family members erasure error: {e}")

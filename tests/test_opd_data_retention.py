@@ -141,3 +141,55 @@ async def test_family_member_erasure_unreferenced_vs_referenced():
 
         assert res["errors"] == []
         assert res["family_members_deleted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_family_member_referenced_outside_opd_is_redacted_and_loop_continues():
+    """A member with no OPD rows but an IPD admission / DX visit: the per-member delete
+    hits a foreign key (23503). It must be redacted in place and the remaining members
+    still processed, with no error recorded."""
+    service = DataRetentionService()
+    fam_ipd_only, fam_free = str(uuid.uuid4()), str(uuid.uuid4())
+    no = MagicMock(data=[])
+    fam_rows_res = MagicMock(data=[{"id": fam_ipd_only}, {"id": fam_free}])
+    fk = Exception('{"code": "23503", "message": "update or delete on table \\"family_members\\" violates '
+                   'foreign key constraint \\"ipd_admissions_family_fk\\""}')
+
+    with patch("app.services.data_retention.sb", AsyncMock()) as sb_patch:
+        sb_patch.side_effect = [
+            MagicMock(data=[{"id": PATIENT_ID, "name": "Family Head", "phone": PATIENT_PHONE}]),
+            no, no, no, no,                       # appointments, lab reports x2, prescriptions
+            Exception("violates foreign key constraint"),   # bulk delete
+            fam_rows_res,
+            no, no, no, no,                       # 4 OPD reference checks (none) for fam_ipd_only
+            fk,                                   # its delete hits ipd_admissions
+            MagicMock(data=[{"id": fam_ipd_only}]),          # redact in place
+            no, no, no, no,                       # 4 OPD reference checks for fam_free
+            MagicMock(data=[{"id": fam_free}]),   # delete succeeds
+        ] + [no] * 10                             # remaining steps (dx redact, records, patient, queue, audit)
+
+        res = await service.anonymize_clinical_records(CLINIC_ID, PATIENT_PHONE)
+
+    assert not [e for e in res["errors"] if e.startswith("family_members")], res["errors"]
+    assert res["family_members_deleted"] == 1
+    updates = [c for c in sb_patch.await_args_list]
+    assert len(updates) >= 18   # loop reached the second member's delete
+
+
+@pytest.mark.asyncio
+async def test_family_member_delete_non_fk_error_is_still_reported():
+    service = DataRetentionService()
+    no = MagicMock(data=[])
+    with patch("app.services.data_retention.sb", AsyncMock()) as sb_patch:
+        sb_patch.side_effect = [
+            MagicMock(data=[{"id": PATIENT_ID, "name": "Family Head", "phone": PATIENT_PHONE}]),
+            no, no, no, no,
+            Exception("violates foreign key constraint"),
+            MagicMock(data=[{"id": FAM_UNREFERENCED_ID}]),
+            no, no, no, no,
+            Exception("connection reset"),        # not a foreign-key error
+        ] + [no] * 10
+
+        res = await service.anonymize_clinical_records(CLINIC_ID, PATIENT_PHONE)
+
+    assert any(e.startswith("family_members") and "connection reset" in e for e in res["errors"])
