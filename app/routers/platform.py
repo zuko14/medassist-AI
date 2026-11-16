@@ -900,7 +900,8 @@ async def update_clinic_feature(
 
     clinic_res = (
         # unscoped: platform super-admin fetching feature flags for specified clinic_id
-        await sb(supabase.table("clinics").select("features, plan, account_type, ipd_state").eq("id", clinic_id))
+        # "*": works before and after migration 134 (rx_state is read with .get below)
+        await sb(supabase.table("clinics").select("*").eq("id", clinic_id))
     )
     if not clinic_res.data:
         raise HTTPException(status_code=404, detail="Clinic not found")
@@ -909,6 +910,11 @@ async def update_clinic_feature(
             and (clinic_res.data[0].get("ipd_state") or "OFF") != "OFF"):
         raise HTTPException(status_code=409, detail="Switch IPD OS off (and let it finish winding down) before "
                                                     "disabling OPD OS: inpatient billing runs through OPD.")
+    # Pharmacy OS runs on the OPD registry, shifts and counters (ADR-RX-09, VERIFICATION D7).
+    if (body.feature == "opd_enabled" and body.enabled is not True
+            and (clinic_res.data[0].get("rx_state") or "OFF") != "OFF"):
+        raise HTTPException(status_code=409, detail="Switch Pharmacy OS off (and let it finish winding down) "
+                                                    "before disabling OPD OS: the pharmacy runs on OPD.")
     if (body.feature == "ai_receptionist" and body.enabled
             and (clinic_res.data[0].get("account_type") or "tenant") != "tenant"):
         raise HTTPException(
@@ -1011,6 +1017,26 @@ async def update_clinic_feature(
                     "preview": preview})
             clinic_update_fields["dx_state"] = "WIND_DOWN" if preview["blocking"] else "OFF"
 
+    if body.feature == "pharmacy_enabled":
+        # ADR-RX-09: disabling never deletes. With work open it needs confirmation and
+        # enters WIND_DOWN (nothing new; returns, exports and audits continue).
+        # enabled=None (clear the override) is a disable too.
+        from app.services import rx
+        from app.services.tenant import rx_eligible
+        if body.enabled:
+            if not rx_eligible(clinic_res.data[0]):
+                raise HTTPException(status_code=400, detail="Enable OPD OS for this clinic before Pharmacy OS.")
+            await rx.provision_defaults(clinic_id)
+            clinic_update_fields["rx_state"] = "ACTIVE"
+        else:
+            preview = await rx.deactivation_preview(clinic_id)
+            if preview["blocking"] and not body.confirm_disable:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Pharmacy work is still open. Confirm to stop new sales and purchases while "
+                               "returns, exports and audits continue (wind-down). Nothing is deleted.",
+                    "preview": preview})
+            clinic_update_fields["rx_state"] = "WIND_DOWN" if preview["blocking"] else "OFF"
+
     result = (
         # unscoped: platform super-admin updating feature flags for specified clinic_id
         await sb(supabase.table("clinics")
@@ -1064,6 +1090,23 @@ async def get_dx_deactivation_preview(
     clinic = res.data[0]
     return {**await dx.deactivation_preview(clinic_id), "state": clinic.get("dx_state") or "OFF",
             "access": dx_access(clinic), "eligible": dx_eligible(clinic)}
+
+
+@router.get("/clinics/{clinic_id}/rx/deactivation-preview")
+async def get_rx_deactivation_preview(
+    clinic_id: str,
+    owner: AdminUser = Depends(verify_owner_credentials),
+):
+    """Owner inspection of open Pharmacy OS work before disabling the module."""
+    from app.services import rx
+    from app.services.tenant import rx_access, rx_eligible
+    # unscoped: platform super-admin reading one clinic's RX state by primary key
+    res = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+    clinic = res.data[0]
+    return {**await rx.deactivation_preview(clinic_id), "state": clinic.get("rx_state") or "OFF",
+            "access": rx_access(clinic), "eligible": rx_eligible(clinic)}
 
 
 class PlatformAIBudgetRequest(BaseModel):
@@ -2628,6 +2671,13 @@ async def delete_clinic(
         full = await sb(supabase.table("clinics").select("*").eq("id", clinic_id).limit(1))
         if full.data and "dx_state" in full.data[0]:
             await sb(supabase.rpc("dx_purge_clinic", {"p_clinic_id": clinic_id}))
+        # Pharmacy next (VERIFICATION D8): its rows will reference patients, OPD Rx and IPD orders.
+        # Every pharmacy row hangs off a store, so no store means nothing to purge.
+        if full.data and "rx_state" in full.data[0]:
+            # unscoped: platform super-admin probing the clinic being deleted
+            rx_rows = await sb(supabase.table("rx_stores").select("id").eq("clinic_id", clinic_id).limit(1))
+            if rx_rows.data:
+                await sb(supabase.rpc("rx_purge_clinic", {"p_clinic_id": clinic_id}))
         # ipd_purge_clinic purges OPD too (IPD charges reference OPD invoices)
         await sb(supabase.rpc("ipd_purge_clinic" if has_ipd_rows else "opd_purge_clinic", {"p_clinic_id": clinic_id}))
 

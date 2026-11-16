@@ -57,7 +57,8 @@ CREATE TABLE rx_stores (
   CONSTRAINT rx_stores_no_self_parent CHECK (parent_store_id IS DISTINCT FROM id),
   CONSTRAINT rx_stores_branch_fk FOREIGN KEY (clinic_id, branch_id) REFERENCES branches (clinic_id, id),
   CONSTRAINT rx_stores_parent_fk FOREIGN KEY (clinic_id, parent_store_id) REFERENCES rx_stores (clinic_id, id),
-  CONSTRAINT rx_stores_ward_fk   FOREIGN KEY (clinic_id, ward_id) REFERENCES ipd_wards (clinic_id, id)
+  -- rx_stores_ward_fk (clinic_id, ward_id) → ipd_wards is added in 139 (RX-M6): 134 depends only on clinics and
+  -- branches, so the 103–133 rollback chains never have to unwind it. Until then the API checks the ward (P1).
 );
 CREATE UNIQUE INDEX uq_rx_stores_one_central ON rx_stores (clinic_id, branch_id) WHERE store_type = 'central' AND is_active;
 ```
@@ -554,7 +555,10 @@ CREATE TABLE rx_alerts (id, clinic_id, store_id, item_id NULL, batch_id NULL,
 dose parsed from `dosage` matching `^\d+(\.5)?$`; any other frequency/dosage → no plan is created (no guessing).
 Plans are never created for `schedule IN ('H1','X','narcotic','psychotropic')` or `is_chronic = false`.
 
-## 10. Helpers (134)
+## 10. Helpers
+As built in 134: `rx_purging`, `rx_raise`, `rx_guard_store`, `rx_update_settings`, `rx_purge_clinic`. Every other
+helper below lands in the migration of its first user (`rx_in_tx` / `rx_ist_date` 136, `rx_normalize` 135,
+`rx_unit_price` / `rx_gst_split_inclusive` 138). Timestamps default to `clock_timestamp()`.
 `rx_purging(clinic)`, `rx_in_tx(clinic)`, `rx_raise(code)`, `rx_ist_date(ts)`, `rx_normalize(text)` (lower, strip
 punctuation, collapse spaces, `mg`/`ml` spacing), `rx_unit_price(mrp_pack, pack_size, units)` = `(mrp_pack::BIGINT ×
 units + pack_size/2) / pack_size` (half-up), `rx_gst_split_inclusive(gross, rate_bps)` → `(taxable, cgst, sgst)`

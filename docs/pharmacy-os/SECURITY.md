@@ -21,12 +21,23 @@
 ## 2. Permissions
 | Permission | Grants |
 |:-|:-|
-| `RX_READ` | view catalogue, stock, sales, ledger, alerts, dashboard (no cost/margin) |
-| `RX_DISPENSE` | POS drafts/complete, returns within window, indent dispense, refill queue |
+Implemented in P1 (`app/services/permissions.py`, 13 grants). The v1 spec's `RX_STOCK` is split into
+`RX_ADJUST` / `RX_TRANSFER` / `RX_AUDIT`, and `RX_REGISTER_EXPORT` is named `RX_REGISTERS` (owner decision at P1).
+
+| Permission | Grants |
+|:-|:-|
+| `RX_READ` | view catalogue, stock, sales, ledger, alerts, dashboard, setup (no cost/margin) |
+| `RX_DISPENSE` | POS drafts/complete, returns within window, indent dispense |
 | `RX_PURCHASE` | suppliers, PO, GRN, supplier returns |
-| `RX_STOCK` | transfers, write-offs, stock audits (count/review/post under threshold) |
+| `RX_ADJUST` | write-offs, batch block/unblock requests, opening-stock review |
+| `RX_TRANSFER` | transfers between stores (dispatch / receive) |
+| `RX_AUDIT` | stock audits (count / review / post under threshold) |
+| `RX_REGISTERS` | view, verify and export statutory registers |
+| `RX_REFILLS` | refill request queue |
+| `RX_REPORTS` | pharmacy reports and exports |
+| `RX_STORE_MANAGE` | add and edit stores |
+| `RX_CATALOGUE` | drug master |
 | `RX_CONTROLLED` | sell/dispense/transfer/receive Schedule X, narcotic, psychotropic items; controlled audits |
-| `RX_REGISTER_EXPORT` | view, verify and export statutory registers |
 | `RX_ADMIN` | settings, stores, item master, price/discount override, voids, returns past window, audit second approval, margin/cost views, opening stock |
 
 `clinic_admin` and `super_admin` (scoped to one clinic) hold all RX permissions while `rx_access` is not None —
@@ -37,9 +48,9 @@ in `permissions.py`; the staff grant cap (a staff user cannot grant what they do
 ### 3.1 New staff roles (added to `STAFF_ROLES`, presets in `ROLE_PRESETS`)
 | Role | Preset |
 |:-|:-|
-| `PHARMACIST` | RX_READ, RX_DISPENSE, RX_REGISTER_EXPORT, ORDERS_READ |
-| `PHARMACY_MANAGER` | RX_READ, RX_DISPENSE, RX_PURCHASE, RX_STOCK, RX_REGISTER_EXPORT, RX_CONTROLLED, RX_ADMIN |
-| `STORE_KEEPER` | RX_READ, RX_PURCHASE, RX_STOCK |
+| `PHARMACIST` | RX_READ, RX_DISPENSE, RX_REGISTERS, RX_REFILLS |
+| `PHARMACY_MANAGER` | all 13 RX grants (incl. RX_CONTROLLED, RX_ADMIN) |
+| `STORE_KEEPER` | RX_READ, RX_PURCHASE, RX_ADJUST, RX_TRANSFER, RX_AUDIT |
 
 `RX_CONTROLLED` is **not** in the PHARMACIST preset: the clinic names its controlled-drug custodians explicitly
 (usually the chief pharmacist) — a deliberate act, audited.
@@ -49,19 +60,22 @@ in `permissions.py`; the staff grant cap (a staff user cannot grant what they do
 |:-|:-|:-|
 | `PHARMACY_OPERATOR` (exists, empty preset — AUDIT A36) | RX_READ, RX_DISPENSE | logins already created for counter staff work without re-saving |
 | `NURSE` (holds IPD_NURSING) | none new; IPD_NURSING itself opens indent/ward-issue/receive routes | no stock-wide visibility for nurses |
-| `CASHIER` | RX_READ | sees pharmacy totals in shift close |
+| `CASHIER` | none in P1; RX-34 (P4) decides when shift close shows pharmacy totals | an implied grant on a role that predates RX needs the `_PRE_RX_ROLES` grant-cap carve-out, so it is added only with the feature that needs it |
 | `DOCTOR` | none | doctors prescribe in OPD/IPD; they do not touch stock |
 
 Implied grants live in `_RX_GRANTS_IMPLIED_BY_ROLE` and are evaluated by `holds_rx_permission`; they are **not**
-written to `clinic_admins.permissions` (no data migration, nothing to roll back).
+written to `clinic_admins.permissions` (no data migration, nothing to roll back). New roles also imply their own
+presets. `role_grants_beyond_authority` treats `PHARMACY_OPERATOR` as a pre-RX role (`_PRE_RX_ROLES`): a staff
+granter without RX grants can still create one, exactly as before migration 134.
 
 ### 3.3 Store scope
 `allowed_store_ids(user)`:
 1. clinic_admin / super_admin → all stores of the clinic.
-2. Staff with `RX_STORE:<uuid>` entries in permissions → exactly those stores.
-3. Staff with `branch_id` → stores of that branch.
-4. Nurse acting through IPD routes → the sub-store of the admission's ward (+ the indent's `from_store_id` for read).
-5. Otherwise all stores of the clinic.
+2. Staff with `branch_id` → stores of that branch only (a clinic-wide store with no branch is not theirs).
+3. Nurse acting through IPD routes → the sub-store of the admission's ward (+ the indent's `from_store_id` for read) — P5.
+4. Otherwise all stores of the clinic.
+Per-store pins (`RX_STORE:<uuid>` grants) are deferred: the staff API validates every grant against `PERMISSIONS`,
+so dynamic grant names need their own storage first (RX-D7). The setup checklist stays clinic-wide for a pinned login.
 A row outside scope returns **404**.
 
 ### 3.4 Permissions matrix (abridged; full matrix is `tests/test_rx_route_matrix.py`)

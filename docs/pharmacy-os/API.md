@@ -26,10 +26,10 @@
 ## 1. Setup & settings (P1)
 | Method | Path | Perm | Notes |
 |:-|:-|:-|:-|
-| GET | `/admin/rx/setup` | RX_READ | checklist: stores, items, opening stock, shift, GSTIN, templates. |
+| GET | `/admin/rx/setup` | RX_READ or RX_ADMIN | settings, store list (scoped), branches, IPD wards (names, only when IPD is on), clinic-wide checklist (stores, drug master, GSTIN, settings). |
 | GET / PATCH | `/admin/rx/settings` | RX_READ / RX_ADMIN | PATCH with `If-Match: <settings_digest>` (CAS, 409 on stale); validates keys (DATA-MODEL §1). *audit: rx_settings_update* |
 | GET | `/admin/rx/stores` | RX_READ | scoped list |
-| POST / PATCH | `/admin/rx/stores`, `/admin/rx/stores/{id}` | RX_ADMIN | type/ward/parent validated; deactivate refused with stock on hand. *audit* |
+| POST / PATCH | `/admin/rx/stores`, `/admin/rx/stores/{store_id}` | RX_STORE_MANAGE or RX_ADMIN | P1: code/type/branch/ward set once (PATCH: name, parent, licence, GRN flag, active); ward of this clinic (and branch); branch login only its branch; re-activating is new work (409 in WIND_DOWN); deactivate refused with stock on hand from P2. *audit* |
 | GET | `/admin/rx/deactivation-preview` | RX_ADMIN | open drafts, indents, transfers, audits (also used by platform toggle) |
 | GET | `/admin/me` (existing) | — | + `rx_access`, `rx_state`, `rx_store_ids`, `rx_perms` |
 

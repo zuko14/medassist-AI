@@ -60,6 +60,7 @@ from app.services.tenant import (
     kriya_ketu_enabled,
     ipd_access,
     dx_access,
+    rx_access,
     opd_enabled,
     require_feature,
     specialty_enabled,
@@ -79,7 +80,9 @@ from app.services.lab_reports import DxReportResendRefused, LabReportService
 from app.services.permissions import (
     CORPORATE_VIEWER,
     PHLEBOTOMIST,
+    RX_PERMISSIONS,
     enforce_branch_scope,
+    holds_rx_permission,
     require_permission,
     resolve_owned_branch,
 )
@@ -942,6 +945,10 @@ async def get_current_admin(
             "dx_access": None,
             "dx_state": None,
             "dx_site_ids": None,
+            "rx_access": None,
+            "rx_state": None,
+            "rx_store_ids": None,
+            "rx_perms": [],
         }
 
     clinic = await get_clinic_by_id(scoped_clinic_id)
@@ -958,6 +965,13 @@ async def get_current_admin(
     if dx and user.branch_id:
         res = await sb(scoped_query("dx_sites", scoped_clinic_id, "id").eq("branch_id", user.branch_id))
         dx_site_ids = [r["id"] for r in (res.data or [])]
+    # Pharmacy OS (migration 134): a branch-pinned login works at its branch's stores; None = every store.
+    rx = rx_access(clinic)
+    rx_store_ids = None
+    if rx and user.branch_id and user.role not in ("super_admin", "clinic_admin"):
+        res = await sb(scoped_query("rx_stores", scoped_clinic_id, "id").eq("branch_id", user.branch_id))
+        rx_store_ids = [r["id"] for r in (res.data or [])]
+    rx_perms = [p for p in RX_PERMISSIONS if holds_rx_permission(user, p)] if rx else []
     features = (
         list(ALL_FEATURES)
         if plan == "enterprise"
@@ -993,6 +1007,11 @@ async def get_current_admin(
         "dx_access": dx,
         "dx_state": clinic.get("dx_state"),
         "dx_site_ids": dx_site_ids,
+        # Pharmacy OS (migration 134): 'ACTIVE', 'WIND_DOWN' (no new sales / purchases) or None
+        "rx_access": rx,
+        "rx_state": clinic.get("rx_state"),
+        "rx_store_ids": rx_store_ids,
+        "rx_perms": rx_perms,
         # migration 082. The Treatments page files rows under these sections
         # (Child Care / Women Care / Fertility Care) -- from here, so the panel
         # never keeps its own copy of the registry.

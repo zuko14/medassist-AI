@@ -3938,6 +3938,17 @@
             <div class="nav-link" tabindex="0" data-page="leads" data-role="admin" onclick="go('leads',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1.5"></circle></svg></span> WhatsApp Leads
             </div>
+            <!-- RX:foundation:START — Pharmacy OS (migration 134): owner opt-in on an OPD clinic -->
+            <div class="nav-group" data-nav-group="rx">
+                <button type="button" class="nav-group-head" id="navGrpRxHead" aria-expanded="false" aria-controls="navGrpRx" onclick="navGroupToggle('rx')">
+                    <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 20.5 3.5 13.5a4.95 4.95 0 1 1 7-7l7 7a4.95 4.95 0 1 1-7 7z"></path><path d="m8.5 8.5 7 7"></path></svg></span><span class="nav-group-title">Pharmacy</span><span class="nav-group-count" aria-hidden="true"></span><svg class="nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                </button>
+                <div class="nav-group-body" id="navGrpRx" role="group" aria-labelledby="navGrpRxHead"><div class="nav-group-inner">
+            <div class="nav-link" tabindex="0" data-page="rxsetup" data-rx="nav RX_ADMIN RX_READ" style="display:none" onclick="go('rxsetup',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 20.5 3.5 13.5a4.95 4.95 0 1 1 7-7l7 7a4.95 4.95 0 1 1-7 7z"></path><path d="m8.5 8.5 7 7"></path></svg></span><span>Pharmacy Setup</span>
+            </div>
+            </div></div></div>
+            <!-- RX:foundation:END -->
             <div class="nav-link" tabindex="0" data-page="diagreports" data-feature="diagnostic_reports" onclick="go('diagreports',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span> Report Automation
             </div>
@@ -5980,6 +5991,9 @@
                             <option value="TPA_DESK" data-ipd="role" hidden>TPA / Insurance desk (cashless claims)</option>
                             <option value="CORPORATE_VIEWER" data-corporate="opt" hidden>Company Viewer (Corporate Health dashboard only)</option>
                             <option value="PHLEBOTOMIST" data-homecollect="opt" hidden>Phlebotomist (home sample collection only)</option>
+                            <option value="PHARMACIST" data-rx="role" hidden>Pharmacist (counter and ward dispensing)</option>
+                            <option value="PHARMACY_MANAGER" data-rx="role" hidden>Pharmacy Manager (stores, purchase, registers, settings)</option>
+                            <option value="STORE_KEEPER" data-rx="role" hidden>Store Keeper (purchase, GRN, transfers, audits)</option>
                         </select>
                     </div>
                     <div class="field" id="f-staffDoctorWrap" style="display:none;">
@@ -6074,6 +6088,21 @@
                         <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_QC"> Diagnostic OS: quality control</label>
                         <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="DX_ADMIN"> Diagnostic OS: sites, settings, templates</label>
                         <!-- DX:foundation:END -->
+                        <!-- RX:foundation:START -->
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_READ"> Pharmacy OS: see stores, stock, sales and setup</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_DISPENSE"> Pharmacy OS: counter billing and ward dispensing</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_PURCHASE"> Pharmacy OS: purchase orders and goods receipt</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_ADJUST"> Pharmacy OS: stock write-offs and adjustments</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_TRANSFER"> Pharmacy OS: transfers between stores</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_AUDIT"> Pharmacy OS: physical stock audits</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_REGISTERS"> Pharmacy OS: Schedule H / H1 / X registers and exports</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_REFILLS"> Pharmacy OS: refill requests</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_REPORTS"> Pharmacy OS: pharmacy reports</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_STORE_MANAGE"> Pharmacy OS: add and edit stores</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_CATALOGUE"> Pharmacy OS: edit the drug master</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_CONTROLLED"> Pharmacy OS: Schedule X / narcotic custody</label>
+                        <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="staff-perm-cb" value="RX_ADMIN"> Pharmacy OS: settings, overrides, voids</label>
+                        <!-- RX:foundation:END -->
                     </div>
                 </div>
                 <div style="display:flex; gap:10px; margin-top:14px;">
@@ -7588,6 +7617,76 @@
             </div>
             <div id="ipdSetupWards"></div>
         </div>
+        <!-- RX:foundation:START — Pharmacy Setup page (docs/pharmacy-os/UI.md, page rxsetup) -->
+        <div id="pg-rxsetup" class="sec">
+            <div class="page-head">
+                <div><h2>Pharmacy Setup</h2><p>Stores, settings and readiness for Pharmacy OS.</p></div>
+            </div>
+            <div class="ipd-winddown" data-rx-winddown hidden>Pharmacy OS is being switched off for this clinic: new sales, purchases and configuration are closed. Returns, register exports and stock audits continue.</div>
+            <div class="card">
+                <div class="card-head"><h3>Checklist</h3></div>
+                <ul class="dx-checklist" id="rxChecklist"></ul>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Stores</h3></div>
+                <p class="muted">Every unit of stock lives in one store. A retail counter sells; a central store receives goods and supplies the others; ward sub-stores and OT / emergency trays hold ward stock. The drug licence number prints on bills from that store.</p>
+                <div id="rxStores"></div>
+                <div data-rx-edit id="rxStoreForm">
+                    <h4 id="rxStoreFormTitle" style="margin:18px 0 8px;">Add a store</h4>
+                    <div class="dx-grid">
+                        <div class="field" id="rxStoreTypeWrap"><label for="rxStoreType">Type</label><select id="rxStoreType" onchange="rxos.onTypeChange()">
+                            <option value="retail_counter">Retail counter (sells)</option>
+                            <option value="central">Central store (receives goods)</option>
+                            <option value="ward_substore">Ward sub-store</option>
+                            <option value="ot_tray">OT tray</option>
+                            <option value="emergency_tray">Emergency tray</option></select></div>
+                        <div class="field" id="rxStoreCodeWrap"><label for="rxStoreCode">Code (2–20: A–Z 0–9 _ -)</label><input id="rxStoreCode" maxlength="20" autocapitalize="characters" placeholder="OPD1"></div>
+                        <div class="field"><label for="rxStoreName">Name</label><input id="rxStoreName" maxlength="100" placeholder="OPD pharmacy counter"></div>
+                        <div class="field" id="rxStoreBranchWrap"><label for="rxStoreBranch">Branch</label><select id="rxStoreBranch"></select></div>
+                        <div class="field" id="rxStoreWardWrap" hidden><label for="rxStoreWard">Ward</label><select id="rxStoreWard"></select></div>
+                        <div class="field"><label for="rxStoreParent">Replenished from</label><select id="rxStoreParent"></select></div>
+                        <div class="field"><label for="rxStoreLicence">Drug licence no. (Form 20/21)</label><input id="rxStoreLicence" maxlength="60"></div>
+                    </div>
+                    <div class="dx-grid" style="margin-top:8px;">
+                        <label class="check" id="rxStoreGrnWrap"><input type="checkbox" id="rxStoreGrn"> Receives goods from suppliers (GRN)</label>
+                    </div>
+                    <div class="dx-actions">
+                        <button type="button" class="btn btn-accent btn-sm" id="rxStoreSave" onclick="rxos.saveStore(this)">Add store</button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="rxStoreCancel" hidden onclick="rxos.resetStoreForm()">Cancel edit</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-head"><h3>Pharmacy settings</h3></div>
+                <fieldset id="rxSettingsForm" style="border:0; padding:0; margin:0;">
+                    <div class="dx-grid">
+                        <div class="field"><label for="rxMaxDisc">Counter discount limit (%)</label><input id="rxMaxDisc" type="number" min="0" max="100" step="0.5"></div>
+                        <div class="field"><label for="rxNearExpiry">Near-expiry warning (days)</label><input id="rxNearExpiry" type="number" min="7" max="365"></div>
+                        <div class="field"><label for="rxMinShelf">Minimum shelf life at sale (days)</label><input id="rxMinShelf" type="number" min="0" max="365"></div>
+                        <div class="field"><label for="rxValidity">Prescription valid for (days)</label><input id="rxValidity" type="number" min="1" max="365"></div>
+                        <div class="field"><label for="rxReturnDays">Patient returns accepted for (days)</label><input id="rxReturnDays" type="number" min="0" max="90"></div>
+                        <div class="field"><label for="rxAuditApproval">Stock audit second approval above (₹)</label><input id="rxAuditApproval" type="number" min="0" max="1000000"></div>
+                        <div class="field"><label for="rxReceipt">Receipt format</label><select id="rxReceipt">
+                            <option value="80mm">80 mm thermal</option><option value="a5">A5</option></select></div>
+                        <div class="field"><label for="rxIpdPrice">Inpatient medicine price</label><select id="rxIpdPrice">
+                            <option value="mrp">MRP per unit</option><option value="cost_plus">Cost plus margin</option></select></div>
+                        <div class="field"><label for="rxRefillLead">Refill reminder lead (days)</label><input id="rxRefillLead" type="number" min="1" max="30"></div>
+                    </div>
+                    <div class="dx-grid" style="margin-top:8px;">
+                        <label class="check"><input type="checkbox" id="rxIpdAutopost"> Post ward dispensing to the patient's bill straight away</label>
+                        <label class="check"><input type="checkbox" id="rxLoose"> Allow loose (part-strip) sales</label>
+                        <label class="check"><input type="checkbox" id="rxRoundOff"> Round bills to the rupee</label>
+                        <label class="check"><input type="checkbox" id="rxFefoReason"> Picking a later-expiry batch needs a reason</label>
+                        <label class="check"><input type="checkbox" id="rxRefills"> Refill reminders on WhatsApp (needs an approved template)</label>
+                    </div>
+                    <p class="muted">Expired or recalled batches can never be sold or dispensed, whatever these settings say. Medicines are never suggested or substituted by Kriya: a pharmacist chooses, and only within the same composition.</p>
+                    <div class="dx-actions" data-rx-edit>
+                        <button type="button" class="btn btn-accent btn-sm" onclick="rxos.saveSettings(this)">Save settings</button>
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+        <!-- RX:foundation:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -9000,6 +9099,9 @@
                     <option value="RADIOLOGIST" data-orders="role" hidden>Radiologist (imaging reports &amp; PCPNDT Form F)</option>
                     <option value="TPA_DESK" data-ipd="role" hidden>TPA / Insurance desk (cashless claims)</option>
                     <option value="PHLEBOTOMIST" disabled>Phlebotomist</option>
+                    <option value="PHARMACIST" data-rx="role" hidden>Pharmacist (counter and ward dispensing)</option>
+                    <option value="PHARMACY_MANAGER" data-rx="role" hidden>Pharmacy Manager (stores, purchase, registers, settings)</option>
+                    <option value="STORE_KEEPER" data-rx="role" hidden>Store Keeper (purchase, GRN, transfers, audits)</option>
                 </select>
             </div>
         </div>
@@ -9101,6 +9203,21 @@
                 <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_QC"> Diagnostic OS: quality control</label>
                 <label class="check" data-dx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="DX_ADMIN"> Diagnostic OS: sites, settings, templates</label>
                 <!-- DX:foundation:END -->
+                <!-- RX:foundation:START -->
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_READ"> Pharmacy OS: see stores, stock, sales and setup</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_DISPENSE"> Pharmacy OS: counter billing and ward dispensing</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_PURCHASE"> Pharmacy OS: purchase orders and goods receipt</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_ADJUST"> Pharmacy OS: stock write-offs and adjustments</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_TRANSFER"> Pharmacy OS: transfers between stores</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_AUDIT"> Pharmacy OS: physical stock audits</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_REGISTERS"> Pharmacy OS: Schedule H / H1 / X registers and exports</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_REFILLS"> Pharmacy OS: refill requests</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_REPORTS"> Pharmacy OS: pharmacy reports</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_STORE_MANAGE"> Pharmacy OS: add and edit stores</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_CATALOGUE"> Pharmacy OS: edit the drug master</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_CONTROLLED"> Pharmacy OS: Schedule X / narcotic custody</label>
+                <label class="check" data-rx="perm" style="display:none"><input type="checkbox" class="edit-staff-perm-cb" value="RX_ADMIN"> Pharmacy OS: settings, overrides, voids</label>
+                <!-- RX:foundation:END -->
             </div>
         </div>
         <div class="modal-actions">
@@ -9692,6 +9809,11 @@ let myIpd = null;  // /admin/me.ipd_access: 'ACTIVE' | 'WIND_DOWN' | null
 let myDx = null;         // /admin/me.dx_access: 'ACTIVE' | 'WIND_DOWN' | null
 let myDxSiteIds = null;  // /admin/me.dx_site_ids: a branch-pinned login's sites; null = every site
 /* DX:foundation:END */
+/* RX:foundation:START */
+let myRx = null;          // /admin/me.rx_access: 'ACTIVE' | 'WIND_DOWN' | null
+let myRxStoreIds = null;  // /admin/me.rx_store_ids: a branch-pinned login's stores; null = every store
+let myRxPerms = [];       // /admin/me.rx_perms: the RX_* grants the server says this login holds
+/* RX:foundation:END */
 let myDoctorId = null;
 
 function hasPermission(perm) {
@@ -9813,6 +9935,7 @@ function applyFeatureVisibility() {
     applyOpdGates();
     applyIpdGates();
     /* DX:foundation:START */ applyDxGates(); /* DX:foundation:END */
+    /* RX:foundation:START */ applyRxGates(); /* RX:foundation:END */
     applyOrdersGates();
     applyPermissionVisibility();
     applyOpdRoleNav();
@@ -9976,6 +10099,182 @@ function applyIpdGates() {
     const admitCard = document.getElementById('ipdAdmitCard');
     if (admitCard) admitCard.style.display = myIpd === 'ACTIVE' ? '' : 'none';
 }
+
+/* RX:foundation:START — Pharmacy OS (migration 134). Permissions come from /admin/me.rx_perms
+   (the server's own answer); the server re-checks every call, hiding here is convenience only. */
+function rxCan(perm) {
+    return !!myRx && (myRxPerms || []).includes(perm);
+}
+// data-rx="nav PERM PERM…" / "perm": shown when Pharmacy OS is on and the user holds any listed permission.
+function applyRxGates() {
+    document.querySelectorAll('[data-rx]').forEach(el => {
+        const tokens = (el.dataset.rx || '').split(' ');
+        const perms = tokens.filter(t => t.startsWith('RX_'));
+        const on = !!myRx && (!perms.length || perms.some(rxCan));
+        if (tokens[0] === 'role') { el.hidden = !myRx; return; }
+        el.style.display = on ? '' : 'none';
+        const cb = el.querySelector && el.querySelector('input[type="checkbox"]');
+        if (!myRx && cb) cb.checked = false;
+    });
+    document.querySelectorAll('[data-rx-winddown]').forEach(el => { el.hidden = myRx !== 'WIND_DOWN'; });
+}
+
+const rxos = {
+    setup: null,
+    editingStore: null,
+    wards: [],
+    typeLabels: { central: 'Central store', retail_counter: 'Retail counter', ward_substore: 'Ward sub-store', ot_tray: 'OT tray', emergency_tray: 'Emergency tray' },
+    canEdit() { return rxCan('RX_STORE_MANAGE') || rxCan('RX_ADMIN'); },
+    canSettings() { return rxCan('RX_ADMIN') && !myBranchId; },
+    async loadSetup() {
+        const list = document.getElementById('rxStores');
+        list.innerHTML = loading();
+        try {
+            rxos.setup = await api('/admin/rx/setup');
+        } catch (e) {
+            list.innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+            return;
+        }
+        rxos.wards = rxos.setup.wards || [];
+        rxos.render();
+    },
+    render() {
+        const st = rxos.setup, s = st.settings, edit = rxos.canEdit() && st.access === 'ACTIVE';
+        document.getElementById('rxChecklist').innerHTML = st.checklist.map(c => `
+            <li class="${c.done ? 'done' : ''}"><span class="dx-mark" aria-hidden="true">${c.done ? '✓' : ''}</span>
+                <div><b>${esc(c.label)}</b><small>${esc(c.detail || (c.done ? 'Done' : 'To do'))}</small>
+                <span class="sr-only">${c.done ? 'done' : 'not done'}</span></div></li>`).join('');
+        const branchName = id => id ? ((st.branches.find(b => b.id === id) || {}).name || '—') : 'All branches';
+        const storeName = id => id ? ((st.stores.find(x => x.id === id) || {}).name || '—') : '—';
+        document.getElementById('rxStores').innerHTML = st.stores.length ? `<div class="tbl-wrap"><table class="dx-sites"><thead><tr>
+            <th>Code</th><th>Name</th><th>Type</th><th>Branch</th><th>From</th><th>Licence</th><th>Status</th><th></th></tr></thead><tbody>
+            ${st.stores.map(x => `<tr>
+                <td data-label="Code"><b>${esc(x.code)}</b></td>
+                <td data-label="Name">${esc(x.name)}<span class="muted">${[x.can_sell && 'Sells', x.can_receive_grn && 'Receives goods'].filter(Boolean).join(' · ')}</span></td>
+                <td data-label="Type">${esc(rxos.typeLabels[x.store_type] || x.store_type)}</td>
+                <td data-label="Branch">${esc(branchName(x.branch_id))}</td>
+                <td data-label="From">${esc(storeName(x.parent_store_id))}</td>
+                <td data-label="Licence">${esc(x.drug_licence_no || '—')}</td>
+                <td data-label="Status">${x.is_active ? 'Active' : 'Inactive'}</td>
+                <td>${edit ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxos.editStore('${esc(x.id)}')">Edit</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxos.toggleStore('${esc(x.id)}', ${!x.is_active}, this)">${x.is_active ? 'Deactivate' : 'Activate'}</button>` : ''}</td>
+            </tr>`).join('')}</tbody></table></div>` : '<p class="muted">No stores yet. Add a retail counter to start selling.</p>';
+        const branches = st.branches.filter(b => b.is_active !== false);
+        document.getElementById('rxStoreBranch').innerHTML = (myBranchId ? '' : '<option value="">All branches (clinic-wide)</option>')
+            + branches.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+        document.getElementById('rxStoreWard').innerHTML = rxos.wards.length
+            ? rxos.wards.map(w => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('')
+            : '<option value="">No IPD wards</option>';
+        document.querySelectorAll('#pg-rxsetup [data-rx-edit]').forEach(el => { el.hidden = !edit; });
+        const f = id => document.getElementById(id);
+        f('rxMaxDisc').value = (s.max_discount_bps || 0) / 100; f('rxNearExpiry').value = s.near_expiry_days;
+        f('rxMinShelf').value = s.min_shelf_days_at_sale; f('rxValidity').value = s.rx_validity_days;
+        f('rxReturnDays').value = s.return_days; f('rxAuditApproval').value = Math.round((s.audit_approval_paise || 0) / 100);
+        f('rxReceipt').value = s.receipt_format; f('rxIpdPrice').value = s.ipd_price_basis; f('rxRefillLead').value = s.refill_lead_days;
+        f('rxIpdAutopost').checked = !!s.ipd_autopost; f('rxLoose').checked = !!s.allow_loose_sale;
+        f('rxRoundOff').checked = !!s.round_off_to_rupee; f('rxFefoReason').checked = !!s.fefo_override_requires_reason;
+        f('rxRefills').checked = !!s.refill_enabled;
+        const settingsEdit = rxos.canSettings() && st.access === 'ACTIVE';
+        f('rxSettingsForm').disabled = !settingsEdit;
+        f('rxSettingsForm').querySelector('[data-rx-edit]').hidden = !settingsEdit;
+        rxos.resetStoreForm();
+        applyRxGates();
+    },
+    onTypeChange() {
+        const t = document.getElementById('rxStoreType').value;
+        document.getElementById('rxStoreWardWrap').hidden = t !== 'ward_substore';
+        document.getElementById('rxStoreGrn').checked = t === 'central' || t === 'retail_counter';
+    },
+    fillParents(exceptId) {
+        const opts = rxos.setup.stores.filter(x => x.is_active && x.id !== exceptId);
+        document.getElementById('rxStoreParent').innerHTML = '<option value="">— none —</option>'
+            + opts.map(x => `<option value="${esc(x.id)}">${esc(x.code)} · ${esc(x.name)}</option>`).join('');
+    },
+    resetStoreForm() {
+        rxos.editingStore = null;
+        const f = id => document.getElementById(id);
+        f('rxStoreForm').hidden = !rxos.canEdit() || (rxos.setup && rxos.setup.access !== 'ACTIVE');
+        ['rxStoreCode', 'rxStoreName', 'rxStoreLicence'].forEach(id => { f(id).value = ''; });
+        f('rxStoreType').value = 'retail_counter';
+        ['rxStoreTypeWrap', 'rxStoreCodeWrap', 'rxStoreBranchWrap'].forEach(id => { f(id).hidden = false; });
+        rxos.fillParents(null);
+        rxos.onTypeChange();
+        f('rxStoreFormTitle').textContent = 'Add a store';
+        f('rxStoreSave').textContent = 'Add store';
+        f('rxStoreCancel').hidden = true;
+    },
+    editStore(id) {
+        const x = rxos.setup.stores.find(v => v.id === id);
+        if (!x) return;
+        rxos.editingStore = id;
+        const f = el => document.getElementById(el);
+        f('rxStoreForm').hidden = false;
+        f('rxStoreName').value = x.name; f('rxStoreLicence').value = x.drug_licence_no || '';
+        rxos.fillParents(id);
+        f('rxStoreParent').value = x.parent_store_id || '';
+        f('rxStoreGrn').checked = !!x.can_receive_grn;
+        // code, type, branch and ward never change (a store is history on every document)
+        ['rxStoreTypeWrap', 'rxStoreCodeWrap', 'rxStoreBranchWrap', 'rxStoreWardWrap'].forEach(el => { f(el).hidden = true; });
+        f('rxStoreFormTitle').textContent = 'Edit store ' + x.code;
+        f('rxStoreSave').textContent = 'Save store';
+        f('rxStoreCancel').hidden = false;
+        f('rxStoreName').focus();
+    },
+    async saveStore(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        const body = { name: v('rxStoreName'), parent_store_id: v('rxStoreParent') || null,
+                       drug_licence_no: v('rxStoreLicence') || null, can_receive_grn: document.getElementById('rxStoreGrn').checked };
+        if (body.name.length < 2) { toast('Enter a store name.', true); return; }
+        btn.disabled = true;
+        try {
+            if (rxos.editingStore) {
+                await apiPatch(`/admin/rx/stores/${encodeURIComponent(rxos.editingStore)}`, body);
+            } else {
+                body.code = v('rxStoreCode').toUpperCase();
+                body.store_type = v('rxStoreType');
+                body.branch_id = v('rxStoreBranch') || null;
+                if (body.store_type === 'ward_substore') body.ward_id = v('rxStoreWard') || null;
+                if (!/^[A-Z0-9_-]{2,20}$/.test(body.code)) { toast('Store code: 2 to 20 letters, digits, _ or -.', true); return; }
+                if (body.store_type === 'ward_substore' && !body.ward_id) { toast('Choose the ward for this sub-store.', true); return; }
+                Object.keys(body).forEach(k => { if (body[k] === null) delete body[k]; });
+                await apiPost('/admin/rx/stores', body);
+            }
+            toast('Store saved');
+            await rxos.loadSetup();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async toggleStore(id, active, btn) {
+        btn.disabled = true;
+        try {
+            await apiPatch(`/admin/rx/stores/${encodeURIComponent(id)}`, { is_active: active });
+            await rxos.loadSetup();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async saveSettings(btn) {
+        const f = id => document.getElementById(id), n = id => parseInt(f(id).value, 10);
+        const body = { version: rxos.setup.settings.version,
+                       max_discount_bps: Math.round(parseFloat(f('rxMaxDisc').value || '0') * 100),
+                       near_expiry_days: n('rxNearExpiry'), min_shelf_days_at_sale: n('rxMinShelf'),
+                       rx_validity_days: n('rxValidity'), return_days: n('rxReturnDays'),
+                       audit_approval_paise: n('rxAuditApproval') * 100, receipt_format: f('rxReceipt').value,
+                       ipd_price_basis: f('rxIpdPrice').value, refill_lead_days: n('rxRefillLead'),
+                       ipd_autopost: f('rxIpdAutopost').checked, allow_loose_sale: f('rxLoose').checked,
+                       round_off_to_rupee: f('rxRoundOff').checked, fefo_override_requires_reason: f('rxFefoReason').checked,
+                       refill_enabled: f('rxRefills').checked };
+        btn.disabled = true;
+        try {
+            const r = await apiPatch('/admin/rx/settings', body);
+            rxos.setup.settings = r.settings;
+            toast('Pharmacy settings saved');
+            await rxos.loadSetup();
+        } catch (e) {
+            // CAS: someone else saved first. Show their version rather than overwrite it.
+            toast(e.status === 409 ? 'Someone else changed these settings. The latest values are loaded; re-apply your change.' : e.message, true);
+            if (e.status === 409) await rxos.loadSetup();
+        } finally { btn.disabled = false; }
+    },
+};
+/* RX:foundation:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -16300,6 +16599,7 @@ async function login() {
     myDoctorId = me.opd_doctor_id || null;
     myIpd = me.ipd_access || null;
     /* DX:foundation:START */ myDx = me.dx_access || null; myDxSiteIds = me.dx_site_ids || null; /* DX:foundation:END */
+    /* RX:foundation:START */ myRx = me.rx_access || null; myRxStoreIds = me.rx_store_ids || null; myRxPerms = me.rx_perms || []; /* RX:foundation:END */
     myServiceLines = Array.isArray(me.service_lines) ? me.service_lines : [];
     myPlanServiceLines = Array.isArray(me.plan_service_lines) ? me.plan_service_lines : [];
     myUsername = me.username || '';
@@ -16488,6 +16788,7 @@ async function adoptClinicPlan() {
             myDoctorId = scoped.opd_doctor_id || null;
             myIpd = scoped.ipd_access || null;
             /* DX:foundation:START */ myDx = scoped.dx_access || null; myDxSiteIds = scoped.dx_site_ids || null; /* DX:foundation:END */
+            /* RX:foundation:START */ myRx = scoped.rx_access || null; myRxStoreIds = scoped.rx_store_ids || null; myRxPerms = scoped.rx_perms || []; /* RX:foundation:END */
             myServiceLines = Array.isArray(scoped.service_lines) ? scoped.service_lines : [];
             myPlanServiceLines = Array.isArray(scoped.plan_service_lines) ? scoped.plan_service_lines : [];
         }
@@ -17906,7 +18207,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ };
     if (loaders[page]) loaders[page]();
 }
 

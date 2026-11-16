@@ -20,6 +20,8 @@ UP, DOWN = MIG / "133_dx_instruments_qc.sql", MIG / "rollback" / "133_rollback_d
 def unwind_133(cur) -> None:
     """Inside an open transaction: purge every clinic with DX-M9 rows, run the 133 rollback.
     Called first by unwind_132 (newest first)."""
+    from tests.test_migration_rx_m1 import unwind_134
+    unwind_134(cur)  # newest first: 134's rx_stores sits on 103's branches
     cur.execute("SELECT to_regclass('public.dx_bridge_agents') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

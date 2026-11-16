@@ -2033,6 +2033,18 @@
                 <div id="modalDxState" style="font-size:0.8rem; color:var(--text3); margin-top:10px;"></div>
             </div>
             <!-- DX:foundation:END -->
+
+            <!-- RX:foundation:START — Migration 134: Pharmacy OS. Needs OPD OS; disabling with open work winds down. -->
+            <div id="modalRxCard" style="background:var(--surface2); padding:20px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-top:16px;">
+                <h4 style="color:#fff; font-size:0.95rem; margin-bottom:4px;">Pharmacy OS</h4>
+                <p style="color:var(--text3); font-size:0.78rem; margin-bottom:12px;">Stores, purchase and GRN, counter billing, IPD dispensing and drug registers. Needs OPD OS. Turning it off never deletes records; returns, register exports and stock audits continue while it winds down.</p>
+                <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); cursor:pointer;">
+                    <input type="checkbox" id="modalRxToggle" onchange="toggleRx(this)">
+                    Pharmacy OS enabled
+                </label>
+                <div id="modalRxState" style="font-size:0.8rem; color:var(--text3); margin-top:10px;"></div>
+            </div>
+            <!-- RX:foundation:END -->
         </div>
     </div>
 
@@ -3138,6 +3150,13 @@
                     if (dxToggle) dxToggle.checked = overrides.dx_enabled === true;
                     loadDxState(c.id || _modalClinicId);
                     /* DX:foundation:END */
+                    /* RX:foundation:START */
+                    const rxCard = document.getElementById('modalRxCard');
+                    if (rxCard) rxCard.style.display = (c.account_type || 'tenant') === 'tenant' ? '' : 'none';
+                    const rxToggle = document.getElementById('modalRxToggle');
+                    if (rxToggle) rxToggle.checked = overrides.pharmacy_enabled === true;
+                    loadRxState(c.id || _modalClinicId);
+                    /* RX:foundation:END */
                     document.getElementById('modalTotalAppts').innerText = a.total_appointments || 0;
                     document.getElementById('modalConfirmedAppts').innerText = a.confirmed || 0;
                     document.getElementById('modalTotalPatients').innerText = a.total_patients || 0;
@@ -3277,6 +3296,56 @@
             }
         }
         /* DX:foundation:END */
+
+        /* RX:foundation:START */
+        // Pharmacy OS (migration 134). Same contract as the Diagnostic OS card: state and eligibility
+        // come from the preview route; open work answers 409 + preview; only a confirmed disable winds down.
+        async function loadRxState(clinicId) {
+            const el = document.getElementById('modalRxState');
+            if (!el || !clinicId) return;
+            try {
+                const res = await fetch(`/platform/clinics/${clinicId}/rx/deactivation-preview`, { headers: { 'Authorization': ownerAuthHeader } });
+                if (!res.ok) { el.textContent = ''; return; }
+                const p = await res.json();
+                el.textContent = p.state === 'WIND_DOWN'
+                    ? 'State: WIND_DOWN (no new sales or purchases; returns, exports and audits continue)'
+                    : `State: ${p.state}${p.eligible ? '' : ' (enable OPD OS first)'}`;
+            } catch (e) { el.textContent = ''; }
+        }
+
+        async function toggleRx(cb) {
+            const clinicId = _modalClinicId;
+            const send = async (enabled, confirmDisable) => fetch(`/platform/clinics/${clinicId}/features`, {
+                method: 'PATCH',
+                headers: { 'Authorization': ownerAuthHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ feature: 'pharmacy_enabled', enabled, confirm_disable: confirmDisable })
+            });
+            cb.disabled = true;
+            try {
+                let res = await send(cb.checked, false);
+                if (res.status === 409 && !cb.checked) {
+                    const p = ((await res.json().catch(() => ({}))).detail || {}).preview || {};
+                    const ok = confirm(`${p.open_sales || 0} open bill(s), ${p.open_indents || 0} ward indent(s), `
+                        + `${p.transfers_in_transit || 0} transfer(s) in transit, ${p.open_audits || 0} stock audit(s) open.`
+                        + '\n\nTurning Pharmacy OS off now stops NEW sales and purchases only. Returns, register exports and audits continue. '
+                        + 'No record is deleted.\n\nWind down Pharmacy OS?');
+                    if (!ok) { cb.checked = true; return; }
+                    res = await send(false, true);
+                }
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error((err.detail && (err.detail.message || err.detail)) || 'Failed to update Pharmacy OS');
+                }
+                openModal(clinicId);
+                fetchPlatformData();
+            } catch (e) {
+                alert(e.message || 'Failed to update Pharmacy OS');
+                openModal(clinicId);
+            } finally {
+                cb.disabled = false;
+            }
+        }
+        /* RX:foundation:END */
 
         let opdDeact = { clinicId: null, checkbox: null };
         async function toggleOpd(cb) {

@@ -80,7 +80,8 @@ PAGES: dict[str, str] = {
     "dxb2b": "B2B Accounts",   # Diagnostic OS B2B money (migration 132); page hand-off only
     "dxreferrers": "Referrers",   # Diagnostic OS referral volume, counts only (migration 132); page hand-off only
     "dxpartner": "Partner Portal",   # B2B partner logins only (migration 132); Ketu is off for partners
-    "dxdash": "DX Dashboard",   # Diagnostic OS stage funnel, alerts and MIS (P9); R0 reads via /admin/dx/dashboard
+    "dxdash": "DX Dashboard",
+    "rxsetup": "Pharmacy Setup",   # Pharmacy OS (migration 134): nav only; RX reads in Ketu arrive in P9   # Diagnostic OS stage funnel, alerts and MIS (P9); R0 reads via /admin/dx/dashboard
     "dxinstruments": "Instruments & QC",   # Diagnostic OS analyser bridge and QC (migration 133); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",

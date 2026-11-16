@@ -25,11 +25,11 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **Specification complete and verified** (review round 1, VERIFICATION.md, 2026-11-16). Implementation not started |
-| Next task | **RX-00** (P0 baseline) — after the owner reviews the open decisions in ADR.md (O-1…O-6; defaults are in force, so P0–P6 are not blocked) |
-| Working branch | spec on `rx/spec` (from `main` @ `e5f99b5`, not pushed); create `rx/p0-baseline` from it when RX-00 starts |
-| Last commit touching RX | `docs(rx): forensic verification round 1 and advanced staff features` on `rx/spec` |
-| Last VERIFIED gate | none (no code) |
+| Active phase | **P1 Foundation VERIFIED** (2026-11-16). P0 + P1 complete on `rx/p1-foundation`; P2 not started |
+| Next task | **RX-12** (P2: migration 135, catalogue) — next session. Open owner decisions O-1…O-6 have defaults in force |
+| Working branch | `rx/p1-foundation` (from `rx/spec` @ `1078dca`, which includes RX-67/68); local commits only, not pushed |
+| Last commit touching RX | `feat(rx): P0 baseline + P1 foundation (RX-00…RX-11)` on `rx/p1-foundation` |
+| Last VERIFIED gate | P1: RG1–RG3 + `test_migration_rx_m1.py`, `test_rx_feature_gate.py`, full suite 9,479 passed / 0 failed (§9, 2026-11-16) |
 | Open blockers | none for P0–P6. P7 go-live needs O-4 (legal confirmation of register formats). P8 refill sends need Meta-approved templates in each clinic's WABA |
 | Lanes running in parallel | none |
 
@@ -51,14 +51,14 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 | Latest migration on disk | `133_dx_instruments_qc.sql` → RX-M1 takes **134** |
 | `TENANT_OWNED_TABLES` size | 135 (41 dx, 19 ipd, 10 opd) at `e5f99b5` |
 | Migrations 125–133 applied to Supabase? | not verified (DX status says owner action pending) — RX migrations must be applied **after** them |
-| Full-suite baseline count | fill in RX-00 (`python -m pytest -q -rs`, summary line) |
-| Lint baseline | fill in RX-00 (`TOTAL_BARE_BASELINE` must be 0) |
+| Full-suite baseline count | **9,412 passed, 5 skipped, 0 failed** at `1078dca` (clean worktree, 2026-11-16) |
+| Lint baseline | RG1 10 passed (`TOTAL_BARE_BASELINE` 0); RG2 1,587 passed; RG3 (firewall + DX no-LLM) 41 passed |
 
 ## 4. Phase board
 | Phase | Name | Migration | Gate to close | State |
 |:-|:-|:-|:-|:-|
-| P0 | Baseline & audit re-verification | — | RG1–RG7 green on `main`, counts in §3 | NOT_STARTED |
-| P1 | Foundation: gate, roles, stores, setup | 134 (RX-M1) | RG1–RG7 + P1 DoD | NOT_STARTED |
+| P0 | Baseline & audit re-verification | — | RG1–RG7 green on `main`, counts in §3 | VERIFIED |
+| P1 | Foundation: gate, roles, stores, setup | 134 (RX-M1) | RG1–RG7 + P1 DoD | VERIFIED |
 | P2 | Catalogue, batches, stock ledger | 135, 136 | RG1–RG7 + ledger invariants | NOT_STARTED |
 | P3 | Purchase: suppliers, PO, GRN, supplier returns | 137 | RG1–RG7 | NOT_STARTED |
 | P4 | OPD POS, tax, returns, shifts | 138 | RG1–RG8 + POS timing | NOT_STARTED |
@@ -76,7 +76,7 @@ for pages added; no existing test edited; this file updated.
 ## 5. Migration ledger
 | No. | File | Task | Content | Rollback | State |
 |:-|:-|:-|:-|:-|:-|
-| 134 | `134_rx_foundation.sql` | RX-02 | `clinics.rx_state/rx_settings`, helpers, `rx_stores`, `rx_purge_clinic` v1 | `rollback/134_rollback_rx_foundation.sql` | NOT_STARTED |
+| 134 | `134_rx_foundation.sql` | RX-02 | `clinics.rx_state/rx_settings`, helpers, `rx_stores`, `rx_purge_clinic` v1 | `rollback/134_rollback_rx_foundation.sql` | VERIFIED |
 | 135 | `135_rx_catalogue.sql` | RX-12 | manufacturers, generics, items, barcodes, aliases, item changes | `rollback/135_…` | NOT_STARTED |
 | 136 | `136_rx_stock_ledger.sql` | RX-17 | batches, movements, balances, triggers, views | `rollback/136_…` | NOT_STARTED |
 | 137 | `137_rx_purchase.sql` | RX-22 | suppliers, PO, GRN, supplier returns | `rollback/137_…` | NOT_STARTED |
@@ -92,22 +92,22 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 ### P0 — Baseline
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| RX-00 | Branch `rx/p0-baseline`; run RG1–RG7 on `main`; record counts in §3 | — | all green; counts pasted | RG1–RG7 | NOT_STARTED |
-| RX-01 | Re-verify every AUDIT.md row by symbol; record moved lines in §7; update design if a finding changed | RX-00 | A1–A48 confirmed or docs updated in same commit | — (evidence in §7) | NOT_STARTED |
+| RX-00 | Branch `rx/p0-baseline`; run RG1–RG7 on `main`; record counts in §3 | — | all green; counts pasted | RG1–RG7 | VERIFIED |
+| RX-01 | Re-verify every AUDIT.md row by symbol; record moved lines in §7; update design if a finding changed | RX-00 | A1–A48 confirmed or docs updated in same commit | — (evidence in §7) | VERIFIED |
 
 ### P1 — Foundation (RX-M1, 134)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| RX-02 | Migration 134 + rollback + verify block | RX-01 | applies on 133; idempotent; rollback + re-apply | `test_migration_rx_m1.py` | NOT_STARTED |
-| RX-03 | `tenant.py`: `OPT_IN_FEATURES["pharmacy_enabled"]`, `rx_eligible`, `rx_access` (ADR-RX-09) | RX-02 | off by default; needs OPD; wildcard never enables | `test_rx_feature_gate.py` | NOT_STARTED |
-| RX-04 | `permissions.py`: RX perms, PHARMACIST/PHARMACY_MANAGER/STORE_KEEPER, implied grants, `holds_rx_permission`, `allowed_store_ids` | — | existing logins gain only SECURITY §3.2 grants, only while rx_access | `test_rx_feature_gate.py`, existing permission tests | NOT_STARTED |
-| RX-05 | `app/routers/rx.py` + `app/services/rx.py`: `_rx_scope`, settings (CAS), stores CRUD, setup checklist, deactivation preview; mount in `app/main.py` | RX-03, RX-04 | check order permission → tenant → access → wind-down → store | `test_rx_feature_gate.py` | NOT_STARTED |
-| RX-06 | `platform.py`: `pharmacy_enabled` toggle (eligibility 400, provision default store, 409 preview, confirm → WIND_DOWN, re-enable; `None` = disable); refuse `opd_enabled` off while `rx_state ≠ OFF` (D7); owner console card | RX-05 | ADR-RX-09 lifecycle | `test_rx_feature_gate.py` | NOT_STARTED |
-| RX-07 | `/admin/me` + `rx_access`, `rx_state`, `rx_store_ids`, `rx_perms` | RX-04 | additive keys | `test_rx_feature_gate.py` | NOT_STARTED |
-| RX-08 | Platform purge: gate also counts `rx_sales`/`rx_stock_movements`; `rx_purge_clinic` first when the `rx_state` column exists (D8, A60) | RX-02 | purge of RX clinic leaves zero rx rows and succeeds; non-RX purge unchanged | `test_migration_rx_m1.py::test_platform_purge_order` | NOT_STARTED |
-| RX-09 | `tenancy.py` registration (134 tables); `test_rx_tenancy_registry.py`; `test_rx_route_matrix.py` skeleton | RX-05 | RG1, RG2 green | RG1, RG2 | NOT_STARTED |
-| RX-10 | `tests/test_rx_no_llm.py` (ADR-RX-06) | RX-05 | | itself | NOT_STARTED |
-| RX-11 | UI: Pharmacy nav group, `applyRxGates()`, **Pharmacy Setup** page (`<!-- RX:foundation -->`) | RX-05–07 | hidden for non-RX clinic; 1440/390 | manual (§9) | NOT_STARTED |
+| RX-02 | Migration 134 + rollback + verify block | RX-01 | applies on 133; idempotent; rollback + re-apply | `test_migration_rx_m1.py` | VERIFIED |
+| RX-03 | `tenant.py`: `OPT_IN_FEATURES["pharmacy_enabled"]`, `rx_eligible`, `rx_access` (ADR-RX-09) | RX-02 | off by default; needs OPD; wildcard never enables | `test_rx_feature_gate.py` | VERIFIED |
+| RX-04 | `permissions.py`: RX perms, PHARMACIST/PHARMACY_MANAGER/STORE_KEEPER, implied grants, `holds_rx_permission`, `allowed_store_ids` | — | existing logins gain only SECURITY §3.2 grants, only while rx_access | `test_rx_feature_gate.py`, existing permission tests | VERIFIED |
+| RX-05 | `app/routers/rx.py` + `app/services/rx.py`: `_rx_scope`, settings (CAS), stores CRUD, setup checklist, deactivation preview; mount in `app/main.py` | RX-03, RX-04 | check order permission → tenant → access → wind-down → store | `test_rx_feature_gate.py` | VERIFIED |
+| RX-06 | `platform.py`: `pharmacy_enabled` toggle (eligibility 400, provision default store, 409 preview, confirm → WIND_DOWN, re-enable; `None` = disable); refuse `opd_enabled` off while `rx_state ≠ OFF` (D7); owner console card | RX-05 | ADR-RX-09 lifecycle | `test_rx_feature_gate.py` | VERIFIED |
+| RX-07 | `/admin/me` + `rx_access`, `rx_state`, `rx_store_ids`, `rx_perms` | RX-04 | additive keys | `test_rx_feature_gate.py` | VERIFIED |
+| RX-08 | Platform purge: `rx_purge_clinic` after `dx_purge_clinic` and before OPD/IPD purge, only when the clinic has `rx_stores` rows (every RX row hangs off a store), so the DX-first contract and non-RX deletions are unchanged (D8, A60) | RX-02 | purge of RX clinic leaves zero rx rows and succeeds; non-RX purge makes no rx call | `test_rx_feature_gate.py::test_clinic_deletion_purges_pharmacy_before_opd`, `::test_deletion_of_a_clinic_without_pharmacy_makes_no_rx_purge_call` | VERIFIED |
+| RX-09 | `tenancy.py` registration (134 tables); `test_rx_tenancy_registry.py`; `test_rx_route_matrix.py` skeleton | RX-05 | RG1, RG2 green | RG1, RG2 | VERIFIED |
+| RX-10 | `tests/test_rx_no_llm.py` (ADR-RX-06) | RX-05 | | itself | VERIFIED |
+| RX-11 | UI: Pharmacy nav group, `applyRxGates()`, **Pharmacy Setup** page (`<!-- RX:foundation -->`) | RX-05–07 | hidden for non-RX clinic; 1440/390 | manual (§9) | VERIFIED |
 **P1 DoD:** no clinic's behaviour changed; owner can enable / wind down / re-enable on a sandbox clinic; RG1–RG7 green.
 
 ### P2 — Catalogue & ledger (135, 136)
@@ -234,6 +234,7 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | RX-D4 | Home delivery logistics for refills | O-6 |
 | RX-D5 | Cold-chain temperature logging | G28 |
 | RX-D6 | Standalone retail pharmacy without OPD | G30 |
+| RX-D7 | Per-store login pins (`RX_STORE:<uuid>`) | staff grants are validated against `PERMISSIONS`; P1 scopes by branch (SECURITY §3.3) |
 
 ## 7. Audit deltas (lines that moved / findings that changed)
 | Date | AUDIT ID | Old | New | Design impact |
@@ -252,7 +253,20 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 ## 9. Verification log (paste command summaries here)
 | Date | Task / gate | Command | Result |
 |:-|:-|:-|:-|
-| — | — | — | — |
+| 2026-11-16 | RX-00 RG1 (baseline) | `.venv/bin/pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q` | 10 passed |
+| 2026-11-16 | RX-00 RG2 (baseline) | `.venv/bin/pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q` | 1587 passed |
+| 2026-11-16 | RX-00 RG3 (baseline) | `.venv/bin/pytest tests/test_clinical_firewall.py tests/test_dx_no_llm.py -q` | 41 passed |
+| 2026-11-16 | RX-00 full suite (baseline, clean worktree of `1078dca`) | `.venv/bin/pytest -q -rs` | 9412 passed, 5 skipped, 0 failed (a first run reported 3 failures only because P1 files appeared mid-run) |
+| 2026-11-16 | RX-01 | citation re-check of AUDIT.md / VERIFICATION.md against `git show 1078dca:<file>` (87 symbols + A54/A55) | 0 moved, 0 changed findings; §7 stays empty |
+| 2026-11-16 | RX-02 | `.venv/bin/pytest tests/test_migration_rx_m1.py -q` | 11 passed (keys, shapes, composite FKs, guard, one central per branch, RLS, CAS, purge, search_path, rollback + double re-apply) |
+| 2026-11-16 | RX-03…RX-08 | `.venv/bin/pytest tests/test_rx_feature_gate.py -q` | 21 passed (gate, perms, grant cap, store scope, settings, HTTP: enable/provision, permission-first, CAS, stores scope, wind-down, OPD-disable guard, purge order) |
+| 2026-11-16 | RX-09 / RX-10 | `.venv/bin/pytest tests/test_rx_tenancy_registry.py tests/test_rx_route_matrix.py tests/test_rx_no_llm.py -q` | 17 passed (route count pinned at 6; all 6 in both global matrices; role matrix × 8) |
+| 2026-11-16 | 103 rollback with 134 | `.venv/bin/pytest tests/test_migration_103_opd.py -k "rollback or down or reapply" -q` | 1 passed (after the owner-approved 1-line `unwind_133` → `unwind_134` chain extension) |
+| 2026-11-16 | P1 RG1 | `.venv/bin/pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q` | 10 passed |
+| 2026-11-16 | P1 RG2 | `.venv/bin/pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q` | 1605 passed (the 6 `/admin/rx` routes included) |
+| 2026-11-16 | P1 RG3 | `.venv/bin/pytest tests/test_clinical_firewall.py tests/test_rx_no_llm.py -q` | 37 passed |
+| 2026-11-16 | P1 full suite | `.venv/bin/pytest -q -rs` | **9479 passed, 5 skipped, 0 failed** |
+| 2026-11-16 | RX-11 live UI | real app + fresh pgserver (001→134 applied clean) + PostgREST bridge, real logins, `lifespan=off` (no scheduler, no Supabase, no WhatsApp) | **@1440 px** `rxadmin`: Pharmacy group + Setup page; checklist Stores ✓ / Drug master / GSTIN (bill of supply) / Settings; MAIN store provisioned; added ward sub-store W3 (Kukatpally, Ward 3, parent MAIN) through the form; Save settings 12 % → 1200 bps, version 1, toast, checklist Settings ✓. **@390 px** branch-pinned `pharmacist`: page width = viewport (no overflow), sees only W3, store form hidden, settings read-only. Plain OPD clinic `opdadmin`: no RX element visible, `/admin/rx/setup` 403. Found and fixed: checklist counted only the login's visible stores (now clinic-wide, test added). Console: no errors (one deliberate 403 probe) |
 
 ## 10. Session log
 | Date | Agent | What happened |
@@ -260,3 +274,4 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-16 | Claude Code | Forensic audit (AUDIT.md, A1–A48, brief corrections §0) and 15-document specification suite written. No code, no migrations. |
 | 2026-11-16 | Claude Code | Review round 1 (VERIFICATION.md): 15 design defects fixed (2 critical: shift cash D1, MAR guard/purge D2), 2 latent production bugs found (L1 branch delete 500, L2 erasure abort) with fix tasks RX-67/68, 19 loopholes closed, zero-impact matrix; ADVANCED-FEATURES.md A1–A14 (RX-69…RX-82). |
 | 2026-11-16 | Antigravity | Latent bugs RX-67 and RX-68 implemented on main and merged into rx/spec: safe branch delete with FK deactivation fallback (test_admin_branches.py, 4 tests passed) and robust family member erasure (test_opd_data_retention.py, 5 tests passed). Both tasks marked VERIFIED. |
+| 2026-11-16 | Claude Code | P0 + P1 implemented and VERIFIED on `rx/p1-foundation`: migration 134, gate, 13 RX permissions (owner chose brief names + RX_CONTROLLED), 3 roles, router (6 routes), platform toggle + OPD guard, /admin/me, purge order, Setup page + platform card; 5 new test files (66 tests). Owner-approved: 1-line `unwind_133` → `unwind_134` chain extension (134's composite branch FK sits on 103's index). Docs aligned (SECURITY §2–§3, DATA-MODEL §1/§10, API §1). Stopped before P2 as instructed. |

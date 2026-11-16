@@ -934,6 +934,41 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 28. MIGRATION 134 — Pharmacy OS foundation (RX-M1)
+-- ============================================================================
+DO $$
+DECLARE
+    v_cols int;
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_cols FROM information_schema.columns
+     WHERE table_name = 'clinics' AND column_name IN ('rx_state', 'rx_settings');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M134', 'Columns: clinics.rx_state, clinics.rx_settings',
+            CASE WHEN v_cols = 2 THEN 'PASS' ELSE 'FAIL' END, v_cols || ' of 2 present');
+
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname = 'rx_stores' AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_stores_clinic_id_id_key', 'rx_stores_code_key', 'rx_stores_branch_fk', 'rx_stores_parent_fk',
+                       'rx_stores_ward_shape', 'rx_stores_sell_shape', 'rx_stores_no_self_parent');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M134', 'Table: rx_stores (RLS forced, composite branch/parent FKs, 7 constraints)',
+            CASE WHEN v_tbl = 1 AND v_con = 7 THEN 'PASS' ELSE 'FAIL' END,
+            v_tbl || ' table, ' || v_con || ' of 7 constraints');
+
+    SELECT (to_regprocedure('rx_purging(uuid)') IS NOT NULL)::int + (to_regprocedure('rx_raise(text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_purge_clinic(uuid)') IS NOT NULL)::int
+         + (to_regprocedure('rx_update_settings(uuid,jsonb,integer)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_rx_stores_guard')::int INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M134', 'Functions: rx_purging, rx_raise, rx_purge_clinic, rx_update_settings + store guard trigger',
+            CASE WHEN v_fn = 5 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 5 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

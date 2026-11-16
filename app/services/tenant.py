@@ -670,6 +670,7 @@ OPT_IN_FEATURES: dict[str, str] = {
     "ipd_enabled": "IPD OS (Admissions, Beds, Nursing, Discharge)",
     "kriya_ketu": "Kriya Ketu assistant",
     "dx_enabled": "Diagnostic OS (Registration, Samples, Lab, Reports, B2B)",
+    "pharmacy_enabled": "Pharmacy OS (Stores, Purchase, POS, IPD Dispensing, Registers)",
 }
 
 
@@ -724,6 +725,32 @@ def dx_access(clinic: Optional[dict]) -> Optional[str]:
     if clinic.get("dx_state") == "WIND_DOWN":
         return "WIND_DOWN"
     return None
+
+
+def rx_eligible(clinic: Optional[dict]) -> bool:
+    """Pharmacy OS builds on OPD OS (patient registry, MRN, prescriptions,
+    cashier shifts, number counters), so only an OPD-enabled tenant may turn it
+    on (docs/pharmacy-os/ADR.md ADR-RX-09)."""
+    return opd_enabled(clinic)
+
+
+def rx_access(clinic: Optional[dict]) -> Optional[str]:
+    """'ACTIVE', 'WIND_DOWN' or None (module unavailable).
+
+    ACTIVE needs the owner's explicit opt-in (features.pharmacy_enabled is True,
+    never has_feature(): the enterprise wildcard must not switch it on) on an
+    eligible tenant. WIND_DOWN is what an owner disable leaves while work is
+    still open: nothing new starts, returns / exports / audits continue.
+    """
+    if not clinic or (clinic.get("account_type") or "tenant") != "tenant":
+        return None
+    overrides = clinic.get("features") or {}
+    if isinstance(overrides, dict) and overrides.get("pharmacy_enabled") is True and rx_eligible(clinic):
+        return "ACTIVE"
+    if clinic.get("rx_state") == "WIND_DOWN":
+        return "WIND_DOWN"
+    return None
+
 
 def opd_enabled(clinic: Optional[dict]) -> bool:
     """True only if the clinic is a regular tenant with an explicit owner opt-in
