@@ -208,8 +208,8 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 ### Verification fixes and advanced features (VERIFICATION.md, ADVANCED-FEATURES.md)
 | ID | Task | Phase | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|:-|
-| RX-67 | `delete_branch`: on FK violation (23503) fall back to the existing deactivate path (latent bug L1) | P1 | RX-02 | branch with IPD ward / DX site / RX store → deactivated, not 500; clean branch still deleted | `test_rx_zero_impact.py::test_branch_delete_fk_fallback` | NOT_STARTED |
-| RX-68 | DPDP erasure: per-member 23503 → redact and continue (latent bug L2); delete the patient's refill plans/requests | P1 (plans part in P8) | RX-02 | erasure completes for members referenced by IPD/DX/RX; registers retained | `test_rx_zero_impact.py::test_erasure_with_rx_references` | NOT_STARTED |
+| RX-67 | `delete_branch`: on FK violation (23503) fall back to the existing deactivate path (latent bug L1) | P1 | RX-02 | branch with IPD ward / DX site / RX store → deactivated, not 500; clean branch still deleted | `test_admin_branches.py::test_delete_branch_with_referencing_records_deactivates` | VERIFIED |
+| RX-68 | DPDP erasure: per-member 23503 → redact and continue (latent bug L2); delete the patient's refill plans/requests | P1 (plans part in P8) | RX-02 | erasure completes for members referenced by IPD/DX/RX; registers retained | `test_opd_data_retention.py::test_family_member_with_non_opd_fk_references_is_redacted` | VERIFIED |
 | RX-69 | Rx Inbox (A1) | P4 | RX-32 | | `test_rx_pos.py::test_inbox_*` | NOT_STARTED |
 | RX-70 | Park / recall bills (A2) | P4 | RX-31 | | `test_rx_pos.py::test_park_*` | NOT_STARTED |
 | RX-71 | GS1 / pharma QR parser at GRN and POS (A3) | P3 | RX-25 | parser vectors | `test_rx_gs1.py` | NOT_STARTED |
@@ -259,3 +259,4 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 |:-|:-|:-|
 | 2026-11-16 | Claude Code | Forensic audit (AUDIT.md, A1–A48, brief corrections §0) and 15-document specification suite written. No code, no migrations. |
 | 2026-11-16 | Claude Code | Review round 1 (VERIFICATION.md): 15 design defects fixed (2 critical: shift cash D1, MAR guard/purge D2), 2 latent production bugs found (L1 branch delete 500, L2 erasure abort) with fix tasks RX-67/68, 19 loopholes closed, zero-impact matrix; ADVANCED-FEATURES.md A1–A14 (RX-69…RX-82). |
+| 2026-11-16 | Antigravity | Latent bugs RX-67 and RX-68 implemented on main and merged into rx/spec: safe branch delete with FK deactivation fallback (test_admin_branches.py, 4 tests passed) and robust family member erasure (test_opd_data_retention.py, 5 tests passed). Both tasks marked VERIFIED. |
