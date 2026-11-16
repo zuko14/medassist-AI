@@ -76,3 +76,49 @@ async def test_delete_branch_refuses_a_branch_from_another_clinic():
 
     assert exc.value.status_code == 404
     assert not mock_sb.table.return_value.delete.called
+
+
+def _fail_branch_delete(mock_sb, error):
+    """Make the final DELETE on branches raise `error` (dependency checks stay empty)."""
+    inner = mock_sb.table.side_effect
+
+    def table_side_effect(name):
+        t = inner(name)
+        if name == "branches":
+            t.delete.return_value.eq.return_value.eq.return_value.execute.side_effect = error
+        return t
+
+    mock_sb.table.side_effect = table_side_effect
+
+
+@pytest.mark.asyncio
+async def test_delete_branch_deactivates_when_another_module_references_it():
+    """IPD wards/admissions, DX sites/visits etc. reference branches but are not in
+    _BRANCH_DEPENDENT_TABLES: the DB refuses the delete (23503). That used to surface
+    as a 500; the branch must be deactivated instead."""
+    admin = AdminUser("drpatel", role="clinic_admin", clinic_id="clinic-1", user_id="user-1")
+    mock_sb = _mock_supabase(dependents_by_table={})
+    _fail_branch_delete(mock_sb, Exception(
+        '{"code": "23503", "message": "update or delete on table \\"branches\\" violates foreign key '
+        'constraint \\"ipd_wards_branch_fk\\" on table \\"ipd_wards\\""}'))
+
+    with patch("app.routers.admin.supabase", mock_sb), patch("app.database.supabase", mock_sb):
+        result = await delete_branch(branch_id="branch-1", clinic_id="clinic-1", user=admin)
+
+    assert result["success"] is True and result["deleted"] is False
+    assert "deactivated" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_delete_branch_other_errors_still_fail():
+    from fastapi import HTTPException
+
+    admin = AdminUser("drpatel", role="clinic_admin", clinic_id="clinic-1", user_id="user-1")
+    mock_sb = _mock_supabase(dependents_by_table={})
+    _fail_branch_delete(mock_sb, Exception("connection reset"))
+
+    with patch("app.routers.admin.supabase", mock_sb), patch("app.database.supabase", mock_sb):
+        with pytest.raises(HTTPException) as exc:
+            await delete_branch(branch_id="branch-1", clinic_id="clinic-1", user=admin)
+
+    assert exc.value.status_code == 500
