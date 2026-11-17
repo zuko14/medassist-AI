@@ -94,6 +94,32 @@ _ERRORS = {
     "rx_reason_required": (422, "A reason is required (3+ characters)."),
     "rx_return_not_found": (404, "Supplier return not found."),
     "rx_return_empty": (422, "Add at least one batch before dispatching the return."),
+    # 138 counter sales
+    "rx_sale_not_found": (404, "Sale not found."),
+    "rx_sale_item_not_found": (404, "Bill line not found."),
+    "rx_sale_empty": (422, "Add at least one medicine before completing the bill."),
+    "rx_store_cannot_sell": (409, "This store does not sell."),
+    "rx_prescription_superseded": (409, "The doctor changed this prescription. Reload it before billing."),
+    "rx_discount_over_limit": (403, "This discount is above the counter limit. Ask a manager to approve it."),
+    "rx_fulfilment_exceeds_rx": (409, "This is more than the prescription allows (already dispensed elsewhere?)."),
+    "rx_schedule_needs_rx": (422, "A scheduled medicine needs a prescription with the prescriber's registration number."),
+    "rx_schedule_needs_patient": (422, "A scheduled medicine needs the patient's name."),
+    "rx_controlled_permission": (403, "Selling Schedule X / narcotic medicines needs the RX_CONTROLLED permission."),
+    "rx_controlled_requires_inhouse_rx": (422, "Schedule X / narcotic medicines are never sold over the counter: "
+                                               "link the clinic's prescription or capture the outside one."),
+    "rx_external_rx_reused": (409, "This outside prescription has already been used for a controlled medicine."),
+    "rx_payment_mismatch": (422, "The payments do not add up to the bill total."),
+    "rx_payment_mode_invalid": (422, "Payment mode must be cash, UPI, card or wallet."),
+    "rx_payment_invalid": (422, "Each payment must be a positive amount."),
+    "rx_shift_not_open": (409, "No open cashier shift for cash. Open your shift first."),
+    "rx_whole_packs_only": (422, "This medicine is sold in whole packs only."),
+    "rx_return_exceeds_sold": (409, "You cannot return more than was sold (and not already returned)."),
+    "rx_return_window_closed": (409, "The return window for this bill has closed. A manager can approve it."),
+    "rx_restock_needs_admin": (403, "Controlled or Schedule H1 returns go back to stock only with a manager."),
+    "rx_refund_exceeds_tender": (409, "Refund is more than was paid in this mode. Use the original mode or a credit note."),
+    "rx_void_not_same_day": (409, "Only today's bills can be voided. Use a return instead."),
+    "rx_void_has_returns": (409, "This bill has returns; it can no longer be voided."),
+    "rx_write_via_function_only": (500, "The pharmacy operation failed. Nothing was changed; please retry."),
 }
 # constraints whose clients branch on a stable code (API.md §4)
 _CONSTRAINT_CODES = {"rx_grns_invoice_key": "rx_grn_duplicate_invoice"}
@@ -131,6 +157,12 @@ _CONSTRAINTS = (
     ("rx_po_supplier_fk", 404, "Supplier not found."), ("rx_grns_supplier_fk", 404, "Supplier not found."),
     ("rx_srn_supplier_fk", 404, "Supplier not found."), ("rx_grn_lines_item_fk", 404, "Item not found."),
     ("rx_po_lines_item_fk", 404, "Item not found."), ("rx_srn_lines_batch_fk", 404, "Batch not found."),
+    ("uq_rx_sales_idem", 409, "This bill was already completed with another request."),
+    ("rx_sales_has_person", 422, "Enter the patient's name."),
+    ("rx_sale_items_le_mrp", 422, "A line cannot be priced above MRP."),
+    ("rx_sale_items_returned_le_qty", 409, "You cannot return more than was sold."),
+    ("rx_sales_giveback_le_net", 409, "Refunds cannot exceed what was paid for this bill."),
+    ("rx_sale_payments_cash_needs_shift", 409, "Cash needs an open cashier shift."),
 )
 
 

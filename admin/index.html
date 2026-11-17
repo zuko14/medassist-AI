@@ -3658,6 +3658,44 @@
         .rx-drawer.wide { width: min(1180px, 100vw); }
         .rxp-group h4 { margin: 14px 0 6px; }
         /* RX:purchase:END */
+        /* RX:pos:START — Pharmacy POS (migration 138; docs/pharmacy-os/UI.md §2) */
+        .rxpos-grid { display: grid; grid-template-columns: minmax(0, 65fr) minmax(300px, 35fr); gap: 16px; align-items: start; }
+        .rxpos-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 12px; font-size: 0.85rem; color: var(--text2); }
+        .rxpos-search { position: relative; }
+        .rxpos-search input { width: 100%; font-size: 1rem; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+        .rxpos-results { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: var(--surface-solid, var(--bg)); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.25); max-height: 340px; overflow-y: auto; }
+        .rxpos-results button { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--border); background: none; color: var(--text); font: inherit; cursor: pointer; }
+        .rxpos-results button[aria-selected="true"], .rxpos-results button:hover { background: var(--accent-soft); }
+        .rxpos-lines { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .rxpos-lines th { text-align: left; font-size: 0.72rem; color: var(--text3); padding: 6px 4px; border-bottom: 1px solid var(--border); }
+        .rxpos-lines td { padding: 7px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        .rxpos-lines tr.rx-focus td { background: var(--accent-soft); }
+        .rxpos-lines input[type="number"] { width: 74px; padding: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+        .rxpos-chip { display: inline-flex; gap: 5px; align-items: center; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); font: inherit; font-size: 0.78rem; cursor: pointer; }
+        .rxpos-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex: none; }
+        .rxpos-dot.near, .rxpos-dot.short_shelf { background: var(--amber); } .rxpos-dot.expired, .rxpos-dot.blocked { background: var(--red); }
+        .rxpos-map { border: 1px dashed var(--amber); background: var(--amber-bg); border-radius: 10px; padding: 8px 10px; margin-top: 8px; font-size: 0.85rem; }
+        .rxpos-total { font-size: 2rem; font-weight: 800; text-align: right; }
+        .rxpos-sum { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; font-size: 0.88rem; }
+        .rxpos-sum .rx-num { font-variant-numeric: tabular-nums; }
+        .rxpos-tender { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+        .rxpos-tender label { font-size: 0.72rem; color: var(--text3); }
+        .rxpos-tender input { width: 100%; padding: 9px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 1rem; }
+        .rxpos-complete { width: 100%; margin-top: 12px; padding: 14px; font-size: 1rem; }
+        .rxpos-keys { font-size: 0.75rem; color: var(--text3); }
+        .rxpos-keys kbd { border: 1px solid var(--border2); border-radius: 4px; padding: 0 4px; font: inherit; }
+        @media (max-width: 1024px) { .rxpos-grid { grid-template-columns: minmax(0, 1fr); } .rxpos-keys { display: none; } }
+        @media (max-width: 760px) {
+            .rxpos-lines thead { display: none; }
+            .rxpos-lines tr { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+            .rxpos-lines td { border: 0; padding: 0; background: none !important; }
+            .rxpos-lines tr.rx-focus { background: var(--accent-soft); border-radius: 10px; }
+            .rxpos-lines td:first-child { display: none; }
+            .rxpos-lines td:nth-child(2) { grid-column: 1 / -1; }
+            .rxpos-lines td.rx-num { text-align: right; }
+            .rxpos-side { position: sticky; bottom: 0; z-index: 20; }
+        }
+        /* RX:pos:END */
     </style>
 </head>
 <body>
@@ -3999,6 +4037,11 @@
                     <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 20.5 3.5 13.5a4.95 4.95 0 1 1 7-7l7 7a4.95 4.95 0 1 1-7 7z"></path><path d="m8.5 8.5 7 7"></path></svg></span><span class="nav-group-title">Pharmacy</span><span class="nav-group-count" aria-hidden="true"></span><svg class="nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"></polyline></svg>
                 </button>
                 <div class="nav-group-body" id="navGrpRx" role="group" aria-labelledby="navGrpRxHead"><div class="nav-group-inner">
+            <!-- RX:pos:START -->
+            <div class="nav-link" tabindex="0" data-page="rxpos" data-rx="nav RX_READ RX_DISPENSE RX_ADMIN" style="display:none" onclick="go('rxpos',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M7 20h10M12 16v4M7 9h4M7 12h2"></path></svg></span><span>Pharmacy POS</span>
+            </div>
+            <!-- RX:pos:END -->
             <!-- RX:stock:START -->
             <div class="nav-link" tabindex="0" data-page="rxstock" data-rx="nav RX_READ" style="display:none" onclick="go('rxstock',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"></path><path d="m3 8 9 5 9-5"></path><path d="M12 13v8"></path></svg></span><span>Stock &amp; Expiry</span>
@@ -7943,6 +7986,42 @@
             </aside>
         </div>
         <!-- RX:purchase:END -->
+        <!-- RX:pos:START — Pharmacy POS page (docs/pharmacy-os/UI.md §2, page rxpos) -->
+        <div id="pg-rxpos" class="sec">
+            <div class="page-head">
+                <div><h2>Pharmacy POS</h2><p>Bill a prescription or a walk-in. Prices, tax and stock are checked by the server at completion.</p></div>
+                <div class="dx-actions" style="margin:0;">
+                    <select id="rxpsStore" aria-label="Selling store" onchange="rxpos.newBill()"></select>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.inbox()">Rx Inbox <span class="rxpos-keys"><kbd>Ctrl+I</kbd></span></button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.parked()">Parked <span class="rxpos-keys"><kbd>F3</kbd></span></button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.recent()">Recent bills <span class="rxpos-keys"><kbd>F9</kbd></span></button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.daySummary()">Day summary</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.help()" aria-label="Keyboard shortcuts">?</button>
+                </div>
+            </div>
+            <div class="ipd-winddown" data-rx-winddown hidden>Pharmacy OS is being switched off for this clinic: new bills are closed. Returns and reprints continue.</div>
+            <div class="rxpos-grid">
+                <div class="card">
+                    <div class="rxpos-search">
+                        <label for="rxpsQ" class="sr-only">Search token, MRN, phone, bill number, medicine or barcode</label>
+                        <input id="rxpsQ" autocomplete="off" placeholder="F2 · token, MRN, phone, bill no., medicine or barcode" role="combobox" aria-expanded="false" aria-controls="rxpsResults"
+                               oninput="rxpos.typed()" onkeydown="rxpos.searchKeys(event)">
+                        <div id="rxpsResults" class="rxpos-results" role="listbox" hidden></div>
+                    </div>
+                    <div id="rxpsHead" class="rxpos-bar" style="margin-top:10px;"></div>
+                    <div id="rxpsLines" aria-live="polite"></div>
+                    <div id="rxpsMap"></div>
+                    <div id="rxpsPanel"></div>
+                </div>
+                <div class="card rxpos-side" id="rxpsSide" aria-live="polite"></div>
+            </div>
+            <aside class="rx-drawer" id="rxpsDrawer" role="dialog" aria-modal="true" aria-labelledby="rxpsDrawerTitle">
+                <header><h3 id="rxpsDrawerTitle"></h3><button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body" id="rxpsDrawerBody"></div>
+                <footer id="rxpsDrawerFoot"></footer>
+            </aside>
+        </div>
+        <!-- RX:pos:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -11415,6 +11494,444 @@ const rxpur = {
     },
 };
 /* RX:purchase:END */
+
+/* RX:pos:START — Pharmacy POS (migration 138). The server prices every line from the batch, splits GST, enforces
+   discount caps, schedule rules, Rx caps and stock at completion; this screen only collects and shows. */
+const rxDr = n => n ? (/^dr\.?\s/i.test(String(n)) ? String(n) : 'Dr ' + n) : '';
+const rxpos = {
+    stores: [], sale: null, results: [], sel: -1, focus: 0, timer: null, idem: null, override: null, rxMap: [],
+    canSell() { return myRx === 'ACTIVE' && (rxCan('RX_DISPENSE') || rxCan('RX_ADMIN')); },
+    store() { return document.getElementById('rxpsStore').value; },
+    async load() {
+        if (!rxpos.stores.length) {
+            try { rxpos.stores = (await api('/admin/rx/stores')).stores.filter(s => s.is_active && s.can_sell); }
+            catch (e) { document.getElementById('rxpsLines').innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+            document.getElementById('rxpsStore').innerHTML = rxpos.stores.length
+                ? rxpos.stores.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('') : '<option value="">No selling counter</option>';
+        }
+        if (!rxpos.keysBound) { document.addEventListener('keydown', rxpos.keys); rxpos.keysBound = true; }
+        applyRxGates();
+        rxpos.render();
+        setTimeout(() => document.getElementById('rxpsQ').focus(), 50);
+    },
+    active() { return document.getElementById('pg-rxpos').classList.contains('active') || document.getElementById('pg-rxpos').offsetParent !== null; },
+    keys(e) {
+        if (!rxpos.active()) return;
+        const k = e.key, ctrl = e.ctrlKey || e.metaKey, drawer = document.getElementById('rxpsDrawer').classList.contains('open');
+        const map = { F2: () => document.getElementById('rxpsQ').focus(), F3: rxpos.parked, F4: rxpos.discount, F6: () => rxpos.tender('cash'),
+                      F7: () => rxpos.tender('upi'), F8: () => rxpos.tender('card'), F9: rxpos.recent, F10: rxpos.recent, F11: rxpos.repeatList };
+        if (map[k]) { e.preventDefault(); map[k](); return; }
+        if (ctrl && ['b', 'p', 'r', 'i', 'o'].includes(k.toLowerCase())) {
+            e.preventDefault();
+            ({ b: () => rxpos.batches(rxpos.focus), p: rxpos.park, r: rxpos.parked, i: rxpos.inbox, o: () => rxpos.overrideForm('discount_over_cap') })[k.toLowerCase()]();
+            return;
+        }
+        if (k === 'Escape' && drawer) { e.preventDefault(); rxpos.close(); return; }
+        if (k === '?' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) { e.preventDefault(); rxpos.help(); return; }
+        if (k === 'Enter' && e.target.closest && e.target.closest('#rxpsSide') && e.target.tagName !== 'BUTTON') { e.preventDefault(); rxpos.complete(); }
+        if (!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && rxpos.sale && rxpos.sale.status === 'draft') {
+            const ln = rxpos.sale.lines[rxpos.focus];
+            if (!ln) return;
+            const step = e.shiftKey ? (ln.item || {}).pack_size || 1 : 1;
+            if (k === '+' || k === '=') { e.preventDefault(); rxpos.setQty(rxpos.focus, ln.qty_units + step); }
+            if (k === '-') { e.preventDefault(); rxpos.setQty(rxpos.focus, Math.max(1, ln.qty_units - step)); }
+            if (k === 'Delete') { e.preventDefault(); rxpos.remove(rxpos.focus); }
+            if (k === 'ArrowDown' || k === 'ArrowUp') { e.preventDefault(); rxpos.focus = Math.max(0, Math.min(rxpos.sale.lines.length - 1, rxpos.focus + (k === 'ArrowDown' ? 1 : -1))); rxpos.renderLines(); }
+        }
+    },
+    // ── search: Rx lookup (token / MRN / phone / QR / bill no.) or medicine / barcode ──
+    typed() { clearTimeout(rxpos.timer); rxpos.timer = setTimeout(rxpos.search, 180); },
+    async search() {
+        const q = document.getElementById('rxpsQ').value.trim(), box = document.getElementById('rxpsResults');
+        if (q.length < 1) { box.hidden = true; return; }
+        const looksPerson = /^\d{1,4}$/.test(q) || /^PHS-/i.test(q) || /^[0-9a-f-]{36}$/i.test(q) || /^MRN/i.test(q) || q.replace(/\D/g, '').length >= 10;
+        rxpos.results = [];
+        try {
+            if (looksPerson) {
+                const r = await api('/admin/rx/pos/lookup?q=' + encodeURIComponent(q));
+                rxpos.results = r.prescriptions.map(p => ({ kind: 'rx', p, label: `℞ ${esc((p.patient || {}).patient_name || 'Patient')} · ${esc(rxDr(p.doctor))} · ${new Date(p.signed_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })} · ${esc(p.state)}` }))
+                    .concat(r.sales.map(s => ({ kind: 'bill', s, label: `Bill ${esc(s.sale_number || 'draft')} · ${rxRs(s.net_paise)} · ${esc(s.status)}` })));
+            }
+            if (!looksPerson || !rxpos.results.length) {
+                const r = await api(`/admin/rx/items/resolve?limit=8&q=${encodeURIComponent(q)}&store_id=${encodeURIComponent(rxpos.store())}`);
+                rxpos.results = rxpos.results.concat(r.candidates.map(cnd => ({ kind: 'item', c: cnd, label: `${esc(cnd.brand_name)} <span class="rx-sub">${esc(cnd.item_code)} · ${esc(cnd.source)}</span> ${rxSchedBadge(cnd.schedule)}` })));
+            }
+        } catch (e) { toast(e.message, true); return; }
+        rxpos.sel = rxpos.results.length ? 0 : -1;
+        box.innerHTML = rxpos.results.length ? rxpos.results.map((r, i) => `<button type="button" role="option" aria-selected="${i === rxpos.sel}" onclick="rxpos.pick(${i})">${r.label}</button>`).join('')
+            : '<div class="muted" style="padding:10px">No match. Prescriptions: token, MRN or phone. Medicines: name or barcode.</div>';
+        box.hidden = false;
+        document.getElementById('rxpsQ').setAttribute('aria-expanded', 'true');
+    },
+    searchKeys(e) {
+        const n = rxpos.results.length;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!n) return;
+            rxpos.sel = (rxpos.sel + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+            document.querySelectorAll('#rxpsResults button').forEach((b, i) => b.setAttribute('aria-selected', String(i === rxpos.sel)));
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            clearTimeout(rxpos.timer);
+            if (rxpos.sel >= 0 && n) rxpos.pick(rxpos.sel); else rxpos.search().then(() => rxpos.results.length === 1 && rxpos.pick(0));
+        } else if (e.key === 'Escape') { document.getElementById('rxpsResults').hidden = true; }
+    },
+    closeResults() {
+        document.getElementById('rxpsResults').hidden = true;
+        document.getElementById('rxpsQ').value = '';
+        document.getElementById('rxpsQ').setAttribute('aria-expanded', 'false');
+    },
+    async pick(i) {
+        const r = rxpos.results[i];
+        rxpos.closeResults();
+        if (!r) return;
+        if (r.kind === 'bill') return rxpos.open(r.s.id);
+        if (r.kind === 'rx') return rxpos.startRx(r.p.id);
+        if (!rxpos.canSell()) return;
+        if (!rxpos.sale || rxpos.sale.status !== 'draft') await rxpos.create({ sale_kind: 'otc' });
+        if (!rxpos.sale) return;
+        const items = (await api(`/admin/rx/items/${encodeURIComponent(r.c.item_id)}`).catch(() => null));
+        const lines = rxpos.linesBody();
+        lines.push({ item_id: r.c.item_id, qty_units: items ? (items.allow_loose ? 1 : items.pack_size) : 1 });
+        await rxpos.putLines(lines);
+        rxpos.focus = rxpos.sale ? rxpos.sale.lines.length - 1 : 0;
+        rxpos.renderLines();
+    },
+    async create(body) {
+        try {
+            const s = await apiPost('/admin/rx/sales', { store_id: rxpos.store(), ...body });
+            rxpos.rxMap = s.mapping || [];
+            rxpos.set(s);
+            if (s.existing_draft) toast('This prescription already has a draft at this counter — continuing it');
+            return s;
+        } catch (e) { toast(e.message, true); return null; }
+    },
+    async startRx(rxId, pick) { await rxpos.create({ sale_kind: 'opd_rx', opd_prescription_id: rxId, pick: !!pick }); },
+    async open(id) {
+        try { rxpos.rxMap = []; rxpos.set(await api(`/admin/rx/sales/${encodeURIComponent(id)}`)); } catch (e) { toast(e.message, true); }
+    },
+    set(s) { rxpos.sale = s; rxpos.idem = s && s.status === 'draft' ? (rxpos.idem && rxpos.idemFor === s.id ? rxpos.idem : 'pos-' + s.id) : null; rxpos.idemFor = s && s.id; rxpos.render(); },
+    newBill() { rxpos.sale = null; rxpos.override = null; rxpos.rxMap = []; rxpos.render(); document.getElementById('rxpsQ').focus(); },
+    linesBody() {
+        return (rxpos.sale ? rxpos.sale.lines : []).map(l => ({ item_id: l.item_id, batch_id: l.batch_id, qty_units: l.qty_units,
+            opd_prescription_item_id: l.opd_prescription_item_id || null, substituted_from_item_id: l.substituted_from_item_id || null,
+            substitution_reason: l.substitution_reason || null, fefo_override_reason: l.fefo_override_reason || null }));
+    },
+    async putLines(lines) {
+        try { rxpos.set({ ...await apiPut(`/admin/rx/sales/${encodeURIComponent(rxpos.sale.id)}/lines`, lines) }); return true; }
+        catch (e) { toast(e.message, true); return false; }
+    },
+    setQty(i, qty) {
+        const lines = rxpos.linesBody();
+        if (!lines[i] || !(qty >= 1)) return;
+        lines[i].qty_units = qty;
+        rxpos.putLines(lines);
+    },
+    remove(i) { const lines = rxpos.linesBody(); lines.splice(i, 1); rxpos.focus = Math.max(0, i - 1); rxpos.putLines(lines); },
+    // ── rendering ──
+    render() { rxpos.renderLines(); rxpos.renderSide(); },
+    renderLines() {
+        const s = rxpos.sale, head = document.getElementById('rxpsHead'), box = document.getElementById('rxpsLines');
+        if (!s) {
+            head.innerHTML = '';
+            box.innerHTML = `<p class="muted">${rxpos.canSell() ? 'Press <kbd>F2</kbd> and type a token, MRN, phone or bill number to load a prescription, or a medicine name / scan a barcode for a walk-in sale.' : 'Read-only: you can look up and reprint bills.'}</p>`;
+            document.getElementById('rxpsMap').innerHTML = ''; document.getElementById('rxpsPanel').innerHTML = '';
+            return;
+        }
+        const rx = s.prescription, snap = s.prescriber_snapshot || {}, pat = (s.patient_panel || {}).patient || {};
+        head.innerHTML = `${rxDocBadge(s.status === 'completed' ? 'posted' : s.status)} <b>${esc(s.sale_number || 'Draft')}</b>
+            ${rx ? `<span>℞ ${esc(rxDr(rx.doctor))} · signed ${new Date(rx.signed_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}</span>` : snap.external ? `<span>Outside ℞ · ${esc(snap.name)} · ${esc(snap.registration_number)}</span>` : ''}
+            <span>${esc(pat.name || s.walkin_name || 'Walk-in')}${pat.mrn ? ' · MRN ' + esc(pat.mrn) : ''}${pat.age_years ? ' · ' + esc(pat.age_years) + (pat.gender ? (pat.gender[0] || '').toUpperCase() : '') : ''}</span>
+            ${s.parked_label ? `<span class="rx-badge e-near">Parked: ${esc(s.parked_label)}</span>` : ''}`;
+        const edit = s.status === 'draft' && rxpos.canSell();
+        rxpos.focus = Math.min(rxpos.focus, Math.max(0, s.lines.length - 1));
+        const rxText = id => ((rx && rx.lines) || []).find(l => l.id === id);
+        box.innerHTML = s.lines.length ? `<table class="rxpos-lines"><thead><tr><th>#</th><th>Item</th><th>Batch / Exp</th><th>Qty</th><th class="rx-num">₹</th><th></th></tr></thead><tbody>
+            ${s.lines.map((l, i) => { const it = l.item || {}, b = l.batch || {}, rl = rxText(l.opd_prescription_item_id);
+                const st = b.expiry_date && (new Date(b.expiry_date) - new Date()) / 864e5 < 90 ? 'near' : 'ok';
+                return `<tr class="${i === rxpos.focus ? 'rx-focus' : ''}" onclick="rxpos.focus=${i}; rxpos.renderLines()">
+                <td>${l.line_no}</td>
+                <td><b>${esc(it.brand_name || '')}</b> ${rxSchedBadge(l.schedule)}${rl ? `<br><span class="rx-sub">↳ “${esc(rl.drug_name)} ${esc(rl.dosage)} ${esc(rl.frequency)}${rl.duration_days ? ' × ' + esc(rl.duration_days) + 'd' : ''}”</span>` : ''}
+                    ${l.substitution_reason ? `<br><span class="rx-sub">Substitute for ${esc((l.substituted_from || {}).brand_name || '')}: ${esc(l.substitution_reason)}</span>` : ''}</td>
+                <td><button type="button" class="rxpos-chip" ${edit ? '' : 'disabled'} onclick="event.stopPropagation(); rxpos.batches(${i})" aria-label="Batch ${esc(b.batch_no || '')}, change with Ctrl+B"><span class="rxpos-dot ${st}"></span>${esc(b.batch_no || '')} · ${esc(String(b.expiry_date || '').slice(5, 7))}/${esc(String(b.expiry_date || '').slice(2, 4))}</button></td>
+                <td>${edit ? `<input type="number" min="1" value="${esc(l.qty_units)}" aria-label="Quantity of ${esc(it.brand_name || '')} (units)" onchange="rxpos.setQty(${i}, parseInt(this.value, 10))">` : esc(l.qty_units)}
+                    <br><span class="rx-sub">${esc(fmtPackLoose(l.qty_units, it.pack_size, it.pack_label, it.base_unit))}</span></td>
+                <td class="rx-num">${rxRs(l.line_gross_paise - l.line_discount_paise)}</td>
+                <td>${edit ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); rxpos.remove(${i})" aria-label="Remove line">✕</button>` : ''}</td></tr>`; }).join('')}</tbody></table>`
+            : '<p class="muted">No lines yet.</p>';
+        // Rx lines still needing a choice: unmapped (ambiguous) or not on the bill (out of stock / pending)
+        const onBill = new Set(s.lines.map(l => l.opd_prescription_item_id).filter(Boolean));
+        const pend = ((rx && rx.lines) || []).filter(l => !onBill.has(l.id) && (l.pending === null || l.pending > 0));
+        document.getElementById('rxpsMap').innerHTML = edit && pend.length ? pend.map(l => {
+            const m = rxpos.rxMap.find(x => x.rx_item_id === l.id) || {};
+            return `<div class="rxpos-map">⚠ Map: “${esc(l.drug_name)} ${esc(l.strength || '')}” ${l.pending ? '· ' + esc(l.pending) + ' units' : ''}
+                ${(m.candidates || []).map(cd => `<button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.mapTo(${JSON.stringify(l.id)}, ${JSON.stringify(cd.item_id)}, ${Number(l.pending) || 0})'>${esc(cd.brand_name)} <span class="rx-sub">${esc(cd.source)}</span></button>`).join('')}
+                <button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.mapSearch(${JSON.stringify(l.id)}, ${JSON.stringify(l.drug_name)}, ${Number(l.pending) || 0})'>Search…</button>
+                <span class="rx-sub">Leave it to mark pending.</span></div>`; }).join('') : '';
+        const panel = s.patient_panel;
+        document.getElementById('rxpsPanel').innerHTML = (s.warnings || []).map(w => `<div class="rxpos-map">Line ${esc(w.line_no)}: ${esc(w.message)}</div>`).join('')
+            + (panel && panel.patient ? `<details style="margin-top:10px"><summary>History &amp; recorded allergies</summary>
+                <p class="rx-sub">${esc(panel.note)}</p>
+                <p>${panel.allergies.length ? panel.allergies.map(a => `<span class="rx-badge e-near">${esc(a.text)}</span> <span class="rx-sub">${esc(a.source)}</span>`).join(' ') : '<span class="muted">No allergies recorded (' + esc(panel.allergies_status) + ').</span>'}</p>
+                ${panel.history.map(h => `<div class="rx-sub">${esc(h.sale_number)} · ${rxDay(h.completed_at)} · ${h.items.map(x => esc(x.brand_name) + ' ×' + esc(x.qty_units)).join(', ')}</div>`).join('')}</details>` : '');
+    },
+    renderSide() {
+        const s = rxpos.sale, side = document.getElementById('rxpsSide');
+        if (!s) { side.innerHTML = '<div class="rxpos-total">₹0.00</div><p class="rxpos-keys">F2 search · F3 parked · F9 recent · Ctrl+I inbox · ? keys</p>'; return; }
+        const draft = s.status === 'draft' && rxpos.canSell(), paidModes = {};
+        (s.payments || []).forEach(p => { paidModes[p.mode] = (paidModes[p.mode] || 0) + Number(p.amount_paise); });
+        side.innerHTML = `<div class="rx-sub">TOTAL</div><div class="rxpos-total">${rxRs(s.net_paise)}</div>
+            <div class="rxpos-sum">${s.is_tax_invoice ? `<span>Taxable</span><span class="rx-num">${rxRs(s.taxable_paise)}</span><span>CGST</span><span class="rx-num">${rxRs(s.cgst_paise)}</span><span>SGST</span><span class="rx-num">${rxRs(s.sgst_paise)}</span>` : '<span>Bill of supply (no GSTIN)</span><span></span>'}
+                <span>Gross</span><span class="rx-num">${rxRs(s.gross_paise)}</span><span>Discount <span class="rxpos-keys"><kbd>F4</kbd></span></span><span class="rx-num">−${rxRs(s.discount_paise)}</span>
+                <span>Round off</span><span class="rx-num">${rxRs(s.round_off_paise)}</span></div>
+            ${draft ? `<div class="rxpos-tender">${['cash', 'upi', 'card'].map((m, i) => `<div><label for="rxpsPay_${m}">${m.toUpperCase()} <kbd>F${6 + i}</kbd></label><input id="rxpsPay_${m}" inputmode="decimal" placeholder="0.00"></div>`).join('')}</div>
+                <input id="rxpsRef" placeholder="UPI / card reference (optional)" maxlength="60" style="width:100%; margin-top:8px; padding:8px; border-radius:10px; border:1px solid var(--border); background:var(--surface2); color:var(--text)">
+                ${rxpos.override ? `<p class="rx-badge e-ok" style="margin-top:8px">Override ready: ${esc(rxpos.override.action)} by ${esc(rxpos.override.approver_name)}</p>` : ''}
+                <button type="button" class="btn btn-accent rxpos-complete" onclick="rxpos.complete()" ${s.lines.length ? '' : 'disabled'}>Complete &amp; print <span class="rxpos-keys"><kbd>Enter</kbd></span></button>
+                <div class="dx-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.park()">Park <span class="rxpos-keys"><kbd>Ctrl+P</kbd></span></button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.overrideForm('discount_over_cap')">Manager override <span class="rxpos-keys"><kbd>Ctrl+O</kbd></span></button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.discard()">Discard draft</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.labels()">Labels</button></div>`
+            : `<div class="rxpos-sum" style="margin-top:10px">${Object.entries(paidModes).map(([m, a]) => `<span>${esc(m.toUpperCase())}</span><span class="rx-num">${rxRs(a)}</span>`).join('')}</div>
+                <div class="dx-actions"><button type="button" class="btn btn-accent btn-sm" onclick="rxpos.print()">Print</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.labels()">Labels</button>
+                    ${s.status === 'completed' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.returnForm()">Return <span class="rxpos-keys"><kbd>F10</kbd></span></button>` : ''}
+                    ${s.status === 'completed' && rxCan('RX_ADMIN') ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.voidSale()">Void</button>` : ''}
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.newBill()">New bill</button></div>`}`;
+    },
+    // ── line tools ──
+    async mapTo(rxItemId, itemId, pending) {
+        const lines = rxpos.linesBody();
+        let item;
+        try { item = await api(`/admin/rx/items/${encodeURIComponent(itemId)}`); } catch (e) { toast(e.message, true); return; }
+        lines.push({ item_id: itemId, qty_units: pending || item.pack_size, opd_prescription_item_id: rxItemId });
+        await rxpos.putLines(lines);
+    },
+    mapSearch(rxItemId, text, pending) {
+        rxpos.drawer('Map prescription line', `<p>“${esc(text)}”</p><div class="field"><label for="rxpsMapQ">Search medicine</label><input id="rxpsMapQ" value="${esc(text)}" onkeydown="if(event.key==='Enter'){event.preventDefault(); rxpos.mapFind(${esc(JSON.stringify(rxItemId))}, ${pending});}"></div><div id="rxpsMapRes"></div>`, '');
+        rxpos.mapFind(rxItemId, pending);
+    },
+    async mapFind(rxItemId, pending) {
+        const q = document.getElementById('rxpsMapQ').value.trim();
+        const r = await api(`/admin/rx/items/resolve?limit=8&q=${encodeURIComponent(q)}&store_id=${encodeURIComponent(rxpos.store())}`).catch(() => ({ candidates: [] }));
+        document.getElementById('rxpsMapRes').innerHTML = r.candidates.length ? r.candidates.map(c => `<button type="button" class="btn btn-ghost btn-sm" style="display:block; margin:4px 0" onclick='rxpos.close(); rxpos.mapTo(${JSON.stringify(rxItemId)}, ${JSON.stringify(c.item_id)}, ${pending})'>${esc(c.brand_name)} · ${esc(c.item_code)} ${rxSchedBadge(c.schedule)}</button>`).join('')
+            + (r.substitutes.length ? `<h4>Same composition in stock</h4>${r.substitutes.map(sb => `<div class="rx-sub">${esc(sb.brand_name)} — ${esc(sb.stock_units)} units</div>`).join('')}` : '')
+            : '<p class="muted">No match.</p>';
+    },
+    async batches(i) {
+        const s = rxpos.sale, l = s && s.lines[i];
+        if (!l || s.status !== 'draft') return;
+        let b;
+        try { b = (await api(`/admin/rx/batches?item_id=${encodeURIComponent(l.item_id)}&store_id=${encodeURIComponent(s.store_id)}`)).batches; } catch (e) { toast(e.message, true); return; }
+        rxpos.drawer(`Batch · ${(l.item || {}).brand_name || ''}`, `<table class="rx-tbl" style="width:100%"><tbody>${b.map(x => {
+            const ok = !['expired', 'blocked'].includes(x.expiry_status);
+            return `<tr style="${ok ? '' : 'opacity:.55'}"><td>${x.fefo_rank === 1 ? '<span class="rx-badge e-ok">FEFO</span> ' : ''}<b>${esc(x.batch_no)}</b></td><td>${rxExpBadge(x.expiry_status, x.expiry_date, x.days_left)}</td>
+                <td class="rx-num">${esc(fmtPackLoose(x.qty_units, (l.item || {}).pack_size, (l.item || {}).pack_label, (l.item || {}).base_unit))}</td><td class="rx-num">${rxRs(x.mrp_pack_paise)}</td>
+                <td>${ok ? `<button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.useBatch(${i}, ${JSON.stringify(x.batch_id)}, ${x.fefo_rank === 1})'>${String(x.batch_id) === String(l.batch_id) ? 'Selected' : 'Use'}</button>` : esc(x.block_reason || 'Not sellable')}</td></tr>`; }).join('')}</tbody></table>`, '');
+    },
+    async useBatch(i, batchId, fefo) {
+        const lines = rxpos.linesBody();
+        let reason = null;
+        if (!fefo) {
+            reason = (prompt('A later-expiring batch than FEFO: why?', 'Patient asked for a longer expiry') || '').trim();
+            if (reason.length < 3) return;
+        }
+        lines[i] = { ...lines[i], batch_id: batchId, fefo_override_reason: reason };
+        rxpos.close();
+        await rxpos.putLines(lines);
+    },
+    // ── money ──
+    async discount() {
+        const s = rxpos.sale;
+        if (!s || s.status !== 'draft') return;
+        const v = (prompt('Discount: amount in ₹, or a percentage like 5%', '') || '').trim();
+        if (!v) return;
+        const paise = v.endsWith('%') ? Math.round(s.gross_paise * parseFloat(v) / 100) : rxPaise(v);
+        if (paise == null || paise < 0) { toast('Enter an amount or a percentage.', true); return; }
+        try {
+            const r = await apiPatch(`/admin/rx/sales/${encodeURIComponent(s.id)}`, { discount_paise: paise });
+            rxpos.set(r);
+            if (r.discount_needs_override) toast('Above the counter discount limit: a manager must approve (Ctrl+O) before completing.', true);
+        } catch (e) { toast(e.message, true); }
+    },
+    tender(mode) {
+        const s = rxpos.sale, el = document.getElementById('rxpsPay_' + mode);
+        if (!s || !el) return;
+        const other = ['cash', 'upi', 'card'].filter(m => m !== mode).reduce((a, m) => a + (rxPaise(document.getElementById('rxpsPay_' + m).value) || 0), 0);
+        el.value = rxRupees(Math.max(0, s.net_paise - other));
+        el.focus(); el.select();
+    },
+    async complete() {
+        const s = rxpos.sale;
+        if (!s || s.status !== 'draft' || !rxpos.canSell()) return;
+        const ref = (document.getElementById('rxpsRef') || {}).value || null;
+        let payments = ['cash', 'upi', 'card'].map(m => ({ mode: m, amount_paise: rxPaise(document.getElementById('rxpsPay_' + m).value) || 0, reference: m === 'cash' ? null : ref }))
+            .filter(p => p.amount_paise > 0);
+        if (!payments.length && s.net_paise > 0) payments = [{ mode: 'cash', amount_paise: s.net_paise, reference: null }];
+        const paid = payments.reduce((a, p) => a + p.amount_paise, 0);
+        if (paid !== s.net_paise) { toast(`Payments ${rxRs(paid)} do not match the total ${rxRs(s.net_paise)}.`, true); return; }
+        const btn = document.querySelector('#rxpsSide .rxpos-complete');
+        if (btn) btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/rx/sales/${encodeURIComponent(s.id)}/complete`, { payments, idempotency_key: rxpos.idem, override_id: rxpos.override ? rxpos.override.override_id : null });
+            rxpos.override = null;
+            rxpos.set(r);
+            toast(`Bill ${r.sale_number} completed`);
+            rxpos.printDialog();
+        } catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
+    },
+    printDialog() {
+        rxpos.drawer('Print', `<p>Bill ${esc(rxpos.sale.sale_number)} · ${rxRs(rxpos.sale.net_paise)}</p>`,
+            `<button type="button" class="btn btn-accent btn-sm" onclick="rxpos.print('80mm')">80 mm receipt</button>
+             <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.print('a5')">A5</button>
+             <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.labels()">Dispensing labels</button>
+             <button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.close(); rxpos.newBill()">Next bill</button>`);
+    },
+    async print(fmt) {
+        const s = rxpos.sale;
+        fmt = fmt || (myRxSettingsFormat || '80mm');
+        try {
+            const blob = await (await apiRaw(`/admin/rx/sales/${encodeURIComponent(s.id)}/receipt?format=${fmt}`)).blob();
+            window.open(URL.createObjectURL(blob), '_blank', 'noopener');
+        } catch (e) { toast(e.message, true); }
+    },
+    async labels() {
+        const s = rxpos.sale;
+        if (!s) return;
+        try { window.open(URL.createObjectURL(await (await apiRaw(`/admin/rx/sales/${encodeURIComponent(s.id)}/labels.pdf`)).blob()), '_blank', 'noopener'); }
+        catch (e) { toast(e.message, true); }
+    },
+    async park() {
+        const s = rxpos.sale;
+        if (!s || s.status !== 'draft') return;
+        const label = (prompt('Park this bill with a short note', s.walkin_name || ((s.patient_panel || {}).patient || {}).name || '') || '').trim();
+        if (!label) return;
+        try { await apiPost(`/admin/rx/sales/${encodeURIComponent(s.id)}/park`, { label }); toast('Bill parked'); rxpos.newBill(); } catch (e) { toast(e.message, true); }
+    },
+    async discard() {
+        if (!confirm('Discard this draft? Nothing has been sold.')) return;
+        try { await apiDel(`/admin/rx/sales/${encodeURIComponent(rxpos.sale.id)}`); rxpos.newBill(); } catch (e) { toast(e.message, true); }
+    },
+    // ── drawers: parked, recent, inbox, repeat, return, override, day summary, help ──
+    drawer(title, html, foot) {
+        const d = document.getElementById('rxpsDrawer');
+        document.getElementById('rxpsDrawerTitle').textContent = title;
+        document.getElementById('rxpsDrawerBody').innerHTML = html;
+        document.getElementById('rxpsDrawerFoot').innerHTML = (foot || '') + '<button type="button" class="btn btn-ghost btn-sm" onclick="rxpos.close()">Close</button>';
+        if (!d.classList.contains('open')) rxpos.lastFocus = document.activeElement;
+        d.classList.add('open');
+        setTimeout(() => (d.querySelector('input, button') || d).focus(), 50);
+    },
+    close() { document.getElementById('rxpsDrawer').classList.remove('open'); if (rxpos.lastFocus && rxpos.lastFocus.focus) rxpos.lastFocus.focus(); },
+    async listDrawer(title, path, rowFn, empty) {
+        let rows;
+        try { rows = await api(path); } catch (e) { toast(e.message, true); return; }
+        rows = rows.sales || rows.prescriptions || [];
+        rxpos.drawer(title, rows.length ? rows.map(rowFn).join('') : `<p class="muted">${empty}</p>`, '');
+    },
+    parked() {
+        rxpos.listDrawer('Parked & stale drafts', `/admin/rx/sales?status=draft&store_id=${encodeURIComponent(rxpos.store())}`, s =>
+            `<div class="rx-toolbar" style="justify-content:space-between"><div><b>${esc(s.parked_label || (s.patient || {}).name || s.walkin_name || 'Draft')}</b>
+             <span class="rx-sub">${rxDay(s.created_at)}${s.stale ? ' · stale (over 24 h)' : ''}</span></div>
+             <button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.recall(${JSON.stringify(s.id)})'>Recall</button></div>`, 'No drafts at this counter.');
+    },
+    async recall(id) { try { rxpos.close(); rxpos.rxMap = []; rxpos.set(await apiPost(`/admin/rx/sales/${encodeURIComponent(id)}/recall`, {})); } catch (e) { toast(e.message, true); } },
+    recent() {
+        rxpos.listDrawer('Recent bills', `/admin/rx/sales?status=completed&limit=20&store_id=${encodeURIComponent(rxpos.store())}`, s =>
+            `<div class="rx-toolbar" style="justify-content:space-between"><div><b>${esc(s.sale_number)}</b> <span class="rx-sub">${esc((s.patient || {}).name || s.walkin_name || 'Walk-in')} · ${rxRs(s.net_paise)}${s.refunded_paise + s.credited_paise ? ' · returns ' + rxRs(s.refunded_paise + s.credited_paise) : ''}</span></div>
+             <button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.close(); rxpos.open(${JSON.stringify(s.id)})'>Open</button></div>`, 'No bills yet today.');
+    },
+    inbox() {
+        rxpos.listDrawer('Rx Inbox — signed today', `/admin/rx/pos/inbox?store_id=${encodeURIComponent(rxpos.store())}`, p =>
+            `<div class="rx-toolbar" style="justify-content:space-between"><div><b>${esc((p.patient || {}).patient_name || 'Patient')}</b> <span class="rx-sub">${esc(rxDr(p.doctor))} · ${esc(p.lines.length)} lines · ${esc(p.state)}</span></div>
+             ${p.draft_sale_id ? `<button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.close(); rxpos.open(${JSON.stringify(p.draft_sale_id)})'>Open draft</button>`
+               : p.state === 'billed' ? '' : `<button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.close(); rxpos.startRx(${JSON.stringify(p.id)}, true)'>Pick</button>`}</div>`, 'No prescriptions signed today for this counter.');
+    },
+    repeatList() {
+        const panel = rxpos.sale && rxpos.sale.patient_panel;
+        if (!panel || !panel.history.length) { toast('Load a patient first: their last bills appear here.', true); return; }
+        rxpos.drawer('Repeat a previous bill', panel.history.slice(0, 5).map(h => `<div class="rx-toolbar" style="justify-content:space-between"><div><b>${esc(h.sale_number)}</b>
+            <span class="rx-sub">${rxDay(h.completed_at)} · ${h.items.map(x => esc(x.brand_name) + (['H1', 'X', 'narcotic', 'psychotropic', 'H'].includes(x.schedule) ? ' (needs ℞)' : '')).join(', ')}</span></div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick='rxpos.repeat(${JSON.stringify(h.id)})'>Repeat</button></div>`).join(''), '');
+    },
+    async repeat(id) {
+        rxpos.close();
+        const pid = rxpos.sale.patient_id;
+        const s = await rxpos.create({ sale_kind: 'otc', patient_id: pid, repeat_of_sale_id: id });
+        if (s) { const skipped = (s.mapping || []).filter(m => m.status === 'needs_rx'); if (skipped.length) toast(`Not added without a prescription: ${skipped.map(m => m.brand_name).join(', ')}`, true); }
+    },
+    returnForm() {
+        const s = rxpos.sale;
+        rxpos.drawer(`Return against ${s.sale_number}`, `<table class="rx-tbl" style="width:100%"><thead><tr><th>Item</th><th>Returnable</th><th>Units</th><th>Back to stock</th></tr></thead><tbody>
+            ${s.lines.map(l => `<tr><td>${esc((l.item || {}).brand_name)} <span class="rx-sub">${esc((l.batch || {}).batch_no)}</span></td><td>${esc(l.qty_units - l.returned_units)}</td>
+                <td><input type="number" min="0" max="${esc(l.qty_units - l.returned_units)}" value="0" data-ret="${esc(l.id)}" style="width:70px" aria-label="Units of ${esc((l.item || {}).brand_name)} to return"></td>
+                <td><input type="checkbox" data-restock="${esc(l.id)}" ${['H1', 'X', 'narcotic', 'psychotropic'].includes(l.schedule) ? '' : 'checked'} aria-label="Unopened, back to stock"></td></tr>`).join('')}</tbody></table>
+            <div class="dx-grid"><div class="field"><label for="rxpsRetReason">Reason</label><select id="rxpsRetReason">${['unopened_unused', 'wrong_item', 'adverse_reaction_doctor_advised', 'therapy_changed', 'other'].map(r => `<option value="${r}">${r.replace(/_/g, ' ')}</option>`).join('')}</select></div>
+            <div class="field"><label for="rxpsRetMode">Refund</label><select id="rxpsRetMode"><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="credit_note">Credit note</option></select></div></div>
+            <p class="rx-sub">Refund is the price actually paid for those units. Opened strips and broken cold chain do not go back to stock.</p>`,
+            `<button type="button" class="btn btn-accent btn-sm" onclick="rxpos.submitReturn(this)">Record return</button>`);
+    },
+    async submitReturn(btn) {
+        const s = rxpos.sale;
+        const lines = [...document.querySelectorAll('[data-ret]')].map(i => ({ sale_item_id: i.dataset.ret, qty_units: parseInt(i.value, 10) || 0,
+            restock: document.querySelector(`[data-restock="${i.dataset.ret}"]`).checked })).filter(l => l.qty_units > 0);
+        if (!lines.length) { toast('Enter units to return.', true); return; }
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/rx/sales/${encodeURIComponent(s.id)}/returns`, { lines, reason: document.getElementById('rxpsRetReason').value,
+                refund_mode: document.getElementById('rxpsRetMode').value, idempotency_key: 'ret-' + s.id + '-' + Date.now(), override_id: rxpos.override ? rxpos.override.override_id : null });
+            rxpos.override = null;
+            toast(`${r.return_number}: ${rxRs(r.amount_paise)} ${r.credit_note_id ? 'as a credit note' : 'refunded'}`);
+            if (r.credit_note_id) window.open(URL.createObjectURL(await (await apiRaw(`/admin/rx/credit-notes/${encodeURIComponent(r.credit_note_id)}.pdf`)).blob()), '_blank', 'noopener');
+            rxpos.close(); rxpos.open(s.id);
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    async voidSale() {
+        const reason = (prompt('Void this bill (today only)? Reason:') || '').trim();
+        if (reason.length < 3) return;
+        try { await apiPost(`/admin/rx/sales/${encodeURIComponent(rxpos.sale.id)}/void`, { reason }); toast('Bill voided; stock and payment reversed'); rxpos.open(rxpos.sale.id); }
+        catch (e) { toast(e.message, true); }
+    },
+    overrideForm(action) {
+        const s = rxpos.sale;
+        rxpos.drawer('Manager override', `<p class="rx-sub">A manager types their own login. The approval lasts 60 seconds and is used once.</p><div class="dx-grid">
+            <div class="field"><label for="rxpsOvAction">For</label><select id="rxpsOvAction">${['discount_over_cap', 'return_past_window', 'rx_over_fulfil', 'fefo_override'].map(a => `<option value="${a}" ${a === action ? 'selected' : ''}>${a.replace(/_/g, ' ')}</option>`).join('')}</select></div>
+            <div class="field"><label for="rxpsOvAmt">Amount ₹ (discount)</label><input id="rxpsOvAmt" inputmode="decimal" value="${s ? rxRupees(s.discount_paise) : ''}"></div>
+            <div class="field"><label for="rxpsOvReason">Reason</label><input id="rxpsOvReason" maxlength="300"></div>
+            <div class="field"><label for="rxpsOvUser">Manager username</label><input id="rxpsOvUser" autocomplete="off"></div>
+            <div class="field"><label for="rxpsOvPass">Manager password</label><input id="rxpsOvPass" type="password" autocomplete="off"></div></div>`,
+            `<button type="button" class="btn btn-accent btn-sm" onclick="rxpos.requestOverride(this)">Approve</button>`);
+    },
+    async requestOverride(btn) {
+        const v = id => document.getElementById(id).value.trim();
+        const body = { action: v('rxpsOvAction'), sale_id: rxpos.sale ? rxpos.sale.id : null, amount_paise: v('rxpsOvAmt') ? rxPaise(v('rxpsOvAmt')) : null,
+                       reason: v('rxpsOvReason'), approver_username: v('rxpsOvUser'), approver_password: document.getElementById('rxpsOvPass').value };
+        if (body.reason.length < 3) { toast('Give a reason.', true); return; }
+        btn.disabled = true;
+        try { rxpos.override = await apiPost('/admin/rx/overrides', body); rxpos.close(); rxpos.renderSide(); toast('Approved for 60 seconds — complete now'); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+        finally { const p = document.getElementById('rxpsOvPass'); if (p) p.value = ''; }
+    },
+    async daySummary() {
+        let z;
+        try { z = await api('/admin/rx/pos/day-summary?store_id=' + encodeURIComponent(rxpos.store())); } catch (e) { toast(e.message, true); return; }
+        rxpos.drawer(`Day summary · ${z.date}`, `<div class="rx-stats"><div><span class="rx-sub">Bills</span><b>${esc(z.sales_count)}</b></div><div><span class="rx-sub">Net sales</span><b>${rxRs(z.net_paise)}</b></div>
+            <div><span class="rx-sub">Discounts</span><b>${rxRs(z.discount_paise)}</b></div><div><span class="rx-sub">Returns</span><b>${rxRs(z.returns_paise)}</b><span class="rx-sub">${esc(z.returns_count)} · voids ${esc(z.voids)}</span></div></div>
+            <h4>By payment mode (money moved today)</h4>${Object.entries(z.by_mode).map(([m, a]) => `<div class="rx-sub">${esc(m.toUpperCase())}: ${rxRs(a)}</div>`).join('') || '<p class="muted">None.</p>'}
+            <h4>By GST slab</h4>${Object.entries(z.by_gst_slab).map(([k, v]) => `<div class="rx-sub">${esc(k)}: taxable ${rxRs(v.taxable_paise)} · CGST ${rxRs(v.cgst_paise)} · SGST ${rxRs(v.sgst_paise)}</div>`).join('') || '<p class="muted">None.</p>'}
+            <h4>Scheduled medicines</h4>${Object.entries(z.by_schedule).map(([k, v]) => `<div class="rx-sub">${esc(k)}: ${esc(v.lines)} lines, ${esc(v.units)} units</div>`).join('') || '<p class="muted">None.</p>'}
+            <h4>Overrides</h4>${z.overrides.map(o => `<div class="rx-sub">${esc(o.action.replace(/_/g, ' '))} · approved by ${esc(o.approver_name)}${o.amount_paise ? ' · ' + rxRs(o.amount_paise) : ''}</div>`).join('') || '<p class="muted">None.</p>'}`, '');
+    },
+    help() {
+        rxpos.drawer('Keyboard', `<table class="rx-tbl" style="width:100%">${[['F2', 'Search: token, MRN, phone, bill no., medicine, barcode'], ['↑ ↓ / Enter', 'Move through results / pick'], ['Ctrl+B', 'Batch drawer for the focused line'],
+            ['+ / −', 'Quantity ±1 unit (Shift: ±1 pack)'], ['Del', 'Remove focused line'], ['F4', 'Discount (₹ or %)'], ['F6 / F7 / F8', 'Cash / UPI / Card (fills the balance)'],
+            ['Enter (in totals)', 'Complete & print'], ['F3 / Ctrl+R', 'Parked bills'], ['Ctrl+P', 'Park this bill'], ['F9 / F10', 'Recent bills (reprint / return)'],
+            ['F11', 'Repeat a previous bill of this patient'], ['Ctrl+I', 'Rx Inbox'], ['Ctrl+O', 'Manager override'], ['Esc', 'Close drawer (never discards the bill)']]
+            .map(([k, d]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(d)}</td></tr>`).join('')}</table>`, '');
+    },
+};
+let myRxSettingsFormat = '80mm';
+/* RX:pos:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -19347,7 +19864,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ };
     if (loaders[page]) loaders[page]();
 }
 

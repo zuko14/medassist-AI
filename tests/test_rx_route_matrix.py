@@ -42,6 +42,15 @@ RX_ROUTES = {
     ("GET", "/admin/rx/supplier-returns"), ("POST", "/admin/rx/supplier-returns"),
     ("GET", "/admin/rx/supplier-returns/{return_id}"), ("POST", "/admin/rx/supplier-returns/{return_id}/dispatch"),
     ("PATCH", "/admin/rx/supplier-returns/{return_id}/credit"), ("GET", "/admin/rx/gs1"),
+    # P4 counter sales (138)
+    ("GET", "/admin/rx/pos/inbox"), ("GET", "/admin/rx/pos/lookup"), ("GET", "/admin/rx/pos/day-summary"),
+    ("GET", "/admin/rx/sales"), ("POST", "/admin/rx/sales"), ("GET", "/admin/rx/sales/{sale_id}"),
+    ("PUT", "/admin/rx/sales/{sale_id}/lines"), ("PATCH", "/admin/rx/sales/{sale_id}"),
+    ("DELETE", "/admin/rx/sales/{sale_id}"), ("POST", "/admin/rx/sales/{sale_id}/complete"),
+    ("POST", "/admin/rx/sales/{sale_id}/void"), ("POST", "/admin/rx/sales/{sale_id}/park"),
+    ("POST", "/admin/rx/sales/{sale_id}/recall"), ("POST", "/admin/rx/sales/{sale_id}/returns"),
+    ("GET", "/admin/rx/sales/{sale_id}/receipt"), ("GET", "/admin/rx/sales/{sale_id}/labels.pdf"),
+    ("GET", "/admin/rx/credit-notes/{cn_id}.pdf"), ("POST", "/admin/rx/overrides"),
 }
 
 
@@ -149,3 +158,29 @@ def test_p3_role_matrix(api, role, grants):  # noqa: F811
     added = api.call("POST", "/admin/rx/suppliers", clinic, {"name": "New " + uuid.uuid4().hex[:6]}).status_code
     sent = api.call("POST", f"/admin/rx/purchase-orders/{po}/send", clinic).status_code
     assert (listed, added, sent) == P3_MATRIX[(role, grants)]
+
+
+# P4: (role, stored grants) -> expected status for: open a walk-in draft, read the day summary, void a bill
+P4_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (201, 200, 409),               # 409: the seeded bill is a draft, not completed
+    ("PHARMACIST", ()): (201, 200, 403),                     # sells; voids need RX_ADMIN
+    ("PHARMACY_OPERATOR", ()): (201, 200, 403),
+    ("STORE_KEEPER", ()): (403, 200, 403),                   # stock, not the counter
+    ("FRONT_DESK", ("RX_DISPENSE",)): (201, 200, 403),
+    ("NURSE", ("IPD_NURSING",)): (403, 403, 403),
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P4_MATRIX))
+def test_p4_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    store = str(_q(api.conn, "SELECT id FROM rx_stores WHERE clinic_id = %s", clinic))
+    seeded = str(_q(api.conn, "INSERT INTO rx_sales (clinic_id, store_id, sale_kind) VALUES (%s, %s, 'otc') RETURNING id",
+                    clinic, store))
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    draft = api.call("POST", "/admin/rx/sales", clinic, {"store_id": store, "sale_kind": "otc"}).status_code
+    summary = api.call("GET", "/admin/rx/pos/day-summary", clinic).status_code
+    voided = api.call("POST", f"/admin/rx/sales/{seeded}/void", clinic, {"reason": "Wrong bill"}).status_code
+    assert (draft, summary, voided) == P4_MATRIX[(role, grants)]

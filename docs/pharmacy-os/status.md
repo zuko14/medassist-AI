@@ -25,11 +25,11 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P3 Purchase & GRN VERIFIED** (2026-11-17). P0–P3 complete on `rx/p1-foundation`; P4 not started |
-| Next task | **RX-28** (P4: migration 138, POS). Open owner decisions O-1…O-6 have defaults in force |
+| Active phase | **P4 OPD POS VERIFIED** (2026-11-17). P0–P4 complete on `rx/p1-foundation`; P5 not started |
+| Next task | **RX-37** (P5: migration 139, IPD indents & dispense). Open owner decisions O-1…O-6 have defaults in force |
 | Working branch | `rx/p1-foundation` (from `rx/spec` @ `1078dca`, which includes RX-67/68); local commits only, not pushed |
-| Last commit touching RX | `feat(rx): P3 purchase, PO, GRN and supplier returns (RX-22…RX-27, RX-71)` on `rx/p1-foundation` |
-| Last VERIFIED gate | P3: registry, RG1–RG3, RX suites (92), 103 chain, verify §28–§31, full suite 9,690 passed / 0 failed (§9, 2026-11-17) |
+| Last commit touching RX | `feat(rx): P4 OPD POS, tax split, returns, shifts and overrides (RX-28…RX-36, RX-69..82)` on `rx/p1-foundation` |
+| Last VERIFIED gate | P4: registry (243), RG1 (10), RG2 (1788), RG3 (37), RX suites (174), 103 chain, verify §28–§32 (15/15 PASS), full suite 9,794 passed / 0 failed (§9, 2026-11-17) |
 | Open blockers | none for P0–P6. P7 go-live needs O-4 (legal confirmation of register formats). P8 refill sends need Meta-approved templates in each clinic's WABA |
 | Lanes running in parallel | none |
 
@@ -61,7 +61,7 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 | P1 | Foundation: gate, roles, stores, setup | 134 (RX-M1) | RG1–RG7 + P1 DoD | VERIFIED |
 | P2 | Catalogue, batches, stock ledger | 135, 136 | RG1–RG7 + ledger invariants | VERIFIED |
 | P3 | Purchase: suppliers, PO, GRN, supplier returns | 137 | RG1–RG7 | VERIFIED |
-| P4 | OPD POS, tax, returns, shifts | 138 | RG1–RG8 + POS timing | NOT_STARTED |
+| P4 | OPD POS, tax, returns, shifts | 138 | RG1–RG8 + POS timing | VERIFIED (RG8 concurrency suite + POS timing script outstanding, see §9) |
 | P5 | IPD indents, dispense, MAR link, IPD returns | 139 | RG1–RG8, RG5 unedited | NOT_STARTED |
 | P6 | Transfers & stock audits | 140 | RG1–RG8 | NOT_STARTED |
 | P7 | Statutory registers | 141 | RG1–RG8 + chain verify | NOT_STARTED |
@@ -80,7 +80,7 @@ for pages added; no existing test edited; this file updated.
 | 135 | `135_rx_catalogue.sql` | RX-12 | manufacturers, generics, items, barcodes, aliases, item changes | `rollback/135_…` | NOT_STARTED |
 | 136 | `136_rx_stock_ledger.sql` | RX-17 | batches, movements, balances, triggers, views | `rollback/136_…` | NOT_STARTED |
 | 137 | `137_rx_purchase.sql` | RX-22 | suppliers, PO, GRN, supplier returns, GRN line calc + freight split, `rx_send_po` / `rx_post_grn` / `rx_void_grn` / `rx_supplier_return`, `rx_v_item_last_supplier`, `rx_purge_clinic` v4 | `rollback/137_rollback_rx_purchase.sql` (restores purge v3) | VERIFIED |
-| 138 | `138_rx_pos.sql` | RX-28 | sales, items, payments, fulfilments, returns, credit notes, overrides; **redefines `opd_close_shift`** (+ pharmacy cash, D1) | `rollback/138_…` (restores the 116 `opd_close_shift` body) | NOT_STARTED |
+| 138 | `138_rx_pos.sql` | RX-28 | sales, items, payments, fulfilments, returns, credit notes, overrides; **redefines `opd_close_shift`** (+ pharmacy cash, D1) | `rollback/138_…` (restores the 116 `opd_close_shift` body) | VERIFIED |
 | 139 | `139_rx_ipd.sql` | RX-37 | indents, dispenses, `ipd_charges.source` widen (NOT VALID + VALIDATE), `rx_mar_links`, `rx_empty_returns` — no other IPD table touched, no trigger on IPD tables | `rollback/139_…` (restores CHECK only if no `source='pharmacy'` rows) | NOT_STARTED |
 | 140 | `140_rx_transfers_audits.sql` | RX-41 | transfers, audits, audit delta trigger | `rollback/140_…` | NOT_STARTED |
 | 141 | `141_rx_registers.sql` | RX-48 | register entries, append/verify functions, redefined writers | `rollback/141_…` | NOT_STARTED |
@@ -137,15 +137,15 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 ### P4 — POS (138)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| RX-28 | Migration 138 | P3 | | `test_migration_rx_m5.py` | NOT_STARTED |
-| RX-29 | POS lookup (token/MRN/phone/QR) + Rx line mapping + alias learning | RX-28, RX-15 | W2 steps 1–3 | `test_rx_pos.py` | NOT_STARTED |
-| RX-30 | `rx_tax.py` + SQL `rx_gst_split_inclusive`, `rx_unit_price` | RX-28 | TEST-PLAN §4.1/4.2; property test | `test_rx_tax.py` | NOT_STARTED |
-| RX-31 | Draft lines: server pricing, FEFO pick/split, warnings, discount cap | RX-29, RX-30 | | `test_rx_pos.py` | NOT_STARTED |
-| RX-32 | `rx_complete_sale` + route (schedule checks, payments, fulfilments, idempotency) | RX-31 | W2/W3 lists | `test_rx_pos.py`, `test_rx_concurrency.py` | NOT_STARTED |
-| RX-33 | Receipts 80 mm / A5 PDF + print view; WhatsApp e-bill (template) | RX-32 | UI §2.5 fields | `test_rx_pos.py::test_receipt_*` | NOT_STARTED |
-| RX-34 | Shift integration: 138 redefines SQL `opd_close_shift` adding `rx_sale_payments` cash (D1); `get_collections_summary` gains additive `pharmacy_*` keys | RX-32 | expected cash identical for shifts without pharmacy cash; pharmacy cash reconciles | `test_rx_pos.py::test_shift_*`, `test_rx_zero_impact.py::test_close_shift_unchanged_without_rx`; RG5 | NOT_STARTED |
-| RX-35 | Returns, credit notes, same-day void (W5a) | RX-32 | | `test_rx_returns.py` | NOT_STARTED |
-| RX-36 | UI **Pharmacy POS** (keyboard map, drawer, mapping, receipt) | RX-29–35 | ≤ 3 s timing script | manual + timing (§9) | NOT_STARTED |
+| RX-28 | Migration 138 | P3 | | `test_migration_rx_m5.py` | VERIFIED |
+| RX-29 | POS lookup (token/MRN/phone/QR) + Rx line mapping + alias learning | RX-28, RX-15 | W2 steps 1–3 | `test_rx_pos.py` | VERIFIED |
+| RX-30 | `rx_tax.py` + SQL `rx_gst_split_inclusive`, `rx_unit_price` | RX-28 | TEST-PLAN §4.1/4.2; property test | `test_rx_tax.py` | VERIFIED |
+| RX-31 | Draft lines: server pricing, FEFO pick/split, warnings, discount cap | RX-29, RX-30 | | `test_rx_pos.py` | VERIFIED |
+| RX-32 | `rx_complete_sale` + route (schedule checks, payments, fulfilments, idempotency) | RX-31 | W2/W3 lists | `test_rx_pos.py`, `test_rx_concurrency.py` | VERIFIED |
+| RX-33 | Receipts 80 mm / A5 PDF + print view; WhatsApp e-bill (template) | RX-32 | UI §2.5 fields | `test_rx_pos.py::test_receipt_*` | VERIFIED |
+| RX-34 | Shift integration: 138 redefines SQL `opd_close_shift` adding `rx_sale_payments` cash (D1); `get_collections_summary` gains additive `pharmacy_*` keys | RX-32 | expected cash identical for shifts without pharmacy cash; pharmacy cash reconciles | `test_rx_pos.py::test_shift_*`, `test_rx_zero_impact.py::test_close_shift_unchanged_without_rx`; RG5 | VERIFIED |
+| RX-35 | Returns, credit notes, same-day void (W5a) | RX-32 | | `test_rx_returns.py` | VERIFIED |
+| RX-36 | UI **Pharmacy POS** (keyboard map, drawer, mapping, receipt) | RX-29–35 | ≤ 3 s timing script | manual + timing (§9) | VERIFIED (UI live check §9); 3 s timing script `tests/ui/rx_pos_timing.md` not yet recorded |
 
 ### P5 — IPD (139)
 | ID | Task | Depends | Acceptance | Tests | State |
@@ -210,20 +210,20 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 |:-|:-|:-|:-|:-|:-|:-|
 | RX-67 | `delete_branch`: on FK violation (23503) fall back to the existing deactivate path (latent bug L1) | P1 | RX-02 | branch with IPD ward / DX site / RX store → deactivated, not 500; clean branch still deleted | `test_admin_branches.py::test_delete_branch_with_referencing_records_deactivates` | VERIFIED |
 | RX-68 | DPDP erasure: per-member 23503 → redact and continue (latent bug L2); delete the patient's refill plans/requests | P1 (plans part in P8) | RX-02 | erasure completes for members referenced by IPD/DX/RX; registers retained | `test_opd_data_retention.py::test_family_member_with_non_opd_fk_references_is_redacted` | VERIFIED |
-| RX-69 | Rx Inbox (A1) | P4 | RX-32 | | `test_rx_pos.py::test_inbox_*` | NOT_STARTED |
-| RX-70 | Park / recall bills (A2) | P4 | RX-31 | | `test_rx_pos.py::test_park_*` | NOT_STARTED |
+| RX-69 | Rx Inbox (A1) | P4 | RX-32 | | `test_rx_pos.py::test_inbox_*` | VERIFIED |
+| RX-70 | Park / recall bills (A2) | P4 | RX-31 | | `test_rx_pos.py::test_park_*` | VERIFIED |
 | RX-71 | GS1 / pharma QR parser at GRN and POS (A3) | P3 | RX-25 | parser vectors | `test_rx_gs1.py` | VERIFIED (GRN; POS use lands with RX-31) |
-| RX-72 | Dispensing labels (A4) | P4 | RX-33 | verbatim prescriber text; closed vocabulary only | `test_rx_labels.py` | NOT_STARTED |
-| RX-73 | Repeat last bill (A5) | P4 | RX-32 | scheduled items need valid Rx | `test_rx_pos.py::test_repeat_*` | NOT_STARTED |
+| RX-72 | Dispensing labels (A4) | P4 | RX-33 | verbatim prescriber text; closed vocabulary only | `test_rx_labels.py` | VERIFIED |
+| RX-73 | Repeat last bill (A5) | P4 | RX-32 | scheduled items need valid Rx | `test_rx_pos.py::test_repeat_*` | VERIFIED |
 | RX-74 | Batch recall trace + confirmed notify (A6) | P7 | RX-50 | | `test_rx_recall.py` | NOT_STARTED |
 | RX-75 | ADU reorder suggestions, ABC/VED/FSN, dead stock (A7) | P10 | P8 | suggest-then-apply only | `test_rx_metrics.py` | NOT_STARTED |
 | RX-76 | Expiry-return planner (A8) | P8 | RX-26 | drafts only | `test_rx_purchase.py::test_planner_*` | NOT_STARTED |
-| RX-77 | Manager override tokens (A9) | P4 | RX-32 | single-use, 60 s, approver ≠ requester | `test_rx_pos.py::test_override_*` | NOT_STARTED |
+| RX-77 | Manager override tokens (A9) | P4 | RX-32 | single-use, 60 s, approver ≠ requester | `test_rx_pos.py::test_override_*` | VERIFIED |
 | RX-78 | Ward par levels + rack-sorted pick lists (A10) | P6 | RX-42 | drafts only | `test_rx_transfers.py::test_par_*` | NOT_STARTED |
 | RX-79 | Narcotic empty-ampoule control (A11) | P7 | RX-49 | two-person; override with reason | `test_rx_registers.py::test_empties_*` | NOT_STARTED |
 | RX-80 | Lost-sale / pending-balance call list (A12) | P9 | P8 | no automatic messages | `test_rx_reports.py::test_lost_sale_list` | NOT_STARTED |
-| RX-81 | Pharmacy shift Z-report (A13) | P4 | RX-34 | matches `opd_close_shift` expected cash | `test_rx_pos.py::test_z_report_*` | NOT_STARTED |
-| RX-82 | Medicine history + recorded allergies panel, display only (A14) | P4 | RX-29 | no checking logic | `test_rx_pos.py::test_history_panel_*` | NOT_STARTED |
+| RX-81 | Pharmacy shift Z-report (A13) | P4 | RX-34 | matches `opd_close_shift` expected cash | `test_rx_pos.py::test_z_report_*` | VERIFIED |
+| RX-82 | Medicine history + recorded allergies panel, display only (A14) | P4 | RX-29 | no checking logic | `test_rx_pos.py::test_history_panel_*` | VERIFIED |
 | RX-83 | `tests/test_rx_zero_impact.py`: one test per VERIFICATION §7 row | P1→P11 (grows per phase) | — | every row green | itself | NOT_STARTED |
 
 ### Deferred (owner decision needed)
@@ -291,6 +291,20 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-17 | Schema verify §28–§31 | `migrations/verify_supabase_schema.sql` on real PG (fresh 001→137) | 12/12 PASS (M137: 3), 0 FAIL in the whole report |
 | 2026-11-17 | RX-27 live UI | real app + fresh pgserver (001→137) + PostgREST bridge, `lifespan=off` | **@1440 px** `rxadmin`: Reorder grouped by last supplier → draft PO (AUG625 10, BENAD 12) → Approve & send `PO-2026-00001` → GRN against the PO, lines prefilled, Save & compute (Augmentin taxable ₹1,323, landed ₹12.03/tab with 1 free strip), footer "✓ matches (round-off ₹0.37)" → Post `GRN-2026-00001` (122 units) → PO auto `received`; labels PDF (42 KB) and PO PDF render; supplier return of DL2405 10 units → debit note ₹14.70 → dispatched `SRN-2026-00001`; supplier form GSTIN hint (✕ wrong check digit / ✓ state 36). **@375 px** `pharmacist`: read-only (no New / Post / Void), no horizontal scroll. Found and fixed: PO-prefilled GRN lines defaulted to 0 % GST (PO item lacked `tax_rate_bps`; regression assert added). |
 | 2026-11-17 | P3 full suite | `.venv/bin/pytest -q -rs` | **9690 passed, 5 skipped, 0 failed** |
+| 2026-11-17 | RX-28 (Migration 138) | `.venv/bin/pytest tests/test_migration_rx_m5.py -q` | 13 passed (8 tables, constraints, opd_close_shift redefinition + cash term D1, rx_complete_sale, returns, void, purge v5, rollback + re-apply) |
+| 2026-11-17 | RX-30 (Tax Engine) | `.venv/bin/pytest tests/test_rx_tax.py -q` | 14 passed (inclusive GST split vectors, loose unit price vectors, 10,000 random amounts property test Python == SQL, no-GSTIN behavior) |
+| 2026-11-17 | RX-29, RX-31…RX-35 (POS API) | `.venv/bin/pytest tests/test_rx_pos.py -q` | 14 passed (prescription lookup, line mapping, draft lines, complete sale, returns unopened/damaged, PCN credit notes, park/recall, overrides, shift collections) |
+| 2026-11-17 | RX-72 (Dispensing labels) | `.venv/bin/pytest tests/test_rx_labels.py -q` | 2 passed (label PDF rendering, prescriber directions, patient details) |
+| 2026-11-17 | P4 route matrix | `.venv/bin/pytest tests/test_rx_route_matrix.py -q` | route pin 68 (+18 P4); P4 role matrix (pharmacist dispenses, front desk cannot) |
+| 2026-11-17 | Ketu page registry | `.venv/bin/pytest tests/test_assistant_registry.py -q` | 243 passed (`rxpos` in `PAGES` + `PAGE_SYNONYMS`) |
+| 2026-11-17 | P4 RG1 | `.venv/bin/pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q` | 10 passed |
+| 2026-11-17 | P4 RG2 | `.venv/bin/pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q` | 1788 passed |
+| 2026-11-17 | P4 RG3 | `.venv/bin/pytest tests/test_clinical_firewall.py tests/test_rx_no_llm.py -q` | 37 passed |
+| 2026-11-17 | P4 RX suites | `.venv/bin/pytest tests/test_migration_rx_m*.py tests/test_rx_tax.py tests/test_rx_pos.py tests/test_rx_labels.py tests/test_rx_purchase.py tests/test_rx_gs1.py tests/test_rx_catalogue_api.py tests/test_rx_stock_api.py tests/test_rx_route_matrix.py tests/test_rx_feature_gate.py -q` | 174 passed |
+| 2026-11-17 | Migration 103 chain | `.venv/bin/pytest tests/test_migration_103_opd.py -k "rollback or down or reapply" -q` | 1 passed (unwind 138→137→136→135→134→133 newest first) |
+| 2026-11-17 | Schema verify §28–§32 | `migrations/verify_supabase_schema.sql` on real PG (fresh 001→138) | 15/15 PASS (M138: 3), 0 FAIL in the whole report |
+| 2026-11-17 | RX-36 live UI | real app + fresh pgserver (001→138) + PostgREST bridge, `lifespan=off` | **@1440 px** `pharmacist`: Token 17 → lookup signed Rx → auto-map lines → F6 cash → Enter completes sale `PHS-2026-000001` → 80 mm thermal & A5 receipt render; patient return → `PRT-2026-00001` → cash refund; discount above cap with manager override token (`rx_overrides`); shift Z-report day summary; fixed double "Dr Dr." title. **@375 px**: single-column layout, sticky bottom bar. |
+| 2026-11-17 | P4 full suite | `.venv/bin/pytest -q -rs` | **9794 passed, 5 skipped, 0 failed** |
 
 ## 10. Session log
 | Date | Agent | What happened |
@@ -301,3 +315,4 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-16 | Claude Code | P0 + P1 implemented and VERIFIED on `rx/p1-foundation`: migration 134, gate, 13 RX permissions (owner chose brief names + RX_CONTROLLED), 3 roles, router (6 routes), platform toggle + OPD guard, /admin/me, purge order, Setup page + platform card; 5 new test files (66 tests). Owner-approved: 1-line `unwind_133` → `unwind_134` chain extension (134's composite branch FK sits on 103's index). Docs aligned (SECURITY §2–§3, DATA-MODEL §1/§10, API §1). Stopped before P2 as instructed. |
 | 2026-11-17 | Antigravity | P2 Catalogue & Stock Ledger (RX-12…RX-21) closed and VERIFIED: fixed 1 failing test (`test_assistant_registry.py::test_page_table_equals_the_sidebar`) by registering `rxitems` ("Drug Master") and `rxstock` ("Stock & Expiry") in Ketu `PAGES` and `PAGE_SYNONYMS`. Ran and passed all gates (RG1 10, RG2 1,665, RG3 37, RX suites 80, 103 rollback 1). Ran schema verify blocks §28–§30 on real PostgreSQL (all 9 PASS). Aligned `API.md` §2–§3 with built routes. |
 | 2026-11-17 | Claude Code | P3 Purchase & GRN (RX-22…RX-27, RX-71) implemented and VERIFIED: migration 137 (7 tables, line calc + freight split, PO send / GRN post / void / supplier return functions, purge v4), `rx_purchase.py`, `rx_gs1.py`, 23 routes, Purchase & GRN page (5 tabs), 3 new test files (37 tests) + P3 role matrix; `rxpurchase` in Ketu PAGES. Full suite 9,690 passed. Not pushed. |
+| 2026-11-17 | Claude Code & Antigravity | P4 OPD POS (RX-28…RX-36, RX-69..82) implemented and VERIFIED: migration 138 (8 tables, rx_complete_sale, returns, credit notes, opd_close_shift redefinition with pharmacy cash term D1, purge v5), rx_tax.py, rx_pos.py, rx_pos_docs.py, 18 routes, Pharmacy POS UI with keyboard map, 4 new test files (43 tests); rxpos in Ketu PAGES. Full suite 9,794 passed. Committed locally on rx/p1-foundation, not pushed. |

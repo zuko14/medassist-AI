@@ -1,11 +1,13 @@
 """Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20),
-purchase (137, RX-23…26, RX-71). Design: docs/pharmacy-os/API.md §0–§4, SECURITY.md §2–§3.
+purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82).
+Design: docs/pharmacy-os/API.md §0–§5, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
 """
 
 import uuid
+from datetime import date
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
@@ -13,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
-from app.services import rx, rx_catalogue, rx_gs1, rx_purchase, rx_stock
+from app.services import rx, rx_catalogue, rx_gs1, rx_pos, rx_pos_docs, rx_purchase, rx_stock
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
@@ -766,3 +768,235 @@ async def parse_gs1(code: str = Query(..., min_length=4, max_length=200), clinic
     item = await rx_catalogue.get_item(scope, rows[0]["item_id"]) if rows else None
     return {**parsed, "expiry_date": str(parsed["expiry_date"]) if parsed["expiry_date"] else None,
             "mfg_date": str(parsed["mfg_date"]) if parsed["mfg_date"] else None, "item": item}
+
+
+# ── counter sales (138): lookup, drafts, completion, returns, void, park, overrides, Z-report ──
+
+POS_WORK = ("RX_DISPENSE", "RX_ADMIN")
+POS_READ = ("RX_READ", "RX_DISPENSE", "RX_ADMIN")
+
+
+async def _sale_in_scope(user: AdminUser, scope: str, sale_id: uuid.UUID) -> dict:
+    sale = await rx_pos.get_sale_row(scope, str(sale_id))
+    _store_for(user, await rx.get_store(scope, str(sale["store_id"])))
+    return sale
+
+
+async def _shift(scope: str, user: AdminUser, shift_id: Optional[str], cash: bool) -> Optional[str]:
+    """Cash goes into the actor's open OPD cashier shift (D5, resolve_counter_shift); UPI / card need none."""
+    if not cash:
+        return None
+    from app.services.opd_billing import resolve_counter_shift
+    return await resolve_counter_shift(scope, user, shift_id, require_drawer=True)
+
+
+@router.get("/pos/inbox")
+async def pos_inbox(store_id: uuid.UUID, since: Optional[str] = Query(None, max_length=40), clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *POS_WORK)
+    store = _store_for(user, await rx.get_store(scope, str(store_id)))
+    return {"prescriptions": await rx_pos.inbox(scope, store, since)}
+
+
+@router.get("/pos/lookup")
+async def pos_lookup(q: str = Query(..., min_length=1, max_length=80), clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_WORK)
+    return await rx_pos.lookup(scope, q, rx.get_rx_settings(clinic))
+
+
+@router.get("/pos/day-summary")
+async def pos_day_summary(day: Optional[date] = Query(None, alias="date"), store_id: Optional[uuid.UUID] = None,
+                          shift_id: Optional[uuid.UUID] = None, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *POS_READ)
+    from app.utils.helpers import today_ist
+    return await rx_pos.day_summary(scope, await _store_ids(user, scope, store_id), day or today_ist(),
+                                    str(shift_id) if shift_id else None)
+
+
+@router.get("/sales")
+async def list_sales(status_: Optional[Literal["draft", "completed", "void"]] = Query(None, alias="status"),
+                     day_from: Optional[date] = Query(None, alias="from"), day_to: Optional[date] = Query(None, alias="to"),
+                     store_id: Optional[uuid.UUID] = None, q: Optional[str] = Query(None, max_length=40),
+                     parked: Optional[bool] = None, limit: int = Query(50, ge=1, le=200), clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *POS_READ)
+    return {"sales": await rx_pos.list_sales(scope, await _store_ids(user, scope, store_id), status_, day_from, day_to, q,
+                                             parked, limit)}
+
+
+@router.post("/sales", status_code=status.HTTP_201_CREATED)
+async def create_sale(body: rx_pos.SaleIn, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_WORK, new_work=True)
+    store = _store_for(user, await rx.get_store(scope, body.store_id))
+    if not (store.get("can_sell") and store.get("is_active")):
+        raise HTTPException(status_code=409, detail={"code": "rx_store_cannot_sell", "message": "This store does not sell."})
+    if body.sale_kind == "staff" and not holds_rx_permission(user, "RX_ADMIN"):
+        raise HTTPException(status_code=403, detail="Missing permission: RX_ADMIN (staff sale)")
+    settings = rx.get_rx_settings(clinic)
+    out = await rx_pos.create_sale(scope, store, body, _actor(user), settings)
+    if not out["existing"]:
+        await _audit(user, request, "rx_sale_draft", "rx_sale", out["sale_id"],
+                     {"kind": body.sale_kind, "rx": bool(body.opd_prescription_id), "repeat": bool(body.repeat_of_sale_id)})
+    return {**await rx_pos.sale_detail(scope, out["sale_id"], settings), "mapping": out["mapping"],
+            "existing_draft": out["existing"]}
+
+
+@router.get("/sales/{sale_id}")
+async def get_sale(sale_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_READ)
+    await _sale_in_scope(user, scope, sale_id)
+    return await rx_pos.sale_detail(scope, str(sale_id), rx.get_rx_settings(clinic))
+
+
+@router.put("/sales/{sale_id}/lines")
+async def put_sale_lines(sale_id: uuid.UUID, lines: list[rx_pos.LineIn], clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_WORK, new_work=True)
+    sale = await _sale_in_scope(user, scope, sale_id)
+    settings = rx.get_rx_settings(clinic)
+    await rx_pos.replace_lines(scope, sale, lines, settings)
+    return await rx_pos.sale_detail(scope, str(sale_id), settings)
+
+
+@router.patch("/sales/{sale_id}")
+async def patch_sale(sale_id: uuid.UUID, body: rx_pos.SalePatch, clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_WORK, new_work=True)
+    sale = await _sale_in_scope(user, scope, sale_id)
+    settings = rx.get_rx_settings(clinic)
+    needs = await rx_pos.patch_sale(scope, sale, body, int(settings["max_discount_bps"]),
+                                    holds_rx_permission(user, "RX_ADMIN"))
+    return {**await rx_pos.sale_detail(scope, str(sale_id), settings), "discount_needs_override": needs}
+
+
+@router.delete("/sales/{sale_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sale(sale_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *POS_WORK)
+    sale = await _sale_in_scope(user, scope, sale_id)
+    await rx_pos.delete_draft(scope, sale)
+    await _audit(user, request, "rx_sale_draft_delete", "rx_sale", str(sale_id), {})
+    return Response(status_code=204)
+
+
+@router.post("/sales/{sale_id}/complete")
+async def complete_sale(sale_id: uuid.UUID, body: rx_pos.CompleteIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_WORK, new_work=True)
+    sale = await _sale_in_scope(user, scope, sale_id)
+    shift = await _shift(scope, user, body.shift_id, any(p.mode == "cash" for p in body.payments))
+    out = await rx_pos.complete(scope, sale, body, shift, _actor(user), holds_rx_permission(user, "RX_ADMIN"),
+                                holds_rx_permission(user, "RX_CONTROLLED"))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_sale_complete", "rx_sale", str(sale_id),
+                     {"sale_number": out["sale_number"], "net_paise": out["net_paise"],
+                      "modes": sorted({p.mode for p in body.payments}), "override": out.get("override_used")})
+    detail = await rx_pos.sale_detail(scope, str(sale_id), rx.get_rx_settings(clinic))
+    return {**detail, "replayed": out.get("replayed", False),
+            "receipt_url": f"/admin/rx/sales/{sale_id}/receipt?format={rx.get_rx_settings(clinic)['receipt_format']}"}
+
+
+@router.post("/sales/{sale_id}/void")
+async def void_sale(sale_id: uuid.UUID, body: rx_pos.VoidIn, request: Request, clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, "RX_ADMIN")
+    sale = await _sale_in_scope(user, scope, sale_id)
+    shift = await _shift(scope, user, body.shift_id, await rx_pos.has_cash(scope, str(sale_id)))
+    out = await rx_pos.void(scope, sale, body.reason, shift, _actor(user))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_sale_void", "rx_sale", str(sale_id), {"reason": body.reason})
+    return out
+
+
+@router.post("/sales/{sale_id}/park")
+async def park_sale(sale_id: uuid.UUID, body: rx_pos.ParkIn, clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *POS_WORK)
+    return await rx_pos.park(scope, await _sale_in_scope(user, scope, sale_id), body.label)
+
+
+@router.post("/sales/{sale_id}/recall")
+async def recall_sale(sale_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_WORK)
+    await rx_pos.park(scope, await _sale_in_scope(user, scope, sale_id), None)
+    return await rx_pos.sale_detail(scope, str(sale_id), rx.get_rx_settings(clinic))
+
+
+@router.post("/sales/{sale_id}/returns", status_code=status.HTTP_201_CREATED)
+async def sale_return(sale_id: uuid.UUID, body: rx_pos.ReturnIn, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *POS_WORK)        # returns continue in wind-down
+    sale = await _sale_in_scope(user, scope, sale_id)
+    shift = await _shift(scope, user, body.shift_id, body.refund_mode == "cash")
+    out = await rx_pos.record_return(scope, sale, body, shift, _actor(user), holds_rx_permission(user, "RX_ADMIN"))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_sale_return", "rx_sale", str(sale_id),
+                     {"return_number": out["return_number"], "amount_paise": out["amount_paise"],
+                      "refund_mode": body.refund_mode})
+    return out
+
+
+@router.get("/sales/{sale_id}/receipt")
+async def sale_receipt(sale_id: uuid.UUID, fmt: Literal["80mm", "a5"] = Query("80mm", alias="format"),
+                       clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_READ)
+    sale = await _sale_in_scope(user, scope, sale_id)
+    settings = rx.get_rx_settings(clinic)
+    model = rx_pos_docs.receipt_model(await rx_pos.sale_detail(scope, str(sale_id), settings), clinic,
+                                      await rx.get_store(scope, str(sale["store_id"])), settings)
+    if fmt == "a5":
+        return _pdf(rx_pos_docs.render_receipt_pdf(model), f"{model['number']}.pdf")
+    return Response(content=rx_pos_docs.render_receipt_html(model, fmt), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.get("/sales/{sale_id}/labels.pdf")
+async def sale_labels(sale_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_READ)
+    await _sale_in_scope(user, scope, sale_id)
+    detail = await rx_pos.sale_detail(scope, str(sale_id), rx.get_rx_settings(clinic))
+    lang = ((detail.get("patient_panel") or {}).get("patient") or {}).get("language") or "en"
+    return _pdf(rx_pos_docs.render_labels_pdf(detail, clinic, lang), f"labels-{detail.get('sale_number') or 'draft'}.pdf")
+
+
+@router.get("/credit-notes/{cn_id}.pdf")
+async def credit_note_pdf(cn_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *POS_READ)
+    rows = (await sb(scoped_query("rx_credit_notes", scope).eq("id", str(cn_id)).limit(1))).data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Credit note not found.")
+    sale = await _sale_in_scope(user, scope, uuid.UUID(str(rows[0]["sale_id"])))
+    return _pdf(rx_pos_docs.render_credit_note_pdf(rows[0], sale, clinic), f"{rows[0]['cn_number']}.pdf")
+
+
+@router.post("/overrides", status_code=status.HTTP_201_CREATED)
+async def grant_override(body: rx_pos.OverrideIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    """A9: a second person holding RX_ADMIN re-authenticates here; the token lives 60 s and is single-use."""
+    scope, _ = await _rx_scope(user, clinic_id, *POS_WORK)
+    requester, _name = _actor(user)
+    if not requester:
+        raise HTTPException(status_code=403, detail="Overrides are requested from a staff login.")
+    if not rx_pos.override_rate_ok(requester):
+        raise HTTPException(status_code=429, detail="Too many override requests. Wait a minute.")
+    if body.sale_id:
+        await _sale_in_scope(user, scope, uuid.UUID(body.sale_id))
+    from app.routers.admin import _authenticate_password
+    approver = await _authenticate_password(body.approver_username, body.approver_password,
+                                            request.client.host if request.client else "unknown")
+    approver_id = _actor(approver)[0]
+    if str(getattr(approver, "clinic_id", None) or "") != scope or not approver_id \
+            or not holds_rx_permission(approver, "RX_ADMIN"):
+        raise HTTPException(status_code=403, detail={"code": "rx_override_not_authorised",
+                                                     "message": "The approver must be a pharmacy manager of this clinic."})
+    if approver_id == requester:
+        raise HTTPException(status_code=403, detail={"code": "rx_override_same_person",
+                                                     "message": "The approver must be a different person."})
+    out = await rx_pos.grant_override(scope, body, requester, approver)
+    await _audit(user, request, "rx_override_grant", "rx_override", out["override_id"],
+                 {"action": body.action, "sale_id": body.sale_id, "approver": approver.username,
+                  "amount_paise": body.amount_paise})
+    return out

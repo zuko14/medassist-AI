@@ -25,6 +25,8 @@ GSTIN = "36AABCU9603R1ZM"
 
 def unwind_137(cur) -> None:
     """Inside an open transaction: purge every clinic with purchase rows and run the 137 rollback."""
+    from tests.test_migration_rx_m5 import unwind_138
+    unwind_138(cur)  # newest first: 138's sale lines point at rx_batches / stores
     cur.execute("SELECT to_regclass('public.rx_suppliers') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

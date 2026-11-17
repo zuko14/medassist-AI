@@ -1153,7 +1153,15 @@ async def get_collections_summary(
             paid = inv.get("paid_paise", 0)
             outstanding_dues_paise += max(0, tot - paid)
 
+    pharmacy: dict = {}
+    clinic = await get_clinic_by_id(clinic_id)
+    from app.services.tenant import rx_access
+    if rx_access(clinic):   # RX-34: additive pharmacy keys, only for clinics with Pharmacy OS
+        from app.services.rx_pos import collections_keys
+        pharmacy = await collections_keys(clinic_id, start_dt, end_dt, branch_id)
+
     return {
+        **pharmacy,
         "date": target_date,
         "gross_paise": gross_total,
         "refunds_paise": refunds_total,

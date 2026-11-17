@@ -108,7 +108,26 @@ WIND_DOWN (clearing stock); new suppliers, POs and GRNs are new work (409).
 | GET | `/admin/rx/sales?from&to&store_id&q&status` | RX_READ | history |
 | POST | `/admin/rx/sales/{id}/returns` | RX_DISPENSE (+RX_ADMIN past window / restock opened) | `{lines:[{sale_item_id,qty_units,restock}],reason,refund_mode,shift_id?,idempotency_key}` → `PRT-`, refund/PCN. *audit* |
 | GET | `/admin/rx/credit-notes/{id}.pdf` | RX_READ | |
-| GET | `/admin/rx/pos/day-summary?store_id&date` | RX_READ | sales, returns, by mode, by GST slab, by schedule |
+| GET | `/admin/rx/pos/day-summary?store_id&date&shift_id` | RX_READ | sales, returns, by mode, by GST slab, by schedule, overrides; with `shift_id` also `cash_expected_paise` (= `rx_shift_expected_cash`, the `opd_close_shift` formula) |
+
+P4 notes (as built, migration 138):
+- `POST /sales` also takes `repeat_of_sale_id` (A5: same items, fresh FEFO, today's prices; scheduled items listed
+  `needs_rx` and left out) and `pick: true` (A1 inbox pick → `picked_at/by`). The response carries `mapping[]`: per Rx
+  line `{rx_item_id, text, candidates[≤5], mapped_item_id|null}`; a line is auto-mapped only for a confirmed alias, an
+  exact brand / generic match, or a single clear candidate — never guessed. `sale_kind: 'staff'` needs RX_ADMIN;
+  `ipd_discharge_meds` arrives with P5.
+- `PUT /lines` does **not** accept `line_discount_paise`: the header discount (`PATCH discount_paise`) is spread over
+  lines by gross (largest remainder) in SQL so GST is always computed on what the patient pays. A non-FEFO batch needs
+  `fefo_override_reason` (setting `fefo_override_requires_reason`); a substitute must share the item's `generic_id`
+  (422 `rx_substitute_not_same_generic`).
+- `PATCH` with a discount above `max_discount_bps` is accepted on the draft and flagged `discount_needs_override`;
+  completion then needs RX_ADMIN or an override (403 `rx_discount_over_limit`).
+- Lookup: `q` = token (today), MRN, phone (10 digits), Rx id (printed QR), or `PHS-…` bill number; patients come
+  with the A14 panel (last 10 purchases + allergies as recorded, no checking).
+- Receipt `format=80mm` returns a same-origin HTML print view; `format=a5` a PDF. `send_whatsapp_bill` is accepted
+  and ignored until the e-bill template lands (P8).
+- `GET /admin/opd/collections/summary` gains `pharmacy_gross_paise`, `pharmacy_refunds_paise`, `pharmacy_net_paise`,
+  `pharmacy_cash_paise`, `pharmacy_by_mode` — only for clinics with Pharmacy OS (absent otherwise).
 
 ## 6. IPD (P5) — additionally require `ipd_access(clinic) is not None` (ACTIVE or WIND_DOWN, VERIFICATION D6) and an active admission
 | Method | Path | Perm | Notes |

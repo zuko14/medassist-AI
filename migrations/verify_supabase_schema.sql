@@ -1081,6 +1081,47 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 32. MIGRATION 138 — Pharmacy OS counter sales (RX-M5)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_sales', 'rx_sale_items', 'rx_sale_payments', 'rx_rx_fulfilments', 'rx_returns',
+                       'rx_return_lines', 'rx_credit_notes', 'rx_overrides') AND relkind = 'r'
+       AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M138', 'Tables: sales, items, payments, fulfilments, returns, return lines, credit notes, overrides (RLS forced)',
+            CASE WHEN v_tbl = 8 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 8 present');
+
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_sales_paid_in_full', 'rx_sales_giveback_le_net', 'rx_sales_discount_le_gross',
+                       'rx_sales_rx_fk', 'rx_sale_items_le_mrp', 'rx_sale_items_returned_le_qty',
+                       'rx_sale_payments_cash_needs_shift', 'rx_sale_payments_shift_fk', 'rx_overrides_two_people',
+                       'rx_overrides_short_lived', 'rx_rx_fulfilments_sale_item_key');
+    SELECT v_con + count(*) INTO v_con FROM pg_indexes WHERE indexname IN ('uq_rx_sales_idem', 'uq_rx_sales_one_live_per_rx');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M138', 'Constraints: never above MRP, paid in full, refunds <= paid, cash needs a shift, two-person overrides',
+            CASE WHEN v_con = 13 THEN 'PASS' ELSE 'FAIL' END, v_con || ' of 13 present');
+
+    SELECT (to_regprocedure('rx_complete_sale(uuid,uuid,jsonb,uuid,text,uuid,text,uuid,boolean,boolean)') IS NOT NULL)::int
+         + (to_regprocedure('rx_record_return(uuid,uuid,jsonb,text,text,uuid,text,uuid,text,boolean,uuid)') IS NOT NULL)::int
+         + (to_regprocedure('rx_void_sale(uuid,uuid,text,uuid,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_gst_split_inclusive(bigint,integer,boolean)') IS NOT NULL)::int
+         + (to_regprocedure('rx_unit_price(integer,integer,integer)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'opd_close_shift' AND prosrc LIKE '%rx_sale_payments%')::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_purge_clinic' AND prosrc LIKE '%rx_overrides%')::int
+         + (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_rx_sale_line_calc', 'trg_rx_sales_guard'))::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M138', 'Functions: complete / return / void, GST split, unit price, opd_close_shift + pharmacy cash (D1), purge v5',
+            CASE WHEN v_fn = 9 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 9 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================
