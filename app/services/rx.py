@@ -56,6 +56,28 @@ _ERRORS = {
     "rx_clinic_not_found": (404, "Clinic not found."),
     "rx_store_delete_refused": (409, "Stores are never deleted. Deactivate the store instead."),
     "rx_store_field_locked": (409, "A store's code and type never change. Create a new store instead."),
+    # 135 catalogue
+    "rx_item_not_found": (404, "Item not found."),
+    "rx_item_delete_refused": (409, "Items are never deleted. Deactivate the item instead."),
+    "rx_item_field_locked": (409, "This field cannot change (item code, base unit, a schedule downgrade, or the "
+                                  "generic / pack size once stock exists). Create a new item instead."),
+    "rx_item_reason_required": (422, "Changing the GST rate or HSN code needs a reason (e.g. the notification)."),
+    "rx_barcode_taken": (409, "This barcode is already on another item."),
+    "rx_append_only": (409, "History rows are never edited or deleted."),
+    # 136 stock ledger
+    "rx_insufficient_stock": (409, "Not enough stock in this batch at this store."),
+    "rx_batch_expired": (409, "This batch has expired and cannot be sold, dispensed or used as opening stock."),
+    "rx_batch_blocked": (409, "This batch is blocked (recall / quarantine)."),
+    "rx_batch_not_found": (404, "Batch not found."),
+    "rx_batch_field_locked": (409, "A batch's number, expiry, MRP and cost never change."),
+    "rx_batch_delete_refused": (409, "Batches are never deleted."),
+    "rx_qty_invalid": (422, "Quantity must be a positive whole number of units."),
+    "rx_writeoff_kind_invalid": (422, "A write-off is either expiry or damage."),
+    "rx_opening_closed": (409, "This store has already traded: opening stock can no longer be loaded. "
+                               "Use a stock audit instead."),
+    "rx_store_not_found": (404, "Store not found."),
+    "rx_movement_via_function_only": (500, "The pharmacy operation failed. Nothing was changed; please retry."),
+    "rx_balance_via_ledger_only": (500, "The pharmacy operation failed. Nothing was changed; please retry."),
 }
 _CONSTRAINTS = (
     ("rx_stores_code_key", 409, "Another store already uses this code."),
@@ -67,7 +89,33 @@ _CONSTRAINTS = (
     ("rx_stores_no_self_parent", 422, "A store cannot be its own parent."),
     ("rx_stores_code_check", 422, "A store code is 2–20 capital letters, digits, _ or -."),
     ("rx_stores_name_check", 422, "A store name is 2–100 characters."),
+    ("rx_items_code_key", 409, "Another item already uses this item code."),
+    ("rx_item_barcodes_barcode_key", 409, "This barcode is already on another item."),
+    ("uq_rx_manufacturers_name", 409, "This manufacturer already exists."),
+    ("rx_generics_class_key", 409, "This generic (name + strength + form) already exists."),
+    ("rx_items_generic_fk", 404, "Generic not found."),
+    ("rx_items_mfr_fk", 404, "Manufacturer not found."),
+    ("rx_item_barcodes_item_fk", 404, "Item not found."),
+    ("rx_items_drug_has_generic", 422, "A drug needs its generic (name, strength, form)."),
+    ("rx_items_controlled_no_loose", 422, "Schedule X and narcotic items must allow per-unit dispensing."),
+    ("rx_sm_reason_for_adjust", 422, "A write-off or adjustment needs a reason (3+ characters)."),
+    ("rx_batches_block_reason", 422, "Blocking a batch needs a reason (3+ characters)."),
+    ("rx_batches_batch_no_check", 422, "A batch number is 1–30 letters, digits or / . _ -."),
+    ("rx_batches_mrp_pack_paise_check", 422, "MRP must be between ₹0.01 and ₹10,00,000 per pack."),
 )
+
+
+def explain(msg: str) -> Optional[tuple[int, Optional[dict], str]]:
+    """(status, {code, reason} or None, message) for a known rx_* code / constraint in a DB message."""
+    for code in sorted(_ERRORS, key=len, reverse=True):
+        if code in msg:
+            status, message = _ERRORS[code]
+            m = re.search(re.escape(code) + r":([A-Za-z_]+)", msg)
+            return status, {"code": code, "reason": m.group(1) if m else None}, message
+    for constraint, status, message in _CONSTRAINTS:
+        if constraint in msg:
+            return status, None, message
+    return None
 
 
 def raise_for(exc: Exception) -> None:
@@ -75,15 +123,12 @@ def raise_for(exc: Exception) -> None:
     if isinstance(exc, HTTPException):
         raise exc
     msg = str(getattr(exc, "message", None) or exc)
-    for code in sorted(_ERRORS, key=len, reverse=True):
-        if code in msg:
-            status, message = _ERRORS[code]
-            m = re.search(re.escape(code) + r":([A-Za-z_]+)", msg)
-            raise HTTPException(status_code=status, detail={"code": code, "reason": m.group(1) if m else None,
-                                                            "message": message})
-    for constraint, status, message in _CONSTRAINTS:
-        if constraint in msg:
-            raise HTTPException(status_code=status, detail=message)
+    known = explain(msg)
+    if known and known[0] < 500:
+        status, code, message = known
+        raise HTTPException(status_code=status, detail={**code, "message": message} if code else message)
+    if known:   # a ledger wall reached from Python means a code path bypassed the rx_* functions
+        logger.critical(f"RX_LEDGER_BYPASS code={known[1] and known[1]['code']}")
     logger.error(f"RX_DB_ERROR type={type(exc).__name__}")
     raise HTTPException(status_code=500, detail="The pharmacy operation failed. Nothing was changed; please retry.")
 

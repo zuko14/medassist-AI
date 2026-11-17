@@ -3603,6 +3603,47 @@
             .dxi-chart circle { r: 10; }
         }
         /* DX:instruments:END */
+        /* RX:catalogue:START — Drug Master + shared pharmacy widgets (migrations 135–136; docs/pharmacy-os/UI.md §7) */
+        .rx-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 12px; }
+        .rx-toolbar .field { margin: 0; min-width: min(200px, 100%); }
+        .rx-toolbar .grow { flex: 1 1 240px; }
+        .rx-badge { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; padding: 1px 8px; border-radius: 999px;
+            font-size: 0.74rem; font-weight: 600; border: 1px solid var(--border2); color: var(--text2); background: var(--surface2); }
+        .rx-badge.s-H, .rx-badge.e-near, .rx-badge.e-short_shelf { border-color: var(--amber); color: var(--amber); background: var(--amber-bg); }
+        .rx-badge.s-H1, .rx-badge.s-X, .rx-badge.s-narcotic, .rx-badge.s-psychotropic, .rx-badge.e-expired, .rx-badge.e-blocked {
+            border-color: var(--red); color: var(--red); background: var(--red-bg); }
+        .rx-badge.e-ok { border-color: var(--green-border, var(--border2)); color: var(--green); background: var(--green-bg); }
+        .rx-item { display: flex; gap: 10px; align-items: flex-start; }
+        .rx-item .rx-form { flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+            background: var(--surface2); border: 1px solid var(--border); color: var(--text2); }
+        .rx-item b { display: block; }
+        .rx-item small, .rx-sub { color: var(--text3); font-size: 0.78rem; }
+        .rx-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .rx-tbl td { vertical-align: top; }
+        .rx-tbl tr.rx-open > td { background: var(--surface2); }
+        .rx-tbl .rx-batches td { padding-top: 0; }
+        .rx-errors { max-height: 280px; overflow: auto; margin-top: 10px; }
+        .rx-errors table { width: 100%; font-size: 0.82rem; }
+        .rx-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+        .rx-tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent2); border-color: var(--accent); }
+        .rx-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 10px; margin-bottom: 12px; }
+        .rx-stats div { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--surface2); }
+        .rx-stats b { display: block; font-size: 1.1rem; }
+        .rx-drawer { position: fixed; inset: 0 0 0 auto; width: min(640px, 100vw); background: var(--bg); border-left: 1px solid var(--border);
+            box-shadow: -12px 0 32px rgba(0,0,0,.35); z-index: 450; transform: translateX(100%); transition: transform .2s ease;
+            display: flex; flex-direction: column; visibility: hidden; }
+        .rx-drawer.open { transform: none; visibility: visible; }
+        .rx-drawer header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-start; }
+        .rx-drawer header h3 { margin: 0; font-size: 1.05rem; flex: 1; }
+        .rx-drawer .rx-body { padding: 12px 16px; overflow-y: auto; flex: 1; }
+        .rx-drawer footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; }
+        .rx-drawer h4 { margin: 16px 0 6px; font-size: 0.85rem; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; }
+        .rx-lock { color: var(--text3); font-size: 0.75rem; }
+        @media (max-width: 760px) {
+            .rx-toolbar .field { min-width: 100%; }
+            .rx-tbl .rx-num { text-align: left; }
+        }
+        /* RX:catalogue:END */
     </style>
 </head>
 <body>
@@ -3944,6 +3985,16 @@
                     <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 20.5 3.5 13.5a4.95 4.95 0 1 1 7-7l7 7a4.95 4.95 0 1 1-7 7z"></path><path d="m8.5 8.5 7 7"></path></svg></span><span class="nav-group-title">Pharmacy</span><span class="nav-group-count" aria-hidden="true"></span><svg class="nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"></polyline></svg>
                 </button>
                 <div class="nav-group-body" id="navGrpRx" role="group" aria-labelledby="navGrpRxHead"><div class="nav-group-inner">
+            <!-- RX:stock:START -->
+            <div class="nav-link" tabindex="0" data-page="rxstock" data-rx="nav RX_READ" style="display:none" onclick="go('rxstock',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"></path><path d="m3 8 9 5 9-5"></path><path d="M12 13v8"></path></svg></span><span>Stock &amp; Expiry</span>
+            </div>
+            <!-- RX:stock:END -->
+            <!-- RX:catalogue:START -->
+            <div class="nav-link" tabindex="0" data-page="rxitems" data-rx="nav RX_READ RX_CATALOGUE RX_ADMIN" style="display:none" onclick="go('rxitems',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg></span><span>Drug Master</span>
+            </div>
+            <!-- RX:catalogue:END -->
             <div class="nav-link" tabindex="0" data-page="rxsetup" data-rx="nav RX_ADMIN RX_READ" style="display:none" onclick="go('rxsetup',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 20.5 3.5 13.5a4.95 4.95 0 1 1 7-7l7 7a4.95 4.95 0 1 1-7 7z"></path><path d="m8.5 8.5 7 7"></path></svg></span><span>Pharmacy Setup</span>
             </div>
@@ -7687,6 +7738,168 @@
             </div>
         </div>
         <!-- RX:foundation:END -->
+        <!-- RX:catalogue:START — Drug Master page (docs/pharmacy-os/UI.md §7, page rxitems) -->
+        <div id="pg-rxitems" class="sec">
+            <div class="page-head">
+                <div><h2>Drug Master</h2><p>Every medicine and consumable the pharmacy stocks: brand, generic, pack, schedule and tax.</p></div>
+                <div class="dx-actions" style="margin:0;">
+                    <button type="button" class="btn btn-ghost btn-sm" data-rxcat-edit onclick="rxcat.toggleImport()">Import CSV / Excel</button>
+                    <button type="button" class="btn btn-accent btn-sm" data-rxcat-edit onclick="rxcat.openNew()">Add item</button>
+                </div>
+            </div>
+            <div class="ipd-winddown" data-rx-winddown hidden>Pharmacy OS is being switched off for this clinic: the drug master is read-only.</div>
+            <div class="card" id="rxcatImport" hidden>
+                <div class="card-head"><h3>Import the item master</h3></div>
+                <p class="muted">Columns: item_code, brand_name, generic_name, strength, dosage_form, route, manufacturer, item_kind, schedule, base_unit, pack_size, pack_label, allow_loose, hsn_code, gst_rate_percent, reorder_level_units, reorder_qty_units, is_chronic, is_cold_chain, rack_location, barcode. Run the check first: nothing is saved until every row is clean, and re-uploading the same file changes nothing.</p>
+                <div class="rx-toolbar">
+                    <div class="field grow"><label for="rxcatFile">File (.csv or .xlsx, up to 5 MB)</label><input type="file" id="rxcatFile" accept=".csv,.xlsx" onchange="rxcat.fileChanged()"></div>
+                    <button type="button" class="btn btn-ghost btn-sm" id="rxcatDry" onclick="rxcat.importFile(false, this)">Check file</button>
+                    <button type="button" class="btn btn-accent btn-sm" id="rxcatApply" disabled onclick="rxcat.importFile(true, this)">Import</button>
+                </div>
+                <div id="rxcatImportResult" aria-live="polite"></div>
+            </div>
+            <div class="card">
+                <div class="rx-toolbar">
+                    <div class="field grow"><label for="rxcatQ">Search brand</label><input id="rxcatQ" type="search" placeholder="Dolo, Augmentin…" oninput="rxcat.debounce()"></div>
+                    <div class="field"><label for="rxcatSched">Schedule</label><select id="rxcatSched" onchange="rxcat.load()">
+                        <option value="">All</option><option value="none">Non-scheduled</option><option value="G">G</option><option value="H">H</option>
+                        <option value="H1">H1</option><option value="X">X</option><option value="narcotic">Narcotic</option><option value="psychotropic">Psychotropic</option></select></div>
+                    <div class="field"><label for="rxcatActive">Status</label><select id="rxcatActive" onchange="rxcat.load()">
+                        <option value="true">Active</option><option value="false">Inactive</option><option value="">All</option></select></div>
+                </div>
+                <div id="rxcatList" aria-live="polite"></div>
+            </div>
+            <aside class="rx-drawer" id="rxcatDrawer" role="dialog" aria-modal="true" aria-labelledby="rxcatDrawerTitle">
+                <header><h3 id="rxcatDrawerTitle">Add item</h3>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxcat.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body">
+                    <fieldset id="rxcatForm" style="border:0; padding:0; margin:0;">
+                    <h4>Identity</h4>
+                    <div class="dx-grid">
+                        <div class="field"><label for="rxiCode">Item code <span class="rx-lock" data-lock="item_code" hidden title="The item code never changes">🔒 fixed</span></label><input id="rxiCode" maxlength="40" autocapitalize="characters" placeholder="DOLO650"></div>
+                        <div class="field"><label for="rxiBrand">Brand name</label><input id="rxiBrand" maxlength="200" placeholder="Dolo 650"></div>
+                        <div class="field"><label for="rxiKind">Kind</label><select id="rxiKind">
+                            <option value="drug">Drug</option><option value="otc">OTC</option><option value="consumable">Consumable</option>
+                            <option value="surgical">Surgical</option><option value="nutrition">Nutrition</option><option value="device">Device</option></select></div>
+                        <div class="field"><label for="rxiGeneric">Generic (molecule + strength + form) <span class="rx-lock" data-lock="generic_id" hidden title="Fixed once stock has moved">🔒 stock moved</span></label><select id="rxiGeneric" onchange="rxcat.genericChanged()"></select></div>
+                        <div class="field"><label for="rxiMfr">Manufacturer</label><select id="rxiMfr" onchange="rxcat.mfrChanged()"></select></div>
+                    </div>
+                    <div class="dx-grid" id="rxiNewGeneric" hidden>
+                        <div class="field"><label for="rxiGName">New generic name</label><input id="rxiGName" maxlength="200" placeholder="Paracetamol"></div>
+                        <div class="field"><label for="rxiGStrength">Strength</label><input id="rxiGStrength" maxlength="60" placeholder="650 mg"></div>
+                        <div class="field"><label for="rxiGForm">Dosage form</label><select id="rxiGForm">
+                            <option>tablet</option><option>capsule</option><option>syrup</option><option>suspension</option><option>injection</option><option>drops</option>
+                            <option>ointment</option><option>cream</option><option>gel</option><option>inhaler</option><option>powder</option><option>lotion</option>
+                            <option>spray</option><option>patch</option><option>infusion</option><option>other</option></select></div>
+                        <div class="field"><label for="rxiGRoute">Route</label><select id="rxiGRoute">
+                            <option>oral</option><option>topical</option><option>iv</option><option>im</option><option>sc</option><option>inhalation</option><option>nasal</option>
+                            <option>ophthalmic</option><option>otic</option><option>rectal</option><option>vaginal</option><option>sublingual</option><option>other</option></select></div>
+                    </div>
+                    <div class="dx-grid" id="rxiNewMfr" hidden>
+                        <div class="field"><label for="rxiMName">New manufacturer</label><input id="rxiMName" maxlength="120" placeholder="Micro Labs"></div>
+                    </div>
+                    <h4>Packaging</h4>
+                    <div class="dx-grid">
+                        <div class="field"><label for="rxiUnit">Base unit <span class="rx-lock" data-lock="base_unit" hidden title="The base unit never changes">🔒 fixed</span></label><select id="rxiUnit">
+                            <option>tablet</option><option>capsule</option><option>ml</option><option>gram</option><option>vial</option><option>ampoule</option><option>bottle</option>
+                            <option>tube</option><option>sachet</option><option>piece</option><option>pair</option><option>box</option><option>inhaler</option><option>patch</option></select></div>
+                        <div class="field"><label for="rxiPack">Units per pack <span class="rx-lock" data-lock="pack_size" hidden title="Fixed once a batch exists">🔒 batches exist</span></label><input id="rxiPack" type="number" min="1" max="10000" value="10"></div>
+                        <div class="field"><label for="rxiPackLabel">Pack</label><select id="rxiPackLabel">
+                            <option>strip</option><option>blister</option><option>bottle</option><option>vial</option><option>ampoule</option><option>tube</option>
+                            <option>box</option><option>sachet</option><option>piece</option><option>pack</option></select></div>
+                    </div>
+                    <label class="check"><input type="checkbox" id="rxiLoose" checked> Can be sold loose (part of a pack)</label>
+                    <h4>Regulatory</h4>
+                    <div class="dx-grid">
+                        <div class="field"><label for="rxiSched">Schedule <span class="rx-lock">can only be raised</span></label><select id="rxiSched">
+                            <option value="none">Non-scheduled</option><option value="G">G</option><option value="H">H</option><option value="H1">H1</option>
+                            <option value="X">X</option><option value="narcotic">Narcotic (NDPS)</option><option value="psychotropic">Psychotropic (NDPS)</option></select></div>
+                        <div class="field"><label for="rxiHsn">HSN code</label><input id="rxiHsn" maxlength="8" inputmode="numeric" placeholder="30049099"></div>
+                        <div class="field"><label for="rxiGst">GST rate</label><select id="rxiGst">
+                            <option value="0">0 %</option><option value="500">5 %</option><option value="1200" selected>12 %</option><option value="1800">18 %</option>
+                            <option value="2800">28 %</option><option value="4000">40 %</option></select></div>
+                        <div class="field" id="rxiReasonWrap" hidden><label for="rxiReason">Reason for a GST / HSN change</label><input id="rxiReason" maxlength="300" placeholder="Notification no."></div>
+                    </div>
+                    <label class="check"><input type="checkbox" id="rxiCold"> Cold chain (2–8 °C)</label>
+                    <h4>Stock policy</h4>
+                    <div class="dx-grid">
+                        <div class="field"><label for="rxiReorder">Reorder below (units)</label><input id="rxiReorder" type="number" min="0" value="0"></div>
+                        <div class="field"><label for="rxiReorderQty">Reorder quantity (units)</label><input id="rxiReorderQty" type="number" min="0" value="0"></div>
+                        <div class="field"><label for="rxiRack">Rack / shelf</label><input id="rxiRack" maxlength="40" placeholder="A-3"></div>
+                    </div>
+                    <label class="check"><input type="checkbox" id="rxiChronic"> Chronic medicine (eligible for refill reminders)</label>
+                    <label class="check" id="rxiActiveWrap" hidden><input type="checkbox" id="rxiActive" checked> Active</label>
+                    </fieldset>
+                    <div id="rxcatExtra"></div>
+                </div>
+                <footer>
+                    <button type="button" class="btn btn-accent btn-sm" id="rxcatSave" data-rxcat-edit onclick="rxcat.save(this)">Save item</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxcat.close()">Close</button>
+                </footer>
+            </aside>
+        </div>
+        <!-- RX:catalogue:END -->
+        <!-- RX:stock:START — Stock & Expiry page (docs/pharmacy-os/UI.md §5, page rxstock) -->
+        <div id="pg-rxstock" class="sec">
+            <div class="page-head">
+                <div><h2>Stock &amp; Expiry</h2><p>What is on the shelf, batch by batch. Stock changes only through goods receipt, sales, transfers and write-offs; nobody edits a number.</p></div>
+                <div class="field" style="margin:0; min-width:200px;"><label for="rxsStore">Store</label><select id="rxsStore" onchange="rxstock.load()"></select></div>
+            </div>
+            <div class="rx-tabs" role="tablist" aria-label="Stock views">
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="stock" aria-selected="true" onclick="rxstock.tab('stock')">Stock</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="expiry" aria-selected="false" onclick="rxstock.tab('expiry')">Expiry alerts</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="reorder" aria-selected="false" onclick="rxstock.tab('reorder')">Reorder</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="opening" aria-selected="false" data-rxs-adjust onclick="rxstock.tab('opening')">Opening stock</button>
+            </div>
+            <div class="card" data-rxs-tab="stock">
+                <div class="rx-toolbar">
+                    <div class="field grow"><label for="rxsQ">Search</label><input id="rxsQ" type="search" placeholder="Brand or item code" oninput="rxstock.debounce()"></div>
+                    <div class="field"><label for="rxsSched">Schedule</label><select id="rxsSched" onchange="rxstock.load()">
+                        <option value="">All</option><option value="H">H</option><option value="H1">H1</option><option value="X">X</option>
+                        <option value="narcotic">Narcotic</option><option value="psychotropic">Psychotropic</option><option value="none">Non-scheduled</option></select></div>
+                    <label class="check" style="margin:0 0 8px;"><input type="checkbox" id="rxsLow" onchange="rxstock.load()"> Below reorder level</label>
+                </div>
+                <div id="rxsList" aria-live="polite"></div>
+            </div>
+            <div class="card" data-rxs-tab="expiry" hidden>
+                <div class="rx-toolbar" role="group" aria-label="Expiry window">
+                    <button type="button" class="btn btn-ghost btn-sm" data-days="30" onclick="rxstock.loadExpiry(30)">30 days</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-days="60" onclick="rxstock.loadExpiry(60)">60 days</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-days="90" onclick="rxstock.loadExpiry(90)">90 days</button>
+                </div>
+                <div id="rxsExpiry" aria-live="polite"></div>
+            </div>
+            <div class="card" data-rxs-tab="reorder" hidden><div id="rxsReorder" aria-live="polite"></div></div>
+            <div class="card" data-rxs-tab="opening" hidden>
+                <div class="card-head"><h3>Load opening stock</h3></div>
+                <p class="muted">Columns: item_code, batch_no, expiry_mm_yyyy, mrp_per_pack, purchase_rate_per_pack, gst_rate_percent, and qty_units or packs + loose. Allowed only until the store's first sale, receipt or write-off. Expired batches are refused. Re-uploading the same file adds nothing.</p>
+                <div class="rx-toolbar">
+                    <div class="field grow"><label for="rxsOpenFile">File (.csv or .xlsx)</label><input type="file" id="rxsOpenFile" accept=".csv,.xlsx" onchange="document.getElementById('rxsOpenApply').disabled = true"></div>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxstock.opening(false, this)">Check file</button>
+                    <button type="button" class="btn btn-accent btn-sm" id="rxsOpenApply" disabled onclick="rxstock.opening(true, this)">Load stock</button>
+                </div>
+                <div id="rxsOpenResult" aria-live="polite"></div>
+            </div>
+            <aside class="rx-drawer" id="rxsDrawer" role="dialog" aria-modal="true" aria-labelledby="rxsDrawerTitle">
+                <header><h3 id="rxsDrawerTitle">Write off stock</h3>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxstock.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body">
+                    <p id="rxsWoBatch" class="muted"></p>
+                    <div class="dx-grid">
+                        <div class="field"><label for="rxsWoKind">Kind</label><select id="rxsWoKind">
+                            <option value="expiry">Expired / short expiry</option><option value="damage">Damaged / broken / recalled</option></select></div>
+                        <div class="field"><label for="rxsWoQty">Units to write off</label><input id="rxsWoQty" type="number" min="1" step="1"></div>
+                    </div>
+                    <div class="field"><label for="rxsWoReason">Reason (kept in the ledger)</label><input id="rxsWoReason" maxlength="300" placeholder="Strip crushed in transit"></div>
+                    <p class="muted">The units leave stock permanently. A write-off is never edited; a mistake is corrected by a stock audit.</p>
+                </div>
+                <footer>
+                    <button type="button" class="btn btn-accent btn-sm" onclick="rxstock.submitWriteoff(this)">Write off</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxstock.close()">Cancel</button>
+                </footer>
+            </aside>
+        </div>
+        <!-- RX:stock:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -10275,6 +10488,410 @@ const rxos = {
     },
 };
 /* RX:foundation:END */
+
+/* RX:catalogue:START — Drug Master (migration 135). Matching and substitutes are deterministic server reads
+   (ADR-RX-06): Kriya never suggests a molecule, only other brands of the same generic. */
+const rxRs = p => '₹' + ((Number(p) || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const rxPlural = (n, w) => n === 1 || ['ml', 'gram'].includes(w) ? w : (/(x|ch)$/.test(w) ? w + 'es' : w + 's');
+function fmtPackLoose(units, pack, label, unit) {
+    units = Number(units) || 0; pack = Number(pack) || 1; unit = unit || 'unit'; label = label || 'pack';
+    if (pack <= 1) return `${units} ${rxPlural(units, unit)}`;
+    const p = Math.floor(units / pack), l = units % pack;
+    return [p && `${p} ${rxPlural(p, label)}`, l && `${l} ${rxPlural(l, unit)}`].filter(Boolean).join(' + ') || `0 ${rxPlural(0, unit)}`;
+}
+const RX_SCHED = { G: 'Sch G', H: 'Sch H', H1: 'Sch H1', X: 'Sch X', narcotic: 'NDPS', psychotropic: 'NDPS psy' };
+function rxSchedBadge(s) {
+    return s && s !== 'none' ? `<span class="rx-badge s-${esc(s)}" title="Schedule ${esc(s)}">${esc(RX_SCHED[s] || s)}</span>` : '';
+}
+function rxFormIcon(unit) {
+    const g = ['tablet', 'capsule'].includes(unit) ? '<rect x="3" y="9" width="18" height="6" rx="3"></rect><path d="M12 9v6"></path>'
+        : ['ml', 'bottle'].includes(unit) ? '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"></path>'
+        : ['vial', 'ampoule'].includes(unit) ? '<path d="m18 2 4 4M17 7l3-3M9 11l4 4M5 19l-3 3M14 4l6 6-9.5 9.5a2.1 2.1 0 0 1-3 0l-3-3a2.1 2.1 0 0 1 0-3z"></path>'
+        : ['tube', 'gram'].includes(unit) ? '<path d="M8 3h8l-1 4v13a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V7z"></path>'
+        : '<rect x="4" y="6" width="16" height="13" rx="2"></rect><path d="M4 10h16"></path>';
+    return `<span class="rx-form" title="${esc(unit || '')}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${g}</svg></span>`;
+}
+const RX_EXP = { ok: 'OK', near: 'Near expiry', short_shelf: 'Short shelf life', expired: 'Expired', blocked: 'Blocked' };
+function rxExpBadge(status, expiry, days) {
+    const d = expiry ? String(expiry).slice(5, 7) + '/' + String(expiry).slice(2, 4) : '';
+    const left = days == null ? '' : days < 0 ? ` · ${-days} d ago` : ` · ${days} d`;
+    return `<span class="rx-badge e-${esc(status)}">${esc(RX_EXP[status] || status)}</span> <span class="rx-sub">Exp ${esc(d)}${esc(left)}</span>`;
+}
+async function rxUpload(path, input, keep422) {
+    const f = input.files[0];
+    if (!f) throw new Error('Choose a .csv or .xlsx file first.');
+    const fd = new FormData(); fd.append('file', f);
+    const r = await apiRaw(path, { method: 'POST', headers: authHeaders(), body: fd }, s => keep422 && s === 422);
+    const body = await r.json().catch(() => ({}));
+    if (r.status === 422) return { ...(body.detail || {}), valid: false, applied: false };
+    return body;
+}
+function rxRowErrors(errors) {
+    if (!errors || !errors.length) return '';
+    return `<div class="rx-errors tbl-wrap"><table><thead><tr><th>Row</th><th>Column</th><th>Problem</th></tr></thead><tbody>
+        ${errors.map(e => `<tr><td>${esc(e.row ?? '')}</td><td>${esc(e.field || '—')}</td><td>${esc(e.msg)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+const rxcat = {
+    items: [], generics: [], mfrs: [], editing: null, timer: null,
+    canEdit() { return myRx === 'ACTIVE' && (rxCan('RX_CATALOGUE') || rxCan('RX_ADMIN')); },
+    debounce() { clearTimeout(rxcat.timer); rxcat.timer = setTimeout(rxcat.load, 250); },
+    async load() {
+        document.querySelectorAll('[data-rxcat-edit]').forEach(el => { el.hidden = !rxcat.canEdit(); });
+        applyRxGates();
+        const list = document.getElementById('rxcatList');
+        list.innerHTML = loading();
+        const p = new URLSearchParams({ limit: '200' }), v = id => document.getElementById(id).value.trim();
+        if (v('rxcatQ')) p.set('q', v('rxcatQ'));
+        if (v('rxcatSched')) p.set('schedule', v('rxcatSched'));
+        if (v('rxcatActive')) p.set('active', v('rxcatActive'));
+        try { rxcat.items = (await api('/admin/rx/items?' + p)).items; }
+        catch (e) { list.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        list.innerHTML = rxcat.items.length ? `<div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr>
+            <th>Item</th><th>Generic</th><th>Schedule</th><th>Pack</th><th>HSN · GST</th><th class="rx-num">In stock</th><th></th></tr></thead><tbody>
+            ${rxcat.items.map(i => `<tr>
+                <td data-label="Item"><div class="rx-item">${rxFormIcon(i.base_unit)}<div><b>${esc(i.brand_name)}</b><small>${esc(i.item_code)}${i.is_active ? '' : ' · inactive'}${i.is_cold_chain ? ' · cold chain' : ''}</small></div></div></td>
+                <td data-label="Generic">${i.generic ? `${esc(i.generic.name)}<span class="muted">${esc(i.generic.strength)} · ${esc(i.generic.dosage_form)}</span>` : '<span class="muted">—</span>'}</td>
+                <td data-label="Schedule">${rxSchedBadge(i.schedule) || '<span class="muted">—</span>'}</td>
+                <td data-label="Pack">${esc(i.pack_size)} ${esc(rxPlural(i.pack_size, i.base_unit))} / ${esc(i.pack_label)}</td>
+                <td data-label="HSN · GST">${esc(i.hsn_code)} · ${esc(i.tax_rate_bps / 100)} %</td>
+                <td data-label="In stock" class="rx-num">${esc(fmtPackLoose(i.stock_units, i.pack_size, i.pack_label, i.base_unit))}</td>
+                <td><button type="button" class="btn btn-ghost btn-sm" onclick="rxcat.open('${esc(i.id)}')">${rxcat.canEdit() ? 'Edit' : 'View'}</button></td>
+            </tr>`).join('')}</tbody></table></div>`
+            : `<p class="muted">${v('rxcatQ') ? 'No item matches.' : 'No items yet. Import your item master or add items one by one.'}</p>`;
+    },
+    async masters() {
+        const [g, m] = await Promise.all([api('/admin/rx/generics'), api('/admin/rx/manufacturers')]);
+        rxcat.generics = g.generics; rxcat.mfrs = m.manufacturers;
+        const gs = document.getElementById('rxiGeneric'), ms = document.getElementById('rxiMfr');
+        gs.innerHTML = '<option value="">— none (OTC / consumable) —</option>'
+            + rxcat.generics.map(x => `<option value="${esc(x.id)}">${esc(x.name)} ${esc(x.strength)} · ${esc(x.dosage_form)}</option>`).join('')
+            + (rxcat.canEdit() ? '<option value="__new">+ New generic…</option>' : '');
+        ms.innerHTML = '<option value="">— not set —</option>'
+            + rxcat.mfrs.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')
+            + (rxcat.canEdit() ? '<option value="__new">+ New manufacturer…</option>' : '');
+    },
+    genericChanged() { document.getElementById('rxiNewGeneric').hidden = document.getElementById('rxiGeneric').value !== '__new'; },
+    mfrChanged() { document.getElementById('rxiNewMfr').hidden = document.getElementById('rxiMfr').value !== '__new'; },
+    fill(i) {
+        const f = id => document.getElementById(id);
+        f('rxiCode').value = i.item_code || ''; f('rxiBrand').value = i.brand_name || ''; f('rxiKind').value = i.item_kind || 'drug';
+        f('rxiGeneric').value = i.generic_id || ''; f('rxiMfr').value = i.manufacturer_id || '';
+        f('rxiUnit').value = i.base_unit || 'tablet'; f('rxiPack').value = i.pack_size || 10; f('rxiPackLabel').value = i.pack_label || 'strip';
+        f('rxiLoose').checked = i.allow_loose !== false; f('rxiSched').value = i.schedule || 'none'; f('rxiHsn').value = i.hsn_code || '';
+        f('rxiGst').value = String(i.tax_rate_bps ?? 1200); f('rxiCold').checked = !!i.is_cold_chain;
+        f('rxiReorder').value = i.reorder_level_units || 0; f('rxiReorderQty').value = i.reorder_qty_units || 0; f('rxiRack').value = i.rack_location || '';
+        f('rxiChronic').checked = !!i.is_chronic; f('rxiActive').checked = i.is_active !== false; f('rxiReason').value = '';
+        rxcat.genericChanged(); rxcat.mfrChanged();
+    },
+    setLocks(item) {
+        const stocked = !!item && (rxcat.items.find(x => x.id === item.id) || {}).stock_units > 0;
+        const locks = { item_code: !!item, base_unit: !!item, generic_id: stocked, pack_size: stocked };
+        const ids = { item_code: 'rxiCode', base_unit: 'rxiUnit', generic_id: 'rxiGeneric', pack_size: 'rxiPack' };
+        Object.entries(locks).forEach(([k, on]) => {
+            document.getElementById(ids[k]).disabled = on;
+            document.querySelector(`#rxcatForm [data-lock="${k}"]`).hidden = !on;
+        });
+        document.getElementById('rxiReasonWrap').hidden = !item;
+        document.getElementById('rxiActiveWrap').hidden = !item;
+    },
+    async openNew() {
+        try { await rxcat.masters(); } catch (e) { toast(e.message, true); return; }
+        rxcat.editing = null;
+        rxcat.fill({});
+        rxcat.setLocks(null);
+        document.getElementById('rxcatForm').disabled = false;
+        document.getElementById('rxcatDrawerTitle').textContent = 'Add item';
+        document.getElementById('rxcatExtra').innerHTML = '';
+        rxcat.show();
+    },
+    async open(id) {
+        let item;
+        try { [item] = await Promise.all([api(`/admin/rx/items/${encodeURIComponent(id)}`), rxcat.masters()]); }
+        catch (e) { toast(e.message, true); return; }
+        rxcat.editing = item;
+        rxcat.fill(item);
+        rxcat.setLocks(item);
+        document.getElementById('rxcatForm').disabled = !rxcat.canEdit();
+        document.getElementById('rxcatDrawerTitle').textContent = item.brand_name;
+        rxcat.renderExtra(item);
+        rxcat.show();
+    },
+    renderExtra(item) {
+        const edit = rxcat.canEdit();
+        document.getElementById('rxcatExtra').innerHTML = `
+            <h4>Barcodes</h4>
+            ${item.barcodes.length ? item.barcodes.map(b => `<span class="rx-badge">${esc(b.barcode)} · ${esc(b.symbology)}</span>`).join(' ') : '<p class="muted">None yet.</p>'}
+            ${edit ? `<div class="rx-toolbar" style="margin-top:8px;"><div class="field grow"><label for="rxiBarcode">Add barcode (scan or type)</label><input id="rxiBarcode" maxlength="40" inputmode="numeric"></div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rxcat.addBarcode(this)">Add</button></div>` : ''}
+            <h4>Same-generic brands</h4>
+            ${item.substitutes.length ? `<ul class="rx-sub">${item.substitutes.map(s => `<li>${esc(s.brand_name)} (${esc(s.item_code)}) — ${esc(s.stock_units)} in stock</li>`).join('')}</ul>`
+                : '<p class="muted">No other brand of this generic.</p>'}
+            ${item.aliases.length ? `<h4>Learned names</h4><p class="rx-sub">${item.aliases.map(a => esc(a.alias_norm)).join(' · ')}</p>` : ''}
+            <h4>Change history</h4>
+            ${item.changes.length ? `<div class="tbl-wrap"><table class="rx-tbl" style="width:100%; font-size:0.82rem;"><thead><tr><th>When</th><th>Field</th><th>From → to</th><th>By · why</th></tr></thead><tbody>
+                ${item.changes.slice(0, 15).map(c => `<tr><td>${esc(new Date(c.changed_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }))}</td>
+                    <td>${esc(c.field)}</td><td>${esc(c.old_value ?? '—')} → ${esc(c.new_value ?? '—')}</td><td>${esc(c.changed_by_name || '—')}${c.reason ? ' · ' + esc(c.reason) : ''}</td></tr>`).join('')}</tbody></table></div>`
+                : '<p class="muted">No changes since the item was created.</p>'}`;
+    },
+    show() {
+        const d = document.getElementById('rxcatDrawer');
+        rxcat.lastFocus = document.activeElement;
+        d.classList.add('open');
+        setTimeout(() => (d.querySelector('input:not([disabled]), select:not([disabled])') || d).focus(), 50);
+    },
+    close() {
+        document.getElementById('rxcatDrawer').classList.remove('open');
+        if (rxcat.lastFocus && rxcat.lastFocus.focus) rxcat.lastFocus.focus();
+    },
+    formBody() {
+        const f = id => document.getElementById(id), v = id => f(id).value.trim(), n = id => parseInt(f(id).value || '0', 10);
+        return { item_code: v('rxiCode').toUpperCase(), brand_name: v('rxiBrand'), item_kind: v('rxiKind'),
+                 generic_id: v('rxiGeneric') || null, manufacturer_id: v('rxiMfr') || null, base_unit: v('rxiUnit'),
+                 pack_size: n('rxiPack'), pack_label: v('rxiPackLabel'), allow_loose: f('rxiLoose').checked, schedule: v('rxiSched'),
+                 hsn_code: v('rxiHsn'), tax_rate_bps: n('rxiGst'), is_cold_chain: f('rxiCold').checked,
+                 reorder_level_units: n('rxiReorder'), reorder_qty_units: n('rxiReorderQty'), rack_location: v('rxiRack') || null,
+                 is_chronic: f('rxiChronic').checked, is_active: f('rxiActive').checked };
+    },
+    async save(btn) {
+        const body = rxcat.formBody(), f = id => document.getElementById(id);
+        if (body.brand_name.length < 2) { toast('Enter the brand name.', true); return; }
+        if (!/^[0-9]{4,8}$/.test(body.hsn_code)) { toast('HSN code: 4 to 8 digits.', true); return; }
+        btn.disabled = true;
+        try {
+            if (body.generic_id === '__new') {
+                const g = { name: f('rxiGName').value.trim(), strength: f('rxiGStrength').value.trim(), dosage_form: f('rxiGForm').value, route: f('rxiGRoute').value };
+                if (g.name.length < 2 || !g.strength) { toast('Enter the new generic name and strength.', true); return; }
+                body.generic_id = (await apiPost('/admin/rx/generics', g)).id;
+            }
+            if (body.manufacturer_id === '__new') {
+                const name = f('rxiMName').value.trim();
+                if (name.length < 2) { toast('Enter the manufacturer name.', true); return; }
+                body.manufacturer_id = (await apiPost('/admin/rx/manufacturers', { name })).id;
+            }
+            if (!rxcat.editing) {
+                if (!/^[A-Z0-9_-]{2,40}$/.test(body.item_code)) { toast('Item code: 2 to 40 capital letters, digits, _ or -.', true); return; }
+                delete body.is_active;
+                Object.keys(body).forEach(k => { if (body[k] === null) delete body[k]; });
+                const item = await apiPost('/admin/rx/items', body);
+                toast('Item added');
+                await rxcat.load();
+                await rxcat.open(item.id);
+                return;
+            }
+            const cur = rxcat.editing, patch = {};
+            Object.keys(body).forEach(k => { if ((body[k] ?? null) !== (cur[k] ?? null)) patch[k] = body[k]; });
+            if (!Object.keys(patch).length) { toast('Nothing changed'); return; }
+            if (('tax_rate_bps' in patch || 'hsn_code' in patch)) {
+                patch.reason = f('rxiReason').value.trim();
+                if (patch.reason.length < 3) { toast('Give a reason for the GST / HSN change.', true); f('rxiReason').focus(); return; }
+            }
+            await apiPatch(`/admin/rx/items/${encodeURIComponent(cur.id)}`, patch);
+            toast('Item saved');
+            await rxcat.load();
+            await rxcat.open(cur.id);
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async addBarcode(btn) {
+        const code = document.getElementById('rxiBarcode').value.trim();
+        if (!/^[0-9A-Za-z]{6,40}$/.test(code)) { toast('A barcode is 6 to 40 letters or digits.', true); return; }
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/rx/items/${encodeURIComponent(rxcat.editing.id)}/barcodes`, { barcode: code });
+            toast('Barcode added');
+            await rxcat.open(rxcat.editing.id);
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    toggleImport() { const c = document.getElementById('rxcatImport'); c.hidden = !c.hidden; },
+    fileChanged() { document.getElementById('rxcatApply').disabled = true; document.getElementById('rxcatImportResult').innerHTML = ''; },
+    async importFile(apply, btn) {
+        const out = document.getElementById('rxcatImportResult');
+        btn.disabled = true;
+        try {
+            const r = await rxUpload(`/admin/rx/items/import/${apply ? 'apply' : 'dry-run'}`, document.getElementById('rxcatFile'), true);
+            if (apply && r.created !== undefined) {
+                out.innerHTML = `<div class="alert alert-ok">Imported: ${esc(r.created)} new, ${esc(r.updated)} updated, ${esc(r.unchanged)} unchanged.</div>`;
+                document.getElementById('rxcatApply').disabled = true;
+                await rxcat.load();
+                return;
+            }
+            const ok = r.valid !== false && !(r.errors || []).length;
+            out.innerHTML = (ok ? `<div class="alert alert-ok">File is clean: ${esc(r.would_create)} new, ${esc(r.would_update)} to update, ${esc(r.unchanged)} unchanged. Nothing has been saved yet.</div>`
+                : `<div class="alert alert-err">${esc(r.message || 'Fix these rows and check the file again. Nothing was saved.')}</div>`) + rxRowErrors(r.errors);
+            document.getElementById('rxcatApply').disabled = !ok;
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+};
+/* RX:catalogue:END */
+
+/* RX:stock:START — Stock & Expiry (migration 136). Every number here is read from the ledger projection;
+   the only writes are a quarantine flag, a write-off and the one-time opening load, each an rx_* SQL function. */
+const rxstock = {
+    stores: [], cur: 'stock', days: 30, timer: null, wo: null, rows: [],
+    canAdjust() { return rxCan('RX_ADJUST') || rxCan('RX_ADMIN'); },
+    debounce() { clearTimeout(rxstock.timer); rxstock.timer = setTimeout(rxstock.load, 250); },
+    storeQ() { const s = document.getElementById('rxsStore').value; return s ? '&store_id=' + encodeURIComponent(s) : ''; },
+    storeName(id) { return (rxstock.stores.find(s => s.id === id) || {}).code || '—'; },
+    async load() {
+        if (!rxstock.stores.length) {
+            try { rxstock.stores = (await api('/admin/rx/stores')).stores; } catch (e) { toast(e.message, true); return; }
+            const sel = document.getElementById('rxsStore');
+            sel.innerHTML = '<option value="">All my stores</option>' + rxstock.stores.filter(s => s.is_active)
+                .map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('');
+        }
+        document.querySelectorAll('[data-rxs-adjust]').forEach(el => { el.hidden = !(rxstock.canAdjust() && myRx === 'ACTIVE'); });
+        if (rxstock.cur === 'expiry') return rxstock.loadExpiry(rxstock.days);
+        if (rxstock.cur === 'reorder') return rxstock.loadReorder();
+        if (rxstock.cur === 'opening') return;
+        return rxstock.loadStock();
+    },
+    tab(name) {
+        rxstock.cur = name;
+        document.querySelectorAll('#pg-rxstock [role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+        document.querySelectorAll('#pg-rxstock [data-rxs-tab]').forEach(c => { c.hidden = c.dataset.rxsTab !== name; });
+        rxstock.load();
+    },
+    async loadStock() {
+        const list = document.getElementById('rxsList'), v = id => document.getElementById(id).value.trim();
+        list.innerHTML = loading();
+        const p = new URLSearchParams();
+        if (v('rxsQ')) p.set('q', v('rxsQ'));
+        if (v('rxsSched')) p.set('schedule', v('rxsSched'));
+        if (document.getElementById('rxsLow').checked) p.set('below_reorder', 'true');
+        try { rxstock.rows = (await api('/admin/rx/stock?' + p + rxstock.storeQ())).stock; }
+        catch (e) { list.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        const value = rxstock.rows.some(r => r.value_paise !== undefined);
+        list.innerHTML = rxstock.rows.length ? `<div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr>
+            <th>Item</th><th class="rx-num">On hand</th><th class="rx-num">Sellable</th><th>Nearest expiry</th>${value ? '<th class="rx-num">Value (cost)</th>' : ''}<th></th></tr></thead><tbody>
+            ${rxstock.rows.map(r => { const i = r.item; return `<tr id="rxs-${esc(i.id)}">
+                <td data-label="Item"><div class="rx-item">${rxFormIcon(i.base_unit)}<div><b>${esc(i.brand_name)} ${rxSchedBadge(i.schedule)}</b><small>${esc(i.item_code)}${i.reorder_level_units && r.qty_units < i.reorder_level_units ? ' · below reorder level' : ''}</small></div></div></td>
+                <td data-label="On hand" class="rx-num">${esc(fmtPackLoose(r.qty_units, i.pack_size, i.pack_label, i.base_unit))}</td>
+                <td data-label="Sellable" class="rx-num">${esc(r.sellable_units)}</td>
+                <td data-label="Nearest expiry">${r.nearest_expiry ? esc(new Date(r.nearest_expiry).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })) : '<span class="muted">none sellable</span>'}</td>
+                ${value ? `<td data-label="Value" class="rx-num">${rxRs(r.value_paise)}</td>` : ''}
+                <td><button type="button" class="btn btn-ghost btn-sm" aria-expanded="false" onclick="rxstock.toggle('${esc(i.id)}', this)">Batches</button></td>
+            </tr>`; }).join('')}</tbody></table></div>`
+            : '<p class="muted">No stock here yet. Stock arrives through opening stock and goods receipts.</p>';
+    },
+    async toggle(itemId, btn) {
+        const tr = document.getElementById('rxs-' + itemId), next = tr.nextElementSibling;
+        if (next && next.classList.contains('rx-batches')) { next.remove(); tr.classList.remove('rx-open'); btn.setAttribute('aria-expanded', 'false'); return; }
+        btn.disabled = true;
+        try {
+            const item = rxstock.rows.find(r => r.item.id === itemId).item;
+            const b = (await api(`/admin/rx/batches?item_id=${encodeURIComponent(itemId)}` + rxstock.storeQ())).batches;
+            const row = document.createElement('tr');
+            row.className = 'rx-batches';
+            row.innerHTML = `<td colspan="6">${rxstock.batchTable(b, item)}</td>`;
+            tr.after(row); tr.classList.add('rx-open'); btn.setAttribute('aria-expanded', 'true');
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    batchTable(batches, item) {
+        const adj = rxstock.canAdjust();
+        if (!batches.length) return '<p class="muted">No batch on hand.</p>';
+        return `<table class="rx-tbl" style="width:100%; font-size:0.85rem;"><thead><tr><th>FEFO</th><th>Batch</th><th>Store</th><th>Expiry</th><th class="rx-num">Qty</th><th class="rx-num">MRP / pack</th><th></th></tr></thead><tbody>
+            ${batches.map(x => `<tr>
+                <td>${x.fefo_rank ? '#' + esc(x.fefo_rank) : '—'}</td>
+                <td><b>${esc(x.batch_no)}</b>${x.is_blocked ? `<span class="rx-sub"> · ${esc(x.block_reason || '')}</span>` : ''}</td>
+                <td>${esc(rxstock.storeName(x.store_id))}</td>
+                <td>${rxExpBadge(x.expiry_status, x.expiry_date, x.days_left)}</td>
+                <td class="rx-num">${esc(fmtPackLoose(x.qty_units, item.pack_size, item.pack_label, item.base_unit))}</td>
+                <td class="rx-num">${rxRs(x.mrp_pack_paise)}</td>
+                <td>${adj ? `<button type="button" class="btn btn-ghost btn-sm" onclick='rxstock.block(${JSON.stringify(x.batch_id)}, ${!x.is_blocked}, this)'>${x.is_blocked ? 'Unblock' : 'Block'}</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick='rxstock.openWriteoff(${esc(JSON.stringify({ batch_id: x.batch_id, store_id: x.store_id, batch_no: x.batch_no, qty: x.qty_units, status: x.expiry_status, brand: item.brand_name }))})'>Write off</button>` : ''}</td>
+            </tr>`).join('')}</tbody></table>`;
+    },
+    async block(batchId, block, btn) {
+        const reason = (prompt(block ? 'Why is this batch blocked? (recall notice, quality alert…)' : 'Why is this batch released?') || '').trim();
+        if (reason.length < 3) { if (reason) toast('Give a reason of at least 3 characters.', true); return; }
+        btn.disabled = true;
+        try {
+            await apiPost(`/admin/rx/batches/${encodeURIComponent(batchId)}/${block ? 'block' : 'unblock'}`, { reason });
+            toast(block ? 'Batch blocked: it can no longer be sold or dispensed' : 'Batch released');
+            await rxstock.loadStock();
+        } catch (e) { toast(e.message, true); btn.disabled = false; }
+    },
+    openWriteoff(w) {
+        rxstock.wo = w;
+        document.getElementById('rxsWoBatch').textContent = `${w.brand} · batch ${w.batch_no} · ${rxstock.storeName(w.store_id)} · ${w.qty} units on hand`;
+        document.getElementById('rxsWoKind').value = ['expired', 'short_shelf', 'near'].includes(w.status) ? 'expiry' : 'damage';
+        document.getElementById('rxsWoQty').value = w.qty; document.getElementById('rxsWoQty').max = w.qty;
+        document.getElementById('rxsWoReason').value = '';
+        rxstock.key = 'wo-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+        rxstock.lastFocus = document.activeElement;
+        document.getElementById('rxsDrawer').classList.add('open');
+        setTimeout(() => document.getElementById('rxsWoQty').focus(), 50);
+    },
+    close() {
+        document.getElementById('rxsDrawer').classList.remove('open');
+        if (rxstock.lastFocus && rxstock.lastFocus.focus) rxstock.lastFocus.focus();
+    },
+    async submitWriteoff(btn) {
+        const w = rxstock.wo, qty = parseInt(document.getElementById('rxsWoQty').value, 10), reason = document.getElementById('rxsWoReason').value.trim();
+        if (!(qty >= 1 && qty <= w.qty)) { toast(`Enter 1 to ${w.qty} units.`, true); return; }
+        if (reason.length < 3) { toast('Give a reason of at least 3 characters.', true); return; }
+        btn.disabled = true;
+        try {
+            await apiPost('/admin/rx/write-offs', { store_id: w.store_id, idempotency_key: rxstock.key,
+                lines: [{ batch_id: w.batch_id, qty_units: qty, kind: document.getElementById('rxsWoKind').value, reason }] });
+            toast(`${qty} units written off`);
+            rxstock.close();
+            await rxstock.load();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async loadExpiry(days) {
+        rxstock.days = days;
+        document.querySelectorAll('#pg-rxstock [data-days]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.days) === days)));
+        const out = document.getElementById('rxsExpiry'), seq = rxstock.seq = (rxstock.seq || 0) + 1;
+        out.innerHTML = loading();
+        let r;
+        try { r = await api(`/admin/rx/expiry?days=${days}` + rxstock.storeQ()); }
+        catch (e) { out.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        if (seq !== rxstock.seq) return;   // a newer window was asked for meanwhile
+        const names = { expired: 'Expired on hand', le_30: 'Within 30 days', le_60: 'Within 60 days', le_90: 'Within 90 days' };
+        const keys = Object.keys(names).filter(k => r.buckets[k]);
+        out.innerHTML = `<div class="rx-stats">${keys.map(k => `<div><span class="rx-sub">${esc(names[k])}</span><b>${esc(r.totals[k].batches)} ${r.totals[k].batches === 1 ? 'batch' : 'batches'}</b><span class="rx-sub">${esc(r.totals[k].units)} units · ${rxRs(r.totals[k].value_paise)} at cost</span></div>`).join('')}</div>`
+            + (keys.some(k => r.buckets[k].length) ? keys.filter(k => r.buckets[k].length).map(k => `<h4 style="margin:14px 0 6px;">${esc(names[k])}</h4>
+                <div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr><th>Item</th><th>Batch</th><th>Store</th><th>Expiry</th><th class="rx-num">Qty</th><th class="rx-num">Cost value</th></tr></thead><tbody>
+                ${r.buckets[k].map(x => `<tr><td data-label="Item"><b>${esc(x.item ? x.item.brand_name : '—')}</b> ${x.item ? rxSchedBadge(x.item.schedule) : ''}</td>
+                    <td data-label="Batch">${esc(x.batch_no)}</td><td data-label="Store">${esc(rxstock.storeName(x.store_id))}</td>
+                    <td data-label="Expiry">${rxExpBadge(x.is_blocked ? 'blocked' : k === 'expired' ? 'expired' : 'near', x.expiry_date, x.days_left)}</td>
+                    <td data-label="Qty" class="rx-num">${esc(x.item ? fmtPackLoose(x.qty_units, x.item.pack_size, x.item.pack_label, x.item.base_unit) : x.qty_units)}</td>
+                    <td data-label="Cost value" class="rx-num">${rxRs(x.value_paise)}</td></tr>`).join('')}</tbody></table></div>`).join('')
+                : `<p class="muted">Nothing expires within ${esc(days)} days.</p>`);
+    },
+    async loadReorder() {
+        const out = document.getElementById('rxsReorder');
+        out.innerHTML = loading();
+        let rows;
+        try { rows = (await api('/admin/rx/reorder' + rxstock.storeQ().replace('&', '?'))).reorder; }
+        catch (e) { out.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        out.innerHTML = rows.length ? `<div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr><th>Item</th><th class="rx-num">Sellable</th><th class="rx-num">Reorder below</th><th class="rx-num">Suggested order</th></tr></thead><tbody>
+            ${rows.map(r => `<tr><td data-label="Item"><div class="rx-item">${rxFormIcon(r.item.base_unit)}<div><b>${esc(r.item.brand_name)}</b><small>${esc(r.item.item_code)}</small></div></div></td>
+                <td data-label="Sellable" class="rx-num">${esc(fmtPackLoose(r.sellable_units, r.item.pack_size, r.item.pack_label, r.item.base_unit))}</td>
+                <td data-label="Reorder below" class="rx-num">${esc(r.reorder_level_units)}</td>
+                <td data-label="Suggested" class="rx-num"><b>${esc(r.suggested_packs)} ${esc(rxPlural(r.suggested_packs, r.item.pack_label))}</b></td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">Nothing is below its reorder level. Set reorder levels in the Drug Master.</p>';
+    },
+    async opening(apply, btn) {
+        const store = document.getElementById('rxsStore').value, out = document.getElementById('rxsOpenResult');
+        if (!store) { toast('Choose the store to load into (top right).', true); return; }
+        btn.disabled = true;
+        try {
+            const r = await rxUpload(`/admin/rx/stock/opening-import?store_id=${encodeURIComponent(store)}&dry_run=${!apply}`, document.getElementById('rxsOpenFile'), true);
+            const ok = r.valid !== false && !(r.errors || []).length;
+            if (apply && r.applied) {
+                out.innerHTML = `<div class="alert alert-ok">Loaded ${esc(r.movements)} batches (${esc(r.units)} units) into ${esc(rxstock.storeName(store))}. ${esc(r.already_loaded)} were already loaded.</div>`;
+                document.getElementById('rxsOpenApply').disabled = true;
+                return;
+            }
+            out.innerHTML = (ok ? `<div class="alert alert-ok">File is clean: ${esc(r.movements)} batches, ${esc(r.units)} units to load (${esc(r.already_loaded)} already loaded). Nothing has been saved yet.</div>`
+                : `<div class="alert alert-err">${esc(r.message || 'Fix these rows and check the file again. Nothing was loaded.')}</div>`) + rxRowErrors(r.errors);
+            document.getElementById('rxsOpenApply').disabled = !ok;
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+};
+/* RX:stock:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -18207,7 +18824,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ };
     if (loaders[page]) loaders[page]();
 }
 

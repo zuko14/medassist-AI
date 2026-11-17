@@ -19,6 +19,17 @@ from tests.test_phase2_route_adversarial_matrix import ALL_ADMIN_ROUTES
 RX_ROUTES = {
     ("GET", "/admin/rx/setup"), ("GET", "/admin/rx/settings"), ("PATCH", "/admin/rx/settings"),
     ("GET", "/admin/rx/stores"), ("POST", "/admin/rx/stores"), ("PATCH", "/admin/rx/stores/{store_id}"),
+    # P2 catalogue (135)
+    ("GET", "/admin/rx/manufacturers"), ("POST", "/admin/rx/manufacturers"),
+    ("GET", "/admin/rx/generics"), ("POST", "/admin/rx/generics"),
+    ("GET", "/admin/rx/items"), ("POST", "/admin/rx/items"), ("GET", "/admin/rx/items/resolve"),
+    ("POST", "/admin/rx/items/import/dry-run"), ("POST", "/admin/rx/items/import/apply"),
+    ("GET", "/admin/rx/items/{item_id}"), ("PATCH", "/admin/rx/items/{item_id}"),
+    ("POST", "/admin/rx/items/{item_id}/barcodes"),
+    # P2 stock (136)
+    ("GET", "/admin/rx/stock"), ("GET", "/admin/rx/batches"), ("GET", "/admin/rx/expiry"), ("GET", "/admin/rx/reorder"),
+    ("POST", "/admin/rx/batches/{batch_id}/block"), ("POST", "/admin/rx/batches/{batch_id}/unblock"),
+    ("POST", "/admin/rx/write-offs"), ("POST", "/admin/rx/stock/opening-import"),
 }
 
 
@@ -65,3 +76,30 @@ def test_role_matrix(api, role, grants):  # noqa: F811
     store = api.call("POST", "/admin/rx/stores", clinic,
                      {"code": "T" + uuid.uuid4().hex[:6].upper(), "name": "OT tray", "store_type": "ot_tray"}).status_code
     assert (read, settings, store) == MATRIX[(role, grants)]
+
+
+# P2: (role, stored grants) -> expected status for: list items, add a generic, write off (bad batch -> 404 when allowed)
+P2_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (200, 201, 404),
+    ("PHARMACIST", ()): (200, 403, 403),
+    ("STORE_KEEPER", ()): (200, 403, 404),
+    ("PHARMACY_OPERATOR", ()): (200, 403, 403),
+    ("FRONT_DESK", ("RX_CATALOGUE",)): (200, 201, 403),       # the drug-master grant reads and edits the catalogue
+    ("FRONT_DESK", ("RX_ADJUST",)): (403, 403, 404),
+    ("NURSE", ("IPD_NURSING",)): (403, 403, 403),
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P2_MATRIX))
+def test_p2_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    store = _q(api.conn, "SELECT id FROM rx_stores WHERE clinic_id = %s", clinic)
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    items = api.call("GET", "/admin/rx/items", clinic).status_code
+    generic = api.call("POST", "/admin/rx/generics", clinic, {"name": "Cetirizine " + uuid.uuid4().hex[:4],
+                                                              "strength": "10 mg", "dosage_form": "tablet"}).status_code
+    writeoff = api.call("POST", "/admin/rx/write-offs", clinic, {"store_id": str(store), "lines": [
+        {"batch_id": str(uuid.uuid4()), "qty_units": 1, "kind": "damage", "reason": "Broken"}]}).status_code
+    assert (items, generic, writeoff) == P2_MATRIX[(role, grants)]

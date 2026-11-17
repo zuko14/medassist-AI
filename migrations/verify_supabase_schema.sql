@@ -969,6 +969,78 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 29. MIGRATION 135 — Pharmacy OS catalogue (RX-M2)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_manufacturers', 'rx_generics', 'rx_items', 'rx_item_barcodes', 'rx_item_aliases',
+                       'rx_item_changes') AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M135', 'Tables: manufacturers, generics, items, barcodes, aliases, item changes (RLS forced)',
+            CASE WHEN v_tbl = 6 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 6 present');
+
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_items_clinic_id_id_key', 'rx_items_code_key', 'rx_items_generic_fk', 'rx_items_mfr_fk',
+                       'rx_items_drug_has_generic', 'rx_items_controlled_no_loose', 'rx_generics_class_key',
+                       'rx_item_barcodes_barcode_key', 'rx_item_barcodes_item_fk', 'rx_item_aliases_item_fk',
+                       'rx_item_changes_item_fk');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M135', 'Constraints: composite FKs, item code / barcode unique per clinic, drug needs generic',
+            CASE WHEN v_con = 11 THEN 'PASS' ELSE 'FAIL' END, v_con || ' of 11 present');
+
+    SELECT (to_regprocedure('rx_normalize(text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_update_item(uuid,uuid,jsonb,uuid,text,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_import_items(uuid,jsonb,boolean,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_resolve_items(uuid,text,integer)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_rx_items_guard', 'trg_rx_item_changes_append_only'))::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M135', 'Functions: rx_normalize, rx_update_item, rx_import_items, rx_resolve_items + item guards',
+            CASE WHEN v_fn = 6 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 6 present');
+END $$;
+
+-- ============================================================================
+-- 30. MIGRATION 136 — Pharmacy OS batches and stock ledger (RX-M3)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_trg int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_batches', 'rx_stock_movements', 'rx_stock_balances') AND relkind = 'r'
+       AND relrowsecurity AND relforcerowsecurity;
+    SELECT v_tbl + count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_v_batch_stock', 'rx_v_fefo', 'rx_v_item_stock') AND relkind = 'v';
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M136', 'Tables: batches, movements, balances (RLS forced) + views batch_stock, fefo, item_stock',
+            CASE WHEN v_tbl = 6 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 6 present');
+
+    SELECT count(*) INTO v_trg FROM pg_trigger
+     WHERE tgname IN ('trg_rx_batches_guard', 'trg_rx_sm_guard_insert', 'trg_rx_block_expired_dispense',
+                      'trg_rx_prevent_negative_stock', 'trg_rx_sm_append_only', 'trg_rx_balances_guard');
+    SELECT v_trg + count(*) INTO v_trg FROM pg_constraint WHERE conname IN ('rx_bal_non_negative', 'rx_sm_sign');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M136', 'Ledger walls: function-only, append-only, no negative stock, expired / blocked never dispensed',
+            CASE WHEN v_trg = 8 THEN 'PASS' ELSE 'FAIL' END, v_trg || ' of 8 present');
+
+    SELECT (to_regprocedure('rx_in_tx(uuid)') IS NOT NULL)::int + (to_regprocedure('rx_ist_date(timestamptz)') IS NOT NULL)::int
+         + (to_regprocedure('rx_post_writeoff(uuid,uuid,uuid,jsonb,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_opening_stock(uuid,uuid,jsonb,boolean,uuid,text)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_purge_clinic' AND prosrc LIKE '%rx_stock_movements%')::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M136', 'Functions: rx_in_tx, rx_ist_date, rx_post_writeoff, rx_opening_stock, rx_purge_clinic v3',
+            CASE WHEN v_fn = 5 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 5 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

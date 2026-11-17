@@ -43,27 +43,25 @@ eligibility 400 (`opd_enabled` required) → provision default store → disable
 |:-|:-|:-|:-|
 | GET | `/admin/rx/items?q&generic_id&schedule&active` | RX_READ | `[{id,item_code,brand_name,generic:{name,strength,dosage_form},schedule,pack_size,base_unit,tax_rate_bps,hsn_code,stock_units?}]` |
 | GET | `/admin/rx/items/{id}` | RX_READ | item + barcodes + aliases + change log |
-| POST | `/admin/rx/items` | RX_ADMIN | `{item_code,brand_name,generic_id|generic:{…},manufacturer_id,item_kind,schedule,base_unit,pack_size,pack_label,allow_loose,hsn_code,tax_rate_bps,reorder_level_units,reorder_qty_units,is_chronic,is_cold_chain,rack_location}` → 201 item. *audit: rx_item_create* |
-| PATCH | `/admin/rx/items/{id}` | RX_ADMIN | immutables → 409 `rx_item_field_locked:<field>`; rate/HSN change requires `reason`. *audit* |
-| POST | `/admin/rx/items/{id}/barcodes` | RX_ADMIN | `{barcode,symbology}`; 409 if barcode on another item |
-| DELETE | `/admin/rx/items/{id}/barcodes/{bid}` | RX_ADMIN | |
-| GET/POST/PATCH | `/admin/rx/generics`, `/admin/rx/manufacturers` | RX_READ / RX_ADMIN | |
-| POST | `/admin/rx/items/import?dry_run=true` | RX_ADMIN | CSV/XLSX (columns ROLLOUT §4.2) → `{valid,errors:[{row,field,msg}],would_create,would_update}`; `dry_run=false` applies idempotently on `item_code`. *audit: rx_item_import* |
-| GET | `/admin/rx/items/resolve?text=&strength=&form=` | RX_READ | mapping candidates `[{item_id,score,source:'alias'|'barcode'|'trgm'}]` (≤5). Deterministic. |
-| GET | `/admin/rx/items/{id}/substitutes` | RX_READ | same `generic_id`, active, in stock in `store_id` |
+| POST | `/admin/rx/items` | RX_ADMIN / RX_CATALOGUE | `{item_code,brand_name,generic_id|generic:{…},manufacturer_id,item_kind,schedule,base_unit,pack_size,pack_label,allow_loose,hsn_code,tax_rate_bps,reorder_level_units,reorder_qty_units,is_chronic,is_cold_chain,rack_location}` → 201 item. *audit: rx_item_create* |
+| PATCH | `/admin/rx/items/{id}` | RX_ADMIN / RX_CATALOGUE | immutables → 409 `rx_item_field_locked:<field>`; rate/HSN change requires `reason`. *audit* |
+| POST | `/admin/rx/items/{id}/barcodes` | RX_ADMIN / RX_CATALOGUE | `{barcode,symbology}`; 409 if barcode on another item |
+| GET/POST | `/admin/rx/generics`, `/admin/rx/manufacturers` | RX_READ / RX_CATALOGUE (or RX_ADMIN) | List or create generic/manufacturer records |
+| POST | `/admin/rx/items/import/dry-run` | RX_ADMIN / RX_CATALOGUE | CSV/JSON rows → `{valid,errors:[{row,field,msg}],would_create,would_update,sample:[...]}` |
+| POST | `/admin/rx/items/import/apply` | RX_ADMIN / RX_CATALOGUE | CSV/JSON rows → applied idempotently on `item_code` within transaction. *audit: rx_item_import* |
+| GET | `/admin/rx/items/resolve?q=&limit=` | RX_READ | deterministic candidate matches + substitutes on same generic |
 
 ## 3. Stock (P2–P3)
 | Method | Path | Perm | Notes |
 |:-|:-|:-|:-|
 | GET | `/admin/rx/stock?store_id&q&below_reorder&schedule` | RX_READ | `[{item, qty_units, packs_loose:{packs,loose}, nearest_expiry, value_paise}]` |
-| GET | `/admin/rx/stock/{item_id}/batches?store_id` | RX_READ | FEFO-ranked batches with `expiry_status: ok|near|short_shelf|expired|blocked` |
-| GET | `/admin/rx/ledger?store_id&item_id&batch_id&from&to&type` | RX_READ | movements with running balance |
-| GET | `/admin/rx/expiry?within_days&store_id` | RX_READ | near-expiry and expired-on-hand |
-| GET | `/admin/rx/reorder?store_id` | RX_PURCHASE | items below reorder level with suggested packs and last supplier |
-| POST | `/admin/rx/batches/{id}/block` | RX_ADMIN | `{reason}` recall/quarantine. *audit: rx_batch_block* |
-| POST | `/admin/rx/batches/{id}/unblock` | RX_ADMIN | `{reason}`. *audit* |
-| POST | `/admin/rx/writeoffs` | RX_STOCK | `{store_id, lines:[{batch_id,qty_units,kind:'expiry'|'damage',reason}]}` → movements. *audit* |
-| POST | `/admin/rx/opening-stock?dry_run=` | RX_ADMIN | CSV (ROLLOUT §4.3); allowed only before the store's first non-opening movement. *audit* |
+| GET | `/admin/rx/batches?item_id=&store_id=&status=` | RX_READ | FEFO-ranked batches with `expiry_status: ok|near|short_shelf|expired|blocked` |
+| GET | `/admin/rx/expiry?within_days&store_id` | RX_READ | near-expiry and expired-on-hand batches |
+| GET | `/admin/rx/reorder?store_id` | RX_READ | items below reorder level with suggested packs and deficit |
+| POST | `/admin/rx/batches/{id}/block` | RX_ADMIN / RX_ADJUST | `{reason}` recall/quarantine. *audit: rx_batch_block* |
+| POST | `/admin/rx/batches/{id}/unblock` | RX_ADMIN / RX_ADJUST | `{reason}`. *audit* |
+| POST | `/admin/rx/write-offs` | RX_ADJUST / RX_ADMIN | `{store_id, lines:[{batch_id,qty_units,kind:'expiry'|'damage',reason}]}` → movements. *audit* |
+| POST | `/admin/rx/stock/opening-import` | RX_ADJUST / RX_ADMIN | CSV / rows with `dry_run: true|false`; allowed only before the store's first non-opening movement. *audit* |
 
 ## 4. Purchase (P3)
 | Method | Path | Perm | Notes |

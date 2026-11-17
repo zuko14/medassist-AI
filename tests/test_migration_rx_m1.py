@@ -23,6 +23,8 @@ def unwind_134(cur) -> None:
     rollback allows) and run the 134 rollback. Newest first: unwind_133 must call
     this before its own rollback, because rx_stores_branch_fk sits on 103's
     uq_branches_clinic_id_id; later RX migrations' unwinds call it after their own."""
+    from tests.test_migration_rx_m2 import unwind_135
+    unwind_135(cur)  # newest first: 135/136 rows hang off rx_stores
     cur.execute("SELECT to_regclass('public.rx_stores') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

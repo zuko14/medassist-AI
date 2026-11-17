@@ -1,18 +1,20 @@
-"""Kriya Pharmacy OS API — foundation (migration 134, RX-05).
-Design: docs/pharmacy-os/API.md §0–§1, SECURITY.md §2–§3.
+"""Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20).
+Design: docs/pharmacy-os/API.md §0–§3, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
 """
 
+import uuid
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
-from app.services import rx
+from app.services import rx, rx_catalogue, rx_stock
+from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
 from app.services.tenant import get_clinic_by_id, invalidate_tenant_cache, ipd_access, rx_access
 
@@ -131,7 +133,13 @@ async def get_setup(clinic_id: str = "default", user: AdminUser = Depends(verify
                  if w.get("is_active") is not False]
     return {"access": rx_access(clinic), "state": clinic.get("rx_state"), "settings": settings, "stores": stores,
             # readiness is clinic-wide (a branch login still sees whether the clinic can sell); the list is scoped
-            "branches": branches, "wards": wards, "checklist": rx.setup_checklist(settings, all_stores, gstin)}
+            "branches": branches, "wards": wards,
+            "checklist": rx.setup_checklist(settings, all_stores, gstin, {"items": await _active_item_count(scope)})}
+
+
+async def _active_item_count(scope: str) -> int:
+    # shortcut: counts up to 1000; the checklist only needs "any items yet"
+    return len((await sb(scoped_query("rx_items", scope, "id").eq("is_active", True).limit(1000))).data or [])
 
 
 @router.get("/settings")
@@ -202,9 +210,306 @@ async def update_store(store_id: str, body: StorePatch, request: Request, clinic
     patch = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k in nullable}
     if not patch:
         return store
+    if patch.get("is_active") is False and store.get("is_active"):
+        on_hand = (await sb(scoped_query("rx_v_item_stock", scope, "item_id").eq("store_id", store_id)
+                            .gt("qty_units", 0).limit(1))).data
+        if on_hand:
+            raise HTTPException(status_code=409, detail="This store still holds stock. Transfer or write it off first.")
     if patch.get("is_active") is True and not store.get("is_active"):
         await _rx_scope(user, clinic_id, "RX_STORE_MANAGE", "RX_ADMIN", new_work=True)   # re-opening is new work
     await _check_links(user, scope, None, patch.get("parent_store_id"), store_id)
     store = await rx.create_or_update_store(scope, patch, store_id)
     await _audit(user, request, "rx_store_update", "rx_store", store_id, {"keys": sorted(patch)})
     return store
+
+
+# ── shared helpers for the catalogue and stock routes ───────────────────────
+
+CATALOGUE_READ = ("RX_READ", "RX_CATALOGUE", "RX_ADMIN")
+CATALOGUE_WRITE = ("RX_CATALOGUE", "RX_ADMIN")
+STOCK_WRITE = ("RX_ADJUST", "RX_ADMIN")
+
+
+def _actor(user: AdminUser) -> tuple[Optional[str], str]:
+    """(uuid or None, display name) for ledger / change-log rows; never a phone number."""
+    try:
+        uid = str(uuid.UUID(str(user.user_id))) if getattr(user, "user_id", None) else None
+    except ValueError:
+        uid = None
+    return uid, str(getattr(user, "username", None) or "admin")[:100]
+
+
+async def _store_ids(user: AdminUser, scope: str, store_id: Optional[uuid.UUID]) -> Optional[list[str]]:
+    """The stores a read may cover: the one asked for (404 outside scope), else every visible
+    store (None = all of the clinic's)."""
+    if store_id:
+        _store_for(user, await rx.get_store(scope, str(store_id)))
+        return [str(store_id)]
+    allowed = allowed_store_ids(user, await rx.list_stores(scope))
+    return None if allowed is None else sorted(allowed)
+
+
+async def _upload(file: UploadFile) -> list[dict]:
+    raw = await file.read(rx_catalogue.MAX_IMPORT_BYTES + 1)
+    return rx_catalogue.parse_table(raw, file.filename or "")
+
+
+# ── catalogue: manufacturers, generics (RX-13) ──────────────────────────────
+
+@router.get("/manufacturers")
+async def list_manufacturers(clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_READ)
+    return {"manufacturers": await rx_catalogue.list_manufacturers(scope)}
+
+
+@router.post("/manufacturers", status_code=status.HTTP_201_CREATED)
+async def create_manufacturer(body: ManufacturerIn, request: Request, clinic_id: str = "default",
+                              user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_WRITE, new_work=True)
+    row = await rx_catalogue.create_manufacturer(scope, body)
+    await _audit(user, request, "rx_manufacturer_create", "rx_manufacturer", row["id"], {"name": body.name})
+    return row
+
+
+@router.get("/generics")
+async def list_generics(q: Optional[str] = Query(None, max_length=80), clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_READ)
+    return {"generics": await rx_catalogue.list_generics(scope, q)}
+
+
+@router.post("/generics", status_code=status.HTTP_201_CREATED)
+async def create_generic(body: GenericIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_WRITE, new_work=True)
+    row = await rx_catalogue.create_generic(scope, body)
+    await _audit(user, request, "rx_generic_create", "rx_generic", row["id"], {"name": body.name})
+    return row
+
+
+# ── catalogue: items, barcodes (RX-13), resolver (RX-15), import (RX-14) ────
+
+@router.get("/items")
+async def list_items(q: Optional[str] = Query(None, max_length=80), generic_id: Optional[uuid.UUID] = None,
+                     schedule: Optional[rx_catalogue.Schedule] = None, active: Optional[bool] = None,
+                     limit: int = Query(50, ge=1, le=200), clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_READ)
+    items = await rx_catalogue.list_items(scope, q, str(generic_id) if generic_id else None, schedule, active, limit)
+    stock = {r["item"]["id"]: r for r in await rx_stock.stock(scope, await _store_ids(user, scope, None))}
+    for i in items:
+        i["stock_units"] = stock[i["id"]]["sellable_units"] if i["id"] in stock else 0
+    return {"items": items}
+
+
+@router.post("/items", status_code=status.HTTP_201_CREATED)
+async def create_item(body: ItemIn, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_WRITE, new_work=True)
+    item = await rx_catalogue.create_item(scope, body)
+    await _audit(user, request, "rx_item_create", "rx_item", item["id"],
+                 {"item_code": body.item_code, "schedule": body.schedule})
+    return item
+
+
+@router.get("/items/resolve")
+async def resolve_items(q: str = Query(..., min_length=1, max_length=120), store_id: Optional[uuid.UUID] = None,
+                        limit: int = Query(5, ge=1, le=20), clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    """Deterministic candidates (barcode > alias > code > brand > generic) and, for the best one,
+    in-stock substitutes of the same generic. The pharmacist confirms; nothing is auto-picked."""
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_READ)
+    store_ids = await _store_ids(user, scope, store_id)
+    candidates = await rx_catalogue.resolve(scope, q, limit)
+    subs = await rx_catalogue.substitutes(scope, candidates[0], store_ids) if candidates else []
+    return {"candidates": candidates, "substitutes": subs}
+
+
+@router.post("/items/import/dry-run")
+async def import_items_dry_run(file: UploadFile = File(...), clinic_id: str = "default",
+                               user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_WRITE, new_work=True)
+    rows, errors = rx_catalogue.validate_item_rows(await _upload(file))
+    res = await rx_catalogue.import_items(scope, rows, False, *_actor(user)) if rows else \
+        {"would_create": 0, "would_update": 0, "unchanged": 0, "errors": [], "applied": False}
+    errors = sorted(errors + res["errors"], key=lambda e: e["row"] or 0)
+    return {**res, "errors": errors, "valid": not errors, "rows": len(rows) + len({e["row"] for e in errors})}
+
+
+@router.post("/items/import/apply")
+async def import_items_apply(request: Request, file: UploadFile = File(...), clinic_id: str = "default",
+                             user: AdminUser = Depends(verify_credentials)):
+    """All or nothing: any row error (file or database) means nothing is written."""
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_WRITE, new_work=True)
+    rows, errors = rx_catalogue.validate_item_rows(await _upload(file))
+    if errors or not rows:
+        raise HTTPException(status_code=422, detail={"code": "rx_import_invalid", "errors": errors,
+                                                     "message": "Fix the listed rows (run the dry run) and upload again."})
+    res = await rx_catalogue.import_items(scope, rows, True, *_actor(user))
+    if not res.get("applied"):
+        raise HTTPException(status_code=422, detail={"code": "rx_import_invalid", "errors": res["errors"],
+                                                     "message": "Nothing was imported. Fix the listed rows."})
+    await _audit(user, request, "rx_item_import", "clinic", scope,
+                 {k: res[k] for k in ("would_create", "would_update", "unchanged")})
+    return {"created": res["would_create"], "updated": res["would_update"], "unchanged": res["unchanged"]}
+
+
+@router.get("/items/{item_id}")
+async def get_item(item_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_READ)
+    item = await rx_catalogue.item_detail(scope, str(item_id))
+    item["substitutes"] = await rx_catalogue.substitutes(scope, item, await _store_ids(user, scope, None))
+    return item
+
+
+@router.patch("/items/{item_id}")
+async def update_item(item_id: uuid.UUID, body: ItemPatch, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_WRITE, new_work=True)
+    nullable = ("ved_class", "rack_location", "manufacturer_id")       # null clears these; never the rest
+    patch = {k: v for k, v in body.model_dump(exclude_unset=True, exclude={"reason"}).items()
+             if v is not None or k in nullable}
+    if not patch:
+        return await rx_catalogue.get_item(scope, str(item_id))
+    item = await rx_catalogue.update_item(scope, str(item_id), patch, *_actor(user), body.reason)
+    await _audit(user, request, "rx_item_update", "rx_item", str(item_id), {"keys": sorted(patch)})
+    return item
+
+
+@router.post("/items/{item_id}/barcodes", status_code=status.HTTP_201_CREATED)
+async def add_barcode(item_id: uuid.UUID, body: BarcodeIn, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *CATALOGUE_WRITE, new_work=True)
+    row = await rx_catalogue.add_barcode(scope, str(item_id), body)
+    await _audit(user, request, "rx_barcode_add", "rx_item", str(item_id), {"symbology": row["symbology"]})
+    return row
+
+
+# ── stock reads (RX-18) ─────────────────────────────────────────────────────
+
+@router.get("/stock")
+async def get_stock(store_id: Optional[uuid.UUID] = None, q: Optional[str] = Query(None, max_length=80),
+                    schedule: Optional[rx_catalogue.Schedule] = None, below_reorder: bool = False,
+                    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, "RX_READ")
+    with_value = holds_rx_permission(user, "RX_ADMIN") or holds_rx_permission(user, "RX_PURCHASE")
+    return {"stock": await rx_stock.stock(scope, await _store_ids(user, scope, store_id), q, schedule, below_reorder,
+                                          with_value)}
+
+
+@router.get("/batches")
+async def get_batches(item_id: uuid.UUID, store_id: Optional[uuid.UUID] = None,
+                      required_qty: Optional[int] = Query(None, ge=1, le=1_000_000), clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    """Batches of one item, FEFO-ranked, with expiry status; with store_id + required_qty also the FEFO pick."""
+    scope, clinic = await _rx_scope(user, clinic_id, "RX_READ")
+    store_ids = await _store_ids(user, scope, store_id)
+    out = {"batches": await rx_stock.batches(scope, str(item_id), store_ids, rx.get_rx_settings(clinic))}
+    if store_id and required_qty:
+        out["fefo"] = await rx_stock.get_fefo_batches(scope, str(store_id), str(item_id), required_qty)
+    return out
+
+
+@router.get("/expiry")
+async def get_expiry(days: int = 90, store_id: Optional[uuid.UUID] = None,
+                     clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, "RX_READ")
+    if days not in (30, 60, 90):
+        raise HTTPException(status_code=422, detail="days is 30, 60 or 90.")
+    return await rx_stock.expiry(scope, await _store_ids(user, scope, store_id), days)
+
+
+@router.get("/reorder")
+async def get_reorder(store_id: Optional[uuid.UUID] = None, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, "RX_READ")
+    return {"reorder": await rx_stock.reorder(scope, await _store_ids(user, scope, store_id))}
+
+
+# ── quarantine, write-offs (RX-19), opening stock (RX-20) ───────────────────
+
+class BlockIn(_In):
+    reason: str = Field(..., min_length=3, max_length=300)
+
+
+class WriteoffLine(_In):
+    batch_id: uuid.UUID
+    qty_units: int = Field(..., ge=1, le=1_000_000)
+    kind: Literal["expiry", "damage"]
+    reason: str = Field(..., min_length=3, max_length=300)
+
+
+class WriteoffIn(_In):
+    store_id: uuid.UUID
+    lines: list[WriteoffLine] = Field(..., min_length=1, max_length=200)
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=80)
+
+
+async def _batch_in_scope(user: AdminUser, scope: str, batch_id: str) -> dict:
+    """A branch login may quarantine only batches held in its own stores (404 otherwise)."""
+    batch = await rx_stock.get_batch(scope, batch_id)
+    allowed = allowed_store_ids(user, await rx.list_stores(scope))
+    if allowed is not None and not (await rx_stock.batch_store_ids(scope, batch_id)) & allowed:
+        raise HTTPException(status_code=404, detail="Batch not found.")
+    return batch
+
+
+@router.post("/batches/{batch_id}/block")
+async def block_batch(batch_id: uuid.UUID, body: BlockIn, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *STOCK_WRITE)          # recalls stay possible in wind-down
+    await _batch_in_scope(user, scope, str(batch_id))
+    batch = await rx_stock.set_blocked(scope, str(batch_id), True, body.reason)
+    await _audit(user, request, "rx_batch_block", "rx_batch", str(batch_id), {"reason": body.reason})
+    return batch
+
+
+@router.post("/batches/{batch_id}/unblock")
+async def unblock_batch(batch_id: uuid.UUID, body: BlockIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *STOCK_WRITE)
+    await _batch_in_scope(user, scope, str(batch_id))
+    batch = await rx_stock.set_blocked(scope, str(batch_id), False, None)
+    await _audit(user, request, "rx_batch_unblock", "rx_batch", str(batch_id), {"reason": body.reason})
+    return batch
+
+
+@router.post("/write-offs", status_code=status.HTTP_201_CREATED)
+async def post_writeoff(body: WriteoffIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *STOCK_WRITE)          # clearing expired stock is not new work
+    _store_for(user, await rx.get_store(scope, str(body.store_id)))
+    keys = [(str(line.batch_id), line.kind) for line in body.lines]
+    if len(set(keys)) != len(keys):
+        raise HTTPException(status_code=422, detail="Each batch appears once per write-off kind.")
+    lines = [{**line.model_dump(), "batch_id": str(line.batch_id)} for line in body.lines]
+    res = await rx_stock.post_writeoff(scope, str(body.store_id), rx_stock.writeoff_ref(scope, body.idempotency_key),
+                                       lines, *_actor(user))
+    if not res.get("replayed"):
+        await _audit(user, request, "rx_writeoff", "rx_store", str(body.store_id),
+                     {"ref_id": res["ref_id"], "lines": len(lines), "units": res["units"]})
+    return res
+
+
+@router.post("/stock/opening-import")
+async def opening_import(request: Request, store_id: uuid.UUID, dry_run: bool = True, file: UploadFile = File(...),
+                         clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """Opening stock CSV/XLSX (ROLLOUT §4.3). dry_run=true (default) writes nothing; apply is all or
+    nothing, idempotent per batch × store, and refused once the store has traded."""
+    scope, clinic = await _rx_scope(user, clinic_id, *STOCK_WRITE, new_work=True)
+    _store_for(user, await rx.get_store(scope, str(store_id)))
+    gstin = ((clinic.get("opd_settings") or {}).get("gstin") or "").strip()
+    rows, errors = await rx_stock.validate_opening_rows(scope, await _upload(file), bool(gstin))
+    if errors and not dry_run:
+        raise HTTPException(status_code=422, detail={"code": "rx_import_invalid", "errors": errors,
+                                                     "message": "Fix the listed rows (run the dry run) and upload again."})
+    res = await rx_stock.opening_stock(scope, str(store_id), rows, not dry_run, *_actor(user)) if rows else \
+        {"new_batches": 0, "movements": 0, "units": 0, "already_loaded": 0, "errors": [], "applied": False}
+    errors = sorted(errors + res["errors"], key=lambda e: e["row"] or 0)
+    if not dry_run:
+        if not res.get("applied"):
+            raise HTTPException(status_code=422, detail={"code": "rx_import_invalid", "errors": errors,
+                                                         "message": "Nothing was loaded. Fix the listed rows."})
+        await _audit(user, request, "rx_opening_stock", "rx_store", str(store_id),
+                     {"movements": res["movements"], "units": res["units"]})
+    return {**res, "errors": errors, "valid": not errors}

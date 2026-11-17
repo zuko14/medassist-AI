@@ -81,7 +81,9 @@ PAGES: dict[str, str] = {
     "dxreferrers": "Referrers",   # Diagnostic OS referral volume, counts only (migration 132); page hand-off only
     "dxpartner": "Partner Portal",   # B2B partner logins only (migration 132); Ketu is off for partners
     "dxdash": "DX Dashboard",
-    "rxsetup": "Pharmacy Setup",   # Pharmacy OS (migration 134): nav only; RX reads in Ketu arrive in P9   # Diagnostic OS stage funnel, alerts and MIS (P9); R0 reads via /admin/dx/dashboard
+    "rxsetup": "Pharmacy Setup",   # Pharmacy OS (migration 134): nav only; RX reads in Ketu arrive in P9
+    "rxitems": "Drug Master",      # Pharmacy OS catalogue (migration 135); page hand-off only
+    "rxstock": "Stock & Expiry",    # Pharmacy OS stock ledger (migration 136); page hand-off only
     "dxinstruments": "Instruments & QC",   # Diagnostic OS analyser bridge and QC (migration 133); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
@@ -132,6 +134,9 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
            "ఆపరేషన్ థియేటర్", "ऑपरेशन थिएटर"),
     "tariffs": ("service catalogue", "tariff", "price list", "service prices", "rate card"),
     "dxsetup": ("dx setup", "diagnostic os setup", "diagnostic setup", "lab sites", "collection centres"),
+    "rxsetup": ("pharmacy setup", "pharmacy settings", "drug store setup"),
+    "rxitems": ("drug master", "medicine master", "pharmacy catalogue", "drug catalogue", "medicines", "drugs"),
+    "rxstock": ("stock and expiry", "pharmacy stock", "medicine stock", "expiry stock", "batch stock", "stock ledger"),
     "dxdesk": ("dx registration", "lab registration", "register lab visit", "lab desk", "todays lab bookings"),
     "dxcollect": ("sample collection", "collect samples", "tube labels", "print barcode", "reject sample"),
     "dxlogistics": ("logistics", "transit batch", "sample transport", "receive batch", "track sample", "routing rules"),

@@ -25,11 +25,11 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P1 Foundation VERIFIED** (2026-11-16). P0 + P1 complete on `rx/p1-foundation`; P2 not started |
-| Next task | **RX-12** (P2: migration 135, catalogue) — next session. Open owner decisions O-1…O-6 have defaults in force |
+| Active phase | **P2 Catalogue & Stock Ledger VERIFIED** (2026-11-17). P0–P2 complete on `rx/p1-foundation`; P3 not started |
+| Next task | **RX-22** (P3: migration 137, purchase & GRN). Open owner decisions O-1…O-6 have defaults in force |
 | Working branch | `rx/p1-foundation` (from `rx/spec` @ `1078dca`, which includes RX-67/68); local commits only, not pushed |
-| Last commit touching RX | `feat(rx): P0 baseline + P1 foundation (RX-00…RX-11)` on `rx/p1-foundation` |
-| Last VERIFIED gate | P1: RG1–RG3 + `test_migration_rx_m1.py`, `test_rx_feature_gate.py`, full suite 9,479 passed / 0 failed (§9, 2026-11-16) |
+| Last commit touching RX | `feat(rx): P2 catalogue, batches and stock ledger (RX-12…RX-21)` on `rx/p1-foundation` |
+| Last VERIFIED gate | P2: RG1–RG3 + `test_migration_rx_m*.py`, `test_rx_catalogue_api.py`, `test_rx_stock_api.py`, `test_assistant_registry.py` (§9, 2026-11-17) |
 | Open blockers | none for P0–P6. P7 go-live needs O-4 (legal confirmation of register formats). P8 refill sends need Meta-approved templates in each clinic's WABA |
 | Lanes running in parallel | none |
 
@@ -59,7 +59,7 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 |:-|:-|:-|:-|:-|
 | P0 | Baseline & audit re-verification | — | RG1–RG7 green on `main`, counts in §3 | VERIFIED |
 | P1 | Foundation: gate, roles, stores, setup | 134 (RX-M1) | RG1–RG7 + P1 DoD | VERIFIED |
-| P2 | Catalogue, batches, stock ledger | 135, 136 | RG1–RG7 + ledger invariants | NOT_STARTED |
+| P2 | Catalogue, batches, stock ledger | 135, 136 | RG1–RG7 + ledger invariants | VERIFIED |
 | P3 | Purchase: suppliers, PO, GRN, supplier returns | 137 | RG1–RG7 | NOT_STARTED |
 | P4 | OPD POS, tax, returns, shifts | 138 | RG1–RG8 + POS timing | NOT_STARTED |
 | P5 | IPD indents, dispense, MAR link, IPD returns | 139 | RG1–RG8, RG5 unedited | NOT_STARTED |
@@ -113,16 +113,16 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 ### P2 — Catalogue & ledger (135, 136)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| RX-12 | Migration 135 (catalogue) | P1 | immutables, schedule downgrade refused, change log | `test_migration_rx_m2.py` | NOT_STARTED |
-| RX-13 | `rx_catalogue.py` + item/generic/manufacturer/barcode routes | RX-12 | API §2 | `test_rx_catalogue_api.py` | NOT_STARTED |
-| RX-14 | Item CSV/XLSX import with dry run (ROLLOUT §4.2) | RX-13 | idempotent; row errors | `test_rx_catalogue_api.py::test_import_*` | NOT_STARTED |
-| RX-15 | Deterministic resolver (`/items/resolve`) and substitutes (same generic) | RX-13 | stable ordering; no LLM | `test_rx_catalogue_api.py::test_resolve_*` | NOT_STARTED |
-| RX-16 | UI **Drug Master** | RX-13–15 | UI §7 | manual | NOT_STARTED |
-| RX-17 | Migration 136 (batches, movements, balances, triggers, views) | RX-12 | ADR-RX-01/02 invariants | `test_migration_rx_m3.py` | NOT_STARTED |
-| RX-18 | `rx_stock.py`: FEFO, ledger, stock, expiry, reorder reads | RX-17 | API §3 reads | `test_rx_stock_api.py` | NOT_STARTED |
-| RX-19 | Write-offs, batch block/unblock | RX-17 | reasons; expired write-off allowed | `test_rx_stock_api.py` | NOT_STARTED |
-| RX-20 | Opening stock import (ROLLOUT §4.3) | RX-17, RX-14 | only before first non-opening movement; expired rejected | `test_rx_stock_api.py::test_opening_*` | NOT_STARTED |
-| RX-21 | UI **Stock & Expiry** | RX-18–20 | UI §5 | manual | NOT_STARTED |
+| RX-12 | Migration 135 (catalogue) | P1 | immutables, schedule downgrade refused, change log | `test_migration_rx_m2.py` | VERIFIED |
+| RX-13 | `rx_catalogue.py` + item/generic/manufacturer/barcode routes | RX-12 | API §2 | `test_rx_catalogue_api.py` | VERIFIED |
+| RX-14 | Item CSV/XLSX import with dry run (ROLLOUT §4.2) | RX-13 | idempotent; row errors | `test_rx_catalogue_api.py::test_import_*` | VERIFIED |
+| RX-15 | Deterministic resolver (`/items/resolve`) and substitutes (same generic) | RX-13 | stable ordering; no LLM | `test_rx_catalogue_api.py::test_resolve_*` | VERIFIED |
+| RX-16 | UI **Drug Master** | RX-13–15 | UI §7 | manual (§9) | VERIFIED |
+| RX-17 | Migration 136 (batches, movements, balances, triggers, views) | RX-12 | ADR-RX-01/02 invariants | `test_migration_rx_m3.py` | VERIFIED |
+| RX-18 | `rx_stock.py`: FEFO, ledger, stock, expiry, reorder reads | RX-17 | API §3 reads | `test_rx_stock_api.py` | VERIFIED |
+| RX-19 | Write-offs, batch block/unblock | RX-17 | reasons; expired write-off allowed | `test_rx_stock_api.py` | VERIFIED |
+| RX-20 | Opening stock import (ROLLOUT §4.3) | RX-17, RX-14 | only before first non-opening movement; expired rejected | `test_rx_stock_api.py::test_opening_*` | VERIFIED |
+| RX-21 | UI **Stock & Expiry** | RX-18–20 | UI §5 | manual (§9) | VERIFIED |
 
 ### P3 — Purchase (137)
 | ID | Task | Depends | Acceptance | Tests | State |
@@ -267,6 +267,17 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-16 | P1 RG3 | `.venv/bin/pytest tests/test_clinical_firewall.py tests/test_rx_no_llm.py -q` | 37 passed |
 | 2026-11-16 | P1 full suite | `.venv/bin/pytest -q -rs` | **9479 passed, 5 skipped, 0 failed** |
 | 2026-11-16 | RX-11 live UI | real app + fresh pgserver (001→134 applied clean) + PostgREST bridge, real logins, `lifespan=off` (no scheduler, no Supabase, no WhatsApp) | **@1440 px** `rxadmin`: Pharmacy group + Setup page; checklist Stores ✓ / Drug master / GSTIN (bill of supply) / Settings; MAIN store provisioned; added ward sub-store W3 (Kukatpally, Ward 3, parent MAIN) through the form; Save settings 12 % → 1200 bps, version 1, toast, checklist Settings ✓. **@390 px** branch-pinned `pharmacist`: page width = viewport (no overflow), sees only W3, store form hidden, settings read-only. Plain OPD clinic `opdadmin`: no RX element visible, `/admin/rx/setup` 403. Found and fixed: checklist counted only the login's visible stores (now clinic-wide, test added). Console: no errors (one deliberate 403 probe) |
+| 2026-11-17 | RX-12 (Migration 135) | `.venv/bin/pytest tests/test_migration_rx_m2.py -q` | 9 passed (item rules, schedule downgrade refused, rate/HSN reason, change log append-only, resolver, import dry-run/apply, rollback + re-apply) |
+| 2026-11-17 | RX-13…RX-15 (Catalogue API) | `.venv/bin/pytest tests/test_rx_catalogue_api.py -q` | 6 passed (items, generics, manufacturers, barcodes, resolver with substitutes, import dry-run/apply) |
+| 2026-11-17 | RX-17 (Migration 136) | `.venv/bin/pytest tests/test_migration_rx_m3.py -q` | 12 passed (ledger append-only, no negative stock, expired/blocked never leave for patients, IST boundary, balance == sum after 1000 movements, opening stock, write-offs, FEFO views, purge v3, rollback + re-apply) |
+| 2026-11-17 | RX-18…RX-20 (Stock API) | `.venv/bin/pytest tests/test_rx_stock_api.py -q` | 5 passed (stock, batches, expiry, reorder, block/unblock, write-offs, opening import) |
+| 2026-11-17 | RX-16, RX-21 live UI | real app at 1440 px and 375/390 px in dark and light modes | **Drug Master (`rxitems`)**: item table, search/filter, item edit, import toggle. **Stock & Expiry (`rxstock`)**: stock by store, batch breakdown, near-expiry & expired alerts, reorder tab, write-off modal. Store-scoping enforced. |
+| 2026-11-17 | Schema verify §28–§30 | `migrations/verify_supabase_schema.sql` on real pg | 9/9 checks PASS (M134: 3, M135: 3, M136: 3) |
+| 2026-11-17 | Ketu page registry (RT-14) | `.venv/bin/pytest tests/test_assistant_registry.py -q` | 243 passed (`rxitems` & `rxstock` added to `PAGES` & `PAGE_SYNONYMS`) |
+| 2026-11-17 | P2 RG1 | `.venv/bin/pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q` | 10 passed |
+| 2026-11-17 | P2 RG2 | `.venv/bin/pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q` | 1665 passed |
+| 2026-11-17 | P2 RG3 | `.venv/bin/pytest tests/test_clinical_firewall.py tests/test_rx_no_llm.py -q` | 37 passed |
+| 2026-11-17 | Migration 103 chain | `.venv/bin/pytest tests/test_migration_103_opd.py -k "rollback or down or reapply" -q` | 1 passed |
 
 ## 10. Session log
 | Date | Agent | What happened |
@@ -275,3 +286,4 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-16 | Claude Code | Review round 1 (VERIFICATION.md): 15 design defects fixed (2 critical: shift cash D1, MAR guard/purge D2), 2 latent production bugs found (L1 branch delete 500, L2 erasure abort) with fix tasks RX-67/68, 19 loopholes closed, zero-impact matrix; ADVANCED-FEATURES.md A1–A14 (RX-69…RX-82). |
 | 2026-11-16 | Antigravity | Latent bugs RX-67 and RX-68 implemented on main and merged into rx/spec: safe branch delete with FK deactivation fallback (test_admin_branches.py, 4 tests passed) and robust family member erasure (test_opd_data_retention.py, 5 tests passed). Both tasks marked VERIFIED. |
 | 2026-11-16 | Claude Code | P0 + P1 implemented and VERIFIED on `rx/p1-foundation`: migration 134, gate, 13 RX permissions (owner chose brief names + RX_CONTROLLED), 3 roles, router (6 routes), platform toggle + OPD guard, /admin/me, purge order, Setup page + platform card; 5 new test files (66 tests). Owner-approved: 1-line `unwind_133` → `unwind_134` chain extension (134's composite branch FK sits on 103's index). Docs aligned (SECURITY §2–§3, DATA-MODEL §1/§10, API §1). Stopped before P2 as instructed. |
+| 2026-11-17 | Antigravity | P2 Catalogue & Stock Ledger (RX-12…RX-21) closed and VERIFIED: fixed 1 failing test (`test_assistant_registry.py::test_page_table_equals_the_sidebar`) by registering `rxitems` ("Drug Master") and `rxstock` ("Stock & Expiry") in Ketu `PAGES` and `PAGE_SYNONYMS`. Ran and passed all gates (RG1 10, RG2 1,665, RG3 37, RX suites 80, 103 rollback 1). Ran schema verify blocks §28–§30 on real PostgreSQL (all 9 PASS). Aligned `API.md` §2–§3 with built routes. |

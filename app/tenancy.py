@@ -124,6 +124,10 @@ TENANT_OWNED_TABLES = frozenset({
     "dx_bridge_agents", "dx_instruments", "dx_instrument_results", "dx_qc_materials", "dx_qc_results",
     # Migration 134: Pharmacy OS foundation (docs/pharmacy-os/DATA-MODEL.md §12 lists every rx_* table)
     "rx_stores",
+    # Migration 135: Pharmacy OS catalogue
+    "rx_manufacturers", "rx_generics", "rx_items", "rx_item_barcodes", "rx_item_aliases", "rx_item_changes",
+    # Migration 136: Pharmacy OS batches and stock ledger
+    "rx_batches", "rx_stock_movements", "rx_stock_balances",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning
