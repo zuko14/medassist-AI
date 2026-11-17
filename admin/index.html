@@ -3696,6 +3696,36 @@
             .rxpos-side { position: sticky; bottom: 0; z-index: 20; }
         }
         /* RX:pos:END */
+        /* RX:ipd:START — Ward Indents (migration 139; docs/pharmacy-os/UI.md §3) */
+        .rxi-bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 12px; }
+        .rxi-bar .field { margin: 0; min-width: 220px; }
+        .rxi-orders { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .rxi-orders th { text-align: left; font-size: 0.72rem; color: var(--text3); padding: 6px 4px; border-bottom: 1px solid var(--border); }
+        .rxi-orders td { padding: 7px 4px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        .rxi-orders select { max-width: 220px; padding: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font: inherit; }
+        .rxi-step { display: inline-flex; align-items: center; gap: 4px; }
+        .rxi-step input { width: 64px; padding: 6px; text-align: center; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+        .rxi-step button { min-width: 32px; min-height: 32px; }
+        .rxi-stat { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--red); }
+        .rxi-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 16px; }
+        .rxi-card { text-align: left; border: 1px solid var(--border); border-left: 5px solid var(--border2); border-radius: 12px; padding: 10px 12px; background: var(--surface2); color: var(--text); font: inherit; cursor: pointer; }
+        .rxi-card:hover, .rxi-card:focus-visible { border-color: var(--accent); }
+        .rxi-card.p-stat { border-left-color: var(--red); background: var(--red-bg); }
+        .rxi-card.p-urgent { border-left-color: var(--amber); background: var(--amber-bg); }
+        .rxi-card b { display: block; }
+        .rxi-pri { font-size: 0.72rem; font-weight: 800; letter-spacing: .04em; }
+        .rxi-pri.p-stat { color: var(--red); } .rxi-pri.p-urgent { color: var(--amber); } .rxi-pri.p-routine { color: var(--text3); }
+        .rxi-line { border-bottom: 1px solid var(--border); padding: 10px 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+        .rxi-line input[type="number"] { width: 74px; padding: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+        .rxi-mine { margin-top: 18px; }
+        @media (max-width: 760px) {
+            .rxi-orders thead { display: none; }
+            .rxi-orders tr { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+            .rxi-orders td { border: 0; padding: 0; }
+            .rxi-orders td:nth-child(n+3) { grid-column: 2; }
+            .rxi-line { grid-template-columns: minmax(0, 1fr); }
+        }
+        /* RX:ipd:END */
     </style>
 </head>
 <body>
@@ -4042,6 +4072,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M7 20h10M12 16v4M7 9h4M7 12h2"></path></svg></span><span>Pharmacy POS</span>
             </div>
             <!-- RX:pos:END -->
+            <!-- RX:ipd:START -->
+            <div class="nav-link" tabindex="0" data-page="rxindents" data-rx="nav RX_READ RX_DISPENSE IPD_NURSING RX_ADMIN" style="display:none" onclick="go('rxindents',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V9l9-6 9 6v12"></path><path d="M9 21v-6h6v6"></path><path d="M12 7v4M10 9h4"></path></svg></span><span>Ward Indents</span>
+            </div>
+            <!-- RX:ipd:END -->
             <!-- RX:stock:START -->
             <div class="nav-link" tabindex="0" data-page="rxstock" data-rx="nav RX_READ" style="display:none" onclick="go('rxstock',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"></path><path d="m3 8 9 5 9-5"></path><path d="M12 13v8"></path></svg></span><span>Stock &amp; Expiry</span>
@@ -8022,6 +8057,24 @@
             </aside>
         </div>
         <!-- RX:pos:END -->
+        <!-- RX:ipd:START — Ward Indents page (docs/pharmacy-os/UI.md §3, page rxindents) -->
+        <div id="pg-rxindents" class="sec">
+            <div class="page-head">
+                <div><h2>Ward Indents</h2><p>Nurses ask the pharmacy for the doctor's active medicines; the pharmacy dispenses the first-expiring batch and the charge lands on the IPD bill in the same step.</p></div>
+            </div>
+            <div class="ipd-winddown" data-rx-winddown hidden>Pharmacy OS is being switched off for this clinic: new indents are closed. Open indents can still be dispensed, received and returned.</div>
+            <div class="rx-tabs" role="tablist" aria-label="Ward indent views">
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="nurse" aria-selected="false" onclick="rxind.tab('nurse')">Nurse view</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="queue" aria-selected="false" onclick="rxind.tab('queue')">Pharmacy queue</button>
+            </div>
+            <div class="card"><div id="rxiBody" aria-live="polite"></div></div>
+            <aside class="rx-drawer wide" id="rxiDrawer" role="dialog" aria-modal="true" aria-labelledby="rxiDrawerTitle">
+                <header><h3 id="rxiDrawerTitle"></h3><button type="button" class="btn btn-ghost btn-sm" onclick="rxind.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body" id="rxiDrawerBody"></div>
+                <footer id="rxiDrawerFoot"></footer>
+            </aside>
+        </div>
+        <!-- RX:ipd:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -10297,7 +10350,7 @@ const OPD_ROLE_PAGE_PERMS = {
     treatments: ['TREATMENTS_MANAGE'],
 };
 // Already gated by permission elsewhere in applyFeatureVisibility; left as set.
-const OPD_ROLE_SELF_GATED = new Set(['ot', 'radiology', 'insurance', 'leaves', 'holidays', 'branches', 'leads', 'staff', 'voice', 'dentalplans', 'corporate', 'homecollect']);
+const OPD_ROLE_SELF_GATED = new Set(['ot', 'radiology', 'insurance', 'leaves', 'holidays', 'branches', 'leads', 'staff', 'voice', 'dentalplans', 'corporate', 'homecollect', 'rxindents']);
 function applyOpdRoleNav() {
     const bell = document.getElementById('notifBellBtn');
     if (bell) bell.style.display = isOpdRole() ? 'none' : '';
@@ -10438,13 +10491,15 @@ function applyIpdGates() {
 /* RX:foundation:START — Pharmacy OS (migration 134). Permissions come from /admin/me.rx_perms
    (the server's own answer); the server re-checks every call, hiding here is convenience only. */
 function rxCan(perm) {
+    // IPD_* grants (Ward Indents, migration 139) come from the login's own permissions, and only while IPD is on
+    if (perm.startsWith('IPD_')) return !!myRx && !!myIpd && hasPermission(perm);
     return !!myRx && (myRxPerms || []).includes(perm);
 }
 // data-rx="nav PERM PERM…" / "perm": shown when Pharmacy OS is on and the user holds any listed permission.
 function applyRxGates() {
     document.querySelectorAll('[data-rx]').forEach(el => {
         const tokens = (el.dataset.rx || '').split(' ');
-        const perms = tokens.filter(t => t.startsWith('RX_'));
+        const perms = tokens.filter(t => t.startsWith('RX_') || t.startsWith('IPD_'));
         const on = !!myRx && (!perms.length || perms.some(rxCan));
         if (tokens[0] === 'role') { el.hidden = !myRx; return; }
         el.style.display = on ? '' : 'none';
@@ -11932,6 +11987,243 @@ const rxpos = {
 };
 let myRxSettingsFormat = '80mm';
 /* RX:pos:END */
+
+/* RX:ipd:START — Ward Indents (migration 139). Nurses raise indents against the doctor's ACTIVE medication orders;
+   the pharmacy dispenses FEFO batches and the server writes stock + IPD charge in one transaction. This screen only
+   collects and shows; the server re-checks the order, the stay, stock, expiry and price (WORKFLOWS W4). */
+const RXI_PRI = { stat: 'STAT', urgent: 'URGENT', routine: 'ROUTINE' };
+const RXI_STATUS = { raised: 'Raised', partially_dispensed: 'Part dispensed', dispensed: 'Dispensed', cancelled: 'Cancelled', closed: 'Closed' };
+const rxind = {
+    view: null, stores: [], adm: null, orders: [], doc: null, seenStat: new Set(), lastFocus: null,
+    canNurse() { return rxCan('IPD_NURSING') || rxCan('RX_ADMIN'); },
+    canPharm() { return rxCan('RX_DISPENSE') || rxCan('RX_ADMIN'); },
+    async load() {
+        if (!rxind.stores.length && (rxCan('RX_READ') || rxind.canPharm())) {   // nurses get stores with the orders
+            try { rxind.stores = (await api('/admin/rx/stores')).stores.filter(s => s.is_active); }
+            catch (e) { rxind.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        }
+        applyRxGates();
+        document.querySelector('#pg-rxindents [data-tab="nurse"]').hidden = !rxind.canNurse();
+        document.querySelector('#pg-rxindents [data-tab="queue"]').hidden = !(rxind.canPharm() || rxCan('RX_READ'));
+        rxind.tab(rxind.view || (rxind.canPharm() || !rxind.canNurse() ? 'queue' : 'nurse'));
+    },
+    tab(t) {
+        rxind.view = t;
+        document.querySelectorAll('#pg-rxindents [role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+        return t === 'nurse' ? rxind.loadNurse() : rxind.loadQueue();
+    },
+    body(html) { document.getElementById('rxiBody').innerHTML = html; },
+    async run(btn, fn, ok) {
+        if (btn) btn.disabled = true;
+        try { const r = await fn(); if (ok) toast(ok); return r; }
+        catch (e) { toast(e.message, true); return null; }
+        finally { if (btn) btn.disabled = false; }
+    },
+    idem() { return 'rxi-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2)); },
+    storeName(id) { const s = rxind.stores.find(x => x.id === id); return s ? `${s.code} · ${s.name}` : '—'; },
+    supplyStores() { return rxind.stores.filter(s => s.store_type !== 'ward_substore'); },
+    when(ts) { return ts ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : '—'; },
+    age(m) { return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d`; },
+
+    // ── Nurse view: pick the patient, tick orders, set units, raise ──
+    async loadNurse() {
+        rxind.body(loading());
+        let board;
+        try { board = await api('/admin/ipd/board'); }
+        catch (e) { rxind.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        const occ = [];
+        board.wards.forEach(w => w.beds.forEach(b => {
+            if (b.occupant && ['admitted', 'discharge_pending'].includes(b.occupant.status)) occ.push({ w, b, o: b.occupant });
+        }));
+        if (!occ.length) { rxind.body('<p class="muted">No admitted patients on your wards.</p>'); return; }
+        rxind.body(`<div class="rxi-bar">
+            <div class="field"><label for="rxiAdm">Patient</label><select id="rxiAdm" onchange="rxind.pick(this.value)">
+                <option value="">Select a patient…</option>${occ.map(x => `<option value="${esc(x.o.admission_id)}" ${x.o.admission_id === rxind.adm ? 'selected' : ''}>${esc(x.w.name)} · ${esc(x.b.code)} · ${esc(x.o.patient_name || 'Patient')} (${esc(x.o.admission_number || '')})</option>`).join('')}</select></div>
+            <div class="field"><label for="rxiStore">Supplying store</label><select id="rxiStore"><option value="">Pick a patient first</option></select></div>
+            <label class="rxi-stat"><input type="checkbox" id="rxiStat"> STAT</label>
+            <div class="field" style="min-width:140px;"><label for="rxiPri">Priority</label><select id="rxiPri"><option value="routine">Routine</option><option value="urgent">Urgent</option></select></div>
+        </div><div id="rxiOrders"></div><div id="rxiMine" class="rxi-mine"></div>`);
+        if (rxind.adm && occ.some(x => x.o.admission_id === rxind.adm)) rxind.pick(rxind.adm);
+    },
+    async pick(id) {
+        rxind.adm = id || null;
+        const box = document.getElementById('rxiOrders'), mine = document.getElementById('rxiMine');
+        if (!id) { box.innerHTML = ''; mine.innerHTML = ''; return; }
+        box.innerHTML = loading();
+        let r;
+        try { r = await api(`/admin/rx/ipd/admissions/${encodeURIComponent(id)}/indentable`); }
+        catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        rxind.orders = r.orders;
+        const sel = document.getElementById('rxiStore'), keep = sel.value;
+        sel.innerHTML = r.stores.map(s => `<option value="${esc(s.id)}" ${s.id === keep ? 'selected' : ''}>${esc(s.code)} · ${esc(s.name)}</option>`).join('') || '<option value="">No pharmacy store</option>';
+        box.innerHTML = r.orders.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr>
+            <th><span class="sr-only">Include</span></th><th>Medicine order</th><th>Item</th><th>Units</th><th>Ward stock</th><th>Dispensed · pending</th></tr></thead><tbody>
+            ${r.orders.map((o, i) => `<tr>
+                <td><input type="checkbox" id="rxiPick${i}" aria-label="Indent ${esc(o.drug_name)}" ${o.pending_units ? '' : 'checked'}></td>
+                <td><label for="rxiPick${i}"><b>${esc(o.drug_name)}</b> ${esc(o.dose)} · ${esc(o.route)} · ${esc(o.frequency)}${o.is_prn ? ' · PRN' : ''}</label><div class="rx-sub">${esc(o.ordered_by_name || '')}</div></td>
+                <td><select id="rxiItem${i}" aria-label="Item for ${esc(o.drug_name)}"><option value="">Pharmacy to choose</option>${o.candidates.map(c => `<option value="${esc(c.item_id)}" ${c.item_id === o.last_item_id ? 'selected' : ''}>${esc(c.brand_name)}</option>`).join('')}</select></td>
+                <td><span class="rxi-step"><button type="button" class="btn btn-ghost btn-sm" aria-label="Fewer" onclick="rxind.step(${i}, -1)">−</button>
+                    <input type="number" id="rxiUnits${i}" min="1" max="10000" value="${Number(o.default_units) || 1}" aria-label="Units of ${esc(o.drug_name)}">
+                    <button type="button" class="btn btn-ghost btn-sm" aria-label="More" onclick="rxind.step(${i}, 1)">+</button></span></td>
+                <td>${o.ward_stock_units == null ? '<span class="rx-sub">—</span>' : `<span class="rx-badge ${o.ward_stock_units ? 'e-ok' : 'e-near'}">${o.ward_stock_units} in ward</span>`}</td>
+                <td class="rx-num">${o.dispensed_units} · ${o.pending_units ? `<b>${o.pending_units} pending</b>` : '0'}</td></tr>`).join('')}
+            </tbody></table></div>
+            <div class="rxp-foot"><button type="button" class="btn btn-accent" onclick="rxind.raise(this)" ${myRx === 'ACTIVE' ? '' : 'disabled'}>Raise indent</button></div>`
+            : '<p class="muted">No active medication orders for this patient.</p>';
+        rxind.loadMine();
+    },
+    step(i, d) { const el = document.getElementById('rxiUnits' + i); el.value = Math.max(1, Math.min(10000, (Number(el.value) || 0) + d)); },
+    async raise(btn) {
+        const lines = rxind.orders.map((o, i) => document.getElementById('rxiPick' + i).checked ? {
+            ipd_order_id: o.id, requested_units: Number(document.getElementById('rxiUnits' + i).value) || 0,
+            ...(document.getElementById('rxiItem' + i).value ? { item_id: document.getElementById('rxiItem' + i).value } : {}),
+        } : null).filter(Boolean);
+        if (!lines.length) { toast('Tick at least one medicine.', true); return; }
+        if (lines.some(l => l.requested_units < 1)) { toast('Units must be at least 1.', true); return; }
+        const priority = document.getElementById('rxiStat').checked ? 'stat' : document.getElementById('rxiPri').value;
+        const r = await rxind.run(btn, () => apiPost('/admin/rx/ipd/indents', { admission_id: rxind.adm,
+            from_store_id: document.getElementById('rxiStore').value, priority, lines, idempotency_key: rxind.idem() }));
+        if (r) { toast(`Indent ${r.indent_number} raised${priority === 'stat' ? ' (STAT)' : ''}`); rxind.pick(rxind.adm); }
+    },
+    async loadMine() {
+        const box = document.getElementById('rxiMine');
+        if (!box || !rxind.adm) return;
+        let open, done;
+        try {
+            const q = '/admin/rx/ipd/indents?admission_id=' + encodeURIComponent(rxind.adm);
+            [open, done] = await Promise.all([api(q), api(q + '&status=dispensed')]);
+        } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        const rows = open.indents.concat(done.indents);
+        const details = await Promise.all(rows.filter(i => i.status !== 'raised')
+            .map(i => api('/admin/rx/ipd/indents/' + encodeURIComponent(i.id)).catch(() => null)));
+        const unreceived = {};
+        details.filter(Boolean).forEach(d => { unreceived[d.id] = d.dispenses.filter(x => !x.received_at); });
+        box.innerHTML = `<h4>This patient's indents</h4>` + (rows.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr>
+            <th>Indent</th><th>Priority</th><th>Status</th><th>Raised</th><th></th></tr></thead><tbody>${rows.map(i => `<tr>
+            <td><b>${esc(i.indent_number || '—')}</b></td><td><span class="rxi-pri p-${esc(i.priority)}">${RXI_PRI[i.priority]}</span></td>
+            <td>${esc(RXI_STATUS[i.status] || i.status)}</td><td>${esc(rxind.when(i.raised_at))}</td>
+            <td>${(unreceived[i.id] || []).map(d => `<button type="button" class="btn btn-accent btn-sm" onclick="rxind.receive(this, '${esc(d.id)}')">Receive</button>`).join(' ')}
+                ${['raised', 'partially_dispensed'].includes(i.status) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxind.cancel(this, '${esc(i.id)}')">Cancel</button>` : ''}</td></tr>`).join('')}
+            </tbody></table></div>` : '<p class="muted">No open indents for this patient.</p>');
+    },
+    async receive(btn, id) {
+        const r = await rxind.run(btn, () => apiPost(`/admin/rx/ipd/dispenses/${encodeURIComponent(id)}/receive`, {}), 'Received on the ward');
+        if (r) rxind.loadMine();
+    },
+    async cancel(btn, id) {
+        const reason = (prompt('Why cancel the undispensed lines? (3+ characters)') || '').trim();
+        if (reason.length < 3) return;
+        const r = await rxind.run(btn, () => apiPost(`/admin/rx/ipd/indents/${encodeURIComponent(id)}/cancel`, { reason }), 'Indent cancelled');
+        if (r) { if (rxind.view === 'nurse') rxind.loadMine(); else { rxind.close(); rxind.loadQueue(); } }
+    },
+
+    // ── Pharmacy queue: STAT (red, top, one chime) → URGENT → ROUTINE ──
+    async loadQueue() {
+        rxind.body(loading());
+        let r;
+        try { r = await api('/admin/rx/ipd/indents'); }
+        catch (e) { rxind.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        const newStat = r.indents.filter(i => i.priority === 'stat' && !rxind.seenStat.has(i.id));
+        if (newStat.length && rxind.seenStat.size) rxind.chime();
+        r.indents.forEach(i => { if (i.priority === 'stat') rxind.seenStat.add(i.id); });
+        if (!rxind.seenStat.size) rxind.seenStat.add('-');
+        const group = p => r.indents.filter(i => i.priority === p);
+        const card = i => `<button type="button" class="rxi-card p-${esc(i.priority)}" onclick="rxind.open('${esc(i.id)}')">
+            <span class="rxi-pri p-${esc(i.priority)}">${RXI_PRI[i.priority]}</span> <span class="rx-sub">${esc(i.indent_number || '')} · ${esc(RXI_STATUS[i.status] || i.status)}</span>
+            <b>${esc(i.patient_name || 'Patient')}</b>
+            <span class="rx-sub">${esc(i.ward || '—')} · Bed ${esc(i.bed || '—')} · ${i.lines_count} line${i.lines_count === 1 ? '' : 's'} · ${esc(rxind.age(i.age_minutes))} ago</span></button>`;
+        rxind.body(r.indents.length ? ['stat', 'urgent', 'routine'].filter(p => group(p).length)
+            .map(p => `<h4>${RXI_PRI[p]} (${group(p).length})</h4><div class="rxi-cards">${group(p).map(card).join('')}</div>`).join('')
+            + '<div class="rxp-foot"><button type="button" class="btn btn-ghost btn-sm" onclick="rxind.loadQueue()">Refresh</button></div>'
+            : '<p class="muted">No open ward indents. <button type="button" class="btn btn-ghost btn-sm" onclick="rxind.loadQueue()">Refresh</button></p>');
+    },
+    chime() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)(), o = ctx.createOscillator(), g = ctx.createGain();
+            o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.35);
+        } catch (e) { /* no audio: the red card is the signal */ }
+    },
+    async open(id) {
+        let d;
+        try { d = await api('/admin/rx/ipd/indents/' + encodeURIComponent(id)); }
+        catch (e) { toast(e.message, true); return; }
+        rxind.doc = d;
+        const live = ['raised', 'partially_dispensed'].includes(d.status), canDo = live && rxind.canPharm();
+        const lines = d.lines.map((l, i) => {
+            const pick = l.fefo && l.fefo.picks && l.fefo.picks[0];
+            const settled = !['open', 'partial'].includes(l.status);
+            return `<div class="rxi-line"><div>
+                <b>${esc((l.order || {}).drug_name || '')}</b> ${esc((l.order || {}).dose || '')} · ${esc((l.order || {}).frequency || '')}
+                ${l.order_stopped ? '<span class="rx-badge e-expired">Order stopped</span>' : ''}
+                <div class="rx-sub">Asked ${l.requested_units} · dispensed ${l.dispensed_units}${l.returned_units ? ` · returned ${l.returned_units}` : ''} · ${esc(l.status)}</div>
+                ${settled ? '' : l.item ? `<div>${esc(l.item.brand_name)} ${rxSchedBadge(l.item.schedule)}
+                    ${pick ? `<span class="rx-sub">FEFO ${esc(pick.batch_no)} · Exp ${esc(String(pick.expiry_date).slice(0, 7))}${l.fefo.shortfall_units ? ` · <b>short ${l.fefo.shortfall_units}</b>` : ''}</span>` : '<span class="rx-badge e-expired">Out of stock</span>'}</div>`
+                    : `<select id="rxiMap${i}" aria-label="Item for line ${l.line_no}"><option value="">Choose the medicine…</option>${(l.candidates || []).map(c => `<option value="${esc(c.item_id)}">${esc(c.brand_name)}</option>`).join('')}</select>`}
+            </div><div>${settled || !canDo ? '' : `<label class="sr-only" for="rxiQty${i}">Units</label>
+                <input type="number" id="rxiQty${i}" min="1" max="${l.remaining_units}" value="${l.remaining_units}" ${l.order_stopped ? 'disabled' : ''}>
+                <label class="check"><input type="checkbox" id="rxiNa${i}" ${l.order_stopped ? 'checked' : ''}> Not available / close</label>`}</div></div>`;
+        }).join('');
+        const disp = d.dispenses.map(x => `<li>${esc(rxind.when(x.dispensed_at))} · ${esc(x.dispensed_by_name)} · ${x.lines.length} line(s) ·
+            ${x.received_at ? 'received ' + esc(rxind.when(x.received_at)) : '<b>awaiting ward</b>'}
+            <button type="button" class="btn btn-ghost btn-sm" onclick="rxind.slip('${esc(x.id)}')">Issue slip</button></li>`).join('');
+        const stores = rxind.supplyStores();
+        rxind.drawer(`${RXI_PRI[d.priority]} · ${d.indent_number || 'Indent'} · ${d.patient_name || ''}`,
+            `<p class="rx-sub">${esc(d.ward || '—')} · Bed ${esc(d.bed || '—')} · ${esc(d.admission_number || '')} · raised ${esc(rxind.when(d.raised_at))} by ${esc(d.raised_by_name)}</p>
+            ${canDo ? `<div class="field"><label for="rxiFrom">Dispense from</label><select id="rxiFrom">${stores.map(s => `<option value="${esc(s.id)}" ${s.id === d.from_store_id ? 'selected' : ''}>${esc(s.code)} · ${esc(s.name)}</option>`).join('')}</select></div>` : ''}
+            ${lines}${disp ? `<h4>Dispenses</h4><ul>${disp}</ul>` : ''}`,
+            (canDo ? `<button type="button" class="btn btn-accent btn-sm" id="rxiDispenseBtn" onclick="rxind.dispense(this)">Dispense <span class="rxpos-keys"><kbd>Enter</kbd></span></button>` : '')
+            + (live && (rxind.canPharm() || rxind.canNurse()) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxind.cancel(this, '${esc(d.id)}')">Cancel rest</button>` : ''));
+    },
+    async dispense(btn) {
+        const d = rxind.doc, lines = [];
+        for (const [i, l] of d.lines.entries()) {
+            if (!['open', 'partial'].includes(l.status)) continue;
+            const na = document.getElementById('rxiNa' + i);
+            if (na && na.checked) { lines.push({ indent_line_id: l.id, not_available: true }); continue; }
+            const qty = Number((document.getElementById('rxiQty' + i) || {}).value) || 0;
+            const map = document.getElementById('rxiMap' + i);
+            if (map && !map.value) continue;              // unmapped and not chosen: leave the line open
+            if (qty < 1) continue;
+            lines.push({ indent_line_id: l.id, qty_units: qty, ...(map ? { item_id: map.value } : {}) });
+        }
+        if (!lines.length) { toast('Nothing to dispense: choose a medicine or mark lines not available.', true); return; }
+        // opened inside the click: a window opened after the await is a pop-up the browser blocks
+        const win = lines.some(l => l.qty_units) ? window.open('about:blank', '_blank') : null;
+        if (win) win.opener = null;
+        const r = await rxind.run(btn, () => apiPost(`/admin/rx/ipd/indents/${encodeURIComponent(d.id)}/dispense`,
+            { store_id: document.getElementById('rxiFrom').value, lines, idempotency_key: rxind.idem() }));
+        if (!r) { if (win) win.close(); return; }
+        toast(`Dispensed ${d.indent_number || ''}${r.final_bill_exists ? ' · final bill exists: regenerate before discharge' : ''}`);
+        if (win) rxind.slip(r.dispense_id, win);
+        rxind.close(); rxind.loadQueue();
+    },
+    async slip(id, win) {
+        win = win || window.open('about:blank', '_blank');
+        try {
+            const res = await apiRaw(`/admin/rx/ipd/dispenses/${encodeURIComponent(id)}/slip.pdf`);
+            const url = URL.createObjectURL(await res.blob());
+            if (win) win.location.href = url; else toast('Allow pop-ups to print the issue slip.', true);
+        } catch (e) { if (win) win.close(); toast(e.message, true); }
+    },
+    drawer(title, html, foot) {
+        const el = document.getElementById('rxiDrawer');
+        document.getElementById('rxiDrawerTitle').textContent = title;
+        document.getElementById('rxiDrawerBody').innerHTML = html;
+        document.getElementById('rxiDrawerFoot').innerHTML = (foot || '') + '<button type="button" class="btn btn-ghost btn-sm" onclick="rxind.close()">Close</button>';
+        if (!el.classList.contains('open')) rxind.lastFocus = document.activeElement;
+        el.classList.add('open');
+        if (!rxind.keysBound) {
+            el.addEventListener('keydown', e => {
+                if (e.key === 'Escape') { e.preventDefault(); rxind.close(); }
+                if (e.key === 'Enter' && e.target.tagName === 'INPUT') { const b = document.getElementById('rxiDispenseBtn'); if (b && !b.disabled) { e.preventDefault(); rxind.dispense(b); } }
+            });
+            rxind.keysBound = true;
+        }
+        setTimeout(() => (el.querySelector('input, select, button') || el).focus(), 50);
+    },
+    close() { document.getElementById('rxiDrawer').classList.remove('open'); if (rxind.lastFocus && rxind.lastFocus.focus) rxind.lastFocus.focus(); },
+};
+/* RX:ipd:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -19864,7 +20156,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ };
     if (loaders[page]) loaders[page]();
 }
 

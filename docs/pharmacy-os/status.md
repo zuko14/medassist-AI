@@ -25,11 +25,11 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P4 OPD POS VERIFIED** (2026-11-17). P0–P4 complete on `rx/p1-foundation`; P5 not started |
-| Next task | **RX-37** (P5: migration 139, IPD indents & dispense). Open owner decisions O-1…O-6 have defaults in force |
+| Active phase | **P5 Inpatient pharmacy VERIFIED** (2026-11-17). P0–P5 complete on `rx/p1-foundation`; P6 not started |
+| Next task | **RX-41** (P6: migration 140, transfers & stock audits). P5 carry-overs: MAR route wiring + MAR batch select, ward-issue route, `test_rx_concurrency.py` (RG8). Open owner decisions O-1…O-6 have defaults in force |
 | Working branch | `rx/p1-foundation` (from `rx/spec` @ `1078dca`, which includes RX-67/68); local commits only, not pushed |
-| Last commit touching RX | `feat(rx): P4 OPD POS, tax split, returns, shifts and overrides (RX-28…RX-36, RX-69..82)` on `rx/p1-foundation` |
-| Last VERIFIED gate | P4: registry (243), RG1 (10), RG2 (1788), RG3 (37), RX suites (174), 103 chain, verify §28–§32 (15/15 PASS), full suite 9,794 passed / 0 failed (§9, 2026-11-17) |
+| Last commit touching RX | `feat(rx): P5 IPD ward indents, dispense, MAR links and IPD returns (RX-37…RX-40)` on `rx/p1-foundation` |
+| Last VERIFIED gate | P5: registry (243), RG1 (10), RG2 (1815), RG3 (37), RX suites (126), RG5 111/115/116/117 unedited (63), 103 chain, verify §28–§33 (18/18 PASS), full suite 9,846 passed / 0 failed (§9, 2026-11-17) |
 | Open blockers | none for P0–P6. P7 go-live needs O-4 (legal confirmation of register formats). P8 refill sends need Meta-approved templates in each clinic's WABA |
 | Lanes running in parallel | none |
 
@@ -62,7 +62,7 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 | P2 | Catalogue, batches, stock ledger | 135, 136 | RG1–RG7 + ledger invariants | VERIFIED |
 | P3 | Purchase: suppliers, PO, GRN, supplier returns | 137 | RG1–RG7 | VERIFIED |
 | P4 | OPD POS, tax, returns, shifts | 138 | RG1–RG8 + POS timing | VERIFIED (RG8 concurrency suite + POS timing script outstanding, see §9) |
-| P5 | IPD indents, dispense, MAR link, IPD returns | 139 | RG1–RG8, RG5 unedited | NOT_STARTED |
+| P5 | IPD indents, dispense, MAR link, IPD returns | 139 | RG1–RG8, RG5 unedited | VERIFIED (RG8 concurrency suite outstanding, see §9) |
 | P6 | Transfers & stock audits | 140 | RG1–RG8 | NOT_STARTED |
 | P7 | Statutory registers | 141 | RG1–RG8 + chain verify | NOT_STARTED |
 | P8 | Refills & alerts | 142 | RG1–RG8 | NOT_STARTED |
@@ -81,7 +81,7 @@ for pages added; no existing test edited; this file updated.
 | 136 | `136_rx_stock_ledger.sql` | RX-17 | batches, movements, balances, triggers, views | `rollback/136_…` | NOT_STARTED |
 | 137 | `137_rx_purchase.sql` | RX-22 | suppliers, PO, GRN, supplier returns, GRN line calc + freight split, `rx_send_po` / `rx_post_grn` / `rx_void_grn` / `rx_supplier_return`, `rx_v_item_last_supplier`, `rx_purge_clinic` v4 | `rollback/137_rollback_rx_purchase.sql` (restores purge v3) | VERIFIED |
 | 138 | `138_rx_pos.sql` | RX-28 | sales, items, payments, fulfilments, returns, credit notes, overrides; **redefines `opd_close_shift`** (+ pharmacy cash, D1) | `rollback/138_…` (restores the 116 `opd_close_shift` body) | VERIFIED |
-| 139 | `139_rx_ipd.sql` | RX-37 | indents, dispenses, `ipd_charges.source` widen (NOT VALID + VALIDATE), `rx_mar_links`, `rx_empty_returns` — no other IPD table touched, no trigger on IPD tables | `rollback/139_…` (restores CHECK only if no `source='pharmacy'` rows) | NOT_STARTED |
+| 139 | `139_rx_ipd.sql` | RX-37 | indents, indent lines, dispenses, dispense lines, `rx_mar_links`, `rx_empty_returns`; `ipd_charges.source` widened (keeps `package`; NOT VALID + VALIDATE); raise / dispense / cancel / receive / MAR link / ward return functions; FKs into IPD tables cascade (IPD purge unchanged); purge v6 — no other IPD table touched, no trigger on IPD tables | `rollback/139_rollback_rx_ipd.sql` (restores purge v5; CHECK narrowed only if no `source='pharmacy'` rows) | VERIFIED |
 | 140 | `140_rx_transfers_audits.sql` | RX-41 | transfers, audits, audit delta trigger | `rollback/140_…` | NOT_STARTED |
 | 141 | `141_rx_registers.sql` | RX-48 | register entries, append/verify functions, redefined writers | `rollback/141_…` | NOT_STARTED |
 | 142 | `142_rx_refills_alerts.sql` | RX-55 | refill plans/requests, alerts | `rollback/142_…` | NOT_STARTED |
@@ -150,10 +150,10 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 ### P5 — IPD (139)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| RX-37 | Migration 139 (NOT VALID + VALIDATE for CHECK/FK) | P4 | 111/115/116/117 suites unedited green | `test_migration_rx_m6.py`, RG5 | NOT_STARTED |
-| RX-38 | Indents: indentable list, raise, cancel, queue; order-end cascade | RX-37 | W4 steps 1–3 | `test_rx_ipd.py` | NOT_STARTED |
-| RX-39 | `rx_dispense_indent` (admission lock first, order re-check, D9/D10), ward issue, receive, slip PDF; MAR route pops `rx_dispense_line_id` and writes `rx_mar_links` after the unchanged insert (D2) | RX-38 | ADR-RX-04 list | `test_rx_ipd.py`, `test_rx_concurrency.py` | NOT_STARTED |
-| RX-40 | IPD returns (W5b) + UI **Ward Indents** + MAR batch select | RX-39 | | `test_rx_ipd.py`, manual | NOT_STARTED |
+| RX-37 | Migration 139 (NOT VALID + VALIDATE for CHECK/FK) | P4 | 111/115/116/117 suites unedited green | `test_migration_rx_m6.py`, RG5 | VERIFIED |
+| RX-38 | Indents: indentable list, raise, cancel, queue; order-end cascade | RX-37 | W4 steps 1–3 | `test_rx_ipd.py` | VERIFIED (order end: no trigger, D9 — dispense re-checks the order, the pharmacist closes the stale line) |
+| RX-39 | `rx_dispense_indent` (admission lock first, order re-check, D9/D10), ward issue, receive, slip PDF; MAR route pops `rx_dispense_line_id` and writes `rx_mar_links` after the unchanged insert (D2) | RX-38 | ADR-RX-04 list | `test_rx_ipd.py`, `test_rx_concurrency.py` | VERIFIED for dispense / receive / slip / `rx_link_mar`; DEFERRED: ward issue route and the MAR route wiring (P5 leaves IPD handlers unedited; API §6 notes), `test_rx_concurrency.py` (RG8) |
+| RX-40 | IPD returns (W5b) + UI **Ward Indents** + MAR batch select | RX-39 | | `test_rx_ipd.py`, manual | VERIFIED (one-step ward return; Ward Indents nurse view + pharmacy queue); DEFERRED: MAR batch select (needs the MAR route wiring) and a returns UI |
 
 ### P6 — Transfers & audits (140)
 | ID | Task | Depends | Acceptance | Tests | State |
@@ -305,6 +305,19 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-17 | Schema verify §28–§32 | `migrations/verify_supabase_schema.sql` on real PG (fresh 001→138) | 15/15 PASS (M138: 3), 0 FAIL in the whole report |
 | 2026-11-17 | RX-36 live UI | real app + fresh pgserver (001→138) + PostgREST bridge, `lifespan=off` | **@1440 px** `pharmacist`: Token 17 → lookup signed Rx → auto-map lines → F6 cash → Enter completes sale `PHS-2026-000001` → 80 mm thermal & A5 receipt render; patient return → `PRT-2026-00001` → cash refund; discount above cap with manager override token (`rx_overrides`); shift Z-report day summary; fixed double "Dr Dr." title. **@375 px**: single-column layout, sticky bottom bar. |
 | 2026-11-17 | P4 full suite | `.venv/bin/pytest -q -rs` | **9794 passed, 5 skipped, 0 failed** |
+| 2026-11-17 | RX-37 migration 139 | `.venv/bin/pytest tests/test_migration_rx_m6.py -q` | 14 passed (source CHECK widened + keeps `package`, no rx trigger on IPD tables, active-medication-order lines, function-only writes, IND numbering + replay, dispense ×3 → one charge, autopost off + 999 split, stopped order / pending stay refused, substitution, receive closes, MAR link validated, return void + re-issue, credit note on issued bill, IPD owner purge cascades RX rows, purge v6 + guarded rollback + re-apply ×2) |
+| 2026-11-17 | RX-38…RX-40 API | `.venv/bin/pytest tests/test_rx_ipd.py -q` | 5 passed (nurse raises → STAT-first queue → FEFO dispense → one posted charge ₹2/tab → slip PDF → receive closes; dose on the unchanged MAR route linked to the batch, wrong line refused with MAR kept; ward return void + re-issue; permissions + stopped order 409; IPD WIND_DOWN still dispenses, IPD off → 403) |
+| 2026-11-17 | P5 route matrix | `.venv/bin/pytest tests/test_rx_route_matrix.py -q` | route pin 77 (+9 P5); P5 role matrix (nurse raises not dispenses, pharmacist dispenses not raises, store keeper / cashier / doctor 403) |
+| 2026-11-17 | Ketu page registry | `.venv/bin/pytest tests/test_assistant_registry.py -q` | 243 passed (`rxindents` in `PAGES` + `PAGE_SYNONYMS`) |
+| 2026-11-17 | P5 RG1 | `.venv/bin/pytest tests/test_lint_unscoped_queries.py tests/test_phase4_scoped_queries.py -q` | 10 passed |
+| 2026-11-17 | P5 RG2 | `.venv/bin/pytest tests/test_admin_super_admin_scope_matrix.py tests/test_phase2_route_adversarial_matrix.py -q` | 1815 passed |
+| 2026-11-17 | P5 RG3 | `.venv/bin/pytest tests/test_clinical_firewall.py tests/test_rx_no_llm.py -q` | 37 passed |
+| 2026-11-17 | P5 RX suites | `.venv/bin/pytest tests/test_migration_rx_m*.py tests/test_rx_ipd.py tests/test_rx_pos.py tests/test_rx_route_matrix.py -q` | 126 passed |
+| 2026-11-17 | P5 RG5 (IPD unedited) | `.venv/bin/pytest tests/test_migration_111_ipd.py tests/test_migration_115_orders.py tests/test_migration_116_ipd_finance.py tests/test_migration_117_gst.py -q` | 63 passed, files unedited. Found and fixed on the way: `ipd_purge_clinic` (used by 111's rollback test) failed on `rx_indent_lines_order_fk` — every FK into an IPD table now cascades / sets null and the RX guard yields to the IPD purge |
+| 2026-11-17 | Migration 103 chain | `.venv/bin/pytest tests/test_migration_103_opd.py -k "rollback or down or reapply" -q` | 1 passed (unwind 139→138→…→134→133 newest first; `unwind_139` owner-purges clinics with pharmacy charges so `116_down` can narrow `ipd_charges.source`) |
+| 2026-11-17 | Schema verify §28–§33 | `migrations/verify_supabase_schema.sql` on real PG (001→139) | 18/18 PASS (M139: 3), 178 checks, 0 FAIL in the whole report |
+| 2026-11-17 | RX-40 live UI | real app + pgserver (001→139) + PgBridge, real password logins, `lifespan=off` | **@1440 px** `rxnurse` (NURSE, IPD_NURSING only): Ward Indents in the Pharmacy group; patient picker from the bed board; orders with 24 h defaults (BD → 2, PRN → 1), deterministic item candidates, stores from `indentable`; STAT → `IND-2026-00001`, order shows "2 pending". `rxpharma`: queue STAT (red) above ROUTINE with ward / bed / age; drawer FEFO batch `CEFN1`; Enter dispenses; slip PDF 30 KB. **@390 px** nurse: no horizontal overflow, single column; Receive → indent `closed`. Console: no errors. Found and fixed: nurse nav hidden by `applyOpdRoleNav` (added `rxindents` to its self-gated set), JS / page blocks inserted into the wrong lane (marker substring), priority class `stat` colliding with the dashboard `.stat` card (now `p-stat`), "0 in ward" without a ward sub-store (now "—"), slip pop-up blocked after `await` (window opened inside the click) |
+| 2026-11-17 | P5 full suite | `.venv/bin/pytest -q -rs` | **9846 passed, 5 skipped, 0 failed** |
 
 ## 10. Session log
 | Date | Agent | What happened |
@@ -316,3 +329,4 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-17 | Antigravity | P2 Catalogue & Stock Ledger (RX-12…RX-21) closed and VERIFIED: fixed 1 failing test (`test_assistant_registry.py::test_page_table_equals_the_sidebar`) by registering `rxitems` ("Drug Master") and `rxstock` ("Stock & Expiry") in Ketu `PAGES` and `PAGE_SYNONYMS`. Ran and passed all gates (RG1 10, RG2 1,665, RG3 37, RX suites 80, 103 rollback 1). Ran schema verify blocks §28–§30 on real PostgreSQL (all 9 PASS). Aligned `API.md` §2–§3 with built routes. |
 | 2026-11-17 | Claude Code | P3 Purchase & GRN (RX-22…RX-27, RX-71) implemented and VERIFIED: migration 137 (7 tables, line calc + freight split, PO send / GRN post / void / supplier return functions, purge v4), `rx_purchase.py`, `rx_gs1.py`, 23 routes, Purchase & GRN page (5 tabs), 3 new test files (37 tests) + P3 role matrix; `rxpurchase` in Ketu PAGES. Full suite 9,690 passed. Not pushed. |
 | 2026-11-17 | Claude Code & Antigravity | P4 OPD POS (RX-28…RX-36, RX-69..82) implemented and VERIFIED: migration 138 (8 tables, rx_complete_sale, returns, credit notes, opd_close_shift redefinition with pharmacy cash term D1, purge v5), rx_tax.py, rx_pos.py, rx_pos_docs.py, 18 routes, Pharmacy POS UI with keyboard map, 4 new test files (43 tests); rxpos in Ketu PAGES. Full suite 9,794 passed. Committed locally on rx/p1-foundation, not pushed. |
+| 2026-11-17 | Claude Code | P5 Inpatient pharmacy (RX-37…RX-40) implemented and VERIFIED: migration 139 (6 tables, raise / dispense / cancel / receive / MAR link / ward-return functions, `ipd_charges.source` widened, FKs into IPD tables cascade, purge v6), `rx_ipd.py`, 9 routes, Ward Indents UI (nurse view + pharmacy queue), 2 new test files (19 tests) + P5 role matrix; `rxindents` in Ketu PAGES; `rx.deactivation_preview` counts open indents. Deviations recorded in DATA-MODEL §6 / API §6 (one-step ward return, no `rx_stores_ward_fk`, MAR route wiring + ward issue deferred). Full suite 9,846 passed. Committed locally on rx/p1-foundation, not pushed. |

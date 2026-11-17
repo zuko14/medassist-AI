@@ -1,6 +1,6 @@
 """Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20),
-purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82).
-Design: docs/pharmacy-os/API.md §0–§5, SECURITY.md §2–§3.
+purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82), inpatient pharmacy (139, RX-38…40).
+Design: docs/pharmacy-os/API.md §0–§6, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
-from app.services import rx, rx_catalogue, rx_gs1, rx_pos, rx_pos_docs, rx_purchase, rx_stock
+from app.services import rx, rx_catalogue, rx_gs1, rx_ipd, rx_pos, rx_pos_docs, rx_purchase, rx_stock
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
@@ -999,4 +999,140 @@ async def grant_override(body: rx_pos.OverrideIn, request: Request, clinic_id: s
     await _audit(user, request, "rx_override_grant", "rx_override", out["override_id"],
                  {"action": body.action, "sale_id": body.sale_id, "approver": approver.username,
                   "amount_paise": body.amount_paise})
+    return out
+
+
+# ── inpatient pharmacy: ward indents, dispense, receipt, slip, returns (139, RX-38…40) ──
+# API.md §6: also needs ipd_access(clinic) (ACTIVE or WIND_DOWN, VERIFICATION D6); SQL re-checks the stay.
+
+IPD_WARD = ("IPD_NURSING", "RX_DISPENSE", "RX_ADMIN")
+IPD_PHARMACY = ("RX_DISPENSE", "RX_ADMIN")
+IPD_NURSE = ("IPD_NURSING", "RX_ADMIN")
+
+
+async def _ipd_scope(user: AdminUser, clinic_id: str, *perms: str, new_work: bool = False) -> tuple[str, dict]:
+    scope, clinic = await _rx_scope(user, clinic_id, *perms, new_work=new_work)
+    if ipd_access(clinic) is None:
+        raise HTTPException(status_code=403, detail="The IPD module is not enabled for this clinic.")
+    return scope, clinic
+
+
+async def _admission_in_scope(user: AdminUser, scope: str, admission_id: str) -> dict:
+    adm = await rx_ipd.get_admission(scope, admission_id)
+    pinned = _pinned_branch(user)
+    if pinned and adm.get("branch_id") and str(adm["branch_id"]) != pinned:
+        raise HTTPException(status_code=404, detail="Admission not found.")
+    return adm
+
+
+async def _indent_in_scope(user: AdminUser, scope: str, indent_id: uuid.UUID) -> dict:
+    indent = await rx_ipd.get_indent_row(scope, str(indent_id))
+    _store_for(user, await rx.get_store(scope, str(indent["from_store_id"])))
+    return indent
+
+
+async def _dispense_in_scope(user: AdminUser, scope: str, dispense_id: uuid.UUID) -> dict:
+    d = await rx_ipd.get_dispense_row(scope, str(dispense_id))
+    _store_for(user, await rx.get_store(scope, str(d["store_id"])))
+    return d
+
+
+@router.get("/ipd/admissions/{admission_id}/indentable")
+async def ipd_indentable(admission_id: uuid.UUID, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, *IPD_WARD)
+    adm = await _admission_in_scope(user, scope, str(admission_id))
+    rx_ipd.require_active(adm)
+    # the stores a nurse may ask: a nurse holds no RX_READ, so /stores is closed to them
+    stores = [{k: s[k] for k in ("id", "code", "name", "store_type")} for s in await _visible_stores(user, scope)
+              if s.get("is_active") and s["store_type"] != "ward_substore"]
+    return {**await rx_ipd.indentable(scope, adm), "stores": stores}
+
+
+@router.post("/ipd/indents", status_code=status.HTTP_201_CREATED)
+async def ipd_raise_indent(body: rx_ipd.IndentIn, request: Request, clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, *IPD_NURSE, new_work=True)
+    rx_ipd.require_active(await _admission_in_scope(user, scope, body.admission_id))
+    _store_for(user, await rx.get_store(scope, body.from_store_id))
+    out = await rx_ipd.raise_indent(scope, body, _actor(user))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_indent_raise", "rx_ipd_indent", out["indent_id"],
+                     {"indent_number": out["indent_number"], "priority": body.priority, "lines": len(body.lines)})
+    return {**await rx_ipd.indent_detail(scope, await rx_ipd.get_indent_row(scope, out["indent_id"])),
+            "replayed": out.get("replayed", False)}
+
+
+@router.get("/ipd/indents")
+async def ipd_list_indents(status_: Optional[Literal["raised", "partially_dispensed", "dispensed", "cancelled", "closed"]]
+                           = Query(None, alias="status"), ward_id: Optional[uuid.UUID] = None,
+                           priority: Optional[Literal["routine", "urgent", "stat"]] = None,
+                           admission_id: Optional[uuid.UUID] = None, limit: int = Query(50, ge=1, le=200),
+                           clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, *IPD_WARD)
+    return {"indents": await rx_ipd.list_indents(scope, await _store_ids(user, scope, None), status_,
+                                                 str(ward_id) if ward_id else None, priority,
+                                                 str(admission_id) if admission_id else None, limit)}
+
+
+@router.get("/ipd/indents/{indent_id}")
+async def ipd_get_indent(indent_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, *IPD_WARD)
+    return await rx_ipd.indent_detail(scope, await _indent_in_scope(user, scope, indent_id))
+
+
+@router.post("/ipd/indents/{indent_id}/dispense")
+async def ipd_dispense(indent_id: uuid.UUID, body: rx_ipd.DispenseIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _ipd_scope(user, clinic_id, *IPD_PHARMACY)    # open indents finish in wind-down
+    indent = await _indent_in_scope(user, scope, indent_id)
+    _store_for(user, await rx.get_store(scope, body.store_id))
+    out = await rx_ipd.dispense(scope, indent, body, _actor(user), rx.get_rx_settings(clinic))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_dispense", "rx_ipd_indent", str(indent_id),
+                     {"dispense_id": out["dispense_id"], "lines": out.get("lines"), "total_paise": out.get("total_paise")})
+    return {**await rx_ipd.indent_detail(scope, await rx_ipd.get_indent_row(scope, str(indent_id))),
+            "dispense_id": out["dispense_id"], "replayed": out.get("replayed", False),
+            "final_bill_exists": out.get("final_bill_exists", False),
+            "slip_url": f"/admin/rx/ipd/dispenses/{out['dispense_id']}/slip.pdf"}
+
+
+@router.post("/ipd/indents/{indent_id}/cancel")
+async def ipd_cancel_indent(indent_id: uuid.UUID, body: rx_ipd.CancelIn, request: Request, clinic_id: str = "default",
+                            user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, *IPD_WARD)
+    out = await rx_ipd.cancel(scope, await _indent_in_scope(user, scope, indent_id), body.reason, _actor(user))
+    await _audit(user, request, "rx_indent_cancel", "rx_ipd_indent", str(indent_id),
+                 {"reason": body.reason, "lines_cancelled": out.get("lines_cancelled")})
+    return out
+
+
+@router.post("/ipd/dispenses/{dispense_id}/receive")
+async def ipd_receive(dispense_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, *IPD_NURSE)
+    out = await rx_ipd.receive(scope, await _dispense_in_scope(user, scope, dispense_id), _actor(user))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_dispense_receive", "rx_dispense", str(dispense_id), {})
+    return out
+
+
+@router.get("/ipd/dispenses/{dispense_id}/slip.pdf")
+async def ipd_slip(dispense_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _ipd_scope(user, clinic_id, *POS_READ)
+    d = await _dispense_in_scope(user, scope, dispense_id)
+    model = await rx_ipd.slip_model(scope, d, clinic, await rx.get_store(scope, str(d["store_id"])))
+    return _pdf(rx_ipd.render_slip_pdf(model), f"slip-{model['indent'].get('indent_number') or dispense_id}.pdf")
+
+
+@router.post("/ipd/dispenses/{dispense_id}/returns", status_code=status.HTTP_201_CREATED)
+async def ipd_return(dispense_id: uuid.UUID, body: rx_ipd.ReturnIn, request: Request, clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _ipd_scope(user, clinic_id, *IPD_WARD)
+    d = await _dispense_in_scope(user, scope, dispense_id)
+    out = await rx_ipd.ipd_return(scope, d, body, _actor(user), holds_rx_permission(user, "RX_ADMIN"))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_ipd_return", "rx_dispense", str(dispense_id),
+                     {"return_id": out["return_id"], "value_paise": out.get("value_paise"),
+                      "credit_notes": out.get("credit_notes")})
     return out

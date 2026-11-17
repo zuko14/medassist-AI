@@ -57,8 +57,8 @@ CREATE TABLE rx_stores (
   CONSTRAINT rx_stores_no_self_parent CHECK (parent_store_id IS DISTINCT FROM id),
   CONSTRAINT rx_stores_branch_fk FOREIGN KEY (clinic_id, branch_id) REFERENCES branches (clinic_id, id),
   CONSTRAINT rx_stores_parent_fk FOREIGN KEY (clinic_id, parent_store_id) REFERENCES rx_stores (clinic_id, id),
-  -- rx_stores_ward_fk (clinic_id, ward_id) → ipd_wards is added in 139 (RX-M6): 134 depends only on clinics and
-  -- branches, so the 103–133 rollback chains never have to unwind it. Until then the API checks the ward (P1).
+  -- No FK to ipd_wards (decided in 139): it would block the IPD owner purge; 134 depends only on clinics and
+  -- branches. The API checks the ward (rx.assert_ward).
 );
 CREATE UNIQUE INDEX uq_rx_stores_one_central ON rx_stores (clinic_id, branch_id) WHERE store_type = 'central' AND is_active;
 ```
@@ -472,6 +472,17 @@ line: batch FEFO-checked, `ipd_dispense_out` movement, `dispensed_units += qty` 
 `ipd_charges (category 'pharmacy', source 'pharmacy', source_ref 'rx:dl:'||line.id, quantity, unit_price_paise,
 tax_rate_bps 0, hsn_sac item.hsn, status posted|proposed per ipd_autopost)`, store `ipd_charge_id`; update indent
 status; write register rows for controlled drugs. Idempotent by `idempotency_key` and by `uq_ipd_charges_source_ref`.
+
+**As built (139).** (1) The CHECK widening keeps 116's `'package'`: `('manual','bed_day','order','package','pharmacy')`.
+(2) Every FK into an IPD table cascades (`admission`, `order`, MAR) or sets null (`ward_id`, `ipd_charge_id`), and the
+RX→RX chain cascades, so the unchanged `ipd_purge_clinic` and the 111–117 rollbacks never meet a pharmacy row; the RX
+guard lets these rows go while either owner purge runs. (3) **No `rx_stores_ward_fk`**: a ward sub-store would block the
+IPD owner purge and 134's rule (rx_stores depends on no other module) stands; `rx.assert_ward` stays the check.
+(4) `rx_dispense_lines.returned_units` (CHECK ≤ qty) carries ward returns per batch; only it and `ipd_charge_id` change
+after insert, inside an rx_* function. (5) Indent numbers are assigned last (`indent_year/seq` NULL until then, D12).
+(6) Functions: `rx_raise_indent`, `rx_dispense_indent`, `rx_cancel_indent`, `rx_receive_dispense`, `rx_link_mar`,
+`rx_ipd_return` (one step: void + re-issue unbilled, credit note on an issued bill), helpers `rx_lock_admission_active`
+(FOR SHARE), `rx_ipd_unit_price`, `rx_ipd_post_charge`, `rx_indent_refresh`. Register rows arrive with 141.
 
 **Quantity > 999**: `ipd_charges.quantity` is `SMALLINT BETWEEN 1 AND 999` (111:388). A dispense line >999 units is
 split into charges of ≤999 with `source_ref` suffix `:p2`, `:p3` (rare: IV fluids by ml are sold by bottle).

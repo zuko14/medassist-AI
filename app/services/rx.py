@@ -120,6 +120,30 @@ _ERRORS = {
     "rx_void_not_same_day": (409, "Only today's bills can be voided. Use a return instead."),
     "rx_void_has_returns": (409, "This bill has returns; it can no longer be voided."),
     "rx_write_via_function_only": (500, "The pharmacy operation failed. Nothing was changed; please retry."),
+    # 139 inpatient pharmacy
+    "rx_admission_not_found": (404, "Admission not found."),
+    "rx_admission_not_active": (409, "This patient is no longer admitted."),
+    "rx_order_not_found": (404, "This medication order is not on this patient's chart."),
+    "rx_order_not_medication": (422, "Only medication orders can be indented."),
+    "rx_order_not_active": (409, "The doctor has stopped this order. Close the line instead of dispensing it."),
+    "rx_indent_not_found": (404, "Indent not found."),
+    "rx_indent_not_open": (409, "This indent is no longer open."),
+    "rx_indent_empty": (422, "Add at least one line."),
+    "rx_indent_line_not_found": (404, "Indent line not found."),
+    "rx_indent_line_closed": (409, "This indent line is already settled."),
+    "rx_substitute_not_same_generic": (422, "A substitute must be the same generic (molecule, strength and form)."),
+    "rx_substitution_reason_required": (422, "A substitution needs a reason."),
+    "rx_dispense_not_found": (404, "Dispense not found."),
+    "rx_dispense_line_not_found": (404, "Dispensed line not found."),
+    "rx_return_exceeds_dispensed": (409, "You cannot return more than was dispensed (and not already returned)."),
+    "rx_mar_not_found": (404, "Dose record not found."),
+    "rx_mar_line_mismatch": (409, "This batch was dispensed for another order or patient."),
+    "rx_mar_already_linked": (409, "This dose is already linked to another batch."),
+    "ipd_charge_billed": (409, "This charge is on a final bill. Void and regenerate the bill, or issue it first."),
+    "opd_credit_note_invoice_state": (409, "The final bill is still a draft. Issue it, or void and regenerate it, "
+                                           "before returning billed medicines."),
+    "opd_credit_note_refund_required": (409, "The patient has paid more than the bill after this return. Record the "
+                                             "refund from IPD billing."),
 }
 # constraints whose clients branch on a stable code (API.md §4)
 _CONSTRAINT_CODES = {"rx_grns_invoice_key": "rx_grn_duplicate_invoice"}
@@ -163,6 +187,12 @@ _CONSTRAINTS = (
     ("rx_sale_items_returned_le_qty", 409, "You cannot return more than was sold."),
     ("rx_sales_giveback_le_net", 409, "Refunds cannot exceed what was paid for this bill."),
     ("rx_sale_payments_cash_needs_shift", 409, "Cash needs an open cashier shift."),
+    ("rx_indent_lines_dispensed_le_requested", 409, "That is more than the nurse asked for on this line."),
+    ("rx_dispense_lines_returned_le_qty", 409, "You cannot return more than was dispensed."),
+    ("uq_rx_ipd_indents_idem", 409, "This indent was already raised with another request."),
+    ("uq_rx_dispenses_idem", 409, "This dispense was already recorded with another request."),
+    ("rx_ipd_indents_store_fk", 404, "Store not found."),
+    ("rx_indent_lines_item_fk", 404, "Item not found."),
 )
 
 
@@ -256,8 +286,8 @@ async def create_or_update_store(clinic_id: str, body: dict, store_id: Optional[
 
 
 async def assert_ward(clinic_id: str, ward_id: str, branch_id: Optional[str]) -> None:
-    """A ward sub-store sits on a ward of this clinic (and of its branch, when it has one).
-    The database FK to ipd_wards arrives with migration 139; until then this is the check."""
+    """A ward sub-store sits on a ward of this clinic (and of its branch, when it has one). This is the only
+    check: an rx_stores → ipd_wards FK would block the IPD owner purge (migration 139 leaves rx_stores alone)."""
     q = scoped_query("ipd_wards", clinic_id, "id, branch_id").eq("id", ward_id).limit(1)
     rows = await _rows(q)
     if not rows or (branch_id and rows[0].get("branch_id") and str(rows[0]["branch_id"]) != str(branch_id)):
@@ -297,6 +327,9 @@ def setup_checklist(settings: dict, stores: list[dict], gstin: Optional[str], co
 
 async def deactivation_preview(clinic_id: str) -> dict:
     """What an owner disable would leave running (ADR-RX-09).
-    shortcut: always zero until drafts / indents / transfers / audits exist (RX-M5…M7);
-    each of those migrations must count its open rows here and set blocking."""
-    return {"open_sales": 0, "open_indents": 0, "transfers_in_transit": 0, "open_audits": 0, "blocking": False}
+    shortcut: sales / transfers / audits count zero until RX-M7 wires them; each later migration must count
+    its open rows here and set blocking."""
+    from app.services.rx_ipd import open_indent_count
+    indents = await open_indent_count(clinic_id) if await list_stores(clinic_id) else 0
+    return {"open_sales": 0, "open_indents": indents, "transfers_in_transit": 0, "open_audits": 0,
+            "blocking": indents > 0}

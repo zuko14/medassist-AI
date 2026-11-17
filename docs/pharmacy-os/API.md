@@ -145,6 +145,27 @@ P4 notes (as built, migration 138):
 | POST | `/admin/rx/ipd/returns/{id}/accept` | RX_DISPENSE | `{restock per line}` → void/re-issue or credit note. *audit* |
 | GET | `/admin/rx/ipd/admissions/{id}/dispense-lines?order_id` | IPD_NURSING | for the MAR batch select (W4 step 6) |
 
+P5 notes (as built, migration 139 — 9 routes, route pin 77):
+- Built: `indentable`, `POST/GET indents`, `GET indents/{id}`, `dispense`, `cancel`, `dispenses/{id}/receive`,
+  `dispenses/{id}/slip.pdf`, and **`POST /admin/rx/ipd/dispenses/{id}/returns`** (IPD_NURSING or RX_DISPENSE;
+  `{lines:[{dispense_line_id,qty_units,restock}], reason, idempotency_key}`) — a one-step ward return in place of
+  the `returns` + `returns/{id}/accept` pair: stock comes back (`ipd_return_in`, opened / expired → write-off), an
+  unbilled charge is voided and re-issued for the units kept (`source_ref rx:dl:<line>:r:<return>`), a charge on an
+  issued IPD bill gets an `opd_issue_credit_note` (a draft bill → 409, regenerate or issue it first). The idempotency
+  key is the return id (uuid5), so a retry replays. Restocking H1 / X / narcotic needs RX_ADMIN.
+- Deferred (not routed in P5): `ward-issue`, the two-step `returns/{id}/accept`, `admissions/{id}/dispense-lines`, and
+  the MAR route change. `rx_link_mar` (SQL) + `rx_ipd.link_mar()` (best effort, never raises) are built and tested;
+  wiring them into the MAR route edits an IPD handler, which P5 leaves untouched.
+- `indentable` also returns `stores` (active non-ward stores in scope): a nurse holds no RX_READ for `/stores`.
+  `default_units` = 24 h from the closed frequency map (oral solid doses), else one unit per dose, PRN → 1.
+- Raising an indent is *new work* (refused in pharmacy WIND_DOWN); dispense, cancel, receive, slip and returns
+  continue. All need `ipd_access` (IPD WIND_DOWN keeps dispensing to admitted patients, D6).
+- Dispense lines without `batch_id` are FEFO-split from the dispensing store (a named later batch needs
+  `fefo_override_reason`); `not_available: true` settles a line (also the way to close a line whose order stopped:
+  dispensing it is 409 `rx_order_not_active`). Response carries `final_bill_exists` (D10) and `slip_url`.
+- Price per base unit: MRP ÷ pack (half-up), or landed cost + `ipd_cost_plus_bps` capped at MRP; charges are
+  `category/source 'pharmacy'`, posted or proposed per `ipd_autopost`, split at 999 units (`:p2`, `:p3` …).
+
 Existing MAR route `POST /admin/ipd/admissions/{id}/administrations` (`app/routers/ipd.py:701`): `AdministrationIn`
 gains optional `rx_dispense_line_id`; the handler **pops it** before `ipd.record_administration` (the body is inserted
 verbatim, VERIFICATION A53), records the MAR unchanged, then calls `rx_link_mar` when RX is on. A wrong line → MAR

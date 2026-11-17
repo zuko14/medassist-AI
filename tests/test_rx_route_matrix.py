@@ -51,6 +51,12 @@ RX_ROUTES = {
     ("POST", "/admin/rx/sales/{sale_id}/recall"), ("POST", "/admin/rx/sales/{sale_id}/returns"),
     ("GET", "/admin/rx/sales/{sale_id}/receipt"), ("GET", "/admin/rx/sales/{sale_id}/labels.pdf"),
     ("GET", "/admin/rx/credit-notes/{cn_id}.pdf"), ("POST", "/admin/rx/overrides"),
+    # P5 inpatient pharmacy (139)
+    ("GET", "/admin/rx/ipd/admissions/{admission_id}/indentable"), ("POST", "/admin/rx/ipd/indents"),
+    ("GET", "/admin/rx/ipd/indents"), ("GET", "/admin/rx/ipd/indents/{indent_id}"),
+    ("POST", "/admin/rx/ipd/indents/{indent_id}/dispense"), ("POST", "/admin/rx/ipd/indents/{indent_id}/cancel"),
+    ("POST", "/admin/rx/ipd/dispenses/{dispense_id}/receive"), ("GET", "/admin/rx/ipd/dispenses/{dispense_id}/slip.pdf"),
+    ("POST", "/admin/rx/ipd/dispenses/{dispense_id}/returns"),
 }
 
 
@@ -184,3 +190,31 @@ def test_p4_role_matrix(api, role, grants):  # noqa: F811
     summary = api.call("GET", "/admin/rx/pos/day-summary", clinic).status_code
     voided = api.call("POST", f"/admin/rx/sales/{seeded}/void", clinic, {"reason": "Wrong bill"}).status_code
     assert (draft, summary, voided) == P4_MATRIX[(role, grants)]
+
+
+# P5: (role, stored grants) -> expected status for: read the indent queue, raise an indent (unknown stay -> 404 when
+# allowed), dispense an indent (unknown indent -> 404 when allowed). IPD must be on for any of it.
+P5_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (200, 404, 404),
+    ("PHARMACIST", ()): (200, 403, 404),                     # dispenses; nurses raise
+    ("NURSE", ("IPD_NURSING",)): (200, 404, 403),            # raises; never dispenses
+    ("STORE_KEEPER", ()): (403, 403, 403),
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403),
+    ("DOCTOR", ("IPD_CLINICAL",)): (403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P5_MATRIX))
+def test_p5_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "ipd_enabled", True).status_code == 200
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    store = str(_q(api.conn, "SELECT id FROM rx_stores WHERE clinic_id = %s", clinic))
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    queue = api.call("GET", "/admin/rx/ipd/indents", clinic).status_code
+    raised = api.call("POST", "/admin/rx/ipd/indents", clinic, {
+        "admission_id": str(uuid.uuid4()), "from_store_id": store,
+        "lines": [{"ipd_order_id": str(uuid.uuid4()), "requested_units": 1}]}).status_code
+    dispensed = api.call("POST", f"/admin/rx/ipd/indents/{uuid.uuid4()}/dispense", clinic, {
+        "store_id": store, "lines": [{"indent_line_id": str(uuid.uuid4())}]}).status_code
+    assert (queue, raised, dispensed) == P5_MATRIX[(role, grants)]

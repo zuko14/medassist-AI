@@ -1122,6 +1122,51 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 33. MIGRATION 139 — Pharmacy OS inpatient pharmacy (RX-M6)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_ipd_indents', 'rx_indent_lines', 'rx_dispenses', 'rx_dispense_lines', 'rx_mar_links',
+                       'rx_empty_returns') AND relkind = 'r'
+       AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M139', 'Tables: indents, indent lines, dispenses, dispense lines, MAR links, narcotic empties (RLS forced)',
+            CASE WHEN v_tbl = 6 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 6 present');
+
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_indent_lines_dispensed_le_requested', 'rx_indent_lines_returned_le_dispensed',
+                       'rx_indent_lines_order_fk', 'rx_ipd_indents_admission_fk', 'rx_dispense_lines_returned_le_qty',
+                       'rx_mar_links_mar_fk', 'rx_empty_returns_two_people', 'rx_indent_lines_indent_fk')
+       AND convalidated;
+    SELECT v_con + count(*) INTO v_con FROM pg_constraint
+     WHERE conname = 'ipd_charges_source_check' AND convalidated
+       AND pg_get_constraintdef(oid) LIKE '%pharmacy%' AND pg_get_constraintdef(oid) LIKE '%package%';
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M139', 'Constraints: dispense <= requested, return <= dispensed, order / stay FKs, MAR cascade, ipd_charges.source widened',
+            CASE WHEN v_con = 9 THEN 'PASS' ELSE 'FAIL' END, v_con || ' of 9 present');
+
+    SELECT (to_regprocedure('rx_raise_indent(uuid,uuid,uuid,text,jsonb,text,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_dispense_indent(uuid,uuid,uuid,jsonb,uuid,text,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_cancel_indent(uuid,uuid,text,uuid)') IS NOT NULL)::int
+         + (to_regprocedure('rx_receive_dispense(uuid,uuid,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_link_mar(uuid,uuid,uuid,uuid)') IS NOT NULL)::int
+         + (to_regprocedure('rx_ipd_return(uuid,uuid,jsonb,text,uuid,uuid,text,boolean)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_purge_clinic' AND prosrc LIKE '%rx_mar_links%')::int
+         + (SELECT CASE WHEN count(*) = 0 THEN 1 ELSE 0 END FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
+             WHERE t.tgrelid IN ('ipd_charges'::regclass, 'ipd_orders'::regclass, 'ipd_med_administrations'::regclass)
+               AND p.proname LIKE 'rx\_%')::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M139', 'Functions: raise / dispense / cancel / receive / MAR link / ward return, purge v6, no rx trigger on IPD tables (D2/D9)',
+            CASE WHEN v_fn = 8 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 8 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================
