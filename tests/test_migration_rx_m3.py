@@ -28,6 +28,8 @@ UP, DOWN = MIG / "136_rx_stock_ledger.sql", MIG / "rollback" / "136_rollback_rx_
 
 def unwind_136(cur) -> None:
     """Inside an open transaction: purge every clinic with stock rows and run the 136 rollback."""
+    from tests.test_migration_rx_m4 import unwind_137
+    unwind_137(cur)  # newest first: 137's GRN lines point at rx_batches
     cur.execute("SELECT to_regclass('public.rx_batches') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

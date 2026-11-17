@@ -84,6 +84,7 @@ PAGES: dict[str, str] = {
     "rxsetup": "Pharmacy Setup",   # Pharmacy OS (migration 134): nav only; RX reads in Ketu arrive in P9
     "rxitems": "Drug Master",      # Pharmacy OS catalogue (migration 135); page hand-off only
     "rxstock": "Stock & Expiry",    # Pharmacy OS stock ledger (migration 136); page hand-off only
+    "rxpurchase": "Purchase & GRN",   # Pharmacy OS purchase (migration 137); page hand-off only
     "dxinstruments": "Instruments & QC",   # Diagnostic OS analyser bridge and QC (migration 133); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
@@ -137,6 +138,8 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "rxsetup": ("pharmacy setup", "pharmacy settings", "drug store setup"),
     "rxitems": ("drug master", "medicine master", "pharmacy catalogue", "drug catalogue", "medicines", "drugs"),
     "rxstock": ("stock and expiry", "pharmacy stock", "medicine stock", "expiry stock", "batch stock", "stock ledger"),
+    "rxpurchase": ("purchase and grn", "purchase orders", "goods receipt", "grn", "inward", "supplier returns",
+                   "pharmacy suppliers"),
     "dxdesk": ("dx registration", "lab registration", "register lab visit", "lab desk", "todays lab bookings"),
     "dxcollect": ("sample collection", "collect samples", "tube labels", "print barcode", "reject sample"),
     "dxlogistics": ("logistics", "transit batch", "sample transport", "receive batch", "track sample", "routing rules"),

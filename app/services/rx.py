@@ -78,7 +78,25 @@ _ERRORS = {
     "rx_store_not_found": (404, "Store not found."),
     "rx_movement_via_function_only": (500, "The pharmacy operation failed. Nothing was changed; please retry."),
     "rx_balance_via_ledger_only": (500, "The pharmacy operation failed. Nothing was changed; please retry."),
+    # 137 purchase
+    "rx_document_locked": (409, "This document is no longer a draft and cannot be changed."),
+    "rx_po_not_found": (404, "Purchase order not found."),
+    "rx_po_empty": (422, "Add at least one line before sending the purchase order."),
+    "rx_grn_not_found": (404, "Goods receipt not found."),
+    "rx_grn_empty": (422, "Add at least one line before posting the goods receipt."),
+    "rx_grn_total_mismatch": (409, "The computed total does not match the supplier's invoice total (difference "
+                                   "above ₹0.99). Check the lines, freight and invoice total."),
+    "rx_grn_expired_batch": (422, "This batch has already expired and cannot be received."),
+    "rx_grn_po_line_mismatch": (422, "This line does not belong to the purchase order of this receipt."),
+    "rx_grn_stock_consumed": (409, "Some of this receipt's stock has already been used. Return it to the supplier "
+                                   "instead of voiding the receipt."),
+    "rx_store_cannot_receive": (409, "This store does not receive goods from suppliers."),
+    "rx_reason_required": (422, "A reason is required (3+ characters)."),
+    "rx_return_not_found": (404, "Supplier return not found."),
+    "rx_return_empty": (422, "Add at least one batch before dispatching the return."),
 }
+# constraints whose clients branch on a stable code (API.md §4)
+_CONSTRAINT_CODES = {"rx_grns_invoice_key": "rx_grn_duplicate_invoice"}
 _CONSTRAINTS = (
     ("rx_stores_code_key", 409, "Another store already uses this code."),
     ("uq_rx_stores_one_central", 409, "This branch already has an active central store."),
@@ -102,6 +120,17 @@ _CONSTRAINTS = (
     ("rx_batches_block_reason", 422, "Blocking a batch needs a reason (3+ characters)."),
     ("rx_batches_batch_no_check", 422, "A batch number is 1–30 letters, digits or / . _ -."),
     ("rx_batches_mrp_pack_paise_check", 422, "MRP must be between ₹0.01 and ₹10,00,000 per pack."),
+    ("rx_grns_invoice_key", 409, "This supplier invoice has already been entered."),
+    ("uq_rx_suppliers_gstin", 409, "Another supplier already has this GSTIN."),
+    ("rx_suppliers_state_matches_gstin", 422, "The supplier's state must match the first two digits of its GSTIN."),
+    ("rx_po_cancel_reason", 422, "A cancellation needs a reason (3+ characters)."),
+    ("rx_srn_lines_batch_key", 422, "Each batch appears once per return."),
+    ("rx_srn_credit_after_dispatch", 409, "Record the supplier's credit after the return is dispatched."),
+    ("rx_grn_lines_dates", 422, "The manufacture date must be before the expiry date."),
+    ("rx_po_store_fk", 404, "Store not found."), ("rx_grns_store_fk", 404, "Store not found."),
+    ("rx_po_supplier_fk", 404, "Supplier not found."), ("rx_grns_supplier_fk", 404, "Supplier not found."),
+    ("rx_srn_supplier_fk", 404, "Supplier not found."), ("rx_grn_lines_item_fk", 404, "Item not found."),
+    ("rx_po_lines_item_fk", 404, "Item not found."), ("rx_srn_lines_batch_fk", 404, "Batch not found."),
 )
 
 
@@ -110,11 +139,12 @@ def explain(msg: str) -> Optional[tuple[int, Optional[dict], str]]:
     for code in sorted(_ERRORS, key=len, reverse=True):
         if code in msg:
             status, message = _ERRORS[code]
-            m = re.search(re.escape(code) + r":([A-Za-z_]+)", msg)
+            m = re.search(re.escape(code) + r":(-?[A-Za-z0-9_]+)", msg)
             return status, {"code": code, "reason": m.group(1) if m else None}, message
     for constraint, status, message in _CONSTRAINTS:
         if constraint in msg:
-            return status, None, message
+            code = _CONSTRAINT_CODES.get(constraint)
+            return status, {"code": code, "reason": None} if code else None, message
     return None
 
 

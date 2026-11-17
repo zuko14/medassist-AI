@@ -128,6 +128,9 @@ TENANT_OWNED_TABLES = frozenset({
     "rx_manufacturers", "rx_generics", "rx_items", "rx_item_barcodes", "rx_item_aliases", "rx_item_changes",
     # Migration 136: Pharmacy OS batches and stock ledger
     "rx_batches", "rx_stock_movements", "rx_stock_balances",
+    # Migration 137: Pharmacy OS purchase
+    "rx_suppliers", "rx_purchase_orders", "rx_po_lines", "rx_grns", "rx_grn_lines", "rx_supplier_returns",
+    "rx_supplier_return_lines",
 })
 
 #: Values that are NOT a clinic. "default" is the historical sentinel meaning

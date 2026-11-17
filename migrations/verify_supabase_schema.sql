@@ -1041,6 +1041,46 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 31. MIGRATION 137 — Pharmacy OS purchase (RX-M4)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_suppliers', 'rx_purchase_orders', 'rx_po_lines', 'rx_grns', 'rx_grn_lines',
+                       'rx_supplier_returns', 'rx_supplier_return_lines') AND relkind = 'r'
+       AND relrowsecurity AND relforcerowsecurity;
+    SELECT v_tbl + count(*) INTO v_tbl FROM pg_class WHERE relname = 'rx_v_item_last_supplier' AND relkind = 'v';
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M137', 'Tables: suppliers, POs, PO lines, GRNs, GRN lines, supplier returns + lines (RLS forced) + last-supplier view',
+            CASE WHEN v_tbl = 8 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 8 present');
+
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_grns_invoice_key', 'rx_grns_number_key', 'rx_po_number_key', 'rx_srn_number_key',
+                       'rx_grn_lines_grn_fk', 'rx_grn_lines_item_fk', 'rx_grn_lines_batch_fk', 'rx_po_lines_po_fk',
+                       'rx_srn_lines_batch_fk', 'rx_grns_supplier_fk', 'rx_suppliers_state_matches_gstin');
+    SELECT v_con + count(*) INTO v_con FROM pg_indexes WHERE indexname = 'uq_rx_suppliers_gstin';
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M137', 'Constraints: one entry per supplier invoice, gapless numbers, composite FKs, GSTIN unique',
+            CASE WHEN v_con = 12 THEN 'PASS' ELSE 'FAIL' END, v_con || ' of 12 present');
+
+    SELECT (to_regprocedure('rx_post_grn(uuid,uuid,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_void_grn(uuid,uuid,text,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_send_po(uuid,uuid)') IS NOT NULL)::int
+         + (to_regprocedure('rx_supplier_return(uuid,uuid,uuid,text)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_rx_grn_line_calc', 'trg_rx_grns_guard',
+              'trg_rx_grn_lines_guard', 'trg_rx_srn_line_fill'))::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_purge_clinic' AND prosrc LIKE '%rx_supplier_return_lines%')::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M137', 'Functions: rx_post_grn, rx_void_grn, rx_send_po, rx_supplier_return, line calc + guards, purge v4',
+            CASE WHEN v_fn = 9 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 9 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

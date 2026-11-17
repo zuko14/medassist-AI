@@ -156,6 +156,14 @@ async def reorder(clinic_id: str, store_ids: Optional[list[str]]) -> list[dict]:
             want = max(int(i["reorder_qty_units"]) or int(i["reorder_level_units"]) - have, 1)
             out.append({"item": i, "sellable_units": have, "reorder_level_units": i["reorder_level_units"],
                         "suggested_packs": -(-want // int(i["pack_size"]))})
+    # W1 step 1: group by the supplier of the latest posted GRN line (migration 137)
+    last = {}
+    ids = [r["item"]["id"] for r in out]
+    for i in range(0, len(ids), 200):
+        for r in await _rows(scoped_query("rx_v_item_last_supplier", clinic_id).in_("item_id", ids[i:i + 200])):
+            last[r["item_id"]] = r
+    for r in out:
+        r["last_supplier"] = last.get(r["item"]["id"])
     return out
 
 

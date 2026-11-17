@@ -3644,6 +3644,20 @@
             .rx-tbl .rx-num { text-align: left; }
         }
         /* RX:catalogue:END */
+        /* RX:purchase:START — Purchase & GRN (migration 137; docs/pharmacy-os/UI.md §4) */
+        .rxp-grid { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .rxp-grid th { text-align: left; font-size: 0.72rem; color: var(--text3); padding: 4px 3px; white-space: nowrap; }
+        .rxp-grid td { padding: 2px 3px; vertical-align: top; }
+        .rxp-grid input, .rxp-grid select { width: 100%; min-width: 54px; padding: 6px 6px; border-radius: 8px; border: 1px solid var(--border);
+            background: var(--surface2); color: var(--text); font: inherit; }
+        .rxp-grid input.rxp-item { min-width: 180px; }
+        .rxp-grid .rx-num { padding-top: 8px; }
+        .rxp-foot { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: flex-end; margin-top: 10px; font-size: 0.9rem; }
+        .rxp-diff.ok { color: var(--green); font-weight: 700; }
+        .rxp-diff.bad { color: var(--red); font-weight: 700; }
+        .rx-drawer.wide { width: min(1180px, 100vw); }
+        .rxp-group h4 { margin: 14px 0 6px; }
+        /* RX:purchase:END */
     </style>
 </head>
 <body>
@@ -3990,6 +4004,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"></path><path d="m3 8 9 5 9-5"></path><path d="M12 13v8"></path></svg></span><span>Stock &amp; Expiry</span>
             </div>
             <!-- RX:stock:END -->
+            <!-- RX:purchase:START -->
+            <div class="nav-link" tabindex="0" data-page="rxpurchase" data-rx="nav RX_READ RX_PURCHASE RX_ADMIN" style="display:none" onclick="go('rxpurchase',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h13v10H3z"></path><path d="M16 10h3l2 3v4h-5"></path><circle cx="7" cy="18" r="1.6"></circle><circle cx="18" cy="18" r="1.6"></circle></svg></span><span>Purchase &amp; GRN</span>
+            </div>
+            <!-- RX:purchase:END -->
             <!-- RX:catalogue:START -->
             <div class="nav-link" tabindex="0" data-page="rxitems" data-rx="nav RX_READ RX_CATALOGUE RX_ADMIN" style="display:none" onclick="go('rxitems',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg></span><span>Drug Master</span>
@@ -7900,6 +7919,30 @@
             </aside>
         </div>
         <!-- RX:stock:END -->
+        <!-- RX:purchase:START — Purchase & GRN page (docs/pharmacy-os/UI.md §4, page rxpurchase) -->
+        <div id="pg-rxpurchase" class="sec">
+            <div class="page-head">
+                <div><h2>Purchase &amp; GRN</h2><p>Order from suppliers, receive goods batch by batch, and return what must go back. Stock moves only when a receipt is posted or a return dispatched.</p></div>
+                <div class="field" style="margin:0; min-width:220px;"><label for="rxpStore">Receiving store</label><select id="rxpStore" onchange="rxpur.load()"></select></div>
+            </div>
+            <div class="ipd-winddown" data-rx-winddown hidden>Pharmacy OS is being switched off for this clinic: new orders and receipts are closed. Supplier returns continue.</div>
+            <div class="rx-tabs" role="tablist" aria-label="Purchase views">
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="reorder" aria-selected="true" onclick="rxpur.tab('reorder')">Reorder</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="pos" aria-selected="false" onclick="rxpur.tab('pos')">Purchase orders</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="grn" aria-selected="false" onclick="rxpur.tab('grn')">GRN</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="returns" aria-selected="false" onclick="rxpur.tab('returns')">Supplier returns</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="suppliers" aria-selected="false" onclick="rxpur.tab('suppliers')">Suppliers</button>
+            </div>
+            <div class="card"><div id="rxpBody" aria-live="polite"></div></div>
+            <datalist id="rxpItemList"></datalist>
+            <aside class="rx-drawer" id="rxpDrawer" role="dialog" aria-modal="true" aria-labelledby="rxpDrawerTitle">
+                <header><h3 id="rxpDrawerTitle"></h3>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body" id="rxpDrawerBody"></div>
+                <footer id="rxpDrawerFoot"></footer>
+            </aside>
+        </div>
+        <!-- RX:purchase:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -10892,6 +10935,486 @@ const rxstock = {
     },
 };
 /* RX:stock:END */
+
+/* RX:purchase:START — Purchase & GRN (migration 137). Taxable value, GST, freight share, landed cost and every
+   document number come from the server (rx_grn_line_calc, rx_post_grn); this page collects input and shows results. */
+const rxPaise = v => { const n = parseFloat(String(v ?? '').replace(/[₹,\s]/g, '')); return Number.isFinite(n) ? Math.round(n * 100) : null; };
+const rxBps = v => { const n = parseFloat(String(v ?? '').replace('%', '')); return Number.isFinite(n) ? Math.round(n * 100) : 0; };
+const rxRupees = p => p == null ? '' : (Number(p) / 100).toFixed(2);
+function rxGstinOk(g) {   // same mod-36 check as app.services.gst_billing.valid_gstin; the server decides
+    const C = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) return false;
+    let t = 0;
+    for (let i = 0; i < 14; i++) { const v = C.indexOf(g[i]) * (i % 2 ? 2 : 1); t += Math.floor(v / 36) + v % 36; }
+    return g[14] === C[(36 - t % 36) % 36];
+}
+const RX_DOC_STATUS = { draft: 'Draft', sent: 'Sent', partially_received: 'Part received', received: 'Received',
+                        cancelled: 'Cancelled', posted: 'Posted', void: 'Void', dispatched: 'Dispatched' };
+const rxDocBadge = s => `<span class="rx-badge ${['void', 'cancelled'].includes(s) ? 'e-expired' : ['posted', 'received', 'dispatched'].includes(s) ? 'e-ok' : s === 'draft' ? '' : 'e-near'}">${esc(RX_DOC_STATUS[s] || s)}</span>`;
+const rxDay = d => d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+const rxpur = {
+    cur: 'reorder', stores: [], suppliers: [], items: {}, doc: null, timer: null, retLines: [],
+    canBuy() { return myRx === 'ACTIVE' && (rxCan('RX_PURCHASE') || rxCan('RX_ADMIN')); },
+    canApprove() { return myRx === 'ACTIVE' && rxCan('RX_PURCHASE') && rxCan('RX_ADMIN'); },
+    canReturn() { return !!myRx && (rxCan('RX_PURCHASE') || rxCan('RX_ADMIN')); },
+    store() { return document.getElementById('rxpStore').value; },
+    supName(id) { return (rxpur.suppliers.find(s => s.id === id) || {}).name || '—'; },
+    supOptions(sel, activeOnly = true) {
+        return '<option value="">Choose supplier…</option>' + rxpur.suppliers.filter(s => !activeOnly || s.is_active || s.id === sel)
+            .map(s => `<option value="${esc(s.id)}" ${s.id === sel ? 'selected' : ''}>${esc(s.name)}${s.gstin ? ' · ' + esc(s.gstin) : ''}</option>`).join('');
+    },
+    async load() {
+        const body = document.getElementById('rxpBody');
+        try {
+            if (!rxpur.stores.length) {
+                rxpur.stores = (await api('/admin/rx/stores')).stores.filter(s => s.is_active && s.can_receive_grn);
+                document.getElementById('rxpStore').innerHTML = rxpur.stores.length
+                    ? rxpur.stores.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('')
+                    : '<option value="">No store receives goods</option>';
+            }
+            rxpur.suppliers = (await api('/admin/rx/suppliers')).suppliers;
+        } catch (e) { body.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+        applyRxGates();
+        body.innerHTML = loading();
+        try { await rxpur['load_' + rxpur.cur](); } catch (e) { body.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    },
+    tab(name) {
+        rxpur.cur = name;
+        document.querySelectorAll('#pg-rxpurchase [role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+        rxpur.load();
+    },
+    body(html) { document.getElementById('rxpBody').innerHTML = html; },
+    bar(title, actions) {
+        return `<div class="rx-toolbar" style="justify-content:space-between; align-items:center;"><h3 style="margin:0">${title}</h3><div class="dx-actions" style="margin:0">${actions || ''}</div></div>`;
+    },
+    storeQ(prefix = '?') { return rxpur.store() ? `${prefix}store_id=${encodeURIComponent(rxpur.store())}` : ''; },
+    // item picker: a datalist refilled from the server as the user types; the label maps back to the item
+    itemLabel(it) { return it ? `${it.brand_name} · ${it.item_code}` : ''; },
+    remember(it) { if (it) rxpur.items[rxpur.itemLabel(it)] = it; },
+    searchItems(input) {
+        clearTimeout(rxpur.timer);
+        rxpur.timer = setTimeout(async () => {
+            const q = input.value.split(' · ')[0].trim();
+            if (q.length < 2) return;
+            try {
+                const items = (await api(`/admin/rx/items?active=true&limit=20&q=${encodeURIComponent(q)}`)).items;
+                items.forEach(rxpur.remember);
+                document.getElementById('rxpItemList').innerHTML = items.map(i => `<option value="${esc(rxpur.itemLabel(i))}"></option>`).join('');
+            } catch (e) { /* typing continues; the save reports an unknown item */ }
+        }, 200);
+    },
+    itemOf(label) { return rxpur.items[(label || '').trim()] || null; },
+    open(title, html, foot, wide) {
+        const d = document.getElementById('rxpDrawer');
+        document.getElementById('rxpDrawerTitle').textContent = title;
+        document.getElementById('rxpDrawerBody').innerHTML = html;
+        document.getElementById('rxpDrawerFoot').innerHTML = foot + '<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.close()">Close</button>';
+        d.classList.toggle('wide', !!wide);
+        if (!d.classList.contains('open')) rxpur.lastFocus = document.activeElement;
+        d.classList.add('open');
+        setTimeout(() => (d.querySelector('input:not([disabled]), select:not([disabled])') || d).focus(), 50);
+    },
+    close() {
+        document.getElementById('rxpDrawer').classList.remove('open');
+        if (rxpur.lastFocus && rxpur.lastFocus.focus) rxpur.lastFocus.focus();
+    },
+    async pdf(path, btn) {
+        btn.disabled = true;
+        try {
+            const blob = await (await apiRaw(path)).blob();
+            window.open(URL.createObjectURL(blob), '_blank', 'noopener');
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    async run(btn, fn, ok) {
+        btn.disabled = true;
+        try { const r = await fn(); if (ok) toast(ok); return r; }
+        catch (e) { toast(e.message, true); return null; }
+        finally { btn.disabled = false; }
+    },
+
+    // ── Reorder: below-reorder items grouped by the supplier of their last receipt (W1 step 1) ──
+    async load_reorder() {
+        const rows = (await api('/admin/rx/reorder' + rxpur.storeQ())).reorder;
+        const groups = {};
+        rows.forEach(r => { const k = (r.last_supplier || {}).supplier_id || ''; (groups[k] = groups[k] || []).push(r); });
+        rxpur.reorder = groups;
+        rxpur.body(rxpur.bar('Below reorder level') + (rows.length ? Object.entries(groups).map(([k, list]) => `<div class="rxp-group">
+            <h4>${k ? esc(rxpur.supName(k)) : 'No earlier supplier'}</h4>
+            <div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr><th>Item</th><th class="rx-num">Sellable</th><th class="rx-num">Reorder below</th><th class="rx-num">Last rate / pack</th><th>Order packs</th></tr></thead><tbody>
+            ${list.map(r => `<tr><td data-label="Item"><b>${esc(r.item.brand_name)}</b><span class="muted">${esc(r.item.item_code)}</span></td>
+                <td data-label="Sellable" class="rx-num">${esc(fmtPackLoose(r.sellable_units, r.item.pack_size, r.item.pack_label, r.item.base_unit))}</td>
+                <td data-label="Reorder below" class="rx-num">${esc(r.reorder_level_units)}</td>
+                <td data-label="Last rate" class="rx-num">${r.last_supplier ? rxRs(r.last_supplier.last_rate_pack_paise) : '—'}</td>
+                <td data-label="Order packs"><input type="number" min="0" step="1" value="${esc(r.suggested_packs)}" data-reorder="${esc(k)}" data-item="${esc(r.item.id)}" data-rate="${esc((r.last_supplier || {}).last_rate_pack_paise ?? '')}" aria-label="Packs to order of ${esc(r.item.brand_name)}" style="max-width:110px"></td></tr>`).join('')}</tbody></table></div>
+            ${rxpur.canBuy() ? `<div class="dx-actions">${k ? '' : `<select id="rxpReoSup" aria-label="Supplier for these items">${rxpur.supOptions('')}</select>`}
+                <button type="button" class="btn btn-accent btn-sm" onclick="rxpur.draftFromReorder('${esc(k)}', this)">Draft purchase order</button></div>` : ''}</div>`).join('')
+            : '<p class="muted">Nothing is below its reorder level for this store.</p>'));
+    },
+    async draftFromReorder(key, btn) {
+        const supplier = key || (document.getElementById('rxpReoSup') || {}).value;
+        if (!supplier) { toast('Choose the supplier for these items.', true); return; }
+        if (!rxpur.store()) { toast('Choose the receiving store.', true); return; }
+        const lines = [...document.querySelectorAll(`#rxpBody input[data-reorder="${key}"]`)]
+            .map(i => ({ item_id: i.dataset.item, ordered_packs: parseInt(i.value, 10) || 0, expected_rate_pack_paise: i.dataset.rate ? Number(i.dataset.rate) : null }))
+            .filter(l => l.ordered_packs > 0);
+        if (!lines.length) { toast('Enter packs to order.', true); return; }
+        const po = await rxpur.run(btn, () => apiPost('/admin/rx/purchase-orders', { store_id: rxpur.store(), supplier_id: supplier, lines }), 'Draft purchase order created');
+        if (po) { rxpur.tab('pos'); rxpur.openPo(po.id); }
+    },
+
+    // ── Purchase orders ──
+    async load_pos() {
+        const st = (document.getElementById('rxpPoStatus') || {}).value || '';
+        const list = (await api('/admin/rx/purchase-orders?' + (st ? 'status=' + st : '') + rxpur.storeQ('&'))).purchase_orders;
+        rxpur.body(rxpur.bar('Purchase orders', `<select id="rxpPoStatus" aria-label="Status" onchange="rxpur.load()"><option value="">All statuses</option>${Object.keys(RX_DOC_STATUS).slice(0, 5).map(s => `<option value="${s}" ${s === st ? 'selected' : ''}>${RX_DOC_STATUS[s]}</option>`).join('')}</select>
+            ${rxpur.canBuy() ? '<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.openPo(null)">New purchase order</button>' : ''}`)
+            + (list.length ? `<div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr><th>PO</th><th>Supplier</th><th>Status</th><th>Created</th><th>Expected</th><th></th></tr></thead><tbody>
+            ${list.map(p => `<tr><td data-label="PO"><b>${esc(p.po_number || 'Draft')}</b></td><td data-label="Supplier">${esc(p.supplier_name || '—')}</td>
+                <td data-label="Status">${rxDocBadge(p.status)}</td><td data-label="Created">${rxDay(p.created_at)}</td><td data-label="Expected">${rxDay(p.expected_on)}</td>
+                <td><button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.openPo('${esc(p.id)}')">Open</button></td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">No purchase orders yet.</p>'));
+    },
+    poLineRow(l = {}) {
+        rxpur.remember(l.item);
+        return `<tr><td><input class="rxp-item" list="rxpItemList" value="${esc(rxpur.itemLabel(l.item))}" oninput="rxpur.searchItems(this)" aria-label="Item"></td>
+            <td><input type="number" min="1" value="${esc(l.ordered_packs ?? '')}" aria-label="Packs"></td>
+            <td><input type="number" min="0" value="${esc(l.free_packs ?? 0)}" aria-label="Free packs"></td>
+            <td><input inputmode="decimal" value="${esc(rxRupees(l.expected_rate_pack_paise))}" aria-label="Expected rate per pack (₹)"></td>
+            <td><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()" aria-label="Remove line">✕</button></td></tr>`;
+    },
+    async openPo(id) {
+        let po = { status: 'draft', lines: [] };
+        if (id) { try { po = await api(`/admin/rx/purchase-orders/${encodeURIComponent(id)}`); } catch (e) { toast(e.message, true); return; } }
+        rxpur.doc = po;
+        const edit = po.status === 'draft' && rxpur.canBuy();
+        const lines = edit ? `<table class="rxp-grid" id="rxpPoLines"><thead><tr><th>Item</th><th>Packs</th><th>Free</th><th>Rate ₹ / pack</th><th></th></tr></thead>
+                <tbody>${(po.lines.length ? po.lines : [{}]).map(l => rxpur.poLineRow(l)).join('')}</tbody></table>
+                <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="document.querySelector('#rxpPoLines tbody').insertAdjacentHTML('beforeend', rxpur.poLineRow())">Add line</button>`
+            : `<div class="tbl-wrap"><table class="rx-tbl" style="width:100%"><thead><tr><th>Item</th><th class="rx-num">Packs</th><th class="rx-num">Free</th><th class="rx-num">Received</th><th class="rx-num">Rate</th></tr></thead><tbody>
+                ${po.lines.map(l => `<tr><td>${esc(rxpur.itemLabel(l.item))}</td><td class="rx-num">${esc(l.ordered_packs)}</td><td class="rx-num">${esc(l.free_packs)}</td><td class="rx-num">${esc(l.received_packs)}</td><td class="rx-num">${l.expected_rate_pack_paise != null ? rxRs(l.expected_rate_pack_paise) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+        const html = `${id ? `<p>${rxDocBadge(po.status)} ${po.cancel_reason ? '<span class="rx-sub">' + esc(po.cancel_reason) + '</span>' : ''}</p>` : ''}
+            <div class="dx-grid">
+                <div class="field"><label for="rxpPoSup">Supplier</label><select id="rxpPoSup" ${id ? 'disabled' : ''}>${rxpur.supOptions(po.supplier_id)}</select></div>
+                <div class="field"><label for="rxpPoExp">Expected on</label><input type="date" id="rxpPoExp" value="${esc(po.expected_on || '')}" ${edit ? '' : 'disabled'}></div>
+                <div class="field"><label for="rxpPoNotes">Notes for the supplier</label><input id="rxpPoNotes" maxlength="500" value="${esc(po.notes || '')}" ${edit ? '' : 'disabled'}></div>
+            </div><h4>Lines</h4>${lines}
+            <p class="muted">Sending numbers the order. Share the PDF with the supplier yourself; Kriya does not message suppliers.</p>`;
+        const foot = (edit ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.savePo(this)">Save draft</button>` : '')
+            + (id && po.status === 'draft' && rxpur.canApprove() ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.sendPo(this)">Approve &amp; send</button>` : '')
+            + (id && ['draft', 'sent'].includes(po.status) && rxpur.canBuy() ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.cancelPo(this)">Cancel order</button>` : '')
+            + (id ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.pdf('/admin/rx/purchase-orders/${esc(id)}.pdf', this)">PDF</button>` : '');
+        rxpur.open(id ? `Purchase order ${po.po_number || '(draft)'}` : 'New purchase order', html, foot, false);
+    },
+    poBody() {
+        const lines = [...document.querySelectorAll('#rxpPoLines tbody tr')].map(tr => {
+            const v = [...tr.querySelectorAll('input')].map(i => i.value.trim());
+            const it = rxpur.itemOf(v[0]);
+            return { label: v[0], line: it && { item_id: it.id, ordered_packs: parseInt(v[1], 10) || 0, free_packs: parseInt(v[2], 10) || 0,
+                                                expected_rate_pack_paise: v[3] ? rxPaise(v[3]) : null } };
+        }).filter(x => x.label);
+        const bad = lines.find(x => !x.line || x.line.ordered_packs < 1);
+        if (bad) throw new Error(bad.line ? 'Every line needs at least 1 pack.' : `Pick "${bad.label}" from the list.`);
+        if (!lines.length) throw new Error('Add at least one line.');
+        return { expected_on: document.getElementById('rxpPoExp').value || null, notes: document.getElementById('rxpPoNotes').value.trim() || null,
+                 lines: lines.map(x => x.line) };
+    },
+    async savePo(btn) {
+        let body;
+        try { body = rxpur.poBody(); } catch (e) { toast(e.message, true); return; }
+        const id = rxpur.doc.id;
+        const po = await rxpur.run(btn, () => id ? apiPatch(`/admin/rx/purchase-orders/${encodeURIComponent(id)}`, body)
+            : apiPost('/admin/rx/purchase-orders', { ...body, store_id: rxpur.store(), supplier_id: document.getElementById('rxpPoSup').value }), 'Draft saved');
+        if (po) { await rxpur.openPo(po.id); rxpur.load(); }
+    },
+    async sendPo(btn) {
+        const r = await rxpur.run(btn, () => apiPost(`/admin/rx/purchase-orders/${encodeURIComponent(rxpur.doc.id)}/send`, {}));
+        if (r) { toast(`Sent as ${r.po_number}`); await rxpur.openPo(rxpur.doc.id); rxpur.load(); }
+    },
+    async cancelPo(btn) {
+        const reason = (prompt('Why is this order cancelled?') || '').trim();
+        if (reason.length < 3) { if (reason) toast('Give a reason of at least 3 characters.', true); return; }
+        if (await rxpur.run(btn, () => apiPost(`/admin/rx/purchase-orders/${encodeURIComponent(rxpur.doc.id)}/cancel`, { reason }), 'Order cancelled')) {
+            await rxpur.openPo(rxpur.doc.id); rxpur.load();
+        }
+    },
+
+    // ── GRN: the inward ledger and the receipt grid ──
+    async load_grn() {
+        const st = (document.getElementById('rxpGrnStatus') || {}).value || '';
+        rxpur.grns = (await api('/admin/rx/grns?' + (st ? 'status=' + st : '') + rxpur.storeQ('&'))).grns;
+        const list = rxpur.grns;
+        rxpur.body(rxpur.bar('Goods receipts (inward ledger)', `<select id="rxpGrnStatus" aria-label="Status" onchange="rxpur.load()"><option value="">All</option>${['draft', 'posted', 'void'].map(s => `<option value="${s}" ${s === st ? 'selected' : ''}>${RX_DOC_STATUS[s]}</option>`).join('')}</select>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.csv()">Export CSV</button>
+            ${rxpur.canBuy() ? '<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.openGrn(null)">New GRN</button>' : ''}`)
+            + (list.length ? `<div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Invoice</th><th class="rx-num">Taxable</th><th class="rx-num">GST</th><th class="rx-num">Total</th><th>Status</th><th></th></tr></thead><tbody>
+            ${list.map(g => `<tr><td data-label="GRN"><b>${esc(g.grn_number || 'Draft')}</b></td><td data-label="Date">${rxDay(g.posted_at || g.created_at)}</td>
+                <td data-label="Supplier">${esc(g.supplier_name || '—')}</td><td data-label="Invoice">${esc(g.supplier_invoice_no)}<span class="muted">${rxDay(g.supplier_invoice_date)}</span></td>
+                <td data-label="Taxable" class="rx-num">${rxRs(g.taxable_paise)}</td><td data-label="GST" class="rx-num">${rxRs(Number(g.cgst_paise) + Number(g.sgst_paise) + Number(g.igst_paise))}</td>
+                <td data-label="Total" class="rx-num">${rxRs(g.invoice_total_paise)}</td><td data-label="Status">${rxDocBadge(g.status)}</td>
+                <td><button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.openGrn('${esc(g.id)}')">Open</button></td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">No goods receipts yet.</p>'));
+    },
+    csv() {
+        const cell = v => { let s = String(v ?? ''); if (/^[=+\-@]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };   // formula-injection guard
+        const rows = [['GRN', 'Posted', 'Supplier', 'Invoice no', 'Invoice date', 'Taxable', 'CGST', 'SGST', 'IGST', 'Freight', 'Round off', 'Total', 'Status']]
+            .concat((rxpur.grns || []).filter(g => g.status !== 'draft').map(g => [g.grn_number, (g.posted_at || '').slice(0, 10), g.supplier_name, g.supplier_invoice_no, g.supplier_invoice_date,
+                rxRupees(g.taxable_paise), rxRupees(g.cgst_paise), rxRupees(g.sgst_paise), rxRupees(g.igst_paise), rxRupees(g.freight_paise), rxRupees(g.round_off_paise), rxRupees(g.invoice_total_paise), g.status]));
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv' }));
+        a.download = 'inward-ledger.csv'; a.click();
+    },
+    grnRow(l = {}) {
+        rxpur.remember(l.item);
+        const exp = l.expiry_date ? `${String(l.expiry_date).slice(5, 7)}/${String(l.expiry_date).slice(0, 4)}` : (l.expiry || '');
+        const gst = l.tax_rate_bps ?? (l.item && l.item.tax_rate_bps != null ? l.item.tax_rate_bps : 1200);
+        return `<tr data-po-line="${esc(l.po_line_id || '')}" data-serial="${esc(l.gs1_serial || '')}">
+            <td><input class="rxp-item" list="rxpItemList" value="${esc(rxpur.itemLabel(l.item))}" oninput="rxpur.searchItems(this)" aria-label="Item"></td>
+            <td><input value="${esc(l.batch_no || '')}" maxlength="30" aria-label="Batch"></td>
+            <td><input value="${esc(exp)}" placeholder="MM/YY" maxlength="10" aria-label="Expiry"></td>
+            <td><input type="number" min="1" value="${esc(l.packs ?? '')}" aria-label="Packs"></td>
+            <td><input type="number" min="0" value="${esc(l.free_packs ?? 0)}" aria-label="Free packs"></td>
+            <td><input inputmode="decimal" value="${esc(rxRupees(l.rate_pack_paise))}" aria-label="Rate per pack (₹)"></td>
+            <td><input inputmode="decimal" value="${esc(l.scheme_discount_bps ? l.scheme_discount_bps / 100 : '')}" aria-label="Scheme %"></td>
+            <td><input inputmode="decimal" value="${esc(l.cash_discount_bps ? l.cash_discount_bps / 100 : '')}" aria-label="Cash discount %"></td>
+            <td><select aria-label="GST %">${[0, 500, 1200, 1800, 2800, 4000].map(r => `<option value="${r}" ${r === Number(gst) ? 'selected' : ''}>${r / 100}</option>`).join('')}</select></td>
+            <td><input inputmode="decimal" value="${esc(rxRupees(l.mrp_pack_paise))}" aria-label="MRP per pack (₹)"></td>
+            <td class="rx-num">${l.taxable_paise != null ? rxRs(l.taxable_paise) : ''}</td>
+            <td class="rx-num">${l.tax_paise != null ? rxRs(l.tax_paise) : ''}</td>
+            <td class="rx-num">${l.landed_unit_cost_paise_x100 != null ? rxRs(l.landed_unit_cost_paise_x100 / 100) : ''}</td>
+            <td>${(l.warnings || []).length ? `<span class="rx-badge e-near" title="${esc(l.warnings.join(' · '))}">⚠ ${esc(l.warnings.length)}</span><span class="sr-only">${esc(l.warnings.join('. '))}</span>` : ''}</td>
+            <td><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()" aria-label="Remove line">✕</button></td></tr>`;
+    },
+    grnKeys(e) {   // Enter on the last row adds a row; Tab moves right natively
+        if (e.key !== 'Enter' || e.target.tagName === 'BUTTON') return;
+        e.preventDefault();
+        const tr = e.target.closest('tr'), tbody = tr.parentElement;
+        if (tr === tbody.lastElementChild) { tbody.insertAdjacentHTML('beforeend', rxpur.grnRow()); tbody.lastElementChild.querySelector('input').focus(); }
+    },
+    async openGrn(id) {
+        let g = { status: 'draft', lines: [], freight_paise: 0, invoice_total_paise: 0 };
+        if (id) { try { g = await api(`/admin/rx/grns/${encodeURIComponent(id)}`); } catch (e) { toast(e.message, true); return; } }
+        rxpur.doc = g;
+        const edit = g.status === 'draft' && rxpur.canBuy();
+        const dis = edit ? '' : 'disabled';
+        const pos = id ? [] : (await api('/admin/rx/purchase-orders' + rxpur.storeQ()).catch(() => ({ purchase_orders: [] }))).purchase_orders
+            .filter(p => ['sent', 'partially_received'].includes(p.status));
+        rxpur.openPos = pos;
+        const diff = Number(g.difference_paise || 0);
+        const html = `${id ? `<p>${rxDocBadge(g.status)} ${g.void_reason ? '<span class="rx-sub">' + esc(g.void_reason) + '</span>' : ''} ${g.is_interstate ? '<span class="rx-badge">IGST (interstate)</span>' : ''}</p>` : ''}
+            <div class="dx-grid">
+                <div class="field"><label for="rxpGSup">Supplier</label><select id="rxpGSup" ${id ? 'disabled' : ''} onchange="rxpur.filterPos()">${rxpur.supOptions(g.supplier_id)}</select></div>
+                ${id ? '' : `<div class="field"><label for="rxpGPo">Against purchase order (optional)</label><select id="rxpGPo" onchange="rxpur.fromPo()"><option value="">— none —</option></select></div>`}
+                <div class="field"><label for="rxpGInv">Supplier invoice no.</label><input id="rxpGInv" maxlength="40" value="${esc(g.supplier_invoice_no || '')}" ${dis}></div>
+                <div class="field"><label for="rxpGDate">Invoice date</label><input type="date" id="rxpGDate" value="${esc(g.supplier_invoice_date || new Date().toISOString().slice(0, 10))}" ${dis}></div>
+                <div class="field"><label for="rxpGFreight">Freight ₹</label><input id="rxpGFreight" inputmode="decimal" value="${esc(rxRupees(g.freight_paise))}" ${dis}></div>
+                <div class="field"><label for="rxpGTotal">Supplier's invoice total ₹</label><input id="rxpGTotal" inputmode="decimal" value="${esc(rxRupees(g.invoice_total_paise))}" ${dis}></div>
+            </div>
+            ${edit ? `<div class="rx-toolbar"><div class="field grow"><label for="rxpScan">Scan a pack (GS1 DataMatrix / QR) to add a line</label><input id="rxpScan" placeholder="Scan here" onkeydown="if(event.key==='Enter'){event.preventDefault(); rxpur.scan(this);}"></div></div>` : ''}
+            <div class="tbl-wrap"><table class="rxp-grid" id="rxpGrnLines" onkeydown="rxpur.grnKeys(event)"><thead><tr><th>Item</th><th>Batch</th><th>Exp</th><th>Packs</th><th>Free</th><th>Rate ₹</th><th>Sch %</th><th>CD %</th><th>GST %</th><th>MRP ₹</th><th class="rx-num">Taxable</th><th class="rx-num">Tax</th><th class="rx-num">Landed / unit</th><th>⚠</th><th></th></tr></thead>
+                <tbody>${(g.lines.length ? g.lines : (edit ? [{}] : [])).map(l => rxpur.grnRow(l)).join('')}</tbody></table></div>
+            ${edit ? `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="document.querySelector('#rxpGrnLines tbody').insertAdjacentHTML('beforeend', rxpur.grnRow())">Add line</button>` : ''}
+            ${id ? `<div class="rxp-foot" aria-live="polite"><span>Taxable ${rxRs(g.taxable_paise)}</span><span>GST ${rxRs(Number(g.cgst_paise) + Number(g.sgst_paise) + Number(g.igst_paise))}</span><span>Freight ${rxRs(g.freight_paise)}</span>
+                <span>Computed <b>${rxRs(g.computed_total_paise)}</b></span><span>Supplier <b>${rxRs(g.invoice_total_paise)}</b></span>
+                ${g.status === 'draft' ? `<span class="rxp-diff ${Math.abs(diff) <= 99 ? 'ok' : 'bad'}">${Math.abs(diff) <= 99 ? '✓ matches' + (diff ? ` (round-off ${rxRs(diff)})` : '') : '✕ differs by ' + rxRs(diff)}</span>` : `<span>Round-off ${rxRs(g.round_off_paise)}</span>`}</div>` : ''}
+            ${edit ? '<p class="muted">Save to compute tax and landed cost. Posting is allowed when the computed total is within ₹0.99 of the supplier\'s total; the difference is booked as round-off.</p>' : ''}`;
+        const foot = (edit ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.saveGrn(this)">Save &amp; compute</button>` : '')
+            + (id && g.status === 'draft' && rxpur.canBuy() ? `<button type="button" class="btn btn-accent btn-sm" ${g.can_post ? '' : 'disabled'} onclick="rxpur.postGrn(this)">Post GRN</button>` : '')
+            + (id && g.status === 'posted' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.pdf('/admin/rx/grns/${esc(id)}/labels.pdf?copies=per_pack', this)">Print labels</button>` : '')
+            + (id && g.status === 'posted' && rxCan('RX_ADMIN') ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.voidGrn(this)">Void GRN</button>` : '');
+        rxpur.open(id ? `GRN ${g.grn_number || '(draft)'} · ${rxpur.supName(g.supplier_id)}` : 'New goods receipt', html, foot, true);
+        if (!id) rxpur.filterPos();
+    },
+    filterPos() {
+        const sel = document.getElementById('rxpGPo');
+        if (!sel) return;
+        const sup = document.getElementById('rxpGSup').value;
+        sel.innerHTML = '<option value="">— none —</option>' + (rxpur.openPos || []).filter(p => p.supplier_id === sup)
+            .map(p => `<option value="${esc(p.id)}">${esc(p.po_number)} · ${esc(RX_DOC_STATUS[p.status])}</option>`).join('');
+    },
+    async fromPo() {
+        const id = document.getElementById('rxpGPo').value;
+        if (!id) return;
+        try {
+            const po = await api(`/admin/rx/purchase-orders/${encodeURIComponent(id)}`);
+            document.querySelector('#rxpGrnLines tbody').innerHTML = po.lines.filter(l => l.received_packs < l.ordered_packs).map(l => rxpur.grnRow({
+                item: l.item, po_line_id: l.id, packs: l.ordered_packs - l.received_packs, free_packs: l.free_packs, rate_pack_paise: l.expected_rate_pack_paise })).join('') || rxpur.grnRow();
+        } catch (e) { toast(e.message, true); }
+    },
+    async scan(input) {
+        const code = input.value.trim();
+        if (!code) return;
+        try {
+            const r = await api('/admin/rx/gs1?code=' + encodeURIComponent(code));
+            if (!r.item) { toast(`GTIN ${r.gtin} is not on any item. Add it as a barcode in the Drug Master.`, true); return; }
+            const tbody = document.querySelector('#rxpGrnLines tbody'), last = tbody.lastElementChild;
+            if (last && ![...last.querySelectorAll('input')].some(i => i.value && i.type !== 'number')) last.remove();
+            tbody.insertAdjacentHTML('beforeend', rxpur.grnRow({ item: r.item, batch_no: r.batch_no, expiry_date: r.expiry_date, gs1_serial: r.serial }));
+            tbody.lastElementChild.querySelectorAll('input')[3].focus();
+            input.value = '';
+        } catch (e) { toast(e.message, true); }
+    },
+    grnBody() {
+        const val = id => document.getElementById(id).value.trim();
+        const lines = [...document.querySelectorAll('#rxpGrnLines tbody tr')].map(tr => {
+            const v = [...tr.querySelectorAll('input, select')].map(i => i.value.trim());
+            if (!v[0]) return null;
+            const it = rxpur.itemOf(v[0]);
+            if (!it) throw new Error(`Pick "${v[0]}" from the list.`);
+            if (!v[1] || !v[2] || !v[3] || !v[5] || !v[9]) throw new Error(`${it.brand_name}: batch, expiry, packs, rate and MRP are required.`);
+            return { item_id: it.id, po_line_id: tr.dataset.poLine || null, gs1_serial: tr.dataset.serial || null, batch_no: v[1], expiry: v[2],
+                     packs: parseInt(v[3], 10), free_packs: parseInt(v[4] || '0', 10), rate_pack_paise: rxPaise(v[5]),
+                     scheme_discount_bps: rxBps(v[6]), cash_discount_bps: rxBps(v[7]), tax_rate_bps: Number(v[8]), mrp_pack_paise: rxPaise(v[9]) };
+        }).filter(Boolean);
+        return { supplier_invoice_no: val('rxpGInv'), supplier_invoice_date: val('rxpGDate'),
+                 freight_paise: rxPaise(val('rxpGFreight')) || 0, invoice_total_paise: rxPaise(val('rxpGTotal')) || 0, lines };
+    },
+    async saveGrn(btn) {
+        let body;
+        try { body = rxpur.grnBody(); } catch (e) { toast(e.message, true); return; }
+        if (!body.supplier_invoice_no) { toast('Enter the supplier invoice number.', true); return; }
+        const id = rxpur.doc.id;
+        if (!id) {
+            const po = document.getElementById('rxpGPo').value;
+            Object.assign(body, { store_id: rxpur.store(), supplier_id: document.getElementById('rxpGSup').value, po_id: po || null });
+            if (!body.supplier_id) { toast('Choose the supplier.', true); return; }
+        }
+        const g = await rxpur.run(btn, () => id ? apiPatch(`/admin/rx/grns/${encodeURIComponent(id)}`, body) : apiPost('/admin/rx/grns', body), 'Saved and computed');
+        if (g) { await rxpur.openGrn(g.id); rxpur.load(); }
+    },
+    async postGrn(btn) {
+        if (!confirm('Post this goods receipt? Stock is added now and the receipt can no longer be edited.')) return;
+        const r = await rxpur.run(btn, () => apiPost(`/admin/rx/grns/${encodeURIComponent(rxpur.doc.id)}/post`, { idempotency_key: 'grn-' + rxpur.doc.id }));
+        if (r) { toast(`Posted ${r.grn_number}: ${r.units} units in stock`); await rxpur.openGrn(rxpur.doc.id); rxpur.load(); }
+    },
+    async voidGrn(btn) {
+        const reason = (prompt('Why is this receipt voided? (Allowed only while none of its stock has been used.)') || '').trim();
+        if (reason.length < 3) { if (reason) toast('Give a reason of at least 3 characters.', true); return; }
+        if (await rxpur.run(btn, () => apiPost(`/admin/rx/grns/${encodeURIComponent(rxpur.doc.id)}/void`, { reason }), 'Receipt voided; its stock was reversed')) {
+            await rxpur.openGrn(rxpur.doc.id); rxpur.load();
+        }
+    },
+
+    // ── Supplier returns (W6): expired and blocked batches can go back ──
+    async load_returns() {
+        const list = (await api('/admin/rx/supplier-returns' + rxpur.storeQ())).returns;
+        rxpur.body(rxpur.bar('Supplier returns', rxpur.canReturn() ? '<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.openReturn(null)">New return</button>' : '')
+            + (list.length ? `<div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr><th>Debit note</th><th>Supplier</th><th>Reason</th><th>Status</th><th>Credit</th><th></th></tr></thead><tbody>
+            ${list.map(r => `<tr><td data-label="Debit note"><b>${esc(r.srn_number || 'Draft')}</b><span class="muted">${rxDay(r.dispatched_at || r.created_at)}</span></td><td data-label="Supplier">${esc(r.supplier_name || '—')}</td>
+                <td data-label="Reason">${esc(r.reason.replace('_', ' '))}</td><td data-label="Status">${rxDocBadge(r.status)}</td>
+                <td data-label="Credit">${r.credit_ref ? esc(r.credit_ref) + ' · ' + rxRs(r.credit_received_paise) : '—'}</td>
+                <td><button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.openReturn('${esc(r.id)}')">Open</button></td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">No supplier returns yet. Expired, recalled and damaged stock leaves through a return.</p>'));
+    },
+    async openReturn(id) {
+        if (!id) {
+            rxpur.doc = {}; rxpur.retLines = [];
+            const html = `<div class="dx-grid">
+                    <div class="field"><label for="rxpRSup">Supplier</label><select id="rxpRSup">${rxpur.supOptions('')}</select></div>
+                    <div class="field"><label for="rxpRReason">Reason</label><select id="rxpRReason">${['expired', 'near_expiry', 'damaged', 'recall', 'excess', 'other'].map(r => `<option value="${r}">${r.replace('_', ' ')}</option>`).join('')}</select></div>
+                    <div class="field"><label for="rxpRNotes">Notes</label><input id="rxpRNotes" maxlength="300"></div></div>
+                <div class="rx-toolbar"><div class="field grow"><label for="rxpRItem">Item (batches in the receiving store, expired and blocked included)</label>
+                    <input id="rxpRItem" class="rxp-item" list="rxpItemList" oninput="rxpur.searchItems(this)" onchange="rxpur.retBatches()"></div></div>
+                <div id="rxpRBatches"></div><h4>To return</h4><div id="rxpRLines"><p class="muted">No batches added.</p></div>`;
+            rxpur.open('New supplier return', html, '<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.saveReturn(this)">Save draft</button>', false);
+            return;
+        }
+        let r;
+        try { r = await api(`/admin/rx/supplier-returns/${encodeURIComponent(id)}`); } catch (e) { toast(e.message, true); return; }
+        rxpur.doc = r;
+        const html = `<p>${rxDocBadge(r.status)} <span class="rx-sub">${esc(r.reason.replace('_', ' '))}${r.notes ? ' · ' + esc(r.notes) : ''}</span></p>
+            <div class="tbl-wrap"><table class="rx-tbl" style="width:100%"><thead><tr><th>Item</th><th>Batch</th><th>Expiry</th><th class="rx-num">Units</th><th class="rx-num">Rate / pack</th><th class="rx-num">GST</th><th class="rx-num">Value</th></tr></thead><tbody>
+            ${r.lines.map(l => `<tr><td>${esc(rxpur.itemLabel(l.item))}</td><td>${esc((l.batch || {}).batch_no)}${(l.batch || {}).is_blocked ? ' <span class="rx-badge e-blocked">Blocked</span>' : ''}</td><td>${rxDay((l.batch || {}).expiry_date)}</td>
+                <td class="rx-num">${esc(l.qty_units)}</td><td class="rx-num">${rxRs(l.rate_pack_paise)}</td><td class="rx-num">${esc(l.tax_rate_bps / 100)} %</td><td class="rx-num">${rxRs(l.taxable_paise + l.tax_paise)}</td></tr>`).join('')}</tbody></table></div>
+            <div class="rxp-foot"><span>Taxable ${rxRs(r.debit_note.taxable_paise)}</span><span>GST reversal ${rxRs(r.debit_note.tax_paise)}</span><span>Debit note <b>${rxRs(r.debit_note.total_paise)}</b></span></div>
+            ${r.status === 'dispatched' ? `<h4>Supplier's credit</h4><div class="dx-grid">
+                <div class="field"><label for="rxpRCredit">Credit received ₹</label><input id="rxpRCredit" inputmode="decimal" value="${esc(rxRupees(r.credit_received_paise))}"></div>
+                <div class="field"><label for="rxpRRef">Credit note / reference</label><input id="rxpRRef" maxlength="60" value="${esc(r.credit_ref || '')}"></div></div>` : ''}`;
+        const foot = (r.status === 'draft' && rxpur.canReturn() ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.dispatchReturn(this)">Dispatch</button>` : '')
+            + (r.status === 'dispatched' && rxpur.canReturn() ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.saveCredit(this)">Save credit</button>` : '');
+        rxpur.open(`Supplier return ${r.srn_number || '(draft)'} · ${rxpur.supName(r.supplier_id)}`, html, foot, false);
+    },
+    async retBatches() {
+        const it = rxpur.itemOf(document.getElementById('rxpRItem').value), out = document.getElementById('rxpRBatches');
+        if (!it) return;
+        try {
+            const b = (await api(`/admin/rx/batches?item_id=${encodeURIComponent(it.id)}` + rxpur.storeQ('&'))).batches;
+            out.innerHTML = b.length ? `<table class="rx-tbl" style="width:100%"><tbody>${b.map(x => `<tr><td><b>${esc(x.batch_no)}</b></td><td>${rxExpBadge(x.expiry_status, x.expiry_date, x.days_left)}</td>
+                <td class="rx-num">${esc(x.qty_units)} on hand</td><td><input type="number" min="1" max="${esc(x.qty_units)}" value="${esc(x.qty_units)}" aria-label="Units of ${esc(x.batch_no)} to return" style="max-width:90px"></td>
+                <td><button type="button" class="btn btn-ghost btn-sm" onclick='rxpur.addRet(this, ${esc(JSON.stringify({ batch_id: x.batch_id, batch_no: x.batch_no, max: x.qty_units, brand: it.brand_name }))})'>Add</button></td></tr>`).join('')}</tbody></table>`
+                : '<p class="muted">No stock of this item in the receiving store.</p>';
+        } catch (e) { toast(e.message, true); }
+    },
+    addRet(btn, b) {
+        const qty = parseInt(btn.closest('tr').querySelector('input').value, 10);
+        if (!(qty >= 1 && qty <= b.max)) { toast(`Enter 1 to ${b.max} units.`, true); return; }
+        rxpur.retLines = rxpur.retLines.filter(l => l.batch_id !== b.batch_id).concat([{ ...b, qty_units: qty }]);
+        document.getElementById('rxpRLines').innerHTML = `<ul>${rxpur.retLines.map(l => `<li>${esc(l.brand)} · ${esc(l.batch_no)} — ${esc(l.qty_units)} units
+            <button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.retLines = rxpur.retLines.filter(x => x.batch_id !== '${esc(l.batch_id)}'); this.closest('li').remove()" aria-label="Remove">✕</button></li>`).join('')}</ul>`;
+    },
+    async saveReturn(btn) {
+        const sup = document.getElementById('rxpRSup').value;
+        if (!sup) { toast('Choose the supplier.', true); return; }
+        if (!rxpur.retLines.length) { toast('Add at least one batch.', true); return; }
+        const r = await rxpur.run(btn, () => apiPost('/admin/rx/supplier-returns', { store_id: rxpur.store(), supplier_id: sup,
+            reason: document.getElementById('rxpRReason').value, notes: document.getElementById('rxpRNotes').value.trim() || null,
+            lines: rxpur.retLines.map(l => ({ batch_id: l.batch_id, qty_units: l.qty_units })) }), 'Draft return saved');
+        if (r) { await rxpur.openReturn(r.id); rxpur.load(); }
+    },
+    async dispatchReturn(btn) {
+        if (!confirm('Dispatch this return? The units leave stock now.')) return;
+        const r = await rxpur.run(btn, () => apiPost(`/admin/rx/supplier-returns/${encodeURIComponent(rxpur.doc.id)}/dispatch`, {}));
+        if (r) { toast(`Dispatched as ${r.srn_number}`); await rxpur.openReturn(rxpur.doc.id); rxpur.load(); }
+    },
+    async saveCredit(btn) {
+        const body = { credit_received_paise: rxPaise(document.getElementById('rxpRCredit').value) ?? 0, credit_ref: document.getElementById('rxpRRef').value.trim() };
+        if (!body.credit_ref) { toast('Enter the supplier credit note reference.', true); return; }
+        if (await rxpur.run(btn, () => apiPatch(`/admin/rx/supplier-returns/${encodeURIComponent(rxpur.doc.id)}/credit`, body), 'Credit recorded')) rxpur.load();
+    },
+
+    // ── Suppliers ──
+    async load_suppliers() {
+        const list = rxpur.suppliers;
+        rxpur.body(rxpur.bar('Suppliers', rxpur.canBuy() ? '<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.openSupplier(null)">Add supplier</button>' : '')
+            + (list.length ? `<div class="tbl-wrap"><table class="dx-sites rx-tbl"><thead><tr><th>Supplier</th><th>GSTIN</th><th>Drug licence</th><th>Terms</th><th>Phone</th><th>Status</th><th></th></tr></thead><tbody>
+            ${list.map(s => `<tr><td data-label="Supplier"><b>${esc(s.name)}</b></td><td data-label="GSTIN">${esc(s.gstin || 'Unregistered')}</td>
+                <td data-label="Drug licence">${esc(s.drug_licence_no || '—')}</td><td data-label="Terms">${esc(s.payment_terms_days)} d credit · ${esc(s.lead_time_days)} d lead</td>
+                <td data-label="Phone">${esc(s.phone || '—')}</td><td data-label="Status">${s.is_active ? 'Active' : 'Inactive'}</td>
+                <td>${rxpur.canBuy() ? `<button type="button" class="btn btn-ghost btn-sm" onclick="rxpur.openSupplier('${esc(s.id)}')">Edit</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">No suppliers yet.</p>'));
+    },
+    openSupplier(id) {
+        const s = rxpur.suppliers.find(x => x.id === id) || { payment_terms_days: 30, lead_time_days: 3, is_active: true };
+        rxpur.doc = s;
+        const f = (k, label, extra = '') => `<div class="field"><label for="rxpS_${k}">${label}</label><input id="rxpS_${k}" value="${esc(s[k] ?? '')}" ${extra}></div>`;
+        const html = `<div class="dx-grid">${f('name', 'Name', 'maxlength="120"')}
+            <div class="field"><label for="rxpS_gstin">GSTIN (blank if unregistered)</label><input id="rxpS_gstin" maxlength="15" value="${esc(s.gstin || '')}" autocapitalize="characters" oninput="rxpur.gstinHint(this)"><small id="rxpGstinHint" class="rx-sub" aria-live="polite"></small></div>
+            ${f('drug_licence_no', 'Drug licence no.', 'maxlength="60"')}${f('phone', 'Phone', 'maxlength="20" inputmode="tel"')}${f('email', 'Email', 'maxlength="120" type="email"')}
+            ${f('address', 'Address', 'maxlength="300"')}${f('payment_terms_days', 'Credit days', 'type="number" min="0" max="365"')}
+            ${f('lead_time_days', 'Lead time (days)', 'type="number" min="0" max="90"')}${f('return_window_days', 'Accepts returns within (days)', 'type="number" min="0" max="365"')}</div>
+            ${id ? `<label class="check"><input type="checkbox" id="rxpS_active" ${s.is_active ? 'checked' : ''}> Active</label>` : ''}`;
+        rxpur.open(id ? `Supplier · ${s.name}` : 'Add supplier', html, '<button type="button" class="btn btn-accent btn-sm" onclick="rxpur.saveSupplier(this)">Save supplier</button>', false);
+    },
+    gstinHint(input) {
+        input.value = input.value.toUpperCase();
+        const g = input.value.trim();
+        document.getElementById('rxpGstinHint').textContent = !g ? '' : g.length < 15 ? `${15 - g.length} more characters` : rxGstinOk(g) ? `✓ Valid · state ${g.slice(0, 2)}` : '✕ Not a valid GSTIN (check digit)';
+    },
+    async saveSupplier(btn) {
+        const v = k => document.getElementById('rxpS_' + k).value.trim(), n = k => v(k) === '' ? null : parseInt(v(k), 10);
+        const body = { name: v('name'), gstin: v('gstin') || null, drug_licence_no: v('drug_licence_no') || null, phone: v('phone') || null,
+                       email: v('email') || null, address: v('address') || null, payment_terms_days: n('payment_terms_days') ?? 30,
+                       lead_time_days: n('lead_time_days') ?? 3, return_window_days: n('return_window_days') };
+        if (body.name.length < 2) { toast('Enter the supplier name.', true); return; }
+        if (body.gstin && !rxGstinOk(body.gstin)) { toast('The GSTIN is not valid.', true); return; }
+        const id = rxpur.doc.id;
+        if (id) body.is_active = document.getElementById('rxpS_active').checked;
+        if (await rxpur.run(btn, () => id ? apiPatch(`/admin/rx/suppliers/${encodeURIComponent(id)}`, body) : apiPost('/admin/rx/suppliers', body), 'Supplier saved')) {
+            rxpur.close(); rxpur.load();
+        }
+    },
+};
+/* RX:purchase:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -18824,7 +19347,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ };
     if (loaders[page]) loaders[page]();
 }
 

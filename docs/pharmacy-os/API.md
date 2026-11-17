@@ -67,9 +67,10 @@ eligibility 400 (`opd_enabled` required) → provision default store → disable
 | Method | Path | Perm | Notes |
 |:-|:-|:-|:-|
 | GET/POST/PATCH | `/admin/rx/suppliers[/{id}]` | RX_READ / RX_PURCHASE | GSTIN checksum validated (`gst_billing.valid_gstin`) |
-| GET | `/admin/rx/purchase-orders?status&supplier_id` | RX_READ | |
+| GET | `/admin/rx/purchase-orders?status&supplier_id&store_id` | RX_READ | store-scoped list with supplier name |
+| GET | `/admin/rx/purchase-orders/{id}` | RX_READ | header + lines (item incl. `tax_rate_bps`) + supplier |
 | POST | `/admin/rx/purchase-orders` | RX_PURCHASE | `{store_id,supplier_id,expected_on,lines:[{item_id,ordered_packs,free_packs,expected_rate_pack_paise}]}` (draft) |
-| PATCH | `/admin/rx/purchase-orders/{id}` | RX_PURCHASE | draft only |
+| PATCH | `/admin/rx/purchase-orders/{id}` | RX_PURCHASE | draft only; `lines` replaces all lines |
 | POST | `/admin/rx/purchase-orders/{id}/send` | RX_PURCHASE + RX_ADMIN *or* PHARMACY_MANAGER role | assigns `PO-`. *audit* |
 | POST | `/admin/rx/purchase-orders/{id}/cancel` | RX_PURCHASE | `{reason}` |
 | GET | `/admin/rx/purchase-orders/{id}.pdf` | RX_READ | |
@@ -77,9 +78,16 @@ eligibility 400 (`opd_enabled` required) → provision default store → disable
 | POST | `/admin/rx/grns/{id}/post` | RX_PURCHASE | `{idempotency_key}` → `rx_post_grn`. 409 `rx_grn_total_mismatch` with diff. *audit: rx_grn_post* |
 | POST | `/admin/rx/grns/{id}/void` | RX_ADMIN | `{reason}`; 409 `rx_grn_stock_consumed`. *audit* |
 | GET | `/admin/rx/grns/{id}/labels.pdf?copies=per_unit|per_pack|1` | RX_READ | |
-| GET/POST | `/admin/rx/supplier-returns[/{id}]` | RX_READ / RX_PURCHASE | |
+| GET/POST | `/admin/rx/supplier-returns[/{id}]` | RX_READ / RX_PURCHASE | `{store_id,supplier_id,reason,notes,lines:[{batch_id,qty_units}]}`; item, rate and GST are filled from the batch's first GRN line (else batch PTR + item GST); detail carries `debit_note {taxable,tax,total}` |
 | POST | `/admin/rx/supplier-returns/{id}/dispatch` | RX_PURCHASE | `rx_supplier_return`; debit note PDF link. *audit* |
 | PATCH | `/admin/rx/supplier-returns/{id}/credit` | RX_PURCHASE | `{credit_received_paise, credit_ref}` |
+| GET | `/admin/rx/gs1?code=` | RX_READ / RX_PURCHASE / RX_DISPENSE | A3 / RX-71: parse a GS1 DataMatrix / pharma QR (`]d2`, `]Q3`, GS, or `(01)…` form) → `{gtin,batch_no,expiry_date,mfg_date,serial,item}`; 422 `rx_gs1_invalid` |
+
+P3 notes (as built, migration 137): the PO `send` needs RX_PURCHASE **and** RX_ADMIN (a Pharmacy Manager holds both).
+GRN `post` is idempotent per GRN (a retry returns `replayed: true`); the posted `round_off_paise` is the invoice
+total minus the computed total and must be within ±99. Freight is split over lines by taxable value (largest
+remainder) into landed cost; GST on freight is not modelled. Write paths for supplier returns stay open in
+WIND_DOWN (clearing stock); new suppliers, POs and GRNs are new work (409).
 
 ## 5. POS (P4)
 | Method | Path | Perm | Notes |

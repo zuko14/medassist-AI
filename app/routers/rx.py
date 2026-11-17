@@ -1,5 +1,5 @@
-"""Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20).
-Design: docs/pharmacy-os/API.md §0–§3, SECURITY.md §2–§3.
+"""Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20),
+purchase (137, RX-23…26, RX-71). Design: docs/pharmacy-os/API.md §0–§4, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
@@ -8,13 +8,14 @@ Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 import uuid
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
-from app.services import rx, rx_catalogue, rx_stock
+from app.services import rx, rx_catalogue, rx_gs1, rx_purchase, rx_stock
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
+from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
 from app.services.tenant import get_clinic_by_id, invalidate_tenant_cache, ipd_access, rx_access
 
@@ -513,3 +514,255 @@ async def opening_import(request: Request, store_id: uuid.UUID, dry_run: bool = 
         await _audit(user, request, "rx_opening_stock", "rx_store", str(store_id),
                      {"movements": res["movements"], "units": res["units"]})
     return {**res, "errors": errors, "valid": not errors}
+
+
+# ── purchase: suppliers, purchase orders, GRN, supplier returns (137, RX-23…RX-26) ──
+
+PURCHASE_READ = ("RX_READ", "RX_PURCHASE", "RX_ADMIN")
+PURCHASE_WRITE = ("RX_PURCHASE", "RX_ADMIN")
+
+
+class ReasonIn(_In):
+    reason: str = Field(..., min_length=3, max_length=300)
+
+
+class PostIn(_In):
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=80)
+
+
+async def _doc_in_scope(user: AdminUser, scope: str, doc: dict) -> dict:
+    """A document is visible only through its store (SECURITY §3.3): outside scope reads as not found."""
+    _store_for(user, await rx.get_store(scope, str(doc["store_id"])))
+    return doc
+
+
+def _pdf(content: bytes, name: str) -> Response:
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{name}"', "Cache-Control": "no-store"})
+
+
+@router.get("/suppliers")
+async def list_suppliers(active: Optional[bool] = None, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    return {"suppliers": await rx_purchase.list_suppliers(scope, active)}
+
+
+@router.post("/suppliers", status_code=status.HTTP_201_CREATED)
+async def create_supplier(body: SupplierIn, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    row = await rx_purchase.create_supplier(scope, body)
+    await _audit(user, request, "rx_supplier_create", "rx_supplier", row["id"], {"has_gstin": bool(body.gstin)})
+    return row
+
+
+@router.patch("/suppliers/{supplier_id}")
+async def update_supplier(supplier_id: uuid.UUID, body: SupplierPatch, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    row = await rx_purchase.update_supplier(scope, str(supplier_id), body)
+    await _audit(user, request, "rx_supplier_update", "rx_supplier", str(supplier_id),
+                 {"keys": sorted(body.model_dump(exclude_unset=True))})
+    return row
+
+
+@router.get("/purchase-orders")
+async def list_pos(status_: Optional[Literal["draft", "sent", "partially_received", "received", "cancelled"]] = Query(
+                       None, alias="status"), supplier_id: Optional[uuid.UUID] = None, store_id: Optional[uuid.UUID] = None,
+                   clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    return {"purchase_orders": await rx_purchase.list_pos(scope, await _store_ids(user, scope, store_id), status_,
+                                                          str(supplier_id) if supplier_id else None)}
+
+
+@router.post("/purchase-orders", status_code=status.HTTP_201_CREATED)
+async def create_po(body: POIn, request: Request, clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    _store_for(user, await rx.get_store(scope, body.store_id))
+    po = await rx_purchase.create_po(scope, body, _actor(user))
+    await _audit(user, request, "rx_po_create", "rx_purchase_order", po["id"], {"lines": len(body.lines)})
+    return po
+
+
+@router.get("/purchase-orders/{po_id}.pdf")
+async def po_pdf(po_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    po = await _doc_in_scope(user, scope, await rx_purchase.get_po(scope, str(po_id)))
+    store = await rx.get_store(scope, str(po["store_id"]))
+    return _pdf(rx_purchase.render_po_pdf(po, clinic, store), f"{po.get('po_number') or 'PO-draft'}.pdf")
+
+
+@router.get("/purchase-orders/{po_id}")
+async def get_po(po_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    return await _doc_in_scope(user, scope, await rx_purchase.get_po(scope, str(po_id)))
+
+
+@router.patch("/purchase-orders/{po_id}")
+async def update_po(po_id: uuid.UUID, body: POPatch, request: Request, clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    await _doc_in_scope(user, scope, await rx_purchase.get_po(scope, str(po_id)))
+    po = await rx_purchase.update_po(scope, str(po_id), body)
+    await _audit(user, request, "rx_po_update", "rx_purchase_order", str(po_id),
+                 {"keys": sorted(body.model_dump(exclude_unset=True))})
+    return po
+
+
+@router.post("/purchase-orders/{po_id}/send")
+async def send_po(po_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                  user: AdminUser = Depends(verify_credentials)):
+    """Approval step: RX_PURCHASE and RX_ADMIN (a Pharmacy Manager holds both)."""
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    if not (holds_rx_permission(user, "RX_PURCHASE") and holds_rx_permission(user, "RX_ADMIN")):
+        raise HTTPException(status_code=403, detail="Missing permission: RX_PURCHASE and RX_ADMIN (manager approval)")
+    await _doc_in_scope(user, scope, await rx_purchase.get_po(scope, str(po_id)))
+    out = await rx_purchase.send_po(scope, str(po_id))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_po_send", "rx_purchase_order", str(po_id), {"po_number": out["po_number"]})
+    return out
+
+
+@router.post("/purchase-orders/{po_id}/cancel")
+async def cancel_po(po_id: uuid.UUID, body: ReasonIn, request: Request, clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE)
+    await _doc_in_scope(user, scope, await rx_purchase.get_po(scope, str(po_id)))
+    po = await rx_purchase.cancel_po(scope, str(po_id), body.reason)
+    await _audit(user, request, "rx_po_cancel", "rx_purchase_order", str(po_id), {"reason": body.reason})
+    return po
+
+
+@router.get("/grns")
+async def list_grns(status_: Optional[Literal["draft", "posted", "void"]] = Query(None, alias="status"),
+                    supplier_id: Optional[uuid.UUID] = None, store_id: Optional[uuid.UUID] = None,
+                    clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    return {"grns": await rx_purchase.list_grns(scope, await _store_ids(user, scope, store_id), status_,
+                                                str(supplier_id) if supplier_id else None)}
+
+
+@router.post("/grns", status_code=status.HTTP_201_CREATED)
+async def create_grn(body: GrnIn, request: Request, clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    store = _store_for(user, await rx.get_store(scope, body.store_id))
+    g = await rx_purchase.create_grn(scope, clinic, store, body, _actor(user), rx.get_rx_settings(clinic))
+    await _audit(user, request, "rx_grn_create", "rx_grn", g["id"], {"lines": len(body.lines)})
+    return g
+
+
+@router.get("/grns/{grn_id}/labels.pdf")
+async def grn_labels(grn_id: uuid.UUID, copies: Literal["1", "per_pack", "per_unit"] = "1", clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    g = await _doc_in_scope(user, scope, await rx_purchase.get_grn(scope, str(grn_id), rx.get_rx_settings(clinic)))
+    return _pdf(rx_purchase.render_labels_pdf(g, copies), f"labels-{g.get('grn_number') or 'draft'}.pdf")
+
+
+@router.get("/grns/{grn_id}")
+async def get_grn(grn_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    return await _doc_in_scope(user, scope, await rx_purchase.get_grn(scope, str(grn_id), rx.get_rx_settings(clinic)))
+
+
+@router.patch("/grns/{grn_id}")
+async def update_grn(grn_id: uuid.UUID, body: GrnPatch, request: Request, clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    settings = rx.get_rx_settings(clinic)
+    await _doc_in_scope(user, scope, await rx_purchase.get_grn(scope, str(grn_id), settings))
+    g = await rx_purchase.update_grn(scope, str(grn_id), body, settings)
+    await _audit(user, request, "rx_grn_update", "rx_grn", str(grn_id),
+                 {"keys": sorted(body.model_dump(exclude_unset=True))})
+    return g
+
+
+@router.post("/grns/{grn_id}/post")
+async def post_grn(grn_id: uuid.UUID, request: Request, body: Optional[PostIn] = None, clinic_id: str = "default",
+                   user: AdminUser = Depends(verify_credentials)):
+    """rx_post_grn is idempotent per GRN: a retry (same or no key) returns the posted number, replayed."""
+    scope, clinic = await _rx_scope(user, clinic_id, *PURCHASE_WRITE, new_work=True)
+    await _doc_in_scope(user, scope, await rx_purchase.get_grn(scope, str(grn_id), rx.get_rx_settings(clinic)))
+    out = await rx_purchase.post_grn(scope, str(grn_id), _actor(user))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_grn_post", "rx_grn", str(grn_id),
+                     {"grn_number": out["grn_number"], "units": out["units"]})
+    return out
+
+
+@router.post("/grns/{grn_id}/void")
+async def void_grn(grn_id: uuid.UUID, body: ReasonIn, request: Request, clinic_id: str = "default",
+                   user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, "RX_ADMIN")
+    await _doc_in_scope(user, scope, await rx_purchase.get_grn(scope, str(grn_id), rx.get_rx_settings(clinic)))
+    out = await rx_purchase.void_grn(scope, str(grn_id), body.reason, _actor(user))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_grn_void", "rx_grn", str(grn_id), {"reason": body.reason})
+    return out
+
+
+@router.get("/supplier-returns")
+async def list_returns(status_: Optional[Literal["draft", "dispatched", "cancelled"]] = Query(None, alias="status"),
+                       store_id: Optional[uuid.UUID] = None, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    return {"returns": await rx_purchase.list_returns(scope, await _store_ids(user, scope, store_id), status_)}
+
+
+@router.post("/supplier-returns", status_code=status.HTTP_201_CREATED)
+async def create_return(body: ReturnIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE)      # clearing expired stock continues in wind-down
+    _store_for(user, await rx.get_store(scope, body.store_id))
+    r = await rx_purchase.create_return(scope, body, _actor(user))
+    await _audit(user, request, "rx_supplier_return_create", "rx_supplier_return", r["id"],
+                 {"reason": body.reason, "lines": len(body.lines)})
+    return r
+
+
+@router.get("/supplier-returns/{return_id}")
+async def get_return(return_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ)
+    return await _doc_in_scope(user, scope, await rx_purchase.get_return(scope, str(return_id)))
+
+
+@router.post("/supplier-returns/{return_id}/dispatch")
+async def dispatch_return(return_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE)
+    await _doc_in_scope(user, scope, await rx_purchase.get_return(scope, str(return_id)))
+    out = await rx_purchase.dispatch_return(scope, str(return_id), _actor(user))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_supplier_return_dispatch", "rx_supplier_return", str(return_id),
+                     {"srn_number": out["srn_number"], "units": out["units"]})
+    return out
+
+
+@router.patch("/supplier-returns/{return_id}/credit")
+async def record_credit(return_id: uuid.UUID, body: CreditIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_WRITE)
+    await _doc_in_scope(user, scope, await rx_purchase.get_return(scope, str(return_id)))
+    r = await rx_purchase.record_credit(scope, str(return_id), body)
+    await _audit(user, request, "rx_supplier_credit", "rx_supplier_return", str(return_id),
+                 {"credit_received_paise": body.credit_received_paise})
+    return r
+
+
+@router.get("/gs1")
+async def parse_gs1(code: str = Query(..., min_length=4, max_length=200), clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    """A3: one scan of a GS1 DataMatrix / pharma QR → GTIN, batch, expiry, serial and the matching item."""
+    scope, _ = await _rx_scope(user, clinic_id, *PURCHASE_READ, "RX_DISPENSE")
+    try:
+        parsed = rx_gs1.parse(code)
+    except rx_gs1.GS1Error as e:
+        raise HTTPException(status_code=422, detail={"code": "rx_gs1_invalid", "message": str(e)})
+    rows = (await sb(scoped_query("rx_item_barcodes", scope, "item_id, barcode")
+                     .in_("barcode", rx_gs1.barcode_candidates(parsed["gtin"])).limit(1))).data or []
+    item = await rx_catalogue.get_item(scope, rows[0]["item_id"]) if rows else None
+    return {**parsed, "expiry_date": str(parsed["expiry_date"]) if parsed["expiry_date"] else None,
+            "mfg_date": str(parsed["mfg_date"]) if parsed["mfg_date"] else None, "item": item}

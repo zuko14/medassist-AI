@@ -30,6 +30,18 @@ RX_ROUTES = {
     ("GET", "/admin/rx/stock"), ("GET", "/admin/rx/batches"), ("GET", "/admin/rx/expiry"), ("GET", "/admin/rx/reorder"),
     ("POST", "/admin/rx/batches/{batch_id}/block"), ("POST", "/admin/rx/batches/{batch_id}/unblock"),
     ("POST", "/admin/rx/write-offs"), ("POST", "/admin/rx/stock/opening-import"),
+    # P3 purchase (137)
+    ("GET", "/admin/rx/suppliers"), ("POST", "/admin/rx/suppliers"), ("PATCH", "/admin/rx/suppliers/{supplier_id}"),
+    ("GET", "/admin/rx/purchase-orders"), ("POST", "/admin/rx/purchase-orders"),
+    ("GET", "/admin/rx/purchase-orders/{po_id}"), ("PATCH", "/admin/rx/purchase-orders/{po_id}"),
+    ("GET", "/admin/rx/purchase-orders/{po_id}.pdf"), ("POST", "/admin/rx/purchase-orders/{po_id}/send"),
+    ("POST", "/admin/rx/purchase-orders/{po_id}/cancel"),
+    ("GET", "/admin/rx/grns"), ("POST", "/admin/rx/grns"), ("GET", "/admin/rx/grns/{grn_id}"),
+    ("PATCH", "/admin/rx/grns/{grn_id}"), ("POST", "/admin/rx/grns/{grn_id}/post"),
+    ("POST", "/admin/rx/grns/{grn_id}/void"), ("GET", "/admin/rx/grns/{grn_id}/labels.pdf"),
+    ("GET", "/admin/rx/supplier-returns"), ("POST", "/admin/rx/supplier-returns"),
+    ("GET", "/admin/rx/supplier-returns/{return_id}"), ("POST", "/admin/rx/supplier-returns/{return_id}/dispatch"),
+    ("PATCH", "/admin/rx/supplier-returns/{return_id}/credit"), ("GET", "/admin/rx/gs1"),
 }
 
 
@@ -103,3 +115,37 @@ def test_p2_role_matrix(api, role, grants):  # noqa: F811
     writeoff = api.call("POST", "/admin/rx/write-offs", clinic, {"store_id": str(store), "lines": [
         {"batch_id": str(uuid.uuid4()), "qty_units": 1, "kind": "damage", "reason": "Broken"}]}).status_code
     assert (items, generic, writeoff) == P2_MATRIX[(role, grants)]
+
+
+# P3: (role, stored grants) -> expected status for: list suppliers, add a supplier, send a draft PO
+P3_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (200, 201, 200),
+    ("STORE_KEEPER", ()): (200, 201, 403),                    # drafts and receives, never approves
+    ("PHARMACIST", ()): (200, 403, 403),                      # reads purchase documents (RX_READ)
+    ("FRONT_DESK", ("RX_PURCHASE",)): (200, 201, 403),
+    ("FRONT_DESK", ("RX_PURCHASE", "RX_ADMIN")): (200, 201, 200),
+    ("NURSE", ("IPD_NURSING",)): (403, 403, 403),
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P3_MATRIX))
+def test_p3_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    store = str(_q(api.conn, "SELECT id FROM rx_stores WHERE clinic_id = %s", clinic))
+    gen = str(_q(api.conn, "INSERT INTO rx_generics (clinic_id, name, strength, dosage_form) VALUES (%s, 'Cetirizine', "
+                           "'10 mg', 'tablet') RETURNING id", clinic))
+    item = str(_q(api.conn, "INSERT INTO rx_items (clinic_id, item_code, brand_name, generic_id, base_unit, pack_size, "
+                            "hsn_code, tax_rate_bps) VALUES (%s, 'CTZ', 'Okacet', %s, 'tablet', 10, '3004', 1200) "
+                            "RETURNING id", clinic, gen))
+    sup = str(_q(api.conn, "INSERT INTO rx_suppliers (clinic_id, name) VALUES (%s, 'Seed Supplier') RETURNING id", clinic))
+    po = str(_q(api.conn, "INSERT INTO rx_purchase_orders (clinic_id, store_id, supplier_id) VALUES (%s, %s, %s) "
+                          "RETURNING id", clinic, store, sup))
+    _q(api.conn, "INSERT INTO rx_po_lines (clinic_id, po_id, line_no, item_id, ordered_packs) VALUES (%s, %s, 1, %s, 5)",
+       clinic, po, item)
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    listed = api.call("GET", "/admin/rx/suppliers", clinic).status_code
+    added = api.call("POST", "/admin/rx/suppliers", clinic, {"name": "New " + uuid.uuid4().hex[:6]}).status_code
+    sent = api.call("POST", f"/admin/rx/purchase-orders/{po}/send", clinic).status_code
+    assert (listed, added, sent) == P3_MATRIX[(role, grants)]
