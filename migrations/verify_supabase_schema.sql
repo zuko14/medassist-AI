@@ -1167,6 +1167,50 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 34. MIGRATION 140 — Pharmacy OS transfers, stock audits, par levels (RX-M7)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname IN ('rx_transfers', 'rx_transfer_lines', 'rx_stock_audits', 'rx_stock_audit_lines', 'rx_par_levels')
+       AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M140', 'Tables: transfers, transfer lines, stock audits, audit lines, par levels (RLS forced)',
+            CASE WHEN v_tbl = 5 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 5 present');
+
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_transfers_distinct_stores', 'rx_transfers_controlled_two_person', 'rx_transfers_number_key',
+                       'rx_transfer_lines_received_range', 'rx_transfer_lines_short_reason', 'rx_stock_audits_number_key',
+                       'rx_stock_audits_second_person', 'rx_stock_audit_lines_batch_key', 'rx_par_levels_pkey')
+       AND convalidated;
+    SELECT v_con + count(*) INTO v_con FROM pg_indexes WHERE indexname = 'uq_rx_stock_audits_open';
+    SELECT v_con + count(*) INTO v_con FROM information_schema.columns
+     WHERE table_name = 'rx_stock_audit_lines' AND column_name = 'variance_units' AND is_generated = 'ALWAYS';
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M140', 'Constraints: distinct stores, two-person controlled receipt, short needs reason, one open audit per store, generated variance',
+            CASE WHEN v_con = 11 THEN 'PASS' ELSE 'FAIL' END, v_con || ' of 11 present');
+
+    SELECT (to_regprocedure('rx_save_transfer(uuid,uuid,uuid,uuid,jsonb,text,text,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_dispatch_transfer(uuid,uuid,uuid,text,boolean)') IS NOT NULL)::int
+         + (to_regprocedure('rx_receive_transfer(uuid,uuid,jsonb,uuid,text,boolean)') IS NOT NULL)::int
+         + (to_regprocedure('rx_start_audit(uuid,uuid,text,text,uuid[],boolean,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_record_counts(uuid,uuid,jsonb)') IS NOT NULL)::int
+         + (to_regprocedure('rx_post_audit(uuid,uuid,jsonb,uuid,text,uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_set_par_levels(uuid,uuid,jsonb,uuid)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'rx_stock_movements'::regclass
+              AND tgname IN ('trg_rx_sm_audit_freeze', 'trg_rx_sm_audit_delta'))::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_purge_clinic' AND prosrc LIKE '%rx_par_levels%')::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M140', 'Functions: transfer save / dispatch / receive, audit start / counts / post, par levels, ledger audit triggers, purge v7',
+            CASE WHEN v_fn = 10 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 10 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

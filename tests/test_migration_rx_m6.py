@@ -30,6 +30,8 @@ def unwind_139(cur) -> None:
     """Inside an open transaction: purge every clinic with indents and run the 139 rollback. Pharmacy charges
     belong to patient bills and outlive the RX purge; the owner's IPD purge (run after the RX purge, as the
     platform does) removes them so older rollbacks (116_down) can narrow ipd_charges.source again."""
+    from tests.test_migration_rx_m7 import unwind_140
+    unwind_140(cur)  # newest first: 140's purge v7 names 139 tables and its lines point at batches / stores
     cur.execute("SELECT to_regclass('public.rx_ipd_indents') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

@@ -3726,6 +3726,27 @@
             .rxi-line { grid-template-columns: minmax(0, 1fr); }
         }
         /* RX:ipd:END */
+        /* RX:transfers:START — Transfers & par levels (migration 140) */
+        .rxi-orders input[type="number"]:not(.rxt-big) { width: 84px; padding: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+        .rxt-big { width: 96px; font-size: 1.1rem; padding: 8px; text-align: center; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+        .rxt-why { width: 100%; margin-top: 6px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--amber); background: var(--amber-bg); color: var(--text); font: inherit; }
+        /* RX:transfers:END */
+        /* RX:audit:START — Stock Audit (migration 140; docs/pharmacy-os/UI.md §6) */
+        .rxa-card { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface2); }
+        .rxa-card b { font-size: 1.1rem; }
+        .rxa-val { display: block; min-height: 54px; font-size: 2.2rem; font-weight: 800; text-align: center; border-radius: 12px; border: 1px solid var(--border2); background: var(--bg); font-variant-numeric: tabular-nums; }
+        .rxa-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .rxa-pad button { min-height: 56px; font-size: 1.3rem; }
+        .rxa-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .rxa-nav button { min-height: 48px; }
+        .rxa-sum { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 10px; font-size: 0.9rem; }
+        .rxa-neg, .rxi-orders tr.rxa-deficit td b { color: var(--red); }
+        .rxa-pos, .rxi-orders tr.rxa-surplus td b { color: var(--green); }
+        .rxi-orders tr.rxa-deficit td { background: var(--red-bg); }
+        .rxi-orders tr.rxa-surplus td { background: var(--green-bg); }
+        .rxa-approver { display: grid; gap: 6px; width: 100%; margin-bottom: 8px; }
+        .rxa-approver input { padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+        /* RX:audit:END */
     </style>
 </head>
 <body>
@@ -4077,6 +4098,16 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V9l9-6 9 6v12"></path><path d="M9 21v-6h6v6"></path><path d="M12 7v4M10 9h4"></path></svg></span><span>Ward Indents</span>
             </div>
             <!-- RX:ipd:END -->
+            <!-- RX:transfers:START -->
+            <div class="nav-link" tabindex="0" data-page="rxtransfers" data-rx="nav RX_READ RX_TRANSFER IPD_NURSING RX_ADMIN" style="display:none" onclick="go('rxtransfers',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h13l-3-3M20 17H7l3 3"></path></svg></span><span>Transfers</span>
+            </div>
+            <!-- RX:transfers:END -->
+            <!-- RX:audit:START -->
+            <div class="nav-link" tabindex="0" data-page="rxaudit" data-rx="nav RX_READ RX_AUDIT RX_ADMIN" style="display:none" onclick="go('rxaudit',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M9 3v3h6V3M9 12l2 2 4-4"></path></svg></span><span>Stock Audit</span>
+            </div>
+            <!-- RX:audit:END -->
             <!-- RX:stock:START -->
             <div class="nav-link" tabindex="0" data-page="rxstock" data-rx="nav RX_READ" style="display:none" onclick="go('rxstock',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"></path><path d="m3 8 9 5 9-5"></path><path d="M12 13v8"></path></svg></span><span>Stock &amp; Expiry</span>
@@ -8075,6 +8106,35 @@
             </aside>
         </div>
         <!-- RX:ipd:END -->
+        <!-- RX:transfers:START — Transfers page (docs/pharmacy-os/WORKFLOWS.md W7, page rxtransfers) -->
+        <div id="pg-rxtransfers" class="sec">
+            <div class="page-head"><div><h2>Transfers</h2><p>Move stock between stores. It leaves the source when dispatched and enters the target when received; anything short on arrival is written off at the source with the reason.</p></div></div>
+            <div class="ipd-winddown" data-rx-winddown hidden>Pharmacy OS is being switched off for this clinic: new transfers are closed. Transfers in transit can still be received.</div>
+            <div class="rx-tabs" role="tablist" aria-label="Transfer views">
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="incoming" aria-selected="false" onclick="rxtr.tab('incoming')">Incoming</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="all" aria-selected="false" onclick="rxtr.tab('all')">All transfers</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="new" aria-selected="false" onclick="rxtr.tab('new')">New transfer</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="par" aria-selected="false" onclick="rxtr.tab('par')">Par levels</button>
+            </div>
+            <div class="card"><div id="rxtBody" aria-live="polite"></div></div>
+            <aside class="rx-drawer wide" id="rxtDrawer" role="dialog" aria-modal="true" aria-labelledby="rxtDrawerTitle">
+                <header><h3 id="rxtDrawerTitle"></h3><button type="button" class="btn btn-ghost btn-sm" onclick="rxtr.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body" id="rxtDrawerBody"></div>
+                <footer id="rxtDrawerFoot"></footer>
+            </aside>
+        </div>
+        <!-- RX:transfers:END -->
+        <!-- RX:audit:START — Stock Audit page (docs/pharmacy-os/UI.md §6, page rxaudit) -->
+        <div id="pg-rxaudit" class="sec">
+            <div class="page-head"><div><h2>Stock Audit</h2><p>Count what is on the shelf, review the difference by value, and post it as adjustments. Counters do not see the system quantity.</p></div></div>
+            <div class="card"><div id="rxaBody" aria-live="polite"></div></div>
+            <aside class="rx-drawer wide" id="rxaDrawer" role="dialog" aria-modal="true" aria-labelledby="rxaDrawerTitle">
+                <header><h3 id="rxaDrawerTitle"></h3><button type="button" class="btn btn-ghost btn-sm" onclick="rxaud.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body" id="rxaDrawerBody"></div>
+                <footer id="rxaDrawerFoot"></footer>
+            </aside>
+        </div>
+        <!-- RX:audit:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -10350,7 +10410,7 @@ const OPD_ROLE_PAGE_PERMS = {
     treatments: ['TREATMENTS_MANAGE'],
 };
 // Already gated by permission elsewhere in applyFeatureVisibility; left as set.
-const OPD_ROLE_SELF_GATED = new Set(['ot', 'radiology', 'insurance', 'leaves', 'holidays', 'branches', 'leads', 'staff', 'voice', 'dentalplans', 'corporate', 'homecollect', 'rxindents']);
+const OPD_ROLE_SELF_GATED = new Set(['ot', 'radiology', 'insurance', 'leaves', 'holidays', 'branches', 'leads', 'staff', 'voice', 'dentalplans', 'corporate', 'homecollect', 'rxindents', 'rxtransfers']);
 function applyOpdRoleNav() {
     const bell = document.getElementById('notifBellBtn');
     if (bell) bell.style.display = isOpdRole() ? 'none' : '';
@@ -12224,6 +12284,374 @@ const rxind = {
     close() { document.getElementById('rxiDrawer').classList.remove('open'); if (rxind.lastFocus && rxind.lastFocus.focus) rxind.lastFocus.focus(); },
 };
 /* RX:ipd:END */
+
+/* RX:transfers:START — Transfers & par levels (migration 140; docs/pharmacy-os/UI.md, WORKFLOWS W7, A10). Stock
+   moves only in SQL: dispatch takes it out of the source, receipt puts it into the target and writes any short
+   units off against the source. Pick lists are rack-sorted. A nurse sees only transfers into her ward stores. */
+const RXT_STATUS = { draft: 'Draft', dispatched: 'In transit', received: 'Received', partially_received: 'Received short', cancelled: 'Cancelled' };
+const rxtr = {
+    view: null, stores: [], doc: null, newLines: [], lastFocus: null,
+    canWork() { return rxCan('RX_TRANSFER') || rxCan('RX_ADMIN'); },
+    wardTypes: ['ward_substore', 'ot_tray', 'emergency_tray'],
+    async load() {
+        document.querySelectorAll('#pg-rxtransfers [data-tab="new"], #pg-rxtransfers [data-tab="all"]').forEach(b => { b.hidden = !rxtr.canWork() && !rxCan('RX_READ'); });
+        document.querySelector('#pg-rxtransfers [data-tab="new"]').hidden = !rxtr.canWork() || myRx !== 'ACTIVE';
+        applyRxGates();
+        return rxtr.tab(rxtr.view || (rxtr.canWork() ? 'all' : 'incoming'));
+    },
+    tab(t) {
+        rxtr.view = t;
+        document.querySelectorAll('#pg-rxtransfers [role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+        return ({ incoming: rxtr.loadList, all: rxtr.loadList, new: rxtr.loadNew, par: rxtr.loadPar })[t]();
+    },
+    body(html) { document.getElementById('rxtBody').innerHTML = html; },
+    run: (btn, fn, ok) => rxind.run(btn, fn, ok),
+    storeLabel(s) { return s ? `${esc(s.code)} · ${esc(s.name)}` : '—'; },
+    async loadList() {
+        rxtr.body(loading());
+        let r;
+        try { r = await api('/admin/rx/transfers' + (rxtr.view === 'incoming' ? '?status=dispatched' : '')); }
+        catch (e) { rxtr.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        rxtr.stores = r.stores;
+        const mine = new Set(r.stores.map(s => s.id));
+        const rows = rxtr.view === 'incoming' ? r.transfers.filter(t => mine.has(t.to_store_id)) : r.transfers;
+        rxtr.body(rows.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr><th>Transfer</th><th>From</th><th>To</th><th>Status</th><th>When</th><th></th></tr></thead><tbody>
+            ${rows.map(t => `<tr>
+                <td><b>${esc(t.transfer_number || 'Draft')}</b>${t.source === 'par' ? ' <span class="rx-sub">par</span>' : ''}</td>
+                <td>${rxtr.storeLabel(t.from_store)}</td><td>${rxtr.storeLabel(t.to_store)}</td>
+                <td><span class="rx-badge ${t.status === 'partially_received' ? 'e-near' : t.status === 'dispatched' ? 'e-short_shelf' : 'e-ok'}">${esc(RXT_STATUS[t.status] || t.status)}</span></td>
+                <td>${esc(rxind.when(t.dispatched_at || t.created_at))}</td>
+                <td><button type="button" class="btn btn-${t.status === 'dispatched' && mine.has(t.to_store_id) ? 'accent' : 'ghost'} btn-sm" onclick="rxtr.open('${esc(t.id)}')">${t.status === 'dispatched' && mine.has(t.to_store_id) ? 'Receive' : 'Open'}</button></td></tr>`).join('')}
+            </tbody></table></div>` : `<p class="muted">${rxtr.view === 'incoming' ? 'Nothing in transit to your stores.' : 'No transfers yet.'}</p>`);
+    },
+    async open(id) {
+        let d;
+        try { d = await api('/admin/rx/transfers/' + encodeURIComponent(id)); } catch (e) { toast(e.message, true); return; }
+        rxtr.doc = d;
+        const receiving = d.status === 'dispatched' && rxtr.stores.some(s => s.id === d.to_store_id);
+        const lines = d.lines.map((l, i) => `<div class="rxi-line"><div>
+                <span class="rx-sub">${esc((l.item || {}).rack_location || 'No rack')}</span>
+                <b>${esc((l.item || {}).brand_name || '')}</b> ${rxSchedBadge((l.item || {}).schedule)}
+                <div class="rx-sub">Batch ${esc((l.batch || {}).batch_no || '')} · Exp ${esc(String((l.batch || {}).expiry_date || '').slice(0, 7))} · sent ${l.sent_units}${l.received_units != null ? ` · received ${l.received_units}` : ''}${l.discrepancy_reason ? ` · ${esc(l.discrepancy_reason)}` : ''}</div></div>
+            <div>${receiving ? `<label class="sr-only" for="rxtGot${i}">Received units</label>
+                <input type="number" inputmode="numeric" class="rxt-big" id="rxtGot${i}" min="0" max="${l.sent_units}" value="${l.sent_units}" oninput="rxtr.shortToggle(${i})">
+                <input type="text" id="rxtWhy${i}" class="rxt-why" placeholder="Why short?" maxlength="300" hidden>` : ''}</div></div>`).join('');
+        const foot = (receiving ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxtr.receive(this)">Confirm receipt</button>` : '')
+            + (d.status === 'draft' && rxtr.canWork() ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxtr.dispatch(this)">Dispatch</button>
+               <button type="button" class="btn btn-ghost btn-sm" onclick="rxtr.cancel(this)">Cancel draft</button>` : '')
+            + `<button type="button" class="btn btn-ghost btn-sm" onclick="rxtr.challan('${esc(d.id)}')">${d.status === 'draft' ? 'Pick list' : 'Challan'}</button>`;
+        rxtr.drawer(`${d.transfer_number || 'Draft transfer'} · ${RXT_STATUS[d.status] || d.status}`,
+            `<p class="rx-sub">${rxtr.storeLabel(d.from_store)} → ${rxtr.storeLabel(d.to_store)}${d.controlled ? ' · <b>controlled: two-person rule</b>' : ''}</p>${lines}`, foot);
+    },
+    shortToggle(i) {
+        const l = rxtr.doc.lines[i], got = Number(document.getElementById('rxtGot' + i).value);
+        document.getElementById('rxtWhy' + i).hidden = !(got < l.sent_units);
+    },
+    async receive(btn) {
+        const lines = rxtr.doc.lines.map((l, i) => {
+            const got = Number(document.getElementById('rxtGot' + i).value), why = document.getElementById('rxtWhy' + i).value.trim();
+            return { line_id: l.id, received_units: got, ...(got < l.sent_units ? { discrepancy_reason: why } : {}) };
+        });
+        if (lines.some(l => !(l.received_units >= 0))) { toast('Enter a received quantity for every line.', true); return; }
+        if (lines.some(l => l.discrepancy_reason !== undefined && l.discrepancy_reason.length < 3)) { toast('Say why each short line is short.', true); return; }
+        const r = await rxtr.run(btn, () => apiPost(`/admin/rx/transfers/${encodeURIComponent(rxtr.doc.id)}/receive`, { lines }));
+        if (r) { toast(r.status === 'partially_received' ? 'Received short: the difference is written off at the source' : 'Received in full'); rxtr.close(); rxtr.loadList(); }
+    },
+    async dispatch(btn) {
+        const r = await rxtr.run(btn, () => apiPost(`/admin/rx/transfers/${encodeURIComponent(rxtr.doc.id)}/dispatch`, {}));
+        if (r) { toast(`Dispatched ${r.transfer_number}`); rxtr.close(); rxtr.loadList(); }
+    },
+    async cancel(btn) {
+        const reason = (prompt('Why cancel this draft? (3+ characters)') || '').trim();
+        if (reason.length < 3) return;
+        if (await rxtr.run(btn, () => apiPost(`/admin/rx/transfers/${encodeURIComponent(rxtr.doc.id)}/cancel`, { reason }), 'Draft cancelled')) { rxtr.close(); rxtr.loadList(); }
+    },
+    async challan(id) {           // window opened inside the click, filled when the PDF arrives (no pop-up block)
+        const win = window.open('about:blank', '_blank');
+        try {
+            const res = await apiRaw(`/admin/rx/transfers/${encodeURIComponent(id)}/challan.pdf`);
+            const url = URL.createObjectURL(await res.blob());
+            if (win) win.location.href = url; else toast('Allow pop-ups to print the challan.', true);
+        } catch (e) { if (win) win.close(); toast(e.message, true); }
+    },
+    // ── new draft: source, target, rack-sorted lines; batches FEFO on the server unless named ──
+    async loadNew() {
+        if (!rxtr.stores.length) { try { rxtr.stores = (await api('/admin/rx/transfers?limit=1')).stores; } catch (e) { rxtr.body(`<p class="muted">${esc(e.message)}</p>`); return; } }
+        const opts = sel => rxtr.stores.filter(s => s.is_active !== false).map(s => `<option value="${esc(s.id)}" ${s.id === sel ? 'selected' : ''}>${rxtr.storeLabel(s)}</option>`).join('');
+        const central = (rxtr.stores.find(s => s.store_type === 'central') || rxtr.stores[0] || {}).id;
+        const ward = (rxtr.stores.find(s => rxtr.wardTypes.includes(s.store_type)) || {}).id;
+        rxtr.newLines = [];
+        rxtr.body(`<div class="rxi-bar">
+            <div class="field"><label for="rxtFrom">From</label><select id="rxtFrom">${opts(central)}</select></div>
+            <div class="field"><label for="rxtTo">To</label><select id="rxtTo">${opts(ward)}</select></div>
+            <div class="field" style="flex:1; min-width:240px;"><label for="rxtQ">Add medicine</label>
+                <input id="rxtQ" list="rxtItemList" placeholder="Brand, generic or barcode" autocomplete="off" oninput="rxtr.suggest()" onchange="rxtr.addPicked()">
+                <datalist id="rxtItemList"></datalist></div></div>
+            <div id="rxtNewLines"></div>
+            <div class="field"><label for="rxtNotes">Notes</label><input id="rxtNotes" maxlength="300"></div>
+            <div class="rxp-foot"><button type="button" class="btn btn-accent" onclick="rxtr.saveDraft(this)">Save draft</button></div>`);
+        rxtr.renderNew();
+    },
+    suggestions: [],
+    async suggest() {
+        const q = document.getElementById('rxtQ').value.trim();
+        if (q.length < 2) return;
+        try {
+            const r = await api(`/admin/rx/items/resolve?limit=8&q=${encodeURIComponent(q)}&store_id=${encodeURIComponent(document.getElementById('rxtFrom').value)}`);
+            rxtr.suggestions = r.candidates;
+            document.getElementById('rxtItemList').innerHTML = r.candidates.map(c => `<option value="${esc(c.brand_name)}">${esc(c.item_code)}</option>`).join('');
+        } catch (e) { /* typing continues */ }
+    },
+    addPicked() {
+        const el = document.getElementById('rxtQ'), c = rxtr.suggestions.find(x => x.brand_name === el.value);
+        if (!c || rxtr.newLines.some(l => l.item_id === c.item_id)) return;
+        rxtr.newLines.push({ item_id: c.item_id, brand_name: c.brand_name, rack: c.rack_location || '', units: c.pack_size || 1 });
+        rxtr.newLines.sort((a, b) => (a.rack || '~').localeCompare(b.rack || '~') || a.brand_name.localeCompare(b.brand_name));
+        el.value = ''; rxtr.renderNew();
+    },
+    renderNew() {
+        document.getElementById('rxtNewLines').innerHTML = rxtr.newLines.length ? `<table class="rxi-orders"><thead><tr><th>Rack</th><th>Medicine</th><th>Units</th><th></th></tr></thead><tbody>
+            ${rxtr.newLines.map((l, i) => `<tr><td>${esc(l.rack || '—')}</td><td>${esc(l.brand_name)}</td>
+                <td><input type="number" min="1" max="100000" value="${l.units}" aria-label="Units of ${esc(l.brand_name)}" onchange="rxtr.newLines[${i}].units = Number(this.value)"></td>
+                <td><button type="button" class="btn btn-ghost btn-sm" aria-label="Remove ${esc(l.brand_name)}" onclick="rxtr.newLines.splice(${i}, 1); rxtr.renderNew()">✕</button></td></tr>`).join('')}</tbody></table>`
+            : '<p class="muted">Add medicines above. Batches are picked first-expiry-first at the source.</p>';
+    },
+    async saveDraft(btn) {
+        if (!rxtr.newLines.length) { toast('Add at least one medicine.', true); return; }
+        const body = { from_store_id: document.getElementById('rxtFrom').value, to_store_id: document.getElementById('rxtTo').value,
+                       lines: rxtr.newLines.map(l => ({ item_id: l.item_id, units: l.units })), notes: document.getElementById('rxtNotes').value.trim() || null };
+        const r = await rxtr.run(btn, () => apiPost('/admin/rx/transfers', body), 'Draft saved');
+        if (r) { rxtr.view = 'all'; await rxtr.tab('all'); rxtr.open(r.id); }
+    },
+    // ── par levels (A10): ward store, par / on hand / deficit, replenish as a draft from the parent ──
+    async loadPar() {
+        if (!rxtr.stores.length) { try { rxtr.stores = (await api('/admin/rx/transfers?limit=1')).stores; } catch (e) { rxtr.body(`<p class="muted">${esc(e.message)}</p>`); return; } }
+        const wards = rxtr.stores.filter(s => rxtr.wardTypes.includes(s.store_type));
+        if (!wards.length) { rxtr.body('<p class="muted">No ward sub-store, OT tray or emergency tray in your scope. Add one in Pharmacy Setup.</p>'); return; }
+        rxtr.parStore = rxtr.parStore && wards.some(w => w.id === rxtr.parStore) ? rxtr.parStore : wards[0].id;
+        let r;
+        try { r = await api('/admin/rx/par-levels?store_id=' + encodeURIComponent(rxtr.parStore)); } catch (e) { rxtr.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        rxtr.par = r.par_levels;
+        rxtr.body(`<div class="rxi-bar"><div class="field"><label for="rxtParStore">Store</label>
+                <select id="rxtParStore" onchange="rxtr.parStore = this.value; rxtr.loadPar()">${wards.map(w => `<option value="${esc(w.id)}" ${w.id === rxtr.parStore ? 'selected' : ''}>${rxtr.storeLabel(w)}</option>`).join('')}</select></div>
+            ${rxtr.canWork() ? '<button type="button" class="btn btn-accent btn-sm" onclick="rxtr.replenish(this)">Draft replenishment</button>' : ''}</div>
+            ${r.par_levels.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr><th>Rack</th><th>Medicine</th><th>Par</th><th>On hand</th><th>To send</th></tr></thead><tbody>
+            ${r.par_levels.map((p, i) => `<tr><td>${esc((p.item || {}).rack_location || '—')}</td><td>${esc((p.item || {}).brand_name || '')}</td>
+                <td><input type="number" min="0" max="100000" id="rxtPar${i}" value="${p.par_units}" aria-label="Par for ${esc((p.item || {}).brand_name || '')}"></td>
+                <td class="rx-num">${p.on_hand_units}</td><td class="rx-num">${p.deficit_units ? `<b>${p.deficit_units}</b>` : '0'}</td></tr>`).join('')}</tbody></table></div>
+            <div class="rxp-foot"><span class="rx-sub">Set 0 to remove an item's par.</span><button type="button" class="btn btn-ghost btn-sm" onclick="rxtr.savePar(this)">Save par levels</button></div>`
+            : '<p class="muted">No par levels for this store yet.</p>'}
+            <div class="rxi-bar"><div class="field" style="flex:1; min-width:240px;"><label for="rxtParQ">Add a par for</label>
+                <input id="rxtParQ" list="rxtParList" autocomplete="off" placeholder="Brand or generic" oninput="rxtr.parSuggest()"><datalist id="rxtParList"></datalist></div>
+                <div class="field" style="min-width:110px;"><label for="rxtParUnits">Par units</label><input id="rxtParUnits" type="number" min="1" value="10"></div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rxtr.addPar(this)">Add</button></div>`);
+    },
+    async parSuggest() {
+        const q = document.getElementById('rxtParQ').value.trim();
+        if (q.length < 2) return;
+        try {
+            rxtr.parCands = (await api(`/admin/rx/items/resolve?limit=8&q=${encodeURIComponent(q)}`)).candidates;
+            document.getElementById('rxtParList').innerHTML = rxtr.parCands.map(c => `<option value="${esc(c.brand_name)}"></option>`).join('');
+        } catch (e) { rxtr.parCands = []; }
+    },
+    async addPar(btn) {
+        const c = (rxtr.parCands || []).find(x => x.brand_name === document.getElementById('rxtParQ').value);
+        if (!c) { toast('Pick a medicine from the list.', true); return; }
+        const r = await rxtr.run(btn, () => apiPost('/admin/rx/par-levels', { store_id: rxtr.parStore,
+            rows: [{ item_id: c.item_id, par_units: Number(document.getElementById('rxtParUnits').value) || 1 }] }), 'Par level saved');
+        if (r) rxtr.loadPar();
+    },
+    async savePar(btn) {
+        const rows = rxtr.par.map((p, i) => ({ item_id: p.item_id, par_units: Number(document.getElementById('rxtPar' + i).value) || 0 }));
+        if (await rxtr.run(btn, () => apiPost('/admin/rx/par-levels', { store_id: rxtr.parStore, rows }), 'Par levels saved')) rxtr.loadPar();
+    },
+    async replenish(btn) {
+        const r = await rxtr.run(btn, () => apiPost('/admin/rx/par-levels/replenish', { store_id: rxtr.parStore }));
+        if (!r) return;
+        if (r.short.length) toast(`Not enough at the parent store for: ${r.short.map(s => s.brand_name).join(', ')}`, true);
+        if (r.transfer) { toast('Replenishment drafted: review and dispatch it'); rxtr.view = 'all'; await rxtr.tab('all'); rxtr.open(r.transfer.id); }
+        else if (!r.short.length) toast('Everything is at par: nothing to send.');
+    },
+    drawer(title, html, foot) {
+        const el = document.getElementById('rxtDrawer');
+        document.getElementById('rxtDrawerTitle').textContent = title;
+        document.getElementById('rxtDrawerBody').innerHTML = html;
+        document.getElementById('rxtDrawerFoot').innerHTML = (foot || '') + '<button type="button" class="btn btn-ghost btn-sm" onclick="rxtr.close()">Close</button>';
+        if (!el.classList.contains('open')) rxtr.lastFocus = document.activeElement;
+        el.classList.add('open');
+        setTimeout(() => (el.querySelector('input, button') || el).focus(), 50);
+    },
+    close() { document.getElementById('rxtDrawer').classList.remove('open'); if (rxtr.lastFocus && rxtr.lastFocus.focus) rxtr.lastFocus.focus(); },
+};
+/* RX:transfers:END */
+
+/* RX:audit:START — Stock Audit (migration 140; docs/pharmacy-os/UI.md §6, WORKFLOWS W8). Blind by default: a counter
+   never sees the system quantity while counting (only a manager may toggle it). Counts are saved per batch and may
+   be re-sent; posting writes adjust movements in SQL and asks for a second manager above the value limit. */
+const RXA_STATUS = { counting: 'Counting', review: 'Review', posted: 'Posted', cancelled: 'Cancelled' };
+const RXA_REASONS = { breakage: 'Breakage', theft_suspected: 'Theft suspected', billing_error: 'Billing error', found: 'Found', expiry_missed: 'Expiry missed', other: 'Other' };
+const rxaud = {
+    doc: null, showSystem: false, mobileIdx: 0, pending: {}, stores: [], lastFocus: null,
+    canWork() { return rxCan('RX_AUDIT') || rxCan('RX_ADMIN'); },
+    body(html) { document.getElementById('rxaBody').innerHTML = html; },
+    run: (btn, fn, ok) => rxind.run(btn, fn, ok),
+    async load() {
+        applyRxGates();
+        rxaud.body(loading());
+        let r;
+        try {
+            [r, rxaud.stores] = await Promise.all([api('/admin/rx/audits'), rxaud.stores.length ? rxaud.stores : api('/admin/rx/stores').then(x => x.stores.filter(s => s.is_active))]);
+        } catch (e) { rxaud.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        const name = id => { const s = rxaud.stores.find(x => x.id === id); return s ? `${esc(s.code)} · ${esc(s.name)}` : '—'; };
+        rxaud.body(`<div class="rxp-foot" style="justify-content:space-between;"><span class="rx-sub">One open audit per store. A frozen store sells and dispenses nothing until the audit is posted or cancelled.</span>
+            ${rxaud.canWork() ? '<button type="button" class="btn btn-accent btn-sm" onclick="rxaud.startForm()">Start audit</button>' : ''}</div>
+            ${r.audits.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr><th>Audit</th><th>Store</th><th>Scope</th><th>Status</th><th>Started</th><th></th></tr></thead><tbody>
+            ${r.audits.map(a => `<tr><td><b>${esc(a.audit_number || '')}</b>${a.freeze_sales && ['counting', 'review'].includes(a.status) ? ' <span class="rx-badge e-expired">Frozen</span>' : ''}</td>
+                <td>${name(a.store_id)}</td><td>${esc(a.scope)}${a.rack ? ' · ' + esc(a.rack) : ''}</td><td>${esc(RXA_STATUS[a.status])}</td>
+                <td>${esc(rxind.when(a.started_at))} · ${esc(a.started_by_name)}</td>
+                <td><button type="button" class="btn btn-ghost btn-sm" onclick="rxaud.open('${esc(a.id)}')">Open</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No audits yet.</p>'}`);
+    },
+    startForm() {
+        rxaud.drawer('Start stock audit', `
+            <div class="field"><label for="rxaStore">Store</label><select id="rxaStore">${rxaud.stores.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="rxaScope">Scope</label><select id="rxaScope" onchange="document.getElementById('rxaRackWrap').hidden = this.value !== 'rack'">
+                <option value="full">Full store</option><option value="rack">One rack</option><option value="controlled">Controlled + H1 only</option></select></div>
+            <div class="field" id="rxaRackWrap" hidden><label for="rxaRack">Rack</label><input id="rxaRack" maxlength="40" placeholder="e.g. A-1"></div>
+            <label class="check"><input type="checkbox" id="rxaFreeze"> Freeze sales and dispensing from this store while counting</label>`,
+            '<button type="button" class="btn btn-accent btn-sm" onclick="rxaud.start(this)">Start</button>');
+    },
+    async start(btn) {
+        const scope = document.getElementById('rxaScope').value;
+        const body = { store_id: document.getElementById('rxaStore').value, scope, freeze_sales: document.getElementById('rxaFreeze').checked,
+                       ...(scope === 'rack' ? { rack: document.getElementById('rxaRack').value.trim() } : {}) };
+        const r = await rxaud.run(btn, () => apiPost('/admin/rx/audits', body));
+        if (r) { toast(`${r.audit_number} started: ${r.summary.lines} batches to count`); rxaud.close(); rxaud.load(); rxaud.open(r.id); }
+    },
+    async open(id) {
+        let d;
+        try { d = await api(`/admin/rx/audits/${encodeURIComponent(id)}${rxaud.showSystem ? '?show_system=true' : ''}`); } catch (e) { toast(e.message, true); return; }
+        rxaud.doc = d; rxaud.pending = {};
+        if (d.status === 'counting') return rxaud.renderCount();
+        return rxaud.renderReview();
+    },
+    // ── counting: grid on desktop, one big card + keypad on a phone ──
+    mobile() { return window.matchMedia('(max-width: 760px)').matches; },
+    renderCount() {
+        const d = rxaud.doc, s = d.summary;
+        const head = `<p class="rx-sub">${esc(d.audit_number)} · ${s.counted}/${s.lines} counted${d.freeze_sales ? ' · <b>store frozen</b>' : ''}${s.blind ? ' · blind count' : ''}</p>
+            ${rxCan('RX_ADMIN') ? `<label class="check"><input type="checkbox" ${rxaud.showSystem ? 'checked' : ''} onchange="rxaud.showSystem = this.checked; rxaud.open(rxaud.doc.id)"> Show system quantity (manager)</label>` : ''}
+            <div class="field"><label for="rxaFind">Find batch or medicine</label><input id="rxaFind" autocomplete="off" placeholder="Batch no., brand or rack" oninput="rxaud.find(this.value)"></div>`;
+        const foot = `<button type="button" class="btn btn-ghost btn-sm" onclick="rxaud.saveCounts(this)">Save counts</button>
+            <button type="button" class="btn btn-accent btn-sm" onclick="rxaud.review(this)">Finish counting</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="rxaud.cancel(this)">Cancel audit</button>`;
+        if (rxaud.mobile()) {
+            rxaud.mobileIdx = Math.min(rxaud.mobileIdx, Math.max(d.lines.length - 1, 0));
+            const l = d.lines[rxaud.mobileIdx];
+            rxaud.drawer(`${d.audit_number} · count`, head + (l ? `<div class="rxa-card">
+                <span class="rx-sub">${esc((l.item || {}).rack_location || 'No rack')} · ${rxaud.mobileIdx + 1} of ${d.lines.length}</span>
+                <b>${esc((l.item || {}).brand_name || '')}</b><span class="rx-sub">Batch ${esc(l.batch.batch_no)} · Exp ${esc(String(l.batch.expiry_date).slice(0, 7))}</span>
+                ${l.system_units_at_start != null ? `<span class="rx-sub">System ${l.system_units_at_start + l.movement_delta_since_start}</span>` : ''}
+                <output id="rxaPadVal" class="rxa-val" aria-live="polite">${rxaud.pending[l.batch_id] ?? l.counted_units ?? ''}</output>
+                <div class="rxa-pad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(k => `<button type="button" class="btn btn-ghost" onclick="rxaud.key('${k}')">${k}</button>`).join('')}</div>
+                <div class="rxa-nav"><button type="button" class="btn btn-ghost" onclick="rxaud.step(-1)" ${rxaud.mobileIdx ? '' : 'disabled'}>Prev</button>
+                    <button type="button" class="btn btn-accent" onclick="rxaud.step(1)">Next</button></div></div>` : '<p class="muted">Nothing in scope.</p>'), foot);
+            return;
+        }
+        rxaud.drawer(`${d.audit_number} · counting`, head + `<table class="rxi-orders"><thead><tr><th>Rack</th><th>Medicine</th><th>Batch</th>${s.blind ? '' : '<th>System</th>'}<th>Counted</th></tr></thead><tbody>
+            ${d.lines.map(l => `<tr data-rxa="${esc(l.batch.batch_no)} ${esc(((l.item || {}).brand_name || '').toLowerCase())} ${esc((l.item || {}).rack_location || '')}">
+                <td>${esc((l.item || {}).rack_location || '—')}</td><td>${esc((l.item || {}).brand_name || '')}</td>
+                <td>${esc(l.batch.batch_no)} <span class="rx-sub">${esc(String(l.batch.expiry_date).slice(0, 7))}</span></td>
+                ${s.blind ? '' : `<td class="rx-num">${l.system_units_at_start + l.movement_delta_since_start}</td>`}
+                <td><input type="number" inputmode="numeric" min="0" value="${l.counted_units ?? ''}" aria-label="Counted ${esc((l.item || {}).brand_name || '')} ${esc(l.batch.batch_no)}"
+                    onchange="rxaud.pending['${esc(l.batch_id)}'] = this.value === '' ? undefined : Number(this.value)"></td></tr>`).join('')}</tbody></table>`, foot);
+    },
+    find(q) {
+        q = q.trim().toLowerCase();
+        if (rxaud.mobile()) {
+            const i = rxaud.doc.lines.findIndex(l => `${l.batch.batch_no} ${(l.item || {}).brand_name} ${(l.item || {}).rack_location || ''}`.toLowerCase().includes(q));
+            if (q && i >= 0) { rxaud.mobileIdx = i; rxaud.renderCount(); setTimeout(() => { const f = document.getElementById('rxaFind'); f.value = q; }, 60); }
+            return;
+        }
+        document.querySelectorAll('#rxaDrawerBody tr[data-rxa]').forEach(tr => { tr.hidden = !!q && !tr.dataset.rxa.toLowerCase().includes(q); });
+    },
+    key(k) {
+        const l = rxaud.doc.lines[rxaud.mobileIdx], cur = String(rxaud.pending[l.batch_id] ?? l.counted_units ?? '');
+        const next = k === 'C' ? '' : k === '⌫' ? cur.slice(0, -1) : (cur === '0' ? '' : cur) + k;
+        rxaud.pending[l.batch_id] = next === '' ? undefined : Math.min(Number(next), 1000000);
+        document.getElementById('rxaPadVal').textContent = next;
+    },
+    async step(d) {
+        if (Object.values(rxaud.pending).some(v => v !== undefined)) await rxaud.saveCounts(null, true);
+        rxaud.mobileIdx = Math.max(0, Math.min(rxaud.doc.lines.length - 1, rxaud.mobileIdx + d));
+        rxaud.renderCount();
+    },
+    async saveCounts(btn, quiet) {
+        const counts = Object.entries(rxaud.pending).filter(([, v]) => v !== undefined && v >= 0).map(([batch_id, counted_units]) => ({ batch_id, counted_units }));
+        if (!counts.length) { if (!quiet) toast('No new counts to save.'); return true; }
+        const r = await rxaud.run(btn, () => apiPut(`/admin/rx/audits/${encodeURIComponent(rxaud.doc.id)}/counts`, counts), quiet ? null : 'Counts saved');
+        if (!r) return false;
+        counts.forEach(c => { const l = rxaud.doc.lines.find(x => x.batch_id === c.batch_id); if (l) l.counted_units = c.counted_units; });
+        rxaud.pending = {}; rxaud.doc.summary.counted = rxaud.doc.lines.filter(l => l.counted_units != null).length;
+        return true;
+    },
+    async review(btn) {
+        if (!(await rxaud.saveCounts(btn, true))) return;
+        const r = await rxaud.run(btn, () => apiPost(`/admin/rx/audits/${encodeURIComponent(rxaud.doc.id)}/review`, {}));
+        if (r) { rxaud.doc = r; rxaud.renderReview(); rxaud.load(); }
+    },
+    // ── review: variance by value; deficits red, surpluses green; a reason on every non-zero line ──
+    renderReview() {
+        const d = rxaud.doc, s = d.summary, live = d.status === 'review' && rxaud.canWork();
+        const rows = d.lines.filter(l => l.variance_units);
+        rxaud.drawer(`${d.audit_number} · ${RXA_STATUS[d.status]}`, `
+            <div class="rxa-sum"><span>Deficit <b class="rxa-neg">${rxRs(-s.deficit_value_paise)}</b></span><span>Surplus <b class="rxa-pos">${rxRs(s.surplus_value_paise)}</b></span>
+                <span>${s.lines_with_variance} of ${s.lines} lines differ</span>${d.variance_value_paise != null ? `<span>Posted value ${rxRs(d.variance_value_paise)}${d.approved_by_name ? ' · approved by ' + esc(d.approved_by_name) : ''}</span>` : ''}</div>
+            ${rows.length ? `<table class="rxi-orders"><thead><tr><th>Medicine</th><th>Batch</th><th>System</th><th>Counted</th><th>Variance</th><th>Value</th><th>Reason</th></tr></thead><tbody>
+            ${rows.map(l => `<tr class="${l.variance_units < 0 ? 'rxa-deficit' : 'rxa-surplus'}"><td>${esc((l.item || {}).brand_name || '')}</td><td>${esc(l.batch.batch_no)}</td>
+                <td class="rx-num">${l.system_units_at_start + l.movement_delta_since_start}</td><td class="rx-num">${l.counted_units}</td>
+                <td class="rx-num"><b>${l.variance_units > 0 ? '+' : ''}${l.variance_units}</b></td><td class="rx-num">${l.variance_value_paise < 0 ? '−' : ''}${rxRs(Math.abs(l.variance_value_paise))}</td>
+                <td>${live ? `<select id="rxaWhy_${esc(l.id)}" aria-label="Reason for ${esc((l.item || {}).brand_name || '')}"><option value="">Reason…</option>${Object.entries(RXA_REASONS).map(([k, v]) => `<option value="${k}" ${l.variance_reason === k ? 'selected' : ''}>${v}</option>`).join('')}</select>` : esc(RXA_REASONS[l.variance_reason] || '—')}</td></tr>`).join('')}</tbody></table>`
+            : '<p class="muted">No variance: the count matches the system.</p>'}`,
+            live ? `<button type="button" class="btn btn-accent btn-sm" onclick="rxaud.post(this)">Post adjustments</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="rxaud.cancel(this)">Cancel audit</button>` : '');
+    },
+    async post(btn, approver) {
+        const reasons = rxaud.doc.lines.filter(l => l.variance_units).map(l => ({ line_id: l.id, variance_reason: document.getElementById('rxaWhy_' + l.id).value }));
+        if (reasons.some(r => !r.variance_reason)) { toast('Choose a reason for every line that differs.', true); return; }
+        btn.disabled = true;
+        try {
+            const r = await apiPost(`/admin/rx/audits/${encodeURIComponent(rxaud.doc.id)}/post`, { reasons, ...(approver || {}) });
+            toast(`Posted ${r.audit_number}: adjustments written`); rxaud.doc = r; rxaud.renderReview(); rxaud.load();
+        } catch (e) {
+            if (/approval limit|second pharmacy manager/i.test(e.message)) return rxaud.approverForm();
+            toast(e.message, true);
+        } finally { btn.disabled = false; }
+    },
+    approverForm() {
+        const foot = document.getElementById('rxaDrawerFoot');
+        foot.insertAdjacentHTML('afterbegin', `<div class="rxa-approver" role="group" aria-label="Second approver">
+            <span class="rx-sub">Above the approval limit: a second pharmacy manager signs in to approve.</span>
+            <input id="rxaApUser" autocomplete="off" placeholder="Approver username" aria-label="Approver username">
+            <input id="rxaApPass" type="password" autocomplete="off" placeholder="Approver password" aria-label="Approver password">
+            <button type="button" class="btn btn-accent btn-sm" onclick="rxaud.post(this, { approver_username: document.getElementById('rxaApUser').value.trim(), approver_password: document.getElementById('rxaApPass').value })">Approve and post</button></div>`);
+        document.getElementById('rxaApUser').focus();
+    },
+    async cancel(btn) {
+        const reason = (prompt('Why cancel this audit? Nothing will be adjusted. (3+ characters)') || '').trim();
+        if (reason.length < 3) return;
+        if (await rxaud.run(btn, () => apiPost(`/admin/rx/audits/${encodeURIComponent(rxaud.doc.id)}/cancel`, { reason }), 'Audit cancelled')) { rxaud.close(); rxaud.load(); }
+    },
+    drawer(title, html, foot) {
+        const el = document.getElementById('rxaDrawer');
+        document.getElementById('rxaDrawerTitle').textContent = title;
+        document.getElementById('rxaDrawerBody').innerHTML = html;
+        document.getElementById('rxaDrawerFoot').innerHTML = (foot || '') + '<button type="button" class="btn btn-ghost btn-sm" onclick="rxaud.close()">Close</button>';
+        if (!el.classList.contains('open')) rxaud.lastFocus = document.activeElement;
+        el.classList.add('open');
+    },
+    close() { document.getElementById('rxaDrawer').classList.remove('open'); if (rxaud.lastFocus && rxaud.lastFocus.focus) rxaud.lastFocus.focus(); },
+};
+/* RX:audit:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -20156,7 +20584,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ /* RX:transfers:START */, rxtransfers: () => rxtr.load() /* RX:transfers:END */ /* RX:audit:START */, rxaudit: () => rxaud.load() /* RX:audit:END */ };
     if (loaders[page]) loaders[page]();
 }
 

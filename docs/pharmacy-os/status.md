@@ -25,11 +25,11 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 ## 1. Current pointer (update at every pause — this is what the next agent resumes from)
 | Field | Value |
 |:-|:-|
-| Active phase | **P5 Inpatient pharmacy VERIFIED** (2026-11-17). P0–P5 complete on `rx/p1-foundation`; P6 not started |
-| Next task | **RX-41** (P6: migration 140, transfers & stock audits). P5 carry-overs: MAR route wiring + MAR batch select, ward-issue route, `test_rx_concurrency.py` (RG8). Open owner decisions O-1…O-6 have defaults in force |
+| Active phase | **P6 Transfers, audits, par levels VERIFIED** (2026-11-17). P0–P6 complete on `rx/p1-foundation`; P7 not started |
+| Next task | **RX-48** (P7: migration 141, statutory registers; go-live needs O-4). Carry-overs: P5 MAR route wiring + MAR batch select, ward-issue route; P6 par 06:00 daily job, staff→ward assignment for same-branch ward scope; `test_rx_concurrency.py` (RG8). Open owner decisions O-1…O-6 have defaults in force |
 | Working branch | `rx/p1-foundation` (from `rx/spec` @ `1078dca`, which includes RX-67/68); local commits only, not pushed |
-| Last commit touching RX | `feat(rx): P5 IPD ward indents, dispense, MAR links and IPD returns (RX-37…RX-40)` on `rx/p1-foundation` |
-| Last VERIFIED gate | P5: registry (243), RG1 (10), RG2 (1815), RG3 (37), RX suites (126), RG5 111/115/116/117 unedited (63), 103 chain, verify §28–§33 (18/18 PASS), full suite 9,846 passed / 0 failed (§9, 2026-11-17) |
+| Last commit touching RX | `feat(rx): P6 store transfers, physical audits and ward par levels (RX-41…RX-47, RX-78)` on `rx/p1-foundation` |
+| Last VERIFIED gate | P6: registry (243), RG1 (10), RG2 (1869), RG3 (37), RX suites (133), RG5 111/115/116/117 unedited (63), 103 chain, verify §28–§34 (21/21 PASS), full suite 9,924 passed / 0 failed (§9, 2026-11-17) |
 | Open blockers | none for P0–P6. P7 go-live needs O-4 (legal confirmation of register formats). P8 refill sends need Meta-approved templates in each clinic's WABA |
 | Lanes running in parallel | none |
 
@@ -63,7 +63,7 @@ and AI never prescribes, doses or substitutes (ADR-RX-06).
 | P3 | Purchase: suppliers, PO, GRN, supplier returns | 137 | RG1–RG7 | VERIFIED |
 | P4 | OPD POS, tax, returns, shifts | 138 | RG1–RG8 + POS timing | VERIFIED (RG8 concurrency suite + POS timing script outstanding, see §9) |
 | P5 | IPD indents, dispense, MAR link, IPD returns | 139 | RG1–RG8, RG5 unedited | VERIFIED (RG8 concurrency suite outstanding, see §9) |
-| P6 | Transfers & stock audits | 140 | RG1–RG8 | NOT_STARTED |
+| P6 | Transfers & stock audits | 140 | RG1–RG8 | VERIFIED (RG8 concurrency suite outstanding, see §9) |
 | P7 | Statutory registers | 141 | RG1–RG8 + chain verify | NOT_STARTED |
 | P8 | Refills & alerts | 142 | RG1–RG8 | NOT_STARTED |
 | P9 | Kriya Ketu, dashboard | — | RG1–RG7 + registry tests | NOT_STARTED |
@@ -82,7 +82,7 @@ for pages added; no existing test edited; this file updated.
 | 137 | `137_rx_purchase.sql` | RX-22 | suppliers, PO, GRN, supplier returns, GRN line calc + freight split, `rx_send_po` / `rx_post_grn` / `rx_void_grn` / `rx_supplier_return`, `rx_v_item_last_supplier`, `rx_purge_clinic` v4 | `rollback/137_rollback_rx_purchase.sql` (restores purge v3) | VERIFIED |
 | 138 | `138_rx_pos.sql` | RX-28 | sales, items, payments, fulfilments, returns, credit notes, overrides; **redefines `opd_close_shift`** (+ pharmacy cash, D1) | `rollback/138_…` (restores the 116 `opd_close_shift` body) | VERIFIED |
 | 139 | `139_rx_ipd.sql` | RX-37 | indents, indent lines, dispenses, dispense lines, `rx_mar_links`, `rx_empty_returns`; `ipd_charges.source` widened (keeps `package`; NOT VALID + VALIDATE); raise / dispense / cancel / receive / MAR link / ward return functions; FKs into IPD tables cascade (IPD purge unchanged); purge v6 — no other IPD table touched, no trigger on IPD tables | `rollback/139_rollback_rx_ipd.sql` (restores purge v5; CHECK narrowed only if no `source='pharmacy'` rows) | VERIFIED |
-| 140 | `140_rx_transfers_audits.sql` | RX-41 | transfers, audits, audit delta trigger | `rollback/140_…` | NOT_STARTED |
+| 140 | `140_rx_transfers_audits.sql` | RX-41 | transfers, transfer lines, stock audits, audit lines, par levels; save / dispatch / receive / cancel transfer, par levels, start / count / review / post / cancel audit; ledger triggers `rx_sm_audit_freeze` + `rx_sm_audit_delta`; purge v7 | `rollback/140_rollback_rx_transfers_audits.sql` (drops the ledger triggers, restores purge v6) | VERIFIED |
 | 141 | `141_rx_registers.sql` | RX-48 | register entries, append/verify functions, redefined writers | `rollback/141_…` | NOT_STARTED |
 | 142 | `142_rx_refills_alerts.sql` | RX-55 | refill plans/requests, alerts | `rollback/142_…` | NOT_STARTED |
 
@@ -158,13 +158,13 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 ### P6 — Transfers & audits (140)
 | ID | Task | Depends | Acceptance | Tests | State |
 |:-|:-|:-|:-|:-|:-|
-| RX-41 | Migration 140 | P5 | | `test_migration_rx_m7.py` | NOT_STARTED |
-| RX-42 | Transfers dispatch/receive/short write-off; controlled two-person | RX-41 | W7 | `test_rx_transfers.py` | NOT_STARTED |
-| RX-43 | Store scope for ward sub-stores in all RX routes | RX-42 | nurse ward A cannot touch ward B (404) | `test_rx_route_matrix.py` | NOT_STARTED |
-| RX-44 | UI **Transfers** (desktop + 390 px receive) | RX-42 | | manual | NOT_STARTED |
-| RX-45 | Audits start/count/review | RX-41 | | `test_rx_audit.py` | NOT_STARTED |
-| RX-46 | Audit delta trigger, freeze, post with second approver | RX-45 | W8 | `test_rx_audit.py`, `test_rx_concurrency.py` | NOT_STARTED |
-| RX-47 | UI **Stock Audit** (blind count, mobile count) | RX-46 | | manual | NOT_STARTED |
+| RX-41 | Migration 140 | P5 | | `test_migration_rx_m7.py` | VERIFIED |
+| RX-42 | Transfers dispatch/receive/short write-off; controlled two-person | RX-41 | W7 | `test_rx_transfers.py` | VERIFIED |
+| RX-43 | Store scope for ward sub-stores in all RX routes | RX-42 | nurse ward A cannot touch ward B (404) | `test_rx_route_matrix.py` | VERIFIED across branches (`test_rx_transfers.py::test_ward_store_scope_and_roles`); same-branch wards need a staff→ward assignment (not in schema) |
+| RX-44 | UI **Transfers** (desktop + 390 px receive) | RX-42 | | manual | VERIFIED (live UI §9) |
+| RX-45 | Audits start/count/review | RX-41 | | `test_rx_audit.py` | VERIFIED |
+| RX-46 | Audit delta trigger, freeze, post with second approver | RX-45 | W8 | `test_rx_audit.py`, `test_rx_concurrency.py` | VERIFIED (`test_rx_concurrency.py` / RG8 outstanding) |
+| RX-47 | UI **Stock Audit** (blind count, mobile count) | RX-46 | | manual | VERIFIED (live UI §9) |
 
 ### P7 — Registers (141)
 | ID | Task | Depends | Acceptance | Tests | State |
@@ -318,6 +318,18 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-17 | Schema verify §28–§33 | `migrations/verify_supabase_schema.sql` on real PG (001→139) | 18/18 PASS (M139: 3), 178 checks, 0 FAIL in the whole report |
 | 2026-11-17 | RX-40 live UI | real app + pgserver (001→139) + PgBridge, real password logins, `lifespan=off` | **@1440 px** `rxnurse` (NURSE, IPD_NURSING only): Ward Indents in the Pharmacy group; patient picker from the bed board; orders with 24 h defaults (BD → 2, PRN → 1), deterministic item candidates, stores from `indentable`; STAT → `IND-2026-00001`, order shows "2 pending". `rxpharma`: queue STAT (red) above ROUTINE with ward / bed / age; drawer FEFO batch `CEFN1`; Enter dispenses; slip PDF 30 KB. **@390 px** nurse: no horizontal overflow, single column; Receive → indent `closed`. Console: no errors. Found and fixed: nurse nav hidden by `applyOpdRoleNav` (added `rxindents` to its self-gated set), JS / page blocks inserted into the wrong lane (marker substring), priority class `stat` colliding with the dashboard `.stat` card (now `p-stat`), "0 in ward" without a ward sub-store (now "—"), slip pop-up blocked after `await` (window opened inside the click) |
 | 2026-11-17 | P5 full suite | `.venv/bin/pytest -q -rs` | **9846 passed, 5 skipped, 0 failed** |
+| 2026-11-17 | RX-41 migration 140 | `.venv/bin/pytest tests/test_migration_rx_m7.py -q` | 10 passed (function-only writes, draft replace, same store refused, dispatch STR- + replay, short receipt: target +received, source debited once, `transfer_in`+`damage_writeoff_out` at source; blocked batch never leaves; controlled two-person; audit delta from a concurrent sale, count SET on re-send, reason required, adjust brings stock to count; rack scope, found stock, uncounted blocks review, one open audit per store; freeze blocks sale / dispense until cancel; approver ≠ starter ≠ poster above threshold; par set / remove; purge v7 + guarded rollback + re-apply ×2) |
+| 2026-11-17 | RX-42/43/78 API | `.venv/bin/pytest tests/test_rx_transfers.py -q` | 4 passed (FEFO split + rack-ordered pick list, STR-2026-00001, challan PDF, branch-A nurse receives short with write-off at source, branch-B nurse 404 everywhere, nurse never drafts / dispatches, controlled: keeper 403, same manager 409, second manager receives; par draft positive deficits only, refreshed in place) |
+| 2026-11-17 | RX-45/46 API | `.venv/bin/pytest tests/test_rx_audit.py -q` | 3 passed (blind for the keeper, manager peeks; counter sale during the count is not a variance; review / reasons / post bring stock to the shelf; frozen store refuses a counter sale until cancelled; second approver: alone 403, pharmacist 403, wrong password 401, manager approves) |
+| 2026-11-17 | P6 route matrix | `.venv/bin/pytest tests/test_rx_route_matrix.py -q` | route pin 95 (+18 P6, incl. `GET /audits` and `POST /audits/{id}/cancel`); P6 role matrix (7 roles) |
+| 2026-11-17 | Ketu page registry | `.venv/bin/pytest tests/test_assistant_registry.py -q` | 243 passed (`rxtransfers`, `rxaudit` in `PAGES` + `PAGE_SYNONYMS`) |
+| 2026-11-17 | P6 RG1 / RG2 / RG3 | lint + scope matrices + firewall / no-LLM | 10 / 1869 / 37 passed |
+| 2026-11-17 | P6 RX suites | `.venv/bin/pytest tests/test_migration_rx_m*.py tests/test_rx_transfers.py tests/test_rx_audit.py tests/test_rx_route_matrix.py -q` | 133 passed |
+| 2026-11-17 | P6 RG5 (IPD unedited) | `.venv/bin/pytest tests/test_migration_111_ipd.py tests/test_migration_115_orders.py tests/test_migration_116_ipd_finance.py tests/test_migration_117_gst.py -q` | 63 passed |
+| 2026-11-17 | Migration 103 chain | `.venv/bin/pytest tests/test_migration_103_opd.py -k "rollback or down or reapply" -q` | 1 passed (unwind 140→139→…→134→133) |
+| 2026-11-17 | Schema verify §28–§34 | `migrations/verify_supabase_schema.sql` on real PG (001→140) | 21/21 PASS (M140: 3), 181 checks, 0 FAIL in the whole report |
+| 2026-11-17 | RX-44 / RX-47 live UI | real app + pgserver (001→140) + PgBridge, real password logins, `lifespan=off` | **@1440 px** `rxkeeper`: Transfers (4 tabs), par levels rack-sorted (A-1, B-2, C-3) with deficits → Draft replenishment (Dolo FEFO 30 + 15) → Dispatch `STR-2026-00002`. **@390 px** `rxnurse` (IPD_NURSING only): Transfers shown, Stock Audit hidden, tabs Incoming + Par levels; receive with one line short → amber reason field → `partially_received`; no horizontal overflow. `rxkeeper` @390: frozen rack audit `AUD-2026-00001`, blind keypad count mode (Prev / Next, counts saved per batch) → review. @1440: variance grid (deficit red), reason select, post above the limit → approver form → `rxmgr` approves → posted. Console: only the expected 403 that opens the approver form. Fixed during the check: negative values shown as "−₹6.00", number inputs styled in the shared table |
+| 2026-11-17 | P6 full suite | `.venv/bin/pytest -q -rs` | **9924 passed, 5 skipped, 0 failed** |
 
 ## 10. Session log
 | Date | Agent | What happened |
@@ -330,3 +342,4 @@ Columns: ID · task · depends · acceptance · tests · state. Every task's "te
 | 2026-11-17 | Claude Code | P3 Purchase & GRN (RX-22…RX-27, RX-71) implemented and VERIFIED: migration 137 (7 tables, line calc + freight split, PO send / GRN post / void / supplier return functions, purge v4), `rx_purchase.py`, `rx_gs1.py`, 23 routes, Purchase & GRN page (5 tabs), 3 new test files (37 tests) + P3 role matrix; `rxpurchase` in Ketu PAGES. Full suite 9,690 passed. Not pushed. |
 | 2026-11-17 | Claude Code & Antigravity | P4 OPD POS (RX-28…RX-36, RX-69..82) implemented and VERIFIED: migration 138 (8 tables, rx_complete_sale, returns, credit notes, opd_close_shift redefinition with pharmacy cash term D1, purge v5), rx_tax.py, rx_pos.py, rx_pos_docs.py, 18 routes, Pharmacy POS UI with keyboard map, 4 new test files (43 tests); rxpos in Ketu PAGES. Full suite 9,794 passed. Committed locally on rx/p1-foundation, not pushed. |
 | 2026-11-17 | Claude Code | P5 Inpatient pharmacy (RX-37…RX-40) implemented and VERIFIED: migration 139 (6 tables, raise / dispense / cancel / receive / MAR link / ward-return functions, `ipd_charges.source` widened, FKs into IPD tables cascade, purge v6), `rx_ipd.py`, 9 routes, Ward Indents UI (nurse view + pharmacy queue), 2 new test files (19 tests) + P5 role matrix; `rxindents` in Ketu PAGES; `rx.deactivation_preview` counts open indents. Deviations recorded in DATA-MODEL §6 / API §6 (one-step ward return, no `rx_stores_ward_fk`, MAR route wiring + ward issue deferred). Full suite 9,846 passed. Committed locally on rx/p1-foundation, not pushed. |
+| 2026-11-17 | Claude Code | P6 Transfers, stock audits, par levels (RX-41…RX-47, RX-78) implemented and VERIFIED: migration 140 (5 tables, transfer / par / audit functions, ledger freeze + delta triggers, purge v7), `rx_transfers.py`, `rx_audit.py`, 18 routes, Transfers + Stock Audit UI (390 px receive, blind keypad count, approver form), 3 new test files (17 tests) + P6 role matrix; `rxtransfers` / `rxaudit` in Ketu PAGES; deactivation preview counts transfers in transit and open audits. Deviations in API §7 / DATA-MODEL §7 (RX_STOCK = RX_TRANSFER / RX_AUDIT, short receipt via transfer_in + write-off at source, audit list + cancel routes, branch-level ward scope, par job not scheduled). Full suite 9,924 passed. Committed locally on rx/p1-foundation, not pushed. |

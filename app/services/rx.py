@@ -144,6 +144,27 @@ _ERRORS = {
                                            "before returning billed medicines."),
     "opd_credit_note_refund_required": (409, "The patient has paid more than the bill after this return. Record the "
                                              "refund from IPD billing."),
+    # 140 transfers and audits
+    "rx_transfer_not_found": (404, "Transfer not found."),
+    "rx_transfer_same_store": (422, "A transfer goes from one store to a different store."),
+    "rx_transfer_empty": (422, "Add at least one line (at most 200)."),
+    "rx_transfer_not_dispatched": (409, "Only a dispatched transfer can be received."),
+    "rx_transfer_lines_incomplete": (422, "Enter the received quantity for every line, once each."),
+    "rx_received_out_of_range": (422, "Received units must be between 0 and the units sent."),
+    "rx_discrepancy_reason_required": (422, "A short receipt needs a reason (3+ characters)."),
+    "rx_controlled_two_person": (409, "A controlled transfer must be received by someone other than the dispatcher."),
+    "rx_store_frozen_for_audit": (409, "This store is frozen for a stock audit: nothing can be sold or dispensed "
+                                       "from it until the audit is posted or cancelled."),
+    "rx_audit_not_found": (404, "Audit not found."),
+    "rx_audit_already_open": (409, "This store already has an audit in progress."),
+    "rx_audit_not_counting": (409, "Counting has finished for this audit."),
+    "rx_audit_not_in_review": (409, "Move the audit to review before posting it."),
+    "rx_audit_uncounted": (409, "Some lines are not counted yet. Enter 0 for an empty shelf."),
+    "rx_audit_out_of_scope": (422, "This batch's item is outside the audit's scope."),
+    "rx_audit_line_not_found": (404, "Audit line not found."),
+    "rx_variance_reason_required": (422, "Every line with a variance needs a reason."),
+    "rx_audit_needs_approver": (403, "This variance is above the approval limit: a second pharmacy manager must "
+                                     "approve it."),
 }
 # constraints whose clients branch on a stable code (API.md §4)
 _CONSTRAINT_CODES = {"rx_grns_invoice_key": "rx_grn_duplicate_invoice"}
@@ -152,6 +173,13 @@ _CONSTRAINTS = (
     ("uq_rx_stores_one_central", 409, "This branch already has an active central store."),
     ("rx_stores_branch_fk", 404, "Branch not found."),
     ("rx_stores_parent_fk", 404, "Parent store not found."),
+    ("rx_transfers_distinct_stores", 422, "A transfer goes from one store to a different store."),
+    ("rx_transfers_controlled_two_person", 409, "A controlled transfer must be received by someone other than the "
+                                                "dispatcher."),
+    ("rx_transfer_lines_batch_key", 422, "Each batch appears once per transfer."),
+    ("uq_rx_stock_audits_open", 409, "This store already has an audit in progress."),
+    ("rx_stock_audits_scope_shape", 422, "A rack audit names its rack; an item-list audit names its items."),
+    ("rx_par_levels_item_fk", 404, "Item not found."),
     ("rx_stores_ward_shape", 422, "A ward sub-store needs its ward; other stores have none."),
     ("rx_stores_sell_shape", 422, "Only a retail counter can sell."),
     ("rx_stores_no_self_parent", 422, "A store cannot be its own parent."),
@@ -327,9 +355,13 @@ def setup_checklist(settings: dict, stores: list[dict], gstin: Optional[str], co
 
 async def deactivation_preview(clinic_id: str) -> dict:
     """What an owner disable would leave running (ADR-RX-09).
-    shortcut: sales / transfers / audits count zero until RX-M7 wires them; each later migration must count
-    its open rows here and set blocking."""
+    Drafts are not counted: they hold no stock and no number."""
+    from app.services.rx_audit import open_count
     from app.services.rx_ipd import open_indent_count
-    indents = await open_indent_count(clinic_id) if await list_stores(clinic_id) else 0
-    return {"open_sales": 0, "open_indents": indents, "transfers_in_transit": 0, "open_audits": 0,
-            "blocking": indents > 0}
+    from app.services.rx_transfers import open_counts
+    if not await list_stores(clinic_id):
+        return {"open_sales": 0, "open_indents": 0, "transfers_in_transit": 0, "open_audits": 0, "blocking": False}
+    indents, transit, audits = (await open_indent_count(clinic_id), await open_counts(clinic_id),
+                                await open_count(clinic_id))
+    return {"open_sales": 0, "open_indents": indents, "transfers_in_transit": transit, "open_audits": audits,
+            "blocking": bool(indents or transit or audits)}

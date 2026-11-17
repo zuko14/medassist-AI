@@ -1,6 +1,7 @@
 """Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20),
-purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82), inpatient pharmacy (139, RX-38…40).
-Design: docs/pharmacy-os/API.md §0–§6, SECURITY.md §2–§3.
+purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82), inpatient pharmacy (139, RX-38…40),
+transfers / par levels / stock audits (140, RX-42…46, RX-78).
+Design: docs/pharmacy-os/API.md §0–§7, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
@@ -15,7 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
-from app.services import rx, rx_catalogue, rx_gs1, rx_ipd, rx_pos, rx_pos_docs, rx_purchase, rx_stock
+from app.services import (rx, rx_audit, rx_catalogue, rx_gs1, rx_ipd, rx_pos, rx_pos_docs, rx_purchase,
+                          rx_stock, rx_transfers)
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
@@ -1135,4 +1137,257 @@ async def ipd_return(dispense_id: uuid.UUID, body: rx_ipd.ReturnIn, request: Req
         await _audit(user, request, "rx_ipd_return", "rx_dispense", str(dispense_id),
                      {"return_id": out["return_id"], "value_paise": out.get("value_paise"),
                       "credit_notes": out.get("credit_notes")})
+    return out
+
+
+# ── transfers, par levels, stock audits (140, RX-42…46, RX-78) ──────────────
+# API.md §7. RX_STOCK of the v1 spec is RX_TRANSFER / RX_AUDIT (SECURITY §2). A nurse (IPD_NURSING) reaches only
+# transfers INTO a ward store in scope (receive) and that store's par levels; anything else reads as not found.
+
+TRANSFER_WORK = ("RX_TRANSFER", "RX_ADMIN")
+TRANSFER_READ = ("RX_READ", "RX_TRANSFER", "RX_ADMIN", "IPD_NURSING")
+AUDIT_WORK = ("RX_AUDIT", "RX_ADMIN")
+AUDIT_READ = ("RX_READ", "RX_AUDIT", "RX_ADMIN")
+
+
+def _ward_only(user: AdminUser) -> bool:
+    """A nurse with no pharmacy grant: ward stores only."""
+    return not any(holds_rx_permission(user, p) for p in ("RX_READ", "RX_TRANSFER", "RX_ADMIN"))
+
+
+def _ward_store_for(user: AdminUser, store: dict) -> dict:
+    _store_for(user, store)
+    if _ward_only(user) and store["store_type"] not in rx_transfers.WARD_STORE_TYPES:
+        raise HTTPException(status_code=404, detail="Store not found.")
+    return store
+
+
+async def _transfer_in_scope(user: AdminUser, scope: str, transfer_id: uuid.UUID) -> dict:
+    t = await rx_transfers.get_row(scope, str(transfer_id))
+    if _ward_only(user):            # the receiving ward's view
+        _ward_store_for(user, await rx.get_store(scope, str(t["to_store_id"])))
+        return t
+    stores = await rx.list_stores(scope)
+    allowed = allowed_store_ids(user, stores)
+    if allowed is not None and not {str(t["from_store_id"]), str(t["to_store_id"])} & allowed:
+        raise HTTPException(status_code=404, detail="Transfer not found.")
+    return t
+
+
+@router.get("/transfers")
+async def list_transfers(status_: Optional[Literal["draft", "dispatched", "received", "partially_received", "cancelled"]]
+                         = Query(None, alias="status"), store_id: Optional[uuid.UUID] = None,
+                         limit: int = Query(50, ge=1, le=200), clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_READ)
+    ids = await _store_ids(user, scope, None)                        # None = every store of the clinic
+    if _ward_only(user):
+        ids = [str(s["id"]) for s in await _visible_stores(user, scope)
+               if s["store_type"] in rx_transfers.WARD_STORE_TYPES]
+    if store_id:
+        _ward_store_for(user, await rx.get_store(scope, str(store_id)))
+        ids = [str(store_id)]
+    rows = await rx_transfers.list_transfers(scope, ids, status_, limit)
+    visible = await _visible_stores(user, scope)
+    if _ward_only(user):            # a nurse sees what comes in, not what the ward sends
+        rows = [r for r in rows if str(r["to_store_id"]) in set(ids or [])]
+        visible = [x for x in visible if x["store_type"] in rx_transfers.WARD_STORE_TYPES]
+    return {"transfers": rows,
+            "stores": [{k: x.get(k) for k in ("id", "code", "name", "store_type", "parent_store_id", "is_active")}
+                       for x in visible]}
+
+
+@router.post("/transfers", status_code=status.HTTP_201_CREATED)
+async def create_transfer(body: rx_transfers.TransferIn, request: Request, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_WORK, new_work=True)
+    _store_for(user, await rx.get_store(scope, body.from_store_id))
+    await rx.get_store(scope, body.to_store_id)
+    tid = await rx_transfers.save(scope, body, _actor(user))
+    await _audit(user, request, "rx_transfer_draft", "rx_transfer", tid, {"lines": len(body.lines)})
+    return await rx_transfers.detail(scope, await rx_transfers.get_row(scope, tid))
+
+
+@router.get("/transfers/{transfer_id}/challan.pdf")
+async def transfer_challan(transfer_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, clinic = await _rx_scope(user, clinic_id, *TRANSFER_READ)
+    d = await rx_transfers.detail(scope, await _transfer_in_scope(user, scope, transfer_id))
+    return _pdf(rx_transfers.render_challan_pdf(d, clinic), f"{d.get('transfer_number') or 'transfer-draft'}.pdf")
+
+
+@router.get("/transfers/{transfer_id}")
+async def get_transfer(transfer_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_READ)
+    return await rx_transfers.detail(scope, await _transfer_in_scope(user, scope, transfer_id))
+
+
+@router.patch("/transfers/{transfer_id}")
+async def update_transfer(transfer_id: uuid.UUID, body: rx_transfers.TransferIn, request: Request,
+                          clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_WORK, new_work=True)
+    await _transfer_in_scope(user, scope, transfer_id)
+    _store_for(user, await rx.get_store(scope, body.from_store_id))
+    await rx.get_store(scope, body.to_store_id)
+    await rx_transfers.save(scope, body, _actor(user), str(transfer_id))
+    await _audit(user, request, "rx_transfer_draft_edit", "rx_transfer", str(transfer_id), {"lines": len(body.lines)})
+    return await rx_transfers.detail(scope, await rx_transfers.get_row(scope, str(transfer_id)))
+
+
+@router.post("/transfers/{transfer_id}/dispatch")
+async def dispatch_transfer(transfer_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                            user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_WORK)      # a drafted transfer may still leave in wind-down
+    t = await _transfer_in_scope(user, scope, transfer_id)
+    _store_for(user, await rx.get_store(scope, str(t["from_store_id"])))
+    out = await rx_transfers.dispatch(scope, t, _actor(user), holds_rx_permission(user, "RX_CONTROLLED"))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_transfer_dispatch", "rx_transfer", str(transfer_id),
+                     {"transfer_number": out["transfer_number"], "controlled": out.get("controlled")})
+    return {**await rx_transfers.detail(scope, await rx_transfers.get_row(scope, str(transfer_id))),
+            "replayed": out.get("replayed", False), "challan_url": f"/admin/rx/transfers/{transfer_id}/challan.pdf"}
+
+
+@router.post("/transfers/{transfer_id}/receive")
+async def receive_transfer(transfer_id: uuid.UUID, body: rx_transfers.ReceiveIn, request: Request,
+                           clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, "RX_TRANSFER", "RX_ADMIN", "IPD_NURSING")
+    t = await _transfer_in_scope(user, scope, transfer_id)
+    _ward_store_for(user, await rx.get_store(scope, str(t["to_store_id"])))   # receiving needs the target's scope
+    out = await rx_transfers.receive(scope, t, body, _actor(user), holds_rx_permission(user, "RX_CONTROLLED"))
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_transfer_receive", "rx_transfer", str(transfer_id),
+                     {"status": out["status"], "short_units": out.get("short_units")})
+    return {**await rx_transfers.detail(scope, await rx_transfers.get_row(scope, str(transfer_id))),
+            "replayed": out.get("replayed", False)}
+
+
+@router.post("/transfers/{transfer_id}/cancel")
+async def cancel_transfer(transfer_id: uuid.UUID, body: rx_transfers.ReasonIn, request: Request,
+                          clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_WORK)
+    out = await rx_transfers.cancel(scope, await _transfer_in_scope(user, scope, transfer_id), body.reason)
+    await _audit(user, request, "rx_transfer_cancel", "rx_transfer", str(transfer_id), {"reason": body.reason})
+    return out
+
+
+@router.get("/par-levels")
+async def get_par_levels(store_id: uuid.UUID, clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_READ)
+    store = _ward_store_for(user, await rx.get_store(scope, str(store_id)))
+    return {"store": store, "par_levels": await rx_transfers.par_levels(scope, str(store_id))}
+
+
+@router.post("/par-levels")
+async def set_par_levels(body: rx_transfers.ParIn, request: Request, clinic_id: str = "default",
+                         user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, "RX_TRANSFER", "RX_ADMIN", "IPD_NURSING")
+    _ward_store_for(user, await rx.get_store(scope, body.store_id))
+    out = await rx_transfers.set_par_levels(scope, body, _actor(user)[0])
+    await _audit(user, request, "rx_par_levels_set", "rx_store", body.store_id, out)
+    return {**out, "par_levels": await rx_transfers.par_levels(scope, body.store_id)}
+
+
+@router.post("/par-levels/replenish")
+async def replenish_par(body: rx_transfers.ReplenishIn, request: Request, clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *TRANSFER_WORK, new_work=True)
+    store = _store_for(user, await rx.get_store(scope, body.store_id))
+    out = await rx_transfers.replenish(scope, store, _actor(user))
+    if out["transfer"]:
+        await _audit(user, request, "rx_par_replenish", "rx_transfer", out["transfer"]["id"],
+                     {"lines": len(out["transfer"]["lines"]), "short_items": len(out["short"])})
+    return out
+
+
+async def _audit_in_scope(user: AdminUser, scope: str, audit_id: uuid.UUID) -> dict:
+    a = await rx_audit.get_row(scope, str(audit_id))
+    _store_for(user, await rx.get_store(scope, str(a["store_id"])))
+    return a
+
+
+@router.get("/audits")
+async def list_audits(status_: Optional[Literal["counting", "review", "posted", "cancelled"]] = Query(None, alias="status"),
+                      store_id: Optional[uuid.UUID] = None, limit: int = Query(50, ge=1, le=200),
+                      clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *AUDIT_READ)
+    return {"audits": await rx_audit.list_audits(scope, await _store_ids(user, scope, store_id), status_, limit)}
+
+
+@router.post("/audits", status_code=status.HTTP_201_CREATED)
+async def start_audit(body: rx_audit.StartIn, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *AUDIT_WORK)          # audits continue in wind-down (ADR-RX-09)
+    _store_for(user, await rx.get_store(scope, body.store_id))
+    out = await rx_audit.start(scope, body, _actor(user))
+    await _audit(user, request, "rx_audit_start", "rx_stock_audit", out["audit_id"],
+                 {"audit_number": out["audit_number"], "scope": body.scope, "freeze_sales": body.freeze_sales})
+    return await rx_audit.detail(scope, await rx_audit.get_row(scope, out["audit_id"]), False)
+
+
+@router.get("/audits/{audit_id}")
+async def get_audit(audit_id: uuid.UUID, show_system: bool = False, clinic_id: str = "default",
+                    user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *AUDIT_READ)
+    a = await _audit_in_scope(user, scope, audit_id)
+    # blind count: only a manager may look at the system quantity while counting is open
+    return await rx_audit.detail(scope, a, show_system and holds_rx_permission(user, "RX_ADMIN"))
+
+
+@router.put("/audits/{audit_id}/counts")
+async def put_audit_counts(audit_id: uuid.UUID, counts: list[rx_audit.CountIn], clinic_id: str = "default",
+                           user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *AUDIT_WORK)
+    if not 1 <= len(counts) <= 500:
+        raise HTTPException(status_code=422, detail="Send 1–500 counts at a time.")
+    return await rx_audit.record_counts(scope, await _audit_in_scope(user, scope, audit_id), counts)
+
+
+@router.post("/audits/{audit_id}/review")
+async def review_audit(audit_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *AUDIT_WORK)
+    a = await _audit_in_scope(user, scope, audit_id)
+    out = await rx_audit.review(scope, a)
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_audit_review", "rx_stock_audit", str(audit_id), {})
+    return await rx_audit.detail(scope, await rx_audit.get_row(scope, str(audit_id)), True)
+
+
+@router.post("/audits/{audit_id}/post")
+async def post_audit(audit_id: uuid.UUID, body: rx_audit.PostIn, request: Request, clinic_id: str = "default",
+                     user: AdminUser = Depends(verify_credentials)):
+    """Over rx_settings.audit_approval_paise a second RX_ADMIN re-authenticates in the body (UI.md §6); the SQL
+    function checks the threshold and that the approver is neither the starter nor the poster."""
+    scope, _ = await _rx_scope(user, clinic_id, *AUDIT_WORK)
+    a = await _audit_in_scope(user, scope, audit_id)
+    approver = None
+    if body.approver_username or body.approver_password:
+        actor_id = _actor(user)[0]
+        if not rx_pos.override_rate_ok(actor_id or user.username):
+            raise HTTPException(status_code=429, detail="Too many approval attempts. Wait a minute.")
+        from app.routers.admin import _authenticate_password
+        who = await _authenticate_password(body.approver_username or "", body.approver_password or "",
+                                           request.client.host if request.client else "unknown")
+        approver = _actor(who)
+        if str(getattr(who, "clinic_id", None) or "") != scope or not approver[0] or not holds_rx_permission(who, "RX_ADMIN"):
+            raise HTTPException(status_code=403, detail={"code": "rx_approver_not_authorised",
+                                                         "message": "The approver must be a pharmacy manager of this clinic."})
+        if approver[0] == actor_id:
+            raise HTTPException(status_code=403, detail={"code": "rx_approver_same_person",
+                                                         "message": "The approver must be a different person."})
+    out = await rx_audit.post(scope, a, body, _actor(user), approver)
+    if not out.get("replayed"):
+        await _audit(user, request, "rx_audit_post", "rx_stock_audit", str(audit_id),
+                     {"audit_number": out["audit_number"], "variance_value_paise": out["variance_value_paise"],
+                      "approver": approver[1] if approver else None})
+    return {**await rx_audit.detail(scope, await rx_audit.get_row(scope, str(audit_id)), True),
+            "replayed": out.get("replayed", False)}
+
+
+@router.post("/audits/{audit_id}/cancel")
+async def cancel_audit(audit_id: uuid.UUID, body: rx_audit.CancelIn, request: Request, clinic_id: str = "default",
+                       user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *AUDIT_WORK)
+    out = await rx_audit.cancel(scope, await _audit_in_scope(user, scope, audit_id), body.reason)
+    await _audit(user, request, "rx_audit_cancel", "rx_stock_audit", str(audit_id), {"reason": body.reason})
     return out

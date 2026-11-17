@@ -183,6 +183,35 @@ still saved, response `rx_link: "refused: <reason>"`. Pre-RX clients that omit t
 | POST | `/admin/rx/audits/{id}/review` | RX_STOCK | moves to review; returns variance list |
 | POST | `/admin/rx/audits/{id}/post` | RX_STOCK (+second RX_ADMIN over threshold: `{approver_session}`) | *audit: rx_audit_post* |
 
+P6 notes (as built, migration 140 — 18 routes, route pin 95):
+- Permissions: the v1 `RX_STOCK` is `RX_TRANSFER` (transfers, par levels) and `RX_AUDIT` (audits), as decided in P1
+  (SECURITY §2). Dispatch / receipt of X / narcotic / psychotropic lines also need `RX_CONTROLLED`, by two different
+  people (409 `rx_controlled_two_person`; CHECK `rx_transfers_controlled_two_person`).
+- Transfers: `GET /transfers?status&store_id` (+ `stores` the caller may use — a nurse holds no RX_READ for `/stores`),
+  `POST` / `PATCH /transfers[/{id}]` `{from_store_id, to_store_id, lines:[{item_id, batch_id?, units}], notes?}` (no
+  `batch_id` → FEFO split at the source; a PATCH replaces a draft), `…/dispatch` (STR- number, `challan_url`),
+  `…/receive` `{lines:[{line_id, received_units, discrepancy_reason?}]}` (every line once; short needs a reason),
+  `…/cancel {reason}` (draft only), `…/challan.pdf` (rack-sorted; a draft prints as the pick list).
+- Short receipt: the short units go back to the source on paper (`transfer_in`) and leave it as `damage_writeoff_out`
+  with the reason, so the loss is recorded against the source without debiting it twice.
+- Store scope (RX-43): `allowed_store_ids` (branch-pinned logins reach their branch's stores; 404 outside). A nurse
+  (IPD_NURSING, no RX grant) reaches only transfers INTO ward-type stores (`ward_substore`, `ot_tray`,
+  `emergency_tray`) in scope, and their par levels. There is no staff→ward assignment in the schema yet, so two
+  wards of one branch are not separated.
+- Par levels (A10): `GET /par-levels?store_id` (par, on hand = sellable units, deficit, rack-sorted),
+  `POST /par-levels {store_id, rows:[{item_id, par_units}]}` (0 removes), `POST /par-levels/replenish {store_id}` →
+  `{transfer, short}`: a **draft** from the parent store (else the branch's central store) for positive deficits,
+  FEFO; pressing it again refreshes the same par draft. The 06:00 IST daily job is not scheduled yet.
+- Audits: also `GET /audits?status&store_id` and `POST /audits/{id}/cancel {reason}` (an abandoned count must never
+  leave a store frozen). `POST /audits {store_id, scope: full|rack|item_list|controlled, rack?, item_ids?,
+  freeze_sales}`; `GET /audits/{id}?show_system` (blind while counting; only RX_ADMIN may show the system quantity);
+  `PUT …/counts [{batch_id, counted_units}]` (1–500, a re-send SETs; a batch outside the snapshot but in scope joins as
+  found stock); `…/review` (409 `rx_audit_uncounted` until every line is counted — 0 for an empty shelf);
+  `…/post {reasons:[{line_id, variance_reason}], approver_username?, approver_password?}` — above
+  `audit_approval_paise` a second RX_ADMIN re-authenticates (not the starter, not the poster; rate-limited 5/min).
+- Freeze: while an audit of a store is `counting|review` with `freeze_sales`, `sale_out` / `ipd_dispense_out` /
+  `ward_issue_out` from that store are refused in the ledger itself (409 `rx_store_frozen_for_audit`).
+
 ## 8. Registers (P7)
 | Method | Path | Perm | Notes |
 |:-|:-|:-|:-|

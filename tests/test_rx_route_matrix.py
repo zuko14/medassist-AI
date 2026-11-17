@@ -57,6 +57,15 @@ RX_ROUTES = {
     ("POST", "/admin/rx/ipd/indents/{indent_id}/dispense"), ("POST", "/admin/rx/ipd/indents/{indent_id}/cancel"),
     ("POST", "/admin/rx/ipd/dispenses/{dispense_id}/receive"), ("GET", "/admin/rx/ipd/dispenses/{dispense_id}/slip.pdf"),
     ("POST", "/admin/rx/ipd/dispenses/{dispense_id}/returns"),
+    # P6 transfers, par levels, stock audits (140)
+    ("GET", "/admin/rx/transfers"), ("POST", "/admin/rx/transfers"), ("GET", "/admin/rx/transfers/{transfer_id}"),
+    ("PATCH", "/admin/rx/transfers/{transfer_id}"), ("POST", "/admin/rx/transfers/{transfer_id}/dispatch"),
+    ("POST", "/admin/rx/transfers/{transfer_id}/receive"), ("POST", "/admin/rx/transfers/{transfer_id}/cancel"),
+    ("GET", "/admin/rx/transfers/{transfer_id}/challan.pdf"),
+    ("GET", "/admin/rx/par-levels"), ("POST", "/admin/rx/par-levels"), ("POST", "/admin/rx/par-levels/replenish"),
+    ("GET", "/admin/rx/audits"), ("POST", "/admin/rx/audits"), ("GET", "/admin/rx/audits/{audit_id}"),
+    ("PUT", "/admin/rx/audits/{audit_id}/counts"), ("POST", "/admin/rx/audits/{audit_id}/review"),
+    ("POST", "/admin/rx/audits/{audit_id}/post"), ("POST", "/admin/rx/audits/{audit_id}/cancel"),
 }
 
 
@@ -218,3 +227,27 @@ def test_p5_role_matrix(api, role, grants):  # noqa: F811
     dispensed = api.call("POST", f"/admin/rx/ipd/indents/{uuid.uuid4()}/dispense", clinic, {
         "store_id": store, "lines": [{"indent_line_id": str(uuid.uuid4())}]}).status_code
     assert (queue, raised, dispensed) == P5_MATRIX[(role, grants)]
+
+
+# P6: (role, stored grants) -> expected status for: list transfers, start an audit (unknown store -> 404 when allowed),
+# replenish par levels (unknown store -> 404 when allowed). RX_STOCK of the v1 spec = RX_TRANSFER / RX_AUDIT.
+P6_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (200, 404, 404),
+    ("STORE_KEEPER", ()): (200, 404, 404),
+    ("PHARMACIST", ()): (200, 403, 403),                     # reads transfers; neither counts nor moves stock
+    ("NURSE", ("IPD_NURSING",)): (200, 403, 403),            # sees transfers into its ward stores only
+    ("FRONT_DESK", ("RX_TRANSFER",)): (200, 403, 404),
+    ("FRONT_DESK", ("RX_AUDIT",)): (403, 404, 403),
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P6_MATRIX))
+def test_p6_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    listed = api.call("GET", "/admin/rx/transfers", clinic).status_code
+    audit = api.call("POST", "/admin/rx/audits", clinic, {"store_id": str(uuid.uuid4()), "scope": "full"}).status_code
+    replenish = api.call("POST", "/admin/rx/par-levels/replenish", clinic, {"store_id": str(uuid.uuid4())}).status_code
+    assert (listed, audit, replenish) == P6_MATRIX[(role, grants)]

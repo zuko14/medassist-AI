@@ -517,6 +517,19 @@ a line for `NEW.batch_id`, add `NEW.qty_units` to that line's `movement_delta_si
 variance value above `rx_settings.audit_approval_paise` (default ₹5,000) needs `RX_ADMIN` second approver
 (`approved_by ≠ started_by`).
 
+**As built (140).** Numbers (`STR-`, `AUD-`) are assigned last (D12), so `transfer_year/seq` and `audit_year/seq` are
+NULL until dispatch / start completes. Extra columns: transfers `source ('manual'|'par')`, `has_controlled`,
+`*_by_name`, `cancelled_reason`; audits `rack`, `item_ids`, `approved_by_name`, `variance_value_paise`,
+`reviewed_at`, `cancelled_reason`; audit lines `counted_at`, `variance_reason` CHECK (breakage, theft_suspected,
+billing_error, found, expiry_missed, other). One open audit per store (`uq_rx_stock_audits_open`, also the index the
+ledger triggers probe). The freeze is a BEFORE INSERT trigger on the ledger (`rx_sm_audit_freeze`), not a change to
+`rx_complete_sale` / `rx_dispense_indent`; the delta trigger also runs in `review`, and posting flips the audit to
+`posted` before its own adjust movements so they are not counted. Short receipt = `transfer_in` + `damage_writeoff_out`
+at the source (net zero there; loss recorded). Functions: `rx_save_transfer`, `rx_dispatch_transfer`,
+`rx_receive_transfer`, `rx_cancel_transfer`, `rx_set_par_levels`, `rx_start_audit` (balance rows locked while
+copied), `rx_record_counts`, `rx_review_audit`, `rx_post_audit`, `rx_cancel_audit`; purge v7. Register `out`/`in`/`adjust`
+rows for controlled stock arrive with 141.
+
 ## 8. Statutory registers (141 — RX-M8)
 ```sql
 CREATE TABLE rx_register_entries (                 -- [A][F] tamper-evident, hash-chained per clinic×register
