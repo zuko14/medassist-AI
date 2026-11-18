@@ -29,6 +29,8 @@ A, B = str(uuid.uuid4()), str(uuid.uuid4())          # two staff ids
 
 def unwind_140(cur) -> None:
     """Inside an open transaction: purge every clinic with transfers, audits or par levels; run the 140 rollback."""
+    from tests.test_migration_rx_m8 import unwind_141
+    unwind_141(cur)  # newest first: 141's purge v8 names 140 tables and register rows point at batches / stores
     cur.execute("SELECT to_regclass('public.rx_transfers') IS NOT NULL")
     if not cur.fetchone()[0]:
         return

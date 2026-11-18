@@ -89,6 +89,7 @@ PAGES: dict[str, str] = {
     "rxindents": "Ward Indents",   # Pharmacy OS inpatient pharmacy (migration 139); page hand-off only
     "rxtransfers": "Transfers",    # Pharmacy OS store transfers + par levels (migration 140); page hand-off only
     "rxaudit": "Stock Audit",      # Pharmacy OS physical stock audit (migration 140); page hand-off only
+    "rxregisters": "Drug Registers",   # Pharmacy OS statutory H/H1/X/narcotic registers (migration 141); page hand-off only
     "dxinstruments": "Instruments & QC",   # Diagnostic OS analyser bridge and QC (migration 133); page hand-off only
     "insurance": "Insurance / TPA",
     "tariffs": "Service Catalogue",
@@ -149,6 +150,8 @@ PAGE_SYNONYMS: dict[str, tuple[str, ...]] = {
                     "ward replenishment"),
     "rxaudit": ("stock audit", "physical stock count", "stock count", "stock take", "stock verification",
                 "variance report"),
+    "rxregisters": ("drug registers", "schedule h1 register", "narcotic register", "schedule x register",
+                    "drug inspector", "batch recall", "recall trace"),
     "rxindents": ("ward indents", "ward indent", "medicine indent", "raise indent", "indent queue", "dispense to ward"),
     "dxdesk": ("dx registration", "lab registration", "register lab visit", "lab desk", "todays lab bookings"),
     "dxcollect": ("sample collection", "collect samples", "tube labels", "print barcode", "reject sample"),

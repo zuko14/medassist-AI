@@ -43,6 +43,7 @@ class RxSettings(BaseModel):
     rx_validity_days: int = Field(30, ge=1, le=365)
     return_days: int = Field(7, ge=0, le=90)
     audit_approval_paise: int = Field(500000, ge=0, le=100_000_000)
+    pharmacist_reg_no: Optional[str] = Field(None, max_length=40)   # printed on statutory registers (141)
     version: int = Field(0, ge=0)
 
 
@@ -165,6 +166,11 @@ _ERRORS = {
     "rx_variance_reason_required": (422, "Every line with a variance needs a reason."),
     "rx_audit_needs_approver": (403, "This variance is above the approval limit: a second pharmacy manager must "
                                      "approve it."),
+    # 141 registers, empties
+    "rx_register_via_function_only": (409, "Register entries are written only by stock movements."),
+    "rx_empties_not_controlled": (422, "Empty returns are recorded only for Schedule X, narcotic and psychotropic items."),
+    "rx_empties_two_person": (409, "Empties must be received by someone other than the person returning them."),
+    "rx_empties_exceed_dispensed": (409, "That is more empties than were dispensed (less returns) on this line."),
 }
 # constraints whose clients branch on a stable code (API.md §4)
 _CONSTRAINT_CODES = {"rx_grns_invoice_key": "rx_grn_duplicate_invoice"}

@@ -3747,6 +3747,19 @@
         .rxa-approver { display: grid; gap: 6px; width: 100%; margin-bottom: 8px; }
         .rxa-approver input { padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
         /* RX:audit:END */
+        /* RX:registers:START — Drug Registers (migration 141; docs/pharmacy-os/UI.md §8) */
+        .rxr-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 12px; }
+        .rxr-filters .field { margin: 0; min-width: 140px; }
+        .rxr-chain { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid var(--border2); color: var(--text2); }
+        .rxr-chain.ok { color: var(--green); background: var(--green-bg); border-color: var(--green-border, var(--border2)); }
+        .rxr-chain.bad { color: var(--red); background: var(--red-bg); border-color: var(--red); }
+        .rxr-tbl td { vertical-align: top; font-size: 0.85rem; }
+        .rxr-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .rxr-in { color: var(--green); } .rxr-out { color: var(--red); }
+        .rxr-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+        @media (max-width: 760px) { .rxr-filters .field { min-width: calc(50% - 6px); flex: 1; } .rxr-hide-sm { display: none; }
+            #pg-rxregisters td[data-label]::before { content: attr(data-label) " "; color: var(--text3); font-size: 0.72rem; } }
+        /* RX:registers:END */
     </style>
 </head>
 <body>
@@ -4108,6 +4121,11 @@
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M9 3v3h6V3M9 12l2 2 4-4"></path></svg></span><span>Stock Audit</span>
             </div>
             <!-- RX:audit:END -->
+            <!-- RX:registers:START -->
+            <div class="nav-link" tabindex="0" data-page="rxregisters" data-rx="nav RX_REGISTERS RX_ADMIN" style="display:none" onclick="go('rxregisters',this)">
+                <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"></path><path d="M4 17a3 3 0 0 1 3-3h12M8 8h7M8 11h5"></path></svg></span><span>Drug Registers</span>
+            </div>
+            <!-- RX:registers:END -->
             <!-- RX:stock:START -->
             <div class="nav-link" tabindex="0" data-page="rxstock" data-rx="nav RX_READ" style="display:none" onclick="go('rxstock',this)">
                 <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"></path><path d="m3 8 9 5 9-5"></path><path d="M12 13v8"></path></svg></span><span>Stock &amp; Expiry</span>
@@ -8135,6 +8153,37 @@
             </aside>
         </div>
         <!-- RX:audit:END -->
+        <!-- RX:registers:START — Drug Registers page (docs/pharmacy-os/UI.md §8, WORKFLOWS W9, page rxregisters) -->
+        <div id="pg-rxregisters" class="sec">
+            <div class="page-head"><div><h2>Drug Registers</h2><p>Statutory Schedule H, H1, X, narcotic and psychotropic registers, written automatically from every stock movement. Each entry is chained to the one before it, so any later change shows up here.</p></div></div>
+            <div class="rx-tabs" role="tablist" aria-label="Registers">
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="H" aria-selected="false" onclick="rxreg.tab('H')">Schedule H</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="H1" aria-selected="false" onclick="rxreg.tab('H1')">Schedule H1</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="X" aria-selected="false" onclick="rxreg.tab('X')">Schedule X</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="narcotic" aria-selected="false" onclick="rxreg.tab('narcotic')">Narcotic</button>
+                <button type="button" class="btn btn-ghost btn-sm" role="tab" data-tab="psychotropic" aria-selected="false" onclick="rxreg.tab('psychotropic')">Psychotropic</button>
+            </div>
+            <div class="card">
+                <div class="rxr-filters">
+                    <div class="field"><label for="rxrFrom">From</label><input type="date" id="rxrFrom" onchange="rxreg.reload()"></div>
+                    <div class="field"><label for="rxrTo">To</label><input type="date" id="rxrTo" onchange="rxreg.reload()"></div>
+                    <div class="field"><label for="rxrStore">Store</label><select id="rxrStore" onchange="rxreg.reload()"><option value="">All stores</option></select></div>
+                    <span id="rxrChain" class="rxr-chain" role="status" aria-live="polite">Checking chain…</span>
+                    <div class="rxr-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="rxreg.export('pdf', this)">Export PDF</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="rxreg.export('csv', this)">Export CSV</button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="rxrTraceBtn" hidden onclick="rxreg.traceForm()">Batch trace</button>
+                    </div>
+                </div>
+                <div id="rxrBody" aria-live="polite"></div>
+            </div>
+            <aside class="rx-drawer wide" id="rxrDrawer" role="dialog" aria-modal="true" aria-labelledby="rxrDrawerTitle">
+                <header><h3 id="rxrDrawerTitle"></h3><button type="button" class="btn btn-ghost btn-sm" onclick="rxreg.close()" aria-label="Close">✕</button></header>
+                <div class="rx-body" id="rxrDrawerBody"></div>
+                <footer id="rxrDrawerFoot"></footer>
+            </aside>
+        </div>
+        <!-- RX:registers:END -->
         <!-- DX:foundation:START — DX Setup page (docs/diagnostic-os/UI.md, page dxsetup) -->
         <div id="pg-dxsetup" class="sec">
             <div class="page-head">
@@ -12652,6 +12701,128 @@ const rxaud = {
     close() { document.getElementById('rxaDrawer').classList.remove('open'); if (rxaud.lastFocus && rxaud.lastFocus.focus) rxaud.lastFocus.focus(); },
 };
 /* RX:audit:END */
+
+/* RX:registers:START — Drug Registers (migration 141; docs/pharmacy-os/UI.md §8, WORKFLOWS W9, A6). Rows are written
+   by the stock ledger, never typed here. The badge re-runs the hash-chain check on every load; exports are audited
+   server-side and never carry a phone number. Batch trace (A6) is for managers (RX_ADMIN) and is logged. */
+const RXR_ENTRY = { in: 'Receipt', out: 'Issue', return: 'Return', writeoff: 'Write-off', adjust: 'Adjustment' };
+const rxreg = {
+    register: 'H1', offset: 0, limit: 100, stores: null, lastFocus: null,
+    body(html) { document.getElementById('rxrBody').innerHTML = html; },
+    qs(extra) {
+        const p = new URLSearchParams();
+        const f = document.getElementById('rxrFrom').value, t = document.getElementById('rxrTo').value, s = document.getElementById('rxrStore').value;
+        if (f) p.set('from', f);
+        if (t) p.set('to', t);
+        if (s) p.set('store_id', s);
+        Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
+        return p.toString();
+    },
+    async load() {
+        applyRxGates();
+        document.getElementById('rxrTraceBtn').hidden = !rxCan('RX_ADMIN');
+        if (!rxreg.stores) {
+            try {
+                rxreg.stores = (await api('/admin/rx/stores')).stores;
+                document.getElementById('rxrStore').innerHTML = '<option value="">All stores</option>' + rxreg.stores.map(s => `<option value="${esc(s.id)}">${esc(s.code)} · ${esc(s.name)}</option>`).join('');
+            } catch (e) { rxreg.stores = []; }
+        }
+        return rxreg.tab(rxreg.register);
+    },
+    tab(r) {
+        rxreg.register = r;
+        document.querySelectorAll('#pg-rxregisters [role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === r)));
+        return rxreg.reload();
+    },
+    reload() { rxreg.offset = 0; rxreg.verify(); return rxreg.list(); },
+    async verify() {
+        const el = document.getElementById('rxrChain');
+        el.className = 'rxr-chain'; el.textContent = 'Checking chain…';
+        try {
+            const v = await api(`/admin/rx/registers/${encodeURIComponent(rxreg.register)}/verify`);
+            const at = new Date(v.verified_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+            if (v.ok) { el.classList.add('ok'); el.textContent = v.rows ? `✓ Verified: hash chain valid (seq 1 to ${v.rows}) · ${at}` : `✓ Verified: register empty · ${at}`; }
+            else { el.classList.add('bad'); el.textContent = `✕ Tamper detected at seq ${v.first_bad_seq} · ${at}`; }
+        } catch (e) { el.textContent = 'Chain check unavailable'; }
+    },
+    async list() {
+        rxreg.body(loading());
+        let r;
+        try { r = await api(`/admin/rx/registers/${encodeURIComponent(rxreg.register)}?${rxreg.qs({ limit: rxreg.limit, offset: rxreg.offset })}`); }
+        catch (e) { rxreg.body(`<p class="muted">${esc(e.message)}</p>`); return; }
+        const person = p => p ? [p.name, [p.age, (p.gender || '').slice(0, 1).toUpperCase()].filter(Boolean).join('/'), p.mrn ? 'MRN ' + p.mrn : '', p.admission ? 'Adm ' + p.admission : '', p.address].filter(Boolean).map(esc).join(', ') : '';
+        const doc = p => p ? esc([p.name, p.registration_number ? `Reg. ${p.registration_number}${p.council ? ' (' + p.council + ')' : ''}` : ''].filter(Boolean).join(' — ')) : '';
+        const sup = s => s ? esc([s.name, s.licence_no ? 'DL ' + s.licence_no : '', s.invoice_no ? 'Inv ' + s.invoice_no : ''].filter(Boolean).join(', ')) : '';
+        const admin = rxCan('RX_ADMIN');
+        const rows = r.entries.map(e => `<tr>
+            <td class="num" data-label="Seq">${esc(e.seq)}</td><td data-label="Date">${esc(e.entry_date)}</td><td data-label="Doc">${esc(e.doc_ref || '—')}</td>
+            <td class="${e.receipt ? 'rxr-in' : 'rxr-out'}">${esc(RXR_ENTRY[e.direction] || e.direction)}<br><small class="rx-sub">${esc(e.movement_type)}</small></td>
+            <td>${person(e.patient_snapshot) || sup(e.supplier_snapshot) || '<span class="rx-sub">—</span>'}</td>
+            <td class="rxr-hide-sm">${doc(e.prescriber_snapshot) || '<span class="rx-sub">—</span>'}</td>
+            <td><b>${esc((e.item || {}).brand_name || '')}</b><br><small class="rx-sub">${esc((e.batch || {}).batch_no || '')} · ${esc((e.store || {}).code || '')}</small>
+                ${admin ? `<br><button type="button" class="btn btn-ghost btn-sm" onclick="rxreg.trace('${esc(e.batch_id)}')">Trace batch</button>` : ''}</td>
+            <td class="num" data-label="Qty">${e.receipt ? '+' : '−'}${esc(e.qty_units)}</td><td class="num" data-label="Balance"><b>${esc(e.balance_after_units)}</b></td>
+            <td class="rxr-hide-sm">${esc(e.dispensed_by_name)}${e.pharmacist_reg_no ? `<br><small class="rx-sub">Reg. ${esc(e.pharmacist_reg_no)}</small>` : ''}</td></tr>`).join('');
+        rxreg.body(r.entries.length ? `<div class="tbl-wrap"><table class="rxi-orders rxr-tbl"><thead><tr><th>Seq</th><th>Date</th><th>Bill / Doc</th><th>Entry</th><th>Patient / Supplier</th><th class="rxr-hide-sm">Prescriber</th><th>Drug · Batch · Store</th><th>Qty</th><th>Balance</th><th class="rxr-hide-sm">Pharmacist</th></tr></thead><tbody>${rows}</tbody></table></div>
+            <div class="rxp-foot" style="justify-content:space-between;"><span class="rx-sub">Entries ${rxreg.offset + 1}–${rxreg.offset + r.entries.length}</span><span>
+            <button type="button" class="btn btn-ghost btn-sm" ${rxreg.offset ? '' : 'disabled'} onclick="rxreg.page(-1)">Previous</button>
+            <button type="button" class="btn btn-ghost btn-sm" ${r.has_more ? '' : 'disabled'} onclick="rxreg.page(1)">Next</button></span></div>`
+            : '<p class="muted">No entries for this register and period. Entries appear automatically when a scheduled medicine is received, sold, dispensed, returned, moved or adjusted.</p>');
+    },
+    page(d) { rxreg.offset = Math.max(0, rxreg.offset + d * rxreg.limit); rxreg.list(); },
+    async export(fmt, btn) {         // window opened inside the click (no pop-up block), filled when the file arrives
+        const win = fmt === 'pdf' ? window.open('about:blank', '_blank') : null;
+        btn.disabled = true;
+        try {
+            const res = await apiRaw(`/admin/rx/registers/${encodeURIComponent(rxreg.register)}/export.${fmt}?${rxreg.qs()}`);
+            const url = URL.createObjectURL(await res.blob());
+            if (fmt === 'pdf') { if (win) win.location.href = url; else toast('Allow pop-ups to open the register.', true); return; }
+            const a = document.createElement('a');
+            a.href = url; a.download = `register-${rxreg.register}.csv`; document.body.appendChild(a); a.click(); a.remove();
+        } catch (e) { if (win) win.close(); toast(e.message, true); } finally { btn.disabled = false; }
+    },
+    // ── A6 batch recall trace: find an in-stock batch by medicine, or use "Trace batch" on any register row ──
+    traceForm() {
+        rxreg.drawer('Batch recall trace', `<p class="rx-sub">Everyone who received a batch: counter bills, ward dispenses, MAR doses, transfers and what is still on the shelf. Every trace is logged. A batch with no stock left can be traced from its register row.</p>
+            <div class="field"><label for="rxrBatchQ">Medicine (name, code or barcode)</label><input id="rxrBatchQ" autocomplete="off" placeholder="e.g. Augmentin" onkeydown="if(event.key==='Enter')rxreg.findBatch()"></div>
+            <div id="rxrBatchList" aria-live="polite"></div>`, '<button type="button" class="btn btn-accent btn-sm" onclick="rxreg.findBatch()">Find batches</button>');
+        setTimeout(() => document.getElementById('rxrBatchQ').focus(), 50);
+    },
+    async findBatch() {
+        const q = document.getElementById('rxrBatchQ').value.trim(), out = document.getElementById('rxrBatchList');
+        if (q.length < 2) return;
+        try {
+            const items = (await api('/admin/rx/items/resolve?' + new URLSearchParams({ q, limit: 3 }))).candidates || [];
+            const lists = await Promise.all(items.map(i => api('/admin/rx/batches?item_id=' + encodeURIComponent(i.id || i.item_id)).then(r => r.batches.map(b => ({ ...b, brand: i.brand_name })))));
+            const seen = new Set(), rows = lists.flat().filter(b => !seen.has(b.batch_id) && seen.add(b.batch_id));
+            out.innerHTML = rows.length ? `<table class="rxi-orders"><tbody>${rows.map(b => `<tr><td><b>${esc(b.batch_no)}</b> ${esc(b.brand || '')}<br><small class="rx-sub">Exp ${esc(String(b.expiry_date || '').slice(0, 7))}${b.is_blocked ? ' · blocked' : ''}</small></td>
+                <td><button type="button" class="btn btn-ghost btn-sm" onclick="rxreg.trace('${esc(b.batch_id)}')">Trace</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No batch with stock matches. Use “Trace batch” on a register row for a used-up batch.</p>';
+        } catch (e) { toast(e.message, true); }
+    },
+    async trace(id) {
+        let t;
+        try { t = await api(`/admin/rx/batches/${encodeURIComponent(id)}/trace`); } catch (e) { toast(e.message, true); return; }
+        const b = t.batch, s = t.summary, when = x => esc(x ? rxind.when(x) : '—');
+        const tbl = (head, rows, empty) => rows.length ? `<div class="tbl-wrap"><table class="rxi-orders"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td data-label="${head[i]}">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : `<p class="muted">${empty}</p>`;
+        rxreg.drawer(`Trace · ${b.brand_name} · batch ${b.batch_no}`, `
+            <div class="rxa-sum"><span>Patients <b>${esc(s.patients)}</b></span><span>Sold <b>${esc(s.sold_units)}</b></span><span>Ward <b>${esc(s.ipd_units)}</b></span><span>On hand <b>${esc(s.on_hand_units)}</b></span>
+                ${b.is_blocked ? '<span class="rx-badge e-blocked">Blocked</span>' : ''}</div>
+            <h4>Counter sales</h4>${tbl(['Bill', 'Date', 'Patient', 'Phone', 'Qty'], t.sales.map(x => [esc(x.sale_number || ''), when(x.completed_at), esc(x.patient_name || '—'), esc(x.phone_masked || '—'), esc(x.qty_units - x.returned_units)]), 'Not sold at the counter.')}
+            <h4>Ward dispenses</h4>${tbl(['Indent', 'Date', 'Patient', 'Ward · Bed', 'Qty', 'MAR doses'], t.ipd.map(x => [esc(x.indent_number || ''), when(x.dispensed_at), `${esc(x.patient_name || '—')}<br><small class="rx-sub">${esc(x.admission_number || '')}</small>`, `${esc(x.ward || '—')} · ${esc(x.bed || '—')}`, esc(x.qty_units - x.returned_units), esc(x.mar_doses)]), 'Not dispensed to a ward.')}
+            <h4>Transfers</h4>${tbl(['Transfer', 'From → To', 'Sent', 'Received', 'Status'], t.transfers.map(x => [esc(x.transfer_number || ''), `${esc(x.from_store)} → ${esc(x.to_store)}`, esc(x.sent_units), esc(x.received_units ?? '—'), esc(x.status)]), 'No transfers.')}
+            <h4>On hand</h4>${tbl(['Store', 'Units'], t.on_hand.map(x => [`${esc(x.store_code)} · ${esc(x.store_name)}`, esc(x.qty_units)]), 'None left on any shelf.')}`);
+    },
+    drawer(title, html, foot) {
+        const el = document.getElementById('rxrDrawer');
+        document.getElementById('rxrDrawerTitle').textContent = title;
+        document.getElementById('rxrDrawerBody').innerHTML = html;
+        document.getElementById('rxrDrawerFoot').innerHTML = (foot || '') + '<button type="button" class="btn btn-ghost btn-sm" onclick="rxreg.close()">Close</button>';
+        if (!el.classList.contains('open')) rxreg.lastFocus = document.activeElement;
+        el.classList.add('open');
+    },
+    close() { document.getElementById('rxrDrawer').classList.remove('open'); if (rxreg.lastFocus && rxreg.lastFocus.focus) rxreg.lastFocus.focus(); },
+};
+/* RX:registers:END */
 
 /* DX:foundation:START — Diagnostic OS (migration 125). Mirrors app.services.permissions
    holds_dx_permission; the server re-checks every call, hiding here is convenience only. */
@@ -20584,7 +20755,7 @@ function go(page, el) {
         window.opd.billing.timer = null;
     }
 
-    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ /* RX:transfers:START */, rxtransfers: () => rxtr.load() /* RX:transfers:END */ /* RX:audit:START */, rxaudit: () => rxaud.load() /* RX:audit:END */ };
+    const loaders = { dashboard: loadDashboard, insights: loadInsights, profile: loadProfile, appointments: loadAppointments, doctors: loadDoctors, leaves: loadLeaves, holidays: loadHolidays, patients: loadPatients, diagreports: loadDiagnosticQueuePage, labreports: loadLabReports, labtests: loadLabTests, homecollect: loadHomeCollectPage, corporate: loadCorporatePage, treatments: loadTreatments, prescriptions: loadPrescriptions, payments: loadPayments, paysettings: loadPaymentSettings, branches: loadBranches, connectors: loadConnectorsPage, staff: loadStaff, data: loadDataPage, dentalplans: loadDentalPage, leads: loadLeads, voice: loadVoicePage, opdsetup: loadOpdSetup, opddesk: loadOpdDesk, opdqueue: loadOpdQueue, opdworkspace: loadOpdWorkspace, opdbilling: loadOpdBilling, opdearnings: loadOpdEarnings, opdanalytics: loadOpdAnalytics, ipdboard: loadIpdBoard, ipdadmit: loadIpdAdmit, ipdchart: loadIpdChart, ipdsetup: loadIpdSetup, dxworklist: loadDxWorklist, lisqueue: () => loadLisQueue(), tariffs: loadTariffs, casualty: loadCasualty, ot: loadOt, radiology: loadRadiology, insurance: loadInsurance, ipdfinance: () => ipd.loadFinancePage(), /* DX:foundation:START */ dxsetup: () => dxos.loadSetup() /* DX:foundation:END */ /* DX:catalogue:START */, dxcatalog: () => dxcat.load() /* DX:catalogue:END */ /* DX:desk:START */, dxdesk: () => dxdesk.load() /* DX:desk:END */ /* DX:samples:START */, dxcollect: () => dxcollect.load() /* DX:samples:END */ /* DX:logistics:START */, dxlogistics: () => dxlog.load() /* DX:logistics:END */ /* DX:bench:START */, dxbench: () => dxbench.load(), dxapprove: () => dxapprove.load() /* DX:bench:END */ /* DX:reports:START */, dxreports: () => dxrep.load(), dxtemplates: () => dxtpl.load() /* DX:reports:END */ /* DX:b2b:START */, dxb2b: () => dxb2b.load(), dxreferrers: () => dxref.load(), dxpartner: () => dxpartner.load() /* DX:b2b:END */ /* DX:mis:START */, dxdash: () => dxdash.load() /* DX:mis:END */ /* DX:instruments:START */, dxinstruments: () => dxinst.load() /* DX:instruments:END */ /* RX:foundation:START */, rxsetup: () => rxos.loadSetup() /* RX:foundation:END */ /* RX:catalogue:START */, rxitems: () => rxcat.load() /* RX:catalogue:END */ /* RX:stock:START */, rxstock: () => rxstock.load() /* RX:stock:END */ /* RX:purchase:START */, rxpurchase: () => rxpur.load() /* RX:purchase:END */ /* RX:pos:START */, rxpos: () => rxpos.load() /* RX:pos:END */ /* RX:ipd:START */, rxindents: () => rxind.load() /* RX:ipd:END */ /* RX:transfers:START */, rxtransfers: () => rxtr.load() /* RX:transfers:END */ /* RX:audit:START */, rxaudit: () => rxaud.load() /* RX:audit:END */ /* RX:registers:START */, rxregisters: () => rxreg.load() /* RX:registers:END */ };
     if (loaders[page]) loaders[page]();
 }
 

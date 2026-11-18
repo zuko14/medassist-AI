@@ -1211,6 +1211,46 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 35. MIGRATION 141 — Pharmacy OS statutory registers, recall trace, narcotic empties (RX-M8)
+-- ============================================================================
+DO $$
+DECLARE
+    v_tbl int;
+    v_con int;
+    v_fn int;
+BEGIN
+    SELECT count(*) INTO v_tbl FROM pg_class
+     WHERE relname = 'rx_register_entries' AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M141', 'Table: rx_register_entries (RLS forced)',
+            CASE WHEN v_tbl = 1 THEN 'PASS' ELSE 'FAIL' END, v_tbl || ' of 1 present');
+
+    SELECT count(*) INTO v_con FROM pg_constraint
+     WHERE conname IN ('rx_register_entries_clinic_id_id_key', 'rx_register_entries_seq_key',
+                       'rx_register_entries_out_prescriber', 'rx_register_entries_out_patient',
+                       'rx_register_entries_chain_head', 'rx_register_entries_batch_fk')
+       AND convalidated;
+    SELECT v_con + count(*) INTO v_con FROM pg_trigger WHERE tgrelid = 'rx_register_entries'::regclass
+       AND tgname IN ('trg_rx_register_entries_insert', 'trg_rx_register_entries_append_only');
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M141', 'Constraints: gapless seq key, prescriber on issues, patient on H1/X/narcotic issues, chain head, function-only + append-only',
+            CASE WHEN v_con = 8 THEN 'PASS' ELSE 'FAIL' END, v_con || ' of 8 present');
+
+    SELECT (to_regprocedure('rx_register_verify(uuid,text)') IS NOT NULL)::int
+         + (to_regprocedure('rx_register_hash(rx_register_entries)') IS NOT NULL)::int
+         + (to_regprocedure('rx_record_empties(uuid,uuid,integer,uuid,uuid)') IS NOT NULL)::int
+         + (to_regprocedure('rx_batch_trace(uuid,uuid)') IS NOT NULL)::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_register_append')::int
+         + (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'rx_stock_movements'::regclass
+              AND tgname = 'trg_rx_sm_register' AND tgdeferrable AND tginitdeferred)::int
+         + (SELECT count(*) FROM pg_proc WHERE proname = 'rx_purge_clinic' AND prosrc LIKE '%rx_register_entries%')::int
+      INTO v_fn;
+    INSERT INTO _verification_results (category, check_name, status, detail)
+    VALUES ('M141', 'Functions: verify, hash, append, empties, batch trace, deferred ledger→register trigger, purge v8',
+            CASE WHEN v_fn = 7 THEN 'PASS' ELSE 'FAIL' END, v_fn || ' of 7 present');
+END $$;
+
+-- ============================================================================
 -- FINAL UNIFIED REPORT (Single SELECT for Supabase SQL Editor)
 -- Shows FAIL rows first, then the SUMMARY, then PASS rows
 -- ============================================================================

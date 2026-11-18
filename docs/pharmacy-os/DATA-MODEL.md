@@ -557,6 +557,21 @@ audits, write-offs) under `pg_advisory_xact_lock(hashtext('rx_reg:'||clinic||reg
 register)` recomputes the chain → `{ok, first_bad_seq}`; nightly job alerts on break. Schedule H rows record the
 sale (bill number, item, batch, qty, prescriber) — the H1/X/narcotic rows add the patient snapshot and running balance.
 
+As built (141): two extra columns, both inside the hash — `movement_type` (the ledger kind: receipt vs issue, transfer vs
+audit) and `doc_ref` (bill / GRN / SRN / STR / IND / AUD number) — plus `CHECK ((seq = 1) = (prev_hash IS NULL))`.
+`row_hash = sha256(prev_hash ‖ (to_jsonb(row) − hashes − created_at) ‖ created_at as UTC text)::text`.
+Wiring is **one** `DEFERRABLE INITIALLY DEFERRED` constraint trigger on `rx_stock_movements` (`trg_rx_sm_register`)
+instead of redefining each writer: every current and future writer goes through the ledger, and deferral lets
+`rx_dispense_indent` insert its dispense line (the patient / prescriber source) after the movement. Direction mapping:
+`opening, grn_in, transfer_in → in`; `sale_out, ipd_dispense_out → out` (patient issues; prescriber required);
+`sale_return_in, ipd_return_in, supplier_return_out → return`; `*_writeoff_out → writeoff`; `adjust_in/out`
+(audit variance, GRN void), `transfer_out`, `ward_issue_out → adjust` — the CHECK reserves `out` for prescription
+issues, so a store-to-store or ward-stock issue cannot be one. `balance_after_units` is the item × store sum of the
+ledger up to that movement. IPD prescriber = the ordering doctor (`ipd_orders.ordered_by_doctor_id`); counter =
+`rx_sales.prescriber_snapshot`; pharmacist registration from `rx_settings.pharmacist_reg_no`. Rows are insert-only
+through `rx_register_append` (`kriya.rx_reg`), never updated, deleted only by the owner purge. Deleting the newest rows
+leaves a shorter valid chain: the head-hash anchor belongs to the nightly verify job (P8 alerts).
+
 ## 9. Refills and alerts (142 — RX-M9)
 ```sql
 CREATE TABLE rx_refill_plans (id, clinic_id, patient_id, family_member_id NULL, item_id, sale_item_id,

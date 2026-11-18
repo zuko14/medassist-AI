@@ -66,6 +66,10 @@ RX_ROUTES = {
     ("GET", "/admin/rx/audits"), ("POST", "/admin/rx/audits"), ("GET", "/admin/rx/audits/{audit_id}"),
     ("PUT", "/admin/rx/audits/{audit_id}/counts"), ("POST", "/admin/rx/audits/{audit_id}/review"),
     ("POST", "/admin/rx/audits/{audit_id}/post"), ("POST", "/admin/rx/audits/{audit_id}/cancel"),
+    # P7 statutory registers, batch recall, narcotic empties (141)
+    ("GET", "/admin/rx/registers/{register}"), ("GET", "/admin/rx/registers/{register}/verify"),
+    ("GET", "/admin/rx/registers/{register}/export.pdf"), ("GET", "/admin/rx/registers/{register}/export.csv"),
+    ("GET", "/admin/rx/batches/{batch_id}/trace"), ("POST", "/admin/rx/dispenses/{dispense_line_id}/empties"),
 }
 
 
@@ -251,3 +255,27 @@ def test_p6_role_matrix(api, role, grants):  # noqa: F811
     audit = api.call("POST", "/admin/rx/audits", clinic, {"store_id": str(uuid.uuid4()), "scope": "full"}).status_code
     replenish = api.call("POST", "/admin/rx/par-levels/replenish", clinic, {"store_id": str(uuid.uuid4())}).status_code
     assert (listed, audit, replenish) == P6_MATRIX[(role, grants)]
+
+
+# P7: (role, stored grants) -> expected status for: read the H1 register, trace an unknown batch (404 when allowed),
+# receive empties on an unknown dispense line (404 when allowed; 403 without IPD). RX_REGISTER_EXPORT = RX_REGISTERS.
+P7_MATRIX = {
+    ("PHARMACY_MANAGER", ()): (200, 404, 403),               # IPD is off in this clinic: empties are an IPD route
+    ("PHARMACIST", ()): (200, 403, 403),
+    ("STORE_KEEPER", ()): (403, 403, 403),                   # RX_READ alone never opens patient registers
+    ("FRONT_DESK", ("RX_REGISTERS",)): (200, 403, 403),
+    ("NURSE", ("IPD_NURSING",)): (403, 403, 403),
+    ("CASHIER", ("OPD_BILLING",)): (403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("role,grants", sorted(P7_MATRIX))
+def test_p7_role_matrix(api, role, grants):  # noqa: F811
+    clinic = _clinic(api.conn)
+    assert api.owner_toggle(clinic, "pharmacy_enabled", True).status_code == 200
+    api.as_(api.U(role.lower(), "staff", clinic, str(uuid.uuid4()), list(grants), staff_role=role))
+    listed = api.call("GET", "/admin/rx/registers/H1", clinic).status_code
+    trace = api.call("GET", f"/admin/rx/batches/{uuid.uuid4()}/trace", clinic).status_code
+    empties = api.call("POST", f"/admin/rx/dispenses/{uuid.uuid4()}/empties", clinic,
+                       {"units": 1, "returned_by": str(uuid.uuid4())}).status_code
+    assert (listed, trace, empties) == P7_MATRIX[(role, grants)]

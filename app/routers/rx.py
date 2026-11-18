@@ -1,7 +1,8 @@
 """Kriya Pharmacy OS API — foundation (134, RX-05), drug master (135, RX-13…15), stock (136, RX-18…20),
 purchase (137, RX-23…26, RX-71), counter sales (138, RX-29…35, RX-69/70/72/73/77/81/82), inpatient pharmacy (139, RX-38…40),
-transfers / par levels / stock audits (140, RX-42…46, RX-78).
-Design: docs/pharmacy-os/API.md §0–§7, SECURITY.md §2–§3.
+transfers / par levels / stock audits (140, RX-42…46, RX-78), statutory registers / batch recall / narcotic empties
+(141, RX-49, RX-50, RX-74, RX-79).
+Design: docs/pharmacy-os/API.md §0–§8, SECURITY.md §2–§3.
 
 Every route: permission -> enforce_clinic_access -> rx_access(clinic) ->
 (new work) wind-down rule -> store / branch scope -> service. Zero-LLM.
@@ -17,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.database import sb, scoped_query
 from app.routers.admin import AdminUser, enforce_clinic_access, log_admin_action, verify_credentials
 from app.services import (rx, rx_audit, rx_catalogue, rx_gs1, rx_ipd, rx_pos, rx_pos_docs, rx_purchase,
-                          rx_stock, rx_transfers)
+                          rx_registers, rx_stock, rx_transfers)
 from app.services.rx_catalogue import BarcodeIn, GenericIn, ItemIn, ItemPatch, ManufacturerIn
 from app.services.rx_purchase import CreditIn, GrnIn, GrnPatch, POIn, POPatch, ReturnIn, SupplierIn, SupplierPatch
 from app.services.permissions import allowed_store_ids, holds_rx_permission, resolve_owned_branch
@@ -49,6 +50,7 @@ class SettingsPatch(_In):
     rx_validity_days: Optional[int] = None
     return_days: Optional[int] = None
     audit_approval_paise: Optional[int] = None
+    pharmacist_reg_no: Optional[str] = None
 
 
 class StoreIn(_In):
@@ -1390,4 +1392,96 @@ async def cancel_audit(audit_id: uuid.UUID, body: rx_audit.CancelIn, request: Re
     scope, _ = await _rx_scope(user, clinic_id, *AUDIT_WORK)
     out = await rx_audit.cancel(scope, await _audit_in_scope(user, scope, audit_id), body.reason)
     await _audit(user, request, "rx_audit_cancel", "rx_stock_audit", str(audit_id), {"reason": body.reason})
+    return out
+
+
+# ── statutory registers (141, RX-49 / RX-50), recall trace (A6, RX-74), narcotic empties (A11, RX-79) ──
+# RX_REGISTER_EXPORT of the v1 spec is RX_REGISTERS (P1, SECURITY §2). The list is PHI (patient names and
+# addresses): RX_READ alone does not open it.
+REGISTER_READ = ("RX_REGISTERS", "RX_ADMIN")
+
+
+async def _register_args(user: AdminUser, scope: str, store_id: Optional[uuid.UUID], frm: Optional[date],
+                         to: Optional[date]) -> Optional[list[str]]:
+    if frm and to and frm > to:
+        raise HTTPException(status_code=422, detail="The start date must be on or before the end date.")
+    return await _store_ids(user, scope, store_id)
+
+
+@router.get("/registers/{register}")
+async def list_register(register: rx_registers.Register, from_: Optional[date] = Query(None, alias="from"),
+                        to: Optional[date] = None, store_id: Optional[uuid.UUID] = None,
+                        item_id: Optional[uuid.UUID] = None, limit: int = Query(100, ge=1, le=500),
+                        offset: int = Query(0, ge=0, le=1_000_000), clinic_id: str = "default",
+                        user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *REGISTER_READ)
+    stores = await _register_args(user, scope, store_id, from_, to)
+    return {"register": register, **await rx_registers.list_entries(
+        scope, register, from_, to, stores, str(item_id) if item_id else None, limit, offset)}
+
+
+@router.get("/registers/{register}/verify")
+async def verify_register(register: rx_registers.Register, clinic_id: str = "default",
+                          user: AdminUser = Depends(verify_credentials)):
+    scope, _ = await _rx_scope(user, clinic_id, *REGISTER_READ)
+    return {"register": register, **await rx_registers.verify(scope, register)}
+
+
+async def _export(register: str, fmt: str, request: Request, from_: Optional[date], to: Optional[date],
+                  store_id: Optional[uuid.UUID], item_id: Optional[uuid.UUID], clinic_id: str, user: AdminUser) -> Response:
+    scope, clinic = await _rx_scope(user, clinic_id, *REGISTER_READ)
+    stores = await _register_args(user, scope, store_id, from_, to)
+    rows = await rx_registers.all_entries(scope, register, from_, to, stores, str(item_id) if item_id else None)
+    period = f"{from_.isoformat() if from_ else 'start'} to {to.isoformat() if to else date.today().isoformat()}"
+    await _audit(user, request, "rx_register_export", "rx_register", register,
+                 {"format": fmt, "from": from_.isoformat() if from_ else None, "to": to.isoformat() if to else None,
+                  "store_id": str(store_id) if store_id else None, "item_id": str(item_id) if item_id else None,
+                  "rows": len(rows)})
+    name = f"register-{register}-{period.replace(' ', '_')}.{fmt}"
+    if fmt == "csv":
+        return Response(content=rx_registers.render_csv(register, rows), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+    store = await rx.get_store(scope, str(store_id)) if store_id else None
+    chain = await rx_registers.verify(scope, register)
+    return _pdf(rx_registers.render_pdf(register, rows, clinic, period, store, chain), name)
+
+
+@router.get("/registers/{register}/export.pdf")
+async def export_register_pdf(register: rx_registers.Register, request: Request,
+                              from_: Optional[date] = Query(None, alias="from"), to: Optional[date] = None,
+                              store_id: Optional[uuid.UUID] = None, item_id: Optional[uuid.UUID] = None,
+                              clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    return await _export(register, "pdf", request, from_, to, store_id, item_id, clinic_id, user)
+
+
+@router.get("/registers/{register}/export.csv")
+async def export_register_csv(register: rx_registers.Register, request: Request,
+                              from_: Optional[date] = Query(None, alias="from"), to: Optional[date] = None,
+                              store_id: Optional[uuid.UUID] = None, item_id: Optional[uuid.UUID] = None,
+                              clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    return await _export(register, "csv", request, from_, to, store_id, item_id, clinic_id, user)
+
+
+@router.get("/batches/{batch_id}/trace")
+async def batch_trace(batch_id: uuid.UUID, request: Request, clinic_id: str = "default",
+                      user: AdminUser = Depends(verify_credentials)):
+    """A6: everyone who got this batch. Patient names and masked phones: managers only, and every look is logged."""
+    scope, _ = await _rx_scope(user, clinic_id, "RX_ADMIN")
+    out = await rx_registers.trace(scope, str(batch_id))
+    await _audit(user, request, "rx_batch_trace", "rx_batch", str(batch_id), out["summary"])
+    return out
+
+
+@router.post("/dispenses/{dispense_line_id}/empties", status_code=status.HTTP_201_CREATED)
+async def record_empties(dispense_line_id: uuid.UUID, body: rx_registers.EmptiesIn, request: Request,
+                         clinic_id: str = "default", user: AdminUser = Depends(verify_credentials)):
+    """A11: the custodian (this login, RX_CONTROLLED) receives empties from the nurse named in the body."""
+    scope, _ = await _ipd_scope(user, clinic_id, "RX_CONTROLLED")
+    lines = await rx._rows(scoped_query("rx_dispense_lines", scope, "id, dispense_id").eq("id", str(dispense_line_id)).limit(1))
+    if not lines:
+        raise HTTPException(status_code=404, detail="Dispensed line not found.")
+    await _dispense_in_scope(user, scope, lines[0]["dispense_id"])
+    out = await rx_registers.record_empties(scope, str(dispense_line_id), body, _actor(user)[0])
+    await _audit(user, request, "rx_empties_received", "rx_dispense_line", str(dispense_line_id),
+                 {"units": body.units, "returned_by": str(body.returned_by), "outstanding_units": out["outstanding_units"]})
     return out

@@ -219,6 +219,28 @@ P6 notes (as built, migration 140 — 18 routes, route pin 95):
 | GET | `/admin/rx/registers/{register}/export.pdf` / `.csv` | RX_REGISTER_EXPORT | *audit: rx_register_export* (range, rows) |
 | GET | `/admin/rx/registers/{register}/verify` | RX_REGISTER_EXPORT | `{ok, rows, first_bad_seq?}` |
 
+P7 notes (as built, migration 141 — 6 routes, route pin 101):
+- Permission: the v1 `RX_REGISTER_EXPORT` is `RX_REGISTERS` (P1, SECURITY §2; PHARMACIST and PHARMACY_MANAGER by role,
+  or `RX_ADMIN`). `RX_READ` alone does **not** open a register: the rows carry patient names and addresses. The list and
+  exports honour store scope (a branch login sees its stores' rows; `store_id` outside them → 404); verify is clinic-wide.
+- `GET /registers/{register}?from&to&store_id&item_id&limit(1–500)&offset` → `{entries:[…+item, batch, store, receipt],
+  has_more}`; hashes are never returned. `receipt` is the ledger sign (`direction` alone is coarse).
+- `…/export.csv` (UTF-8 with BOM) and `…/export.pdf` (A4 landscape, wrapping cells, headings repeat, "page n of N",
+  hospital, period, store + drug licence, chain status, generation time, pharmacist signature line). H / H1 / X /
+  psychotropic: Seq, Date, Bill / Doc No., Entry, Patient Name & Address, Prescriber Name & Reg. No., Drug, Batch, Qty,
+  Balance, Supplier (PDF folds it into the patient column), Pharmacist. Narcotic: Seq, Date, Doc No., Drug, Batch,
+  Store, Opening Balance, Quantity Received, Quantity Issued, Balance, Patient / Supplier, Prescriber, Signature.
+  Over 20,000 rows → 422 `rx_register_export_too_large`. *audit: rx_register_export* `{format, from, to, store_id,
+  item_id, rows}`. No phone number appears in any export (the snapshots hold none).
+- `…/verify` → `{ok, rows, first_bad_seq, verified_at}`.
+- `GET /batches/{batch_id}/trace` (RX_ADMIN; A6 / RX-74) → `{batch, sales:[…, phone_masked], ipd:[…, ward, bed,
+  mar_doses], transfers, on_hand, summary}`; 404 for another clinic's batch. *audit: rx_batch_trace*. The optional
+  "Notify patients" (`rx_recall_v1`) is not built yet.
+- `POST /dispenses/{dispense_line_id}/empties` (RX_CONTROLLED + IPD on; A11 / RX-79) `{units, returned_by}`: the caller
+  receives; `returned_by` must be an active login of the clinic and a different person (409 `rx_empties_two_person`);
+  never more than dispensed − returned (409 `rx_empties_exceed_dispensed`); Schedule X / narcotic / psychotropic only.
+  *audit: rx_empties_received*. The "outstanding empties block re-dispense" override is not built yet.
+
 ## 9. Refills, alerts, dashboard (P8, P9)
 | Method | Path | Perm | Notes |
 |:-|:-|:-|:-|
