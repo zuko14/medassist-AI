@@ -43,6 +43,7 @@ Detailed, implementation-level intelligence documents are maintained in [`docs/a
 | [15-AGENT-HANDOFF.md](file:///c:/Users/chait/OneDrive/Desktop/SYSTEMS_ALL/KriyaAI/docs/agent-context/15-AGENT-HANDOFF.md) | Direct answers to the 16 architectural handoff questions and debugging entry points. |
 | [docs/ipd-os/status.md](docs/ipd-os/status.md) | **IPD OS (migration 111)**: execution tracker; start here, then ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU in the same folder. |
 | [docs/diagnostic-os/status.md](docs/diagnostic-os/status.md) | **Diagnostic OS (built P0–P11, migrations 125–133; not yet applied to Supabase, off for every clinic until the owner enables it)**: execution tracker and resume pointer; master prompts in AGENT-PROMPT.md; **binding: AUDIT.md (code evidence) and DELIVERY-POLICY.md (no payment → no report; insurance/TPA reports never to the patient)**; design in ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / REPORT-TEMPLATES / API / UI / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU / GAP-ANALYSIS / COMPETITIVE-ANALYSIS in the same folder. |
+| [docs/pharmacy-os/status.md](docs/pharmacy-os/status.md) | **Pharmacy OS (built P0–P11, migrations 134–142; not yet applied to Supabase, off for every clinic until the owner enables `pharmacy_enabled`)**: execution tracker and resume pointer; master prompt in AGENT-PROMPT.md; **binding: AUDIT.md (code evidence) and VERIFICATION.md (defects, loopholes, zero-impact matrix)**; zero-LLM boundary (no `app/services/rx*` / `app/routers/rx*` module imports AI, voice or assistant code; AI never prescribes, doses or substitutes); design in ARCHITECTURE / ADR / DATA-MODEL / WORKFLOWS / API / UI / SECURITY / TEST-PLAN / ROLLOUT / KRIYA-KETU / ADVANCED-FEATURES in the same folder. |
 
 ---
 
@@ -77,4 +78,18 @@ pytest tests/test_clinical_firewall.py tests/test_dx_no_llm.py
 pytest tests/test_dx_*.py tests/test_migration_dx_*.py
 # Kriya Ketu page table / action drift (a new DX page or route)
 pytest tests/test_assistant_registry.py
+```
+
+Pharmacy OS (any change under `app/services/rx*`, `app/routers/rx*`, `app/services/gst_billing.py`,
+`migrations/13[4-9]*|14[0-2]*` or an `RX:` block of `admin/index.html`):
+
+```bash
+# zero-LLM boundary + clinical firewall
+pytest tests/test_clinical_firewall.py tests/test_rx_no_llm.py
+# route pin + role matrix (a new /admin/rx route must be added there in the same commit)
+pytest tests/test_rx_route_matrix.py tests/test_rx_feature_gate.py
+# every RX suite, migrations M1–M9 on real PostgreSQL, concurrency (RG8), zero-impact matrix, release readiness
+pytest tests/test_rx_*.py tests/test_migration_rx_*.py
+# non-RX GSTR-1 unchanged + Kriya Ketu page table / action drift
+pytest tests/test_gst_billing_e2e.py tests/test_assistant_registry.py
 ```

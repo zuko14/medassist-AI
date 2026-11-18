@@ -155,34 +155,88 @@ def test_gstr1_folds_in_pharmacy_sales_credit_notes_and_hsn(api, rxw):  # noqa: 
     assert g["b2b"] == [{"invoice_number": s2, "issued_at": g["b2b"][0]["issued_at"], "buyer_gstin": BUYER,
                          "buyer_name": "Acme Traders", "invoice_value_paise": 10500,
                          "rates": [{"rate_bps": 500, "taxable_paise": 10000, "cgst_paise": 250, "sgst_paise": 250}]}]
-    assert g["b2cs"] == [{"rate_bps": 1200, "taxable_paise": 20000, "cgst_paise": 1200, "sgst_paise": 1200}]  # void out
+    # s1's 2-unit credit-note return (₹22.40 = 2000 + 120 + 120) is retail: netted out of B2CS, not a 9B note
+    assert g["b2cs"] == [{"rate_bps": 1200, "taxable_paise": 18000, "cgst_paise": 1080, "sgst_paise": 1080}]  # void out
     assert g["nil_exempt_paise"] == 10000 and g["clinic_gstin"] == GSTIN
     cn = _q(conn, "SELECT row_to_json(n) FROM rx_credit_notes n WHERE sale_id = %s", w["s1"])
-    assert cn["cn_number"].startswith("PCN-")
-    [pcn] = g["credit_notes"]
-    tax = cn["tax_paise"]
-    assert (pcn["credit_note_number"], pcn["taxable_paise"], pcn["cgst_paise"], pcn["sgst_paise"], pcn["total_paise"]) == (
-        cn["cn_number"], cn["amount_paise"] - tax, tax // 2, tax - tax // 2, cn["amount_paise"])
-    assert pcn["invoice_number"] == _q(conn, "SELECT sale_number FROM rx_sales WHERE id = %s", w["s1"])
+    assert cn["cn_number"].startswith("PCN-") and (cn["amount_paise"], cn["tax_paise"]) == (2240, 240)
+    assert g["credit_notes"] == []                                           # no double count
     assert g["hsn_summary"] == [
         {"hsn_code": "30039011", "tax_rate_bps": 0, "total_qty_units": 10, "total_value_paise": 10000,
          "taxable_paise": 10000, "cgst_paise": 0, "sgst_paise": 0},
         {"hsn_code": "30042019", "tax_rate_bps": 500, "total_qty_units": 10, "total_value_paise": 10500,
          "taxable_paise": 10000, "cgst_paise": 250, "sgst_paise": 250},
-        {"hsn_code": "30049099", "tax_rate_bps": 1200, "total_qty_units": 20, "total_value_paise": 22400,
-         "taxable_paise": 20000, "cgst_paise": 1200, "sgst_paise": 1200}]
+        {"hsn_code": "30049099", "tax_rate_bps": 1200, "total_qty_units": 18, "total_value_paise": 20160,
+         "taxable_paise": 18000, "cgst_paise": 1080, "sgst_paise": 1080}]
     ps = g["doc_summary"]["pharmacy_sales"]
     assert (ps["total"], ps["cancelled"]) == (5, 1) and ps["from"].startswith("PHS-")
     assert g["doc_summary"]["pharmacy_credit_notes"] == {"from": cn["cn_number"], "to": cn["cn_number"], "total": 1,
                                                          "cancelled": 0}
+    assert g["doc_summary"]["pharmacy_returns"]["total"] == 1
     assert g["doc_summary"]["invoices"]["total"] == 0                       # OPD series still there
     assert g["totals"] == {"invoice_value_paise": 11200 + 10500 + 10000 + 11200, "tax_paise": 1200 + 1200 + 500,
-                           "credit_value_paise": cn["amount_paise"], "credit_tax_paise": tax}
+                           "credit_value_paise": 0, "credit_tax_paise": 0,
+                           "b2c_returns_paise": 2240, "b2c_returns_tax_paise": 240}
     api.as_(w["users"]["mgr"])
     ph = api.call("GET", "/admin/rx/reports/gstr1", w["clinic"], month=TODAY.month, year=TODAY.year)
     assert ph.status_code == 200 and ph.json()["b2b"] == g["b2b"] and ph.json()["hsn_summary"] == g["hsn_summary"]
     api.as_(w["users"]["pharma"])
     assert api.call("GET", "/admin/rx/reports/gstr1", w["clinic"], month=TODAY.month, year=TODAY.year).status_code == 403
+
+
+def _return(conn, w, sale, line_id, qty, mode, shift=None):
+    return _q(conn, "SELECT rx_record_return(%s, %s, %s::jsonb, 'unopened_unused', %s, %s, NULL, NULL, 'Ravi', true, NULL)",
+              w["clinic"], sale, json.dumps([{"sale_item_id": line_id, "qty_units": qty, "restock": True}]), mode, shift)
+
+
+def test_returns_in_every_refund_mode_net_out_once(api, rxw):  # noqa: F811
+    """GSTN rules: retail returns (cash / UPI / card / credit note) reduce B2CS, HSN and output tax; a return to a
+    GSTIN buyer is a Table 9B note (PCN- if issued, else PRT-). Each return is counted exactly once."""
+    from tests.test_migration_rx_m5 import open_shift
+    w, conn, c = rxw, api.conn, rxw["clinic"]
+    shift, cashier = open_shift(conn, c)
+
+    def sale(item, mode, shift_id=None, buyer=None):
+        ww = {"clinic": c, "store": w["store"], "item": w["items"][item], "batch": w["batches"][item]}
+        s = draft(conn, ww, "otc", walkin="Acme Traders" if buyer else "Ravi K")
+        if buyer:
+            _q(conn, "UPDATE rx_sales SET buyer_gstin = %s WHERE id = %s", buyer, s)
+        ln = line(conn, ww, s, 10)
+        net = _q(conn, "SELECT net_paise FROM rx_sales WHERE id = %s", s)
+        complete(conn, ww, s, [{"mode": mode, "amount_paise": net}], shift_id, actor=cashier if shift_id else None)
+        return s, ln
+    cash, cash_ln = sale("i12", "cash", shift)
+    card, card_ln = sale("i12", "card")
+    upi, upi_ln = sale("i5", "upi")
+    b2b, b2b_ln = sale("i5", "upi", buyer=BUYER)
+    _return(conn, w, cash, cash_ln, 1, "cash", shift)            # 1120 = 1000 + 60 + 60
+    _return(conn, w, card, card_ln, 1, "card")                   # 1120
+    _return(conn, w, upi, upi_ln, 2, "upi")                      # 2100 = 2000 + 50 + 50
+    pcn = _return(conn, w, b2b, b2b_ln, 4, "credit_note")        # 4200 = 4000 + 100 + 100 → PCN-
+    prt = _return(conn, w, b2b, b2b_ln, 1, "upi")                # 1050 = 1000 + 25 + 25 → PRT-
+    api.as_(w["users"]["admin"])
+    g = api.call("GET", "/admin/billing/gstr1", c, month=TODAY.month, year=TODAY.year).json()
+    # 12 %: s1, s4, cash, card = 4 × 10000; less s1 (2000 / 120), cash and card (1000 / 60 each)
+    # 5 %: upi only (s2 and b2b are B2B) 10000 − 2000
+    assert g["b2cs"] == [{"rate_bps": 500, "taxable_paise": 8000, "cgst_paise": 200, "sgst_paise": 200},
+                         {"rate_bps": 1200, "taxable_paise": 36000, "cgst_paise": 2160, "sgst_paise": 2160}]
+    cn_no = _q(conn, "SELECT cn_number FROM rx_credit_notes WHERE id = %s", pcn["credit_note_id"])
+    notes = {n["credit_note_number"]: n for n in g["credit_notes"]}
+    assert set(notes) == {cn_no, prt["return_number"]} and all(n["buyer_gstin"] == BUYER for n in notes.values())
+    assert (notes[cn_no]["taxable_paise"], notes[cn_no]["cgst_paise"], notes[cn_no]["total_paise"]) == (4000, 100, 4200)
+    assert (notes[prt["return_number"]]["taxable_paise"], notes[prt["return_number"]]["sgst_paise"]) == (1000, 25)
+    hsn = {h["hsn_code"]: h for h in g["hsn_summary"]}
+    assert (hsn["30049099"]["total_qty_units"], hsn["30049099"]["taxable_paise"], hsn["30049099"]["cgst_paise"]) == (
+        36, 36000, 2160)
+    assert (hsn["30042019"]["total_qty_units"], hsn["30042019"]["taxable_paise"]) == (30 - 7, 30000 - 7000)
+    assert g["doc_summary"]["pharmacy_returns"]["total"] == 6
+    assert g["totals"]["credit_value_paise"] == 4200 + 1050 and g["totals"]["credit_tax_paise"] == 250
+    assert g["totals"]["b2c_returns_paise"] == 2240 + 1120 + 1120 + 2100
+    gst = {r["gst_slab"]: r for r in _rows(_csv(api, w, "gst_summary"))}
+    assert (gst["12%"]["sales_taxable_inr"], gst["12%"]["sales_cgst_inr"]) == ("360.00", "21.60")
+    assert (gst["5%"]["sales_taxable_inr"], gst["5%"]["sales_cgst_inr"]) == ("230.00", "5.75")  # 300 − 70 / 7.50 − 1.75
+    out_tax = Decimal("21.60") * 2 + Decimal("5.75") * 2
+    assert Decimal(gst["Total"]["net_gst_payable_inr"]) == out_tax - Decimal(w["grn"]["cgst_paise"] + w["grn"]["sgst_paise"]) / 100
 
 
 # ── CSV reports (RX-53) ─────────────────────────────────────────────────────
@@ -210,14 +264,14 @@ def test_all_report_kinds_totals_filters_audit_and_no_phone(api, rxw):  # noqa: 
     gst = {r["gst_slab"]: r for r in _rows(texts.setdefault("gst_summary", _csv(api, w, "gst_summary")))}
     assert list(gst) == ["0%", "5%", "12%", "18%", "28%", "40%", "Total"]
     assert (gst["12%"]["sales_taxable_inr"], gst["12%"]["sales_cgst_inr"], gst["5%"]["sales_sgst_inr"]) == (
-        "200.00", "12.00", "2.50")
+        "180.00", "10.80", "2.50")                                          # net of the ₹22.40 return
     ptax = Decimal(g["cgst_paise"] + g["sgst_paise"]) / 100
     assert Decimal(gst["12%"]["purchase_cgst_inr"]) + Decimal(gst["12%"]["purchase_sgst_inr"]) == ptax
-    assert Decimal(gst["Total"]["net_gst_payable_inr"]) == Decimal("29.00") - ptax
+    assert Decimal(gst["Total"]["net_gst_payable_inr"]) == Decimal("26.60") - ptax
 
     hsn = _rows(texts.setdefault("hsn_summary", _csv(api, w, "hsn_summary")))
     assert [(r["hsn_code"], r["rate_bps"], r["total_units"], r["total_value_inr"]) for r in hsn] == [
-        ("30039011", "0", "10", "100.00"), ("30042019", "500", "10", "105.00"), ("30049099", "1200", "20", "224.00")]
+        ("30039011", "0", "10", "100.00"), ("30042019", "500", "10", "105.00"), ("30049099", "1200", "18", "201.60")]
 
     val = _rows(texts.setdefault("stock_valuation", _csv(api, w, "stock_valuation")))
     ors = next(r for r in val if r["item_code"] == "ORS01" and r["batch_no"] == "BI0")

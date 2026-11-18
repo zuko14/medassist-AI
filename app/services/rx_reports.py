@@ -16,6 +16,7 @@ from fastapi import HTTPException
 
 from app.database import fetch_all, scoped_query
 from app.services.rx_dashboard import IST, _by_ids, _day_bounds, _in
+from app.services.rx_tax import gst_split_inclusive
 from app.utils.helpers import today_ist
 
 KINDS = ("sales_register", "purchase_register", "gst_summary", "hsn_summary", "stock_valuation", "movement", "expiry",
@@ -93,17 +94,49 @@ async def _lines(clinic_id: str, sales: list[dict]) -> list[dict]:
     return await _children("rx_sale_items", clinic_id, LINE_COLS, "sale_id", [s["id"] for s in sales])
 
 
-def hsn_rows(lines: list[dict]) -> list[dict]:
-    """GSTR-1 Table 12: one row per (HSN, rate)."""
+def hsn_rows(lines: list[dict], returns: list[dict] = ()) -> list[dict]:
+    """GSTR-1 Table 12: one row per (HSN, rate), net of returned lines (`_returns`)."""
     agg: dict = {}
-    for ln in lines:
-        a = agg.setdefault((ln["hsn_code"] or "", int(ln["tax_rate_bps"])), [0, 0, 0, 0])
-        a[0] += int(ln["qty_units"])
-        a[1] += int(ln["taxable_paise"])
-        a[2] += int(ln["cgst_paise"])
-        a[3] += int(ln["sgst_paise"])
+    for sign, rows in ((1, lines), (-1, returns)):
+        for ln in rows:
+            a = agg.setdefault((ln["hsn_code"] or "", int(ln["tax_rate_bps"])), [0, 0, 0, 0])
+            a[0] += sign * int(ln["qty_units"])
+            a[1] += sign * int(ln["taxable_paise"])
+            a[2] += sign * int(ln["cgst_paise"])
+            a[3] += sign * int(ln["sgst_paise"])
     return [{"hsn_code": h, "tax_rate_bps": r, "total_qty_units": u, "total_value_paise": t + c + s,
              "taxable_paise": t, "cgst_paise": c, "sgst_paise": s} for (h, r), (u, t, c, s) in sorted(agg.items())]
+
+
+async def _returns(clinic_id: str, lo: str, hi: str, store_ids: Optional[list[str]] = None) -> tuple[list, list]:
+    """Patient returns made in [lo, hi) — every refund mode — and each returned line with its GST share: the same
+    inclusive split rx_record_return uses for a credit note's tax, at the sold line's rate."""
+    rets = await _fetch("rx_returns", clinic_id, "id, sale_id, store_id, return_year, return_seq, return_number, reason, "
+                        "refund_mode, amount_paise, credit_note_id, created_at",
+                        lambda q: _in(q.gte("created_at", lo).lt("created_at", hi), "store_id", store_ids))
+    rets.sort(key=lambda r: (r["return_year"], r["return_seq"]))
+    lines = await _children("rx_return_lines", clinic_id, "return_id, sale_item_id, qty_units, amount_paise", "return_id",
+                            [r["id"] for r in rets])
+    items = await _by_ids("rx_sale_items", clinic_id, [ln["sale_item_id"] for ln in lines], "id, hsn_code, tax_rate_bps")
+    sales = await _by_ids("rx_sales", clinic_id, [r["sale_id"] for r in rets],
+                          "id, sale_number, completed_at, buyer_gstin, is_tax_invoice")
+    cns = await _by_ids("rx_credit_notes", clinic_id, [r["credit_note_id"] for r in rets], "id, cn_number")
+    by_id = {str(r["id"]): r for r in rets}
+    for r in rets:
+        s = sales.get(str(r["sale_id"])) or {}
+        r.update(sale_number=s.get("sale_number"), sale_date=s.get("completed_at"), buyer_gstin=s.get("buyer_gstin"),
+                 document=(cns.get(str(r["credit_note_id"])) or {}).get("cn_number") or r["return_number"])
+    out = []
+    for ln in lines:
+        r, it = by_id[str(ln["return_id"])], items.get(str(ln["sale_item_id"])) or {}
+        sale = sales.get(str(r["sale_id"])) or {}
+        t, c, g = gst_split_inclusive(int(ln["amount_paise"]), int(it.get("tax_rate_bps") or 0),
+                                      bool(sale.get("is_tax_invoice")))
+        out.append({"return_id": str(r["id"]), "store_id": str(r["store_id"]), "buyer_gstin": r["buyer_gstin"],
+                    "hsn_code": it.get("hsn_code"), "tax_rate_bps": int(it.get("tax_rate_bps") or 0),
+                    "qty_units": int(ln["qty_units"]), "amount_paise": int(ln["amount_paise"]),
+                    "taxable_paise": t, "cgst_paise": c, "sgst_paise": g})
+    return rets, out
 
 
 def _series(numbers: list[str], cancelled: int) -> dict:
@@ -148,19 +181,35 @@ async def pharmacy_gstr1(clinic_id: str, start: str, end: str) -> dict:
                 for i in range(3):
                     agg[i] += vals[i]
 
-    cns = await _fetch("rx_credit_notes", clinic_id, "id, sale_id, cn_year, cn_seq, cn_number, created_at, amount_paise, "
-                       "tax_paise, reason", lambda q: q.gte("created_at", start).lt("created_at", end))
-    cns.sort(key=lambda c: (c["cn_year"], c["cn_seq"]))
-    cn_sale = await _by_ids("rx_sales", clinic_id, [c["sale_id"] for c in cns],
-                            "id, sale_number, completed_at, buyer_gstin")
+    # Returns (every refund mode; GSTN rules): to a buyer with a GSTIN → Table 9B credit note (PCN- if one was issued,
+    # else the PRT- return number); retail → netted out of B2CS / nil by rate. Each return lands in exactly one place.
+    rets, rlines = await _returns(clinic_id, start, end)
+    b2c_ret = [0, 0]
+    for x in rlines:
+        if x["buyer_gstin"]:
+            continue
+        b2c_ret[0] += x["amount_paise"]
+        b2c_ret[1] += x["cgst_paise"] + x["sgst_paise"]
+        if x["tax_rate_bps"] == 0:
+            nil -= x["taxable_paise"]
+            continue
+        agg = b2cs.setdefault(x["tax_rate_bps"], [0, 0, 0])
+        agg[0] -= x["taxable_paise"]
+        agg[1] -= x["cgst_paise"]
+        agg[2] -= x["sgst_paise"]
     credit_notes = []
-    for c in cns:
-        tax, src = int(c["tax_paise"]), cn_sale.get(str(c["sale_id"])) or {}
+    for r in rets:
+        if not r["buyer_gstin"]:
+            continue
+        mine = [x for x in rlines if x["return_id"] == str(r["id"])]
         credit_notes.append({
-            "credit_note_number": c["cn_number"], "created_at": c["created_at"], "reason": c["reason"],
-            "invoice_number": src.get("sale_number"), "invoice_date": src.get("completed_at"),
-            "buyer_gstin": src.get("buyer_gstin"), "taxable_paise": int(c["amount_paise"]) - tax,
-            "cgst_paise": tax // 2, "sgst_paise": tax - tax // 2, "total_paise": int(c["amount_paise"])})
+            "credit_note_number": r["document"], "created_at": r["created_at"], "reason": r["reason"],
+            "invoice_number": r["sale_number"], "invoice_date": r["sale_date"], "buyer_gstin": r["buyer_gstin"],
+            "taxable_paise": sum(x["taxable_paise"] for x in mine), "cgst_paise": sum(x["cgst_paise"] for x in mine),
+            "sgst_paise": sum(x["sgst_paise"] for x in mine), "total_paise": int(r["amount_paise"])})
+    cns = await _fetch("rx_credit_notes", clinic_id, "cn_year, cn_seq, cn_number",
+                       lambda q: q.gte("created_at", start).lt("created_at", end))
+    cns.sort(key=lambda c: (c["cn_year"], c["cn_seq"]))
 
     return {
         "clinic_gstin": next((s["clinic_gstin"] for s in sales if s.get("clinic_gstin")), None),
@@ -169,16 +218,18 @@ async def pharmacy_gstr1(clinic_id: str, start: str, end: str) -> dict:
                  for r, (v, c, g) in sorted(b2cs.items())],
         "nil_exempt_paise": nil,
         "credit_notes": credit_notes,
-        "hsn_summary": hsn_rows(lines),
+        "hsn_summary": hsn_rows(lines, rlines),
         "doc_summary": {
             "pharmacy_sales": _series([s["sale_number"] for s in sales], sum(1 for s in sales if s["status"] == "void")),
             "pharmacy_credit_notes": _series([c["cn_number"] for c in cns], 0),    # a PCN- is never cancelled
+            "pharmacy_returns": _series([r["return_number"] for r in rets], 0),
         },
         "totals": {
             "invoice_value_paise": sum(int(s["net_paise"]) for s in live),
             "tax_paise": sum(int(s["cgst_paise"]) + int(s["sgst_paise"]) for s in live),
             "credit_value_paise": sum(c["total_paise"] for c in credit_notes),
             "credit_tax_paise": sum(c["cgst_paise"] + c["sgst_paise"] for c in credit_notes),
+            "b2c_returns_paise": b2c_ret[0], "b2c_returns_tax_paise": b2c_ret[1],
         },
     }
 
@@ -272,6 +323,11 @@ async def _gst_summary(cid, lo, hi, stores):
         o[0] += int(ln["taxable_paise"])
         o[1] += int(ln["cgst_paise"])
         o[2] += int(ln["sgst_paise"])
+    for x in (await _returns(cid, lo, hi, stores))[1]:           # every refund mode, credit notes included
+        o = out.setdefault(x["tax_rate_bps"], [0] * 7)
+        o[0] -= x["taxable_paise"]
+        o[1] -= x["cgst_paise"]
+        o[2] -= x["sgst_paise"]
     grns = {str(g["id"]): g for g in await _grns(cid, lo, hi, stores, ("posted",))}
     for ln in await _children("rx_grn_lines", cid, "grn_id, tax_rate_bps, taxable_paise, tax_paise", "grn_id", grns):
         o, tax = out.setdefault(int(ln["tax_rate_bps"]), [0] * 7), int(ln["tax_paise"])
@@ -294,9 +350,10 @@ async def _gst_summary(cid, lo, hi, stores):
 
 async def _hsn_summary(cid, lo, hi, stores):
     head = ["hsn_code", "rate_bps", "total_units", "total_value_inr", "taxable_inr", "cgst_inr", "sgst_inr"]
+    lines, rets = await _lines(cid, await _sales(cid, lo, hi, stores)), (await _returns(cid, lo, hi, stores))[1]
     return head, [[h["hsn_code"], h["tax_rate_bps"], h["total_qty_units"], _inr(h["total_value_paise"]),
                    _inr(h["taxable_paise"]), _inr(h["cgst_paise"]), _inr(h["sgst_paise"])]
-                  for h in hsn_rows(await _lines(cid, await _sales(cid, lo, hi, stores)))]
+                  for h in hsn_rows(lines, rets)]
 
 
 async def _on_hand(cid, stores) -> list[dict]:

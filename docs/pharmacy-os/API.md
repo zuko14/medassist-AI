@@ -279,7 +279,7 @@ P8 notes (as built, migration 142 — 9 routes, route pin 110; dashboard and rep
   `rx_refill:<plan>` / `rx_refill_off:<plan>`; three failed sends → `expired`). A STAT indent raises an alert and a
   notification at once. The A8 monthly drafting job is not scheduled: the planner is on demand.
 
-P10 notes (as built, no migration — 5 routes, route pin 119):
+P10 notes (as built, no migration — 5 routes, route pin 118; the P9 pin was 113, not the 114 recorded below):
 - **GSTR-1 (RX-52).** `gst_billing.export_gstr1_report` (`/admin/billing/gstr1`, unchanged route) checks
   `rx_access(clinic)` before any query. Off → the OPD dictionary exactly as before and no `rx_*` read. On → completed
   `rx_sales` by `completed_at` in the IST month (void ones only count in the series): `b2b` (buyer GSTIN, PHS- number,
@@ -288,8 +288,15 @@ P10 notes (as built, no migration — 5 routes, route pin 119):
   total_value_paise, taxable, cgst, sgst`; pharmacy lines only), `doc_summary.pharmacy_sales` /
   `pharmacy_credit_notes` (PCN- has no cancellation), totals include pharmacy value / tax / credits.
   `GET /reports/gstr1?month&year` (RX_REPORTS / RX_ADMIN, clinic-wide logins) returns only the pharmacy section; no
-  `gstr1_pharmacy.csv` kind was added. Patient returns refunded in cash / UPI / card issue no PCN- (P4 design), so they
-  are not GSTR-1 credit notes — carried to P11.
+  `gstr1_pharmacy.csv` kind was added.
+- **Returns in GSTR-1 (P11).** Every patient return in the month (`rx_returns` + `rx_return_lines`, any refund mode;
+  migration 138 unchanged — only `credit_note` returns create a PCN-) is split at the sold line's rate with the same
+  inclusive formula `rx_record_return` uses. Retail sale (no buyer GSTIN) → netted out of `b2cs` / `nil_exempt_paise`
+  by rate, never also listed as a credit note; buyer with a GSTIN → one Table 9B row in `credit_notes` numbered PCN- if
+  one was issued, else the PRT- return number. `hsn_summary` is net of every returned unit / value / tax;
+  `doc_summary.pharmacy_returns` lists the PRT- series; `totals.credit_*` cover the 9B rows and
+  `totals.b2c_returns_paise` / `b2c_returns_tax_paise` the retail netting. `gst_summary.csv` subtracts every return from
+  output taxable / CGST / SGST, so net GST payable is exact.
 - **CSV reports (RX-53).** `GET /reports/{kind}.csv?from&to&store_id` — dates IST inclusive, default this month,
   ≤ 366 days (422 otherwise), unknown kind 422, store outside the login's scope 404. Money in rupees (2 decimals),
   every cell through `rx_reports._csv_safe` (text starting `= + - @ TAB CR` gets a leading `'`; numbers stay numbers),
